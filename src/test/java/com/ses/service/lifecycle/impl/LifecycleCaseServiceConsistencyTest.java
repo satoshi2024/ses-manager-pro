@@ -11,8 +11,13 @@ import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleEventMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.lifecycle.LifecycleCompletionLockPlanner;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import com.ses.service.lifecycle.LifecycleScopeService;
+import com.ses.service.lifecycle.evidence.LifecycleLockExecutor;
+import com.ses.service.lifecycle.evidence.LifecycleLockPlan;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -57,6 +63,9 @@ class LifecycleCaseServiceConsistencyTest {
     @Mock private LifecycleScopeService scopeService;
     @Mock private LifecycleNotificationService notificationService;
     @Mock private PlatformTransactionManager transactionManager;
+    @Mock private LifecycleCompletionLockPlanner completionLockPlanner;
+    @Mock private LifecycleLockExecutor lockExecutor;
+    @Mock private AuthorizationEpochFence authorizationEpochFence;
 
     @InjectMocks
     private LifecycleCaseServiceImpl service;
@@ -103,12 +112,72 @@ class LifecycleCaseServiceConsistencyTest {
 
         service.cancelCase(CASE_ID, ACTOR_ID, "中止");
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(caseMapper, taskMapper);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(caseMapper, taskMapper, authorizationEpochFence);
         order.verify(caseMapper).selectByIdForUpdateAndTenant(CASE_ID, TENANT);
         order.verify(taskMapper).selectByIdAndCaseIdForUpdate(200L, CASE_ID);
         order.verify(taskMapper).selectByIdAndCaseIdForUpdate(300L, CASE_ID);
+        // W3-16b: 取り消したタスクの世代を、案件X → タスクX の後に1回ずつ進める（計画 §2.2・§4.2）。
+        order.verify(authorizationEpochFence).advanceAll(List.of(
+                AuthorizationEpochAnchor.taskGeneration(TENANT, CASE_ID, 200L),
+                AuthorizationEpochAnchor.taskGeneration(TENANT, CASE_ID, 300L)));
         assertEquals("CANCELLED", low.getStatus());
         assertEquals("CANCELLED", high.getStatus());
+    }
+
+    @Test
+    void holdCaseは案件ロック後にタスクをid昇順でロックし終端でないタスクの世代だけを進める() {
+        LifecycleCase lcCase = activeCase("JOIN");
+        stubActorAndCase(lcCase);
+        when(caseMapper.updateById(any(LifecycleCase.class))).thenReturn(1);
+        LifecycleTask done = LifecycleTask.builder().caseId(CASE_ID).status("COMPLETED").build();
+        done.setId(200L);
+        LifecycleTask open = LifecycleTask.builder().caseId(CASE_ID).status("IN_PROGRESS").build();
+        open.setId(300L);
+        when(taskMapper.selectByCaseIdAndTenant(CASE_ID, TENANT)).thenReturn(List.of(open, done));
+        when(taskMapper.selectByIdAndCaseIdForUpdate(200L, CASE_ID)).thenReturn(done);
+        when(taskMapper.selectByIdAndCaseIdForUpdate(300L, CASE_ID)).thenReturn(open);
+
+        service.holdCase(CASE_ID, ACTOR_ID, "保留");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(caseMapper, taskMapper, authorizationEpochFence);
+        order.verify(caseMapper).selectByIdForUpdateAndTenant(CASE_ID, TENANT);
+        order.verify(taskMapper).selectByIdAndCaseIdForUpdate(200L, CASE_ID);
+        order.verify(taskMapper).selectByIdAndCaseIdForUpdate(300L, CASE_ID);
+        order.verify(caseMapper).updateById(lcCase);
+        order.verify(authorizationEpochFence).advanceAll(List.of(AuthorizationEpochAnchor.taskGeneration(TENANT, CASE_ID, 300L)));
+        assertEquals("IN_PROGRESS", open.getStatus(), "保留はタスクの状態を変えない");
+    }
+
+    @Test
+    void タスク世代を進められなければholdCaseは409で中断し保留イベントを残さない() {
+        LifecycleCase lcCase = activeCase("JOIN");
+        stubActorAndCase(lcCase);
+        when(caseMapper.updateById(any(LifecycleCase.class))).thenReturn(1);
+        LifecycleTask open = LifecycleTask.builder().caseId(CASE_ID).status("PENDING").build();
+        open.setId(300L);
+        when(taskMapper.selectByCaseIdAndTenant(CASE_ID, TENANT)).thenReturn(List.of(open));
+        when(taskMapper.selectByIdAndCaseIdForUpdate(300L, CASE_ID)).thenReturn(open);
+        when(authorizationEpochFence.advanceAll(any())).thenThrow(BusinessException.of(409,
+                AuthorizationEpochFence.EPOCH_UNAVAILABLE_KEY));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.holdCase(CASE_ID, ACTOR_ID, "保留"));
+
+        assertEquals(409, ex.getCode());
+        assertEquals(AuthorizationEpochFence.EPOCH_UNAVAILABLE_KEY, ex.getMessageKey());
+        verify(eventMapper, never()).insert(any(LifecycleEvent.class));
+    }
+
+    @Test
+    void resumeCaseはタスクをlockせず世代も進めない() {
+        LifecycleCase lcCase = activeCase("JOIN");
+        lcCase.setStatus("ON_HOLD");
+        stubActorAndCase(lcCase);
+        when(caseMapper.updateById(any(LifecycleCase.class))).thenReturn(1);
+
+        service.resumeCase(CASE_ID, ACTOR_ID);
+
+        verify(taskMapper, never()).selectByIdAndCaseIdForUpdate(any(), any());
+        verifyNoInteractions(authorizationEpochFence);
     }
 
     @Test
@@ -154,12 +223,22 @@ class LifecycleCaseServiceConsistencyTest {
 
     private void stubCompletableCase() {
         LifecycleCase lcCase = activeCase("JOIN");
-        stubActorAndCase(lcCase);
+        stubActor();
+        // 完了は discovery → plan → lock → 再discovery の順で、案件は通常読取（lockはplanが取る。W3-16b）。
+        when(caseMapper.selectByIdAndTenant(CASE_ID, TENANT)).thenReturn(lcCase);
+        when(completionLockPlanner.plan(any(LifecycleCase.class), eq(ACTOR_ID), eq(TENANT)))
+                .thenReturn(LifecycleLockPlan.from(List.of(
+                        LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.LIFECYCLE_CASE, TENANT, CASE_ID))));
         when(taskMapper.selectByCaseIdAndTenant(CASE_ID, TENANT)).thenReturn(List.of());
         when(caseMapper.updateById(any(LifecycleCase.class))).thenReturn(1);
     }
 
     private void stubActorAndCase(LifecycleCase lcCase) {
+        stubActor();
+        when(caseMapper.selectByIdForUpdateAndTenant(CASE_ID, TENANT)).thenReturn(lcCase);
+    }
+
+    private void stubActor() {
         SysUser actor = new SysUser();
         actor.setId(ACTOR_ID);
         actor.setTenantId(TENANT);
@@ -167,7 +246,6 @@ class LifecycleCaseServiceConsistencyTest {
         actor.setStatus(1);
         when(sysUserMapper.selectById(ACTOR_ID)).thenReturn(actor);
         when(scopeService.requireTenant(any())).thenReturn(TENANT);
-        when(caseMapper.selectByIdForUpdateAndTenant(CASE_ID, TENANT)).thenReturn(lcCase);
         Engineer engineer = new Engineer();
         engineer.setId(ENGINEER_ID);
         engineer.setTenantId(TENANT);

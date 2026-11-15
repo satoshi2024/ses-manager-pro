@@ -12,6 +12,9 @@ import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.lifecycle.LifecycleScopeService;
 import com.ses.service.lifecycle.LifecycleTaskService;
+import com.ses.service.security.epoch.ActorShareLock;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.security.epoch.TaskGenerationAnchors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -45,6 +48,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final com.ses.mapper.DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
+    /** タスク世代の増分（NF01 W3-16b）。 */
+    private final AuthorizationEpochFence authorizationEpochFence;
+    /** 担当変更の新担当（rank 3 S、NF01 W3-16b）。 */
+    private final ActorShareLock actorShareLock;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -180,6 +187,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         promoteEligibleSuccessors(lcCase, taskId, userId, tenantId);
     }
 
+    /**
+     * 承認済みの例外申請でタスクを免除する。NF01 W3-16b（細粒度epoch計画 §3.4「waiveTask」・§4.2）: （承認確定経由では
+     * 申請行 2 X の後に）4 X{案件} → 5 X{タスク} の順にlockし、免除した時だけタスク世代を1つ進める。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void waiveTask(Long taskId, Long userId, Long approvalRequestId, String reason) {
@@ -219,6 +230,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (rows == 0) {
             throw BusinessException.of(409, "error.concurrentModification");
         }
+        // 免除はタスク世代を1つ進め、免除前の提出を確認できなくする（細粒度epoch計画 §2.2・§4.2。案件X → タスクX の後）。
+        authorizationEpochFence.advance(TaskGenerationAnchors.of(lcCase, task));
 
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(task.getCaseId())
@@ -238,11 +251,18 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         promoteEligibleSuccessors(lcCase, taskId, userId, tenantId);
     }
 
+    /**
+     * タスクの担当者を変更する。NF01 W3-16b（細粒度epoch計画 §3.4「reassignTask」・§4.2）: 3 S{新担当（要求で既知）} →
+     * 4 X{案件} → 5 X{タスク} の順にlockし、担当者が変わった時だけタスク世代を1つ進める（旧担当の提出を確認できなくする）。
+     * 新担当の有効性は共有lock下の現在値で判定する（判定直後の無効化・role変更と直列化する）。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reassignTask(Long taskId, Long newAssigneeUserId, Long actorUserId, String reason) {
         SysUser actor = requireActor(actorUserId);
         String tenantId = scopeService.requireTenant(actor);
+        // rank 3 S: 新担当の利用者行は案件・タスクより先に取る（取得後に判定するのは従来どおり案件・権限の確認の後）。
+        SysUser newAssignee = newAssigneeUserId == null ? null : actorShareLock.lockActive(newAssigneeUserId, tenantId);
         LockedTask locked = lockCaseThenTask(taskId, tenantId);
         LifecycleTask task = locked.task();
 
@@ -256,13 +276,12 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditTask(actor, task, lcCase, engineer);
 
-        SysUser newAssignee = newAssigneeUserId == null ? null : sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getId, newAssigneeUserId).eq(SysUser::getTenantId, tenantId));
         if (newAssignee == null || newAssignee.getStatus() == null || newAssignee.getStatus() != 1) {
             throw BusinessException.of(400, "error.lifecycle.invalidAssignee", "有効なユーザーを指定してください");
         }
 
         Long oldAssigneeId = task.getAssigneeUserId();
+        String oldAssigneeRole = task.getAssigneeRole();
         task.setAssigneeUserId(newAssignee.getId());
         task.setAssigneeRole(newAssignee.getRole());
         task.setAssigneeNameSnapshot(newAssignee.getRealName() != null ? newAssignee.getRealName() : newAssignee.getUsername());
@@ -270,6 +289,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         int rows = taskMapper.updateById(task);
         if (rows == 0) {
             throw BusinessException.of(409, "error.concurrentModification");
+        }
+        // 担当（利用者・role）が変わった時だけ進める（同じ担当への再保存では進めない。E-4）。
+        if (!Objects.equals(oldAssigneeId, newAssignee.getId()) || !Objects.equals(oldAssigneeRole, newAssignee.getRole())) {
+            authorizationEpochFence.advance(TaskGenerationAnchors.of(lcCase, task));
         }
 
         eventMapper.insert(LifecycleEvent.builder()

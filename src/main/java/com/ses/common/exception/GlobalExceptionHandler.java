@@ -6,6 +6,7 @@ import com.ses.common.util.LogRedaction;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -68,6 +69,25 @@ public class GlobalExceptionHandler {
                 LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiResult<>(409, "他の操作と競合しました。再読み込みして再試行してください。", e.getData()));
+    }
+
+    /**
+     * 行lockの競合（MySQL 1213 deadlock・1205 lock待ちtimeout。Springでは {@link PessimisticLockingFailureException} の
+     * 派生 {@code DeadlockLoserDataAccessException}・{@code CannotAcquireLockException}）。
+     *
+     * <p>transactionはDBまたは宣言的transactionでrollbackされ、業務上の決定でもないため、500ではなく再読み込みして再試行できる
+     * 409として返す（NF01細粒度epoch計画 §9 RR-9、W3-16b）。lock順の不備を監視で見つけられるよう、errorCodeは
+     * {@code LOCK_CONFLICT}・分類はSYSTEMとし、例外の型だけをWARNで記録する（SQLや鍵値は出さない）。</p>
+     */
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ApiResult<Void>> handleLockConflict(PessimisticLockingFailureException e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "LOCK_CONFLICT");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
+        log.warn("行lockの競合により処理を中断しました（再試行可能）: category=SYSTEM exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
+        String message = SafeErrorPolicy.resolveBusinessMessage(
+                BusinessException.of(409, "error.common.optimisticLock"), messageSource, LocaleContextHolder.getLocale());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResult.<Void>error(409, message));
     }
 
     /**

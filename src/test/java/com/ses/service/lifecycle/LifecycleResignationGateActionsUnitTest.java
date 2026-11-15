@@ -20,9 +20,12 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.OrganizationService;
 import com.ses.service.portal.PortalSessionService;
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -71,9 +75,55 @@ class LifecycleResignationGateActionsUnitTest {
     @Mock private ExpenseRequestMapper expenseRequestMapper;
     @Mock private LifecycleTaskMapper lifecycleTaskMapper;
     @Mock private AssetOffboardingService assetOffboardingService;
+    @Mock private AuthorizationEpochFence authorizationEpochFence;
 
     @InjectMocks
     private ResignationGateChecker checker;
+
+    @Test
+    void 自動処理はrank順に停止_所属終了_紐付け解除_営業解除を書き停止でactor_epochを進めsession失効は最後に行う() {
+        linkedUser(activeUser(null));
+        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
+        when(portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(ENGINEER_ID, TENANT))
+                .thenReturn(List.of(portalLink(301L)));
+
+        checker.executeAutomaticGateActions(resignationCase(), engineer());
+
+        // W3-16b（計画 §3.4・§3.5 規則5）: 3（停止）→ 8（所属）→ 9（紐付け）→ 10（担当営業）の後に葉（session）。
+        InOrder order = inOrder(sysUserMapper, authorizationEpochFence, organizationService, engineerAccountLinkService,
+                engineerSalesService, persistentSessionService, portalSessionService);
+        order.verify(sysUserMapper).selectByIdAndTenantForUpdate(USER_ID, TENANT);
+        order.verify(sysUserMapper).update(isNull(), any());
+        order.verify(authorizationEpochFence).advanceIfChanged(AuthorizationEpochAnchor.actor(TENANT, USER_ID), 1, 0);
+        order.verify(organizationService).closeAssignmentsForUser(USER_ID, ANCHOR_DATE);
+        order.verify(engineerAccountLinkService).unlinkByEngineerId(ENGINEER_ID);
+        order.verify(engineerSalesService).releaseAllByEngineerId(ENGINEER_ID, ANCHOR_DATE);
+        order.verify(persistentSessionService).revokeAllForUser(eq(USER_ID), anyString());
+        order.verify(portalSessionService).revokeAllForUser(eq(301L), anyString());
+    }
+
+    @Test
+    void scope側の自動処理はsessionを失効させず対象だけを返し既に無効な連携ユーザーではactor_epochを停止で進めない() {
+        SysUser disabled = activeUser(null);
+        disabled.setStatus(0);
+        linkedUser(disabled);
+        when(portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(ENGINEER_ID, TENANT))
+                .thenReturn(List.of(portalLink(401L)));
+
+        ResignationGateChecker.AutomaticActionResult result =
+                checker.applyAutomaticScopeActions(resignationCase(), engineer());
+
+        assertEquals(USER_ID, result.linkedUserId());
+        assertEquals(List.of(401L), result.portalUserIds());
+        verify(sysUserMapper, never()).update(any(), any());
+        verifyNoInteractions(authorizationEpochFence, persistentSessionService, portalSessionService);
+        verify(organizationService).closeAssignmentsForUser(USER_ID, ANCHOR_DATE);
+        verify(engineerAccountLinkService).unlinkByEngineerId(ENGINEER_ID);
+
+        checker.revokeSessionsAfterScopeActions(result);
+        verify(persistentSessionService).revokeAllForUser(eq(USER_ID), anyString());
+        verify(portalSessionService).revokeAllForUser(eq(401L), anyString());
+    }
 
     @Test
     void 資産免除があっても法人不明の外部アカウントは退社ゲートを通さない() {

@@ -17,6 +17,11 @@ import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.lifecycle.*;
+import com.ses.service.lifecycle.evidence.LifecycleLockExecutor;
+import com.ses.service.lifecycle.evidence.LifecycleLockPlan;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.security.epoch.TaskGenerationAnchors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -50,6 +55,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     /** 終結した案件の状態。これ以外（DRAFT・ACTIVE・ON_HOLD・想定外の値）は未終結として扱う。 */
     private static final List<String> TERMINAL_CASE_STATUSES = List.of("COMPLETED", "CANCELLED");
 
+    /** 終端のタスク状態。保留でタスク世代を進めない（提出の対象にならない）状態。 */
+    private static final Set<String> TERMINAL_TASK_STATUSES = Set.of("COMPLETED", "WAIVED", "CANCELLED");
+
     private final LifecycleCaseMapper caseMapper;
     private final LifecycleCaseSequenceMapper caseSequenceMapper;
     private final LifecycleTaskMapper taskMapper;
@@ -71,6 +79,12 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final ObjectMapper objectMapper;
     /** 完了通知のafterCommit発行用。手動構築の単体テストではnullになり得る。 */
     private final PlatformTransactionManager transactionManager;
+    /** 案件完了が書く行の列挙（NF01 W3-16b）。 */
+    private final LifecycleCompletionLockPlanner completionLockPlanner;
+    /** 案件完了のlock plan実行（NF01 W3-16b）。 */
+    private final LifecycleLockExecutor lockExecutor;
+    /** タスク世代の増分（NF01 W3-16b）。 */
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -642,6 +656,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 案件を保留にする。NF01 W3-16b（細粒度epoch計画 §2.2・§3.4「holdCase / cancelCase」・§4.2）: 4 X{案件} →
+     * 5 X{配下のタスク、ID昇順} の順にlockし、終端（完了・免除・取消）でないタスクのタスク世代を1つずつ進める。保留前に
+     * 提出された二者確認は、再開後も古い世代のため確認できない（再開では世代を戻さない）。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void holdCase(Long caseId, Long userId, String reason) {
@@ -658,6 +677,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
+        // 案件X保持下でタスクをID昇順に行lockし、lock後の現在値で終端かを判定する（cancelCase と同じ順。batch 0 L4）。
+        List<LifecycleTask> openTasks = lockTasksInIdOrder(lcCase, tenantId).stream()
+                .filter(task -> !TERMINAL_TASK_STATUSES.contains(task.getStatus()))
+                .collect(Collectors.toList());
+
         String before = lcCase.getStatus();
         lcCase.setStatus("ON_HOLD");
         lcCase.setUpdatedBy(userId);
@@ -665,6 +689,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         if (rows == 0) {
             throw BusinessException.of(409, "error.concurrentModification", "案件の状態が変更されました。再読み込みしてください。");
         }
+        advanceTaskGenerations(lcCase, openTasks);
 
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
@@ -680,6 +705,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .build());
     }
 
+    /** 保留中の案件を再開する。4 X{案件} だけを取り、タスク世代は戻さない（細粒度epoch計画 §4.2。保留前の提出は復活させない）。 */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resumeCase(Long caseId, Long userId) {
@@ -717,48 +743,59 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .build());
     }
 
+    /**
+     * 案件を完了する。退社案件では退社ゲートを検証し、自動処理（連携ユーザーの停止・所属の終了・紐付け解除・担当営業の解除）、
+     * 外部アカウントの失効要求登録、要員のBench化、session失効を同じtransactionで行う。
+     *
+     * <p>NF01 W3-16b（細粒度epoch計画 §3.4「completeCase」、§3.5、§4.2、§2.4 E-3）: 単一の {@code REQUIRED}・
+     * {@code READ_COMMITTED} transactionで、次の順に処理する。CONFIRMのcoordinator（{@code NEVER}・自動再試行）は使わない。</p>
+     * <ol>
+     *   <li>discovery: lockを取らない通常読取で前提（状態・権限・阻害タスク・退社ゲート）を確かめ、明らかに完了できない要求は
+     *       lockを取らずに拒否する。続けて完了処理が書く行を列挙する（{@link LifecycleCompletionLockPlanner}）。</li>
+     *   <li>lock: 3 S{操作者}・X{連携ユーザー} → 4 X{案件} → 5 X{全タスク} → 7 X{要員} → 8 X{所属} → 9 X{紐付け} →
+     *       10 X{現任の担当営業} → 14 X{外部アカウント（全法人）} を1つのplanで1回だけ取る（{@link LifecycleLockExecutor}）。
+     *       連携ユーザー（rank 3）を要員（rank 7）より先に取るため、利用者・所属のwriter（3 X → 7 X）、紐付け解除（3 S → 7 X）、
+     *       要員削除（3 X → 7 X）、変更申請の承認（2 X → 3 X → 7 X）と同じ向きになる（旧実装の 4 X → 7 X → 3 X は
+     *       これらと循環待ちになり得た。G4r review P3-1、W3-16a review P3-1・P2-1）。</li>
+     *   <li>lock後: 同じ読取で依存先を列挙し直し、discoveryと違えば途中でlockを足さず409にする（§3.5 規則1）。前提の判定も
+     *       lock後の現在値でやり直す（batch 0 P3-1）。</li>
+     *   <li>書込み: 取得済みの行（3・4・7・8・9・10・14）と葉（event・session失効・afterCommit通知・afterCommit送信）だけで、
+     *       新しいrank行のlockを取らない。epochは連携ユーザーのactorと要員のengineerを、入れ子の書込みと合わせて1回ずつ
+     *       進める（fenceが同じtransactionの重複を除く。E-4）。</li>
+     * </ol>
+     */
     @Override
     @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void completeCase(Long caseId, Long userId) {
         SysUser user = requireActor(userId);
         String tenantId = scopeService.requireTenant(user);
-        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(caseId, tenantId);
+
+        // 1. discovery（lockを取らない）。明らかに完了できない要求はlockを取らずに拒否する。
+        LifecycleCase discovered = caseMapper.selectByIdAndTenant(caseId, tenantId);
+        assertCompletable(discovered, user, tenantId);
+        LifecycleLockPlan plan = completionLockPlanner.plan(discovered, userId, tenantId);
+
+        // 2. 完了処理が書く行を1つのplanで1回だけlockする（計画 §3.4）。
+        acquireCompletionLocks(plan, caseId);
+
+        // 3. lock後の現在値で依存先と前提を確かめ直す（不一致は409。lockは途中で足さない）。
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
-        if (!"ACTIVE".equals(lcCase.getStatus())) {
-            throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "進行中(ACTIVE)以外の案件は完了できません");
-        }
+        requireSameCompletionDependencies(plan, completionLockPlanner.plan(lcCase, userId, tenantId), caseId);
+        Engineer engineer = assertCompletable(lcCase, user, tenantId);
 
-        // 登録writerと同じengineer Xを先に保持し、完了前後の新規アカウント登録を直列化する。
-        Engineer engineer = "RESIGNATION".equals(lcCase.getLifecycleType())
-                ? engineerMapper.selectByIdForUpdateForTenant(lcCase.getEngineerId(), tenantId)
-                : findEngineerInTenant(lcCase, tenantId);
-        if (engineer == null) throw BusinessException.of(404, "error.lifecycle.caseNotFound");
-        scopeService.assertCanEditCase(user, lcCase, engineer);
-
-        // 阻害タスクの完了確認
-        List<LifecycleTask> tasks = taskMapper.selectByCaseIdAndTenant(caseId, tenantId);
-        List<LifecycleTask> uncompletedBlocking = tasks.stream()
-                .filter(t -> t.getIsBlocking() != null && t.getIsBlocking() == 1)
-                .filter(t -> !"COMPLETED".equals(t.getStatus()) && !"WAIVED".equals(t.getStatus()))
-                .collect(Collectors.toList());
-        if (!uncompletedBlocking.isEmpty()) {
-            String taskNames = uncompletedBlocking.stream().map(LifecycleTask::getTaskName).collect(Collectors.joining(", "));
-            throw BusinessException.of(400, "error.lifecycle.blockingTasksUncompleted",
-                    "未完了の完了阻害タスクが存在します: " + taskNames);
-        }
-
-        // 退社案件の場合、退社ゲートの厳格検証と自動処理実行
+        // 4. 書込み（取得済みの行と葉だけ）。
+        ResignationGateChecker.AutomaticActionResult automaticActions = null;
         if ("RESIGNATION".equals(lcCase.getLifecycleType())) {
-            ResignationGateResultDto gateResult = resignationGateChecker.evaluate(lcCase, engineer);
-            if (!gateResult.isPassed()) {
-                throw BusinessException.of(400, "error.lifecycle.resignationGateFailed", gateResult.getSummary());
-            }
-            resignationGateChecker.executeAutomaticGateActions(lcCase, engineer);
+            // 順3（停止）→ 8（所属の終了・上長解除）→ 9（紐付け解除）→ 10（担当営業の解除）。
+            automaticActions = resignationGateChecker.applyAutomaticScopeActions(lcCase, engineer);
+            // 順14: 未失効の外部アカウント（全法人）の失効要求を同じcommitで登録する（送信はcommit後）。
             revocationOutbox.enqueueForResignation(lcCase, userId);
 
-            // 要員ステータスをBenchへ更新。楽観ロックCASが0件のまま完了すると要員だけ稼動扱いで残るため409にする。
+            // 要員ステータスをBenchへ更新（順7はX lock済みで、lock後に読んだ行を@VersionのCASで書き戻す）。
+            // CASが0件のまま完了すると要員だけ稼動扱いで残るため409にする。
             engineer.setStatus("Bench");
             if (engineerMapper.updateById(engineer) != 1) {
                 throw BusinessException.of(409, "error.common.optimisticLock");
@@ -787,8 +824,69 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .occurredAt(LocalDateTime.now())
                 .build());
 
+        // 葉: 連携ユーザーの内部sessionと紐付け済みポータルユーザーのsessionを失効させる（rank行の書込みの後）。
+        if (automaticActions != null) {
+            resignationGateChecker.revokeSessionsAfterScopeActions(automaticActions);
+        }
+
         // 完了通知はcommit後に発行する。ロールバックされた完了を通知せず、通知失敗で完了をrollback-onlyにしない。
         publishCaseCompletedAfterCommit(lcCase);
+    }
+
+    /**
+     * 完了の前提（状態・権限・阻害タスク・退社ゲート）を確かめ、対象要員を返す。discovery（lock前）とlock後の2回呼ぶ。
+     * lock前の判定は早期拒否のためで、完了の可否はlock後の判定で決める。
+     */
+    private Engineer assertCompletable(LifecycleCase lcCase, SysUser user, String tenantId) {
+        if (lcCase == null) {
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound");
+        }
+        if (!"ACTIVE".equals(lcCase.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "進行中(ACTIVE)以外の案件は完了できません");
+        }
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        scopeService.assertCanEditCase(user, lcCase, engineer);
+
+        // 阻害タスクの完了確認
+        List<LifecycleTask> tasks = taskMapper.selectByCaseIdAndTenant(lcCase.getId(), tenantId);
+        List<LifecycleTask> uncompletedBlocking = tasks.stream()
+                .filter(t -> t.getIsBlocking() != null && t.getIsBlocking() == 1)
+                .filter(t -> !"COMPLETED".equals(t.getStatus()) && !"WAIVED".equals(t.getStatus()))
+                .collect(Collectors.toList());
+        if (!uncompletedBlocking.isEmpty()) {
+            String taskNames = uncompletedBlocking.stream().map(LifecycleTask::getTaskName).collect(Collectors.joining(", "));
+            throw BusinessException.of(400, "error.lifecycle.blockingTasksUncompleted",
+                    "未完了の完了阻害タスクが存在します: " + taskNames);
+        }
+
+        // 退社案件の場合、退社ゲートの厳格検証
+        if ("RESIGNATION".equals(lcCase.getLifecycleType())) {
+            ResignationGateResultDto gateResult = resignationGateChecker.evaluate(lcCase, engineer);
+            if (!gateResult.isPassed()) {
+                throw BusinessException.of(400, "error.lifecycle.resignationGateFailed", gateResult.getSummary());
+            }
+        }
+        return engineer;
+    }
+
+    /** 完了処理のplanを取る。対象行の欠落（discovery後の削除・tenant不一致）は依存先の変化として409にする。 */
+    private void acquireCompletionLocks(LifecycleLockPlan plan, Long caseId) {
+        try {
+            lockExecutor.acquire(plan);
+        } catch (LifecycleLockPlan.DependencyChangedException e) {
+            log.warn("案件完了のlock対象がdiscovery後に変わったため中断します: caseId={}", caseId);
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+    }
+
+    /** lock後に列挙し直した依存先がlock済みのplanと違えば、途中でlockを足さず409にする（計画 §3.5 規則1）。 */
+    private void requireSameCompletionDependencies(LifecycleLockPlan locked, LifecycleLockPlan current, Long caseId) {
+        try {
+            locked.requireSameDependencies(current);
+        } catch (LifecycleLockPlan.DependencyChangedException e) {
+            log.warn("案件完了の依存先がlockの前後で変わったため中断します: caseId={}", caseId);
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
     }
 
     /**
@@ -851,17 +949,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         // 配下の未完了タスクもキャンセルする。案件ロック保持下でタスクをid昇順に行ロックし、
         // ロック後の現在値で判定する。CASが0件なら案件だけCANCELLEDでタスクが進行中のまま残る
         // 不整合になるため、黙って続行せず409でtransactionごとロールバックする（NF01 batch 0 L4）。
-        List<Long> taskIds = taskMapper.selectByCaseIdAndTenant(caseId, tenantId).stream()
-                .map(LifecycleTask::getId)
-                .filter(Objects::nonNull)
-                .sorted()
-                .distinct()
-                .collect(Collectors.toList());
-        for (Long taskId : taskIds) {
-            LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(taskId, lcCase.getId());
-            if (task == null) {
-                continue;
-            }
+        // 取り消したタスクはタスク世代を1つ進め、取消前の提出を確認できなくする（細粒度epoch計画 §2.2・§4.2）。
+        List<LifecycleTask> cancelledTasks = new ArrayList<>();
+        for (LifecycleTask task : lockTasksInIdOrder(lcCase, tenantId)) {
             if ("PENDING".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()) || "ON_HOLD".equals(task.getStatus())) {
                 task.setStatus("CANCELLED");
                 task.setCompletionComment("案件中止に伴うキャンセル: " + (reason != null ? reason : ""));
@@ -869,8 +959,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 if (taskMapper.updateById(task) != 1) {
                     throw BusinessException.of(409, "error.common.optimisticLock");
                 }
+                cancelledTasks.add(task);
             }
         }
+        advanceTaskGenerations(lcCase, cancelledTasks);
 
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
@@ -903,6 +995,42 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         SysUser actor = userId == null ? null : sysUserMapper.selectById(userId);
         scopeService.requireTenant(actor);
         return actor;
+    }
+
+    /**
+     * X lock済みの案件配下のタスクを、ID昇順に行lockしてlock後の現在値で返す（case X → task X、batch 0 L1・L4）。
+     * 所属案件IDは通常読取で列挙するだけで、タスクは案件行のX保持下でだけlockする。
+     */
+    private List<LifecycleTask> lockTasksInIdOrder(LifecycleCase lockedCase, String tenantId) {
+        List<Long> taskIds = taskMapper.selectByCaseIdAndTenant(lockedCase.getId(), tenantId).stream()
+                .map(LifecycleTask::getId)
+                .filter(Objects::nonNull)
+                .sorted()
+                .distinct()
+                .collect(Collectors.toList());
+        List<LifecycleTask> locked = new ArrayList<>();
+        for (Long taskId : taskIds) {
+            LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(taskId, lockedCase.getId());
+            if (task != null) {
+                locked.add(task);
+            }
+        }
+        return locked;
+    }
+
+    /**
+     * 案件X・タスクX保持下で、タスク世代を1つずつ進める（細粒度epoch計画 §2.2 task generation、W3-10 review P3-10）。
+     * 同じtransactionで同じタスクを既に進めていれば重複しない（fenceの重複除去。E-4）。上限・行欠落は409で業務更新ごと止める。
+     */
+    private void advanceTaskGenerations(LifecycleCase lockedCase, Collection<LifecycleTask> lockedTasks) {
+        if (lockedTasks.isEmpty()) {
+            return;
+        }
+        List<AuthorizationEpochAnchor> anchors = new ArrayList<>();
+        for (LifecycleTask task : lockedTasks) {
+            anchors.add(TaskGenerationAnchors.of(lockedCase, task));
+        }
+        authorizationEpochFence.advanceAll(anchors);
     }
 
     private Engineer findEngineerInTenant(LifecycleCase lcCase, String tenantId) {

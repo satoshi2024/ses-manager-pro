@@ -31,6 +31,7 @@ import com.ses.service.attendance.AttendanceScopeSnapshot;
 import com.ses.service.leave.LeaveApprovalAdapter;
 import com.ses.service.leave.LeaveMinutesCalculator;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.epoch.OrganizationShareLock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,6 +75,8 @@ public class LeaveServiceImpl implements LeaveService {
     private final OrganizationScopeService organizationScopeService;
     private final ApprovalEngineService approvalEngineService;
     private final SystemConfigService systemConfigService;
+    /** 申請行の外部キー参照先の組織行（rank 6）を要員行より先に共有lockする（NF01 W3-16b）。 */
+    private final OrganizationShareLock organizationShareLock;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -101,6 +104,9 @@ public class LeaveServiceImpl implements LeaveService {
             throw BusinessException.of(400, "error.leave.zeroMinutes");
         }
         assertNoClosedMonth(engineerId, leave);
+        // NF01 細粒度epoch計画 §3.5 規則1（W3-16a後半 review P3-1）: 申請行のinsertで外部キー検査が組織行（rank 6）に付ける
+        // 共有lockを、重複検査の要員行（rank 7）のX lockより前に取る（組織統合・所属writerの 6 X → 7 X と循環させない）。
+        organizationShareLock.lockReferenced(leave.getOrganizationId());
         assertNoOverlap(engineerId, leave);
         assertBalance(engineerId, leave.getLeaveType(), leave.getRequestedMinutes());
 

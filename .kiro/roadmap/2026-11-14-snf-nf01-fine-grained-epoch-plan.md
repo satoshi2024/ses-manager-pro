@@ -224,6 +224,13 @@ SELECT id, tenant_id, deleted_flag, organization_id, engineer_scope_epoch
 
 所属writerのうち組織行（6 X）を取るのは assign・transfer・update だけで、merge・updateStatusと直列化するためである。release・closeは対象組織を変えないので6を取らない。
 
+実装時の追記（W3-16a後半・W3-16b、W3-16a後半 review P3-6①）。上表との差分だけを記す。
+
+- 所属writer（assign・update・transfer）は、所属行に設定する上長の利用者行も順3でSに取る（外部キー検査が順8の後に上長行へSを付けないため）。組織の祖先鎖は `parent_id` と現行の親子履歴の両方を辿る（食い違いは過剰な増分になるだけ）。mergeは統合元の会計履歴に現れる要員も順7でXに取り、影響ユーザーの順3 Xは論理削除済みの行も含む。
+- completeCase の順8は、連携ユーザー本人の所属行に加え、連携ユーザーを上長とする他人の所属行（上長解除の対象）も含める。順3の操作者Sと連携ユーザーXが同じIDの場合は 403 `error.lifecycle.selfResignationCompletion` で拒否する。lock前に通常読取で前提（状態・権限・阻害タスク・ゲート）を確かめて早期に拒否し、lock後に同じ判定をやり直す。planは `LifecycleCompletionLockPlanner` が列挙し、`LifecycleLockExecutor` で1回だけ取る。
+- 要員行を書く業務writerのうち、所属組織（`t_engineer.organization_id`）を書く更新（EngineerServiceImpl.updateWithStatusGuard・updateById）と休暇申請（LeaveServiceImpl.apply）は、外部キー検査の参照先の組織行を順7のXより前に順6のSで取る。
+- 担当変更（reassignTask）の新担当は順3のSで取る（ActorShareLock）。H2は `FOR SHARE` を解釈しないため、順3・順6の共有lockとexecutorのSHAREDは同じ行・同じ順の `FOR UPDATE` で代える（`SharedLockSupport`）。
+
 ### 3.5 共通規則
 
 1. 上位rankを取った後に下位rankを取らない。不足に気付いたら途中で足さず、CONFIRMはrollbackして新attempt、writerは409で終える。
@@ -937,6 +944,7 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 - RR-11 退社gateの資産・license入力: 貸与の新規作成・license割当は要員行をlockしないため、gate評価と完了の間に作られた貸与・licenseを見落とし得る（既存。CONFIRMの述語ではない）。外部アカウントはW3-11の要員行lockと退社後登録時の自動登録で覆う。
 - RR-12 H2: `FOR SHARE` の意味論はH2で証明しない。lock順・待ちの証拠はM系だけ。
 - RR-13 表単位のrestore・rollback: anchor表（sys_user、t_engineer、m_organization_unit、t_document、t_lifecycle_task）だけを古い行へ戻すとepochが巻き戻り、旧提出が復活し得る。DB全体のPITRは前後で一貫するので問題ない。配備runbookで表単位のrestoreを禁止する。
+- RR-15 外部キー検査の共有lock（W3-16b追記）: 要員行（順7）をXに取った後のinsert・更新が、外部キー検査で組織行（順6）にSを付けると、組織行を先にXに取って要員行を待つwriter（merge・所属writer）と循環し得る。要員の所属組織を書く更新と休暇申請は参照先の組織行を先にSで取るようにしたが、それ以外の業務writer（要員行をlockした後に組織を参照する行をinsertするもの）は棚卸ししていない。上長が互いの所属行の上長になっている2人の同時停止（clearManagerの相互待ち）も残る。いずれもMySQL 1213はAPIで409（`LOCK_CONFLICT`）として返り、データは壊れない。
 - RR-14 単一tenant前提: `/api/users` は一覧・取得・更新・削除がtenant境界を持たない（§2.6）。F-1の修正後も、多tenant配備では管理者が他tenantの利用者を操作できる。多tenant公開の前に横断バッチ（X3のUSER-TENANT）で `/api/users` をtenant化し、それまでは単一tenant配備を配備前提（X3-4）に書く。外部アカウント関連の表・schedulerも単一tenantを前提とする（`ACCOUNTING_TENANT_IDS` は1件、R2 N9-P3-3）。
 
 ## 10. 外部署名が必要な事項
