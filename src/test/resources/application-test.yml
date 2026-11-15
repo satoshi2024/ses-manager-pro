@@ -91,6 +91,9 @@ spring:
         - classpath:sql/schema-import-center-menu-permission-h2.sql
         # V194: NF08 B2c-1 durable claim列・費用ledger 2表・監査の存在照会索引（t_ai_recommendation_run と t_audit_log の作成より後）
         - classpath:sql/schema-nf08-dispatch-claim-h2.sql
+        # V196: NF07 F2 data element catalog seed（構造行と subject_attribution だけ。H2 でもそのまま実行できる。
+        #       sys_user の tenant と全 m_document_type の作成・seed より後）
+        - classpath:db/migration/V196__nf07_privacy_data_element_catalog_seed.sql
       data-locations:
         - classpath:sql/dummy.sql
 

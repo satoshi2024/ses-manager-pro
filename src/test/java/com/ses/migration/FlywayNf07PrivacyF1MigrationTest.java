@@ -68,6 +68,13 @@ class FlywayNf07PrivacyF1MigrationTest {
             for (String table : F1_TABLES) {
                 assertEquals("utf8mb4_bin", queryString(st, "SELECT table_collation FROM information_schema.tables "
                         + "WHERE table_schema=DATABASE() AND table_name='" + table + "'"), table + " の照合順序");
+                if ("m_pii_data_element".equals(table)) {
+                    // V196（F2）は catalog の構造行だけを seed する。owner・分類・inventory 状態は UNKNOWN のまま
+                    assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE owner_state <> 'UNKNOWN' "
+                                    + "OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' OR owner_ref IS NOT NULL"),
+                            "catalog の seed は構造行だけ（法的な値をseedしない）");
+                    continue;
+                }
                 // 同じcontainerを使う他のtestは tenant_id を nf07- で始める。migration 自体が作る行は0件であること。
                 assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table + " WHERE tenant_id NOT LIKE 'nf07-%'"),
                         table + " はmigrationで行を作らない（法的な値をseedしない）");
@@ -258,6 +265,50 @@ class FlywayNf07PrivacyF1MigrationTest {
                     "既存の privacy.* 行は deny・有効へ揃える");
         }
     }
+
+    /**
+     * V196（F2 catalog seed）: sys_user の tenant ごとに1回だけ入り、再実行しても重複しない。gate に接続する
+     * data element（§3.4.1）は UNKNOWN にならず、collation の異なる sys_user / m_document_type との比較で失敗しない。
+     */
+    @Test
+    void V196のcatalog_seedはtenantごとに1回だけ入り再実行しても重複しない() throws Exception {
+        migrateFresh();
+        try (Connection connection = FRESH.createConnection(""); Statement st = connection.createStatement()) {
+            assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM flyway_schema_history WHERE version='196' AND success=1"));
+            long documentTypes = scalar(st, "SELECT COUNT(*) FROM m_document_type");
+            assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
+                    scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
+                    "固定の data element と文書種別ごとの DOCUMENT:<code>");
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default' "
+                    + "AND subject_attribution='UNKNOWN' AND (provider_id IS NOT NULL OR data_element_id LIKE 'DOCUMENT:%' "
+                    + "OR data_element_id LIKE 'INTEGRATION_HUB_%' OR data_element_id='EXTERNAL_API_READ_SNAPSHOT')"),
+                    "provider が扱う要素と gate に接続する要素は分類済み");
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM "
+                    + "m_pii_data_element e WHERE e.tenant_id='default' AND e.data_element_id=CONCAT('DOCUMENT:', dt.code) "
+                    + "AND e.subject_attribution='ATTRIBUTABLE' AND e.provider_id='document-file')"), "全文書種別の要素");
+
+            st.executeUpdate("INSERT INTO sys_user (tenant_id, username, password, real_name, role, status) "
+                    + "VALUES ('nf07-seed', 'nf07-seed-user', 'x', 'NF07 seed', '管理者', 1)");
+            for (int i = 0; i < 2; i++) {
+                org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                        new org.springframework.core.io.support.EncodedResource(
+                                new org.springframework.core.io.ClassPathResource(
+                                        "db/migration/V196__nf07_privacy_data_element_catalog_seed.sql"),
+                                java.nio.charset.StandardCharsets.UTF_8));
+                assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
+                        scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
+                        "再実行で既存 tenant の行は増えない");
+                assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
+                        scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='nf07-seed'"),
+                        "新しい tenant には1回だけ入る");
+            }
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM (SELECT tenant_id, data_element_id FROM m_pii_data_element "
+                    + "GROUP BY tenant_id, data_element_id HAVING COUNT(*) > 1) d"), "重複なし");
+        }
+    }
+
+    /** V196 が tenant ごとに入れる固定の data element の件数（文書種別ごとの DOCUMENT:<code> を除く）。 */
+    private static final long CATALOG_FIXED_ELEMENTS = 27L;
 
     // ---------------------------------------------------------------- helper
 

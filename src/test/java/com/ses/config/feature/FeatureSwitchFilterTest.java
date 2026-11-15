@@ -70,9 +70,9 @@ class FeatureSwitchFilterTest {
             // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
             Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
                     "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings"),
-            // NF-07 保持・保全はW3-14ではpolicy説明APIだけを持つ（catalog・holdは後続batchが入口と同時に登録する）
+            // NF-07 保持・保全は policy説明API（W3-14）と catalog API（F2）を持つ（holdは後続batchが入口と同時に登録する）
             Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
-                    "/api/privacy/policies/evaluate"),
+                    "/api/privacy/policies/evaluate", "/api/privacy/catalog"),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
 
     /** 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。 */
