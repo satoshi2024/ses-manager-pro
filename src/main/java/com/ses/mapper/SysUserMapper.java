@@ -48,6 +48,13 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     SysUser selectByIdForUpdate(@Param("id") Long id);
 
     /**
+     * NF01 lock rank 3 の利用者行X lock（細粒度epoch計画 §3.4「所属writer（release・closeAssignmentsForUser）」）。
+     * 論理削除済みの行も返す（利用者削除は論理削除の後に所属を閉じるため、削除済みの行もlockしてからactor epochを進める）。
+     */
+    @Select("SELECT * FROM sys_user WHERE id = #{id} FOR UPDATE")
+    SysUser selectByIdForUpdateIncludingDeleted(@Param("id") Long id);
+
+    /**
      * NF01 lock rank 3 の利用者行lock（細粒度epoch計画 §3.1・§3.4）。論理削除済みの行は返さない。
      * {@code tenantId} が {@code null} ならIDだけで照合する。{@code exclusive=false} は {@code FOR SHARE} で、
      * H2は解釈しないため呼出しは {@code ActorShareLock} だけにする（H2では {@code exclusive=true} で代える）。

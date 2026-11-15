@@ -3,6 +3,7 @@ package com.ses.service.security.epoch;
 import com.ses.service.impl.EngineerAccountLinkServiceImpl;
 import com.ses.service.impl.EngineerSalesServiceImpl;
 import com.ses.service.impl.EngineerServiceImpl;
+import com.ses.service.impl.OrganizationServiceImpl;
 import com.ses.service.impl.RoleMenuServiceImpl;
 import com.ses.service.impl.SysUserServiceImpl;
 import com.ses.service.impl.SystemConfigServiceImpl;
@@ -39,23 +40,33 @@ class WriterIsolationPolicyTest {
      * READ_COMMITTEDを宣言するwriter。W3-15分: 所属closeを内包する利用者の状態変更・削除（E-3）と、全体epoch行の
      * lockより前の通常読取がlock後の旧値読取のsnapshotにならないようにする全体epochのwriter（W3-15 review P3-3）。
      * W3-16a分（要員・link・営業）: discovery（連携ユーザー・紐付け）を伴う要員削除（E-3）と紐付け解除。
+     * W3-16a後半分（組織・所属）: 計画 §2.4 E-3 の組織階層writer・統合・所属writerの全部（祖先鎖・依存集合・連携要員の
+     * discoveryを伴う）。
      */
     private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
             SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"),
             RoleMenuServiceImpl.class, List.of("replaceMenus"),
             SystemConfigServiceImpl.class, List.of("updateAll"),
             EngineerServiceImpl.class, List.of("removeById"),
-            EngineerAccountLinkServiceImpl.class, List.of("unlinkByEngineerId"));
+            EngineerAccountLinkServiceImpl.class, List.of("unlinkByEngineerId"),
+            OrganizationServiceImpl.class, OrganizationWriters.ALL);
+
+    /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
+    private static final class OrganizationWriters {
+        static final List<String> ALL = List.of("save", "updateOrganization", "updateStatus", "deactivate",
+                "removeById", "merge", "assignUser", "updateUserOrganization", "transferUser", "releaseAssignment",
+                "closeAssignmentsForUser");
+    }
 
     /** W3-15でfenceへ接続したwriterクラス（NESTEDを置かない対象の下限）。 */
     private static final List<Class<?>> F1_WRITERS = List.of(
             RoleMenuServiceImpl.class, SystemConfigServiceImpl.class, SysUserServiceImpl.class,
             PermissionGroupManagementServiceImpl.class);
 
-    /** W3-16aでfenceへ接続したwriterクラス（要員・link・営業・tenant補正）。 */
+    /** W3-16aでfenceへ接続したwriterクラス（要員・link・営業・tenant補正、後半の組織・所属）。 */
     private static final List<Class<?>> F2_ENGINEER_WRITERS = List.of(
             EngineerServiceImpl.class, EngineerSalesServiceImpl.class, EngineerAccountLinkServiceImpl.class,
-            OwnershipRepairServiceImpl.class);
+            OwnershipRepairServiceImpl.class, OrganizationServiceImpl.class);
 
     @Test
     void discoveryを伴うwriterはREAD_COMMITTEDを宣言する() {
@@ -117,7 +128,8 @@ class WriterIsolationPolicyTest {
                 EngineerServiceImpl.class, List.of("save", "updateById", "updateWithStatusGuard", "removeById"),
                 EngineerSalesServiceImpl.class, List.of("assign", "setPrimary", "release", "releaseAllByEngineerId"),
                 EngineerAccountLinkServiceImpl.class, List.of("link", "unlinkByEngineerId"),
-                OwnershipRepairServiceImpl.class, List.of("resolve"));
+                OwnershipRepairServiceImpl.class, List.of("resolve"),
+                OrganizationServiceImpl.class, OrganizationWriters.ALL);
         entries.forEach((type, names) -> {
             for (String name : names) {
                 List<Method> declared = Arrays.stream(type.getDeclaredMethods())

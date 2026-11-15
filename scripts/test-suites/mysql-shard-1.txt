@@ -35,3 +35,4 @@ AuthorizationEpochSchemaMySqlTest
 BpPaymentTenantSqlMySqlTest
 GlobalEpochFenceMySqlTest
 ActorEpochFenceMySqlTest
+OrganizationScopeFenceMySqlTest
