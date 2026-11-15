@@ -3,6 +3,7 @@ package com.ses.privacy.production;
 import com.ses.privacy.production.provider.AiLogProvider;
 import com.ses.privacy.production.provider.CandidateProvider;
 import com.ses.privacy.production.provider.DocumentFileProvider;
+import com.ses.privacy.production.provider.DsarDeliveryClass;
 import com.ses.privacy.production.provider.EngineerProfileProvider;
 import com.ses.privacy.production.provider.IngestionTextProvider;
 import com.ses.privacy.production.provider.PrivacyReadOnlyQuery;
@@ -58,6 +59,48 @@ class ProductionPrivacyProviderRegistryTest {
         assertThat(registry.providerFor("AUDIT_LOG")).isEmpty();
         assertThat(registry.providerFor("engineer_profile")).isEmpty();
         assertThat(registry.providerFor(null)).isEmpty();
+        // 個別の宣言が接頭辞の宣言より優先されるのではなく、接頭辞の宣言が個別の宣言を除外している
+        assertThat(ProductionPrivacyProviderRegistry.declaration(registry.require("document-file"), "DOCUMENT:IMPORT"))
+                .get().satisfies(e -> {
+                    assertThat(e.prefixMatch()).isFalse();
+                    assertThat(e.attribution()).isEqualTo(SubjectAttribution.NOT_ATTRIBUTABLE);
+                });
+        assertThat(ProductionPrivacyProviderRegistry.declaration(registry.require("document-file"), "DOCUMENT:NEW_TYPE"))
+                .get().satisfies(e -> assertThat(e.prefixMatch()).isTrue());
+    }
+
+    @Test
+    void DSARの交付区分は宣言から引き宣言が無ければ第三者混在として扱う() {
+        ProductionPrivacyProviderRegistry registry = new ProductionPrivacyProviderRegistry(realProviders());
+
+        assertThat(registry.deliveryClassOf("DOCUMENT:SKILL_SHEET")).isEqualTo(DsarDeliveryClass.SELF);
+        assertThat(registry.deliveryClassOf("DOCUMENT:CONTRACT")).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+        assertThat(registry.deliveryClassOf("DOCUMENT:INVOICE_OUT")).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+        assertThat(registry.deliveryClassOf("DOCUMENT:NEW_TYPE")).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+        assertThat(registry.deliveryClassOf("AUDIT_LOG")).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+        assertThat(registry.deliveryClassOf(null)).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+    }
+
+    @Test
+    void 接頭辞の宣言は除外した個別の宣言とは重ならないが除外しなければ重なりとして拒否する() {
+        ProviderDataElement exact = ProviderDataElement.exact("DOC:A", SubjectAttribution.NOT_ATTRIBUTABLE, List.of());
+        ProviderDataElement excluding = ProviderDataElement.prefix("DOC:", java.util.Set.of("DOC:A"),
+                SubjectAttribution.ATTRIBUTABLE, DsarDeliveryClass.MIXED_THIRD_PARTY, List.of(link()));
+        assertThat(excluding.overlaps(exact)).isFalse();
+        assertThat(new ProductionPrivacyProviderRegistry(List.of(new FakeProvider("fake-provider",
+                List.of(exact, excluding), table()))).providerFor("DOC:A")).isPresent();
+
+        assertThatThrownBy(() -> new ProductionPrivacyProviderRegistry(List.of(new FakeProvider("fake-provider",
+                List.of(exact, ProviderDataElement.prefix("DOC:", SubjectAttribution.ATTRIBUTABLE, List.of(link()))),
+                table()))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("重なって");
+        assertThatThrownBy(() -> new ProviderDataElement("DOC:B", false, java.util.Set.of("DOC:C"),
+                SubjectAttribution.ATTRIBUTABLE, DsarDeliveryClass.SELF, List.of(link())))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static SubjectLink link() {
+        return new SubjectLink(PrivacySubjectType.ENGINEER, "t_fake.engineer_id");
     }
 
     @Test

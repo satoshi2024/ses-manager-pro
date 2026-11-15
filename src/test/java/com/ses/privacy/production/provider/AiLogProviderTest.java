@@ -38,16 +38,105 @@ class AiLogProviderTest {
     private static final long PROJECT_A = BASE_ID + 591;
     private static final long PROJECT_B = BASE_ID + 592;
 
+    private static final String RECORDER_TENANT = "tenant-recorder";
+
     @Autowired
     private AiLogProvider provider;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private com.ses.service.ai.AiRecommendationRecorder recorder;
+    @Autowired
+    private com.ses.mapper.EngineerMapper engineerMapper;
+    @Autowired
+    private com.ses.mapper.ProjectMapper projectMapper;
+    @Autowired
+    private com.ses.service.security.DataScopeService dataScopeService;
+    @Autowired
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     private PrivacyProviderH2Fixture fx;
 
     @BeforeEach
     void setUp() {
         fx = new PrivacyProviderH2Fixture(jdbc);
+    }
+
+    /**
+     * 記録側（{@code AiRecommendationRecorder#recordMatch}、AiApiController と同じ引数）で実際に記録した run を provider が
+     * 本人へ帰属させる（記録の DTO・item の書き方・source 案件の扱いが変わったときの不一致を検出する。NF07-F2 delta review P3-4）。
+     * 設定は {@code AiRecommendationRecorderHashTest} と同じ（tenant-recorder、法人 77、管理者）。
+     */
+    @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "1", roles = "管理者")
+    void 記録側で実際に記録したrunを要員から案件と案件から要員の両方で本人へ帰属させる() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        try {
+            com.ses.test.TenantTestSecurity.bindAs(1L, "1", RECORDER_TENANT, "管理者");
+            long stamp = System.nanoTime();
+            Long source = recorderEngineer("AI-attr-src-" + stamp);
+            Long second = recorderEngineer("AI-attr-2nd-" + stamp);
+            Long customerId = jdbc.queryForObject("SELECT COALESCE(MAX(id), 0) + 1 FROM m_customer", Long.class);
+            jdbc.update("INSERT INTO m_customer (id, company_name, tenant_id, legal_entity_id, deleted_flag) "
+                    + "VALUES (?, ?, ?, 77, 0)", customerId, "AI-attr-cust-" + stamp, RECORDER_TENANT);
+            Long projectA = recorderProject(customerId, "AI-attr-pa-" + stamp);
+            Long projectB = recorderProject(customerId, "AI-attr-pb-" + stamp);
+            com.ses.service.ai.copilot.CopilotExecutionContext context = recorderContext();
+
+            // 要員→案件（source 案件なし。summary は source 要員）
+            MatchResultDto toProjectA = project(projectA);
+            recorder.recordMatch("MATCHING", null, List.of(toProjectA, project(projectB)), source, null, context);
+            // 案件→要員（summary は1件目の要員。2件目は第三者）
+            MatchResultDto toSource = engineerResult(source);
+            recorder.recordMatch("MATCHING", null, List.of(toSource, engineerResult(second)), null, projectA, context);
+
+            assertThat(toProjectA.getRunId()).isNotNull();
+            assertThat(toSource.getRunId()).isNotNull();
+            assertThat(provider.findBySubject(RECORDER_TENANT, engineer(source))).extracting(PrivacyRecord::rowId)
+                    .containsExactlyInAnyOrder(toProjectA.getRunId(), toSource.getRunId());
+            assertThat(provider.findBySubject(RECORDER_TENANT, engineer(second))).isEmpty();
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
+    private Long recorderEngineer(String name) {
+        com.ses.entity.Engineer engineer = new com.ses.entity.Engineer();
+        engineer.setTenantId(RECORDER_TENANT);
+        engineer.setFullName(name);
+        engineer.setLegalEntityId(77L);
+        engineer.setEmploymentType("正社員");
+        engineer.setStatus("Bench");
+        engineerMapper.insert(engineer);
+        return engineer.getId();
+    }
+
+    private Long recorderProject(Long customerId, String name) {
+        com.ses.entity.Project project = new com.ses.entity.Project();
+        project.setProjectName(name);
+        project.setLegalEntityId(77L);
+        project.setCustomerId(customerId);
+        project.setStatus("募集中");
+        project.setWorkLocation("東京都千代田区丸の内1-1-1");
+        projectMapper.insert(project);
+        return project.getId();
+    }
+
+    private com.ses.service.ai.copilot.CopilotExecutionContext recorderContext() {
+        com.ses.service.ai.copilot.CopilotExecutionContext context = new com.ses.service.ai.copilot.CopilotExecutionContext(
+                RECORDER_TENANT, 77L, java.time.Instant.parse("2026-09-09T00:00:00Z"), java.time.ZoneId.of("UTC"));
+        context.bindSnapshot(new com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory(dataScopeService,
+                organizationScopeService).create(RECORDER_TENANT, 77L, java.time.LocalDate.of(2026, 9, 9)));
+        return new com.ses.service.ai.LegacyAiExecutionContextBinder().bind(context);
+    }
+
+    private static MatchResultDto engineerResult(long engineerId) {
+        MatchResultDto dto = new MatchResultDto();
+        dto.setEngineerId(engineerId);
+        dto.setScore(80);
+        dto.setReason("ok");
+        return dto;
     }
 
     @Test
@@ -141,6 +230,8 @@ class AiLogProviderTest {
     private static MatchResultDto project(long projectId) {
         MatchResultDto dto = new MatchResultDto();
         dto.setProjectId(projectId);
+        dto.setScore(80);
+        dto.setReason("ok");
         return dto;
     }
 

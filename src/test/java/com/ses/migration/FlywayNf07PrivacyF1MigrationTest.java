@@ -288,7 +288,12 @@ class FlywayNf07PrivacyF1MigrationTest {
                     "provider が扱う要素と gate に接続する要素は分類済み");
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM "
                     + "m_pii_data_element e WHERE e.tenant_id='default' AND e.data_element_id=CONCAT('DOCUMENT:', dt.code) "
-                    + "AND e.subject_attribution='ATTRIBUTABLE' AND e.provider_id='document-file')"), "全文書種別の要素");
+                    + "AND e.subject_attribution IN ('ATTRIBUTABLE','NOT_ATTRIBUTABLE') AND e.provider_id='document-file')"), "全文書種別の要素");
+            // 本人を導出できない文書種別は NOT_ATTRIBUTABLE（DocumentFileProvider.DOCUMENT_TYPE_RULES と同じ。V196・V197）
+            assertEquals(List.of("DOCUMENT:IMPORT", "DOCUMENT:MANAGEMENT_REPORT", "DOCUMENT:SERVICE_REQUEST_ATTACHMENT"),
+                    rows(st, "SELECT data_element_id FROM m_pii_data_element WHERE tenant_id='default' "
+                            + "AND data_element_id LIKE 'DOCUMENT:%' AND subject_attribution='NOT_ATTRIBUTABLE' "
+                            + "ORDER BY data_element_id"), "残余の文書種別");
 
             st.executeUpdate("INSERT INTO sys_user (tenant_id, username, password, real_name, role, status) "
                     + "VALUES ('nf07-seed', 'nf07-seed-user', 'x', 'NF07 seed', '管理者', 1)");
@@ -312,7 +317,7 @@ class FlywayNf07PrivacyF1MigrationTest {
     }
 
     /** V196 が tenant ごとに入れる文書以外の固定の data element の件数（DOCUMENT:<code> は文書種別ごとに数える）。 */
-    private static final long CATALOG_FIXED_ELEMENTS = 26L;
+    private static final long CATALOG_FIXED_ELEMENTS = 27L;
 
     // ---------------------------------------------------------------- helper
 

@@ -37,6 +37,14 @@ class PrivacyCatalogServiceTest {
     private PrivacyReadOnlyQuery query;
     private PrivacyCatalogService service;
 
+    /** LambdaQueryWrapper の列指定は MyBatis-Plus の表情報を要する（Spring の test が先に動いたかどうかに依存させない）。 */
+    @org.junit.jupiter.api.BeforeAll
+    static void initTableInfo() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""), PiiDataElement.class);
+    }
+
     @BeforeEach
     void setUp() {
         guard = mock(PrivacyAccessGuard.class);

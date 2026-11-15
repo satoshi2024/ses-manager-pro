@@ -1,5 +1,6 @@
 package com.ses.privacy.production;
 
+import com.ses.privacy.production.provider.DsarDeliveryClass;
 import com.ses.privacy.production.provider.ProductionPrivacyProvider;
 import com.ses.privacy.production.provider.ProviderDataElement;
 import com.ses.privacy.production.provider.ProviderTable;
@@ -99,6 +100,17 @@ public class ProductionPrivacyProviderRegistry {
             return Optional.empty();
         }
         return provider.dataElements().stream().filter(e -> e.matches(dataElementId)).findFirst();
+    }
+
+    /**
+     * data element の DSAR 交付区分（A2b の {@code ThirdPartyRedactor} へ渡す値）。provider の宣言が無ければ
+     * {@link DsarDeliveryClass#MIXED_THIRD_PARTY}（自動では交付しない）。
+     */
+    public DsarDeliveryClass deliveryClassOf(String dataElementId) {
+        return providerFor(dataElementId)
+                .flatMap(provider -> declaration(provider, dataElementId))
+                .map(ProviderDataElement::deliveryClass)
+                .orElse(DsarDeliveryClass.MIXED_THIRD_PARTY);
     }
 
     private static String validateProviderId(ProductionPrivacyProvider provider) {

@@ -5,6 +5,7 @@ import com.ses.entity.privacy.PiiDataElement;
 import com.ses.mapper.privacy.PiiDataElementMapper;
 import com.ses.privacy.production.PrivacyCoverageReport;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
+import com.ses.privacy.production.provider.DocumentFileProvider;
 import com.ses.privacy.production.provider.ProductionPrivacyProvider;
 import com.ses.privacy.production.provider.ProviderDataElement;
 import org.junit.jupiter.api.Test;
@@ -62,7 +63,7 @@ class PrivacyDataElementCatalogSeedTest {
     /** 未登録として必ず報告される data element（Demo の例: 監査ログ・backup・外部 provider 側の写し）。 */
     private static final List<String> UNREGISTERED_EXAMPLES = List.of("AUDIT_LOG", "DATABASE_BACKUP",
             "AI_EXTERNAL_PROVIDER_COPY", "CLOUDSIGN_REMOTE_DOCUMENT", "FREEE_REMOTE_RECORD", "MAILBOX_SOURCE_MESSAGE",
-            "AI_LEGACY_LOG", "PROJECT_INGESTION_TEXT", "FILE_SECURITY_METADATA");
+            "AI_LEGACY_LOG", "PROJECT_INGESTION_TEXT", "FILE_SECURITY_METADATA", "AI_RECOMMENDATION_ITEM");
 
     private static final Set<String> CLASSIFIED = Set.of("ATTRIBUTABLE", "NOT_ATTRIBUTABLE", "NO_PERSONAL_DATA");
 
@@ -74,6 +75,10 @@ class PrivacyDataElementCatalogSeedTest {
     private PiiDataElementMapper mapper;
     @Autowired
     private ProductionPrivacyProviderRegistry registry;
+    @Autowired
+    private org.springframework.context.ApplicationContext context;
+    @Autowired
+    private com.ses.privacy.production.provider.PrivacyReadOnlyQuery readOnlyQuery;
 
     @Test
     void gateに接続するdata_elementはseedでUNKNOWNにならない() {
@@ -96,7 +101,7 @@ class PrivacyDataElementCatalogSeedTest {
                 + "(owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
                 + "OR owner_ref IS NOT NULL)", Long.class, TENANT)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(26L);
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(27L);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
                 + "AND inventory_ref IS NULL", Long.class, TENANT)).isZero();
     }
@@ -115,6 +120,9 @@ class PrivacyDataElementCatalogSeedTest {
                         .filter(id -> id.startsWith("INTEGRATION_HUB_") || id.startsWith("EXTERNAL_API_")).toList());
         for (ProductionPrivacyProvider provider : registry.providers()) {
             for (ProviderDataElement element : provider.dataElements()) {
+                if (element.prefixMatch()) {
+                    continue; // 未知の種別の受け皿（全ての既知の種別は個別に宣言している）
+                }
                 assertThat(report.registeredElements()).as(element.dataElementId())
                         .anyMatch(entry -> element.matches(entry.dataElementId())
                                 && provider.providerId().equals(entry.providerId()));
@@ -124,6 +132,68 @@ class PrivacyDataElementCatalogSeedTest {
                 + "AND provider_id IS NOT NULL AND (provider_id LIKE '%gemini%' OR provider_id LIKE '%cloudsign%' "
                 + "OR provider_id LIKE '%freee%' OR provider_id LIKE '%mail%' OR provider_id LIKE '%backup%' "
                 + "OR provider_id LIKE '%replica%')", Long.class, TENANT)).isZero();
+    }
+
+    /**
+     * catalog の文書種別ごとの分類は DocumentFileProvider の宣言（唯一の正本）と一致し、残余の種別は catalog・coverage の
+     * どちらでも NOT_ATTRIBUTABLE として見える（§3.4.3 規則5の入力を1つに保つ。NF07-F2 delta review P2-B）。
+     */
+    @Test
+    void catalogの文書種別ごとの分類はproviderの宣言と一致し残余はNOT_ATTRIBUTABLEとして見える() {
+        ProductionPrivacyProvider document = registry.require(DocumentFileProvider.PROVIDER_ID);
+        List<PiiDataElement> rows = catalog(TENANT).stream()
+                .filter(row -> row.getDataElementId().startsWith(DocumentFileProvider.ELEMENT_PREFIX)).toList();
+
+        for (String code : DocumentFileProvider.DOCUMENT_TYPE_RULES.keySet()) {
+            assertThat(rows).as(code).anyMatch(row -> row.getDataElementId().equals("DOCUMENT:" + code));
+        }
+        for (PiiDataElement row : rows) {
+            ProviderDataElement declaration = ProductionPrivacyProviderRegistry
+                    .declaration(document, row.getDataElementId()).orElseThrow();
+            assertThat(declaration.prefixMatch()).as(row.getDataElementId()).isFalse();
+            assertThat(row.getSubjectAttribution()).as(row.getDataElementId())
+                    .isEqualTo(declaration.attribution().name());
+        }
+        PrivacyCoverageReport report = PrivacyCoverageReport.build(TENANT, catalog(TENANT), registry);
+        assertThat(report.unregisteredElements())
+                .noneMatch(entry -> PrivacyCoverageReport.ATTRIBUTION_MISMATCH.equals(entry.reason()));
+        assertThat(report.registeredElements())
+                .filteredOn(entry -> entry.dataElementId().startsWith(DocumentFileProvider.ELEMENT_PREFIX)
+                        && entry.subjectAttribution().equals("NOT_ATTRIBUTABLE"))
+                .extracting(PrivacyCoverageReport.ElementEntry::dataElementId)
+                .containsExactlyInAnyOrder("DOCUMENT:IMPORT", "DOCUMENT:MANAGEMENT_REPORT",
+                        "DOCUMENT:SERVICE_REQUEST_ATTACHMENT");
+    }
+
+    /**
+     * Spring に登録された provider（@Bean や継承で作られたものを含む）は classpath を走査した main の実装と一致し、
+     * registry もその全てを登録している。DB 接続口は read-only transaction の proxy である（P3-3、P3-11）。
+     */
+    @Test
+    void Springのproviderはclasspath走査の実装と一致し読取り口はtransactionのproxyである() throws Exception {
+        org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider scanner =
+                new org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter(new org.springframework.core.type.filter.AssignableTypeFilter(
+                ProductionPrivacyProvider.class));
+        Set<Class<?>> scanned = new java.util.HashSet<>();
+        for (org.springframework.beans.factory.config.BeanDefinition candidate
+                : scanner.findCandidateComponents("com.ses")) {
+            Class<?> type = Class.forName(candidate.getBeanClassName());
+            if (!type.getProtectionDomain().getCodeSource().getLocation().toString().contains("test-classes")) {
+                scanned.add(type);
+            }
+        }
+        Set<Class<?>> beans = context.getBeansOfType(ProductionPrivacyProvider.class).values().stream()
+                .map(org.springframework.util.ClassUtils::getUserClass)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<Class<?>> registered = registry.providers().stream()
+                .map(org.springframework.util.ClassUtils::getUserClass)
+                .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(scanned).isNotEmpty();
+        assertThat(beans).isEqualTo(scanned);
+        assertThat(registered).isEqualTo(scanned);
+        assertThat(org.springframework.aop.support.AopUtils.isAopProxy(readOnlyQuery)).isTrue();
     }
 
     @Test
@@ -136,7 +206,7 @@ class PrivacyDataElementCatalogSeedTest {
             // 再実行の後は、現在の全文書種別（論理削除済みを含む）に分類済みの DOCUMENT:<code> がある
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM "
                     + "m_pii_data_element e WHERE e.tenant_id = ? AND e.data_element_id = CONCAT('DOCUMENT:', dt.code) "
-                    + "AND e.subject_attribution = 'ATTRIBUTABLE' AND e.provider_id = 'document-file')",
+                    + "AND e.subject_attribution IN ('ATTRIBUTABLE', 'NOT_ATTRIBUTABLE') AND e.provider_id = 'document-file')",
                     Long.class, TENANT)).isZero();
 
             jdbc.update("INSERT INTO sys_user (id, tenant_id, username, password, real_name, role, status) "

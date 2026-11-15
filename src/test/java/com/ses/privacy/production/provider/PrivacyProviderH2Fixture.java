@@ -162,6 +162,37 @@ final class PrivacyProviderH2Fixture {
                 + "VALUES (?, ?, ?, ?, ?, ?)", id, tenant, runId, rank, targetType, targetId);
     }
 
+    // ---------------------------------------------------------------- 請求・電子請求書・注文（複数要員は和集合）
+
+    long invoice(long id, long customerId) {
+        jdbc.update("INSERT INTO t_invoice (id, invoice_no, customer_id, billing_month, subtotal, tax, total) "
+                + "VALUES (?, ?, ?, '2026-04', 1000000, 100000, 1100000)", id, "NF07-INV-" + id, customerId);
+        return id;
+    }
+
+    void invoiceItem(long id, long invoiceId, long workRecordId) {
+        jdbc.update("INSERT INTO t_invoice_item (id, invoice_id, work_record_id, amount) VALUES (?, ?, ?, 500000)",
+                id, invoiceId, workRecordId);
+    }
+
+    void digitalInvoice(long id, String tenant, long invoiceId, long xmlDocumentId) {
+        jdbc.update("INSERT INTO t_digital_invoice (id, tenant_id, legal_entity_id, invoice_id, direction, profile, "
+                        + "specification_version, message_id, xml_document_id, status, actor_type, confirmation_source) "
+                        + "VALUES (?, ?, 1, ?, 'SEND', 'Standard', '1.0', ?, ?, 'QUEUED', 'SYSTEM', 'SCHEDULER_POLL')",
+                id, tenant, invoiceId, "nf07-f2-msg-" + id, xmlDocumentId);
+    }
+
+    long salesOrder(long id, long customerId) {
+        jdbc.update("INSERT INTO t_sales_order (id, order_no, customer_id, order_date) VALUES (?, ?, ?, DATE '2026-04-01')",
+                id, "NF07-SO-" + id, customerId);
+        return id;
+    }
+
+    void salesOrderLine(long id, long orderId, int lineNo, long engineerId) {
+        jdbc.update("INSERT INTO t_sales_order_line (id, order_id, line_no, engineer_id, unit_price) "
+                + "VALUES (?, ?, ?, ?, 700000)", id, orderId, lineNo, engineerId);
+    }
+
     /** 書込み0の確認用（test 側は全列を読む）。 */
     List<Map<String, Object>> snapshot(String table, long fromId) {
         return jdbc.queryForList("SELECT * FROM " + table + " WHERE id >= ? ORDER BY id", fromId);

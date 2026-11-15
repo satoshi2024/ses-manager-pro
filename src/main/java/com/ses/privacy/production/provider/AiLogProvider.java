@@ -30,7 +30,7 @@ import java.util.Set;
  * </ul>
  * どちらにも当たらない run（{@code MATCHING} 以外の use_case で source 要員を持つ run、source 要員と source 案件を
  * 両方持つ run、記録規則が変わった run）は帰属できない行として残る（plan §3.4.1 D6 の残余。DSAR では要手動確認）。
- * 記録規則との一致は {@code AiLogProviderTest} が記録側の計算と比べて固定する。
+ * 記録規則との一致は {@code AiLogProviderTest} が記録側の計算との比較と、実際の {@code recordMatch} で記録した run の帰属で固定する。
  * BP の推薦結果は summary に BP 本人の属性を含まないため導出に使わない。実行者（{@code actor_user_id}）は操作の主体で
  * あって内容の本人ではないため使わない。hash・費用・token 数・外部送信の claim 列は返さない。
  *

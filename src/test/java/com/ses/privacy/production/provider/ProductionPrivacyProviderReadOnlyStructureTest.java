@@ -43,7 +43,8 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
     private static final Map<String, Map<String, List<String>>> EXPECTED_ALLOW_LISTS = expectedAllowLists();
 
     /** WHERE の副問合せが選んでよいキー列。 */
-    private static final Set<String> SUBQUERY_KEY_COLUMNS = Set.of("id", "run_id", "document_id", "private_note_ref");
+    private static final Set<String> SUBQUERY_KEY_COLUMNS = Set.of("id", "run_id", "document_id", "private_note_ref",
+            "invoice_id", "order_id", "xml_document_id");
 
     private static final Pattern SUBQUERY = Pattern.compile("(?i)\\bselect\\s+([a-z])\\.([a-z_]+)\\s+from\\b");
 
@@ -110,6 +111,27 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
                 provider.resolveStoredNames("nf07-f2-a", PrivacySubjectRef.of(type, 7L));
             }
         }
+        assertRecordedSql(query);
+    }
+
+    /**
+     * 各照会に合成の1行を返し、前の結果に依存する照会（AI の parameter_hash 照合など）も実行させて同じ検査をする
+     * （空の結果だけでは後続の SQL が記録されない。NF07-F2 delta review P3-2）。
+     */
+    @Test
+    void 合成の行を返しても全providerの後続の照会まで同じ規則を満たす() {
+        PrivacyReadOnlyQuery query = recordingQuery(true);
+        for (ProductionPrivacyProvider provider : providers(query)) {
+            for (PrivacySubjectType type : PrivacySubjectType.values()) {
+                provider.findBySubject("nf07-f2-a", PrivacySubjectRef.of(type, 7L));
+            }
+        }
+        assertThat(calls).as("AI の要員→案件の照合（hash 照会）まで実行されること")
+                .anyMatch(call -> call.contains("parameter_hash IN"));
+        assertRecordedSql(query);
+    }
+
+    private void assertRecordedSql(PrivacyReadOnlyQuery query) {
         assertThat(calls).as("providerがDBへ照会すること").isNotEmpty();
         Map<String, ProviderTable> tables = new LinkedHashMap<>();
         for (ProductionPrivacyProvider provider : providers(query)) {
@@ -146,13 +168,18 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
                 "id = 1 union all select u.password from sys_user u", "id IN (SELECT a.id FROM t_a a INTERSECT SELECT b.id FROM t_b b)",
                 "id IN (SELECT a.id FROM t_a a EXCEPT SELECT b.id FROM t_b b)", "GET_LOCK('x', 1) = 1",
                 "RELEASE_LOCK('x') = 1", "id IN (SELECT a.id, a.password FROM sys_user a)",
-                "id IN (SELECT password FROM sys_user)", "id IN (SELECT a.id FROM (SELECT * FROM sys_user) a)")) {
+                "id IN (SELECT password FROM sys_user)", "id IN (SELECT a.id FROM (SELECT * FROM sys_user) a)",
+                "id IN (SELECT u.password FROM sys_user u)", "id IN (SELECT k.engineer_id FROM t_contract k)",
+                "id IN (TABLE sys_user)", "id IN (VALUES ROW(1))", "EXTRACTVALUE(1, 'x') = 1",
+                "UPDATEXML(1, 'x', 'y') = 1", "SOURCE_POS_WAIT('f', 1) = 0", "MASTER_POS_WAIT('f', 1) = 0",
+                "WAIT_FOR_EXECUTED_GTID_SET('x') = 0", "WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS('x') = 0")) {
             assertThatThrownBy(() -> PrivacyReadOnlyQuery.selectSql(table, where)).as(where)
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThat(PrivacyReadOnlyQuery.selectSql(table, "updated_at IS NOT NULL AND deleted_flag = 0 AND created_at > :t "
-                + "AND id IN (SELECT k.engineer_id FROM t_contract k WHERE k.id = :c)"))
+                + "AND id IN (SELECT k.id FROM t_contract k WHERE k.engineer_id = :c)"))
                 .startsWith("SELECT id, tenant_id, full_name");
+        assertThat(PrivacyReadOnlyQuery.SUBQUERY_KEY_COLUMNS).isEqualTo(SUBQUERY_KEY_COLUMNS);
     }
 
     @Test
@@ -200,20 +227,25 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
         return classes;
     }
 
-    /** DB 接続口の規則に反する field（instance field は PrivacyReadOnlyQuery だけ、static は定数だけ）。 */
+    /**
+     * DB 接続口の規則に反する field（instance field は PrivacyReadOnlyQuery だけ、static は定数だけ）。
+     * 親 class の field も Object の手前まで遡って検査する（P3-3）。
+     */
     static List<String> fieldViolations(Class<?> type) {
         List<String> violations = new ArrayList<>();
-        for (Field field : type.getDeclaredFields()) {
-            if (field.isSynthetic()) {
-                continue;
-            }
-            Class<?> fieldType = field.getType();
-            boolean allowed = Modifier.isStatic(field.getModifiers())
-                    ? fieldType.isPrimitive() || Set.of(String.class, ProviderTable.class, List.class, Map.class)
-                    .contains(fieldType)
-                    : fieldType == PrivacyReadOnlyQuery.class;
-            if (!allowed) {
-                violations.add(field.toString());
+        for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if (field.isSynthetic()) {
+                    continue;
+                }
+                Class<?> fieldType = field.getType();
+                boolean allowed = Modifier.isStatic(field.getModifiers())
+                        ? fieldType.isPrimitive() || Set.of(String.class, ProviderTable.class, List.class, Map.class)
+                        .contains(fieldType)
+                        : fieldType == PrivacyReadOnlyQuery.class;
+                if (!allowed) {
+                    violations.add(field.toString());
+                }
             }
         }
         return violations;
@@ -221,6 +253,14 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
 
     /** query だけを記録して空を返し、それ以外の操作は失敗させる記録用の接続口。 */
     private PrivacyReadOnlyQuery recordingQuery() {
+        return recordingQuery(false);
+    }
+
+    /**
+     * query だけを記録し、それ以外の操作は失敗させる記録用の接続口。{@code syntheticRow} なら各照会に SELECT 句の列から
+     * 作った合成の1行を返す（ID 系は 1、対象種別は PROJECT、文書種別は CONTRACT、論理削除は 0、他は文字列）。
+     */
+    private PrivacyReadOnlyQuery recordingQuery(boolean syntheticRow) {
         NamedParameterJdbcOperations operations = (NamedParameterJdbcOperations) Proxy.newProxyInstance(
                 getClass().getClassLoader(), new Class<?>[]{NamedParameterJdbcOperations.class},
                 (proxy, method, args) -> {
@@ -234,11 +274,27 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
                     String sql = args != null && args.length > 0 && args[0] instanceof String text ? text : "";
                     calls.add(method.getName() + "|" + sql);
                     if ("query".equals(method.getName()) && method.getReturnType() == List.class) {
-                        return List.of();
+                        return syntheticRow ? List.of(syntheticRow(sql)) : List.of();
                     }
                     throw new AssertionError("SELECT以外の操作は許可しない: " + method);
                 });
         return new PrivacyReadOnlyQuery(operations);
+    }
+
+    private static Map<String, Object> syntheticRow(String sql) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        String selectList = sql.substring("SELECT ".length(), sql.indexOf(" FROM "));
+        for (String column : selectList.split(", ")) {
+            Object value = switch (column) {
+                case "target_type" -> "PROJECT";
+                case "document_type" -> "CONTRACT";
+                case "deleted_flag" -> 0;
+                case "rank_no" -> 1L;
+                default -> column.equals("id") || column.endsWith("_id") ? (Object) 1L : "x";
+            };
+            row.put(column, value);
+        }
+        return row;
     }
 
     static List<ProductionPrivacyProvider> providers(PrivacyReadOnlyQuery query) {

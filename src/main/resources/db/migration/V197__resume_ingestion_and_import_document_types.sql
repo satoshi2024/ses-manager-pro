@@ -16,6 +16,8 @@
 --
 -- NF07 の data element catalog（V196）は文書種別ごとに DOCUMENT:<code> を持つため、同じ規則で行を足す
 -- （DOCUMENT:RESUME_INGESTION は V196 で投入済みのため、ここでは DOCUMENT:IMPORT だけが入る）。
+-- 取込CSVは複数人の行を含み本人を導出できないため、DOCUMENT:IMPORT は NOT_ATTRIBUTABLE とする
+-- （DocumentFileProvider.DOCUMENT_TYPE_RULES と同じ。plan §3.4.1 D1 の残余）。
 -- ============================================================
 
 INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
@@ -29,7 +31,7 @@ WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'IMPORT');
 INSERT INTO m_pii_data_element (tenant_id, data_element_id, storage_kind, storage_ref, provider_id,
                                 subject_attribution, inventory_ref)
 SELECT t.tenant_id, CONCAT('DOCUMENT:', dt.code), 'FILE_OBJECT', 't_document_version.storage_key', 'document-file',
-       'ATTRIBUTABLE', 'pii-inventory.md#DB-017'
+       CASE WHEN dt.code = 'IMPORT' THEN 'NOT_ATTRIBUTABLE' ELSE 'ATTRIBUTABLE' END, 'pii-inventory.md#DB-017'
 FROM (SELECT DISTINCT tenant_id FROM sys_user WHERE tenant_id IS NOT NULL AND tenant_id <> '') t
 CROSS JOIN (SELECT code FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT')) dt
 WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e

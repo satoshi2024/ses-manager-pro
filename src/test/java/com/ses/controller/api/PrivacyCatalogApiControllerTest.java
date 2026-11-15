@@ -57,7 +57,8 @@ class PrivacyCatalogApiControllerTest {
     void 登録済みproviderと未登録の要素を分けて理由と本人帰属の分類を返す() throws Exception {
         PrivacyCoverageReport report = new PrivacyCoverageReport("default",
                 List.of(new PrivacyCoverageReport.ProviderEntry("engineer-profile",
-                        List.of(new PrivacyCoverageReport.ProviderElementEntry("ENGINEER_PROFILE", false, "ATTRIBUTABLE",
+                        List.of(new PrivacyCoverageReport.ProviderElementEntry("ENGINEER_PROFILE", false, List.of(),
+                                "ATTRIBUTABLE", "MIXED_THIRD_PARTY",
                                 List.of(new PrivacyCoverageReport.ProviderSubjectRule("ENGINEER", "t_engineer.id")))),
                         Map.of("t_engineer", List.of("id", "full_name")))),
                 List.of(new PrivacyCoverageReport.ElementEntry("ENGINEER_PROFILE", "DB_COLUMN", "t_engineer.(allow-list)",
@@ -72,6 +73,7 @@ class PrivacyCatalogApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.providers[0].providerId").value("engineer-profile"))
                 .andExpect(jsonPath("$.data.providers[0].columnAllowList.t_engineer[1]").value("full_name"))
+                .andExpect(jsonPath("$.data.providers[0].dataElements[0].deliveryClass").value("MIXED_THIRD_PARTY"))
                 .andExpect(jsonPath("$.data.registeredElements[0].subjectAttribution").value("ATTRIBUTABLE"))
                 .andExpect(jsonPath("$.data.unregisteredElements[0].dataElementId").value("AUDIT_LOG"))
                 .andExpect(jsonPath("$.data.unregisteredElements[0].reason").value("PROVIDER_UNREGISTERED"))

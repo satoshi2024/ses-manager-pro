@@ -149,6 +149,8 @@ class DocumentServiceImplH2Test {
     @Test
     void H2DB_V197の文書種別で履歴取込と取込センターの原本をregisterReceivedで登録できる() throws Exception {
         jdbcTemplate.update("DELETE FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT')");
+        // V197 の catalog 行の投入も H2 で実際に通す（V196 が H2 seed の IMPORT から作った行を消しておく。P3-10）
+        jdbcTemplate.update("DELETE FROM m_pii_data_element WHERE data_element_id = 'DOCUMENT:IMPORT'");
         java.sql.Connection connection = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
         try {
             org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
@@ -162,6 +164,11 @@ class DocumentServiceImplH2Test {
         assertEquals(java.util.List.of("IMPORT:INCOMING", "RESUME_INGESTION:INCOMING"), jdbcTemplate.queryForList(
                 "SELECT CONCAT(code, ':', direction) FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT') "
                         + "AND deleted_flag = 0 ORDER BY code", String.class));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM (SELECT DISTINCT tenant_id FROM sys_user "
+                + "WHERE tenant_id IS NOT NULL AND tenant_id <> '') t WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e "
+                + "WHERE e.tenant_id = t.tenant_id AND e.data_element_id = 'DOCUMENT:IMPORT' "
+                + "AND e.subject_attribution = 'NOT_ATTRIBUTABLE' AND e.provider_id = 'document-file')", Integer.class),
+                "V197 が各 tenant に DOCUMENT:IMPORT を NOT_ATTRIBUTABLE で入れる");
 
         // ResumeIngestionServiceImpl と同じ要求（方向は RECEIVED から INCOMING）
         Document resume = documentService.registerReceived(DocumentRegisterRequest.builder()

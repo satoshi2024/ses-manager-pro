@@ -22,8 +22,8 @@
   - NF07 F1 + PERM（W3-14）: `V190__nf07_privacy_f1_core.sql`（F1表。行は作らない）、`V191__nf07_privacy_permission_seed.sql`（privacy-admin・privacy.* の拒否・menu）。prodの起動検査 `ProductionSecurityConfigurationValidator` は、全体baseline `'*'` を持つgroup（privacy-admin以外）に privacy.* の拒否行が無ければ起動を止める（bootstrap中も同じ）。`privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFFで、初回リリースはOFFのまま配備する。1つでもONにした起動では `PrivacyProductionConfigurationValidator`（W3-14b）が決定ID束縛（`privacy.approval.*`、D-01・D-09）、privacy-admin の有効な管理者2名以上（OIDCでログインできる管理者だけ。break-glass口座を除く。ロック中も数える。推奨は §5.0 の C〜E の3名）、privacy-admin 以外のgroupに `privacy.` 系の許可行が無いことを検査し、満たさなければ起動しない。決定の署名日前・失効だけなら起動は止めず、WARN `NF07_PRIVACY_STOPPED_AT_STARTUP` を出してNF07をOFFとして扱う（実行中に失効日を迎えた場合も同日から。metric `ses_privacy_decision_binding_state`。ONの手順: `feature-switches.md` 4.7）。新しいmigrationは無い。
   - NF-06 取込センター画面（W3-12）: `V193__nf06_import_center_menu_and_permission_seed.sql`（menu `import-center` を管理者だけへ付与、`import.metadata.manage` を管理者専用group（`role-admin`・`privacy-admin`）へ明示許可し、他の全groupで拒否する。利用者の割当は変えない）。機能スイッチNF06は既定OFFで、初回リリースはOFFのまま配備する。ONにした起動では admission 承認設定（`ImportAdmissionStartupValidator`）と行参照のHMAC鍵 `IMPORT_ROW_REFERENCE_HMAC_KEY`（`ImportRowReferenceKeyStartupValidator`）が揃わなければ起動しない。前提は単一法人（`m_organization_unit` の論理削除されていない組織の法人IDがちょうど1種類。status・有効期間は見ない。新規導入は0件のため、ONの前に法人を持つ組織を登録する）。ONの手順: `feature-switches.md` 4.8。
   - NF08 B2c-1（W3-13）: `V194__nf08_copilot_dispatch_claim_and_cost_ledger.sql`（summary dispatchのclaim列、費用ledgerの `t_ai_external_send_cost_bucket` / `t_ai_external_send_cost_entry`、`t_audit_log.idx_audit_dispatch_key`。行は作らない）。外部送信は未開放のままで、prodは `AI_EXTERNAL_SEND_ENABLED=true` を `dispatch.permitOnlyNotWired` で起動拒否する（B2c-2の完了と独立Reviewまで。設定では解除できない）。`AI_EXTERNAL_SEND_COST_LEDGER`（`ai.external-send-cost-ledger`）は既定の `persistent` のまま設定しない（`persistent` 以外は解除後も起動拒否）。
-  - NF07 F2（read-only provider）: `V196__nf07_privacy_data_element_catalog_seed.sql`（`m_pii_data_element` に、`sys_user` に存在する tenant ごとの data element の構造行と `subject_attribution` だけを入れる。owner・データ分類・inventory 状態は UNKNOWN のまま、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` に文書以外の固定26件＋文書種別ごとの `DOCUMENT:<code>`（`m_document_type` の全種別。V197 の2種別を含む）。catalog API `GET /api/privacy/catalog` は `privacy.retention.enabled` がOFFの間404で、初回リリースはOFFのまま配備する。外部 provider（Gemini・CloudSign・freee・mailbox・backup）は登録しない。
-  - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT` を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。両経路とも取引日を設定しないため保存期限は NULL のままで、処分候補にはならない。
+  - NF07 F2（read-only provider）: `V196__nf07_privacy_data_element_catalog_seed.sql`（`m_pii_data_element` に、`sys_user` に存在する tenant ごとの data element の構造行と `subject_attribution` だけを入れる。owner・データ分類・inventory 状態は UNKNOWN のまま、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` に文書以外の固定27件＋文書種別ごとの `DOCUMENT:<code>`（`m_document_type` の全種別。V197 の2種別を含む）。catalog API `GET /api/privacy/catalog` は `privacy.retention.enabled` がOFFの間404で、初回リリースはOFFのまま配備する。外部 provider（Gemini・CloudSign・freee・mailbox・backup）は登録しない。
+  - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT`（NOT_ATTRIBUTABLE。取込CSVは本人を導出できない）を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。両経路とも取引日を設定しないため保存期限は NULL のままで、処分候補にはならない。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -231,15 +231,19 @@ SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() A
   't_privacy_request_subject_link', 't_privacy_action', 't_privacy_export_package');      -- 8
 SELECT (SELECT COUNT(*) FROM m_retention_policy) + (SELECT COUNT(*) FROM t_legal_hold)
      + (SELECT COUNT(*) FROM t_privacy_request);                                             -- 0
--- NF07 F2（V196・V197）: catalog は構造行だけ。tenant default に文書以外の固定26件と、文書種別ごとに1件
+-- NF07 F2（V196・V197）: catalog は構造行だけ。tenant default に文書以外の固定27件と、文書種別ごとに1件
 -- （文書種別の数に依存しない数え方にする）。owner・分類・inventory は全て UNKNOWN
 SELECT COUNT(*) FROM m_pii_data_element
- WHERE tenant_id = 'default' AND data_element_id NOT LIKE 'DOCUMENT:%';                    -- 26
+ WHERE tenant_id = 'default' AND data_element_id NOT LIKE 'DOCUMENT:%';                    -- 27
 SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e
  WHERE e.tenant_id = 'default' AND e.data_element_id = CONCAT('DOCUMENT:', dt.code));      -- 0（全文書種別に catalog 行がある）
 -- 文書種別（V197）: 履歴・スキルシート取込と取込センターCSVは受領（INCOMING）として登録できる
-SELECT code, direction FROM m_document_type WHERE code IN ('IMPORT', 'RESUME_INGESTION') ORDER BY code;
+SELECT code, direction FROM m_document_type WHERE code IN ('IMPORT', 'RESUME_INGESTION')
+   AND deleted_flag = 0 ORDER BY code;
 -- IMPORT INCOMING / RESUME_INGESTION INCOMING の2行
+SELECT data_element_id FROM m_pii_data_element WHERE tenant_id = 'default' AND data_element_id LIKE 'DOCUMENT:%'
+   AND subject_attribution = 'NOT_ATTRIBUTABLE' ORDER BY data_element_id;
+-- DOCUMENT:IMPORT / DOCUMENT:MANAGEMENT_REPORT / DOCUMENT:SERVICE_REQUEST_ATTACHMENT の3行（本人を導出できない文書種別）
 SELECT COUNT(*) FROM m_pii_data_element WHERE owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN'
     OR inventory_status <> 'UNKNOWN' OR owner_ref IS NOT NULL;                                -- 0
 SELECT COUNT(*) FROM m_pii_data_element WHERE subject_attribution = 'UNKNOWN'

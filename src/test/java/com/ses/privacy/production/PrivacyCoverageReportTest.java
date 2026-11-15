@@ -79,12 +79,40 @@ class PrivacyCoverageReportTest {
                 List.of(row("ENGINEER_PROFILE", "engineer-profile", "ATTRIBUTABLE")), registry);
 
         assertThat(report.uncatalogedProviderElements()).extracting(PrivacyCoverageReport.MissingElement::dataElementId)
-                .contains("ENGINEER_PHOTO", "CANDIDATE_PROFILE", "DOCUMENT:", "AI_REDACTED_SUMMARY")
-                .doesNotContain("ENGINEER_PROFILE");
+                .contains("ENGINEER_PHOTO", "CANDIDATE_PROFILE", "DOCUMENT:CONTRACT", "DOCUMENT:IMPORT",
+                        "AI_REDACTED_SUMMARY")
+                // 接頭辞の宣言は未知の種別の受け皿なので欠落として数えない
+                .doesNotContain("ENGINEER_PROFILE", "DOCUMENT:");
         assertThat(report.uncatalogedProviderElements()).allSatisfy(m ->
                 assertThat(m.reason()).isEqualTo(PrivacyCoverageReport.CATALOG_MISSING));
         assertThat(PrivacyCoverageReport.build("tenant-empty", null, registry).summary().uncatalogedProviderElementCount())
-                .isEqualTo(10);
+                .isEqualTo(9 + DocumentFileProvider.DOCUMENT_TYPE_RULES.size());
+    }
+
+    @Test
+    void 文書種別の宣言の除外と交付区分と本人帰属をproviderの一覧に示す() {
+        PrivacyCoverageReport report = PrivacyCoverageReport.build("default", fullyCataloged(), registry);
+
+        PrivacyCoverageReport.ProviderEntry document = report.providers().stream()
+                .filter(p -> p.providerId().equals("document-file")).findFirst().orElseThrow();
+        assertThat(document.dataElements()).filteredOn(PrivacyCoverageReport.ProviderElementEntry::prefixMatch)
+                .singleElement().satisfies(e -> {
+                    assertThat(e.excludedIds()).contains("DOCUMENT:IMPORT", "DOCUMENT:CONTRACT");
+                    assertThat(e.deliveryClass()).isEqualTo("MIXED_THIRD_PARTY");
+                });
+        assertThat(document.dataElements()).filteredOn(e -> e.dataElementId().equals("DOCUMENT:IMPORT")).singleElement()
+                .satisfies(e -> {
+                    assertThat(e.subjectAttribution()).isEqualTo("NOT_ATTRIBUTABLE");
+                    assertThat(e.subjectRules()).isEmpty();
+                });
+        assertThat(report.registeredElements()).filteredOn(e -> e.dataElementId().equals("DOCUMENT:IMPORT"))
+                .singleElement().satisfies(e -> assertThat(e.subjectAttribution()).isEqualTo("NOT_ATTRIBUTABLE"));
+        // catalog が残余の種別を ATTRIBUTABLE としていれば登録済みにしない（規則5の入力を1つに保つ）
+        List<PiiDataElement> stale = new ArrayList<>(fullyCataloged());
+        stale.removeIf(r -> r.getDataElementId().equals("DOCUMENT:IMPORT"));
+        stale.add(row("DOCUMENT:IMPORT", "document-file", "ATTRIBUTABLE"));
+        assertThat(reason(PrivacyCoverageReport.build("default", stale, registry), "DOCUMENT:IMPORT"))
+                .isEqualTo(PrivacyCoverageReport.ATTRIBUTION_MISMATCH);
     }
 
     private static String reason(PrivacyCoverageReport report, String id) {
@@ -100,7 +128,8 @@ class PrivacyCoverageReportTest {
         }
         rows.add(row("CANDIDATE_PROFILE", "candidate", "ATTRIBUTABLE"));
         rows.add(row("SYS_USER_ACCOUNT", "sys-user", "ATTRIBUTABLE"));
-        rows.add(row("DOCUMENT:CONTRACT", "document-file", "ATTRIBUTABLE"));
+        DocumentFileProvider.DOCUMENT_TYPE_RULES.forEach((code, rule) ->
+                rows.add(row("DOCUMENT:" + code, "document-file", rule.attribution().name())));
         for (String id : Arrays.asList("RESUME_INGESTION_ORIGINAL", "RESUME_INGESTION_TEXT",
                 "BP_AVAILABILITY_INGESTION_ORIGINAL", "BP_AVAILABILITY_INGESTION_TEXT")) {
             rows.add(row(id, "ingestion-text", "ATTRIBUTABLE"));

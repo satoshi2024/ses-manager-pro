@@ -514,7 +514,7 @@ class FlywayProdFreshInstallMySqlTest {
 
     /**
      * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）と F2 catalog seed（V196・V197）の新規導入直後の件数。
-     * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定26件と、文書種別ごとに1件。
+     * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定27件と、文書種別ごとに1件。
      * 件数は文書種別の数に依存させない。owner・分類・inventory は UNKNOWN）。privacy-admin は1件・未割当、privacy.* の
      * deny は既定5 groupに1件ずつ、menu は2件。prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の
      * 不変条件に違反する group も0件であること。V197 の2種別は受領（INCOMING）として登録できること。
@@ -526,8 +526,8 @@ class FlywayProdFreshInstallMySqlTest {
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table),
                     "NF07 F1表はfresh installで0件であること（法的な値をseedしない）: " + table);
         }
-        assertEquals(26L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "V196 の catalog は文書以外が固定26件");
+        assertEquals(27L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "V196 の catalog は文書以外が固定27件");
         assertEquals(scalar(st, "SELECT COUNT(*) FROM m_document_type"), scalar(st, "SELECT COUNT(*) FROM "
                 + "m_pii_data_element WHERE tenant_id = 'default' AND data_element_id LIKE 'DOCUMENT:%'"),
                 "文書種別ごとに catalog 行が1件");

@@ -22,7 +22,9 @@ import java.util.Optional;
  *   <li>{@link #PROVIDER_ELEMENT_UNDECLARED}: provider はあるが、その data element を宣言していない</li>
  *   <li>{@link #ATTRIBUTION_MISMATCH}: catalog の分類が provider の宣言と一致しない（UNKNOWN を含む）</li>
  * </ul>
- * provider が宣言しているのに catalog に行が無い data element は {@link #CATALOG_MISSING} として別に報告する。
+ * provider が個別に宣言しているのに catalog に行が無い data element は {@link #CATALOG_MISSING} として別に報告する
+ * （接頭辞の宣言は未知の種別の受け皿なので数えない）。catalog の分類は provider の宣言と一致しなければ登録済みにしないため、
+ * 「帰属できない data element」（§3.4.3 規則5）の入力は catalog の {@code subject_attribution} だけでよい。
  * 本 report は状態を持たない計算で、DB にも provider にも触れない（provider の照会は呼ばない）。
  *
  * @param tenantId                    対象 tenant
@@ -79,10 +81,13 @@ public record PrivacyCoverageReport(String tenantId,
             List<ProviderElementEntry> declared = new ArrayList<>();
             for (ProviderDataElement element : provider.dataElements()) {
                 declared.add(new ProviderElementEntry(element.dataElementId(), element.prefixMatch(),
-                        element.attribution().name(), element.subjectLinks().stream().map(ProviderSubjectRule::of).toList()));
+                        List.copyOf(new java.util.TreeSet<>(element.excludedIds())), element.attribution().name(),
+                        element.deliveryClass().name(),
+                        element.subjectLinks().stream().map(ProviderSubjectRule::of).toList()));
                 boolean cataloged = rows.stream().anyMatch(row -> element.matches(row.getDataElementId())
                         && provider.providerId().equals(row.getProviderId()));
-                if (!cataloged) {
+                // 接頭辞の宣言は未知の種別の受け皿で、catalog に行が無くても欠落ではない（個別の宣言だけを数える）
+                if (!cataloged && !element.prefixMatch()) {
                     missing.add(new MissingElement(provider.providerId(), element.dataElementId(), element.prefixMatch(),
                             CATALOG_MISSING));
                 }
@@ -120,10 +125,12 @@ public record PrivacyCoverageReport(String tenantId,
         }
     }
 
-    /** provider が宣言する data element と本人の導出規則。 */
-    public record ProviderElementEntry(String dataElementId, boolean prefixMatch, String subjectAttribution,
+    /** provider が宣言する data element（接頭辞の除外・本人帰属・DSAR 交付区分・本人の導出規則）。 */
+    public record ProviderElementEntry(String dataElementId, boolean prefixMatch, List<String> excludedIds,
+                                       String subjectAttribution, String deliveryClass,
                                        List<ProviderSubjectRule> subjectRules) {
         public ProviderElementEntry {
+            excludedIds = List.copyOf(excludedIds);
             subjectRules = List.copyOf(subjectRules);
         }
     }

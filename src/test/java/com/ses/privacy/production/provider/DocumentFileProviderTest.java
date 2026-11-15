@@ -1,5 +1,6 @@
 package com.ses.privacy.production.provider;
 
+import com.ses.privacy.production.retention.catalog.SubjectAttribution;
 import com.ses.service.impl.DocumentArchiveFileReferenceProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,7 +10,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -119,35 +119,113 @@ class DocumentFileProviderTest {
     }
 
     @Test
+    void 請求と電子請求書XMLと注文は明細の要員へ和集合で導出する() {
+        fx.engineer(ENGINEER_ID, TENANT, "要員E", null, false);
+        fx.engineer(OTHER_ENGINEER_ID, TENANT, "要員O", null, false);
+        long contract = fx.customerProjectContract(BASE_ID + 381, ENGINEER_ID);
+        long otherContract = fx.customerProjectContract(BASE_ID + 382, OTHER_ENGINEER_ID);
+        long workRecord = fx.workRecord(BASE_ID + 383, contract);
+        long otherWorkRecord = fx.workRecord(BASE_ID + 384, otherContract);
+        // 2名の実績を含む請求（PDF は INVOICE link、XML は t_digital_invoice の逆参照）
+        long invoiceId = fx.invoice(BASE_ID + 385, contract);
+        fx.invoiceItem(BASE_ID + 386, invoiceId, workRecord);
+        fx.invoiceItem(BASE_ID + 387, invoiceId, otherWorkRecord);
+        long invoicePdf = linkedDocument(391, "INVOICE_OUT", "INVOICE", invoiceId);
+        long invoiceXml = fx.document(BASE_ID + 393, TENANT, "INVOICE_OUT", false);
+        fx.version(BASE_ID + 394, TENANT, invoiceXml, 1, "invoice-393.xml", false);
+        fx.digitalInvoice(BASE_ID + 395, TENANT, invoiceId, invoiceXml);
+        // 2名を明細に持つ注文（注文書・注文請書とも SALES_ORDER link）
+        long orderId = fx.salesOrder(BASE_ID + 396, contract);
+        fx.salesOrderLine(BASE_ID + 397, orderId, 1, ENGINEER_ID);
+        fx.salesOrderLine(BASE_ID + 398, orderId, 2, OTHER_ENGINEER_ID);
+        long orderReceived = linkedDocument(401, "ORDER_RECEIVED", "SALES_ORDER", orderId);
+        long orderAck = linkedDocument(403, "ORDER_ACKNOWLEDGEMENT", "SALES_ORDER", orderId);
+        // 他の要員だけの注文は本人の文書にしない
+        long otherOrder = fx.salesOrder(BASE_ID + 405, otherContract);
+        fx.salesOrderLine(BASE_ID + 406, otherOrder, 1, OTHER_ENGINEER_ID);
+        long otherOrderDoc = linkedDocument(407, "ORDER_RECEIVED", "SALES_ORDER", otherOrder);
+
+        Set<Long> self = PrivacyProviderH2Fixture.rowIds(provider.findBySubject(TENANT, engineer(ENGINEER_ID)),
+                "t_document");
+        Set<Long> other = PrivacyProviderH2Fixture.rowIds(provider.findBySubject(TENANT, engineer(OTHER_ENGINEER_ID)),
+                "t_document");
+
+        assertThat(self).containsExactlyInAnyOrder(invoicePdf, invoiceXml, orderReceived, orderAck);
+        assertThat(other).containsExactlyInAnyOrder(invoicePdf, invoiceXml, orderReceived, orderAck, otherOrderDoc);
+        assertThat(provider.resolveStoredNames(TENANT, engineer(ENGINEER_ID)))
+                .contains("doc-391.pdf", "invoice-393.xml", "doc-401.pdf", "doc-403.pdf").doesNotContain("doc-407.pdf");
+    }
+
+    @Test
     void 導出できない文書種別は要員と同じIDのtargetにlinkしても本人へ帰属しない() {
-        // 残余の種別が通常付ける link（請求・注文・サービス依頼・取込job）と、link なし
-        long invoice = linkedDocument(351, "INVOICE_OUT", "INVOICE", ENGINEER_ID);
-        long order = linkedDocument(353, "ORDER_RECEIVED", "SALES_ORDER", ENGINEER_ID);
-        long service = linkedDocument(355, "SERVICE_REQUEST_ATTACHMENT", "SERVICE_REQUEST", ENGINEER_ID);
+        // 残余の種別が通常付ける link（サービス依頼・取込job）と、link なし
+        long service = linkedDocument(351, "SERVICE_REQUEST_ATTACHMENT", "SERVICE_REQUEST", ENGINEER_ID);
         long imported = linkedDocument(357, "IMPORT", "IMPORT_JOB", ENGINEER_ID);
         long report = fx.document(BASE_ID + 359, TENANT, "MANAGEMENT_REPORT", false);
 
         Set<Long> attributed = PrivacyProviderH2Fixture.rowIds(provider.findBySubject(TENANT, engineer(ENGINEER_ID)),
                 "t_document");
 
-        assertThat(attributed).doesNotContain(invoice, order, service, imported, report);
-        assertThat(DocumentFileProvider.UNATTRIBUTABLE_DOCUMENT_TYPES).containsKeys("INVOICE_OUT", "ORDER_RECEIVED",
-                "SERVICE_REQUEST_ATTACHMENT", "IMPORT", "MANAGEMENT_REPORT");
+        assertThat(attributed).doesNotContain(service, imported, report);
+        assertThat(DocumentFileProvider.DOCUMENT_TYPE_RULES).allSatisfy((code, rule) -> {
+            boolean residual = Set.of("MANAGEMENT_REPORT", "SERVICE_REQUEST_ATTACHMENT", "IMPORT").contains(code);
+            assertThat(rule.attribution()).as(code)
+                    .isEqualTo(residual ? SubjectAttribution.NOT_ATTRIBUTABLE : SubjectAttribution.ATTRIBUTABLE);
+        });
     }
 
     @Test
-    void m_document_typeの全種別は導出経路か残余のどちらか一方に宣言されている() {
-        Set<String> codes = new HashSet<>(jdbc.queryForList("SELECT code FROM m_document_type", String.class));
-        codes.add("RESUME_INGESTION");
-        codes.add("IMPORT");
-        Set<String> derivable = DocumentFileProvider.DERIVABLE_DOCUMENT_TYPES.keySet();
-        Set<String> residual = DocumentFileProvider.UNATTRIBUTABLE_DOCUMENT_TYPES.keySet();
+    void 文書種別は全て個別に宣言し未知の種別だけを除外付きの接頭辞で受け交付区分を種別ごとに持つ() {
+        List<ProviderDataElement> elements = provider.dataElements();
+        ProviderDataElement fallback = elements.stream().filter(ProviderDataElement::prefixMatch).findFirst().orElseThrow();
+        Set<String> exact = elements.stream().filter(e -> !e.prefixMatch()).map(ProviderDataElement::dataElementId)
+                .collect(java.util.stream.Collectors.toSet());
 
-        assertThat(derivable).doesNotContainAnyElementsOf(residual);
-        for (String code : codes) {
-            assertThat(derivable.contains(code) || residual.contains(code))
-                    .as("文書種別 %s の本人導出（経路か残余）を DocumentFileProvider に宣言すること", code).isTrue();
+        assertThat(elements.stream().filter(ProviderDataElement::prefixMatch)).hasSize(1);
+        assertThat(exact).hasSize(DocumentFileProvider.DOCUMENT_TYPE_RULES.size());
+        assertThat(fallback.excludedIds()).isEqualTo(exact);
+        assertThat(fallback.matches("DOCUMENT:IMPORT")).isFalse();
+        assertThat(fallback.matches("DOCUMENT:NEW_TYPE")).isTrue();
+        assertThat(fallback.deliveryClass()).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+        assertThat(elements).filteredOn(e -> e.deliveryClass() == DsarDeliveryClass.SELF)
+                .extracting(ProviderDataElement::dataElementId).containsExactlyInAnyOrder("DOCUMENT:WORK_REPORT",
+                        "DOCUMENT:RECEIPT", "DOCUMENT:SKILL_SHEET", "DOCUMENT:CHANGE_REQUEST_ATTACHMENT",
+                        "DOCUMENT:CERTIFICATION_EVIDENCE", "DOCUMENT:RESUME_INGESTION");
+        assertThat(elements).filteredOn(e -> e.attribution() == SubjectAttribution.NOT_ATTRIBUTABLE)
+                .allSatisfy(e -> {
+                    assertThat(e.subjectLinks()).isEmpty();
+                    assertThat(e.deliveryClass()).isEqualTo(DsarDeliveryClass.MIXED_THIRD_PARTY);
+                });
+    }
+
+    /**
+     * migration（classpath の {@code db/migration/*.sql}）が {@code m_document_type} に入れる全種別が宣言と一致する
+     * （共有 H2 の状態・実行順に依存しない。宣言に残った古い種別も検出する。NF07-F2 delta review P3-6）。
+     */
+    @Test
+    void migrationが入れる全文書種別と宣言は過不足なく一致する() throws Exception {
+        assertThat(DocumentFileProvider.DOCUMENT_TYPE_RULES.keySet()).isEqualTo(migrationDocumentTypes());
+    }
+
+    /** migration の {@code INSERT … INTO m_document_type} 文から (code, name, direction) の code を取り出す。 */
+    static Set<String> migrationDocumentTypes() throws Exception {
+        java.util.regex.Pattern row = java.util.regex.Pattern.compile(
+                "'([A-Z][A-Z0-9_]*)'\\s*,\\s*'[^']*'\\s*,\\s*'(INCOMING|OUTGOING|INTERNAL)'");
+        Set<String> codes = new java.util.TreeSet<>();
+        for (org.springframework.core.io.Resource resource : new org.springframework.core.io.support
+                .PathMatchingResourcePatternResolver().getResources("classpath*:db/migration/*.sql")) {
+            String sql = new String(resource.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            for (String statement : sql.split(";")) {
+                if (statement.matches("(?is).*\\bINSERT\\b[^;]*\\bINTO\\s+m_document_type\\b.*")) {
+                    java.util.regex.Matcher matcher = row.matcher(statement);
+                    while (matcher.find()) {
+                        codes.add(matcher.group(1));
+                    }
+                }
+            }
         }
+        assertThat(codes).as("migration から文書種別を読めること").hasSizeGreaterThan(20);
+        return codes;
     }
 
     @Test

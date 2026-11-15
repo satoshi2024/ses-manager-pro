@@ -1,6 +1,7 @@
 package com.ses.privacy.production.redaction;
 
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.provider.DsarDeliveryClass;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +24,10 @@ import java.util.function.Supplier;
  *   <li>規則・決定IDの取得で例外</li>
  * </ul>
  * 規則がある場合も、第三者の field は自動で出さず（{@code withheld}）、帰属が不明な field と規則で自動交付を
- * 許していない field は要手動確認に回す。自動で出すのは「本人の field で、規則が自動交付を許すもの」だけである。
+ * 許していない field は要手動確認に回す。自動で出すのは「交付区分が {@link DsarDeliveryClass#SELF} の data element の、
+ * 本人の field で、規則が自動交付を許すもの」だけである。交付区分が {@link DsarDeliveryClass#MIXED_THIRD_PARTY}
+ * （または不明）の data element は、規則があっても1件も自動で出さない（{@link #MIXED_MANUAL_ONLY}。契約書等の file は
+ * 項目単位で redact できないため。区分は provider の宣言から {@code ProductionPrivacyProviderRegistry#deliveryClassOf} で得る）。
  * 本 class は値を書き換えない（伏字化の方式は D-06 の決定後に追加する）。
  */
 @Slf4j
@@ -34,6 +38,8 @@ public class ThirdPartyRedactor {
     public static final String RULES_UNSET = "REDACTION_RULES_UNSET";
     /** D-06 の規則を適用した。 */
     public static final String RULES_APPLIED = "REDACTION_RULES_APPLIED";
+    /** 第三者混在の data element のため、規則があっても自動では出さない。 */
+    public static final String MIXED_MANUAL_ONLY = "REDACTION_MIXED_MANUAL_ONLY";
 
     private final Supplier<Rules> rulesSource;
     private final Supplier<String> boundDecisionId;
@@ -52,10 +58,16 @@ public class ThirdPartyRedactor {
         this.boundDecisionId = Objects.requireNonNull(boundDecisionId, "D-06 決定IDの取得元が必要です");
     }
 
-    /** field の一覧を自動交付・要手動確認・第三者として保留の3つに分ける。入力の順序を保つ。 */
-    public Outcome redact(List<Field> fields) {
+    /**
+     * 1つの data element の field を自動交付・要手動確認・第三者として保留の3つに分ける。入力の順序を保つ。
+     *
+     * @param deliveryClass data element の DSAR 交付区分（null は第三者混在として扱う）
+     * @param fields        判定対象の field
+     */
+    public Outcome redact(DsarDeliveryClass deliveryClass, List<Field> fields) {
         List<Field> input = fields == null ? List.of() : fields;
         Rules rules = effectiveRules();
+        boolean selfOnly = deliveryClass == DsarDeliveryClass.SELF;
         List<Field> autoReleased = new ArrayList<>();
         List<Field> manualReview = new ArrayList<>();
         List<String> withheld = new ArrayList<>();
@@ -67,14 +79,15 @@ public class ThirdPartyRedactor {
                 manualReview.add(field);
             } else if (field.ownership() == Ownership.THIRD_PARTY) {
                 withheld.add(field.fieldId());
-            } else if (field.ownership() == Ownership.SUBJECT
+            } else if (selfOnly && field.ownership() == Ownership.SUBJECT
                     && rules.autoReleasableFieldIds().contains(field.fieldId())) {
                 autoReleased.add(field);
             } else {
                 manualReview.add(field);
             }
         }
-        return new Outcome(rules == null ? RULES_UNSET : RULES_APPLIED, autoReleased, manualReview, withheld);
+        String reason = rules == null ? RULES_UNSET : selfOnly ? RULES_APPLIED : MIXED_MANUAL_ONLY;
+        return new Outcome(reason, autoReleased, manualReview, withheld);
     }
 
     /** D-06 の決定IDに束縛された規則。束縛できなければ null（規則未設定）。 */

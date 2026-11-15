@@ -507,9 +507,9 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 | D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
 | D13 | 他 NF の破壊的経路 | — | — | — | — | A1H 着手時に本表へ追記して同じ規則で分類する。対象外とするものは理由を書いて D-05 owner の受理を得る |
 
-**D1〜D3 の本人導出（F2 `DocumentFileProvider`、NF07-F2 review P2-4 で確定）**
+**D1〜D3 の本人導出（F2 `DocumentFileProvider`、NF07-F2 review P2-4・delta review P2-A で確定）**
 
-文書の link（`t_document_link`、論理削除済みを含む）の target から次の経路で導出し、どれか1つでも当たれば本人の文書とする（和集合）。
+文書の link（`t_document_link`、論理削除済みを含む）の target から次の経路で導出し、どれか1つでも当たれば本人の文書とする（和集合。複数の要員を含む請求・注文は含まれる全員の文書になる）。中間の表は tenant で絞らない（文書と link を tenant で絞り、各表の ID は tenant をまたいで一意。tenant 未解決の契約も hold の範囲に入る）。
 
 | link の target | 導出 |
 |---|---|
@@ -520,19 +520,29 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 | `WORK_RECORD` | `t_work_record.contract_id` → `t_contract.engineer_id` |
 | `BP_PAYMENT` | `t_bp_payment.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id` |
 | `QUOTATION` | `t_quotation.engineer_id`（NULL の見積は帰属不能） |
+| `INVOICE` | `t_invoice_item.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id`（請求の明細の全要員） |
+| `SALES_ORDER` | `t_sales_order_line.engineer_id`（注文の明細の全要員） |
 | （link なし）`PRIVATE_NOTE` | `t_one_on_one_request.private_note_ref`（文書ID）→ `engineer_id` |
+| （link なし）電子請求書 XML（`INVOICE_OUT`） | `t_digital_invoice.xml_document_id`（文書ID）→ `invoice_id` → `INVOICE` と同じ |
 
-文書種別ごとの宣言は `DocumentFileProvider.DERIVABLE_DOCUMENT_TYPES` / `UNATTRIBUTABLE_DOCUMENT_TYPES` にあり、`m_document_type` の全種別がどちらか一方に入ることを `DocumentFileProviderTest` が固定する（種別を足す batch は宣言も足す）。導出できる種別でも、導出に必要な link・列が無い行（要員の無い見積、契約・要員以外へ link した受領請求等）は §3.4.3 規則4の帰属不能行になる。
+文書種別ごとの宣言の正本は `DocumentFileProvider.DOCUMENT_TYPE_RULES` で、全種別を個別の宣言（導出できる種別は ATTRIBUTABLE、残余は NOT_ATTRIBUTABLE）にし、宣言に無い未知の種別だけを除外付きの接頭辞 `DOCUMENT:` で受ける。catalog（V196・V197）の種別ごとの `subject_attribution` はこの宣言と一致させ（一致しない行は coverage report が `ATTRIBUTION_MISMATCH` で登録済みにしない）、migration が `m_document_type` に入れる全種別と宣言が過不足なく一致することを `DocumentFileProviderTest` が classpath の migration を解析して固定する（種別を足す batch は宣言も足す）。このため規則5の「帰属できない data element」は catalog の `subject_attribution` だけを入力にできる。導出できる種別でも、導出に必要な link・列が無い行（要員の無い見積、契約・注文・要員以外へ link した受領請求等）は §3.4.3 規則4の帰属不能行になる。
 
-導出できない文書種別（残余。§3.4.3 規則5の対象）:
+導出できない文書種別（残余。catalog・provider とも NOT_ATTRIBUTABLE。§3.4.3 規則5の対象）:
 
 | 文書種別 | link | 理由 | A1H の扱い |
 |---|---|---|---|
-| `INVOICE_OUT` | INVOICE | 請求は顧客単位で、複数の契約・要員を含み得る | SUBJECT hold 開始画面で tenant 内件数を示し、privacy-admin が DATA_ELEMENT hold を追加するか残余として受理するかを選ぶ（既定なし。C-2-4） |
-| `ORDER_RECEIVED` / `ORDER_ACKNOWLEDGEMENT` | SALES_ORDER | 注文は顧客・案件単位 | 同上 |
-| `SERVICE_REQUEST_ATTACHMENT` | SERVICE_REQUEST | 顧客 portal の依頼で、本人種別（要員・候補者・アカウント・BP）に当たらない | 同上 |
-| `IMPORT` | IMPORT_JOB | 取込CSVは複数人の行を含み得る | 同上 |
+| `SERVICE_REQUEST_ATTACHMENT` | SERVICE_REQUEST | 顧客 portal の依頼で、本人種別（要員・候補者・アカウント・BP）に当たらない | SUBJECT hold 開始画面で tenant 内件数を示し、privacy-admin が DATA_ELEMENT hold を追加するか残余として受理するかを選ぶ（既定なし。C-2-4） |
+| `IMPORT` | IMPORT_JOB | 取込CSVは複数人の行を含み、行と本人を対応付けられない | 同上 |
 | `MANAGEMENT_REPORT` | なし | 経営レポートは集計で個人を対象としない | 同上 |
+
+**DSAR の交付区分（hold の帰属とは別の宣言。delta review 第4項）**: 帰属は保全の側に広く取るが、交付は第三者情報を出さない側に倒す。`DocumentFileProvider.DOCUMENT_TYPE_RULES` が種別ごとに `DsarDeliveryClass` を宣言し、`ThirdPartyRedactor` は `MIXED_THIRD_PARTY`（と宣言の無い data element）を D-06 の規則が設定された後も自動 package に入れない（PDF 等の file は項目単位で redact できない。`ThirdPartyRedactorTest` が固定）。
+
+| 区分 | 文書種別 |
+|---|---|
+| `SELF` | WORK_REPORT、RECEIPT、SKILL_SHEET、CHANGE_REQUEST_ATTACHMENT、CERTIFICATION_EVIDENCE、RESUME_INGESTION |
+| `MIXED_THIRD_PARTY` | 契約類8種（CONTRACT、SIGNED_PDF、ESIGN_CERT、ACCEPTANCE、DISPATCH_LEDGER、EMPLOYMENT_CONDITIONS_STATEMENT、DISPATCH_NOTICE、INDIVIDUAL_CONTRACT）、INVOICE_OUT、INVOICE_IN、ORDER_RECEIVED、ORDER_ACKNOWLEDGEMENT、QUOTATION、BP_SUBMISSION、PRIVATE_NOTE、残余3種 |
+
+文書以外の provider の data element は既定で `MIXED_THIRD_PARTY`（本人の項目だけを自動交付する判断は D-06 の決定後に宣言を変える）。catalog の `third_party_flag` は全行既定の 1（含む扱い）のままで、交付区分の正本は provider の宣言とする（catalog への反映は D-06 と合わせて DDL lane で行う）。第1期の DSAR は開示だけで消去請求を持たない。消去を扱う batch では「帰属できる」と「消去してよい」を別に判定し、法定保存のある種別は消去しない。
 
 catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMENT:UNRESOLVED`）と、seed 後に作られた tenant（catalog 行が無い。coverage report の `CATALOG_MISSING`）は、UNKNOWN と同じく fail-closed とする（hold 機構を使った tenant では処分を止めて警告する。NF07-F2 review P3-6）。
 
@@ -540,8 +550,10 @@ catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMEN
 
 - `use_case` が `MATCHING` 以外で source 要員を持つ run（source 要員を照合する正規形の use_case を限定しているため）
 - source 要員と source 案件を両方持つ run（要員→案件の照合は source 案件を NULL として再計算する）
-- 記録規則（`AiRecommendationRecorderImpl#canonicalParameters`）が変わった後の run（`AiLogProviderTest` が記録側の計算との一致を固定し、変更を検出する）
+- 記録の規則が変わった後の run。`AiLogProviderTest` は (a) 記録側の `canonicalParameters`・`sha256` との一致と、(b) 実際の `recordMatch`（`AiApiController` と同じ引数）で記録した run の帰属を固定する。検出できるのは test が通る経路の変化だけで、matching 実装が返す DTO の中身（案件の結果に要員・BP の ID も入れる等）や新しい呼出し元の引数が変わった場合は、test に現れないまま不一致になり得る（その run は帰属不能行として残る）
 - 根本の解消は、記録時に summary の本人を列として残すこと（DDL lane。番号は総括が割り当てる。F2 では DDL を足さない）
+
+**AI 推薦の候補（`t_ai_recommendation_item` の score・explanation）**: 2件目以降を含む各候補要員の個人データだが、D6 は summary だけを消し item に触れないため破壊的経路ではない。catalog には `AI_RECOMMENDATION_ITEM`（未登録・UNKNOWN）として載せ、DSAR（A2b）の検索範囲に入れるかは A2b で決める（delta review P3-5）。
 
 #### 3.4.2 NF07 hold と `legal_hold_flag` の関係（P1-1）
 
