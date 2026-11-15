@@ -11,6 +11,8 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,8 +54,15 @@ class LifecycleResignationUniquenessTest {
     private SysUser hrUser;
     private Engineer engineer;
 
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @BeforeEach
     void setUp() {
+        // 担当者解決（LifecycleAssigneeResolver）は tenant context を必須とする（G4 で tenant 限定化）。API 経由と同じく default tenant を束縛する。
+        AccountingTenantContextHolder.setTenantId("default");
         long seq = SEQUENCE.incrementAndGet();
         hrUser = SysUser.builder().tenantId("default").username("lc_l7_hr_" + seq).password("pass")
                 .realName("L7人事").role("HR").status(1).build();
