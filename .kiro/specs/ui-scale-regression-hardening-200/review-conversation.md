@@ -67,7 +67,7 @@
 ## Review実行
 
 1. requirements IDごとにdiffとtestをtraceする。
-2. 定向testを実行する。
+2. 対象限定テストを実行する。
 3. アプリを停止して`verify-like-ci`を実行する。
 4. 実MySQLで25 login-spikeと25 steadyを実行する。
 5. アプリを起動し、5role×200名browser Demoを実行する。

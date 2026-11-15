@@ -67,7 +67,7 @@ recipient previewのscope判定は、配布対象がreportの全データを参�
 
 9. documentのpreview/downloadはrun直結の公開経路を持たず、recipient deliveryのtoken、期限、再認証、現在scopeを通過するdelivery経路だけを使用する。通知発行直後は `ENQUEUED` とし、outbox dispatcherの成功・retry・DLQ結果をdeliveryへ同期する。
 
-### 3.4 delivery トランザクション時序（remediation）
+### 3.4 delivery トランザクションの処理順序（remediation）
 
 | 段階 | 境界 | 内容 |
 |---|---|---|

@@ -1,4 +1,4 @@
-# V182 マイグレーション・スコープ固定および修復演練検証契約書 (V182 Rehearsal Contract)
+# V182 マイグレーション・スコープ固定および修復リハーサル検証契約書 (V182 Rehearsal Contract)
 
 ## 1. 目的と安全規範
 
@@ -27,7 +27,7 @@
 
 ---
 
-## 3. 3つの演練シナリオ設計 (Three Rehearsal Scenarios)
+## 3. 3つのリハーサルシナリオ設計 (Three Rehearsal Scenarios)
 
 ```mermaid
 flowchart TD
@@ -39,7 +39,7 @@ flowchart TD
     subgraph Scenario2 [シナリオ 2: V181 合成データからのアップグレード]
         V181_Baseline[V1 〜 V181 適用済 DB] --> SeedSynthetic[V181 合成データ注入<br/>正常/孤立/多親衝突/重複]
         SeedSynthetic -->|V182 実行| Upgraded182[Target V182 アップグレード完了]
-        Upgraded182 --> VerifyData[回填・隔離・制約追加・エラー分類検証]
+        Upgraded182 --> VerifyData[補完・隔離・制約追加・エラー分類検証]
     end
 
     subgraph Scenario3 [シナリオ 3: 最新バージョンへの継続適用]
@@ -64,13 +64,13 @@ flowchart TD
   2. 後述の「第 4 節: 合成テストデータ・マトリクス」に従い、V182 の全分岐を網羅する合成レコードを各テーブルへ `INSERT`。
   3. `target = 182` として V182 を実行。
 - **検証項目**:
-  - 正常行、衝突行、孤立行が SQL の意図通りに回填または隔離されること。
+  - 正常行、衝突行、孤立行が SQL の意図通りに補完または隔離されること。
   - 一意インデックス、複合外部キー、CHECK 制約の追加がデータ違反なく完了すること。
 
 ### 3.3 シナリオ 3: 本候補最新バージョンへの継続アップグレード (Upgrade to Latest Candidate V184)
 - **手順**:
   1. シナリオ 2 の完了状態から、`target` を `184` に設定し、`flyway:migrate` を続行。
-  2. **V185 の除外**: NF10 専用に予約されている V185 は本演練には一切導入しない。
+  2. **V185 の除外**: NF10 専用に予約されている V185 は本リハーサルには一切導入しない。
 - **検証項目**:
   - `V183__lifecycle_case_sequence.sql` および `V184__create_import_metadata_foundation.sql` がエラーなく適用されること。
   - V182 で作成されたテーブル・列・制約が後続マイグレーションと衝突・破損しないこと。
@@ -84,31 +84,31 @@ V182 内の各 SQL 句に対応するテストケースを以下のように定�
 ### 4.1 電子インボイス (`t_digital_invoice`) のスコープ解決と隔離
 V182 は一時テーブル `__ses_v182_digital_scope_candidates` を用いて、請求書（`t_invoice`）・発注（`t_sales_order`）・契約（`t_contract`）の 3 系統から候補スコープを収集する。
 
-| ケース ID | 入力データ状態 | 期待される回填結果 | 期待される修復キュー (`t_nf09_scope_repair_queue`) |
+| ケース ID | 入力データ状態 | 期待される補完結果 | 期待される修復キュー (`t_nf09_scope_repair_queue`) |
 |---|---|---|---|
-| `INV_SINGLE_OK` | 顧客に紐づく `t_invoice` 1件のみと関連 | 顧客の `tenant_id` / `legal_entity_id` が回填される | キュー登録なし |
-| `INV_MULTI_SAME_OK` | `t_invoice` と `t_sales_order` の両方に関連し、双方が同一の `(tenant_id, legal_entity_id)` | 一致したスコープが回填される (`COUNT(*) = 1` 判定) | キュー登録なし |
+| `INV_SINGLE_OK` | 顧客に紐づく `t_invoice` 1件のみと関連 | 顧客の `tenant_id` / `legal_entity_id` が補完される | キュー登録なし |
+| `INV_MULTI_SAME_OK` | `t_invoice` と `t_sales_order` の両方に関連し、双方が同一の `(tenant_id, legal_entity_id)` | 一致したスコープが補完される (`COUNT(*) = 1` 判定) | キュー登録なし |
 | `INV_CONFLICT` | `t_invoice` (法人A) と `t_contract` (法人B) で異なるスコープを持つ | `tenant_id`, `legal_entity_id` は NULL のまま維持 | `entity_type='DIGITAL_INVOICE'`, `reason='SCOPE_CONFLICT'` でキュー登録 |
 | `INV_UNRESOLVED` | 関連する請求・発注・契約がすべて削除済みまたは存在しない孤立レコード | `tenant_id`, `legal_entity_id` は NULL のまま維持 | `entity_type='DIGITAL_INVOICE'`, `reason='SCOPE_UNRESOLVED'` でキュー登録 |
 
 ### 4.2 インボイスイベント (`t_digital_invoice_event`) の親スコープ継承
-| ケース ID | 入力データ状態 | 期待される回填結果 | 期待される修復キュー |
+| ケース ID | 入力データ状態 | 期待される補完結果 | 期待される修復キュー |
 |---|---|---|---|
-| `EVT_PARENT_OK` | 親 `t_digital_invoice` が正常に回填されたイベント | 親と同じスコープが回填される | キュー登録なし |
+| `EVT_PARENT_OK` | 親 `t_digital_invoice` が正常に補完されたイベント | 親と同じスコープが補完される | キュー登録なし |
 | `EVT_PARENT_UNRESOLVED` | 親 `t_digital_invoice` が未解決または衝突して NULL のイベント | イベントのスコープも NULL のまま維持 | `entity_type='DIGITAL_INVOICE_EVENT'`, `reason='PARENT_SCOPE_UNRESOLVED'` でキュー登録 |
 
-### 4.3 Peppol 参加者 (`t_peppol_participant`) の顧客所有回填と重複コールバック隔離
-| ケース ID | 入力データ状態 | 期待される回填結果 | 期待される修復キューとステータス変更 |
+### 4.3 Peppol 参加者 (`t_peppol_participant`) の顧客所有補完と重複コールバック隔離
+| ケース ID | 入力データ状態 | 期待される補完結果 | 期待される修復キューとステータス変更 |
 |---|---|---|---|
-| `PEP_CUSTOMER_OK` | `owner_type='CUSTOMER'` で有効な顧客に紐づく | 顧客のスコープが回填される | キュー登録なし |
+| `PEP_CUSTOMER_OK` | `owner_type='CUSTOMER'` で有効な顧客に紐づく | 顧客のスコープが補完される | キュー登録なし |
 | `PEP_OTHER_UNRESOLVED` | `owner_type='USER'` 等の顧客以外の所有レコード | スコープは NULL のまま維持 | `entity_type='PEPPOL_PARTICIPANT'`, `reason='SCOPE_UNRESOLVED'` でキュー登録 |
 | `PEP_CALLBACK_CONFLICT` | 同一 `(provider, scheme_id, participant_id)` で `status='VERIFIED'` の行が 2 件以上存在 | スコープは元のまま | **重複する全件** がキューへ `reason='CALLBACK_IDENTITY_CONFLICT'` で隔離。<br/>**全件** `status='CONFLICT_REPAIR'`、`verified_at = NULL` に強制リセットされる（勝者を任意に選ばない）。 |
 
 ### 4.4 外部アカウント参照 (`t_external_account_reference`) の技術境界
-| ケース ID | 入力データ状態 | 期待される回填結果 | 期待される修復キュー |
+| ケース ID | 入力データ状態 | 期待される補完結果 | 期待される修復キュー |
 |---|---|---|---|
-| `ACC_ENGINEER_OK` | `assignee_type='ENGINEER'` で有効なエンジニアに紐づく | エンジニアのスコープが回填される | キュー登録なし |
-| `ACC_USER_LEGACY` | `assignee_type='USER'` のレガシーアカウントレコード | スコープは回填されず NULL を維持（組織所属曖昧性） | `entity_type='EXTERNAL_ACCOUNT'`, `reason='SCOPE_UNRESOLVED'` でキュー登録 |
+| `ACC_ENGINEER_OK` | `assignee_type='ENGINEER'` で有効なエンジニアに紐づく | エンジニアのスコープが補完される | キュー登録なし |
+| `ACC_USER_LEGACY` | `assignee_type='USER'` のレガシーアカウントレコード | スコープは補完されず NULL を維持（組織所属曖昧性） | `entity_type='EXTERNAL_ACCOUNT'`, `reason='SCOPE_UNRESOLVED'` でキュー登録 |
 
 ### 4.5 監査主体 (Actor Attribution) の閉集合正規化と制約
 - `t_digital_invoice` および `t_digital_invoice_event` の既存レコードにおいて、`actor_type` や `confirmation_source` が NULL、または closed pair 以外の組み合わせである場合：
@@ -156,12 +156,12 @@ MySQL 8.0 の InnoDB ストレージエンジンにおいて、`ALTER TABLE`、`
 
 ---
 
-## 6. キュー修復（Repair Queue）演練契約
+## 6. キュー修復（Repair Queue）リハーサル契約
 
-`t_nf09_scope_repair_queue` に隔離された未解決行を解消するプロセスを演練する。
+`t_nf09_scope_repair_queue` に隔離された未解決行を解消するプロセスをリハーサルを行う。
 
 ### 6.1 同一トランザクション内での二段階修復と CAS
-業務データ修復とキュー行の結案は、**同一のデータベーストランザクション（`@Transactional`）内で実行しなければならない**。
+業務データ修復とキュー行の完了は、**同一のデータベーストランザクション（`@Transactional`）内で実行しなければならない**。
 
 ```sql
 -- 同一トランザクション内:
@@ -175,7 +175,7 @@ UPDATE t_digital_invoice
    AND version = :expectedInvoiceVersion;
 -- (更新件数が 1 でなければ即座に例外をスローしてロールバック)
 
--- 2. キュー行の CAS 結案
+-- 2. キュー行の CAS 完了
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
@@ -191,16 +191,16 @@ UPDATE t_nf09_scope_repair_queue
 **競合テストにおける敗者アサーション**:
 2 スレッドが同一キュー行および同一業務データを競合修復した場合、勝者のみがコミットされ、**敗者のトランザクションは例外により全ロールバックされる。テストコードでは、敗者の業務エンティティ更新（tenant_id 等）が DB に一切残存していない（dirty な部分更新がない）ことを厳格にアサートする**。
 
-### 6.2 CALLBACK_IDENTITY_CONFLICT 独立修復演練
+### 6.2 CALLBACK_IDENTITY_CONFLICT 独立修復リハーサル
 `t_peppol_participant` における `CALLBACK_IDENTITY_CONFLICT` は、スクリプトの `ON DUPLICATE KEY UPDATE` により、**元の `SCOPE_UNRESOLVED` を上書きして記録されている可能性がある**。したがって、「この理由は重複衝突だからスコープは既に解決している」と推測してはならない。
 
-修復結案時には、以下の **3重条件** をすべて検証しなければならない：
+修復完了時には、以下の **3重条件** をすべて検証しなければならない：
 
 1. **スコープ完全性検証**: 当該参加者レコードの `tenant_id` および `legal_entity_id` が NULL でなく、正当な顧客に紐づいていること。
 2. **重複アイデンティティの完全処置**: `callback_active_slot` は V182 で定義された VIRTUAL 生成列（`AS (CASE WHEN deleted_flag = 0 AND status = 'VERIFIED' THEN 1 ELSE NULL END)`）であるため、**アプリケーションから直接 `callback_active_slot` を UPDATE してはならない**。同一 `(provider, scheme_id, participant_id)` を持つ競合レコード群に対し、**正当な 1 件のみを `status = 'VERIFIED'`, `deleted_flag = 0` に更新し、他の全重複行を明示的に `status = 'DUPLICATE_DEPRECATED'` または `deleted_flag = 1` に更新して無効化すること**。正当な行で `callback_active_slot = 1` となり、無効化された重複行で `callback_active_slot IS NULL` となることは、**データベースの自動生成結果としてアサート（検証）する**。
 3. **アクティブコールバックの一意性実証**: 正当な 1 件を `VERIFIED` に更新した際、複合一意インデックス `uk_peppol_callback_active` がエラーなく成立すること。
 
-スコープが未確定、または重複レコードの無効化が不完全である場合、**キュー行は結案せず `PENDING` のまま維持しなければならない**。実外部 Provider への API 接続は一切行わない。
+スコープが未確定、または重複レコードの無効化が不完全である場合、**キュー行は完了せず `PENDING` のまま維持しなければならない**。実外部 Provider への API 接続は一切行わない。
 
 ---
 
@@ -208,11 +208,11 @@ UPDATE t_nf09_scope_repair_queue
 
 | 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
 |---|---|---|---|
-| `TC-REP-01` | 正常系 | 孤立インボイスの正しいスコープを特定し同一Txで修復結案 | インボイスの `tenant_id` 更新成功、キュー行 `status='RESOLVED'`, `version` 加算。 |
-| `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `status='VERIFIED'`, `deleted_flag=0` となり、DB生成列 `callback_active_slot=1` が自動導出され一意制約成立。無効化行は `slot IS NULL` となる。キュー行結案。 |
-| `TC-REP-03` | 負向系 | 他テナントの担当者が別テナントのキュー行の修復を試行 | 認可境界違反により更新拒否（`403 FORBIDDEN`）。 |
-| `TC-REP-04` | 負向系 | 重複 Peppol でスコープが未解決（NULL）のまま結案を試行 | スコープ完全性チェック違反により拒否。キューは `PENDING` を維持。 |
-| `TC-REP-05` | 負向系 | 業務テーブル更新後、キュー行の CAS がバージョン不一致で失敗（0件） | トランザクション全体がロールバックされ、業務テーブルの変更も取り消される。 |
+| `TC-REP-01` | 正常系 | 孤立インボイスの正しいスコープを特定し同一Txで修復完了 | インボイスの `tenant_id` 更新成功、キュー行 `status='RESOLVED'`, `version` 加算。 |
+| `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `status='VERIFIED'`, `deleted_flag=0` となり、DB生成列 `callback_active_slot=1` が自動導出され一意制約成立。無効化行は `slot IS NULL` となる。キュー行完了。 |
+| `TC-REP-03` | 異常系 | 他テナントの担当者が別テナントのキュー行の修復を試行 | 認可境界違反により更新拒否（`403 FORBIDDEN`）。 |
+| `TC-REP-04` | 異常系 | 重複 Peppol でスコープが未解決（NULL）のまま完了を試行 | スコープ完全性チェック違反により拒否。キューは `PENDING` を維持。 |
+| `TC-REP-05` | 異常系 | 業務テーブル更新後、キュー行の CAS がバージョン不一致で失敗（0件） | トランザクション全体がロールバックされ、業務テーブルの変更も取り消される。 |
 | `TC-REP-06` | 並行系 | 2 スレッドが同一キュー行および同一インボイスを同時に修復実行 | 先行スレッドのみ成功。敗者スレッドは例外終了し、インボイスに敗者の更新痕跡が残らない。 |
 | `TC-REP-07` | 異常系 | マイグレーション中に意図的な DDL エラーを注入 | 移行が直ちに停止し、ログ・スキーマ・history が退避され、検証証拠として固定される。 |
 

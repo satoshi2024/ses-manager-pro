@@ -116,7 +116,7 @@ Reviewの目的は指摘件数を増やすことではなく、誤送信・重�
 - sandbox/Docker/Node/scanner/credential/運用承認が必要なのに無ければ BLOCKED。PASSではない。
 - P2 は requirement/acceptance 未達なら原則 FAIL。要件を満たす非必須改善は NOTE とし、P2/NOTE を延期する場合は発注者承認、owner、期限、release影響を記録する。
 - testの削除、assert緩和、retryでflakeを隠す、provider未実行をMockで置換した場合はFAIL。
-- PRE_MERGEで全AC相当のtrace、定向test、Demo、sandboxとG1〜G4、post-merge canary手順/ownerが揃った場合は`REVIEWABLE`とする。G5/G6はmerge後gateであり、これはmerge許可候補であって最終PASSではない。
+- PRE_MERGEで全AC相当のtrace、対象限定テスト、Demo、sandboxとG1〜G4、post-merge canary手順/ownerが揃った場合は`REVIEWABLE`とする。G5/G6はmerge後gateであり、これはmerge許可候補であって最終PASSではない。
 - `PASS`はMERGEDのcommitを直接reviewし、merge delta、共有consumer、main上の直接回帰を追加確認した場合だけ使用する。reviewed headとmerge commitが異なる場合はPASSにしない。
 
 ## Review中の変更

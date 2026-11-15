@@ -48,7 +48,7 @@ spec単位 Review を省略して横断 Review だけで合格にしてはなら
 7. HFP-02のfile保存/download変更が既存契約文書のhash、権限、path traversal防止を壊していない。
 8. HFP-03のscriptがdefaultでdry-run/fail-closedとなり、production host/DBへの暗黙接続や広いdelete/moveを行わない。
 9. 個別Review後のmerge conflict解消が未Reviewのproduction意味変更を導入していない。
-10. mainで定向回帰と `scripts/verify-like-ci.ps1` が成功し、CI契約どおりskip 0である。
+10. mainで対象限定回帰と `scripts/verify-like-ci.ps1` が成功し、CI契約どおりskip 0である。
 
 ### 実行方法
 

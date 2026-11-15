@@ -9,14 +9,14 @@
 ### 確定済みの設計判断
 - 予測ホライズンは既定3ヶ月（設定可能）。
 - 「将来も稼働」= 対象月に有効な契約が存在（`autoRenew` の見込みを含める/含めないは設定）。
-- 口径は既存ダッシュボードの稼働率算定に合わせる（当月値が一致）。
+- 基準は既存ダッシュボードの稼働率算定に合わせる（当月値が一致）。
 
 ## Requirements
 
 ### Requirement 1: 稼働率・Bench予測
 1. THE システム SHALL 今後Nヶ月（既定3）について、月次の稼働見込み数・Bench見込み数・稼働率見込みを算出する。
 2. THE 判定 SHALL `Contract.endDate`（と `autoRenew` の見込み）を用い、対象月に有効契約が無い要員をBench見込みとする。
-3. THE 口径 SHALL 既存 `DashboardServiceImpl` の当月稼働率と一致する。
+3. THE 基準 SHALL 既存 `DashboardServiceImpl` の当月稼働率と一致する。
 
 ### Requirement 2: ロールオフ一覧
 1. THE システム SHALL 各月に契約が切れてBenchになる見込みの要員一覧（要員・契約・終了日・担当営業）を提示する。

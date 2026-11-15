@@ -321,7 +321,7 @@
 
 ### 実行結果
 
-- L1/L2定向: 65 tests / 0 failures / 0 errors / 0 skipped。
+- L1/L2対象限定: 65 tests / 0 failures / 0 errors / 0 skipped。
 - L3 subsystem: 124 tests / 0 failures / 0 errors / 2 skipped。skipはDocker必須の
   `FlywayMigrationSmokeTest`と`FlywayV63UpgradeMigrationSmokeTest`。
 - 最終差分の直接再確認: 39 tests / 0 failures / 0 errors / 0 skipped。
@@ -340,7 +340,7 @@ Reviewでも回帰testでも検出されていなかった欠陥を修正した�
 | B-01 | P0 | 営業/HR/要員がdashboard・analytics・quotation・work-record・sales-performance・monthly-closing等の`/api/**`で403 | `ActionPermissionResolver`はURI rootからaction keyを機械生成するのに対し、V64 seedと`legacyRoleAllows`が許可listの列挙だった。未列挙keyが全て拒否され、R3.1の後方互換に反した | V66でbaseline `*`＋拒否指定へ変更。`AuthorizationServiceImpl`は拒否をbaselineより優先評価。`legacyRoleAllows`も同じ規則へ書き換え |
 | B-02 | P1 | マネージャーがaction層で`user.*`/`permission.manage`/`payroll.view`/`audit.security.view`/`file.scan.retry`を素通し | V64が`role-manager`へ全権限wildcard `'*'` をseedしたうえ、拒否の仕組みが無かった（`role-admin`はaction 0件）。SecurityConfigのhasRole('管理者')とmenu権限だけが実害を止めていた | V66でrole-adminへbaselineを付与し、role-managerには機密actionの拒否指定を追加。baseline自体は後方互換のため維持する |
 | B-03 | P1 | 営業/HRが`engineer.delete`/`customer.delete`/`contract.delete`を失う | V64 seedに`.delete`が無く、wildcardも`engineer.*`ではなく単一keyだった | V66のbaselineで回復 |
-| B-04 | P1 | 既存アップロード済みファイル（スキルシート・要員写真・取込原本）が升级後に全て403 | `FileStorageServiceImpl#load`が`t_file_security_metadata`の`PUBLISHED`+`CLEAN`と`uploads/published/`配下を要求するが、V63はbackfillせず実体も移動しない | `LegacyUploadMigrationService`＋`LegacyUploadMigrationRunner`を追加。起動時にscanし、CLEANのみpublishedへ移す。INFECTED/UNAVAILABLEはquarantine保持で再scan可能 |
+| B-04 | P1 | 既存アップロード済みファイル（スキルシート・要員写真・取込原本）がアップグレード後に全て403 | `FileStorageServiceImpl#load`が`t_file_security_metadata`の`PUBLISHED`+`CLEAN`と`uploads/published/`配下を要求するが、V63はbackfillせず実体も移動しない | `LegacyUploadMigrationService`＋`LegacyUploadMigrationRunner`を追加。起動時にscanし、CLEANのみpublishedへ移す。INFECTED/UNAVAILABLEはquarantine保持で再scan可能 |
 | B-05 | P1 | V64適用後に作成したユーザーはgroup未割当のままでlegacy fallback判定になる | `UserApiController#save`がdefault group割当を行っていなかった（role変更経路だけ実装済み） | 作成時も`replaceAssignments(id, Set.of(), auth)`で割当。V66でbackfillも再実行 |
 | B-06 | P2 | 同時loginで遷移先が混ざる | `LoginSuccessHandler`（singleton）が`setDefaultTargetUrl`/`setAlwaysUseDefaultTargetUrl`でフィールドを書き換えていた | requestごとのlocal変数＋`getRedirectStrategy().sendRedirect`へ変更 |
 | B-07 | P2 | `MfaEnforcementFilter`/`PersistentSessionFilter`がServletコンテナへ二重登録される | `MenuPermissionFilter`/`ApiAuditFilter`にはある`FilterRegistrationBean(enabled=false)`が未作成だった。既定の順序ではchain内が先に走るため実害は出ないが、順序仮定に依存していた | 両filterへ同じ無効化Beanを追加 |
@@ -375,7 +375,7 @@ Reviewでも回帰testでも検出されていなかった欠陥を修正した�
 - P0: 公開済みV63を`710eecc`時点の内容へ復元し、seed/backfillをV64、break-glass制御DDLをV65へ追加した。`FlywayV63UpgradeMigrationSmokeTest`は旧V63適用後にrepairなしでV64/V65へupgradeし、`FlywayMigrationSmokeTest`は空MySQLからV65まで成功した（各1/0/0/0）。
 - P1: API/action inventoryとgroup優先認可/sidebar、OOXML構造・画像decode・polyglot拒否、quarantine metadata保護、固定OIDC metadataとtimeout、incident/IdP障害確認/申請者と異なる2名承認、account/session/source別MFA rate limit、critical audit fail-closed、prod MFA enrollment検証を実装した。
 - P2: logout時のpersistent session失効、外部identity duplicate-keyのidempotent/409化、台帳の証拠scope修正を実装した。`M. セキュリティ回帰`は外部gate未完了のため未checkのまま保持する。
-- L1〜L3: 統合定向回帰111 tests / 0 failures / 0 errors / 0 skipped。追加のbreak-glass/MFA回帰11/0/0/0、MFA scope回帰3/0/0/0、4言語message key 36件、Node/JS 42 files / 0 failures、`git diff --check` exit 0。
+- L1〜L3: 統合対象限定回帰111 tests / 0 failures / 0 errors / 0 skipped。追加のbreak-glass/MFA回帰11/0/0/0、MFA scope回帰3/0/0/0、4言語message key 36件、Node/JS 42 files / 0 failures、`git diff --check` exit 0。
 - T020 L4: 1回だけ実行し、外側30分timeoutまでに168 reports / 1008 tests / 6 failures / 0 errors / 1 skippedを出力した。6 failuresはanonymous filter、candidate/profile/autocomplete legacy整合、break-glass entity列mappingの4 consumerに限定され、修正後の該当6 suitesは101 tests / 0 failures / 0 errors / 0 skipped。方針に従い全量L4は無条件再実行せず、したがって最終treeのL4全緑証拠は未成立と記録する。
 - 未完了gate: repositoryにOWASP dependency-check相当の設定がない。実Entra login/logout・MFA assurance、desktop/390px browser、login→権限変更→session失効、2名break-glass復旧訓練は環境/credential未提供で未実施。release判定は`FIX/REVIEW`、独立Review P0=0/P1=0/PASSと外部gate完了まで`PASS`へ進めない。
 
@@ -398,7 +398,7 @@ Reviewでも回帰testでも検出されていなかった欠陥を修正した�
 - T014状態: 開発gate完了、独立Review待ち。実Entra test tenant/app登録、実OIDC login/logout、実break-glass訓練は外部gateとして未実施であり、実施済み・PASSとは記録しない。
 - T015状態: **実装・L3検証完了、独立Review待ち**。V63のidentity provider、external identity、MFA、recovery hash、persistent session、permission group/action、file quarantine/scan metadataを追加。既存V1公開履歴は変更せず、V63をbaseline後の増分DDLとした。
 - T015 TEST SCOPE DECISION: task / `f6f0027` base + T015 working tree、changed contracts / V63 schema・Entity/Mapper・H2 replay・MySQL smoke、selected level / **L3**、selected tests / `EnterpriseIdentitySchemaTest` 3件 + `MigrationScriptIntegrityTest` 11件 + `FlywayMigrationSmokeTest`・`FlywayLegacyV60MigrationSmokeTest`・`FlywayV62ClosedHistoryMigrationSmokeTest`各1件、直接consumer / V63 Flyway適用、H2 schema、identity/file metadata unique、recovery hash、tenant-scoped key。
-- T015 exact result: 定向H2/静的 **14 tests / 0 failures / 0 errors / 0 skipped**、fresh/legacy/V62 closed MySQL **3 tests / 0 failures / 0 errors / 0 skipped**、合計**17 tests / 0 failures / 0 errors / 0 skipped**。Entity/Mapper diagnosticsも問題なし。
+- T015 exact result: 対象限定H2/静的 **14 tests / 0 failures / 0 errors / 0 skipped**、fresh/legacy/V62 closed MySQL **3 tests / 0 failures / 0 errors / 0 skipped**、合計**17 tests / 0 failures / 0 errors / 0 skipped**。Entity/Mapper diagnosticsも問題なし。
 - T015 excluded suites: 全量Maven、Node/JS、browser、OIDC provider、MFA runtime、action enforcement、scanner runtimeはT015のDDL直接consumer外のため除外。T020 L4で統合する。
 - T015 escalation: schema/entity/H2/FlywayはL4昇格条件に該当するが、L3が説明可能な全緑で未知回帰なしのため中間L4は実施しない。次のL4 checkpointはT020 M。
 - T015 rollback: V63適用前は機能公開を止める。適用後は過去migrationを編集せずバックアップ復元。identity secretは平文保存せず、V61/V62は変更しない。
@@ -430,17 +430,17 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 
 | task | requirements | 変更file | test | Demo | 状態 | risk / rollback |
 |---|---|---|---|---|---|---|
-| pre-S03 P1-1 | R3.1〜R3.3 | `SystemConfigApiController`、`ScopeChangeInvalidator`、scope回帰test | commit/rollback generation、false→true→false、並行commit/rollback | H2で世代・cache遷移を確認 | FIX・定向test済み | rollback callbackはcacheを書き戻さず、後続commitを保持 |
+| pre-S03 P1-1 | R3.1〜R3.3 | `SystemConfigApiController`、`ScopeChangeInvalidator`、scope回帰test | commit/rollback generation、false→true→false、並行commit/rollback | H2で世代・cache遷移を確認 | FIX・対象限定テスト済み | rollback callbackはcacheを書き戻さず、後続commitを保持 |
 | pre-S03 P1-2 | R2.2、R4 | V62、`EngineerAccountingHistory`、`EngineerMapper`、H2 schema | closed history MySQL fixture、direct-org優先、UNKNOWN未配賦、集計SQL | Docker smokeでV61→V62を再現 | 継続済み、既存回帰維持 | V62適用前バックアップへ戻す。UNKNOWN行は推測補完しない |
-| pre-S03 P1-3 | R1.2〜R1.4 | `OrganizationServiceImpl`、組織サービス回帰test | 主所属順序、部分/前段重複、未来開始、有限validTo、同日開始 | H2で統合前後の期間を確認 | FIX・定向test済み | sourceを先に閉鎖/削除し、targetへ未被覆区間だけを移す |
-| pre-S03 P1-4 | R1.4、R2.2、R4 | `OrganizationServiceImpl`、`EngineerAccountingHistoryMapper`、回帰test | 同日開始履歴、valid_from <= valid_to | H2で履歴整合性を確認 | FIX・定向test済み | 同日/未来開始は原地更新、過去開始だけ分割する |
+| pre-S03 P1-3 | R1.2〜R1.4 | `OrganizationServiceImpl`、組織サービス回帰test | 主所属順序、部分/前段重複、未来開始、有限validTo、同日開始 | H2で統合前後の期間を確認 | FIX・対象限定テスト済み | sourceを先に閉鎖/削除し、targetへ未被覆区間だけを移す |
+| pre-S03 P1-4 | R1.4、R2.2、R4 | `OrganizationServiceImpl`、`EngineerAccountingHistoryMapper`、回帰test | 同日開始履歴、valid_from <= valid_to | H2で履歴整合性を確認 | FIX・対象限定テスト済み | 同日/未来開始は原地更新、過去開始だけ分割する |
 | pre-S03 migration ledger | migration ledger | `enterprise-identity-security/tasks.md`、中央conversation/ledger | V63 grep整合 | 台帳の予約番号照合 | 修正済み | V62以降の予約番号を再利用しない |
 
 ## 最新判定（2026-07-29 第十八次Review対応）
 
-最新独立Reviewの対象は`origin/main=fb91943`（PR #42 merge済み）で、P0=0/P1=4/P2=3だった。P1-1（cache失効原子性）、P1-2（manager全経路scope）、P1-3（混在組織請求書）、P1-4（NULL業務通知）を`90f50c0`で修正した。定向・全量は883/0/0/1、Node/JS syntax実行済み、Flyway fresh・legacy V60・repair・V62 closed fixture・migration integrity・ConcurrentUpdateは0 skippedで実行済み。混在請求書SQLとNULL通知のlist/count/visible/read-allに実行級回帰を追加した。
+最新独立Reviewの対象は`origin/main=fb91943`（PR #42 merge済み）で、P0=0/P1=4/P2=3だった。P1-1（cache失効原子性）、P1-2（manager全経路scope）、P1-3（混在組織請求書）、P1-4（NULL業務通知）を`90f50c0`で修正した。対象限定・全量は883/0/0/1、Node/JS syntax実行済み、Flyway fresh・legacy V60・repair・V62 closed fixture・migration integrity・ConcurrentUpdateは0 skippedで実行済み。混在請求書SQLとNULL通知のlist/count/visible/read-allに実行級回帰を追加した。
 
-`90f50c0`は修正ブランチ上で未mergeであり、merge後独立Reviewは未実施のため、S02は`FIX/REVIEW`、S03は`NOT READY`。次の解放条件は、fix commitのPR merge、merge済みHeadでの独立Review P0=0/P1=0/PASS、中央台帳の再同期である。desktop/390px実ブラウザDemoはS03 blockerではないが、本番前硬门禁として未実施のまま保持する。
+`90f50c0`は修正ブランチ上で未mergeであり、merge後独立Reviewは未実施のため、S02は`FIX/REVIEW`、S03は`NOT READY`。次の解放条件は、fix commitのPR merge、merge済みHeadでの独立Review P0=0/P1=0/PASS、中央台帳の再同期である。desktop/390px実ブラウザDemoはS03 blockerではないが、本番前必須ゲートとして未実施のまま保持する。
 
 
 ## T016 TASK CONTRACT

@@ -1,6 +1,6 @@
 # Design — CRM複数担当者・商機管理
 
-> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは対象限定・直接回帰、M taskで全量を行う。
 
 ## 1. DDL（V73 / V74 / V74.1 / V74.2 / V74.3）
 
@@ -74,7 +74,7 @@
 - `primary_flag`は「1顧客につき有効期間内に1件」を部分UNIQUEまたはservice側CASで保証する。
   0件も許容する（主担当未設定）。0件を「先頭の担当者」へ暗黙fallbackしない。
 
-### 6.2 主体 × 操作 × 可見母集団
+### 6.2 主体 × 操作 × 閲覧可能な母集団
 
 | 主体 | list/detail/count | export/download | notification | scheduler/async |
 |---|---|---|---|---|

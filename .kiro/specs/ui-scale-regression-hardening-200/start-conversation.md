@@ -22,7 +22,7 @@
 ## 実行方法
 
 - `tasks.md`を上から順に実行してください。
-- 各taskは、実装・定向test・Demo・review ledger記入が完了した時だけ`- [x]`にしてください。
+- 各taskは、実装・対象限定テスト・Demo・review ledger記入が完了した時だけ`- [x]`にしてください。
 - まず修正前に失敗を再現する自動testを追加し、その後にproduction codeを修正してください。
 - P1のR3-001、R3-005、R3-006と、偽greenを生むR3-002を最優先にしてください。
 - UI、Java comment/log、spec追記、migration commentは日本語で記述してください。

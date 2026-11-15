@@ -36,7 +36,7 @@
 
 ## 3. テスト証拠（Head `8a8befb`）
 
-- 定向: BP関連9クラス32テスト PASS（Failures=0 / Errors=0 / Skipped=0）
+- 対象限定: BP関連9クラス32テスト PASS（Failures=0 / Errors=0 / Skipped=0）
 - L4全量: `mvn test` = **1162 tests, 0 failures, 0 errors, 7 skipped**
   - skip 7件: Docker必須のFlyway smoke 5件（MigrationSmoke/LegacyV60/Repair/V62/V63）＋`ConcurrentUpdateTest`＋CJKフォントなしの`QuotationPdfServiceImplTest`
 - JS構文: 全`static/js`を`node --check`、0 failure

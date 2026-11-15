@@ -38,7 +38,7 @@
 - 外部I/Oはtransaction外。outbox/job、timeout、retry/backoff、rate limit、correlation ID、recoveryを持つ。
 - internal entityをportal/external API/AIへ直接公開しない。外部DTOはallow-list testを持つ。
 - 既存message bundle全てを同期し、日本語文言をrepositoryの文体へ合わせる。
-- 通常Taskは定向testと直接回帰、Mで必要な全量gateを実行する。skipを成功扱いにしない。
+- 通常Taskは対象限定テストと直接回帰、Mで必要な全量gateを実行する。skipを成功扱いにしない。
 - Task完了時にreview ledgerへrequirements、変更file、test、Demo、base/head、risk、rollbackを記録する。
 - 実測していないことを「確認済み」と書かない。環境不足は未検証とrelease gateへ明記する。
 - 完了条件を満たした原子Taskごとに、repository規約に従う日本語commit messageで対象変更だけをcommitし、
@@ -140,7 +140,7 @@ A1内部service desk→A2 portal起票/返信/CSAT→B1 SLA scheduler/通知→B
 - portal Aからcustomer B、添付download、count/export/notification linkのscope漏えいを拒否する。
 - scheduler二重実行、breach通知dedupe、reopen、二重CSATをtestする。
 
-Taskごとに定向testとDemoを完了し、Mで必要gate、desktop/390px portal Demo、provider/通知障害、
+Taskごとに対象限定テストとDemoを完了し、Mで必要gate、desktop/390px portal Demo、provider/通知障害、
 rollback/runbookを実証してください。完了時はbase/headと独立Review用diffを固定してください。
 ```
 

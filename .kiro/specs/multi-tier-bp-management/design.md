@@ -57,7 +57,7 @@ H2テスト用スキーマ（`src/test/resources/sql/engineer-schema-h2.sql`等�
 - `BpPaymentServiceImplTest`: 階層重複拒否、親子整合性チェック、マージン計算、既存単層データ（`layerOrder=1`固定）の後方互換動作。
 - `FlywayMigrationSmokeTest`（Testcontainers）で新DDLがMySQL 8に対して問題なく適用されることを確認。
 
-## 6. リスク・確定口径（注意点）
+## 6. リスク・確定事項（注意点）
 
 - **UNIQUE制約の移行順序**: 本番データがある環境では、`work_record_id UNIQUE`→複合UNIQUEへの切替時に、既存行は自動的に`layer_order=1`になるためデフォルト値でクリアできるが、**MySQLのオンラインDDL中に一瞬でも制約が緩む区間がある**ため、必ずメンテナンスウィンドウ中に適用する運用注意をREADME等に明記する。
 - **循環参照防止**: `parent_payment_id`が自分自身や下位階層を指す循環参照はDB制約では防げないため、サービス層で`layerOrder`の大小関係（親は必ず自分より小さいlayer_orderを持つ）を検証する。

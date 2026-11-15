@@ -1,6 +1,6 @@
 # Implementation Plan — CRM複数担当者・商機管理
 
-> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T048〜T052はL1〜L3の定向test・直接回帰、T053でL4全量を実行する。
+> **階層別テスト方針**（正本: `test-execution-policy-s03-s17.md`）: T048〜T052はL1〜L3の対象限定テスト・直接回帰、T053でL4全量を実行する。
 > 通常Taskごとの全量test反復は禁止する。
 >
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
@@ -14,7 +14,7 @@
 > S07 approvalの予約V75は維持し、本specがV75を代わりに使ってはならない。V72は欠番のまま残す。
 
 - [x] F1. contact/lead/opportunity DDLと移行
-  - **状態**: 完了。DDL(V73) / 移行 / entity / 定向testに加え、T050の顧客detailで移行contactの表示を確認。
+  - **状態**: 完了。DDL(V73) / 移行 / entity / 対象限定テストに加え、T050の顧客detailで移行contactの表示を確認。
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
   - **実装ガイダンス**: **V73/V74.2**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
@@ -70,8 +70,8 @@
   - **Objective**: stage別金額・滞留日数・活動なし日数・担当別転換率・失注理由・source ROIが表示され、
     担当別funnelからdrilldownできる。営業Aには自分の担当分だけが集計される。
   - **実装ガイダンス**: stage金額/滞留/転換/失注/source ROI。
-    集計口径は既存の提案forecastと重複させない（design §6.3）。両系列を足す画面を作らない。
-  - **テスト要件**: L2〜L3。集計口径（全社=担当別合計）、scope（営業A/Bで母集団が異なる）、
+    集計基準は既存の提案forecastと重複させない（design §6.3）。両系列を足す画面を作らない。
+  - **テスト要件**: L2〜L3。集計基準（全社=担当別合計）、scope（営業A/Bで母集団が異なる）、
     forecast二重計上なし。
   - **Demo**: 担当別funnel drilldown。全社合計と担当別合計が一致することを提示。
 

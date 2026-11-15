@@ -9,7 +9,7 @@
     - 入金 = Σ `t_invoice`（`status != 入金済`）で `due_date` の月が `m` のものの残額（`total − 入金済合計`）。`InvoicePayment` で入金済を差し引く。
     - 支払 = Σ BP支払（`t_bp_payment` の支払予定月＝対象 `work_month`+サイト or 明示予定日）＋ 給与（payroll 月額。`FreeeEmployeeLink`/固定）＋ 固定費（`m_system_config` `cashflow.fixed-cost`）。
     - ネット = 入金 − 支払。累計残高 = 前月残高 + ネット（初月は openingBalance）。
-  - 口径は `MonthlyRevenueCalcService` の対象判定に寄せる（売上=請求ベースと確定実績の整合。MI-09/A7-09の口径と矛盾させない）。
+  - 基準は `MonthlyRevenueCalcService` の対象判定に寄せる（売上=請求ベースと確定実績の整合。MI-09/A7-09の基準と矛盾させない）。
 - 設定: `m_system_config` に `cashflow.opening-balance` / `cashflow.fixed-cost` / `cashflow.alert-threshold`。
 
 ## 2. 警告
@@ -23,5 +23,5 @@
 - 権限: `SecurityConfig` 静的制約＋メニューで管理者/マネージャー（新メニュー `cashflow` を V45 で seed、または dashboard 内タブとして既存権限に載せる。※要確認）。
 
 ## 4. テスト
-- `CashFlowForecastServiceTest`: 未入金の due_date 月計上、既入金除外、BP/給与/固定費の合算、累計残高、閾値割れ検出。ダッシュボード当月と口径整合（`MonthlyRevenueCalcService` と突合）。
+- `CashFlowForecastServiceTest`: 未入金の due_date 月計上、既入金除外、BP/給与/固定費の合算、累計残高、閾値割れ検出。ダッシュボード当月と基準整合（`MonthlyRevenueCalcService` と突合）。
 </content>

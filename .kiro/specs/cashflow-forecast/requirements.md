@@ -18,7 +18,7 @@ SESは「BP/給与を先に払い、客先入金は後」という構造で資�
 1. THE システム SHALL 指定期間（既定6ヶ月）について月次の入金予定・支払予定・ネット・累計残高見込みを算出する。
 2. THE 入金予定 SHALL `t_invoice` の未入金分を `due_date` の月に、`total`（残額）で計上する。
 3. THE 支払予定 SHALL BP支払（`t_bp_payment` の支払予定月）＋給与（payroll/`FreeeEmployeeLink`）＋固定費（`m_system_config`）を月次で計上する。
-4. THE 売上/確定実績の判定口径 SHALL 既存 `MonthlyRevenueCalcService` と整合させる（全社KPIと突合可能に）。
+4. THE 売上/確定実績の判定基準 SHALL 既存 `MonthlyRevenueCalcService` と整合させる（全社KPIと突合可能に）。
 
 ### Requirement 2: 警告
 1. WHEN 累計残高見込みが警戒閾値（`m_system_config`）を下回る月がある場合、THE システム SHALL その月を強調表示し、管理者へ通知する（`NotificationService`）。

@@ -24,7 +24,7 @@
 
 | issue ID | severity | 内容 | ステータス / 対応計画 |
 |---|---|---|---|
-| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED（R10-SCOPE、定向/L4・Browser証跡） |
+| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED（R10-SCOPE、対象限定/L4・Browser証跡） |
 | order-acceptance-workflow-R10-P0-01 | P0 | 既適用V80直接変更によるFlyway checksum不一致 | VERIFIED_CLOSED（V80復元＋V81順方向修復、実MySQL smoke） |
 | order-acceptance-workflow-R9-P1-01 | P1 | V81 historical legacy / wrong-shape index/FK | VERIFIED_CLOSED（V81構造三分岐・legacy fixture） |
 | order-acceptance-workflow-R9-P1-02 | P1 | V81 marker前失敗のdurability不備 | VERIFIED_CLOSED（DDL前durable capture） |
@@ -115,7 +115,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 | current status | `REVIEW`。R11 FAIL指摘の実装修正・証跡更新完了、独立再Review待ち |
 | migration | V80は不変。V81順方向修復、後続予約V82〜V89を維持 |
 | L4 | `verify-like-ci.ps1`のMaven/Surefire最終report群を確認：282 classes / 1582 tests / 0 failures / 0 errors / 0 skipped。Docker MySQL smokeを含む。外側監視の120秒timeoutでwrapper最終trailerは未取得だが、child完了後の全report集計とzero-skippedを確認 |
-| 定向test | `DocumentStorageTest`等30/0/0/0、`SalesOrderDocumentScopeTest`・`AcceptanceAsOfScopeTest` 9/0/0/0、`ConcurrentSubmitReopenTest` 3/0/0/0（実MySQL） |
+| 対象限定テスト | `DocumentStorageTest`等30/0/0/0、`SalesOrderDocumentScopeTest`・`AcceptanceAsOfScopeTest` 9/0/0/0、`ConcurrentSubmitReopenTest` 3/0/0/0（実MySQL） |
 | Browser / Demo | `round11-20260809-sales-order-mobile-390.png`、`...-filter-390.png`、`...-sidebar-390.png`。390x844でfilter/table/sidebarを分離確認、body width/scroll width 390、modal/reload/back/Enter/double-clickを実測、console log空 |
 | diff hygiene | `git diff --check`を現Headで再確認しexit 0 |
 
@@ -181,7 +181,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 | review-input docs Head | 4a4101d4f40c20bea0a2a3fef62c6799eba463be |
 | code/evidence Head | 4c2a77aad450d609879f1626f2f29140f8186d21 |
 | Round7 指摘件数 | R7-P1-01（V80 zero-legacy）、R7-P1-02（最新Head L4 VERIFIED_CLOSED）、R7-P2-01（design宛先）、R7-P2-02（workMonth 400）、R7-P2-03（ledger Head分離・Trace同期）、R7-P2-04（通知リンク・MySQL直接回帰 VERIFIED_CLOSED / Browser Demo PNG・txt証跡保存）、R7-P2-05（zh_CN/ko i18n key） |
-| 定向test | AcceptanceIdMySqlIntegrationTest 1/0/0/0 / FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / AcceptanceAsOfScopeTest 4/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
+| 対象限定テスト | AcceptanceIdMySqlIntegrationTest 1/0/0/0 / FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / AcceptanceAsOfScopeTest 4/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
 | L4全量 | `verify-like-ci.ps1`: Tests run: 1548, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS (surefirebooter-20260807215711703) |
 | Requirements trace | review-ledger §5 |
 
@@ -356,7 +356,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 - `design.md`: R3.1原本・go-live移行方針・S13注記
 - 新規test: `AcceptanceDocumentTest` 2件、`SalesOrderServiceImplTest#poDuplicateRejectsScopeOutsideCustomer`、既存F2統合testで案件fallback/未設定エラー2件
 
-### R09修正の定向test
+### R09修正の対象限定テスト
 `mvn -o test -Dtest=<order全12クラス>,MobileResponsiveLayoutTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 全緑。`FlywayMigrationSmokeTest`（V80変更後fresh）→ 0/0/0 PASS。
 
 ## 13. R09 Round1 対応後のL4全量証拠（P1-01対応）— 記録（2026-08-06）
@@ -438,7 +438,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 
 独立Review（R09 Round5、read-only、prior evidence Base=2dbe83a / fix code Head=5158912 /
 evidence Head=4ee389d / merged Head=8a50eb1=main=origin/main）:
-判定 **FAIL（P0=0 / P1=1 / P2=4 / NOTE=0）**。Reviewer定向test 33/0/0/0、
+判定 **FAIL（P0=0 / P1=1 / P2=4 / NOTE=0）**。Reviewer対象限定テスト 33/0/0/0、
 L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
 
 ### OPEN Issue とRound6対応
@@ -464,7 +464,7 @@ L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
 - `.kiro/specs/order-acceptance-workflow/design.md`（V73残留修正）
 - `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
 
-### Round6定向test・直接回帰
+### Round6対象限定テスト・直接回帰
 
 - `AcceptanceAsOfScopeTest` 2/0/0/0（account-link異動＋会計履歴異動の両経路）、`AcceptanceServiceImplTest` 8/0/0/0、
   `MonthlyClosingUnacceptedTest` 3/0/0/0、`NotificationGenerateServiceTest` 20/0/0/0、
@@ -550,7 +550,7 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
 - `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
 - `.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md`（row9同期）
 
-### Round8定向test・直接回帰
+### Round8対象限定テスト・直接回帰
 
 - `RealBrowserScreenshotTest` 1/0/0/0（実Chrome desktop+mobile）、`AcceptanceJsRuntimeTest` 1/0/0/0、
   `JsSyntaxCheckTest` 1/0/0/0、`MobileResponsiveLayoutTest` 25/0/0/0、

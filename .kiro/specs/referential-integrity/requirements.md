@@ -1,6 +1,6 @@
 # Requirements — 参照整合性ガード + 契約番号採番修正(referential-integrity)
 
-論理削除(`deleted_flag`)運用のため DB の `ON DELETE RESTRICT` 外键が機能せず、
+論理削除(`deleted_flag`)運用のため DB の `ON DELETE RESTRICT` 外部キーが機能せず、
 参照されているマスタを API 直叩きで削除できてしまう問題のサーバー側修正。
 あわせて契約番号採番の count 方式による衝突バグを修正する。
 

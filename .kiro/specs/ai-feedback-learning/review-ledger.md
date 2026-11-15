@@ -64,7 +64,7 @@ Review は git を正とした。S17 差分は `6b4cc56f` のみ。P2 と G10 �
 | R4.2 provider確認 | 送信項目・保存期間・region・opt-outが見える | §7 表 | provider retention assert | 文書 | DPA未締結 | T109 PASS |
 | R3.1 metric | version別採用率等が定義される | §8 | JSON metrics | 文書 | T113/T114 | T109 PASS |
 | R3.3 segment | 少数・機微属性を出さない | min-segment=5、禁止属性非交差 | segment軸assert | 文書 | T114 | T109 PASS |
-| R2.2 EARLY_EXIT | 早期離場の口径 | P2-02: 当初終了日前のみ | JSON outcomes.earlyExit | 文書 | T112 fixture | T109 文書修正 |
+| R2.2 EARLY_EXIT | 早期離場の基準 | P2-02: 当初終了日前のみ | JSON outcomes.earlyExit | 文書 | T112 fixture | T109 文書修正 |
 | R5 canary | canaryがrequest/log/DBに出ない | canary文字列を予約 | markdownに固定 | 文書 | T111/T115 | T109 reserved |
 | design §5.2 禁止属性 | matching/segmentに使わない | 対応表 + prefix token（P2-03） | L0 bindings test | 文書 | — | T109 文書/L0修正 |
 
@@ -101,7 +101,7 @@ T109はDDLなし。T110で正式migration **V108** を追加。欠番埋めな�
 | L3 | `mvn test -Pmysql-tests -Dtest=FlywayAiFeedbackSchemaSmokeTest` | ローカル Docker なし | 1 | 0 | 0 | 1 | 0 | 本commit | implementer（`disabledWithoutDocker`。CI shard-1） |
 | L4 | `mvn test` | JDK17 / H2 / excludedGroups=`mysql \| performance \| browser` | 2506 | 0 | 0 | 0 | 0 | 本commit | implementer |
 | L0 | `git diff --check` | 作業tree | — | 0 | 0 | 0 | 0 | 本commit | implementer |
-| Review 定向 | P1回帰 + R1 P2 直接 | JDK17 / Head `6b4cc56f` | 40 | 0 | 0 | 0 | 0 | `6b4cc56f` | Round 3 独立Review |
+| Review 対象限定 | P1回帰 + R1 P2 直接 | JDK17 / Head `6b4cc56f` | 40 | 0 | 0 | 0 | 0 | `6b4cc56f` | Round 3 独立Review |
 
 L4 checkpoint: T115 完了（Head `e90e0537`。Round 3 は同一 Head のため L4 再実行なし）。除外は pom 既定の mysql/performance/browser。MySQL smoke はクラスと shard-1 登録済み。ローカル Docker なしのため未実行。本番 PASS は `GATE-S17-G10-PROD` まで出さない。
 
@@ -188,5 +188,5 @@ release gate = GATE-S17-G10-PROD（DEFERRED）
 | T113 | R3.2, §5.3 自動promotion禁止 | offline eval fixture, promoteApproved, rollback | `AiOfflineEvaluationTest` | FAILED は昇格拒否。rollback後も過去 run の version 不変 | 本working tree | shadow は ACTIVE 以外。承認は管理者 |
 | T114 | R3.3, §5.2 cost/HR | `/ai/evaluation`, `/api/ai/evaluations`, i18n 4言語, menu `ai-evaluation` | `AiEvaluationApiControllerTest`, PageRendering, MessageBundle | 少数segment非表示。HR 403。cost は管理者のみ | 本working tree | 最長 prefix `/api/ai/evaluations` |
 | T115 | M 回帰 | L4修正（H2 mismatch列、browser tag、PowerShell gate） | L4 `mvn test` **2506/0/0/0 BUILD SUCCESS skip 0**。MySQL smoke は Docker 欠如で未実行（CI shard-1）。browser Demo は markup + `-Pbrowser-tests` へ隔離 | mock既定の既存AI回帰。390px は `MobileResponsiveLayoutTest` `/ai/evaluation` | `e90e0537` | 本番 PASS は GATE-S17-G10-PROD まで出さない。実Chrome Demo は browser profile |
-| R2-P1 | R2-P1-01〜04 | feedback認可、metric分母、matching hash/summary、precision@k 表示 | Review 定向 **40/0/0/0**。implementer 44/0/0/0 | 営業B/HR 403、面談率=採用分母、hash≠0、precision列 | `6b4cc56f` | P2-01〜05 と G10 は未閉じ。最終 PASS にしない |
+| R2-P1 | R2-P1-01〜04 | feedback認可、metric分母、matching hash/summary、precision@k 表示 | Review 対象限定 **40/0/0/0**。implementer 44/0/0/0 | 営業B/HR 403、面談率=採用分母、hash≠0、precision列 | `6b4cc56f` | P2-01〜05 と G10 は未閉じ。最終 PASS にしない |
 | R3 ledger | Round 3 CONDITIONAL PASS 転記 | review-ledger / 中央台帳 / expansion README | Review 判定を正とする。テスト再実行なし | P1=VERIFIED_CLOSED。次spec開始しない | 本commit | 最終/本番 PASS は出さない |

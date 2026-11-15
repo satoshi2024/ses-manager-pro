@@ -42,7 +42,7 @@ S01〜S17は対象外です。隣接機能を再実装・再Reviewしないで�
 
 ### 運用規則
 
-- 各主担当は一度に一taskを `TASK CONTRACT → 実装 → 定向test → Demo → evidence → checkbox` の順で閉じる。
+- 各主担当は一度に一taskを `TASK CONTRACT → 実装 → 対象限定テスト → Demo → evidence → checkbox` の順で閉じる。
 - 子Agentを使う場合は、task、base commit、許可file、禁止file、成果物、完了条件を先に固定する。`tasks.md`、migration、shared configのownerは一人にする。
 - credential/sandbox/Dockerが無い taskは `BLOCKED`。mock成功で外部/隔離実機 gateを閉じない。
 - 実装 AI の自己判定は `REVIEWABLE` まで。base/headとReview packetが無ければReviewを開始しない。

@@ -95,7 +95,7 @@ FR-01・FR-08・既存 `skillsheet-ingestion` は**同一パターン**（受信
   - 新サービス `CashFlowForecastService`：
     - 入: `t_invoice`（`due_date`／`total`／`status`）を入金予定として集計（未入金は due_date 月へ）。
     - 出: `t_bp_payment`（BP支払予定）＋ 給与（`FreeeEmployeeLink`／payroll）＋ 既知の固定費（`m_system_config` で月額登録）。
-    - 月次で「入金−支払＝ネット」「累計残高見込み」を算出。共通口径は既存 `MonthlyRevenueCalcService` の売上判定に寄せる。
+    - 月次で「入金−支払＝ネット」「累計残高見込み」を算出。共通基準は既存 `MonthlyRevenueCalcService` の売上判定に寄せる。
   - 画面: ダッシュボードに CF タブ（Chart.js の棒＋折れ線）。マイナス月・残高警戒ラインを強調。CSV出力。
   - 通知: 残高が閾値を割る見込み月を `NotificationService` で管理者へ。
 - 期待効果: 経営者が最も欲しい「いつ資金が足りなくなるか」を既存データだけで提示。黒字倒産リスクの早期検知。

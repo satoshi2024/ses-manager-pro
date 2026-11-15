@@ -20,7 +20,7 @@
 | R3-007 | P2 | product/UI | 待機filter値`待機`とDB値`Bench`が不一致 | engineer |
 | R3-008 | P2 | product/UI/scope | scope外detailで固定dummy「田中 太郎」を表示 | engineer detail |
 | R3-009 | P2 | product/API | 存在しないcustomerIdで商機更新がDB FK 500 | CRM opportunity |
-| R3-010 | P2 | product/permission | 管理者へ必ず403になるマイ勤怠菜单を表示 | sidebar |
+| R3-010 | P2 | product/permission | 管理者へ必ず403になるマイ勤怠メニューを表示 | sidebar |
 | R3-011 | P2 | product/permission | 要員へ必ず403になる横断検索を表示 | header/search |
 | R3-012 | P2 | scale/UI | 勤怠gridが147行を一括取得・描画 | work record |
 | R3-013 | P2 | scale/UI | 提案Kanbanが83cardを一括取得・描画 | proposal |

@@ -121,7 +121,7 @@ proposed_by 別提案集計 / 主担当数)→ メモリ内グルーピング(`D
 - 成約件数 = 契約 `created_at∈ym` かつ `renewed_from_contract_id IS NULL`
 - 成約率 = 提案 `proposed_by`/`closed_at∈ym` の 成約÷(成約+見送り)、分母0→null
 - 売上/粗利 = 契約ごとに: 確定 work_record あり→ `billing_amount` / `billing - payment`、
-  なし→ `selling_price` / `selling - cost`(契約単位フォールバック。ダッシュボードとの口径差は仕様)
+  なし→ `selling_price` / `selling - cost`(契約単位フォールバック。ダッシュボードとの基準差は仕様)
 - インセンティブ = 契約ごとに
   `base = (基準==売上 ? 月売上 : 月粗利)`、`rate = 契約上書き ?? commission.rate`、
   `baseType = 契約上書き ?? commission.base-type`、`amount = max(0, floor(base×rate/100))` → ユーザー別合算
@@ -150,13 +150,13 @@ proposed_by 別提案集計 / 主担当数)→ メモリ内グルーピング(`D
 - 新規: `EngineerSalesServiceImplTest`(初回主担当/降格/重複拒否/役割拒否/解除ガード/released_at)、
   `SalesPerformanceServiceImplTest`(既定規則/上書き/売上基準/work_record 優先/月窓/分母0/切捨て/マイナス0)
 
-## 6. リスク・確定口径
+## 6. リスク・確定事項
 
-1. 成約率(提案口径 proposed_by)と成約件数(契約口径 sales_user_id)の帰属基準差 → 仕様として注記
+1. 成約率(提案基準 proposed_by)と成約件数(契約基準 sales_user_id)の帰属基準差 → 仕様として注記
 2. 成約件数は契約更新を除外
 3. マイナス粗利月のインセンティブは 0 円、円未満切捨て
 4. 主担当唯一性はサービス層のみで保証(v1 許容)
-5. 契約単位フォールバックとダッシュボード月一括フォールバックの口径差 → 円単位一致は保証しない
+5. 契約単位フォールバックとダッシュボード月一括フォールバックの基準差 → 円単位一致は保証しない
 6. 契約 CSV/Excel 出力への担当営業追加は v1 対象外
 7. `/api/engineers/sales-user-options` は契約画面からも呼ばれるため、
    engineer メニュー権限を持たないカスタム役割設定では選択肢が出ない(既定 seed では全役割付与のため実害なし)

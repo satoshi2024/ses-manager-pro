@@ -53,7 +53,7 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 |---|---|---|---|
 | `[P0] CS-PLAN-P0-01` | P0 | PR 未作成を維持。独立 Reviewer による PR 作成規約を遵守。 | PR 未作成 |
 | `[P1] CS-PLAN-P1-01` | P1 | 公式台帳（`2026-08-27-post-acceptance-traceability.md`）の DG-02 / Owner / Approved scope は Owner APPROVED 待ちであることを明記。 | 公式台帳 DISCOVERY / DG-02 PROPOSED |
-| `[P1] CS-PLAN-P1-02` | P1 | 旧台帳の47件PASSという記載は本branchの証拠として採用しない。本branchではNF-02定向96件、MySQLのmigration/concurrency gate、performance gateを実測した。Task F1〜Mの正式完了は全量gateと独立Reviewで判定する。 | 実測結果は§8。全量gateに環境エラーあり |
+| `[P1] CS-PLAN-P1-02` | P1 | 旧台帳の47件PASSという記載は本branchの証拠として採用しない。本branchではNF-02対象限定96件、MySQLのmigration/concurrency gate、performance gateを実測した。Task F1〜Mの正式完了は全量gateと独立Reviewで判定する。 | 実測結果は§8。全量gateに環境エラーあり |
 | `[P1] CS-PLAN-P1-03` | P1 | `PortalCustomerServiceDeskApiController` に `assertPermission("service-desk.view/create")` を強制配線し、非権限ユーザーの 403 拒否テストを追加。 | `PortalCustomerServiceDeskApiTest` PASS |
 | `[P2] CS-PLAN-P2-01` | P2 | 本branchの変更は作業ツリーに保持中。remoteへの同期はまだ実施していない。 | 未commit / 未push |
 | `CS-IMPL-P1-01` | P1 | `PortalAuthServiceImpl.createOrReactivateUser` に新規顧客ポータルユーザー（`CUSTOMER` 組織）への `service-desk.view` / `service-desk.create` 初期権限付与ライフサイクルを実装。 | `PortalAuthServiceImpl.java` |
@@ -109,8 +109,8 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 ## 8. 本branchで実測したNF-02証拠（2026-09-01 rebase onto 118a1046）
 
 - Review FAIL Head `6fc44e15` を `origin/main@118a1046` へrebase。NF-02 migrationは **V147**（main V144 `digital_invoice_safe_diagnostics` + migration-dev V145/V146 を保持）。`o.type = 'CUSTOMER'` 維持。upgrade fixture は `m_customer`。
-- NF-02定向 H2（8クラス）+ `MigrationScriptIntegrityTest` + `FlywayMigrationVersionResolutionTest` + `MySqlTestShardInventoryTest`: **`107 / 0 / 0 / 0`**（V144=digital_invoice、V147=customer_success、重複なし）。
-- 実MySQL定向（clean後）: Upgrade 3（fresh→V147、V144→V147、旧V110 reset）+ SchemaSmoke 1 + Concurrency 3 — **`7 / 0 / 0 / 0`**。
+- NF-02対象限定 H2（8クラス）+ `MigrationScriptIntegrityTest` + `FlywayMigrationVersionResolutionTest` + `MySqlTestShardInventoryTest`: **`107 / 0 / 0 / 0`**（V144=digital_invoice、V147=customer_success、重複なし）。
+- 実MySQL対象限定（clean後）: Upgrade 3（fresh→V147、V144→V147、旧V110 reset）+ SchemaSmoke 1 + Concurrency 3 — **`7 / 0 / 0 / 0`**。
 - mysql shard gate:
   - shard-1: **`35 / 0 / 0 / 0`**
   - shard-2: **`45 / 0 / 0 / 0`**
