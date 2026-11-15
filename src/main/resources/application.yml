@@ -200,6 +200,11 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: false
+    # 1次cache（SqlSession単位）をstatement単位にする。cache-enabled: false は2次cacheだけを止めるため、
+    # 既定（SESSION）のままでは同じtransaction内で同じ照会・同じ引数を再実行するとDBを読まずに前回の結果を返す。
+    # lock取得前のdiscoveryとlock取得後の読み直しが同じ照会だと、lock待ちの間に他transactionがcommitした変更を
+    # 見落とし、版の照合が古い値で行われる（W3-16b の M6 で検出）。lock文ごとのflushCacheに頼らず全体で止める。
+    local-cache-scope: statement
   global-config:
     banner: false
     db-config:
