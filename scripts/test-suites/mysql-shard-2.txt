@@ -36,3 +36,4 @@ PrivacyJournalStartupVerifierMySqlTest
 ResumeIngestionLedgerRetentionMySqlTest
 DualConfirmationRaceMySqlTest
 DualConfirmationCoordinatorRetryMySqlTest
+PrivacyHoldReleaseMySqlTest

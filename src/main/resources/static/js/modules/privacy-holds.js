@@ -5,14 +5,22 @@
  * - SUBJECT hold では、帰属できない data element ごとに「DATA_ELEMENT hold を追加」か「守られないことを受理」を
  *   明示して選ぶ（既定値なし。C-2）。「追加」を選んだ element は、SUBJECT hold の前に DATA_ELEMENT hold を開始する
  *   （その element の purge が解除の開放まで止まることを確認させる）。
- * - 解除の操作は持たない（NF07-REL）。
+ * - 解除（NF07-REL）は POST /api/privacy/holds/{holdId}/release。発行者・承認者が system の外で署名した proof
+ *   （binding・issuer・approver の JSON）を貼り付けて送る。画面は束縛の全項目（理由の hash は同じ正規形で計算し、
+ *   command ID は画面で発行する）と署名依頼の JSON を表示するだけで、署名・鍵を扱わない。D-03・D-05 の署名前は入口が
+ *   閉じている（releaseReady=false）。
  */
 (function () {
     'use strict';
 
     var CHOICE_ADD = 'DATA_ELEMENT_HOLD';
     var CHOICE_ACCEPT = 'ACCEPT_RISK';
+    var DATA_ELEMENT_PARTITION_PREFIX = 'DATA_ELEMENT#';
+    var UNKNOWN_STARTER = 'sys_user:0';
+    var REASON_DOMAIN = 'NF07-HOLD-RELEASE-REASON-V1';
     var overview = null;
+    var releaseCommandId = null;
+    var reasonHashSeq = 0;
 
     function t(key) {
         return SES.i18n.t.apply(SES.i18n, arguments);
@@ -48,6 +56,7 @@
         renderStatus();
         renderHolds();
         renderForm();
+        renderRelease();
         renderNotes();
     }
 
@@ -70,7 +79,7 @@
     function renderHolds() {
         var holds = overview.holds || [];
         if (holds.length === 0) {
-            $('#privacy-hold-body').html('<tr><td colspan="8" class="text-center text-secondary">'
+            $('#privacy-hold-body').html('<tr><td colspan="9" class="text-center text-secondary">'
                 + esc(t('privacyHold.empty')) + '</td></tr>');
             return;
         }
@@ -83,11 +92,13 @@
                 + '<td class="text-break"><code>' + esc(hold.holdId) + '</code></td>'
                 + '<td>' + esc(t('privacyHold.target.' + hold.targetType)) + '</td>'
                 + '<td class="text-break">' + esc(target) + '</td>'
-                + '<td><span class="badge bg-success">' + esc(t('privacyHold.status.' + hold.status)) + '</span></td>'
+                + '<td><span class="badge ' + (hold.status === 'ACTIVE' ? 'bg-success' : 'bg-secondary') + '">'
+                + esc(t('privacyHold.status.' + hold.status)) + '</span></td>'
                 + '<td>' + reason + '</td>'
                 + '<td class="text-break">' + esc(hold.reconciled ? '' : hold.ticketRef) + '</td>'
                 + '<td class="text-nowrap">' + esc(hold.requestedAt) + '</td>'
                 + '<td>' + esc(hold.journalRevision) + '</td>'
+                + '<td class="text-nowrap">' + esc(hold.releasedAt) + '</td>'
                 + '</tr>';
         });
         $('#privacy-hold-body').html(rows.join(''));
@@ -123,6 +134,201 @@
             : '<tr><td colspan="4" class="text-secondary">' + esc(t('privacyHold.unattributable.none')) + '</td></tr>');
         $('#hold-submit').prop('disabled', !overview.startReady || allowed.length === 0);
         toggleTargetFields();
+    }
+
+    function activeHolds() {
+        return (overview && overview.holds ? overview.holds : []).filter(function (hold) {
+            return hold.status === 'ACTIVE';
+        });
+    }
+
+    function partitionOf(hold) {
+        return hold.partitionRef
+            || (hold.targetType === 'DATA_ELEMENT' ? DATA_ELEMENT_PARTITION_PREFIX + hold.dataElementId : hold.subjectRef);
+    }
+
+    function hex(bytes) {
+        return Array.prototype.map.call(bytes, function (b) {
+            return ('0' + b.toString(16)).slice(-2);
+        }).join('');
+    }
+
+    /** 解除の command ID（hr- + 32桁 hex）。署名の対象に入るため、hold を選ぶたびに画面で発行する。 */
+    function newCommandId() {
+        var bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        return 'hr-' + hex(bytes);
+    }
+
+    /** 長さ付き field（UTF-8 の byte 長と ':' と値）。HoldReleaseBinding と同じ正規形。 */
+    function field(value) {
+        return new TextEncoder().encode(value).length + ':' + value;
+    }
+
+    /** 理由の hash（HoldReleaseBinding.reasonHash と同じ正規形の SHA-256）。計算できない環境では null。 */
+    function reasonHash(code, ticket, text) {
+        if (!window.crypto || !window.crypto.subtle || typeof TextEncoder === 'undefined') {
+            return Promise.resolve(null);
+        }
+        var canonical = field(REASON_DOMAIN) + field(code) + field(ticket) + field(text);
+        return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical)).then(function (digest) {
+            return hex(new Uint8Array(digest));
+        });
+    }
+
+    function selectedHold() {
+        var holdId = $('#hold-release-target').val();
+        return activeHolds().filter(function (h) {
+            return h.holdId === holdId;
+        })[0];
+    }
+
+    function renderRelease() {
+        var ready = !!overview.releaseReady;
+        var holds = activeHolds();
+        $('#hold-release-closed').toggleClass('d-none', ready);
+        var select = $('#hold-release-target').empty();
+        if (holds.length === 0) {
+            select.append($('<option>').val('').text(t('privacyHold.release.none')));
+        }
+        holds.forEach(function (hold) {
+            var target = hold.targetType === 'SUBJECT' ? hold.subjectRef : hold.dataElementId;
+            select.append($('<option>').val(hold.holdId).text(hold.holdId + ' (' + target + ')'));
+        });
+        $('#privacy-hold-release-form :input').prop('disabled', !ready);
+        $('#hold-release-submit').prop('disabled', !ready || holds.length === 0);
+        releaseCommandId = newCommandId();
+        renderBinding();
+    }
+
+    /**
+     * 署名の対象（束縛の全項目）と署名依頼の JSON を表示する。解除の時点の journal head は、gate が Journal と一致している間は
+     * 有効な hold の開始 event と同じ（後続の event があれば server が 409 で拒否するので、署名し直す）。
+     */
+    function renderBinding() {
+        var hold = selectedHold();
+        var starter = hold ? (hold.holdStarterRef || '') : '';
+        $('#hold-release-binding-tenant').text(hold ? (overview.tenantId || '') : '');
+        $('#hold-release-binding-subject').text(hold ? partitionOf(hold) : '');
+        $('#hold-release-binding-hold').text(hold ? hold.holdId : '');
+        $('#hold-release-binding-revision').text(hold ? hold.journalRevision : '');
+        $('#hold-release-binding-command').text(hold ? releaseCommandId : '');
+        $('#hold-release-binding-journal-revision').text(hold ? hold.journalRevision : '');
+        $('#hold-release-binding-hash').text(hold ? (hold.journalEventHash || '') : '');
+        $('#hold-release-binding-requester').text(hold ? (overview.requesterRef || '') : '');
+        $('#hold-release-binding-starter').text(starter);
+        $('#hold-release-starter-unknown').toggleClass('d-none', !hold || starter !== UNKNOWN_STARTER);
+        var seq = ++reasonHashSeq;
+        var code = $.trim($('#hold-release-reason-code').val());
+        var ticket = $.trim($('#hold-release-ticket-ref').val());
+        var text = $('#hold-release-reason-text').val();
+        if (!hold || !code || !ticket || !$.trim(text)) {
+            $('#hold-release-binding-reason').text(hold ? t('privacyHold.release.reasonHashPending') : '');
+            renderTemplate(hold, null);
+            return;
+        }
+        reasonHash(code, ticket, text).then(function (hash) {
+            if (seq !== reasonHashSeq) {
+                return;
+            }
+            $('#hold-release-binding-reason').text(hash || t('privacyHold.release.reasonHashUnavailable'));
+            renderTemplate(hold, hash);
+        }).catch(function () {
+            if (seq === reasonHashSeq) {
+                $('#hold-release-binding-reason').text(t('privacyHold.release.reasonHashUnavailable'));
+                renderTemplate(hold, null);
+            }
+        });
+    }
+
+    function renderTemplate(hold, hash) {
+        if (!hold) {
+            $('#hold-release-template').val('');
+            return;
+        }
+        var claim = {authorityId: '', keyId: '', issuedAt: '', expiresAt: '', signature: ''};
+        var binding = {
+            tenantId: overview.tenantId,
+            subjectRef: partitionOf(hold),
+            holdId: hold.holdId,
+            expectedHoldRevision: hold.journalRevision,
+            reasonHash: hash,
+            commandId: releaseCommandId,
+            expectedJournalRevision: hold.journalRevision,
+            expectedJournalHash: hold.journalEventHash,
+            requesterRef: overview.requesterRef,
+            holdStarterRef: hold.holdStarterRef
+        };
+        $('#hold-release-template').val(JSON.stringify({binding: binding, issuer: claim, approver: $.extend({}, claim)},
+            null, 2));
+    }
+
+    function postRelease(holdId, payload) {
+        return new Promise(function (resolve, reject) {
+            $.ajax({
+                url: '/api/privacy/holds/' + encodeURIComponent(holdId) + '/release',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(payload),
+                headers: SES.csrf.header(),
+                success: function (res) {
+                    if (res.code === 200) {
+                        resolve(res.data);
+                    } else {
+                        reject(res.message || t('privacyHold.error.load'));
+                    }
+                },
+                error: function (xhr) {
+                    reject(errorMessage(xhr));
+                }
+            });
+        });
+    }
+
+    function submitRelease(event) {
+        event.preventDefault();
+        var holdId = $('#hold-release-target').val();
+        var base = {
+            reasonCode: $.trim($('#hold-release-reason-code').val()),
+            reasonText: $('#hold-release-reason-text').val(),
+            ticketRef: $.trim($('#hold-release-ticket-ref').val())
+        };
+        if (!holdId || !base.reasonCode || !$.trim(base.reasonText) || !base.ticketRef) {
+            SES.toast.error(t('privacyHold.validation.required'));
+            return;
+        }
+        var proof;
+        try {
+            proof = JSON.parse($('#hold-release-proof').val());
+        } catch (e) {
+            proof = null;
+        }
+        if (!proof || typeof proof !== 'object' || !proof.binding || !proof.issuer || !proof.approver) {
+            SES.toast.error(t('privacyHold.validation.proof'));
+            return;
+        }
+        var payload = $.extend({}, base, {binding: proof.binding, issuer: proof.issuer, approver: proof.approver});
+        Swal.fire({
+            title: t('privacyHold.release.confirm.title'),
+            text: t('privacyHold.release.confirm.text'),
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: t('privacyHold.release.confirm.ok'),
+            cancelButtonText: t('common.cancel')
+        }).then(function (result) {
+            if (!result.isConfirmed) {
+                return;
+            }
+            $('#hold-release-submit').prop('disabled', true);
+            postRelease(holdId, payload).then(function (data) {
+                SES.toast.success(t(data && data.replayed ? 'privacyHold.toast.releaseReplayed' : 'privacyHold.toast.released'));
+                $('#privacy-hold-release-form')[0].reset();
+            }).catch(function (message) {
+                SES.toast.error(message);
+            }).then(function () {
+                load();
+            });
+        });
     }
 
     function renderNotes() {
@@ -274,6 +480,12 @@
     $(function () {
         $('#hold-target-type').on('change', toggleTargetFields);
         $('#privacy-hold-form').on('submit', submit);
+        $('#hold-release-target').on('change', function () {
+            releaseCommandId = newCommandId();
+            renderBinding();
+        });
+        $('#hold-release-reason-code, #hold-release-ticket-ref, #hold-release-reason-text').on('input', renderBinding);
+        $('#privacy-hold-release-form').on('submit', submitRelease);
         $('#privacy-hold-reload').on('click', load);
         load();
     });

@@ -115,6 +115,16 @@ final class PrivacyHoldTestFixture {
     private final PrivacyHoldAudit audit;
     private final PrivacyHoldProjector projector;
 
+    /**
+     * 解除の service（NF07-REL。同じ store・Journal・projector・監査・時計・操作者）。verifier は test が prod の
+     * {@code MockEnvironment} と test-only 鍵の registry で {@code ProductionPrivacyComponents} から生成して渡す。
+     */
+    PrivacyHoldReleaseService releaseService(com.ses.privacy.foundation.HoldReleaseVerifier verifier,
+                                             com.ses.privacy.foundation.HoldReleaseTrustRegistry registry) {
+        return new PrivacyHoldReleaseService(guard, null, decisions, holdJournal, store, resolver, projector, audit,
+                independent, clock, () -> actor, verifier, registry);
+    }
+
     /** metric を数える gate（同じ store・Journal・resolver）。 */
     PrivacyHoldGate gateWith(io.micrometer.core.instrument.MeterRegistry registry) {
         return new PrivacyHoldGate(store, holdJournal, resolver, providerOf(registry));

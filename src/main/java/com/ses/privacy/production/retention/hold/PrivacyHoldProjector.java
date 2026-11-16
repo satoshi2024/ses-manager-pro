@@ -15,7 +15,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * ACK 済みの HOLD_STARTED を projection へ書く共通部（hold 開始と reconciler の両方が使う。§3.4.4 の4）。
+ * ACK 済みの HOLD_STARTED・HOLD_RELEASED を projection へ書く共通部（hold 開始・解除と reconciler が使う。§3.4.4 の4、
+ * NF07-REL）。
  *
  * <ul>
  *   <li>event は port の {@code events}・{@code head}（adapter の chain 検証）を同じ revision で読み、foundation の chain 検証
@@ -104,11 +105,57 @@ final class PrivacyHoldProjector {
                 store.adoptReconciledMetadata(tenantId, hold);
             }
             List<PrivacyHoldProjectionStore.HoldRow> holds = store.holds(tenantId, true);
-            store.advance(tenantId, journalId, holds.size(), PrivacyHoldProjectionStore.projectionDigest(holds),
-                    clearCommandId, now);
+            store.advance(tenantId, journalId, PrivacyHoldProjectionStore.appliedEventCount(holds),
+                    PrivacyHoldProjectionStore.projectionDigest(holds), clearCommandId, now);
             audit.record(username, auditEvent, auditFields, 200, true);
             return written;
         });
         return Boolean.TRUE.equals(inserted);
+    }
+
+    /** event が hold の解除の HOLD_RELEASED として解釈できるか（hold ID は {@code case_id}。NF07-REL）。 */
+    static boolean isHoldRelease(JournalEvent event, String holdId) {
+        return event != null && event.type() == PrivacyJournalPort.CommandType.HOLD_RELEASED
+                && holdId != null && holdId.equals(event.caseId());
+    }
+
+    /**
+     * ACK 済みの HOLD_RELEASED を projection へ書き、追随位置を進める（NF07-REL。解除の service と reconciler が使う）。
+     *
+     * <p>独立 transaction で追随位置の行と hold 行を locking read で取り、ACTIVE で開始の revision・event hash が一致する
+     * 行だけを RELEASED にする（hold revision の CAS）。既に同じ解除日時で RELEASED なら書き直さない（再実行で二重にならない）。
+     * それ以外（行が無い・別の解除日時で RELEASED）は projection と Journal の不一致として例外を返し、何も書かない。
+     *
+     * @param releasedAt     Journal の HOLD_RELEASED event の時刻
+     * @param clearCommandId pending がこの command なら消す（null なら pending に触れない）
+     * @return 新たに RELEASED にしたら true（既に反映済みなら false）
+     */
+    boolean projectRelease(String tenantId, String holdId, Instant releasedAt, String clearCommandId, String username,
+                           String auditEvent, Map<String, String> auditFields) {
+        String journalId = journal.journalId();
+        Boolean released = requiresNew.execute(status -> {
+            Instant now = clock.instant();
+            if (store.lockState(tenantId, journalId).isEmpty()) {
+                store.ensureStateLocked(tenantId, journalId, now);
+            }
+            PrivacyHoldProjectionStore.HoldRow row = store.lockHold(tenantId, holdId)
+                    .orElseThrow(() -> new IllegalStateException("解除するholdのprojectionがありません"));
+            boolean written = false;
+            if (row.active()) {
+                if (store.markReleased(tenantId, holdId, row.journalRevision(), row.journalEventHash(), releasedAt) != 1) {
+                    throw new IllegalStateException("holdの解除をprojectionへ書けません");
+                }
+                written = true;
+            } else if (!row.released() || row.releasedAt() == null
+                    || !row.releasedAt().equals(releasedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS))) {
+                throw new IllegalStateException("projectionの解除がJournalと一致しません");
+            }
+            List<PrivacyHoldProjectionStore.HoldRow> holds = store.holds(tenantId, true);
+            store.advance(tenantId, journalId, PrivacyHoldProjectionStore.appliedEventCount(holds),
+                    PrivacyHoldProjectionStore.projectionDigest(holds), clearCommandId, now);
+            audit.record(username, auditEvent, auditFields, 200, true);
+            return written;
+        });
+        return Boolean.TRUE.equals(released);
     }
 }

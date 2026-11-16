@@ -1,6 +1,7 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.privacy.foundation.JournalUnavailableException;
+import com.ses.privacy.foundation.PrivacyJournalPort;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -27,8 +28,9 @@ final class JdbcPrivacyHoldJournalIndex implements PrivacyHoldJournalIndex {
 
     private static final String FIND_COMMAND = "SELECT subject_ref, revision, event_hash FROM pj_command "
             + "WHERE tenant_id = ? AND command_id = ?";
-    private static final String HOLD_EVENTS = "SELECT subject_ref, revision, command_id, case_id, event_hash "
-            + "FROM pj_event WHERE tenant_id = ? AND event_type = 'HOLD_STARTED'";
+    private static final String HOLD_EVENTS = "SELECT subject_ref, revision, command_id, case_id, event_hash, "
+            + "event_type, created_at FROM pj_event WHERE tenant_id = ? "
+            + "AND event_type IN ('HOLD_STARTED', 'HOLD_RELEASED')";
     private static final String HEADS = "SELECT subject_ref, revision, event_hash, held FROM pj_head WHERE tenant_id = ?";
     private static final String SERVER_UUID = "SELECT @@server_uuid";
 
@@ -63,8 +65,11 @@ final class JdbcPrivacyHoldJournalIndex implements PrivacyHoldJournalIndex {
                 statement.setString(1, tenantId);
                 try (ResultSet rs = statement.executeQuery()) {
                     while (rs.next()) {
+                        // 時刻は本番 adapter と同じく getTimestamp で読む（同じ pool・同じ session time zone）
+                        java.sql.Timestamp createdAt = rs.getTimestamp(7);
                         events.add(new HoldEvent(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-                                rs.getString(5)));
+                                rs.getString(5), PrivacyJournalPort.CommandType.valueOf(rs.getString(6)),
+                                createdAt == null ? null : createdAt.toInstant()));
                     }
                 }
             }

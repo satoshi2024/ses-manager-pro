@@ -31,12 +31,52 @@ class PrivacyFoundationIsolationTest {
         assertTrue(violations.isEmpty(), "foundationにSpring登録のアノテーションがあります: " + violations);
     }
 
+    /**
+     * public な factory と解除の入口は、どの registry・失効 provider・proof を渡すかを呼出し側が決められるため、呼出し元を
+     * Spring 登録（registry は空・失効は常に UNKNOWN）と解除の service に限る（NF07-REL review P3-3）。呼出し元を増やす変更は
+     * ここに理由と一緒に足し、review を通す。
+     */
+    @Test
+    void 解除のproofとJournalの本番部品の呼出し元はSpring登録と解除のserviceに限る() throws Exception {
+        java.util.Map<String, java.util.Set<String>> allowed = java.util.Map.of(
+                "holdReleaseVerifier(", java.util.Set.of("com/ses/privacy/foundation/ProductionPrivacyComponents.java",
+                        "com/ses/privacy/production/retention/hold/PrivacyHoldConfiguration.java"),
+                "appendHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseJournalPort.java",
+                        "com/ses/privacy/foundation/ProductionPrivacyJournalAdapter.java",
+                        "com/ses/privacy/production/retention/hold/PrivacyHoldReleaseService.java"),
+                "productionPrivacyJournal(", java.util.Set.of("com/ses/privacy/foundation/ProductionPrivacyComponents.java",
+                        "com/ses/privacy/production/retention/hold/PrivacyJournalConnections.java"),
+                "new HoldReleaseProofVerifier(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPrivacyComponents.java"),
+                "new VerifiedHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseProofVerifier.java"));
+        Path root = Path.of("src/main/java");
+        java.util.List<String> violations = new java.util.ArrayList<>();
+        java.util.Map<String, java.util.Set<String>> found = new java.util.HashMap<>();
+        try (java.util.stream.Stream<Path> files = Files.walk(root)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+                String relative = root.relativize(file).toString().replace('\\', '/');
+                for (java.util.Map.Entry<String, java.util.Set<String>> entry : allowed.entrySet()) {
+                    if (source.contains(entry.getKey())) {
+                        found.computeIfAbsent(entry.getKey(), key -> new java.util.HashSet<>()).add(relative);
+                        if (!entry.getValue().contains(relative)) {
+                            violations.add(relative + " " + entry.getKey());
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(), "許可されていない呼出し元があります: " + violations);
+        // 検査が空振りしていない（許可した場所に実際の呼出し・定義がある）
+        assertEquals(allowed, found, "許可した呼出し元と実際の出現が一致しません");
+    }
+
     @Test
     void production部品はProductionPrivacyComponents経由でしか生成できない() throws Exception {
         for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,
                 ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
                 ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class,
-                ProductionPrivacyJournalAdapter.class)) {
+                ProductionPrivacyJournalAdapter.class, HoldReleaseProofVerifier.class)) {
             assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
             for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
                 assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),
@@ -86,6 +126,11 @@ class PrivacyFoundationIsolationTest {
         assertEquals(0, attempts.get(), "生成時とhold解除の拒否ではJournalへ接続しない");
         assertEquals(0, ProductionPrivacyJournalAdapter.class.getConstructors().length,
                 "本番adapterにpublic constructorがない");
+        // NF07-REL: 解除は検証済み proof を受け取る別入口だけ。proof は verifier だけが作り、public constructor を持たない
+        assertTrue(journal instanceof HoldReleaseJournalPort, "本番adapterは解除の入口を持つ");
+        assertEquals(0, VerifiedHoldRelease.class.getConstructors().length, "解除proofにpublic constructorがない");
+        assertFalse(HoldReleaseJournalPort.class.isAssignableFrom(JdbcPrivacyJournalAdapter.class),
+                "合成adapterは解除の入口を持たない（I-6）");
     }
 
     @Test

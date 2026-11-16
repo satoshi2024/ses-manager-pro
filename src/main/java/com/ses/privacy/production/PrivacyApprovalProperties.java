@@ -36,6 +36,12 @@ public class PrivacyApprovalProperties {
     private DecisionReference d01 = new DecisionReference();
 
     /**
+     * D-03 署名鍵（Trust Anchor・KMS の方式と鍵）。hold 解除（NF07-REL）の開放の前提で、capability の承認 digest には含めない
+     * （{@link PrivacyDecisionBinding#evaluateStandalone} が解除の入口で D-05 と合わせて検査する）。
+     */
+    private DecisionReference d03 = new DecisionReference();
+
+    /**
      * D-05 hold の種類と権限者。hold 開始（NF07-A1H）の前提で、capability の承認 digest には含めない
      * （{@link PrivacyDecisionBinding#evaluateStandalone} が hold 開始の入口で検査する）。
      */
@@ -60,6 +66,7 @@ public class PrivacyApprovalProperties {
         }
         return switch (decision) {
             case D01 -> d01;
+            case D03 -> d03;
             case D05 -> d05;
             case D06 -> d06;
             case D09 -> d09;

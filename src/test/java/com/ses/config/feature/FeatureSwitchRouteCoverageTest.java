@@ -208,11 +208,16 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(privacyRoutes).as("F2 の catalog API").anyMatch(route -> route.normalized().equals("/api/privacy/catalog"));
         assertThat(Feature.forPath("/api/privacy/catalog")).contains(Feature.NF07_RETENTION);
         assertThat(Feature.forPath("/api/privacy/catalog-like")).isEmpty();
-        // A1H-1: hold の API と画面。解除（release）は handler を持たないが、prefix の配下なので OFF なら 404 になる
+        // A1H-1: hold の API と画面。NF07-REL: 解除（release）の handler も hold の prefix の配下なので OFF なら 404 になる
         assertThat(privacyRoutes).as("A1H の hold API").anyMatch(route -> route.normalized().equals("/api/privacy/holds"));
         assertThat(privacyRoutes).as("A1H の hold 画面").anyMatch(route -> route.normalized().equals("/privacy/holds"));
-        assertThat(privacyRoutes).as("hold 解除の入口は持たない")
-                .noneMatch(route -> route.normalized().contains("/release"));
+        assertThat(privacyRoutes.stream().filter(route -> route.normalized().contains("/release")).toList())
+                .as("hold の解除の入口は NF07_RETENTION の hold の prefix の配下だけ")
+                .isNotEmpty()
+                .allSatisfy(route -> {
+                    assertThat(route.normalized()).startsWith("/api/privacy/holds/");
+                    assertThat(Feature.forPath(route.normalized())).contains(Feature.NF07_RETENTION);
+                });
         assertThat(Feature.forPath("/api/privacy/holds/x/release")).contains(Feature.NF07_RETENTION);
         assertThat(Feature.forPath("/privacy/holds-like")).isEmpty();
         assertThat(Feature.NF07_RETENTION.apiPrefixes())

@@ -34,6 +34,18 @@ final class PrivacyHoldAudit {
     static final String RECONCILE_PROJECTED = "RECONCILE_PROJECTED";
     static final String RECONCILE_CAUGHT_UP = "RECONCILE_CAUGHT_UP";
     static final String RECONCILE_ABANDONED = "RECONCILE_ABANDONED";
+    /** 解除の要求（NF07-REL。hold ID・対象種別・element・束縛の digest の先頭・発行者と承認者の authority）。 */
+    static final String RELEASE_REQUESTED = "RELEASE_REQUESTED";
+    /** 解除の理由コードと ticket（理由本文・理由 hash は残さない）。 */
+    static final String RELEASE_REASON = "RELEASE_REASON";
+    /** 解除の開放の前提にした D-03・D-05 の決定ID（1行の上限に収めるため別の行にする）。 */
+    static final String RELEASE_DECISIONS = "RELEASE_DECISIONS";
+    static final String RELEASED = "RELEASED";
+    /** proof・束縛・状態の拒否（理由は {@code HoldReleaseRejection} 等の固定 code）。 */
+    static final String RELEASE_REJECTED = "RELEASE_REJECTED";
+    static final String RELEASE_ACK_UNKNOWN = "RELEASE_ACK_UNKNOWN";
+    static final String RECONCILE_RELEASE_PROJECTED = "RECONCILE_RELEASE_PROJECTED";
+    static final String RECONCILE_RELEASE_CAUGHT_UP = "RECONCILE_RELEASE_CAUGHT_UP";
 
     private final AuditLogService auditLogService;
 

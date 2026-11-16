@@ -38,9 +38,12 @@ import java.util.Objects;
  * 呼出しは拒否する。transaction には {@link #APPEND_TRANSACTION_TIMEOUT} の上限を置き、各 statement の timeout は
  * その残り時間から設定される（journal-witness-grant-design.md §2.4）。ACK を確認できない失敗は成功・失敗のどちらとも
  * 推定せず {@link JournalUnavailableException} を返し、呼出し側は同じ command ID で照会・再送する（再送は元の ACK を返す）。
- * hold 解除（{@code HOLD_RELEASED}）は本番 adapter でも拒否する（解除 proof は NF07-REL の範囲）。
+ * hold 解除（{@code HOLD_RELEASED}）は {@link #append} では常に拒否し、検証済みの proof（{@link VerifiedHoldRelease}）を
+ * 受け取る {@link #appendHoldRelease} だけが append する（NF07-REL）。解除の append は同じ transaction の中で head を lock し、
+ * command の再送（元の ACK）→ revision CAS → proof の判定（{@link VerifiedHoldRelease#requireAppendable}: journal head・
+ * hold revision・hold ID・期限）の順に確かめる。合成 adapter の解除の拒否は変えない（I-6）。
  */
-final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
+final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort, HoldReleaseJournalPort {
 
     /** append・読み取りの transaction 上限。{@code privacy.journal.pending-timeout} はこれより長くなければならない。 */
     static final Duration APPEND_TRANSACTION_TIMEOUT = Duration.ofSeconds(10);
@@ -83,10 +86,21 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         Objects.requireNonNull(command, "command");
         requireNoAmbientTransaction();
         if (command.type() == CommandType.HOLD_RELEASED) {
-            throw new SecurityException("hold解除は解除proof（NF07-REL）が揃うまで本番Journalでも拒否します");
+            throw new SecurityException("hold解除は検証済みの解除proof（appendHoldRelease）でだけappendします");
         }
+        return appendDurably(command, null);
+    }
+
+    @Override
+    public JournalAck appendHoldRelease(VerifiedHoldRelease release) {
+        Objects.requireNonNull(release, "release");
+        requireNoAmbientTransaction();
+        return appendDurably(release.command(), release);
+    }
+
+    private JournalAck appendDurably(JournalCommand command, VerifiedHoldRelease release) {
         try {
-            JournalAck ack = writeTransaction.execute(status -> appendInTransaction(command));
+            JournalAck ack = writeTransaction.execute(status -> appendInTransaction(command, release));
             if (ack == null) {
                 throw new JournalUnavailableException("journal ACKを確認できません", null);
             }
@@ -131,7 +145,7 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         }
     }
 
-    private JournalAck appendInTransaction(JournalCommand command) {
+    private JournalAck appendInTransaction(JournalCommand command, VerifiedHoldRelease release) {
         requireDurableJournalConfiguration();
         JournalPartition p = command.partition();
         // 重複行の INSERT IGNORE は共有 duplicate-key lock 後の FOR UPDATE 昇格で deadlock し得るため、
@@ -143,7 +157,8 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         JournalHead head = jdbc.queryForObject("SELECT " + HEAD_COLUMNS
                         + " FROM pj_head WHERE tenant_id = ? AND subject_ref = ? FOR UPDATE",
                 headMapper(p), p.tenantId(), p.subjectRef());
-        verifyChain(p, head, selectEvents(p));
+        List<JournalEvent> events = selectEvents(p);
+        verifyChain(p, head, events);
         Instant eventAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
 
         List<JournalAck> prior = jdbc.query("SELECT payload_hash, revision, event_hash FROM pj_command "
@@ -157,7 +172,7 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         if (!prior.isEmpty()) {
             return prior.get(0);
         }
-        requireAppendAllowed(command, head, eventAt);
+        requireAppendAllowed(command, head, events, eventAt, release);
 
         boolean leaseCommand = isLeaseCommand(command.type());
         long revision = head.revision() + 1;
@@ -200,14 +215,24 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         return new JournalAck(command.commandId(), revision, eventHash, false);
     }
 
-    /** revision CAS と hold・lease・認可の規則（合成 adapter と同じ判定）。 */
-    private void requireAppendAllowed(JournalCommand command, JournalHead head, Instant eventAt) {
+    /**
+     * revision CAS と hold・lease・認可の規則（HOLD_RELEASED 以外は合成 adapter と同じ判定）。HOLD_RELEASED は検証済みの
+     * proof が無ければ拒否し、proof の判定（head・hold revision・hold ID・期限）を通ったときだけ許す（NF07-REL）。
+     */
+    private void requireAppendAllowed(JournalCommand command, JournalHead head, List<JournalEvent> events,
+                                      Instant eventAt, VerifiedHoldRelease release) {
         CommandType type = command.type();
         if (head.revision() != command.expectedRevision()) {
             throw new JournalConflictException("journal revisionが競合しました");
         }
         if (type == CommandType.HOLD_STARTED && head.held()) {
             throw new JournalConflictException("holdは既に有効です");
+        }
+        if (type == CommandType.HOLD_RELEASED) {
+            if (release == null || !release.command().equals(command)) {
+                throw new SecurityException("hold解除は検証済みの解除proofでだけappendします");
+            }
+            release.requireAppendable(head, events, eventAt);
         }
         if (type == CommandType.DISPATCH_AUTHORIZED) {
             if (head.held()) {
@@ -298,6 +323,7 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
         String previous = zeroHash();
         long revision = 1;
         boolean held = false;
+        String activeHoldId = null;
         long leaseGeneration = 0;
         String leaseOwner = null;
         Instant leaseUntil = null;
@@ -314,8 +340,14 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort {
                     throw new JournalUnavailableException("重複hold eventを検出しました", null);
                 }
                 held = true;
+                activeHoldId = event.caseId();
             } else if (event.type() == CommandType.HOLD_RELEASED) {
-                throw new JournalUnavailableException("未実装のhold解除eventを検出しました", null);
+                // 解除は有効な hold に対してだけ、その hold ID（case_id）で1回（NF07-REL）
+                if (!held || event.caseId() == null || !event.caseId().equals(activeHoldId)) {
+                    throw new JournalUnavailableException("有効なholdに対応しないhold解除eventを検出しました", null);
+                }
+                held = false;
+                activeHoldId = null;
             } else if (isLeaseCommand(event.type())) {
                 if (event.expectedLeaseGeneration() != leaseGeneration || event.workerId() == null
                         || event.leaseUntil() == null

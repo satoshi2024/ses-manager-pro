@@ -25,20 +25,24 @@ import java.util.Optional;
  * 業務時刻で書く（application の他の DATETIME 列と同じ）。
  *
  * <p>{@code last_applied_seq} と {@code last_applied_hash} は tenant の projection 全体の要約である。hold は対象ごとの
- * Journal partition に入るため（partition の head は1つの hold ごと）、tenant の追随位置は「反映済みの HOLD_STARTED event の
- * 件数」と、その (partition, revision, event hash, hold ID) の集合の順序に依らない digest（{@link #digest}）で表す。gate は
- * projection 側と Journal 側の両方からこの digest を計算して一致を確かめる。
+ * Journal partition に入るため、tenant の追随位置は「反映済みの hold event（HOLD_STARTED と HOLD_RELEASED）の件数」と、
+ * hold ごとの (partition, 開始の revision, 開始の event hash, hold ID[, 解除日時]) の集合の順序に依らない digest
+ * （{@link #digest}）で表す。解除日時（{@code released_at}）は Journal の HOLD_RELEASED event の時刻をそのまま書き、解除した
+ * hold の要素だけに足す（ACTIVE だけの tenant の digest は NF07-A1H のときと同じ値）。gate は projection 側と Journal 側の
+ * 両方からこの digest を計算して一致を確かめる（Journal に解除が無いのに projection だけが RELEASED なら不一致）。
+ * 解除の後も同じ partition に新しい hold を開始でき、partition の head は最後の hold event を指す（NF07-REL）。
  */
 final class PrivacyHoldProjectionStore {
 
     static final ZoneId ZONE = ZoneId.of("Asia/Tokyo");
     static final String STATUS_ACTIVE = "ACTIVE";
+    static final String STATUS_RELEASED = "RELEASED";
     private static final String DIGEST_DOMAIN = "NF07-HOLD-PROJECTION-V1";
 
     private static final String STATE_COLUMNS = "tenant_id, journal_id, last_applied_seq, last_applied_hash, "
             + "pending_command_id, pending_since, row_version";
     private static final String HOLD_COLUMNS = "hold_id, target_type, subject_ref, data_element_id, status, reason_code, "
-            + "ticket_ref, requested_by, requested_at, journal_revision, journal_event_hash";
+            + "ticket_ref, requested_by, requested_at, journal_revision, journal_event_hash, released_at";
 
     private final JdbcTemplate jdbc;
 
@@ -158,6 +162,36 @@ final class PrivacyHoldProjectionStore {
                 (rs, row) -> rs.getString(1), tenantId, holdId).isEmpty();
     }
 
+    /** hold ID の projection（lock しない。NF07-REL）。 */
+    Optional<HoldRow> hold(String tenantId, String holdId) {
+        return jdbc.query("SELECT " + HOLD_COLUMNS + " FROM t_legal_hold WHERE tenant_id = ? AND hold_id = ?",
+                HOLD_MAPPER, tenantId, holdId).stream().findFirst();
+    }
+
+    /** hold ID の projection を locking read で読む（NF07-REL）。 */
+    Optional<HoldRow> lockHold(String tenantId, String holdId) {
+        return jdbc.query("SELECT " + HOLD_COLUMNS + " FROM t_legal_hold WHERE tenant_id = ? AND hold_id = ? FOR UPDATE",
+                HOLD_MAPPER, tenantId, holdId).stream().findFirst();
+    }
+
+    /** tenant に ACTIVE な SUBJECT hold があるか（locking read。DATA_ELEMENT hold の解除の依存の判定。NF07-REL）。 */
+    boolean activeSubjectHoldExists(String tenantId) {
+        return !jdbc.query("SELECT hold_id FROM t_legal_hold WHERE tenant_id = ? AND target_type = 'SUBJECT' "
+                        + "AND status = 'ACTIVE' FOR UPDATE", (rs, row) -> rs.getString(1), tenantId).isEmpty();
+    }
+
+    /**
+     * ACK 済みの HOLD_RELEASED を projection へ書く（NF07-REL）。開始の revision と event hash が一致する ACTIVE な行だけを
+     * RELEASED にする（hold revision の CAS）。解除日時は Journal の event 時刻。
+     *
+     * @return 更新した行数（0 なら一致する ACTIVE な行が無い）
+     */
+    int markReleased(String tenantId, String holdId, long startRevision, String startEventHash, Instant releasedAt) {
+        return jdbc.update("UPDATE t_legal_hold SET status = 'RELEASED', released_at = ? WHERE tenant_id = ? "
+                        + "AND hold_id = ? AND status = 'ACTIVE' AND journal_revision = ? AND journal_event_hash = ?",
+                local(micros(releasedAt)), tenantId, holdId, startRevision, startEventHash);
+    }
+
     /**
      * reconciler が先に {@code RECONCILED} の印で復元した行を、同じ event の開始者自身の値で置き換える（Review P3-2）。
      * 同じ hold ID・revision・event hash で、まだ {@code RECONCILED} の行だけが対象（開始者の値を後から上書きしない）。
@@ -188,18 +222,29 @@ final class PrivacyHoldProjectionStore {
                 (rs, row) -> rs.getString(1), journalId);
     }
 
-    /** projection の digest（{@link #digest}）。 */
+    /** projection の digest（{@link #digest}）。解除した行だけ解除日時を要素に足す。 */
     static String projectionDigest(Collection<HoldRow> holds) {
         List<DigestEntry> entries = new ArrayList<>();
         for (HoldRow hold : holds) {
-            entries.add(new DigestEntry(hold.partitionRef(), hold.journalRevision(), hold.journalEventHash(), hold.holdId()));
+            entries.add(new DigestEntry(hold.partitionRef(), hold.journalRevision(), hold.journalEventHash(), hold.holdId(),
+                    hold.released() ? hold.releasedAt() : null));
         }
         return digest(entries);
     }
 
+    /** 反映済みの hold event の件数（開始1件ずつと、解除した行の解除1件ずつ。NF07-REL）。 */
+    static long appliedEventCount(Collection<HoldRow> holds) {
+        long count = 0;
+        for (HoldRow hold : holds) {
+            count += hold.released() ? 2 : 1;
+        }
+        return count;
+    }
+
     /**
      * 反映済み hold の集合の digest。各要素を長さ付き field にして辞書順に並べ、domain 付きで SHA-256 を取る（順序に依らない）。
-     * 空集合は null（{@code last_applied_hash} の初期値と同じ）。
+     * 解除した hold の要素だけ {@code RELEASED} と解除日時（micro 秒）を足す。空集合は null（{@code last_applied_hash} の
+     * 初期値と同じ）。
      */
     static String digest(Collection<DigestEntry> entries) {
         if (entries == null || entries.isEmpty()) {
@@ -212,6 +257,10 @@ final class PrivacyHoldProjectionStore {
             field(line, Long.toString(entry.revision()));
             field(line, entry.eventHash());
             field(line, entry.holdId());
+            if (entry.releasedAt() != null) {
+                field(line, STATUS_RELEASED);
+                field(line, micros(entry.releasedAt()).toString());
+            }
             lines.add(line.toString());
         }
         lines.sort(null);
@@ -258,17 +307,20 @@ final class PrivacyHoldProjectionStore {
             rs.getString("data_element_id"), rs.getString("status"), rs.getString("reason_code"),
             rs.getString("ticket_ref"), rs.getLong("requested_by"),
             instant(rs.getObject("requested_at", LocalDateTime.class)), rs.getLong("journal_revision"),
-            rs.getString("journal_event_hash"));
+            rs.getString("journal_event_hash"), instant(rs.getObject("released_at", LocalDateTime.class)));
 
     /** 追随位置の1行。 */
     record StateRow(String tenantId, String journalId, long lastAppliedSeq, String lastAppliedHash,
                     String pendingCommandId, Instant pendingSince, long rowVersion) {
     }
 
-    /** projection の1行。{@code targetType} が解釈できない行は null（gate は不一致として扱う）。 */
+    /**
+     * projection の1行。{@code targetType} が解釈できない行は null（gate は不一致として扱う）。{@code journalRevision}・
+     * {@code journalEventHash} は開始（HOLD_STARTED）の位置、{@code releasedAt} は解除した行の Journal の解除時刻。
+     */
     record HoldRow(String holdId, PrivacyHoldTargetType targetType, String subjectRef, String dataElementId,
                    String status, String reasonCode, String ticketRef, long requestedBy, Instant requestedAt,
-                   long journalRevision, String journalEventHash) {
+                   long journalRevision, String journalEventHash, Instant releasedAt) {
 
         /** Journal 上の partition の参照（{@link PrivacyHoldPartitions}）。解釈できない行は null。 */
         String partitionRef() {
@@ -284,6 +336,10 @@ final class PrivacyHoldProjectionStore {
         boolean active() {
             return STATUS_ACTIVE.equals(status);
         }
+
+        boolean released() {
+            return STATUS_RELEASED.equals(status);
+        }
     }
 
     /** projection へ書く hold。{@code target} は SUBJECT なら subject 参照、DATA_ELEMENT なら data element ID。 */
@@ -292,7 +348,11 @@ final class PrivacyHoldProjectionStore {
                    String journalEventHash) {
     }
 
-    /** digest の1要素。 */
-    record DigestEntry(String partitionRef, long revision, String eventHash, String holdId) {
+    /** digest の1要素（{@code releasedAt} は解除した hold だけ。ACTIVE は null）。 */
+    record DigestEntry(String partitionRef, long revision, String eventHash, String holdId, Instant releasedAt) {
+
+        DigestEntry(String partitionRef, long revision, String eventHash, String holdId) {
+            this(partitionRef, revision, eventHash, holdId, null);
+        }
     }
 }

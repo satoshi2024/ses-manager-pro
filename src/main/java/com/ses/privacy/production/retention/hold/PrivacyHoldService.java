@@ -34,11 +34,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
- * NF07 hold の開始と一覧（production-bridge-phased-plan.md §3.4.4。解除は持たない＝NF07-REL）。
+ * NF07 hold の開始と一覧（production-bridge-phased-plan.md §3.4.4。解除は {@link PrivacyHoldReleaseService}＝NF07-REL）。
  *
  * <p>開始の手順:
  * <ol>
@@ -97,11 +98,25 @@ public class PrivacyHoldService {
     private final TransactionTemplate requiresNew;
     private final Clock clock;
     private final Supplier<Actor> actorSource;
+    private final BooleanSupplier releaseOpen;
 
     PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                        PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
                        HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
                        PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource) {
+        this(accessGuard, oidcProperties, decisions, journal, store, resolver, gate, projector, audit, requiresNew, clock,
+                actorSource, null);
+    }
+
+    /**
+     * @param releaseOpen 解除の入口が開いているか（画面の表示だけに使う。null なら常に false。NF07-REL）
+     */
+    PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
+                       PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
+                       HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
+                       PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource,
+                       BooleanSupplier releaseOpen) {
+        this.releaseOpen = releaseOpen == null ? () -> false : releaseOpen;
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
         this.decisions = Objects.requireNonNull(decisions, "decisions");
@@ -124,7 +139,8 @@ public class PrivacyHoldService {
     /** hold の一覧と開始の前提。 */
     public PrivacyHoldOverview overview() {
         accessGuard.requireAllowed(PrivacyAccessGuard.Capability.RETENTION, VIEW_ACTION);
-        String tenantId = requireCallerTenant(actorSource.get());
+        Actor viewer = actorSource.get();
+        String tenantId = requireCallerTenant(viewer);
         PrivacyHoldDecisions.Readiness readiness = decisions.evaluate();
         PrivacyHoldJournal.Availability availability = journal.availability();
         // 画面の表示は破壊的経路の skip ではないため、gate の UNAVAILABLE の metric・WARN に数えない（Review P3-4）
@@ -151,7 +167,9 @@ public class PrivacyHoldService {
                             hold.targetType() == null ? null : hold.targetType().name(), hold.subjectRef(),
                             hold.dataElementId(), hold.status(), hold.reasonCode(), hold.ticketRef(),
                             hold.requestedAt() == null ? null : DISPLAY_TIME.format(hold.requestedAt()), hold.journalRevision(),
-                            RECONCILED.equals(hold.reasonCode())));
+                            RECONCILED.equals(hold.reasonCode()), hold.journalEventHash(),
+                            hold.releasedAt() == null ? null : DISPLAY_TIME.format(hold.releasedAt()),
+                            hold.partitionRef(), PrivacyHoldReleaseService.starterRef(hold)));
                 });
         List<PrivacyHoldOverview.ElementEntry> unattributable = new ArrayList<>();
         for (String elementId : HoldSubjectResolver.unattributableElementIds(catalog)) {
@@ -177,7 +195,17 @@ public class PrivacyHoldService {
                 missing.isEmpty(), List.copyOf(missing),
                 readiness.allowedTargetTypes().stream().map(Enum::name).sorted().toList(),
                 List.copyOf(entries), List.copyOf(unattributable), HoldSubjectResolver.unclassifiedElementIds(catalog),
-                related, holdable);
+                related, holdable, releaseOpenQuietly(), tenantId,
+                viewer.userId() == null || viewer.userId() <= 0 ? null
+                        : PrivacyHoldReleaseService.REQUESTER_PREFIX + viewer.userId());
+    }
+
+    private boolean releaseOpenQuietly() {
+        try {
+            return releaseOpen.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** hold を開始する。 */

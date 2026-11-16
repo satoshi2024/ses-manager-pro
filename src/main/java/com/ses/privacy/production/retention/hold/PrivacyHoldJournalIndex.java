@@ -1,5 +1,8 @@
 package com.ses.privacy.production.retention.hold;
 
+import com.ses.privacy.foundation.PrivacyJournalPort;
+
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -16,7 +19,7 @@ interface PrivacyHoldJournalIndex {
     /** command ID の位置（同じ tenant で command ID が partition をまたいで重なれば複数件）。 */
     List<CommandLocation> findCommand(String tenantId, String commandId);
 
-    /** tenant の HOLD_STARTED event と全 partition の head を同じ読み取り snapshot で返す。 */
+    /** tenant の HOLD_STARTED・HOLD_RELEASED event と全 partition の head を同じ読み取り snapshot で返す。 */
     TenantView tenantView(String tenantId);
 
     /** Journal instance の {@code @@server_uuid}（application DB と同じ instance への誤接続を実行中に検出する。Review P3-8）。 */
@@ -26,8 +29,20 @@ interface PrivacyHoldJournalIndex {
     record CommandLocation(String partitionRef, long revision, String eventHash) {
     }
 
-    /** HOLD_STARTED event の位置（{@code caseId} は hold ID）。 */
-    record HoldEvent(String partitionRef, long revision, String commandId, String caseId, String eventHash) {
+    /**
+     * hold の event の位置（{@code caseId} は hold ID）。{@code type} は HOLD_STARTED か HOLD_RELEASED、{@code createdAt} は
+     * Journal の event 時刻（解除の projection の {@code released_at} と照合する。NF07-REL）。
+     */
+    record HoldEvent(String partitionRef, long revision, String commandId, String caseId, String eventHash,
+                     PrivacyJournalPort.CommandType type, Instant createdAt) {
+
+        boolean start() {
+            return type == PrivacyJournalPort.CommandType.HOLD_STARTED;
+        }
+
+        boolean release() {
+            return type == PrivacyJournalPort.CommandType.HOLD_RELEASED;
+        }
     }
 
     /** partition の head。 */

@@ -25,10 +25,13 @@ import java.util.Set;
  *   <li>{@code t_privacy_projection_state} に tenant の行が無い（hold 機構を一度も使っていない）→ {@link State#NO_HOLDS}。
  *       照会はこの1回だけで、Journal の起動時検査の結果より優先する（未使用の tenant では Journal の不達が削除を止めない）。</li>
  *   <li>行がある → Journal が {@code AVAILABLE}（profile に関係なく起動時検査の結果で判定）、行の journal ID が設定と一致、
- *       pending が NULL、projection の digest と件数が {@code last_applied_*} と一致、Journal の HOLD_STARTED event の digest と
- *       件数も一致し、projection の各 partition の head が held でその event を指し、projection に無い held の head が無い
- *       → {@link State#VERIFIED}（hold 集合を返す）。どれかが欠ければ {@link State#UNAVAILABLE}（理由は固定 code）。</li>
+ *       pending が NULL、projection の digest と件数が {@code last_applied_*} と一致、Journal の hold event（開始と解除）の
+ *       digest と件数も一致し、projection の ACTIVE な hold の partition の head が held でその開始 event を指し、ACTIVE な
+ *       hold の無い held の head が無い → {@link State#VERIFIED}（ACTIVE な hold の集合を返す）。どれかが欠ければ
+ *       {@link State#UNAVAILABLE}（理由は固定 code）。</li>
  * </ol>
+ * 解除（NF07-REL）した hold は集合に入らないため、解除の後は D1〜D10 の経路が従来どおり動く。projection だけが RELEASED で
+ * Journal に解除が無い場合、Journal にだけ解除がある場合（projection の追随遅れ）はどちらも UNAVAILABLE（fail-closed）。
  * batch 経路は開始時に {@link #evaluate} の結果を1回取り、その回の判定に使う（途中で開始された hold は次回から効く）。
  * 手動経路（D1・D2）は削除・申請作成と同じ application transaction の中で {@link #evaluateLocked} を呼ぶ（追随位置の行を
  * locking read で取り、hold 開始の pending CAS と直列化する。行が無い tenant では、MySQL の locking read が範囲 lock を取る
@@ -218,44 +221,77 @@ public class PrivacyHoldGate {
         return new Decision(State.VERIFIED, null, subjects, elements, catalog);
     }
 
-    /** projection の内部の整合（件数・digest・行の形式）。一致すれば null。 */
+    /**
+     * projection の内部の整合（件数・digest・行の形式）。一致すれば null。ACTIVE の行は解除日時を持たず、RELEASED の行は
+     * 解除日時を持つ（NF07-REL）。それ以外の状態・解釈できない行は不一致。
+     */
     static String projectionMismatch(PrivacyHoldProjectionStore.StateRow state,
                                      List<PrivacyHoldProjectionStore.HoldRow> holds) {
         for (PrivacyHoldProjectionStore.HoldRow hold : holds) {
-            // 第1期は解除が無い（RELEASED の行は Journal に根拠が無い）。形式の解釈できない行も不一致
-            if (hold.partitionRef() == null || !hold.active()) {
+            if (hold.partitionRef() == null) {
+                return REASON_PROJECTION_MISMATCH;
+            }
+            boolean consistent = (hold.active() && hold.releasedAt() == null)
+                    || (hold.released() && hold.releasedAt() != null);
+            if (!consistent) {
                 return REASON_PROJECTION_MISMATCH;
             }
         }
-        if (state.lastAppliedSeq() != holds.size()
+        if (state.lastAppliedSeq() != PrivacyHoldProjectionStore.appliedEventCount(holds)
                 || !Objects.equals(state.lastAppliedHash(), PrivacyHoldProjectionStore.projectionDigest(holds))) {
             return REASON_PROJECTION_MISMATCH;
         }
         return null;
     }
 
-    /** Journal の hold event・head と projection の一致。 */
+    /**
+     * Journal の hold event・head と projection の一致。
+     *
+     * <ul>
+     *   <li>Journal の HOLD_STARTED は hold ID ごとに1件、HOLD_RELEASED は同じ partition の開始より後に hold ID ごとに1件まで。</li>
+     *   <li>Journal から計算した digest（解除した hold は解除 event の時刻を足す）と件数（開始＋解除）が追随位置と一致する。</li>
+     *   <li>projection の ACTIVE な hold は partition ごとに1件までで、その partition の head が held かつその開始 event を指す。
+     *       ACTIVE な hold の無い partition の head は held でない（NF07-REL。解除後の partition は解除 event を指す）。</li>
+     * </ul>
+     */
     static boolean journalMatches(PrivacyHoldProjectionStore.StateRow state,
                                   List<PrivacyHoldProjectionStore.HoldRow> holds,
                                   PrivacyHoldJournalIndex.TenantView view) {
-        List<PrivacyHoldProjectionStore.DigestEntry> journalEntries = new ArrayList<>();
+        Map<String, PrivacyHoldJournalIndex.HoldEvent> starts = new HashMap<>();
+        Map<String, PrivacyHoldJournalIndex.HoldEvent> releases = new HashMap<>();
         for (PrivacyHoldJournalIndex.HoldEvent event : view.holdEvents()) {
-            journalEntries.add(new PrivacyHoldProjectionStore.DigestEntry(event.partitionRef(), event.revision(),
-                    event.eventHash(), event.caseId()));
+            Map<String, PrivacyHoldJournalIndex.HoldEvent> target = event.start() ? starts
+                    : event.release() ? releases : null;
+            if (target == null || event.caseId() == null || target.put(event.caseId(), event) != null) {
+                return false;
+            }
         }
-        if (journalEntries.size() != state.lastAppliedSeq()
+        for (PrivacyHoldJournalIndex.HoldEvent release : releases.values()) {
+            PrivacyHoldJournalIndex.HoldEvent start = starts.get(release.caseId());
+            if (start == null || !Objects.equals(start.partitionRef(), release.partitionRef())
+                    || release.revision() <= start.revision() || release.createdAt() == null) {
+                return false;
+            }
+        }
+        List<PrivacyHoldProjectionStore.DigestEntry> journalEntries = new ArrayList<>();
+        for (PrivacyHoldJournalIndex.HoldEvent start : starts.values()) {
+            PrivacyHoldJournalIndex.HoldEvent release = releases.get(start.caseId());
+            journalEntries.add(new PrivacyHoldProjectionStore.DigestEntry(start.partitionRef(), start.revision(),
+                    start.eventHash(), start.caseId(), release == null ? null : release.createdAt()));
+        }
+        if (starts.size() + releases.size() != state.lastAppliedSeq()
                 || !Objects.equals(PrivacyHoldProjectionStore.digest(journalEntries), state.lastAppliedHash())) {
             return false;
         }
-        Map<String, PrivacyHoldProjectionStore.HoldRow> projected = new HashMap<>();
+        Map<String, PrivacyHoldProjectionStore.HoldRow> active = new HashMap<>();
         for (PrivacyHoldProjectionStore.HoldRow hold : holds) {
-            if (projected.put(hold.partitionRef(), hold) != null) {
+            if (hold.active() && active.put(hold.partitionRef(), hold) != null) {
                 return false;
             }
         }
         Set<String> seen = new LinkedHashSet<>();
         for (PrivacyHoldJournalIndex.HeadState head : view.heads()) {
-            PrivacyHoldProjectionStore.HoldRow hold = projected.get(head.partitionRef());
+            PrivacyHoldProjectionStore.HoldRow hold = active.get(head.partitionRef());
             if (hold == null) {
                 if (head.held()) {
                     return false;
@@ -268,7 +304,7 @@ public class PrivacyHoldGate {
             }
             seen.add(head.partitionRef());
         }
-        return seen.size() == projected.size();
+        return seen.size() == active.size();
     }
 
     /** 破壊的経路の判定として UNAVAILABLE を WARN と metric に数える（判定は変えない）。 */

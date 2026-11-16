@@ -26,6 +26,7 @@ import java.util.Set;
 public class PrivacyHoldDecisions {
 
     static final String REASON_D05 = "d05";
+    static final String REASON_D03 = "d03";
     static final String REASON_TARGET_TYPES = "allowedTargetTypes";
     static final String REASON_MAX_SKEW = "clock.maxSkew";
 
@@ -59,6 +60,51 @@ public class PrivacyHoldDecisions {
             reasons.add(REASON_MAX_SKEW);
         }
         return new Readiness(reasons.isEmpty(), List.copyOf(reasons), allowed, d05.decisionId(), maxSkew);
+    }
+
+    /**
+     * hold 解除（NF07-REL）を開放する決定の前提。D-05（hold の種類と権限者）と D-03（署名鍵）の両方が、capability の決定と
+     * 同じ規則（形式・placeholder・署名日・失効・重複）で有効でなければ開放しない。呼出しごとに評価する（実行中の失効を拾う）。
+     */
+    public ReleaseReadiness releaseReadiness() {
+        List<String> reasons = new ArrayList<>();
+        java.time.LocalDate today = PrivacyDecisionBinding.businessDate(clock);
+        PrivacyDecisionBinding.StandaloneEvaluation d05 = PrivacyDecisionBinding.evaluateStandalone(
+                approvalProperties, PrivacyDecisionBinding.Decision.D05, today);
+        if (!d05.valid()) {
+            reasons.add(REASON_D05);
+        }
+        PrivacyDecisionBinding.StandaloneEvaluation d03 = PrivacyDecisionBinding.evaluateStandalone(
+                approvalProperties, PrivacyDecisionBinding.Decision.D03, today);
+        if (!d03.valid()) {
+            reasons.add(REASON_D03);
+        }
+        return new ReleaseReadiness(reasons.isEmpty(), List.copyOf(reasons), d03.decisionId(), d05.decisionId());
+    }
+
+    /**
+     * 解除 proof の判定規則（D-05「解除の承認者規則」と時計の許容ずれ）。呼出しごとに設定から作る。設定が無い・解釈できない
+     * 場合は最も厳しい側（開始者と分離、開始者が不明なら拒否、許容ずれ 0）。
+     */
+    public com.ses.privacy.foundation.HoldReleaseRules releaseRules() {
+        PrivacyHoldProperties.Release release = holdProperties == null ? null : holdProperties.getRelease();
+        boolean separation = release == null || release.starterSeparationRequired();
+        boolean rejectUnknown = release == null || release.rejectUnknownStarter();
+        return new com.ses.privacy.foundation.HoldReleaseRules(separation, rejectUnknown, maxSkew());
+    }
+
+    /**
+     * 解除の開放の前提の評価結果。
+     *
+     * @param ready         D-03・D-05 がどちらも有効か
+     * @param missing       欠けている決定の固定 code（{@code d03} / {@code d05}）
+     * @param d03DecisionId 有効な D-03 の決定ID（無効なら null）
+     * @param d05DecisionId 有効な D-05 の決定ID（無効なら null）
+     */
+    public record ReleaseReadiness(boolean ready, List<String> missing, String d03DecisionId, String d05DecisionId) {
+        public ReleaseReadiness {
+            missing = List.copyOf(missing);
+        }
     }
 
     /** 設定の許可種別。1件でも解釈できない値があれば空（全体を不正として扱う）。 */
