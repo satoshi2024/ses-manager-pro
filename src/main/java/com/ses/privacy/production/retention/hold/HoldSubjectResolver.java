@@ -44,6 +44,8 @@ public class HoldSubjectResolver {
     public static final String BP_INGESTION_TABLE = "t_bp_availability_ingestion";
     public static final String AI_RUN_TABLE = "t_ai_recommendation_run";
     static final String FILE_OBJECT = "FILE_OBJECT";
+    /** catalog の {@code storage_ref} が application の表の列であることを示す接頭辞（V196・V197 は全て {@code t_<表>.<列>}）。 */
+    static final String APPLICATION_TABLE_PREFIX = "t_";
     /** provider の無い取込原本（catalog は UNKNOWN。DATA_ELEMENT hold の保存先だけを解決する）。 */
     static final String PROJECT_INGESTION_ORIGINAL = "PROJECT_INGESTION_ORIGINAL";
 
@@ -176,20 +178,32 @@ public class HoldSubjectResolver {
     }
 
     /**
-     * DATA_ELEMENT hold の element に属する保存名（D10。論理削除済みの行・状態を問わない）。実体 file を持たない element
-     * （catalog の {@code storage_kind} が {@code FILE_OBJECT} 以外）は空。{@code FILE_OBJECT} の element のうち保存先を
-     * 解決できないもの（外部 service 側の写し等）・catalog に行が無いものは例外（呼出し側は孤児清掃のその回を中止する）。
+     * DATA_ELEMENT hold の element に属する保存名（D10。論理削除済みの行・状態を問わない）。
+     * <ul>
+     *   <li>実体 file を持たない element（catalog の {@code storage_kind} が {@code FILE_OBJECT} 以外）は空。</li>
+     *   <li>{@code FILE_OBJECT} でも保存先が application の表の列でない element（{@code storage_ref} が {@code t_} で
+     *       始まらない。CloudSign・freee・mailbox 等の外部 service 側の写し）は、upload root に実体を持たず孤児清掃の
+     *       対象にならないため、空で {@link ElementStoredNames#outsideUploadRoot()} を立てて返す（清掃を止めても守れる
+     *       ものが無い。A1H-2 review P2-1）。呼出し側は固定 code の WARN と metric を出す。</li>
+     *   <li>catalog に行が無い element と、保存先が表の列なのに解決の規則を持たない element は例外（呼出し側は孤児清掃の
+     *       その回を中止する）。</li>
+     * </ul>
      * 保存先は catalog の {@code storage_ref}（V196・V197）と F2 provider の {@code storedNameColumns} と同じ列。
      */
-    public Set<String> resolveElementStoredNames(String tenantId, String dataElementId) {
+    public ElementStoredNames resolveElementStoredNames(String tenantId, String dataElementId) {
         Objects.requireNonNull(tenantId, "tenantId");
-        List<String> kinds = jdbc.queryForList("SELECT storage_kind FROM m_pii_data_element WHERE tenant_id = ? "
-                + "AND data_element_id = ? AND deleted_flag = 0", String.class, tenantId, dataElementId);
-        if (kinds.size() != 1) {
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT storage_kind, storage_ref FROM m_pii_data_element "
+                + "WHERE tenant_id = ? AND data_element_id = ? AND deleted_flag = 0", tenantId, dataElementId);
+        if (rows.size() != 1) {
             throw new IllegalStateException("hold の data element が catalog に1行ありません");
         }
-        if (!FILE_OBJECT.equals(kinds.get(0))) {
-            return Set.of();
+        Object storageKind = rows.get(0).get("storage_kind");
+        Object storageRef = rows.get(0).get("storage_ref");
+        if (!FILE_OBJECT.equals(storageKind == null ? null : storageKind.toString())) {
+            return ElementStoredNames.none();
+        }
+        if (storageRef == null || !storageRef.toString().trim().startsWith(APPLICATION_TABLE_PREFIX)) {
+            return ElementStoredNames.outside();
         }
         List<String> names;
         if (dataElementId.startsWith(DOCUMENT_PREFIX)) {
@@ -221,7 +235,27 @@ public class HoldSubjectResolver {
                 result.add(name.trim());
             }
         }
-        return Collections.unmodifiableSet(result);
+        return new ElementStoredNames(result, false);
+    }
+
+    /**
+     * DATA_ELEMENT hold の element の保存名。
+     *
+     * @param storedNames       upload root にある実体の保存名
+     * @param outsideUploadRoot 実体が application の外（外部 service 側）にあり、孤児清掃では守れも消せもしない
+     */
+    public record ElementStoredNames(Set<String> storedNames, boolean outsideUploadRoot) {
+        public ElementStoredNames {
+            storedNames = Collections.unmodifiableSet(new LinkedHashSet<>(Objects.requireNonNull(storedNames, "storedNames")));
+        }
+
+        static ElementStoredNames none() {
+            return new ElementStoredNames(Set.of(), false);
+        }
+
+        static ElementStoredNames outside() {
+            return new ElementStoredNames(Set.of(), true);
+        }
     }
 
     private SubjectAttribution effective(String elementId, String providerId, SubjectAttribution stored) {

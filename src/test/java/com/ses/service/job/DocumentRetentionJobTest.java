@@ -146,6 +146,21 @@ class DocumentRetentionJobTest {
         assertEquals(0.0, hold.skipped(PrivacyHoldPath.D3, PrivacyHoldGate.Verdict.HELD));
     }
 
+    @Test
+    void D3_tenantの無い文書は申請を作らずに数え他の文書の抽出を止めない() {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentEligibilityService eligibility = mock(DocumentEligibilityService.class);
+        when(documentMapper.selectList(any())).thenReturn(List.of(
+                expired(null, 1L, "CONTRACT"), expired("tenant-a", 2L, "CONTRACT")));
+        PrivacyHoldTestGuards.Stub hold = PrivacyHoldTestGuards.stub();
+
+        new DocumentRetentionJob(documentMapper, eligibility, hold.guard).processExpiredDocuments();
+
+        verify(eligibility, never()).registerRetentionDisposalCandidate(org.mockito.ArgumentMatchers.isNull(), eq(1L), any());
+        verify(eligibility).registerRetentionDisposalCandidate(eq("tenant-a"), eq(2L), any());
+        assertEquals(1.0, hold.skipped(PrivacyHoldPath.D3, PrivacyHoldGate.Verdict.UNAVAILABLE));
+    }
+
     private static Document expired(String tenantId, long id) {
         return expired(tenantId, id, null);
     }

@@ -2,8 +2,10 @@ package com.ses.privacy.production.retention.hold;
 
 import com.ses.privacy.production.provider.PrivacySubjectRef;
 import com.ses.service.FileReferenceProvider;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -19,16 +21,20 @@ import java.util.Set;
  * 孤児として消え得る（D11）。本 provider は次の保存名を「参照あり」として足す（参照を減らすことはしない）。
  * <ul>
  *   <li>SUBJECT hold: 本人に帰属する保存名（F2 provider が論理削除済みの行を含めて解決。{@link HoldSubjectResolver#resolveStoredNames}）</li>
- *   <li>DATA_ELEMENT hold: その element の保存名（{@link HoldSubjectResolver#resolveElementStoredNames}）</li>
+ *   <li>DATA_ELEMENT hold: その element の保存名（{@link HoldSubjectResolver#resolveElementStoredNames}）。実体が外部 service 側に
+ *       ある element（CloudSign・freee・mailbox 等）は upload root に実体が無く清掃の対象にならないため、清掃を止めずに
+ *       WARN {@link #LOG_CODE_UNPROTECTABLE} と metric {@link #UNPROTECTABLE_METRIC} を出す（A1H-2 review P2-1。外部側の
+ *       保全は D10 の範囲外）</li>
  * </ul>
  * 清掃は保存先の directory の file 名だけで照合するため、保存名に区切り（{@code /}・{@code \}）があれば末尾の名前も足す
  * （{@code DocumentArchiveFileReferenceProvider} と同じ）。
  *
- * <p>hold 機構を使った tenant の gate が UNAVAILABLE、または保存名を解決できない場合は例外を投げ、清掃のその回を中止させる
- * （{@code FileCleanupServiceImpl} は参照の集約を削除の前に行い、provider の例外をそのまま返すため、その回は1件も消さない）。
- * hold 機構を一度も使っていない環境では、照会は gate の1回（使った tenant の列挙）だけで、空を返す。
- * 清掃は tenant ごとに provider を呼ぶが、本 provider は呼出しの tenant に依らず使った全 tenant を判定する（清掃の tenant
- * 一覧に無い tenant の実体も守る。同じ upload root を共有するため）。
+ * <p>hold 機構を使った tenant の gate が UNAVAILABLE、catalog に行の無い element、保存先が表の列なのに解決できない
+ * element の場合は例外を投げ、清掃のその回を中止させる（{@code FileCleanupServiceImpl} は参照の集約を削除の前に行い、
+ * provider の例外をそのまま返すため、その回は1件も消さない）。中止は WARN {@link #LOG_CODE_ABORT} と metric
+ * {@link #ABORT_METRIC}（tag {@code stage}）に数える。hold 機構を一度も使っていない環境では、照会は gate の1回（使った
+ * tenant の列挙）だけで、空を返す。清掃は tenant ごとに provider を呼ぶが、本 provider は呼出しの tenant に依らず使った
+ * 全 tenant を判定する（清掃の tenant 一覧に無い tenant の実体も守る。同じ upload root を共有するため）。
  */
 public class PrivacyHoldFileReferenceProvider implements FileReferenceProvider {
 
@@ -36,13 +42,26 @@ public class PrivacyHoldFileReferenceProvider implements FileReferenceProvider {
 
     /** 清掃の中止の固定 log code。 */
     public static final String LOG_CODE_ABORT = "NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED";
+    /** 清掃の中止の metric（tag {@code stage}＝{@code gate}/{@code resolve}）。 */
+    public static final String ABORT_METRIC = "ses.privacy.hold.file.cleanup.aborted";
+    /** 実体が外部にあり清掃では守れない DATA_ELEMENT hold の固定 log code。 */
+    public static final String LOG_CODE_UNPROTECTABLE = "NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE";
+    /** 実体が外部にあり清掃では守れない DATA_ELEMENT hold の metric（tag {@code element}。catalog の ID で個人情報を含まない）。 */
+    public static final String UNPROTECTABLE_METRIC = "ses.privacy.hold.file.unprotectable";
 
     private final PrivacyHoldGate gate;
     private final HoldSubjectResolver resolver;
+    private final ObjectProvider<MeterRegistry> meterRegistry;
 
     public PrivacyHoldFileReferenceProvider(PrivacyHoldGate gate, HoldSubjectResolver resolver) {
+        this(gate, resolver, null);
+    }
+
+    public PrivacyHoldFileReferenceProvider(PrivacyHoldGate gate, HoldSubjectResolver resolver,
+                                            ObjectProvider<MeterRegistry> meterRegistry) {
         this.gate = Objects.requireNonNull(gate, "gate");
         this.resolver = Objects.requireNonNull(resolver, "resolver");
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
@@ -63,7 +82,12 @@ public class PrivacyHoldFileReferenceProvider implements FileReferenceProvider {
                     addAll(names, resolver.resolveStoredNames(entry.tenantId(), subject));
                 }
                 for (String element : decision.heldDataElements()) {
-                    addAll(names, resolver.resolveElementStoredNames(entry.tenantId(), element));
+                    HoldSubjectResolver.ElementStoredNames resolved =
+                            resolver.resolveElementStoredNames(entry.tenantId(), element);
+                    if (resolved.outsideUploadRoot()) {
+                        unprotectable(element);
+                    }
+                    addAll(names, resolved.storedNames());
                 }
             } catch (RuntimeException e) {
                 log.warn("[privacy-hold] holdの対象の保存名を解決できません: code={} exceptionClass={}", LOG_CODE_ABORT,
@@ -88,10 +112,30 @@ public class PrivacyHoldFileReferenceProvider implements FileReferenceProvider {
         }
     }
 
-    private static IllegalStateException abort(String stage) {
+    /** 外部にある実体の DATA_ELEMENT hold（清掃は止めない。外部側の保全は D10 の範囲外であることを監視に出す）。 */
+    private void unprotectable(String element) {
+        log.warn("[privacy-hold] holdのdata elementの実体は外部にあり孤児清掃では守れません。清掃は続けます: code={} element={}",
+                LOG_CODE_UNPROTECTABLE, element);
+        increment(UNPROTECTABLE_METRIC, "element", element);
+    }
+
+    private IllegalStateException abort(String stage) {
         log.warn("[privacy-hold] holdの対象を判定できないため孤児ファイルの清掃をこの回は中止します: code={} stage={}",
                 LOG_CODE_ABORT, stage);
+        increment(ABORT_METRIC, "stage", stage);
         return new PrivacyHoldCleanupAbortedException();
+    }
+
+    private void increment(String metric, String tag, String value) {
+        MeterRegistry registry = meterRegistry == null ? null : meterRegistry.getIfAvailable();
+        if (registry == null) {
+            return;
+        }
+        try {
+            registry.counter(metric, tag, value).increment();
+        } catch (RuntimeException ignored) {
+            // metric の失敗は判定を変えない
+        }
     }
 
     /** 孤児清掃をその回だけ中止させる例外（message は固定。tenant・subject を含めない）。 */

@@ -85,7 +85,13 @@ public final class PrivacyHoldTestGuards {
                     withSettings().strictness(Strictness.LENIENT));
             when(meterProvider.getIfAvailable()).thenReturn(meters);
             this.guard = new PrivacyHoldPathGuard(gate, resolver, meterProvider);
-            this.fileReferenceProvider = new PrivacyHoldFileReferenceProvider(gate, resolver);
+            this.fileReferenceProvider = new PrivacyHoldFileReferenceProvider(gate, resolver, meterProvider);
+        }
+
+        /** metric の値（名前と tag 1組。無ければ 0）。 */
+        public double counter(String name, String tag, String value) {
+            var counter = meters.find(name).tag(tag, value).counter();
+            return counter == null ? 0 : counter.count();
         }
 
         /** tenant の判定を差し替える。 */

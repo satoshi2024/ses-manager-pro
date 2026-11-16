@@ -90,6 +90,22 @@ class HoldSubjectResolverPathTest {
                 .containsExactly(own);
     }
 
+    /** A1H-2 review P3-11(a): D5 の本人導出を実 provider で（変換先の空き情報の tenant で絞る）。 */
+    @Test
+    void D5は変換先の空き情報の本人の取込だけを返し未変換と他tenantの取込は返さない() {
+        long availability = fx.bpAvailability(BASE_ID + 651, TENANT);
+        long otherTenantAvailability = fx.bpAvailability(BASE_ID + 652, PrivacyProviderH2Fixture.OTHER_TENANT);
+        long held = fx.bpIngestion(BASE_ID + 661, "a1h2-bp-661.pdf", "pdf", availability, false);
+        long unconverted = fx.bpIngestion(BASE_ID + 662, "a1h2-bp-662.pdf", "pdf", null, false);
+        long otherTenant = fx.bpIngestion(BASE_ID + 663, "a1h2-bp-663.pdf", "pdf", otherTenantAvailability, false);
+
+        Map<Long, Set<String>> subjects = resolver.bpAvailabilityIngestionSubjects(TENANT,
+                Set.of("BP_AVAILABILITY:" + availability, "BP_AVAILABILITY:" + otherTenantAvailability));
+
+        assertThat(subjects.get(held)).containsExactly("BP_AVAILABILITY:" + availability);
+        assertThat(subjects).doesNotContainKeys(unconverted, otherTenant);
+    }
+
     @Test
     void SUBJECT_holdが無ければprovider_を呼ばず空で解釈できないsubject参照は例外にする() {
         assertThat(resolver.documentSubjects(TENANT, Set.of())).isEmpty();
