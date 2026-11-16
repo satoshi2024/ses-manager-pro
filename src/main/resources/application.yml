@@ -371,6 +371,11 @@ app:
   # ===== スキルシート取込設定 =====
   resume:
     retention-days: 30
+    # 原本の purge（02:00）に合わせて文書台帳の副本（RESUME_INGESTION、V197）の保存期限を当日にする処理。既定 true（従来どおり）。
+    # false は副本の調整だけを止め、原本・抽出本文の purge は続ける。既に合わせた副本は戻さない。
+    # 真偽値として解釈できない値は起動失敗になる。手順: .kiro/specs/production-launch/deploy-runbook.md §4.3
+    ledger-copy-alignment:
+      enabled: ${RESUME_LEDGER_COPY_ALIGNMENT_ENABLED:true}
   # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
   # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
   # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。

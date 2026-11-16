@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -77,8 +78,18 @@ public class PortalEngineerLinkServiceImpl implements PortalEngineerLinkService 
                 .toList();
     }
 
+    /**
+     * 紐付けを登録する。
+     *
+     * <p>READ_COMMITTED で動かす（W3-02 P2-1(b)）。既定の REPEATABLE READ では、要員lockより前の操作者・ポータルユーザーの
+     * 通常読取で snapshot が決まり、要員行のlockを待つ間にcommitされた退社完了を、lock後の通常読取（現行紐付けの確認・
+     * {@link #resignationCompleted}）が見ない。その結果、退社完了と競合した登録が「要確認」を返さなかった。退社完了
+     * （{@code LifecycleCaseServiceImpl.completeCase}）と同じ分離レベルにし、要員lockの後の読取が、そのlockを持っていた
+     * transactionのcommit結果を見るようにする。案件行（順4 LIFECYCLE_CASE）を要員（順7）の後にlockして読み直す方法は
+     * 計画 §3.1 の順序を逆にし、案件 → 要員の順でlockする退社完了と循環待ちになり得るため採らない。</p>
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public PortalUserEngineerLinkDto register(Long portalUserId, Long engineerId) {
         SysUser actor = requireAdminActor();
         String tenantId = actor.getTenantId().trim();
@@ -193,7 +204,10 @@ public class PortalEngineerLinkServiceImpl implements PortalEngineerLinkService 
         return portalUser;
     }
 
-    /** 要員に完了済みの退社案件があり、未終結の退社案件が無いか（退社完了後の紐付けを「要確認」として返す）。 */
+    /**
+     * 要員に完了済みの退社案件があり、未終結の退社案件が無いか（退社完了後の紐付けを「要確認」として返す）。要員lockの後に
+     * READ_COMMITTED の transaction から呼ぶこと（{@link #register} の説明）。
+     */
     private boolean resignationCompleted(Long engineerId, String tenantId) {
         Long completed = lifecycleCaseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
                 .eq(LifecycleCase::getTenantId, tenantId)

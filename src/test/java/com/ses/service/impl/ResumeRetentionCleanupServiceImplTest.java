@@ -14,7 +14,9 @@ import com.ses.service.scheduler.TenantAwareBatchRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -47,13 +49,14 @@ class ResumeRetentionCleanupServiceImplTest {
     private final BpAvailabilityIngestionMapper bpMapper = mock(BpAvailabilityIngestionMapper.class);
     private final FileStorageService fileStorage = mock(FileStorageService.class);
     private PrivacyHoldTestGuards.Stub hold;
+    private ObjectProvider<ResumeIngestionLedgerRetentionService> ledger;
     private ResumeRetentionCleanupServiceImpl service;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
         hold = PrivacyHoldTestGuards.stub();
-        ObjectProvider<ResumeIngestionLedgerRetentionService> ledger = mock(ObjectProvider.class);
+        ledger = mock(ObjectProvider.class);
         service = new ResumeRetentionCleanupServiceImpl(resumeMapper, bpMapper, fileStorage,
                 mock(TenantAwareBatchRunner.class), ledger, hold.guard);
         when(resumeMapper.selectExpiredOriginalsForTenant(TENANT, THRESHOLD)).thenReturn(List.of(
@@ -140,6 +143,34 @@ class ResumeRetentionCleanupServiceImplTest {
         verify(bpMapper).clearExtractedTextForTenant(21L, TENANT);
         assertEquals(1, hold.gateCalls.get());
         verifyNoInteractions(hold.resolver);
+    }
+
+    @Test
+    void 副本の調整は既定で原本のpurgeの後に呼ばれる() {
+        ResumeIngestionLedgerRetentionService ledgerRetention = mock(ResumeIngestionLedgerRetentionService.class);
+        when(ledger.getIfAvailable()).thenReturn(ledgerRetention);
+        when(ledgerRetention.alignPurgedCopies(eq(TENANT), any()))
+                .thenReturn(new ResumeIngestionLedgerRetentionService.Result(4, 0, 0));
+
+        service.cleanupTenant(TENANT, THRESHOLD);
+
+        verify(ledgerRetention).alignPurgedCopies(eq(TENANT), any(LocalDate.class));
+        verify(resumeMapper).purgeOriginalForTenant(eq(10L), eq(TENANT), any(), any());
+    }
+
+    @Test
+    void 副本の調整の停止口がfalseなら副本だけを止め原本とBP取込のpurgeは続ける() {
+        ReflectionTestUtils.setField(service, "ledgerCopyAlignmentEnabled", false);
+
+        service.cleanupTenant(TENANT, THRESHOLD);
+
+        for (long id = 10L; id <= 13L; id++) {
+            verify(resumeMapper).purgeOriginalForTenant(eq(id), eq(TENANT), any(), any());
+        }
+        verify(bpMapper).clearExtractedTextForTenant(20L, TENANT);
+        verify(bpMapper).clearExtractedTextForTenant(21L, TENANT);
+        // 副本の service を取得もしない（DocumentRetentionJob の廃棄候補につながる保存期限の変更が起きない）
+        verifyNoInteractions(ledger);
     }
 
     private static Map<String, SubjectAttribution> catalog() {

@@ -51,6 +51,14 @@ public class ResumeRetentionCleanupServiceImpl {
     @Value("${app.resume.retention-days:30}")
     private int retentionDays;
 
+    /**
+     * 文書台帳の副本の保存期限を原本の purge に合わせるか（FINAL-FIX (a)-3）。既定 true で従来どおり合わせる。false は副本の
+     * 調整だけを止める停止口で、原本・抽出本文の purge は続ける（scheduler 全体の {@code APP_SCHEDULING_ENABLED} を止めずに済む）。
+     * 既に保存期限を合わせた副本は戻さない。初期値を true にしておくのは、Spring の外で new した場合も既定と同じ挙動にするため。
+     */
+    @Value("${app.resume.ledger-copy-alignment.enabled:true}")
+    private boolean ledgerCopyAlignmentEnabled = true;
+
     @Scheduled(cron = "0 0 2 * * ?")
     @SchedulerLock(name = "resumeRetentionCleanupDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void cleanupExpiredExtractedText() {
@@ -143,6 +151,11 @@ public class ResumeRetentionCleanupServiceImpl {
      * 前回までに合わせられなかった副本（hold の解除後・一時的な失敗）も毎回拾い直す。失敗しても原本の purge は戻さない。
      */
     private void alignLedgerCopies(String tenantId) {
+        if (!ledgerCopyAlignmentEnabled) {
+            log.info("文書台帳の副本の保存期限の調整は停止中です（app.resume.ledger-copy-alignment.enabled=false）: tenantId={}",
+                    tenantId);
+            return;
+        }
         ResumeIngestionLedgerRetentionService ledgerRetention = ledgerRetentionProvider.getIfAvailable();
         if (ledgerRetention == null) {
             return;

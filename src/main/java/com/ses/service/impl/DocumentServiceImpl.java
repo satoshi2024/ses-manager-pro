@@ -1410,6 +1410,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 .build();
     }
 
+    @Override
     public void assertDocumentAccessAllowed(Document doc) {
         // 管理者も法人境界は越えない。歴史NULLは修復完了までfail-closedとする。
         assertDigitalInvoiceDocumentAccess(doc);

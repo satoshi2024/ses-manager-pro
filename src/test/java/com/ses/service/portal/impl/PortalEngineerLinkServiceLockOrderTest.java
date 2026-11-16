@@ -1,6 +1,7 @@
 package com.ses.service.portal.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.portal.PortalUserEngineerLinkDto;
 import com.ses.entity.AuditLog;
 import com.ses.entity.Engineer;
 import com.ses.entity.PortalOrganization;
@@ -26,6 +27,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -106,6 +110,26 @@ class PortalEngineerLinkServiceLockOrderTest {
         assertEquals("PORTAL_ENGINEER_LINK_REGISTERED", audit.getValue().getApplicationCode());
         assertEquals("HUMAN", audit.getValue().getActorType());
         assertEquals(ADMIN_ID, audit.getValue().getHumanUserId());
+    }
+
+    @Test
+    void 登録はREAD_COMMITTEDで動き退社完了の判定は要員行のlockの後に読む() throws Exception {
+        // W3-02 P2-1(b): REPEATABLE READ では lock 前の通常読取で snapshot が決まり、lock 待ちの間に commit された退社完了を
+        // lock 後の判定が見ない。宣言の分離レベルと読む順序を固定する（実 MySQL の競合は M6 の portal 紐付けの case）
+        Transactional declared = PortalEngineerLinkServiceImpl.class
+                .getMethod("register", Long.class, Long.class).getAnnotation(Transactional.class);
+        assertEquals(Isolation.READ_COMMITTED, declared.isolation());
+        when(engineerMapper.selectByIdForUpdateForTenant(ENGINEER_ID, TENANT)).thenReturn(engineer());
+        when(linkMapper.insert(any(PortalUserEngineerLink.class))).thenReturn(1);
+        // 完了済みの退社案件1件・未終結0件
+        when(lifecycleCaseMapper.selectCount(any())).thenReturn(1L, 0L);
+
+        PortalUserEngineerLinkDto registered = service.register(PORTAL_USER_ID, ENGINEER_ID);
+
+        assertTrue(registered.isEngineerResigned());
+        InOrder order = inOrder(engineerMapper, lifecycleCaseMapper);
+        order.verify(engineerMapper).selectByIdForUpdateForTenant(ENGINEER_ID, TENANT);
+        order.verify(lifecycleCaseMapper, times(2)).selectCount(any());
     }
 
     @Test

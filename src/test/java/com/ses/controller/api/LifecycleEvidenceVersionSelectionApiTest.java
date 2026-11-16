@@ -1,11 +1,13 @@
 package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.Document;
+import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
@@ -13,6 +15,7 @@ import com.ses.entity.LifecycleEvidenceLink;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
+import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
@@ -24,6 +27,7 @@ import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.lifecycle.LifecycleCaseService;
+import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
@@ -44,6 +48,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -54,7 +59,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * NF01 N1-3 / Q-9: 証跡は画面で選んだCLEAN版を固定し、版を指定しない（versionless）証跡は400で拒否する。
- * 版一覧APIは完了操作と同じtenant・権限・本人scopeで判定し、元ファイル名等を返さない。
+ * 版一覧APIは完了操作と同じtenant・権限・本人scopeで判定し、元ファイル名等を返さない。文書は文書のdownloadと同じACLも
+ * 通し、閲覧できない文書は要員本人の経路でも存在しない文書と同じ404にする（W3-02 P2-2）。
  * あわせてN1-2のテンプレートAPIによるDUAL_CONFIRMATION拒否（W3-21b以降は二者確認の子スイッチOFFのとき）をHTTP経路で確認する。
  */
 @SpringBootTest
@@ -78,10 +84,15 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @Autowired private LifecycleEvidenceLinkMapper evidenceLinkMapper;
     @Autowired private LifecycleTemplateMapper templateMapper;
     @Autowired private com.ses.config.feature.FeatureSwitchProperties featureSwitchProperties;
+    @Autowired private DocumentLinkMapper documentLinkMapper;
+    @Autowired private LifecycleTaskService taskService;
 
     private SysUser adminUser;
+    private SysUser hrUser;
     private SysUser engineerUser1;
     private SysUser engineerUser2;
+    private Engineer engineer1;
+    private Engineer engineer2;
     private Long visibleDocTaskId;
     private Long internalDocTaskId;
     private Document document;
@@ -96,7 +107,7 @@ class LifecycleEvidenceVersionSelectionApiTest {
         // fixtureのテンプレート作成・起票（担当者解決・営業参照）はtenant contextを要求するため、起票者として束縛する
         // （LifecycleDomainServiceTest と同じ方法）。MockMvcの各要求は要求ごとの認証で上書きする。
         TenantTestSecurity.bindAs(adminUser.getId(), adminUser.getUsername(), "default", "管理者");
-        SysUser hrUser = user("lc_evidence_hr_" + suffix, "HR");
+        hrUser = user("lc_evidence_hr_" + suffix, "HR");
         engineerUser1 = user("lc_evidence_eng1_" + suffix, "要員");
         engineerUser2 = user("lc_evidence_eng2_" + suffix, "要員");
 
@@ -121,8 +132,8 @@ class LifecycleEvidenceVersionSelectionApiTest {
                     .build());
         }
 
-        Engineer engineer1 = engineer("証跡版選択要員1-" + suffix, org.getId());
-        Engineer engineer2 = engineer("証跡版選択要員2-" + suffix, org.getId());
+        engineer1 = engineer("証跡版選択要員1-" + suffix, org.getId());
+        engineer2 = engineer("証跡版選択要員2-" + suffix, org.getId());
         link(engineer1, engineerUser1);
         link(engineer2, engineerUser2);
 
@@ -167,6 +178,8 @@ class LifecycleEvidenceVersionSelectionApiTest {
                 .filter(t -> "EVV_INTERNAL_DOC".equals(t.getTaskCode())).findFirst().orElseThrow().getId();
 
         document = document("default", "本人提出書類-" + suffix);
+        // 文書のdownloadと同じACL（W3-02 P2-2）を通すため、本人の要員へlinkした文書にする
+        documentLink(document, engineer1);
         cleanV1 = version("default", document.getId(), 1, "CLEAN");
         pendingV2 = version("default", document.getId(), 2, "PENDING");
         cleanV3 = version("default", document.getId(), 3, "CLEAN");
@@ -232,6 +245,48 @@ class LifecycleEvidenceVersionSelectionApiTest {
                         .with(asRole(adminUser, "管理者")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(2)));
+    }
+
+    @Test
+    @DisplayName("文書のdownloadと同じACLを通らない文書の版一覧は、要員本人の経路でも存在しない文書と同じ404で拒否する")
+    void 文書のdownloadと同じACLを通らない文書の版一覧は本人の経路でも404で拒否する() throws Exception {
+        Document others = document("default", "他要員の書類-" + System.nanoTime());
+        documentLink(others, engineer2);
+        version("default", others.getId(), 1, "CLEAN");
+        Document unlinked = document("default", "linkの無い書類-" + System.nanoTime());
+        version("default", unlinked.getId(), 1, "CLEAN");
+
+        // 自分の公開タスクでも、他要員にlinkされた文書・linkの無い文書の版の有無と版番号は出さない
+        for (Document hidden : List.of(others, unlinked)) {
+            mockMvc.perform(get("/api/my/lifecycle/tasks/" + visibleDocTaskId + "/evidence-versions")
+                            .param("documentId", String.valueOf(hidden.getId()))
+                            .with(asRole(engineerUser1, "要員")))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.data").doesNotExist());
+        }
+        // 管理者は文書のdownloadと同じく閲覧できる
+        mockMvc.perform(get("/api/lifecycle/tasks/" + internalDocTaskId + "/evidence-versions")
+                        .param("documentId", String.valueOf(others.getId()))
+                        .with(asRole(adminUser, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)));
+    }
+
+    @Test
+    @DisplayName("タスクを編集できるHRでも、HRが閲覧できない専用種別の文書の版一覧は存在しない文書と同じ404で拒否する")
+    void タスクを編集できるHRでも閲覧できない専用種別の文書の版一覧は404で拒否する() {
+        Document receipt = document("default", "領収書-" + System.nanoTime(), "RECEIPT");
+        documentLink(receipt, engineer1);
+        version("default", receipt.getId(), 1, "CLEAN");
+        TenantTestSecurity.bindAs(hrUser.getId(), hrUser.getUsername(), "default", "HR");
+
+        // 対照: 同じHRが同じタスクで閲覧できる文書の版は取得できる（拒否がタスクの権限ではなく文書ACLによることを示す）
+        assertEquals(2, taskService.listEvidenceVersions(internalDocTaskId, document.getId(), hrUser).size());
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> taskService.listEvidenceVersions(internalDocTaskId, receipt.getId(), hrUser));
+        assertEquals(404, denied.getCode());
+        assertEquals("error.document.notFound", denied.getMessageKey());
     }
 
     @Test
@@ -365,14 +420,27 @@ class LifecycleEvidenceVersionSelectionApiTest {
     }
 
     private Document document(String tenantId, String title) {
+        return document(tenantId, title, "LIFECYCLE_EVIDENCE");
+    }
+
+    private Document document(String tenantId, String title, String documentType) {
         Document document = new Document();
         document.setTenantId(tenantId);
-        document.setDocumentType("LIFECYCLE_EVIDENCE");
+        document.setDocumentType(documentType);
         document.setTitle(title);
         document.setDirection("INTERNAL");
         document.setStatus("CONFIRMED");
         documentMapper.insert(document);
         return document;
+    }
+
+    private void documentLink(Document target, Engineer engineer) {
+        DocumentLink link = new DocumentLink();
+        link.setTenantId("default");
+        link.setDocumentId(target.getId());
+        link.setTargetType("ENGINEER");
+        link.setTargetId(engineer.getId());
+        documentLinkMapper.insert(link);
     }
 
     private DocumentVersion version(String tenantId, Long documentId, int versionNo, String scanStatus) {

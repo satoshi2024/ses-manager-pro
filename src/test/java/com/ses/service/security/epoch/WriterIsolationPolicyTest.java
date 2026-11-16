@@ -10,6 +10,7 @@ import com.ses.service.impl.SystemConfigServiceImpl;
 import com.ses.service.lifecycle.ResignationGateChecker;
 import com.ses.service.lifecycle.impl.LifecycleCaseServiceImpl;
 import com.ses.service.lifecycle.impl.LifecycleTaskServiceImpl;
+import com.ses.service.portal.impl.PortalEngineerLinkServiceImpl;
 import com.ses.service.security.impl.OwnershipRepairServiceImpl;
 import com.ses.service.security.impl.PermissionGroupManagementServiceImpl;
 import org.junit.jupiter.api.Test;
@@ -47,8 +48,11 @@ class WriterIsolationPolicyTest {
      * discoveryを伴う）。
      * W3-16b分（lifecycle）: discovery（連携ユーザー・所属・紐付け・担当営業・外部アカウント）→ 1つのplanの取得 →
      * 再discoveryを行う案件完了（計画 §2.4 E-3・§4.2）。
+     * W3-02 P2-1(b)分（ポータル紐付け）: 要員lockの後に退社完了を通常読取で判定する紐付け登録（lock待ちの間にcommitされた
+     * 退社完了を見るため）。
      */
     private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
+            PortalEngineerLinkServiceImpl.class, List.of("register"),
             SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"),
             RoleMenuServiceImpl.class, List.of("replaceMenus"),
             SystemConfigServiceImpl.class, List.of("updateAll"),
