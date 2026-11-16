@@ -1,7 +1,7 @@
 # G2r サービスデスクの補完受入チェックリスト
 
 2026-11-14。実装方針の記録であり、CS Ownerの署名や本番公開の承認を代行しない。
-自動browserは主控Runnerだけが実行する。`ServiceDeskBrowserMTest`はdesktopと390pxで起票・詳細・公開返信・内部メモを実送信し、console/API失敗0件を検証する。
+自動browserは統括Runnerだけが実行する。`ServiceDeskBrowserMTest`はdesktopと390pxで起票・詳細・公開返信・内部メモを実送信し、console/API失敗0件を検証する。
 
 | 記録 | 値 |
 |---|---|

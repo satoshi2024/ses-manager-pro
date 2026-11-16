@@ -107,7 +107,7 @@ spring:
 - 新規 `common/i18n/EnumMappings.java`: `Map<group, Map<日本語DB値, ASCIIコード>>`。
   `V1__create_tables.sql` の全 ENUM(約15グループ)を網羅:
   engineerStatus(稼動中→active 等) / projectStatus / proposalStatus(6値) / contractStatus / userRole / contractType / gender / employmentType / priority / remoteType / proficiency 等
-- メッセージキーは `enum.engineerStatus.active=稼動中`(ja)/ `Active`(en)/ `在岗`(zh)/ `가동 중`(ko)。**プロパティキーに日本語は使わない**
+- メッセージキーは `enum.engineerStatus.active=稼動中`(ja)/ `Active`(en)/ `\u5728\u5c97`(zh)/ `가동 중`(ko)。**プロパティキーに日本語は使わない**
 - Java/Thymeleaf 側: 新規 `common/i18n/EnumLabelResolver.java`(`@Component("enumLabels")`、MessageSource 注入)
   → `th:text="${@enumLabels.label('engineerStatus', eng.status)}"`
 - JS 側: `SES_ENUMS` は同じ `EnumMappings.GROUPS` から I18nJsController が直列化 → `SES.i18n.e('engineerStatus', eng.status)`

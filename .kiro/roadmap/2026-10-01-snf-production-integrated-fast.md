@@ -35,7 +35,7 @@
 - selectorなしの `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。
 - UTC05:38:46.2440343〜05:53:52.0586530、exit1、692 class **4210/2/1/0**。
 - AstraはFAIL証拠として受理。Maven集計は4209件、XMLは4210件であり、offboardingの反復Run 2: PASSを
-  伴う集計口径差を保持する。上記はXML口径、両口径ともfailure/error/skippedは2/1/0。
+  伴う集計基準の差を保持する。上記はXML基準、両基準ともfailure/error/skippedは2/1/0。
 - `verification-evidence/20261016-control-fast-06/` に全証拠を保存。1384 report hash一致。
   log SHA-256 `0C2B7A2B2FAC7178BA5D025434749A929475A030867A49F4E51ADE8E31D981E8`。
 - IntegrationHubMPenetrationTest: readiness前提による1 failure/1 error。
@@ -211,4 +211,4 @@
   ImportIdentityCandidateContext/PwaRestoreTransactionIntegration/PwaRestoreServletBoundaryIntegrationの隔離契約。
   TENANT_ID欠落などの連鎖エラーと個別failureはさらに根因分類する。単純なallowlist追加や制約無効化で成功にしない。
 - 修復はbase `02f6ace4` の `codex/snf-prod-fast-v184-isolation` で実施し、Astra Reviewと必要な再検証を要求する。
-  第4回4088件成功や別SHAのNF06 MySQL40/NF08定向91件成功を、このrunの代替証拠にしない。
+  第4回4088件成功や別SHAのNF06 MySQL40/NF08対象限定91件成功を、このrunの代替証拠にしない。

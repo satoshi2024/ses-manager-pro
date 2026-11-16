@@ -272,7 +272,7 @@ wildcard ALLOWだけではexact grantの代わりにならない。`Authorizatio
 `UserPermissionGroupMapper`、`PermissionGroupMapper`、`PermissionGroupActionMapper`及V63/V66 schema。
 本incrementでこれらの表や共通securityへ権限を自動seedしない。action inventory、permission group templateまたはseedの追加は、
 別途rootの判断を得る。
-每次source create/update、mapping create、job create/bind、validation start/chunk/seal/publish、candidate register
+source create/update、mapping create、job create/bind、validation start/chunk/seal/publish、candidate register の
 各操作で現在の管理者状態とexact permissionを再確認し、期限切れのbooleanやstart時の判定結果を使い回さない。
 
 ## 5. Exact document reader：既存APIとreviewが必要な不足点

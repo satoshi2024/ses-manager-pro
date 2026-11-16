@@ -151,7 +151,7 @@
 | A7-09 | 解消 | `isTargetInMonthWithActual` へ一本化し、ローカル判定を削除。ダッシュボードと突合する集計テストは未追加。 |
 | A7-10 | 解消 | JS全補間点に `SES.escapeHtml`。サーバー側sanitizeは「プレビューは平文エスケープ前提」の設計コメントで決着（許容）。 |
 | A7-11 | 部分解消 | `PageUtils.safePage` を9コントローラーへ展開（既定サイズも維持）✔。ただし Engineer で型を誤りビルド不能（R7-01）。全一覧APIへの size=-1 検証テストは未追加。 |
-| A7-12 | 解消 | 未送付維持+`isOverdue`/`applyOverdueFilter` 一元化、一覧・通知・督促が同一口径に。bulk側のインデント乱れのみ（R7-11-3）。 |
+| A7-12 | 解消 | 未送付維持+`isOverdue`/`applyOverdueFilter` 一元化、一覧・通知・督促が同一の判定基準に。bulk側のインデント乱れのみ（R7-11-3）。 |
 | A7-13 | 部分解消 | AGENTS.md はV42/CSRF/5ロール/要員動線/モジュール表まで更新 ✔。CLAUDE.md 未更新+表に誤記（R7-10）。 |
 | A7-14 | 解消 | `MenuCacheService`（60秒TTL+保存時invalidate）でフィルター/アドバイス/ログイン遷移を共通化。テスト分離とTTLプロパティ化が必要（R7-06）。 |
 | A7-15 | 解消 | fail-openを設計判断として明文化（監視前提を記述）。 |

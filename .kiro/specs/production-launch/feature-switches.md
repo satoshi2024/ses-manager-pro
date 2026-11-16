@@ -101,7 +101,7 @@
 | `PRIVACY_DSAR_DEADLINE_WARNING_DAYS` | 7 | 期限の何日前から privacy-admin へ通知するか（運用上の値。法的な期限ではない） | 運用者が 1〜90 の範囲で決める（範囲外は丸める） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
-| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（主控の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
+| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（統括の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
 | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
 
 - 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=OFF`、`NF03=ON, NF03_CERTIFICATION_PII=OFF` となることを確認する（NF-02/NF-03をONにした場合）。
@@ -130,7 +130,7 @@
 
 ### 4.3 NF-02
 
-- **ON前の必須確認（2026-11-14 DG-02-B3実装方針）**: 当年度を含む全社共通カレンダーを事前登録する。法人既定が無い場合のfallbackと週末出勤日・祝日を確認し、missing_calendar WARN（tenant・法人ID・問い合わせID・相関ID）が無いことを監視する。正式なDG-02署名はCS Ownerが行う。
+- **ON前の必須確認（2026-11-14 DG-02-B3実装方針）**: 当年度を含む全社共通カレンダーを事前登録する。法人既定が無い場合のfallbackと週末出勤日・祝日を確認し（法人既定を登録した法人は、その有効期間に全社共通を参照しないため、法人既定に祝日・会社休日が含まれていることも確認する）、missing_calendar WARN（tenant・法人ID・問い合わせID・相関ID）が無いことを監視する。正式なDG-02署名はCS Ownerが行う。
 
 - ON期間中に作成された問い合わせ添付は文書台帳に登録済みのため、OFF中も既存の文書API（顧客DataScopeを持つ利用者）から参照できる。権限は変わらない（新たな公開にはならない）。
 - 添付補償の再試行（`RETRY` 台帳）はOFF中は止まり、ON復帰後の次回実行で再開する。台帳は削除されない。添付ファイル自体は文書台帳・file security metadataに登録済みのため、cleanupで削除されない。
