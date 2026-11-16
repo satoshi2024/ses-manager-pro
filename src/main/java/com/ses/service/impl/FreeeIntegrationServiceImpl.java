@@ -174,6 +174,15 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     @Value("${spring.profiles.active:dev}")
     private String activeProfile;
 
+    /**
+     * freee連携（給与・会計のOAuth接続）を使うか（{@code freee.enabled}、FINAL-FIX）。prodの既定はfalse。
+     * falseの間は認可の開始・code交換を行わず（{@link #configured()} がfalse、状態はMISCONFIGURED）、prodの起動時に
+     * client設定一式を要求しない。trueのprodでは client-id・client-secret・redirect-uri（HTTPS）・token-encryption-key の
+     * 一式が無いと起動しない。初期値trueは、Springの外でnewした場合（単体試験）に従来の挙動を保つため。
+     */
+    @Value("${freee.enabled:true}")
+    private boolean enabled = true;
+
     public FreeeIntegrationServiceImpl(
             FreeeConnectionMapper connectionMapper,
             FreeeEmployeeLinkMapper linkMapper,
@@ -189,21 +198,40 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     @PostConstruct
     void validateConfig() {
-        if (activeProfile.contains("prod")) {
-            validateOfficialBase("oauth", oauthBase, "accounts.secure.freee.co.jp");
-            validateOfficialBase("hr-api", hrApiBase, "api.freee.co.jp");
-            validateOfficialBase("api", apiBase, "api.freee.co.jp");
-            if (!isBlank(clientId)) {
-                if (isBlank(clientSecret) || isBlank(redirectUri) || encryptionKey.startsWith("change-me")) {
-                    throw new IllegalStateException(
-                            "freee.client-id 設定時は client-secret, redirect-uri(HTTPS), token-encryption-key を一式設定してください");
-                }
-                URI redirect = URI.create(redirectUri);
-                if (!"https".equalsIgnoreCase(redirect.getScheme())) {
-                    throw new IllegalStateException("freee.redirect-uri は本番ではHTTPS固定です");
-                }
-            }
+        if (!isProdProfile()) {
+            return;
         }
+        // 公式host・HTTPSの検証は連携のON/OFFに関係なく行う（既定値は公式hostで、上書きした場合だけ止まる）
+        validateOfficialBase("oauth", oauthBase, "accounts.secure.freee.co.jp");
+        validateOfficialBase("hr-api", hrApiBase, "api.freee.co.jp");
+        validateOfficialBase("api", apiBase, "api.freee.co.jp");
+        if (!enabled) {
+            log.info("freee連携は無効です（freee.enabled=false）。client設定の起動時検査を行わず、認可も開始しません");
+            return;
+        }
+        if (isBlank(clientId) || isBlank(clientSecret) || isBlank(redirectUri)
+                || encryptionKey == null || encryptionKey.startsWith("change-me")) {
+            throw new IllegalStateException("freee連携を有効にする場合（freee.enabled=true）は client-id, client-secret, "
+                    + "redirect-uri(HTTPS), token-encryption-key を一式設定してください");
+        }
+        URI redirect = URI.create(redirectUri);
+        if (!"https".equalsIgnoreCase(redirect.getScheme())) {
+            throw new IllegalStateException("freee.redirect-uri は本番ではHTTPS固定です");
+        }
+    }
+
+    /**
+     * prodか。{@code spring.profiles.active} の値だけでは、試験の {@code @ActiveProfiles("prod")}（この値を設定しない）で
+     * prodの検査が走らないため、Environmentの有効profileも見る（FINAL-FIX: CIで検出できるようにする）。
+     */
+    private boolean isProdProfile() {
+        if (activeProfile != null && activeProfile.contains("prod")) {
+            return true;
+        }
+        org.springframework.core.env.Environment environment =
+                applicationContext == null ? null : applicationContext.getEnvironment();
+        return environment != null
+                && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"));
     }
 
     private void validateOfficialBase(String name, String base, String officialHost) {
@@ -216,10 +244,13 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     private boolean configured() {
+        if (!enabled) {
+            return false;
+        }
         if (isBlank(clientId) || isBlank(clientSecret) || isBlank(redirectUri)) {
             return false;
         }
-        return !(activeProfile.contains("prod") && encryptionKey.startsWith("change-me"));
+        return !(isProdProfile() && encryptionKey.startsWith("change-me"));
     }
 
     private static boolean isBlank(String value) {

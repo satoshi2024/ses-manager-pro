@@ -84,6 +84,21 @@ class ProductionSecurityConfigurationTest {
     @Autowired
     private Environment environment;
 
+    @Autowired
+    private com.ses.service.FreeeIntegrationService freeeIntegrationService;
+
+    @Test
+    void freee連携を使わない既定のprodはclient設定が無くても起動しMISCONFIGUREDになる() {
+        // FINAL-FIX: freeeのprod検査は有効profileも見るため、この@ActiveProfiles("prod")のcontextでも走る。
+        // 既定（freee.enabled=false）ならclient設定一式（deploy-runbook §1.0 の27〜30）が無くても起動する。
+        // 有効で欠けた場合に起動しないことは FreeeProductionStartupTest が確かめる
+        org.assertj.core.api.Assertions.assertThat(environment.getProperty("freee.enabled", Boolean.class)).isFalse();
+        org.assertj.core.api.Assertions.assertThat(environment.getProperty("freee.client-id", "")).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(environment.getProperty("freee.client-secret", "")).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(freeeIntegrationService.connectionStatus().getStatus())
+                .isEqualTo("MISCONFIGURED");
+    }
+
     @Test
     @WithMockUser(roles = "管理者")
     void 非HTTPSリクエストはHTTPSへリダイレクトされる() throws Exception {

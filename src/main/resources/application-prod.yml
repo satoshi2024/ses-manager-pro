@@ -154,9 +154,10 @@ app:
       enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== freee連携（HFP-01） =====
-# 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。
-# redirect-uri はHTTPS固定。URLのHTTPS・公式host検証とclient-id有時の一式検証はコード側(FreeeIntegrationServiceImpl)で実施。
-# client-id・client-secretは未設定・dummyだとprodでは起動しない（FreeeAccountingProviderが無条件のbeanで拒否する。
-# freeeを使わない配備でも4つとも要る）。一覧: .kiro/specs/production-launch/deploy-runbook.md §1.0 の26〜29。
+# prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。
+# 使う場合だけ FREEE_ENABLED=true にし、FREEE_CLIENT_ID/SECRET/REDIRECT_URI(HTTPS)/TOKEN_ENCRYPTION_KEY の一式を
+# secret storeから供給する（欠けると起動しない: FreeeAccountingProvider・FreeeIntegrationServiceImpl）。
+# 公式host・HTTPSの検証はONでもOFFでも行う。一覧: .kiro/specs/production-launch/deploy-runbook.md §1.0。
 freee:
+  enabled: ${FREEE_ENABLED:false}
   redirect-uri: ${FREEE_REDIRECT_URI:}

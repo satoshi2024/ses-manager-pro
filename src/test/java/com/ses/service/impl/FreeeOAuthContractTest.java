@@ -188,17 +188,47 @@ class FreeeOAuthContractTest {
     }
 
     @Test
-    @DisplayName("prodでclient-id未設定なら起動可能（MISCONFIGURED運用）")
-    void prodでclientId未設定は起動を妨げない() throws Exception {
+    @DisplayName("prodでfreee連携が無効ならclient設定が無くても起動可能（MISCONFIGURED運用。FINAL-FIX）")
+    void prodでfreee無効ならclient設定未設定でも起動を妨げない() throws Exception {
         Method m = FreeeIntegrationServiceImpl.class.getDeclaredMethod("validateConfig");
         m.setAccessible(true);
         ReflectionTestUtils.setField(service, "activeProfile", "prod");
+        ReflectionTestUtils.setField(service, "enabled", false);
         ReflectionTestUtils.setField(service, "clientId", "");
         ReflectionTestUtils.setField(service, "clientSecret", "");
+        ReflectionTestUtils.setField(service, "redirectUri", "");
         ReflectionTestUtils.setField(service, "oauthBase", "https://accounts.secure.freee.co.jp/public_api");
         ReflectionTestUtils.setField(service, "hrApiBase", "https://api.freee.co.jp/hr");
         ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
         m.invoke(service); // 例外なし
+        assertEquals("MISCONFIGURED", service.connectionStatus().getStatus());
+    }
+
+    @Test
+    @DisplayName("prodでfreee連携が有効ならclient-id未設定で起動を止める（FINAL-FIX）")
+    void prodでfreee有効ならclientId未設定は起動を止める() throws Exception {
+        Method m = FreeeIntegrationServiceImpl.class.getDeclaredMethod("validateConfig");
+        m.setAccessible(true);
+        ReflectionTestUtils.setField(service, "activeProfile", "prod");
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "clientId", "");
+        ReflectionTestUtils.setField(service, "oauthBase", "https://accounts.secure.freee.co.jp/public_api");
+        ReflectionTestUtils.setField(service, "hrApiBase", "https://api.freee.co.jp/hr");
+        ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
+        java.lang.reflect.InvocationTargetException ex =
+                assertThrows(java.lang.reflect.InvocationTargetException.class, () -> m.invoke(service));
+        assertTrue(ex.getCause() instanceof IllegalStateException
+                        && ex.getCause().getMessage().contains("freee.enabled=true"),
+                "一式検証メッセージ: " + ex.getCause().getMessage());
+    }
+
+    @Test
+    @DisplayName("freee連携が無効なら、client設定が揃っていても認可を開始せず状態はMISCONFIGURED（FINAL-FIX）")
+    void freee無効ならclient設定が揃っていても認可を開始しない() {
+        ReflectionTestUtils.setField(service, "enabled", false);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.authorizationUrl("state-abc"));
+        assertEquals("error.payroll.configIncomplete", ex.getMessage());
         assertEquals("MISCONFIGURED", service.connectionStatus().getStatus());
     }
 

@@ -290,6 +290,39 @@ class LifecycleEvidenceVersionSelectionApiTest {
     }
 
     @Test
+    @DisplayName("完了報告の証跡も文書のdownloadと同じACLを通し、閲覧できない文書は要員本人の経路でも存在しない文書と同じ応答で拒否する")
+    void 完了報告の証跡も文書ACLを通し閲覧できない文書は存在しない文書と同じ応答で拒否する() throws Exception {
+        Document others = document("default", "他要員の証跡-" + System.nanoTime());
+        documentLink(others, engineer2);
+        DocumentVersion othersV1 = version("default", others.getId(), 1, "CLEAN");
+        Document unlinked = document("default", "linkの無い証跡-" + System.nanoTime());
+        DocumentVersion unlinkedV1 = version("default", unlinked.getId(), 1, "CLEAN");
+
+        String missing = completeAsEngineer1(987654321L, cleanV3.getId());
+        for (String denied : List.of(completeAsEngineer1(others.getId(), othersV1.getId()),
+                completeAsEngineer1(unlinked.getId(), unlinkedV1.getId()))) {
+            // 存在しない文書と応答本文まで同じ（存在を推測させない）
+            assertEquals(missing, denied);
+        }
+        assertEquals("IN_PROGRESS", taskMapper.selectById(visibleDocTaskId).getStatus());
+        assertEquals(0, evidenceLinkMapper.selectByTaskId(visibleDocTaskId).size());
+    }
+
+    private String completeAsEngineer1(Long documentId, Long documentVersionId) throws Exception {
+        return mockMvc.perform(post("/api/my/lifecycle/tasks/" + visibleDocTaskId + "/complete")
+                        .with(asRole(engineerUser1, "要員"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CompleteLifecycleTaskCommand.builder()
+                                .documentId(documentId)
+                                .documentVersionId(documentVersionId)
+                                .build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    @Test
     @DisplayName("版を指定しない完了報告は400で拒否され、タスクも証跡linkも変わらない")
     void 版を指定しない完了報告は400で拒否されタスクも証跡も変わらない() throws Exception {
         mockMvc.perform(post("/api/my/lifecycle/tasks/" + visibleDocTaskId + "/complete")

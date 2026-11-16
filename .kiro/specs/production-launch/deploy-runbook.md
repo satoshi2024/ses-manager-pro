@@ -42,7 +42,7 @@
 
 ### 1.0 prod 必須設定（無い・形式が違うとアプリが起動しない。一覧の正本）
 
-`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の29項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。
+`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。
 
 - 一覧はコードを走査して作った（FINAL-FIX、2026-11-17）。走査した出処は3つ: prod profile の validator の必須項目、`@Value` のうち既定値が空・開発用で prod では拒否されるもの、`application-prod.yml` の `${...}` のうち既定値が空で prod では拒否されるもの。
 - 既定値を全く持たない `@Value` と、既定値の無い `application-prod.yml` の `${...}` は、どちらも0件だった。どの項目も空か開発用の既定値を持つため、Spring の解決では止まらない。止めるのは validator である。
@@ -86,28 +86,42 @@
 |---|---|---|---|---|---|
 | 19 | `CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION`（`certification.number-crypto.current-key-version`） | 資格番号の暗号鍵の現行version。NF03の子スイッチがOFFでも必要（`feature-switches.md` 4.1） | 上記のversion | × | ymlに定義なし。`CertificationNumberKeyProviderImpl.java:26,45,54-58` |
 | 20 | `CERTIFICATION_NUMBER_CRYPTO_KEYS_<VERSION>`（`certification.number-crypto.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | `CertificationNumberKeyProviderImpl.java:89,111-126` |
-| 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:521`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
-| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。`application.yml:524` の `COMPLIANCE_CREDENTIAL_KEY_V1` はcommentで**配線されていない**ため、この名前で渡す | 〇 | `application.yml:522-524`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
-| 23 | `compliance.gate.fingerprint-keys.default.current-key-version` | reviewer fingerprintのHMAC鍵の現行version（tenant `default`） | 上記のversion。**OS環境変数では渡せない**（下の注） | × | `ComplianceReviewerFingerprintKeyProviderImpl.java:58-66,132-151,158-178` |
-| 24 | `compliance.gate.fingerprint-keys.default.keys.<version>` | 同 鍵 | 上記の鍵。23と同じ経路で渡す | 〇 | 同上 |
+| 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:529`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
+| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。`application.yml:532` の `COMPLIANCE_CREDENTIAL_KEY_V1` はcommentで**配線されていない**ため、この名前で渡す | 〇 | `application.yml:530-532`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
+| 23 | `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS`（`compliance.gate.fingerprint-key-tenants`） | reviewer fingerprintの鍵を持つtenantの一覧 | `default`（カンマ区切り） | × | `application.yml:542`、`ComplianceReviewerFingerprintKeyProviderImpl.java:167-199` |
+| 24 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION`（`compliance.gate.fingerprint-keys.default.current-key-version`） | reviewer fingerprintのHMAC鍵の現行version（tenant `default`） | 上記のversion | × | `ComplianceReviewerFingerprintKeyProviderImpl.java:65-75,141-160` |
+| 25 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>`（`compliance.gate.fingerprint-keys.default.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | 同上 |
+| 26 | `ACCOUNTING_TENANT_IDS`（`app.accounting.tenants.ids`） | 定期処理の対象tenant（freeeの有無に関係しない） | 1件以上（SRE-1 により `default` の1件）。test以外の全profileで検査する | × | `application.yml:230`、`AccountingTenantInventoryStartupValidator.java:7-13` |
 
-- **23・24の注**: tenantの列挙は、Map型のproperty sourceのうち `compliance.gate.fingerprint-keys.` で始まるproperty名からだけ行う。OS環境変数（`COMPLIANCE_GATE_...`）の名前はこの形にならないため列挙されず、`Fail-fast: missing compliance.gate.fingerprint-keys configuration in prod profile` で止まる。
-- 23・24 は `SPRING_APPLICATION_JSON` で渡す。これは secret store から注入する環境変数で、値はJSONにする。形だけを示す（値はplaceholder）: `{"compliance":{"gate":{"fingerprint-keys":{"default":{"current-key-version":"<version>","keys":{"<version>":"<鍵>"}}}}}}`。
-- 追加の設定fileで渡してもよい。`-D` は process一覧に出るため使わない。
+- **23〜25の注（OS環境変数で渡せなかった理由と対処。FINAL-FIX）**:
+  - 原因は relaxed binding でも、名前の `-`・大文字小文字でもない。tenant を、Map型の property source にある property 名のうち `compliance.gate.fingerprint-keys.` で始まるものだけから列挙していた。
+  - OS環境変数の名前は `COMPLIANCE_GATE_FINGERPRINT_KEYS_...` の形でこの接頭辞に一致しない。しかも `.`・`-` が `_` になり大文字化されるため、名前から tenant ID を復元できない。そのため 24・25 だけを環境変数で渡すと、`Fail-fast: missing compliance.gate.fingerprint-keys configuration in prod profile` で止まっていた。
+  - tenant一覧（23）を足した。一覧にある tenant の version と鍵は `Environment#getProperty` の名前解決で読むため、24・25 は上の環境変数名でそのまま渡せる。
+- 一覧にある tenant の version・鍵が欠けると、起動時に止まる（`missing fingerprint current-key-version for tenant ...` / `missing fingerprint key for tenant ...`）。
+- 従来の経路（設定file・`SPRING_APPLICATION_JSON` で `compliance.gate.fingerprint-keys.<tenant>.*` を渡す）も引き続き使える。その場合は23は要らない。`-D` は process一覧に出るため使わない。
 
-**会計・freee**
+**freee連携を使う場合だけ必須**（`FREEE_ENABLED=true`。prodの既定は `false`。FINAL-FIX）
+
+- `FREEE_ENABLED`（`freee.enabled`）が `false` の間（prodの既定）:
+  - 下の4項目が無くても起動する。給与・会計の freee 接続は認可の開始と code 交換を行わず、状態は MISCONFIGURED になる。
+  - 接続が作られないため、会計送信・入金明細・勤怠連携は接続が無いものとして扱われ、freee を呼ばない。既存の接続が残っていても、token の更新で空の client 設定を freee へ送らない（元の401として扱う）。
+  - `ACCOUNTING_TENANT_IDS`（26）は freee の有無に関係なく要る。
+- 公式host・HTTPS の検査は、ON・OFF のどちらでも行う（`freee.*-base-url` を上書きした場合だけ止まる）。
+- `true` にすると、次の4項目のどれかが欠けたとき起動しない。
 
 | # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
 |---|---|---|---|---|---|
-| 25 | `ACCOUNTING_TENANT_IDS`（`app.accounting.tenants.ids`） | 定期処理の対象tenant | 1件以上（SRE-1 により `default` の1件）。test以外の全profileで検査する | × | `application.yml:230`、`AccountingTenantInventoryStartupValidator.java:7-13` |
-| 26 | `FREEE_CLIENT_ID`（`freee.client-id`） | freee会計・給与のOAuth client | 空でなく `dummy-client-id` でない。**freeeを使わない配備でも必要**（`FreeeAccountingProvider` は無条件のbeanで、prodでは未設定を拒否する） | × | `application.yml:506`、`FreeeAccountingProvider.java:61-87` |
-| 27 | `FREEE_CLIENT_SECRET`（`freee.client-secret`） | 同上 | 空でなく `dummy-client-secret` でない | 〇 | `application.yml:507`、`FreeeAccountingProvider.java:61-87`、`FreeeIntegrationServiceImpl.java:196-200` |
-| 28 | `FREEE_REDIRECT_URI`（`freee.redirect-uri`） | OAuthのredirect URI | HTTPS（26を設定すると必須） | × | `application-prod.yml:161`、`FreeeIntegrationServiceImpl.java:196-205` |
-| 29 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数（26を設定すると必須） | 〇 | `application.yml:512`、`FreeeIntegrationServiceImpl.java:171,197`、`IntegrationConnectionServiceImpl.java:46` |
+| 27 | `FREEE_CLIENT_ID`（`freee.client-id`） | freee会計・給与のOAuth client | 空でなく `dummy-client-id` でない | × | `application.yml:514`、`FreeeAccountingProvider.java:79-107`、`FreeeIntegrationServiceImpl.java:199-221` |
+| 28 | `FREEE_CLIENT_SECRET`（`freee.client-secret`） | 同上 | 空でなく `dummy-client-secret` でない | 〇 | `application.yml:515`、同上 |
+| 29 | `FREEE_REDIRECT_URI`（`freee.redirect-uri`） | OAuthのredirect URI | HTTPS | × | `application-prod.yml:163`、`FreeeIntegrationServiceImpl.java:199-221` |
+| 30 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数 | 〇 | `application.yml:520`、`FreeeIntegrationServiceImpl.java:199-221`、`IntegrationConnectionServiceImpl.java:46` |
 
 **検査の効き方と試験の範囲（注意）**
-- 18・26〜29 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験（`ProductionSecurityConfigurationTest` 等）ではこの検査が走らず、CI はこれらの未設定を検出しない。配備ではtask definitionの `SPRING_PROFILES_ACTIVE=prod` で効く。
-- 26 について、`application-prod.yml` の旧comment「client-id未設定でも起動は可能」は誤りだった。FINAL-FIX で訂正した。
+- 18 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験ではこの検査が走らず、CI はその未設定を検出しない。配備では task definition の `SPRING_PROFILES_ACTIVE=prod` で効く。
+- 27〜30（freee）の検査は、FINAL-FIX で有効profileも見るようにした。CI は次の2つで確かめる。
+  - `ProductionSecurityConfigurationTest`: freee が無効で4項目が無くても、prod の完全な context が起動する。
+  - `FreeeProductionStartupTest`: freee が有効で4項目が無いと、prod の起動が止まる。
+- FINAL-FIX までは、freee を使わない配備でも 27〜29 が必須だった。`application-prod.yml` の旧comment「client-id未設定でも起動は可能」は誤りだった。
 
 **設定してはいけない値**（設定すると起動しない）:
 - `SPRING_FLYWAY_ENABLED=true`（§4）。
@@ -239,11 +253,16 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
 | SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
 | SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
-| SRE-10 | **§1.0 の29項目を全て設定する**（secretはsecret storeから） | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。task definitionの雛形とも照合する（`infra/ecs/offline/validate-task-definition.ps1` が名前の有無を検査する） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
+| SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。task definitionの雛形とも照合する（`infra/ecs/offline/validate-task-definition.ps1` が名前の有無を検査する） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
 
 **DBA の前提**
 - migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
 - serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
+- **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
+  - 対象: 退社完了の `LifecycleCaseServiceImpl.completeCase`、ポータル紐付け登録の `PortalEngineerLinkServiceImpl.register` 等。一覧は `WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS`。
+  - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
+  - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
+  - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
 - **Backup・PITR**:
   - RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**。
   - prodの `.env.backup` に `CONTENT_HASH_TABLES` を設定する（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
@@ -490,7 +509,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
 
 ## 4. アプリ起動（SRE）
 
-- 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodの必須設定（全29項目の一覧は §1.0。security設定の注意は §4.1）。
+- 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodの必須設定（一覧は §1.0。常に必須の26項目と、freeeを使う場合の4項目。security設定の注意は §4.1）。
 - **`SPRING_FLYWAY_ENABLED` は設定しない**。`true` にしても `ProductionSchemaGuardConfiguration` がSpring BootのFlyway初期化でmigrateを拒否し、1件も適用せずに起動を止める。
 - **JVMのタイムゾーンを `Asia/Tokyo` に固定する（必須）**。`JAVA_TOOL_OPTIONS` に `-Duser.timezone=Asia/Tokyo` を加える（imageの既定 `-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0` を消さないよう、両方を書く）か、container環境変数 `TZ=Asia/Tokyo` を設定する。起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。

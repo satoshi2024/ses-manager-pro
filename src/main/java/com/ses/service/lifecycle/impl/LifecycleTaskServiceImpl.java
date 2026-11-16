@@ -653,6 +653,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (document == null) {
             throw BusinessException.of(400, "error.document.notFound");
         }
+        // 文書のdownloadと同じACL（FINAL-FIX、W3-02 P2-2 と同じ）。閲覧できない文書は存在しない文書と同じ400にする
+        assertEvidenceDocumentReadable(document, 400);
         if (documentVersionId == null) {
             throw BusinessException.of(400, "error.lifecycle.evidenceVersionRequired",
                     "証跡文書の版を選択してください");
@@ -706,7 +708,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (document == null) {
             throw BusinessException.of(404, "error.document.notFound");
         }
-        assertEvidenceDocumentReadable(document);
+        assertEvidenceDocumentReadable(document, 404);
         List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, document.getId());
         if (versions == null) {
             return List.of();
@@ -726,18 +728,19 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     /**
-     * 文書のdownloadと同じACLを通す。拒否（403・404）とACLを判定できない状態は、どれも存在しない文書と同じ404にする
-     * （版一覧の有無で存在を推測させない。fail-closed）。
+     * 文書のdownloadと同じACLを通す。拒否（403・404）とACLを判定できない状態は、どれも呼出し経路で存在しない文書に返すのと
+     * 同じ応答（{@code notFoundStatus} と {@code error.document.notFound}）にする。版一覧（404）と完了報告の証跡（400）の
+     * どちらでも存在を推測させない（fail-closed）。
      */
-    private void assertEvidenceDocumentReadable(Document document) {
+    private void assertEvidenceDocumentReadable(Document document, int notFoundStatus) {
         DocumentService documentService = documentServiceProvider.getIfAvailable();
         if (documentService == null) {
-            throw BusinessException.of(404, "error.document.notFound");
+            throw BusinessException.of(notFoundStatus, "error.document.notFound");
         }
         try {
             documentService.assertDocumentAccessAllowed(document);
         } catch (BusinessException denied) {
-            throw BusinessException.of(404, "error.document.notFound");
+            throw BusinessException.of(notFoundStatus, "error.document.notFound");
         }
     }
 

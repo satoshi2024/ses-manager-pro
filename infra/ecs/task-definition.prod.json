@@ -39,9 +39,11 @@
         { "name": "OIDC_USER_INFO_URI", "value": "OIDC_USER_INFO_URI_PLACEHOLDER" },
         { "name": "BREAK_GLASS_USERNAMES", "value": "" },
         { "name": "ACCOUNTING_TENANT_IDS", "value": "default" },
-        { "name": "FREEE_REDIRECT_URI", "value": "FREEE_REDIRECT_URI_PLACEHOLDER" },
+        { "name": "FREEE_ENABLED", "value": "false" },
         { "name": "CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION", "value": "v1" },
-        { "name": "COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION", "value": "v1" }
+        { "name": "COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS", "value": "default" },
+        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "value": "v1" }
       ],
       "secrets": [
         {
@@ -93,20 +95,8 @@
           "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1::"
         },
         {
-          "name": "SPRING_APPLICATION_JSON",
-          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app-json"
-        },
-        {
-          "name": "FREEE_CLIENT_ID",
-          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:client_id::"
-        },
-        {
-          "name": "FREEE_CLIENT_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:client_secret::"
-        },
-        {
-          "name": "FREEE_TOKEN_ENCRYPTION_KEY",
-          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:token_encryption_key::"
+          "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1::"
         }
       ],
       "mountPoints": [
@@ -165,7 +155,7 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
-    "requiredSettings": "The canonical list of the 29 settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0; this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. SPRING_APPLICATION_JSON carries compliance.gate.fingerprint-keys.default.current-key-version and .keys.<version> (OS environment variable names are not enumerated for that tenant map; runbook section 1.0 rows 23-24). BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_CLIENT_ID/SECRET, FREEE_REDIRECT_URI and FREEE_TOKEN_ENCRYPTION_KEY are required even when freee is not used.",
+    "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start.",
     "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",

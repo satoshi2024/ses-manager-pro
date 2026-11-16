@@ -17,14 +17,16 @@
 
 ## prod 必須設定（環境変数・secret）
 
-- prod が起動を拒否する設定（29項目）の**正本は `.kiro/specs/production-launch/deploy-runbook.md` §1.0** である。各項目の用途・形式・secret かどうか・出処はそこに書く。
+- prod が起動を拒否する設定の**正本は `.kiro/specs/production-launch/deploy-runbook.md` §1.0** である。常に必須なのは1〜26の26項目で、freee を使う場合はさらに27〜30の4項目が要る。各項目の用途・形式・secret かどうか・出処はそこに書く。
 - `task-definition.prod.json` には、その名前を placeholder（`*_PLACEHOLDER`、`ACCOUNT_ID` の ARN）で載せるだけで、値は書かない。
 - 配備では全ての placeholder を置き換える。置き換え忘れがあると、アプリの起動時検査か ECS の secret 取得で止まる。
-- `validate-task-definition.ps1` は、§1.0 の名前が environment か secrets に全てあること、secret を environment に置いていないことを検査する。
+- `validate-task-definition.ps1` は次を検査する。
+  - §1.0 の1〜26の名前が environment か secrets に全てあること。`FREEE_ENABLED=true` のときは27〜30も。
+  - secret を environment に置いていないこと。
 - 次の3点に注意する。
-  - reviewer fingerprint の鍵（§1.0 の23・24）は OS 環境変数では渡せないため、`SPRING_APPLICATION_JSON` の secret で渡す。
+  - reviewer fingerprint の鍵（§1.0 の23〜25）を OS 環境変数で渡すときは、tenant一覧 `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS` も要る。環境変数の名前からは tenant を列挙できないためである。
   - `BREAK_GLASS_USERNAMES` は、bootstrap の初回起動では空にする。runbook §5.5 でちょうど2名にする。
-  - freee の4項目（§1.0 の26〜29）は、freee を使わない配備でも必要である。
+  - 雛形は `FREEE_ENABLED=false` で、freee の4項目を載せていない。freee を使うときは `true` にし、4項目（§1.0 の27〜30）を足す。足さないと起動しない。
 
 ## Probe 規約
 
