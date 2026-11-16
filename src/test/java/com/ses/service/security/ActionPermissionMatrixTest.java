@@ -360,6 +360,36 @@ class ActionPermissionMatrixTest {
         }
     }
 
+    /**
+     * NF07-A2b: 検索〜交付記録の入口は、区画の照会が {@code privacy.dsar.view}、草案・交付記録が {@code privacy.dsar.manage}、承認が
+     * {@code privacy.dsar.approve}、専用ダウンロードが {@code privacy.dsar.export} へ解決され、どれも privacy-admin だけの管理者にしか
+     * 許可されない（新しい key の列挙ではなく {@code privacy.*} の規則がそのまま効く。{@code BUSINESS_ACTIONS}・
+     * {@code PRIVACY_ACTIONS} は変えない）。汎用の file 取得の action（{@code file.download}）には解決されない。
+     */
+    @Test
+    void DSARの草案と承認と専用ダウンロードと交付記録の入口は専用actionへ解決されprivacy_admin所属の管理者だけに許可される() {
+        assertEquals("privacy.dsar.view", ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/12/delivery"));
+        assertEquals("privacy.dsar.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/preview"));
+        assertEquals("privacy.dsar.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/delivery"));
+        assertEquals("privacy.dsar.approve", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/approve"));
+        assertEquals("privacy.dsar.export",
+                ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/12/package/download?packageId=7"));
+        org.junit.jupiter.api.Assertions.assertNotEquals("file.download",
+                ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/12/package/download"));
+
+        for (String action : List.of("privacy.dsar.approve", "privacy.dsar.export")) {
+            assertTrue(authorizationService.isAllowed(authenticate(9005L, "管理者"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9007L, "管理者"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9008L, "管理者"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9000L, "管理者"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), action), action);
+            assertFalse(authorizationService.isAllowed(authenticate(9006L, "営業"), action), action);
+        }
+    }
+
     @Test
     void privacy_adminとrole_adminの両方に所属すると拒否優先でprivacyは使えない() {
         Authentication both = authenticate(9008L, "管理者");

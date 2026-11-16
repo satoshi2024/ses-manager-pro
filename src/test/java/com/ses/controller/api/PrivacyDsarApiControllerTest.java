@@ -6,6 +6,7 @@ import com.ses.controller.page.PrivacyDsarPageController;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.dsar.PrivacyDsarCommands;
 import com.ses.privacy.production.dsar.PrivacyDsarViews;
+import com.ses.privacy.production.dsar.PrivacyExportPackageService;
 import com.ses.privacy.production.dsar.PrivacyRequestService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -48,8 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * NF07 DSAR API（A2a）: OFF は404、service 層の再認可で403、409・503 の ApiResult、CSRF 必須、subject 参照は本文だけ、
- * A2b の入口（承認・package・export）を持たない、controller は DSAR の feature package の型に依存する。
+ * NF07 DSAR API（A2a・A2b）: OFF は404、service 層の再認可で403、409・503 の ApiResult、CSRF 必須、subject 参照は本文だけ、
+ * A2b の開示資料の区画・草案・承認・専用ダウンロード・交付記録（package の取得は専用ダウンロードだけで、外部へ送る入口は持たない）、
+ * controller は DSAR の feature package の型に依存する。
  */
 @WebMvcTest(PrivacyDsarApiController.class)
 class PrivacyDsarApiControllerTest {
@@ -62,6 +64,9 @@ class PrivacyDsarApiControllerTest {
 
     @MockBean
     private PrivacyRequestService requestService;
+
+    @MockBean
+    private PrivacyExportPackageService packageService;
 
     @Test
     @WithMockUser(roles = "管理者")
@@ -219,8 +224,12 @@ class PrivacyDsarApiControllerTest {
                 .andExpect(jsonPath("$.code").value(503));
     }
 
+    /**
+     * NF07-A2b で入口を足した: 開示資料の区画・草案・承認・専用ダウンロード・交付記録。package の取得は {@code /{id}/package/download}
+     * だけで、system から外部へ送る入口（export・送信）は持たない。
+     */
     @Test
-    void 入口はA2aの範囲だけで承認とpackageとexportの入口を持たない() {
+    void 入口はDSARのprefixの下に限り開示packageの取得は専用ダウンロードだけで外部へ送る入口を持たない() {
         List<String> paths = new ArrayList<>();
         for (Method method : PrivacyDsarApiController.class.getDeclaredMethods()) {
             assertThat(method.isAnnotationPresent(PatchMapping.class)).as(method.getName()).isFalse();
@@ -229,11 +238,120 @@ class PrivacyDsarApiControllerTest {
             paths.addAll(mappingPaths(method));
         }
         assertThat(paths).containsExactlyInAnyOrder("", "/{id}", "", "/{id}/identity", "/{id}/candidates",
-                "/{id}/candidates/{linkId}", "/{id}/scope", "/{id}/block", "/{id}/cancel");
-        assertThat(paths).noneMatch(path -> path.contains("approve") || path.contains("package")
-                || path.contains("export") || path.contains("download"));
+                "/{id}/candidates/{linkId}", "/{id}/scope", "/{id}/block", "/{id}/cancel",
+                "/{id}/delivery", "/{id}/preview", "/{id}/approve", "/{id}/package/download", "/{id}/delivery");
+        assertThat(paths).filteredOn(path -> path.contains("package")).containsExactly("/{id}/package/download");
+        assertThat(paths).noneMatch(path -> path.contains("export") || path.contains("send")
+                || path.contains("mail") || path.contains("files"));
         assertThat(PrivacyDsarApiController.class.getAnnotation(RequestMapping.class).value())
                 .containsExactly("/api/privacy/dsar");
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 開示資料の区画は件数と理由とhashだけを返し保存名と記録の値を返さない() throws Exception {
+        PrivacyDsarViews.DeliverySection section = new PrivacyDsarViews.DeliverySection("PREVIEWED", 5L, true, true,
+                true, false, new PrivacyDsarViews.HoldStatus("NONE"),
+                new PrivacyDsarViews.PackageSummary(7L, "DRAFT", "a".repeat(64), 120L, "2026-11-16 10:00",
+                        "2026-12-16 10:00", false, false),
+                false, false, null, "REDACTION_RULES_UNSET", 0,
+                List.of(new PrivacyDsarViews.ProviderCount("engineer-profile", 2)),
+                List.of(new PrivacyDsarViews.ManualReviewItem(null, "MAILBOX", "PROVIDER_UNREGISTERED", null)),
+                null, List.of("APPROVE"));
+        when(packageService.section(12L)).thenReturn(section);
+
+        mockMvc.perform(get("/api/privacy/dsar/12/delivery"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.currentPackage.contentSha256").value("a".repeat(64)))
+                .andExpect(jsonPath("$.data.currentPackage.storedName").doesNotExist())
+                .andExpect(jsonPath("$.data.manualReview[0].reason").value("PROVIDER_UNREGISTERED"))
+                .andExpect(jsonPath("$.data.hold.state").value("NONE"))
+                .andExpect(jsonPath("$.data.actions[0]").value("APPROVE"));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 草案と承認と交付記録は本文をそのままserviceへ渡しCSRF_tokenが無ければ拒否する() throws Exception {
+        when(packageService.preview(eq(12L), any())).thenReturn(TRANSITION);
+        when(packageService.approve(eq(12L), any())).thenReturn(TRANSITION);
+        when(packageService.recordDelivery(eq(12L), any())).thenReturn(TRANSITION);
+        String sha = "b".repeat(64);
+
+        mockMvc.perform(post("/api/privacy/dsar/12/preview").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":4}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/privacy/dsar/12/approve").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":5,\"packageId\":7,\"contentSha256\":\"" + sha + "\"}"))
+                .andExpect(status().isOk());
+        ArgumentCaptor<PrivacyDsarCommands.Approval> approval = ArgumentCaptor.forClass(PrivacyDsarCommands.Approval.class);
+        verify(packageService).approve(eq(12L), approval.capture());
+        assertThat(approval.getValue().packageId()).isEqualTo(7L);
+        assertThat(approval.getValue().contentSha256()).isEqualTo(sha);
+        mockMvc.perform(post("/api/privacy/dsar/12/delivery").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":6,\"packageId\":7,\"contentSha256\":\"" + sha
+                                + "\",\"deliveryMethod\":\"POSTAL\",\"deliveryEvidenceRef\":\"SEND-1\"}"))
+                .andExpect(status().isOk());
+        ArgumentCaptor<PrivacyDsarCommands.Delivery> delivery = ArgumentCaptor.forClass(PrivacyDsarCommands.Delivery.class);
+        verify(packageService).recordDelivery(eq(12L), delivery.capture());
+        assertThat(delivery.getValue().deliveryMethod()).isEqualTo("POSTAL");
+
+        for (String path : List.of("/preview", "/approve", "/delivery")) {
+            mockMvc.perform(post("/api/privacy/dsar/12" + path).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"rowVersion\":5}"))
+                    .andExpect(status().isForbidden());
+        }
+        verify(packageService).preview(eq(12L), any());
+        verify(packageService).approve(eq(12L), any());
+        verify(packageService).recordDelivery(eq(12L), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 専用ダウンロードは承認したpackageだけを添付として返し保存も推測もさせない() throws Exception {
+        byte[] content = "{\"format\":\"nf07-dsar-export-package-v1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(packageService.download(12L, 7L))
+                .thenReturn(new PrivacyDsarViews.PackageDownload("DSAR-20261116-ABCDEFGH.json", content));
+
+        mockMvc.perform(get("/api/privacy/dsar/12/package/download").param("packageId", "7"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(content))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Content-Disposition", org.hamcrest.Matchers.startsWith("attachment;")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Content-Disposition", org.hamcrest.Matchers.containsString("DSAR-20261116-ABCDEFGH.json")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("X-Content-Type-Options", "nosniff"));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 専用ダウンロードの各拒否はApiResultのJSONで返しpackage_idが無ければserviceを呼ばない() throws Exception {
+        when(packageService.download(12L, 8L))
+                .thenThrow(BusinessException.of(409, "error.privacy.dsarPackageNotApproved"));
+        when(packageService.download(12L, 9L)).thenThrow(BusinessException.of(403, "error.accessDenied"));
+        when(packageService.download(13L, 7L)).thenThrow(BusinessException.of(404, "error.privacy.dsarNotFound"));
+        when(packageService.download(14L, 7L)).thenThrow(new PrivacyAccessGuard.PrivacyEntryNotFoundException());
+        when(packageService.download(15L, 7L))
+                .thenThrow(BusinessException.of(409, "error.privacy.dsarPackageIntegrity"));
+
+        mockMvc.perform(get("/api/privacy/dsar/12/package/download").param("packageId", "8"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409));
+        mockMvc.perform(get("/api/privacy/dsar/12/package/download").param("packageId", "9"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+        mockMvc.perform(get("/api/privacy/dsar/13/package/download").param("packageId", "7"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/privacy/dsar/14/package/download").param("packageId", "7"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(FeatureSwitchFilter.NOT_FOUND_MESSAGE));
+        mockMvc.perform(get("/api/privacy/dsar/15/package/download").param("packageId", "7"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(get("/api/privacy/dsar/12/package/download"))
+                .andExpect(status().is4xxClientError());
+        verify(packageService, never()).download(eq(12L), org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

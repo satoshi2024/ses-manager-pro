@@ -35,6 +35,16 @@ public class PrivacyDsarAudit {
     static final String CANDIDATE_RESOLVED = "CANDIDATE_RESOLVED";
     static final String SCOPED = "SCOPED";
     static final String CLOSED = "CLOSED";
+    /** NF07-A2b: 検索と草案 package の作成（SCOPED → PREVIEWED）。 */
+    static final String PREVIEWED = "PREVIEWED";
+    /** NF07-A2b: 作成者以外の承認（PREVIEWED → APPROVED）。 */
+    static final String APPROVED = "APPROVED";
+    /** NF07-A2b: 専用ダウンロード（状態は変えない）。 */
+    static final String PACKAGE_DOWNLOADED = "PACKAGE_DOWNLOADED";
+    /** NF07-A2b: 交付の記録（APPROVED → CONFIRMED。package は PURGED）。 */
+    static final String DELIVERY_RECORDED = "DELIVERY_RECORDED";
+    /** NF07-A2b: 期限超過・終了した case の package の削除（scheduler）。 */
+    static final String PACKAGE_PURGED = "PACKAGE_PURGED";
 
     private final AuditLogService auditLogService;
 
@@ -50,6 +60,14 @@ public class PrivacyDsarAudit {
     /** link の状態遷移を記録する（subject 参照・link ID は入れない）。 */
     void linkTransition(String username, String event, String requestNo, String linkFrom, String linkTo) {
         record(username, event, fields("requestNo", requestNo, "linkFrom", linkFrom, "linkTo", linkTo));
+    }
+
+    /**
+     * case の状態を変えない出来事（専用ダウンロード・package の削除）を記録する（失敗は例外）。本文は受付番号だけで、package の
+     * 保存名・内容 hash は入れない。
+     */
+    void event(String username, String event, String requestNo) {
+        record(username, event, fields("requestNo", requestNo));
     }
 
     private void record(String username, String event, Map<String, String> fields) {

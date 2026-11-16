@@ -77,6 +77,7 @@ class FileScopeValidationServiceTest {
     @Mock private EngineerCertificationMapper engineerCertificationMapper;
     @Mock private DocumentLinkMapper documentLinkMapper;
     @Mock private Clock clock;
+    @Mock private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
 
     private FileScopeValidationService service;
 
@@ -102,6 +103,66 @@ class FileScopeValidationServiceTest {
                 authorizationServiceProvider,
                 engineerCertificationMapperProvider,
                 clock);
+        // NF07-A2b: DSAR の開示 package の照合（無ければ全て拒否する fail-closed のため、package でない名前を返す mock を与える）
+        lenient().when(privacyExportPackageMapper.countByStoredNames(any(), any())).thenReturn(0L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper",
+                privacyExportPackageMapper);
+    }
+
+    // ---------------------------------------------------------------- NF07-A2b: 汎用 file 経路の遮断（§3.5.2 P2-5）
+
+    @Test
+    void DSARの開示packageは営業_要員_HR_管理者_privacy_adminの誰が汎用経路で求めても拒否し業務表を見ない() {
+        when(privacyExportPackageMapper.countByStoredNames("dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        // privacy-admin は管理者 role の group 所属で、role の上では管理者と区別されない（管理者の通過分岐より前で拒否する）
+        for (String role : List.of("営業", "要員", "HR", "マネージャー", "管理者")) {
+            loginAs(role);
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("dsarpkg.json"), role);
+            assertEquals(403, ex.getCode(), role);
+            assertEquals("error.forbidden", ex.getMessageKey(), role);
+            BusinessException versioned = assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("dsarpkg.json", 1L, "a".repeat(64)), role);
+            assertEquals(403, versioned.getCode(), role);
+        }
+        verify(resumeIngestionMapper, never()).selectByStoredFileNameForTenant(any(), any());
+        verify(documentVersionMapper, never()).selectList(any());
+        verify(engineerMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void DSARの開示packageは汎用の再scanも拒否する() {
+        when(privacyExportPackageMapper.countByStoredNames("dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.assertRescanAllowed("dsarpkg.json"));
+        assertEquals(403, ex.getCode());
+        assertDoesNotThrow(() -> service.assertRescanAllowed("other.pdf"));
+    }
+
+    @Test
+    void 大文字と末尾の点や空白で表記を変えた保存名も正規化した名前で照合して拒否する() {
+        when(privacyExportPackageMapper.countByStoredNames("DSARPKG.JSON. ", "dsarpkg.json")).thenReturn(1L);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("DSARPKG.JSON. "));
+        assertEquals(403, ex.getCode());
+        verify(privacyExportPackageMapper).countByStoredNames("DSARPKG.JSON. ", "dsarpkg.json");
+    }
+
+    @Test
+    void package表を照合できなければ汎用経路の取得を全て拒否する() {
+        loginAs("管理者");
+        when(privacyExportPackageMapper.countByStoredNames(any(), any())).thenThrow(new IllegalStateException("db"));
+        assertEquals(403, assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("anything.pdf")).getCode());
+
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper", null);
+        assertEquals("error.forbidden", assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("anything.pdf")).getMessageKey());
+        assertEquals(403, assertThrows(BusinessException.class,
+                () -> service.assertRescanAllowed("anything.pdf")).getCode());
     }
 
     @AfterEach

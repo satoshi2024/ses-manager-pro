@@ -77,6 +77,13 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.jdbc.core.JdbcTemplate importMetadataJdbc;
 
+    /**
+     * NF07 DSAR の開示 package の保存名の照合用（NF07-A2b）。汎用 file 経路の遮断に使い、無ければ全て拒否する（fail-closed）。
+     * 全体の context では常に登録される MyBatis mapper。直接生成する単体テストは明示的に与える。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.beans.factory.ObjectProvider<com.ses.importcenter.metadata.ImportMetadataAuthorizationService>
             importAuthorizationProvider;
@@ -229,6 +236,8 @@ public class FileScopeValidationService {
      * @param expectedHash eventに保存したSHA-256 hex（nullなら検証しない）
      */
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
+        // NF07 DSAR の開示 package は専用ダウンロードだけ。role・group・tenant に関係なく、管理者の通過分岐より前に拒否する
+        assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
         assertImportJobNotAccessibleThroughGenericFilePath(storedName);
         // 1. t_resume_ingestion の原本ファイル
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
@@ -469,6 +478,49 @@ public class FileScopeValidationService {
 
         // 未登録・未知のstoredNameは拒否（fail-closed）
         throw BusinessException.of(403, "error.file.unknownReference");
+    }
+
+    /**
+     * 汎用の再scan（{@code POST /api/files/{storedName}/rescan}）の前の確認。NF07 DSAR の開示 package は再scanの対象にしない
+     * （role に関係なく拒否する。production-bridge-phased-plan.md §3.5.2 P2-5）。
+     */
+    public void assertRescanAllowed(String storedName) {
+        assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
+    }
+
+    /**
+     * NF07 DSAR の開示 package（{@code t_privacy_export_package.stored_name}）は専用ダウンロード
+     * （{@code GET /api/privacy/dsar/{id}/package/download}）だけに限定する（production-bridge-phased-plan.md §3.5.2 P2-5）。
+     * 状態（PURGED を含む）・tenant・role・group に関係なく一律に拒否する。保存名は大文字小文字・末尾の {@code .}／空白の違いで
+     * 同じ実体を指し得る（照合順序・file system による）ため、正規化した名前でも照合する（package の保存名は小文字の16進と
+     * 小文字の拡張子で作られる）。mapper が無い・照会に失敗した場合も拒否する（fail-closed）。
+     */
+    private void assertPrivacyPackageNotAccessibleThroughGenericFilePath(String storedName) {
+        if (storedName == null || storedName.isBlank()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (privacyExportPackageMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        long matches;
+        try {
+            matches = privacyExportPackageMapper.countByStoredNames(storedName, normalizedStoredName(storedName));
+        } catch (RuntimeException e) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (matches > 0) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    /** 前後の空白と末尾の {@code .}・空白を除き、小文字にした保存名。 */
+    static String normalizedStoredName(String storedName) {
+        String value = storedName.trim();
+        int end = value.length();
+        while (end > 0 && (value.charAt(end - 1) == '.' || Character.isWhitespace(value.charAt(end - 1)))) {
+            end--;
+        }
+        return value.substring(0, end).toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

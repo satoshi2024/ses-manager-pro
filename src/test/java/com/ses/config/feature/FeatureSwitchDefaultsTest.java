@@ -272,6 +272,23 @@ class FeatureSwitchDefaultsTest {
                 .as("整数として解釈できない期限規則は起動を止める").isInstanceOf(BindException.class);
     }
 
+    /** NF07-A2b: D-06 の package 最長保存期間も既定値を持たず、単位の無い数値は日数として解釈する。 */
+    @Test
+    void DSARのpackage最長保存期間は既定値を持たず単位の無い数値は日数である() throws IOException {
+        com.ses.privacy.production.PrivacyFeatureProperties defaults =
+                bindPrivacy(Map.of(), "application.yml", "application-prod.yml");
+        assertThat(defaults.getDsar().getPackageMaxAge()).as("法的な値の既定値を持たない（I-1）").isNull();
+
+        assertThat(bindPrivacy(Map.of("PRIVACY_DSAR_PACKAGE_MAX_AGE", "30"), "application.yml", "application-prod.yml")
+                .getDsar().getPackageMaxAge()).isEqualTo(java.time.Duration.ofDays(30));
+        assertThat(bindPrivacy(Map.of("PRIVACY_DSAR_PACKAGE_MAX_AGE", "PT12H"), "application.yml",
+                "application-prod.yml").getDsar().getPackageMaxAge()).isEqualTo(java.time.Duration.ofHours(12));
+
+        assertThatThrownBy(() -> bindPrivacy(Map.of("PRIVACY_DSAR_PACKAGE_MAX_AGE", "3O"),
+                "application.yml", "application-prod.yml"))
+                .as("期間として解釈できない値は起動を止める").isInstanceOf(BindException.class);
+    }
+
     @Test
     void 真偽値として解釈できないprivacyの環境変数もbind失敗で起動を止める() {
         assertThatThrownBy(() -> bind(Map.of(Feature.NF07_RETENTION.environmentVariable(), "ture"),

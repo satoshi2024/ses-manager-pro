@@ -19,7 +19,7 @@
 | NF-04 要員PWAシェル（Service Worker・manifest） | `app.features.nf04.enabled` | `FEATURE_NF04_ENABLED` | `false` | `true` |
 | NF-06 データ移行・取込センター（画面 `/import-center`・API。apply系は含まない）。**ONの条件: admission承認設定・行参照鍵・`import.metadata.manage` の付与（V193）・単一法人**（prodでは承認設定と鍵を起動時に強制。4.8） | `app.features.nf06.enabled` | `FEATURE_NF06_ENABLED` | `false` | `true` |
 | NF-07 保持・保全（policy説明。catalog・holdは後続batchで追加）。**ONの条件: 決定ID束縛（D-01・D-09）の完了と、privacy-admin の有効な管理者2名以上**（prodでは起動時に強制。決定の署名日前・失効の間は起動を止めずOFFとして扱う。4.7） | `privacy.retention.enabled` | `PRIVACY_RETENTION_ENABLED` | `false` | `true` |
-| NF-07 本人請求（DSAR。A2a で受付〜範囲確定の画面 `/privacy/dsar`・API・期限通知）。NF-07 保持・保全とは親子にしない。**ONの条件: 決定ID束縛（D-01・D-06・D-09）と計画 §5.1 の追加前提**（prodでは A2b のマージまで ON で起動しない。4.7） | `privacy.dsar.enabled` | `PRIVACY_DSAR_ENABLED` | `false` | `true` |
+| NF-07 本人請求（DSAR。A2a で受付〜範囲確定の画面 `/privacy/dsar`・API・期限通知、A2b で検索・草案・承認・専用ダウンロード・交付記録）。NF-07 保持・保全とは親子にしない。**ONの条件: 決定ID束縛（D-01・D-06・D-09）と計画 §5.1 の追加前提（`due-days`・`package-max-age`・F2 provider 1件以上。4.7）** | `privacy.dsar.enabled` | `PRIVACY_DSAR_ENABLED` | `false` | `true` |
 | NF-10 定期管理レポート | `app.features.nf10.enabled` | `FEATURE_NF10_ENABLED` | `false` | `true` |
 
 - **子スイッチ**: 親機能の一部だけを後から公開するためのスイッチ。**実効値は「親がON かつ 子がON」**で、親がOFFなら子の設定値に関係なくOFFになる（子だけ `true` にしても何も公開されない）。子だけ `true` で親がOFFの設定は起動を止めず、起動ログに `[機能スイッチ] NF02_CUSTOMER_PORTAL は設定上ONですが、親機能 NF02 がOFFのため無効です` のWARNを出す。
@@ -96,8 +96,9 @@
 | 環境変数 | 初回リリース | 根拠（決定記録） | ONにする条件（NF-02/NF-03は**実装側の提案。未決定**。NF-07は計画 §5.1 の条件で、prodでは起動時に強制する） |
 |---|---|---|---|
 | `PRIVACY_RETENTION_ENABLED` | 未設定（OFF） | B-NF07-1: production bridge（W-1〜W-12）を全て接続してから公開する。Q-8: 署名前は値UNKNOWN・flag OFF・未知は拒否のままマージする | 決定ID束縛（D-01・D-09 の決定ID・署名日・失効日、承認tenant、承認capability `retention`、approval digest）の完了と、privacy-admin の有効な管理者2名以上（break-glass口座を除く）。満たさなければ `PrivacyProductionConfigurationValidator` が起動を止める。決定の署名日前・失効だけなら起動は止めず、その間（実行中に失効日を迎えた日以降を含む）NF07はOFFとして扱われる（4.7.2.1） |
-| `PRIVACY_DSAR_ENABLED` | 未設定（OFF） | 同上。A2a で入口（`/privacy/dsar`・`/api/privacy/dsar`）と期限通知を `Feature.NF07_DSAR` に登録した。OFF の間は入口が404、期限通知の scheduler も止まる | A2b（検索〜交付記録・`privacy.dsar.package-max-age`）のマージまでは、prodでONにすると前提未実装（`dsar.prerequisitesNotImplemented`）として起動しない。A2b 以降は上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提 |
+| `PRIVACY_DSAR_ENABLED` | 未設定（OFF） | 同上。A2a で入口（`/privacy/dsar`・`/api/privacy/dsar`）と期限通知を `Feature.NF07_DSAR` に登録した。OFF の間は入口が404、期限通知の scheduler も止まる | prodでONにするには、上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提（`PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`・F2 provider 1件以上）が要る（A2b で実検査に置換。4.7 の表の5） |
 | `PRIVACY_DSAR_DUE_DAYS` | 未設定（期限日を計算しない） | D-06（DSAR SOP）の期限規則。法的な値のため既定値を持たない（I-1） | D-06 の署名後に、署名された日数（受付日 JST からの暦日数、1〜366）を人が設定する。D-01・D-06 の決定が無効な間は設定しても使わない |
+| `PRIVACY_DSAR_PACKAGE_MAX_AGE` | 未設定（草案 package を作らない） | D-06 で決める開示 package の最長保存期間（A2b）。法的な値のため既定値を持たない（I-1）。期限超過・交付記録・case の終了で package は PURGED になり実体も消える（削除の scheduler は flag OFF でも止めない） | D-06 の署名後に人が設定する（1時間〜366日。単位の無い数値は日数、`PT12H` 等も可）。範囲外は未設定と同じ |
 | `PRIVACY_DSAR_DEADLINE_WARNING_DAYS` | 7 | 期限の何日前から privacy-admin へ通知するか（運用上の値。法的な期限ではない） | 運用者が 1〜90 の範囲で決める（範囲外は丸める） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
@@ -206,7 +207,7 @@
 | 2 | `privacy-admin` group が有効・未削除で `privacy.*` を許可し、`'*'`・`privacy.` 接頭辞の拒否行を持たない | `privacyAdminGroup.notGrantingPrivacy` |
 | 3 | `privacy-admin` の有効な管理者が2名以上。「有効」= 所属行が未削除、設定tenantの管理者roleで `status=1`・未削除、**OIDCでログインできる**（設定tenant・`OIDC_ISSUER_URI` の有効なOIDC providerに APPROVED の外部identity link を持つ。`ProductionSecurityConfigurationValidator` のOIDC管理者の数え方と同じ）、`'*'`・`privacy.` 接頭辞の拒否行を持つ有効なgroupに所属していない、break-glass username（`BREAK_GLASS_USERNAMES`。大文字小文字を区別しない）ではない。**アカウントロック中の管理者も数える**（下記） | `privacyAdmins.insufficient[current=1;required=2]` / `privacyAdmins.oidcProviderUnavailable` |
 | 4 | `privacy-admin` 以外の有効なgroupが `privacy.` 接頭辞の許可行（`privacy.*`・`privacy.<x>`）を持たない（W3-14 review P3-2。`'*'` だけの検査では privacy-admin を複製したgroupを見落とすため） | `privacyAllow.outsidePrivacyAdmin[<group key>;…]` |
-| 5 | `PRIVACY_DSAR_ENABLED` は A2b のマージまでONにできない（入口は A2a で追加済み。§5.1 の追加前提 `privacy.dsar.due-days`・`package-max-age`・F2 provider の検査が未実装） | `dsar.prerequisitesNotImplemented` |
+| 5 | `PRIVACY_DSAR_ENABLED` を ON にするとき（A2b）: §5.1 の追加前提。D-06 の決定ID束縛は表の1が DSAR に要求する。加えて `privacy.dsar.due-days` が1〜366、`privacy.dsar.package-max-age` が1時間〜366日、F2 provider が1件以上登録済み | `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` |
 
 - 例外messageには固定の違反コード・flag名・group key・人数だけを出し、決定ID・digest・username・例外本文は出さない。照会に失敗した場合は `*.unverifiable` として起動を止める（fail-closed）。
 - **アカウントロックは起動時の人数に影響しない**（W3-14b review P2-1）。ロックは未認証者でもlogin失敗5回で30分起こせる一時的な状態なので、起動条件にすると外部からアプリ全体の再起動を止められてしまう。ロック中の管理者は、実行時に privacy の各要求で拒否される（`SecurityContextCallerContextProvider` が要求ごとに `locked_until` を確認する）。

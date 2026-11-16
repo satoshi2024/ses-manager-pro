@@ -6,6 +6,7 @@ import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.privacy.production.PrivacyAccessGuard.Capability;
+import com.ses.privacy.production.dsar.PrivacyDsarDecisions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -39,8 +40,10 @@ import java.util.TreeSet;
  *           OIDC でログインできる管理者だけを数え、break-glass username は大文字小文字を区別せず除く）が
  *           {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。アカウントロックは数え方に影響しない（review P2-1）。</li>
  *       <li>{@code privacy-admin} 以外の有効な group が {@code privacy.} 接頭辞の許可行を持たない（review P3-2）。</li>
- *       <li>{@code dsar}: 入口（受付〜SCOPED）は A2a で追加したが、§5.1 の追加前提（{@code privacy.dsar.due-days}・
- *           {@code package-max-age}、F2 provider 等）の検査と検索〜交付記録の A2b が未実装のため、常に不可。</li>
+ *       <li>{@code dsar}（NF07-A2b で実検査に置換）: §5.1 の追加前提。D-06 の決定ID は上の束縛が DSAR に要求する（欠ければ
+ *           {@code decisionBinding.*}）。加えて {@code privacy.dsar.due-days} が 1〜366（{@code dsar.dueDaysUnset}）、
+ *           {@code privacy.dsar.package-max-age} が1時間〜366日（{@code dsar.packageMaxAgeUnset}）、F2 provider が1件以上登録済み
+ *           （{@code dsar.providersUnregistered}）。署名が揃わない間は ON にできない。</li>
  *     </ol>
  *   </li>
  * </ul>
@@ -75,7 +78,20 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
     private final PermissionGroupMapper permissionGroupMapper;
     private final UserPermissionGroupMapper userPermissionGroupMapper;
     private final IdentityProviderMapper identityProviderMapper;
+    private final ProductionPrivacyProviderRegistry providerRegistry;
     private final Clock clock;
+
+    /** F2 provider の registry を持たない生成（DSAR を ON にすると {@code dsar.providersUnregistered} で止まる）。 */
+    public PrivacyProductionConfigurationValidator(PrivacyFeatureProperties featureProperties,
+                                                   PrivacyApprovalProperties approvalProperties,
+                                                   OidcSecurityProperties oidcProperties,
+                                                   PermissionGroupMapper permissionGroupMapper,
+                                                   UserPermissionGroupMapper userPermissionGroupMapper,
+                                                   IdentityProviderMapper identityProviderMapper,
+                                                   Clock clock) {
+        this(featureProperties, approvalProperties, oidcProperties, permissionGroupMapper, userPermissionGroupMapper,
+                identityProviderMapper, null, clock);
+    }
 
     @Autowired
     public PrivacyProductionConfigurationValidator(PrivacyFeatureProperties featureProperties,
@@ -84,6 +100,7 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
                                                    PermissionGroupMapper permissionGroupMapper,
                                                    UserPermissionGroupMapper userPermissionGroupMapper,
                                                    IdentityProviderMapper identityProviderMapper,
+                                                   ProductionPrivacyProviderRegistry providerRegistry,
                                                    Clock clock) {
         this.featureProperties = featureProperties;
         this.approvalProperties = approvalProperties;
@@ -91,6 +108,7 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         this.permissionGroupMapper = permissionGroupMapper;
         this.userPermissionGroupMapper = userPermissionGroupMapper;
         this.identityProviderMapper = identityProviderMapper;
+        this.providerRegistry = providerRegistry;
         this.clock = clock == null ? Clock.system(PrivacyDecisionBinding.BUSINESS_ZONE) : clock;
     }
 
@@ -116,7 +134,7 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
                 tenantId, PrivacyDecisionBinding.businessDate(clock));
         PrivacyDecisionBinding.structuralViolations(binding).forEach(code -> blocking.add("decisionBinding." + code));
         if (enabled.contains(Capability.DSAR)) {
-            blocking.add("dsar.prerequisitesNotImplemented");
+            validateDsarPrerequisites(blocking);
         }
         validatePrivacyAdminGroup(tenantId, blocking);
         int administrators = validatePrivacyAdministrators(tenantId, blocking);
@@ -139,6 +157,31 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         }
         log.info("[privacy] NF07のflag ONの前提を確認しました: flags={} decisionIds={} privacyAdmins={}",
                 flagNames(enabled), binding.snapshot().decisionIds().values(), administrators);
+    }
+
+    /**
+     * DSAR を ON にする追加の前提（§5.1 の表。NF07-A2b）。D-06 の決定ID（本人確認基準・期限規則・package の最長保存期間の根拠）は
+     * {@link PrivacyDecisionBinding#requiredDecisions} が DSAR に要求し、欠落・placeholder・digest 不一致は {@code decisionBinding.*}
+     * として既に数える。ここでは決定書に従って設定する値と F2 provider の登録を確かめる。
+     */
+    private void validateDsarPrerequisites(List<String> missing) {
+        PrivacyFeatureProperties.Dsar dsar = featureProperties == null ? null : featureProperties.getDsar();
+        if (dsar == null || !PrivacyDsarDecisions.isValidDueDays(dsar.getDueDays())) {
+            missing.add("dsar.dueDaysUnset");
+        }
+        if (dsar == null || !PrivacyDsarDecisions.isValidPackageMaxAge(dsar.getPackageMaxAge())) {
+            missing.add("dsar.packageMaxAgeUnset");
+        }
+        int providers;
+        try {
+            providers = providerRegistry == null ? 0 : providerRegistry.providers().size();
+        } catch (RuntimeException e) {
+            log.error("[privacy] F2 providerの登録を確認できません", e);
+            providers = 0;
+        }
+        if (providers < 1) {
+            missing.add("dsar.providersUnregistered");
+        }
     }
 
     private void validatePrivacyAdminGroup(String tenantId, List<String> missing) {

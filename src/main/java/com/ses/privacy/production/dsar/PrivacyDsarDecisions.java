@@ -5,6 +5,7 @@ import com.ses.privacy.production.PrivacyDecisionBinding;
 import com.ses.privacy.production.PrivacyFeatureProperties;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -19,13 +20,19 @@ import java.util.Objects;
  *   <li>D-06 の期限規則 {@code privacy.dsar.due-days}: 1〜{@value #MAX_DUE_DAYS} の暦日数で、D-01・D-06 が有効な場合だけ使う。
  *       それ以外は期限日を計算しない（法的な値の既定値を持たない。I-1）。</li>
  * </ul>
+ * D-06 の開示 package の最長保存期間 {@code privacy.dsar.package-max-age}（NF07-A2b）は {@link #packageMaxAge()} が返し、
+ * 未設定・範囲外なら草案 package を作らない。
  * D-09 と承認 digest は機能スイッチの実行時条件と prod の起動時検査が確かめるため、ここでは見ない（OFF なら入口が404）。
  */
 public class PrivacyDsarDecisions {
 
     static final String REASON_D01 = "d01";
     static final String REASON_D06 = "d06";
-    static final int MAX_DUE_DAYS = 366;
+    public static final int MAX_DUE_DAYS = 366;
+    /** package の最長保存期間の下限（1時間）。 */
+    public static final Duration MIN_PACKAGE_MAX_AGE = Duration.ofHours(1);
+    /** package の最長保存期間の上限（366日）。 */
+    public static final Duration MAX_PACKAGE_MAX_AGE = Duration.ofDays(366);
 
     private final PrivacyApprovalProperties approvalProperties;
     private final PrivacyFeatureProperties featureProperties;
@@ -69,7 +76,30 @@ public class PrivacyDsarDecisions {
     Integer configuredDueDays() {
         Integer dueDays = featureProperties == null || featureProperties.getDsar() == null
                 ? null : featureProperties.getDsar().getDueDays();
-        return dueDays != null && dueDays >= 1 && dueDays <= MAX_DUE_DAYS ? dueDays : null;
+        return isValidDueDays(dueDays) ? dueDays : null;
+    }
+
+    /**
+     * D-06 の開示 package の最長保存期間（{@code privacy.dsar.package-max-age}。NF07-A2b）。未設定・範囲外は null で、
+     * その間は草案 package を作らない（§5.2 の「DSAR 草案 package」）。
+     */
+    public Duration packageMaxAge() {
+        Duration configured = featureProperties == null || featureProperties.getDsar() == null
+                ? null : featureProperties.getDsar().getPackageMaxAge();
+        return isValidPackageMaxAge(configured) ? configured : null;
+    }
+
+    /** 期限規則の日数として使えるか（1〜{@value #MAX_DUE_DAYS}）。prod の起動時検査と同じ規則。 */
+    public static boolean isValidDueDays(Integer dueDays) {
+        return dueDays != null && dueDays >= 1 && dueDays <= MAX_DUE_DAYS;
+    }
+
+    /**
+     * package の最長保存期間として使えるか（{@link #MIN_PACKAGE_MAX_AGE} 以上 {@link #MAX_PACKAGE_MAX_AGE} 以下）。
+     * 下限は単位の付け忘れ等で数分で消える設定を拒否するため、上限は期限規則と同じ1年強に留めるため。
+     */
+    public static boolean isValidPackageMaxAge(Duration maxAge) {
+        return maxAge != null && maxAge.compareTo(MIN_PACKAGE_MAX_AGE) >= 0 && maxAge.compareTo(MAX_PACKAGE_MAX_AGE) <= 0;
     }
 
     /**

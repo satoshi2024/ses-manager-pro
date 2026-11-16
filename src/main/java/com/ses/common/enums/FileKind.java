@@ -51,7 +51,15 @@ public enum FileKind {
     /** import center用raw CSV。内容の上限はsource body 64MiB。 */
     IMPORT(
             Set.of("csv"),
-            64L * 1024 * 1024);
+            64L * 1024 * 1024),
+
+    /**
+     * NF07 DSAR の開示 package（server が生成する JSON。NF07-A2b）。利用者の upload は受け付けない
+     * （{@link #isServerGeneratedOnly()}。{@code FileApiController} が拒否する）。
+     */
+    PRIVACY_EXPORT(
+            Set.of("json"),
+            32L * 1024 * 1024);
 
     private final Set<String> allowedExtensions;
     private final long maxBytes;
@@ -67,6 +75,11 @@ public enum FileKind {
 
     public long getMaxBytes() {
         return maxBytes;
+    }
+
+    /** server が生成する file だけの種別か（汎用 upload の入口では受け付けない）。 */
+    public boolean isServerGeneratedOnly() {
+        return this == PRIVACY_EXPORT;
     }
 
     /** Content-Typeは明示必須。拡張子と完全一致する組だけを許可する。 */
@@ -85,6 +98,7 @@ public enum FileKind {
             case "eml" -> ct.equals("message/rfc822");
             case "txt" -> ct.equals("text/plain");
             case "csv" -> ct.equals("text/csv");
+            case "json" -> ct.equals("application/json");
             default -> false;
         };
     }
@@ -101,6 +115,7 @@ public enum FileKind {
             case "docx", "xlsx" -> isOoxml(ext, data);
             case "eml", "txt" -> isText(data);
             case "csv" -> isText(data) && !(data.length >= 2 && data[0] == 'P' && data[1] == 'K');
+            case "json" -> isText(data) && data[0] == '{';
             default -> false;
         };
     }

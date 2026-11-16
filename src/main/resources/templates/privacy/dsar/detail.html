@@ -60,6 +60,7 @@
                 <dd class="col-12 col-sm-8 mb-0" id="dsar-identity-verified-at">…</dd>
             </dl>
             <p class="text-warning mb-2 d-none" id="dsar-decision-missing"></p>
+            <p class="text-warning mb-2 d-none" id="dsar-decision-changed" th:text="#{privacyDsar.delivery.decisionChanged}">本人確認の後に D-06 の決定が変わりました</p>
             <form id="dsar-identity-form" class="d-none" novalidate>
                 <label class="form-label" for="dsar-identity-evidence-ref" th:text="#{privacyDsar.detail.identity.evidenceRef}">証跡の参照</label>
                 <input type="text" id="dsar-identity-evidence-ref" class="form-control bg-dark border-secondary text-light" maxlength="128" autocomplete="off">
@@ -123,6 +124,84 @@
         </div>
     </div>
 
+    <!-- 開示資料（検索・草案・承認・専用ダウンロード・交付の記録。NF07-A2b） -->
+    <div class="card bg-card border-dark shadow-sm mb-3" id="dsar-delivery-card">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.delivery.heading}">開示資料</div>
+        <div class="card-body small text-light">
+            <p class="text-secondary mb-2" th:text="#{privacyDsar.delivery.description}">説明</p>
+            <dl class="row mb-2">
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.hold}">保全 hold</dt>
+                <dd class="col-12 col-sm-8" id="dsar-delivery-hold">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.packageRule}">package の保存期間（D-06）</dt>
+                <dd class="col-12 col-sm-8" id="dsar-delivery-package-rule">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.package}">開示資料の状態</dt>
+                <dd class="col-12 col-sm-8 text-break" id="dsar-delivery-package">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.redaction}">第三者情報の扱い</dt>
+                <dd class="col-12 col-sm-8" id="dsar-delivery-redaction">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.approval}">承認</dt>
+                <dd class="col-12 col-sm-8 mb-0" id="dsar-delivery-approval">…</dd>
+            </dl>
+            <p class="text-warning mb-2 d-none" id="dsar-delivery-not-ready"></p>
+            <div class="d-grid gap-2 d-sm-flex justify-content-sm-end mb-2">
+                <button type="button" class="btn btn-primary btn-sm d-none" id="dsar-preview-submit" th:text="#{privacyDsar.delivery.preview}">検索して草案を作成</button>
+                <button type="button" class="btn btn-success btn-sm d-none" id="dsar-approve-submit" th:text="#{privacyDsar.delivery.approve}">この草案を承認</button>
+                <button type="button" class="btn btn-outline-light btn-sm d-none" id="dsar-download-submit" th:text="#{privacyDsar.delivery.download}">開示資料をダウンロード</button>
+            </div>
+            <p class="text-secondary mb-2 d-none" id="dsar-approve-own" th:text="#{privacyDsar.delivery.ownDraft}">自分が作成した草案は承認できません</p>
+
+            <h3 class="h6 text-light mt-3" th:text="#{privacyDsar.delivery.providers}">検索した記録の件数</h3>
+            <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-2">
+                    <thead>
+                    <tr>
+                        <th th:text="#{privacyDsar.col.provider}">provider</th>
+                        <th th:text="#{privacyDsar.col.recordCount}">件数</th>
+                    </tr>
+                    </thead>
+                    <tbody id="dsar-delivery-providers"></tbody>
+                </table>
+            </div>
+
+            <h3 class="h6 text-light mt-3" th:text="#{privacyDsar.delivery.manualReview}">要手動確認</h3>
+            <p class="text-secondary mb-2" th:text="#{privacyDsar.delivery.manualReviewDescription}">説明</p>
+            <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-2">
+                    <thead>
+                    <tr>
+                        <th th:text="#{privacyDsar.col.provider}">provider</th>
+                        <th th:text="#{privacyDsar.col.dataElement}">data element</th>
+                        <th th:text="#{privacyDsar.col.reason}">理由</th>
+                        <th th:text="#{privacyDsar.col.recordCount}">件数</th>
+                    </tr>
+                    </thead>
+                    <tbody id="dsar-delivery-manual"></tbody>
+                </table>
+            </div>
+
+            <form id="dsar-delivery-form" class="row g-2 align-items-end mt-2 d-none" novalidate>
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="dsar-delivery-method" th:text="#{privacyDsar.delivery.method}">交付の方法</label>
+                    <select id="dsar-delivery-method" class="form-select bg-dark border-secondary text-light">
+                        <option value="EMAIL" th:text="#{privacyDsar.deliveryMethod.EMAIL}">メール</option>
+                        <option value="POSTAL" th:text="#{privacyDsar.deliveryMethod.POSTAL}">郵送</option>
+                        <option value="IN_PERSON" th:text="#{privacyDsar.deliveryMethod.IN_PERSON}">窓口で手渡し</option>
+                        <option value="SECURE_TRANSFER" th:text="#{privacyDsar.deliveryMethod.SECURE_TRANSFER}">安全な転送サービス</option>
+                        <option value="OTHER" th:text="#{privacyDsar.deliveryMethod.OTHER}">その他</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-5">
+                    <label class="form-label" for="dsar-delivery-evidence" th:text="#{privacyDsar.delivery.evidenceRef}">交付の証跡の参照</label>
+                    <input type="text" id="dsar-delivery-evidence" class="form-control bg-dark border-secondary text-light" maxlength="128" autocomplete="off">
+                </div>
+                <div class="col-12 col-md-3 d-grid">
+                    <button type="submit" class="btn btn-outline-success" th:text="#{privacyDsar.delivery.record}">交付を記録</button>
+                </div>
+                <div class="col-12 form-text text-secondary" th:text="#{privacyDsar.delivery.recordHint}">説明</div>
+            </form>
+            <p class="mb-0 mt-2 d-none" id="dsar-delivery-record"></p>
+        </div>
+    </div>
+
     <!-- 終了の記録（進行不可・取下げ） -->
     <div class="card bg-card border-dark shadow-sm mb-3 d-none" id="dsar-close-card">
         <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.detail.close.heading}">終了の記録</div>
@@ -136,6 +215,8 @@
                             <option value="MULTIPLE_CANDIDATES" data-target="BLOCKED" th:text="#{privacyDsar.reason.MULTIPLE_CANDIDATES}">候補を1件に絞れない</option>
                             <option value="IDENTITY_UNVERIFIED" data-target="BLOCKED" th:text="#{privacyDsar.reason.IDENTITY_UNVERIFIED}">本人確認ができない</option>
                             <option value="OUT_OF_SCOPE" data-target="BLOCKED" th:text="#{privacyDsar.reason.OUT_OF_SCOPE}">対象外の請求</option>
+                            <option value="DECISION_CHANGED" data-target="BLOCKED" th:text="#{privacyDsar.reason.DECISION_CHANGED}">確認基準（D-06）の変更</option>
+                            <option value="REDACTION_NOT_POSSIBLE" data-target="BLOCKED" th:text="#{privacyDsar.reason.REDACTION_NOT_POSSIBLE}">第三者情報を除けない</option>
                             <option value="OTHER_BLOCKED" data-target="BLOCKED" th:text="#{privacyDsar.reason.OTHER_BLOCKED}">その他</option>
                         </optgroup>
                         <optgroup th:label="#{privacyDsar.detail.close.group.CANCELLED}" label="取下げ">

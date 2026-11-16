@@ -1,7 +1,7 @@
 package com.ses.privacy.production.dsar;
 
 /**
- * DSAR 受付〜SCOPED の要求本文（NF07-A2a）。subject 参照は本文だけで受け取り、URL・query に入れない。
+ * DSAR の要求本文（受付〜SCOPED は NF07-A2a、草案・承認・交付記録は NF07-A2b）。subject 参照は本文だけで受け取り、URL・query に入れない。
  *
  * <p>状態を変える要求は全て、画面が表示した時点の {@code rowVersion} を持つ（CAS。古ければ 409）。
  * 依頼者の連絡先・本人確認書類の本体を受け取る項目は持たない（外部 ticket・証跡の参照だけ）。
@@ -68,5 +68,36 @@ public final class PrivacyDsarCommands {
      * @param evidenceRef 証跡の参照（任意）
      */
     public record Closure(Long rowVersion, String reasonCode, String evidenceRef) {
+    }
+
+    /**
+     * 検索と草案 package の作成（NF07-A2b。SCOPED → PREVIEWED、期限切れの package の作り直しも同じ）。
+     *
+     * @param rowVersion 画面表示時の版
+     */
+    public record Preview(Long rowVersion) {
+    }
+
+    /**
+     * 草案 package の承認（作成者以外の privacy-admin。PREVIEWED → APPROVED）。承認する package を id と内容 hash で特定する。
+     *
+     * @param rowVersion    画面表示時の版
+     * @param packageId     承認する package の ID
+     * @param contentSha256 画面で確認した package の内容 hash
+     */
+    public record Approval(Long rowVersion, Long packageId, String contentSha256) {
+    }
+
+    /**
+     * system の外で交付した後の交付記録（APPROVED → CONFIRMED。package は同時に PURGED）。承認した package の id と hash を照合する。
+     *
+     * @param rowVersion          画面表示時の版
+     * @param packageId           交付した package の ID（承認した package と一致すること）
+     * @param contentSha256       交付した package の内容 hash（承認した hash と一致すること）
+     * @param deliveryMethod      交付の方法（{@link PrivacyDsarVocabulary.DeliveryMethod}）
+     * @param deliveryEvidenceRef 交付の証跡の参照（必須。送付記録・受領記録等の ID）
+     */
+    public record Delivery(Long rowVersion, Long packageId, String contentSha256, String deliveryMethod,
+                           String deliveryEvidenceRef) {
     }
 }
