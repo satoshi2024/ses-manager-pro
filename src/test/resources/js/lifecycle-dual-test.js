@@ -204,7 +204,7 @@ async function main() {
         assert.ok(env.toasts.some(t => t[0] === 'warning' && t[1] === 'error.lifecycle.evidenceVersionRequired'));
     });
 
-    await check('確認・差戻しはサーバーのmessageを403でも表示し、409の再試行は同じkey、冪等衝突ではkeyを作り直す', async () => {
+    await check('確認・差戻しはサーバーのmessageを403でも表示し、4xxの後は新しいkey、5xxの後の再送は同じkey', async () => {
         const env = load({ withDecision: true, apiBase: '/api/lifecycle' });
         env.responders.push(ok(PENDING_VIEW));
         await env.D.open(7);
@@ -221,18 +221,36 @@ async function main() {
         });
         assert.ok(env.toasts.some(t => t[0] === 'error' && t[1] === 'SELF-CONFIRMATION-DENIED'));
 
+        // 4xxはサーバーが拒否を決めた（何も保存されていない）ため、次は新しいkey
         env.responders.push(json(409, { code: 409, message: 'RETRY-EXHAUSTED' }), ok(PENDING_VIEW));
         await env.D.decide('CONFIRM');
-        assert.strictEqual(env.posts()[1].init.headers['Idempotency-Key'], first.init.headers['Idempotency-Key']);
+        const second = env.posts()[1].init.headers['Idempotency-Key'];
+        assert.notStrictEqual(second, first.init.headers['Idempotency-Key']);
         assert.ok(env.toasts.some(t => t[0] === 'error' && t[1] === 'RETRY-EXHAUSTED'));
 
-        env.responders.push(json(409, { code: 409, message: 'error.lifecycle.idempotencyConflict' }), ok(PENDING_VIEW));
+        // 5xxは結果が分からないため、同じ内容の再送は同じkey（処理済みなら保存済みの結果が返る）
+        env.responders.push(json(500, { code: 500, message: 'SERVER-ERROR' }));
         await env.D.decide('CONFIRM');
-        env.responders.push(ok({ state: 'CONFIRMED', decision: 'CONFIRM' }),
+        const third = env.posts()[2].init.headers['Idempotency-Key'];
+        assert.notStrictEqual(third, second);
+        env.responders.push(ok({ state: 'CONFIRMED', decision: 'CONFIRM', replayed: true }),
             ok(Object.assign({}, PENDING_VIEW, { state: 'CONFIRMED', canDecide: false })));
         await env.D.decide('CONFIRM');
-        assert.notStrictEqual(env.posts()[3].init.headers['Idempotency-Key'], first.init.headers['Idempotency-Key']);
-        assert.ok(env.toasts.some(t => t[0] === 'success' && t[1] === 'lifecycle.dual.toast.confirmed'));
+        assert.strictEqual(env.posts()[3].init.headers['Idempotency-Key'], third);
+        assert.ok(env.toasts.some(t => t[0] === 'success' && t[1] === 'lifecycle.dual.toast.replayed'));
+        assert.strictEqual(env.D.pending, null);
+    });
+
+    await check('送信の成功後にページの再読込が失敗しても成功を表示し送信中を解除する', async () => {
+        const env = load({ withDecision: true, apiBase: '/api/lifecycle' });
+        env.responders.push(ok(PENDING_VIEW));
+        await env.D.open(7);
+        env.D.onChanged = async () => { throw new Error('page reload failed'); };
+        env.responders.push(ok({ state: 'REJECTED', decision: 'REJECT' }),
+            ok(Object.assign({}, PENDING_VIEW, { state: 'REJECTED', canDecide: false })));
+        await env.D.decide('REJECT');
+        assert.ok(env.toasts.some(t => t[0] === 'success' && t[1] === 'lifecycle.dual.toast.rejected'));
+        assert.strictEqual(env.D.busy, false);
     });
 
     await check('本人画面は確認・差戻しの欄が無く、確認の要求を送らない', async () => {

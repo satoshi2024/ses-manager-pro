@@ -7,8 +7,8 @@
  * - API の入口はモーダルの data-dual-api-base（社内 /api/lifecycle、本人 /api/my/lifecycle）。
  * - 確認・差戻しの欄（#dualDecisionSection）は社内テンプレートにだけある。本人画面には欄自体が無い。
  * - 提出は候補（A2/A6）のCLEAN版から選ばせ、版IDを必ず送る（Q-9。版の無い提出は送らない）。
- * - Idempotency-Key は操作ごとに生成し、同じ内容の再送（通信エラー・競合の再試行）では同じkeyを使う。
- *   内容が変われば新しいkeyにし、成功したら破棄する。
+ * - Idempotency-Key は操作ごとに生成し、結果が分からない失敗（通信エラー・5xx）の後の同じ内容の再送では同じkeyを使う。
+ *   内容が変われば新しいkeyにし、成功した・4xxで拒否されたら破棄する。
  * - 送信中はボタンを無効にして二重送信を防ぐ。
  * - エラーはHTTP statusに関係なくサーバーの message（error.lifecycle.authorizationChanged 等のkeyを解決した文言）を表示する。
  *   共通の SES.api は403の本文を捨て、任意のheaderも付けられないため、ここでは専用の fetch を使う。
@@ -379,31 +379,42 @@ SES.lifecycleDual = {
         this.renderControls();
     },
 
+    /**
+     * 提出・確認・差戻しを送る。Idempotency-Keyは結果が分からない失敗（通信エラー・5xx）の後だけ再利用する。
+     * 4xxはサーバーが拒否を決めた（試行はrollback済みで冪等の行も残らない）ため、keyを破棄して次は新しい操作として送る
+     * （W3-21b review P3-2。冪等衝突を文言の比較で見分けない）。送信の成功後の再読込が失敗しても成功の結果は返す（P3-6）。
+     */
     send: async function(operation, url, payload) {
         if (this.busy) return null;
         const key = this.keyFor(operation, payload);
         this.setBusy(true);
+        let result;
         try {
-            const result = await this.request('POST', url, payload, key);
+            result = (await this.request('POST', url, payload, key)) || {};
             this.pending = null;
-            await this.reload();
-            if (typeof this.onChanged === 'function') {
-                await this.onChanged();
-            }
-            return result || {};
         } catch (e) {
             console.error(e);
-            if (e && e.status === 409 && e.message === this.t('error.lifecycle.idempotencyConflict')) {
+            if (e && e.status >= 400 && e.status < 500) {
                 this.pending = null;
             }
             // 状態が変わった可能性がある（失効・競合・認可の変化）ため、最新の状態を読み直す
             if (e && (e.status === 404 || e.status === 409)) {
                 await this.reload();
             }
+            this.setBusy(false);
             return null;
+        }
+        try {
+            await this.reload();
+            if (typeof this.onChanged === 'function') {
+                await this.onChanged();
+            }
+        } catch (refreshError) {
+            console.error(refreshError);
         } finally {
             this.setBusy(false);
         }
+        return result;
     },
 
     request: async function(method, url, body, idempotencyKey) {

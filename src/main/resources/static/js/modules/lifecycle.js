@@ -887,17 +887,21 @@ SES.lifecycle = {
 
     /**
      * 証跡種別「二者確認」は子スイッチONのときだけ選べる（テンプレートが #dualEvidenceOptionTemplate を描画する）。
-     * OFFでも既存のDUALタスクを改定する場合は値を失わないよう「無効」と示して残し、保存はサーバーの400に任せる。
+     * 選択肢に無い既存の値（OFF中のDUAL、開発seedのSYSTEM_CHECK・SELF_DECLARATION等）は、改定で値を失わない
+     * （空の値を送らない）よう残す。DUALはOFF中なら「無効」と示す。保存の可否（許可値一覧・スイッチ）はサーバーが判定する。
      */
     addDualEvidenceOption: function(select, currentValue) {
         if (!select) return;
         const optionTemplate = document.getElementById('dualEvidenceOptionTemplate');
         if (optionTemplate && optionTemplate.content) {
             select.appendChild(optionTemplate.content.cloneNode(true));
-        } else if (currentValue === 'DUAL_CONFIRMATION') {
+        }
+        if (currentValue && !Array.from(select.options).some(option => option.value === currentValue)) {
             const option = document.createElement('option');
-            option.value = 'DUAL_CONFIRMATION';
-            option.textContent = SES.i18n.t('lifecycle.dual.evidenceOptionDisabled');
+            option.value = currentValue;
+            option.textContent = currentValue === 'DUAL_CONFIRMATION'
+                ? SES.i18n.t('lifecycle.dual.evidenceOptionDisabled')
+                : currentValue;
             select.appendChild(option);
         }
     },

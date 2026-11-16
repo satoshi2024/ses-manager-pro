@@ -114,7 +114,10 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
         }
     }
 
-    /** 確認待ちの宛先: 案件のtenantの有効な管理者・HR（確認者）と、タスクの担当者。tenantが無ければ担当者だけ。 */
+    /**
+     * 確認待ちの宛先: 案件のtenantの有効な管理者・HR（確認者）と、有効なタスクの担当者。tenantが無ければ担当者だけ。
+     * 担当者本人が提出者でも除かない（通知の呼出しが提出者IDを持たないため。review P3-3(b)）。
+     */
     private Set<Long> dualConfirmationPendingRecipients(LifecycleTask task, LifecycleCase lcCase) {
         Set<Long> recipients = new LinkedHashSet<>();
         String tenantId = lcCase.getTenantId();
@@ -130,10 +133,18 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
                 }
             }
         }
-        if (task.getAssigneeUserId() != null) {
+        if (task.getAssigneeUserId() != null && activeUser(task.getAssigneeUserId(), tenantId)) {
             recipients.add(task.getAssigneeUserId());
         }
         return recipients;
+    }
+
+    /** 担当者が有効（status=1・未削除。tenantがあればそのtenant内）か（W3-21b review P3-3(a)）。 */
+    private boolean activeUser(Long userId, String tenantId) {
+        SysUser user = tenantId == null || tenantId.isBlank()
+                ? sysUserMapper.selectById(userId)
+                : sysUserMapper.selectByIdAndTenant(userId, tenantId.trim());
+        return user != null && Integer.valueOf(1).equals(user.getStatus());
     }
 
     @Override

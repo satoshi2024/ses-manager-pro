@@ -20,12 +20,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * W3-21a review P3-7（W3-21b）: 二者確認の「確認待ち」通知は、lifecycle menuの全利用者への配信をやめ、
- * 案件のtenantの有効な確認者（管理者・HR）とタスクの担当者だけへ個別に送る。
+ * 案件のtenantの有効な確認者（管理者・HR）と有効なタスクの担当者（review P3-3(a)）だけへ個別に送る。
  */
 class LifecycleNotificationDualRecipientsTest {
 
@@ -44,6 +43,7 @@ class LifecycleNotificationDualRecipientsTest {
     void 確認待ちは案件tenantの有効な管理者とHRと担当者だけへ個別に送り全体配信しない() {
         when(sysUserMapper.selectActiveByRoleAndTenant("管理者", "tenant-a")).thenReturn(List.of(user(10L)));
         when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of(user(11L), user(12L)));
+        when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(user(20L));
 
         service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(" tenant-a "), 55L);
 
@@ -60,6 +60,7 @@ class LifecycleNotificationDualRecipientsTest {
     void 担当者が確認者でもあれば1回だけ送り通知本文に業務commentや案件titleを載せない() {
         when(sysUserMapper.selectActiveByRoleAndTenant("管理者", "tenant-a")).thenReturn(List.of());
         when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of(user(20L)));
+        when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(user(20L));
 
         service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L);
 
@@ -72,11 +73,31 @@ class LifecycleNotificationDualRecipientsTest {
     }
 
     @Test
-    void 案件のtenantが無ければ確認者を検索せず担当者だけへ送る() {
+    void 案件のtenantが無ければ確認者を検索せず有効な担当者だけへ送る() {
+        when(sysUserMapper.selectById(20L)).thenReturn(user(20L));
+
         service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(null), 55L);
 
-        verifyNoInteractions(sysUserMapper);
+        verify(sysUserMapper, never()).selectActiveByRoleAndTenant(anyString(), anyString());
         verify(notificationService, times(1)).publishToUser(eq(20L), eq("DUAL_CONFIRMATION_PENDING"), anyString(),
+                anyString(), anyString(), anyString(), eq("lifecycle"));
+    }
+
+    @Test
+    void 無効または別tenantの担当者には送らず確認者には送る() {
+        when(sysUserMapper.selectActiveByRoleAndTenant("管理者", "tenant-a")).thenReturn(List.of(user(10L)));
+        when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of());
+        SysUser disabled = user(20L);
+        disabled.setStatus(0);
+        when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(disabled);
+
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L);
+        // 別tenant・削除済みは tenant限定の検索で見つからない
+        service.notifyDualConfirmationSubmitted(task(21L), lifecycleCase("tenant-a"), 56L);
+
+        verify(notificationService, never()).publishToUser(eq(20L), any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(eq(21L), any(), any(), any(), any(), any(), any());
+        verify(notificationService, times(2)).publishToUser(eq(10L), eq("DUAL_CONFIRMATION_PENDING"), anyString(),
                 anyString(), anyString(), anyString(), eq("lifecycle"));
     }
 
@@ -93,6 +114,7 @@ class LifecycleNotificationDualRecipientsTest {
     private static SysUser user(Long id) {
         SysUser user = new SysUser();
         user.setId(id);
+        user.setStatus(1);
         return user;
     }
 

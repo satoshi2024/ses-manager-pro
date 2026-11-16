@@ -15,6 +15,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -24,6 +27,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -34,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * 子スイッチ {@code nf01-dual-confirmation} の実効値（親NF-01との論理積）がONのときだけ受け付ける。
  * OFFでは400で拒否し、テンプレート・タスク定義を1件も書き込まない（W3-02 N1-2 の拒否をスイッチ連動に変更）。
  * ONでは表記揺れを正規の {@code DUAL_CONFIRMATION} にそろえて保存する（完了経路の完全一致判定を迂回させない）。
+ * 証跡種別は許可値一覧で検査し、Unicodeの表記揺れ（NBSP・ゼロ幅文字・全角文字）や一覧外の値は400で1件も書かない
+ * （review P2-1）。子スイッチOFFの間はDUALを含むテンプレートを有効に戻せない（review P3-1）。
  *
  * <p>test profileは子スイッチON。OFFの試験はスイッチ設定を試験の中で切り替え、試験後に元へ戻す
  * （設定値は {@code FeatureSwitches} が毎回読むため再起動は要らない。JUnitの並列実行は無効）。</p>
@@ -94,7 +100,8 @@ class LifecycleTemplateDualPolicyTest {
     @DisplayName("子スイッチOFFでは大文字小文字・前後空白が違うDUAL_CONFIRMATIONも完全一致判定をすり抜けないよう拒否する")
     void 子スイッチOFFでは表記揺れのDUAL_CONFIRMATIONも拒否する() {
         switches(true, false);
-        for (String variant : List.of("dual_confirmation", " DUAL_CONFIRMATION ", "Dual_Confirmation")) {
+        for (String variant : List.of("dual_confirmation", " DUAL_CONFIRMATION ", "Dual_Confirmation",
+                "\u3000DUAL_CONFIRMATION\u3000", "\tdual_confirmation\n")) {
             String name = "二者確認方針表記OFF-" + System.nanoTime();
             BusinessException ex = assertThrows(BusinessException.class, () -> templateService.createTemplate(
                     template(name, task("POLICY_VARIANT", variant)), hrUser.getId()));
@@ -173,7 +180,8 @@ class LifecycleTemplateDualPolicyTest {
     @DisplayName("子スイッチONでは表記揺れのDUAL_CONFIRMATIONを正規の表記にそろえて保存する（通常完了の409を迂回させない）")
     void 子スイッチONでは表記揺れのDUAL_CONFIRMATIONを正規の表記で保存する() {
         switches(true, true);
-        for (String variant : List.of("dual_confirmation", " DUAL_CONFIRMATION ", "Dual_Confirmation")) {
+        for (String variant : List.of("dual_confirmation", " DUAL_CONFIRMATION ", "Dual_Confirmation",
+                "\u3000DUAL_CONFIRMATION\u3000", "\tdual_confirmation\n")) {
             LifecycleTemplateDto created = templateService.createTemplate(
                     template("二者確認方針表記ON-" + System.nanoTime(), task("POLICY_VARIANT", variant)),
                     hrUser.getId());
@@ -195,6 +203,121 @@ class LifecycleTemplateDualPolicyTest {
 
         assertEquals(existing.getVersionNo() + 1, revised.getVersionNo());
         assertEquals("DUAL_CONFIRMATION", storedEvidenceTypes(revised.getId()).get("POLICY_DUAL"));
+    }
+
+    // ===================================================================== 証跡種別の許可値一覧（review P2-1）
+
+    /** 見た目は既存の種別と同じでも、完全一致の判定をすり抜ける値・一覧外の値。 */
+    static Stream<String> invalidEvidenceTypes() {
+        return Stream.of(
+                "DUAL_CONFIRMATION\u00A0",
+                "\u00A0DOCUMENT_LINK",
+                "DUAL_CONFIRMATION\u200B",
+                "\u200BDOCUMENT_LINK",
+                "DUAL_\u200BCONFIRMATION",
+                "\uFEFFDUAL_CONFIRMATION",
+                "\uFF24\uFF35\uFF21\uFF2C\uFF3F\uFF23\uFF2F\uFF2E\uFF26\uFF29\uFF32\uFF2D\uFF21\uFF34\uFF29\uFF2F\uFF2E",
+                "\uFF24\uFF2F\uFF23\uFF35\uFF2D\uFF25\uFF2E\uFF34\uFF3F\uFF2C\uFF29\uFF2E\uFF2B",
+                "DOCUMENT LINK",
+                "unknown",
+                "",
+                "   ",
+                "DUAL_CONFIRMATION_WITH_A_VERY_LONG_SUFFIX");
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidEvidenceTypes")
+    void 許可値一覧に無い証跡種別とASCII以外を含む証跡種別は子スイッチONでも400で1件も書かない(String evidenceType) {
+        switches(true, true);
+        String name = "二者確認方針不正-" + System.nanoTime();
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> templateService.createTemplate(
+                template(name, task("POLICY_OK", "NONE"), task("POLICY_BAD", evidenceType)), hrUser.getId()));
+
+        assertEquals(400, ex.getCode(), evidenceType);
+        assertEquals("error.lifecycle.invalidEvidenceType", ex.getMessageKey(), evidenceType);
+        assertEquals(0L, countByName(name), evidenceType);
+    }
+
+    @Test
+    void 許可値一覧に無い証跡種別を含む改定は400で旧版も新版も変わらない() {
+        switches(true, true);
+        LifecycleTemplateDto existing = templateService.createTemplate(
+                template("二者確認方針不正改定-" + System.nanoTime(), task("POLICY_BASE", "DOCUMENT_LINK")),
+                hrUser.getId());
+        Long versionsBefore = countByType("TRANSFER");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> templateService.updateTemplate(
+                existing.getId(), template(existing.getName(), task("POLICY_BASE", "DOCUMENT_LINK\u200B")),
+                hrUser.getId()));
+
+        assertEquals("error.lifecycle.invalidEvidenceType", ex.getMessageKey());
+        assertNull(templateMapper.selectById(existing.getId()).getValidTo());
+        assertEquals(versionsBefore, countByType("TRANSFER"));
+    }
+
+    /** 前後のUnicode空白（U+3000等）と大文字小文字は正規の表記にそろえる。DOCUMENT_LINKも同じ（W3-02以来の揺れ）。 */
+    static Stream<Arguments> normalizedEvidenceTypes() {
+        return Stream.of(
+                Arguments.of("document_link", "DOCUMENT_LINK"),
+                Arguments.of("\u3000Document_Link\u3000", "DOCUMENT_LINK"),
+                Arguments.of(" DOCUMENT_LINK\t", "DOCUMENT_LINK"),
+                Arguments.of("\u3000dual_confirmation", "DUAL_CONFIRMATION"),
+                Arguments.of("comment", "COMMENT"),
+                Arguments.of("self_declaration", "SELF_DECLARATION"),
+                Arguments.of("System_Check", "SYSTEM_CHECK"),
+                Arguments.of("NONE", "NONE"),
+                Arguments.of(null, "NONE"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedEvidenceTypes")
+    void 前後のUnicode空白と大文字小文字は正規の表記にそろえて保存する(String evidenceType, String stored) {
+        switches(true, true);
+
+        LifecycleTemplateDto created = templateService.createTemplate(
+                template("二者確認方針正規化-" + System.nanoTime(), task("POLICY_NORMALIZED", evidenceType)),
+                hrUser.getId());
+
+        assertEquals(stored, storedEvidenceTypes(created.getId()).get("POLICY_NORMALIZED"), String.valueOf(evidenceType));
+    }
+
+    // ===================================================================== 有効化（review P3-1）
+
+    @Test
+    void 子スイッチOFFの間はDUALを含むテンプレートを無効にできるが有効に戻せない() {
+        switches(true, true);
+        LifecycleTemplateDto dual = templateService.createTemplate(
+                template("二者確認方針有効化-" + System.nanoTime(), task("POLICY_DUAL", "DUAL_CONFIRMATION")),
+                hrUser.getId());
+        switches(true, false);
+
+        templateService.toggleStatus(dual.getId(), "INACTIVE", hrUser.getId());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> templateService.toggleStatus(dual.getId(), "ACTIVE", hrUser.getId()));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("error.lifecycle.dualConfirmationDisabled", ex.getMessageKey());
+        assertEquals("INACTIVE", templateMapper.selectById(dual.getId()).getStatus());
+    }
+
+    @Test
+    void 子スイッチONならDUALを含むテンプレートを有効に戻せOFFでもDUALを含まないテンプレートは有効に戻せる() {
+        switches(true, true);
+        LifecycleTemplateDto dual = templateService.createTemplate(
+                template("二者確認方針再有効ON-" + System.nanoTime(), task("POLICY_DUAL", "DUAL_CONFIRMATION")),
+                hrUser.getId());
+        templateService.toggleStatus(dual.getId(), "INACTIVE", hrUser.getId());
+        templateService.toggleStatus(dual.getId(), "ACTIVE", hrUser.getId());
+        assertEquals("ACTIVE", templateMapper.selectById(dual.getId()).getStatus());
+
+        switches(true, false);
+        LifecycleTemplateDto plain = templateService.createTemplate(
+                template("二者確認方針再有効OFF-" + System.nanoTime(), task("POLICY_DOC", "DOCUMENT_LINK")),
+                hrUser.getId());
+        templateService.toggleStatus(plain.getId(), "INACTIVE", hrUser.getId());
+        templateService.toggleStatus(plain.getId(), "ACTIVE", hrUser.getId());
+        assertEquals("ACTIVE", templateMapper.selectById(plain.getId()).getStatus());
     }
 
     // ===================================================================== helpers
