@@ -33,10 +33,15 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * M8・M9（実MySQLの試験クラス）の共通fixture。本class自身は試験ではない（shard一覧に載せない）。各fixtureは一意のtenantに行をcommitする。
+ * M8・M9（実MySQLの試験クラス）の共通fixture。本class自身は試験ではない（shard一覧に載せない）。
  *
  * <p>B0の不変表はtriggerが削除を拒否するため、試験後に行を消せない（計画 §7.8 W3-18からの引継ぎ）。各試験クラスは専用の
- * MySQL containerを使い、fixtureごとに一意のtenant・利用者名・案件番号で分離する。全tenantを数える問合せはしない。</p>
+ * MySQL containerを使い、fixtureごとに一意の利用者・要員・組織・案件・タスク・文書で分離する。B0の行と拒否eventは
+ * fixtureのタスクID（拒否eventは {@code requested_task_id}）で絞って数え、container全体を数える問合せはしない。</p>
+ *
+ * <p>tenantは配備のtenant（test profileの {@code app.security.oidc.tenant-id: default}）に固定する。明示actorのaction判定
+ * （{@code AuthorizationServiceImpl#isAllowedForActor}）は配備のtenant以外の利用者を常に拒否する（単一tenant配備の前提、
+ * 計画 §9 RR-14）ため、fixtureごとに別のtenantを使うと提出・確認のroute判定がすべて403になる。</p>
  *
  * <p>構成: 担当営業（{@code 営業}、現任の担当営業割当あり）、確認者2名（{@code HR}）、管理者、マネージャー（組織scope有効時に
  * 要員の所属組織を主所属に持つ）、要員（所属組織あり）、ACTIVEの案件、IN_PROGRESSのDUALタスクとPENDINGの後続タスク、
@@ -45,6 +50,8 @@ import java.util.function.Supplier;
 final class DualConfirmationMySqlFixtures {
 
     static final long LEGAL_ENTITY_ID = 1L;
+    /** 配備のtenant（test profileの OIDC tenant-id）。 */
+    static final String TENANT = "default";
     static final LocalDate VALID_FROM = LocalDate.of(2020, 1, 1);
     private static final AtomicLong SEQUENCE = new AtomicLong(System.nanoTime() % 1_000_000_000L);
     private static final AtomicInteger TEMPLATE_VERSION = new AtomicInteger(900_000);
@@ -79,9 +86,12 @@ final class DualConfirmationMySqlFixtures {
         this.taskDepMapper = taskDepMapper;
     }
 
-    /** 一意のtenantで二者確認の前提一式をcommitする（各文はautocommit）。 */
+    /** 二者確認の前提一式を新しい行でcommitする（各文はautocommit）。{@code prefix} は診断用の名前に使う。 */
     Fixture create(String prefix) {
-        String tenant = prefix + "-" + SEQUENCE.incrementAndGet();
+        String tenant = TENANT;
+        if (prefix == null || prefix.isBlank()) {
+            throw new IllegalArgumentException("prefix");
+        }
         long admin = insertUser(tenant, "管理者");
         long sales = insertUser(tenant, "営業");
         long hr1 = insertUser(tenant, "HR");
@@ -165,10 +175,22 @@ final class DualConfirmationMySqlFixtures {
         return value == null ? 0L : value;
     }
 
-    /** tenantの拒否eventのreason（古い順）。 */
+    /** fixtureのタスクへの要求の拒否eventのreason（古い順）。 */
     List<String> deniedReasons(Fixture f) {
         return jdbc.queryForList("SELECT reason_code FROM t_lifecycle_dual_event WHERE tenant_id = ? "
-                + "AND event_type = 'DENIED' ORDER BY id", String.class, f.tenant());
+                + "AND requested_task_id = ? AND event_type = 'DENIED' ORDER BY id", String.class, f.tenant(), f.taskId());
+    }
+
+    /** fixtureのタスクの提出の件数。 */
+    long submissions(Fixture f) {
+        return value("SELECT COUNT(*) FROM t_lifecycle_dual_submission WHERE tenant_id = ? AND task_id = ?",
+                f.tenant(), f.taskId());
+    }
+
+    /** fixtureのタスクの確認・差戻しの件数。 */
+    long confirmations(Fixture f) {
+        return value("SELECT COUNT(*) FROM t_lifecycle_dual_confirmation WHERE tenant_id = ? AND task_id = ?",
+                f.tenant(), f.taskId());
     }
 
     static Throwable capture(Supplier<?> action) {
