@@ -23,9 +23,18 @@ public class ServiceRequestAttachmentCompensationScheduler {
     @org.springframework.beans.factory.annotation.Autowired
     private FeatureSwitches featureSwitches;
 
+    /**
+     * 定期実行の入口。ShedLock の PROXY_METHOD は primitive を返す method を lock できず、呼出しごとに
+     * {@code LockingNotSupportedException} になるため {@code void} にする（件数は {@link #retryDueNow} が返す）。
+     */
     @Scheduled(cron = "${servicedesk.attachment.compensation-cron:0 */5 * * * *}")
     @SchedulerLock(name = "serviceRequestAttachmentCompensation", lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
-    public int retryDue() {
+    public void retryDue() {
+        retryDueNow();
+    }
+
+    /** 補償の再試行を1回行い、完了した件数を返す（NF-02がOFFなら0）。 */
+    public int retryDueNow() {
         if (!FeatureSwitches.allows(featureSwitches, Feature.NF02)) {
             log.debug("[機能スイッチ] NF02がOFFのためサービスデスク添付補償の再試行をスキップしました");
             return 0;

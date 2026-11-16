@@ -115,13 +115,16 @@ class FeatureSwitchSchedulerGateTest {
                 new ServiceRequestAttachmentCompensationScheduler(compensationService);
 
         inject(scheduler, disabledOnly(Feature.NF02));
-        assertThat(scheduler.retryDue()).isZero();
+        scheduler.retryDue();
+        assertThat(scheduler.retryDueNow()).isZero();
         verifyNoInteractions(compensationService);
 
         when(compensationService.retryDue(100)).thenReturn(3);
         inject(scheduler, enabledOnly(Feature.NF02));
-        assertThat(scheduler.retryDue()).isEqualTo(3);
+        // 定期実行の入口（void。ShedLock の PROXY_METHOD は primitive を返す method を lock できない）
+        scheduler.retryDue();
         verify(compensationService).retryDue(100);
+        assertThat(scheduler.retryDueNow()).isEqualTo(3);
     }
 
     @Test
@@ -137,7 +140,7 @@ class FeatureSwitchSchedulerGateTest {
         ReflectionTestUtils.setField(scheduler, "tenantAwareBatchRunner", runner);
 
         inject(scheduler, disabledOnly(Feature.NF03));
-        assertThat(scheduler.dispatchToday()).isZero();
+        scheduler.dispatchToday();
         verifyNoInteractions(certificationMapper, notificationService, runner);
 
         inject(scheduler, enabledOnly(Feature.NF03));
@@ -173,7 +176,7 @@ class FeatureSwitchSchedulerGateTest {
         when(compensationService.retryDue(100)).thenReturn(1);
 
         // Spring管理外でnewした既存単体テストの経路（featureSwitches=null）を変えない。
-        assertThat(new ServiceRequestAttachmentCompensationScheduler(compensationService).retryDue()).isEqualTo(1);
+        assertThat(new ServiceRequestAttachmentCompensationScheduler(compensationService).retryDueNow()).isEqualTo(1);
         assertThat(FeatureSwitches.allows(null, Feature.NF02)).isTrue();
         assertThat(FeatureSwitches.allows(FeatureSwitchTestSupport.allOff(), Feature.NF02)).isFalse();
     }
