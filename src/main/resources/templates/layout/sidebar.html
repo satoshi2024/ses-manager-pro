@@ -434,6 +434,13 @@
                         <span th:text="#{menu.privacyHolds}">プライバシー保全</span>
                     </a>
                 </li>
+                <!-- NF07 DSAR: 機能のmenu keyに加え、privacy action の判定結果（privacy-admin だけ）で表示する（§6.8） -->
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('privacy-dsar') and privacyDsarMenuAllowed == true}">
+                    <a th:href="@{/privacy/dsar}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/privacy/dsar' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-person me-2"></i>
+                        <span th:text="#{menu.privacyDsar}">本人請求（DSAR）</span>
+                    </a>
+                </li>
                 <li class="nav-item" sec:authorize="hasRole('管理者')">
                     <a th:href="@{/integration-hub/inbound-events}" class="nav-link px-3 py-2 rounded-md"
                        th:classappend="${#strings.startsWith(currentUri, '/integration-hub/inbound-events') ? 'active bg-tertiary text-white' : 'text-secondary'}">

@@ -53,9 +53,8 @@ class FeatureSwitchRouteCoverageTest {
      *
      * <p>NF-07 は1つのresource（{@code privacy}）が保持・保全とDSARの2機能にまたがるため、
      * {@link #NF_ACTION_RESOURCES} には登録せず package で判定する。privacy の controller は
-     * {@code com.ses.privacy.production.retention.*}（保持・保全）の型に依存させる（C-1）。
-     * {@code com.ses.privacy.production.dsar} は DSAR の機能スイッチを登録する A2a で追加する（W3-14 では
-     * {@code Feature.NF07_DSAR} が未登録のため対応先が無い）。
+     * {@code com.ses.privacy.production.retention.*}（保持・保全）か {@code com.ses.privacy.production.dsar}（DSAR、A2a）の
+     * 型に依存させる（C-1）。両方に依存する controller は所属が2つになり検出される。
      */
     private static final Map<String, Feature> NF_SERVICE_PACKAGES = Map.ofEntries(
             Map.entry("com.ses.service.lifecycle", Feature.NF01),
@@ -67,6 +66,7 @@ class FeatureSwitchRouteCoverageTest {
             Map.entry("com.ses.service.pwa", Feature.NF04),
             Map.entry("com.ses.importcenter", Feature.NF06),
             Map.entry("com.ses.privacy.production.retention", Feature.NF07_RETENTION),
+            Map.entry("com.ses.privacy.production.dsar", Feature.NF07_DSAR),
             Map.entry("com.ses.service.report", Feature.NF10));
 
     /** ActionPermissionResolverのresource名 → 所属機能（API root・画面rootの解決結果で判定）。 */
@@ -102,6 +102,8 @@ class FeatureSwitchRouteCoverageTest {
             "com.ses.service.scheduler.ServiceSlaScheduler", Feature.NF02,
             "com.ses.service.scheduler.ServiceRequestAttachmentCompensationScheduler", Feature.NF02,
             "com.ses.service.certification.CertificationExpiryNotificationScheduler", Feature.NF03,
+            // NF07-A2a: DSAR の期限通知（OFF なら privacy-admin へ通知しない）
+            "com.ses.privacy.production.dsar.PrivacyDsarDeadlineScheduler", Feature.NF07_DSAR,
             "com.ses.service.scheduler.ManagementReportScheduler", Feature.NF10);
 
     /**
@@ -195,6 +197,8 @@ class FeatureSwitchRouteCoverageTest {
         List<Route> privacyRoutes = controllerRoutes().stream()
                 .filter(route -> Feature.matchesSegmentPrefix(route.normalized(), "/api/privacy")
                         || Feature.matchesSegmentPrefix(route.normalized(), "/privacy"))
+                // DSAR（A2a）の入口は別の最上位機能に属する（下の DSAR の test で確かめる）
+                .filter(route -> !isDsarRoute(route))
                 .toList();
 
         assertThat(privacyRoutes).as("privacyのcontroller入口を検出できること").isNotEmpty();
@@ -220,6 +224,42 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(Feature.NF07_RETENTION.pagePrefixes()).containsExactly("/privacy/holds");
         assertThat(Feature.NF07_RETENTION.menuKeys()).containsExactly("privacy-retention");
         assertThat(NF_ACTION_RESOURCES).doesNotContainKey("privacy");
+    }
+
+    /**
+     * NF07-A2a（C-1）: DSAR の画面・API は保持・保全とは別の最上位機能 {@code NF07_DSAR} に属し、
+     * controller は {@code com.ses.privacy.production.dsar} の型にだけ依存する。A2b の承認・package の入口も同じ prefix の配下にある。
+     */
+    @Test
+    void NF07のDSARの画面とAPIは本人請求の機能に属し保持保全とは分かれる() throws Exception {
+        List<Route> dsarRoutes = controllerRoutes().stream().filter(FeatureSwitchRouteCoverageTest::isDsarRoute).toList();
+
+        assertThat(dsarRoutes).as("DSARのcontroller入口").isNotEmpty();
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/api/privacy/dsar"));
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/privacy/dsar"));
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/privacy/dsar/1"));
+        for (Route route : dsarRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF07_DSAR);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF07_DSAR);
+        }
+        assertThat(Feature.NF07_DSAR.isTopLevel()).isTrue();
+        assertThat(Feature.NF07_DSAR.apiPrefixes()).containsExactly("/api/privacy/dsar");
+        assertThat(Feature.NF07_DSAR.pagePrefixes()).containsExactly("/privacy/dsar");
+        assertThat(Feature.NF07_DSAR.exactPaths()).isEmpty();
+        assertThat(Feature.NF07_DSAR.menuKeys()).containsExactly("privacy-dsar");
+        assertThat(Feature.forPath("/api/privacy/dsar/1/package/download")).contains(Feature.NF07_DSAR);
+        assertThat(Feature.forPath("/api/privacy/dsar/1/approve")).contains(Feature.NF07_DSAR);
+        assertThat(Feature.forPath("/privacy/dsar-like")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy/dsar-like")).isEmpty();
+        assertThat(Feature.forPath("/privacy")).isEmpty();
+        assertThat(dsarRoutes).as("承認・package・交付の入口は A2b で足す")
+                .noneMatch(route -> route.normalized().contains("/approve") || route.normalized().contains("/package")
+                        || route.normalized().contains("/export"));
+    }
+
+    private static boolean isDsarRoute(Route route) {
+        return Feature.matchesSegmentPrefix(route.normalized(), "/api/privacy/dsar")
+                || Feature.matchesSegmentPrefix(route.normalized(), "/privacy/dsar");
     }
 
     @Test
@@ -405,7 +445,7 @@ class FeatureSwitchRouteCoverageTest {
         }
 
         assertThat(linkedFeatures).containsExactlyInAnyOrder(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF06,
-                Feature.NF07_RETENTION, Feature.NF10);
+                Feature.NF07_RETENTION, Feature.NF07_DSAR, Feature.NF10);
         assertThat(violations).as("NF導線がFeature.menuKeys以外の条件で表示されている: %s", violations).isEmpty();
     }
 

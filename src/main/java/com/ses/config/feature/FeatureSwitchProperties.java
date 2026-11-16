@@ -55,7 +55,8 @@ public class FeatureSwitchProperties {
     private Toggle nf10 = new Toggle();
 
     /**
-     * NF-07 の設定値（{@code privacy.*}）。{@code app.features.*} としてはbindしない（getter/setterを持たせず、
+     * NF-07 の設定値（{@code privacy.*}。保持・保全は {@code privacy.retention}、DSAR は {@code privacy.dsar}）。
+     * {@code app.features.*} としてはbindしない（getter/setterを持たせず、
      * 別名を作らない）。Spring contextでは同じ {@link com.ses.privacy.production.PrivacyFeatureProperties} beanを
      * {@link #usePrivacyFeatureProperties} で受け取る。Spring管理外で {@code new} した場合は既定OFFの値を持つ。
      */
@@ -86,6 +87,7 @@ public class FeatureSwitchProperties {
             case NF04 -> nf04;
             case NF06 -> nf06;
             case NF07_RETENTION -> privacy.getRetention();
+            case NF07_DSAR -> privacy.getDsar();
             case NF10 -> nf10;
         };
     }

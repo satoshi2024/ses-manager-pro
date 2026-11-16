@@ -39,7 +39,8 @@ import java.util.TreeSet;
  *           OIDC でログインできる管理者だけを数え、break-glass username は大文字小文字を区別せず除く）が
  *           {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。アカウントロックは数え方に影響しない（review P2-1）。</li>
  *       <li>{@code privacy-admin} 以外の有効な group が {@code privacy.} 接頭辞の許可行を持たない（review P3-2）。</li>
- *       <li>{@code dsar}: 入口と §5.1 の追加前提（D-06 の値、F2 provider 等）を検査する A2a が未実装のため、常に不可。</li>
+ *       <li>{@code dsar}: 入口（受付〜SCOPED）は A2a で追加したが、§5.1 の追加前提（{@code privacy.dsar.due-days}・
+ *           {@code package-max-age}、F2 provider 等）の検査と検索〜交付記録の A2b が未実装のため、常に不可。</li>
  *     </ol>
  *   </li>
  * </ul>

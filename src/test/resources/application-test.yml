@@ -211,11 +211,14 @@ app:
     nf10:
       enabled: true
 
-# NF07: 既存テストの意味を保つため、機能スイッチ（Feature.NF07_RETENTION）と同じく test profile ではONにする。
-# OFF時の404・policy source読取0回は PrivacyAccessGuardTest / ProductionPolicyReadonlyQueryServiceTest で検証する。
-# privacy.dsar はW3-14ではFeature未登録（A2aで登録）のため既定OFFのままにする。
+# NF07: 既存テストの意味を保つため、機能スイッチ（Feature.NF07_RETENTION・NF07_DSAR）と同じく test profile ではONにする。
+# OFF時の404・policy source読取0回は PrivacyAccessGuardTest / ProductionPolicyReadonlyQueryServiceTest で、
+# DSAR の OFF は PrivacyDsarApiControllerTest / PrivacyDsarDeadlineSchedulerTest で検証する。
+# DSAR の期限規則（privacy.dsar.due-days）は法的な値のため test profile でも設定しない（必要な test が個別に与える）。
 privacy:
   retention:
+    enabled: true
+  dsar:
     enabled: true
 
 ai:

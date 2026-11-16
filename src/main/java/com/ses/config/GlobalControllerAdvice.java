@@ -91,11 +91,14 @@ public class GlobalControllerAdvice {
             new NavRoute("/user", "/user"),
             new NavRoute("/system-config", "/system-config"),
             new NavRoute("/audit-log", "/audit-log"),
-            new NavRoute("/privacy/holds", "/privacy/holds")
+            new NavRoute("/privacy/holds", "/privacy/holds"),
+            new NavRoute("/privacy/dsar", "/privacy/dsar")
     );
 
     /** NF07 保全 hold の画面の action（privacy-admin だけが許可される）。 */
     private static final String PRIVACY_HOLD_VIEW_ACTION = "privacy.hold.view";
+    /** NF07 DSAR の画面の action（privacy-admin だけが許可される）。 */
+    private static final String PRIVACY_DSAR_VIEW_ACTION = "privacy.dsar.view";
 
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
@@ -191,12 +194,24 @@ public class GlobalControllerAdvice {
      */
     @ModelAttribute("privacyHoldMenuAllowed")
     public boolean privacyHoldMenuAllowed(Authentication authentication) {
+        return privacyMenuAllowed(authentication, com.ses.config.feature.Feature.NF07_RETENTION,
+                PRIVACY_HOLD_VIEW_ACTION);
+    }
+
+    /** NF07 DSAR の導線を出すか（{@link #privacyHoldMenuAllowed} と同じ判定を {@code NF07_DSAR}・{@code privacy.dsar.view} で行う）。 */
+    @ModelAttribute("privacyDsarMenuAllowed")
+    public boolean privacyDsarMenuAllowed(Authentication authentication) {
+        return privacyMenuAllowed(authentication, com.ses.config.feature.Feature.NF07_DSAR, PRIVACY_DSAR_VIEW_ACTION);
+    }
+
+    private boolean privacyMenuAllowed(Authentication authentication, com.ses.config.feature.Feature feature,
+                                       String actionKey) {
         if (authentication == null || authentication.getAuthorities().stream()
                 .noneMatch(authority -> "ROLE_管理者".equals(authority.getAuthority()))) {
             return false;
         }
         com.ses.config.feature.FeatureSwitches switches = featureSwitches();
-        if (switches == null || !switches.isEnabled(com.ses.config.feature.Feature.NF07_RETENTION)) {
+        if (switches == null || !switches.isEnabled(feature)) {
             return false;
         }
         com.ses.service.security.AuthorizationService authorizationService =
@@ -205,7 +220,7 @@ public class GlobalControllerAdvice {
             return false;
         }
         try {
-            return authorizationService.isAllowed(authentication, PRIVACY_HOLD_VIEW_ACTION);
+            return authorizationService.isAllowed(authentication, actionKey);
         } catch (RuntimeException e) {
             return false;
         }

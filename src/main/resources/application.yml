@@ -591,7 +591,8 @@ integration:
 # OFFの間は登録済みの /api/privacy/policies が404になり（FeatureSwitchFilter と PrivacyAccessGuard）、policy source は
 # 読まずに POLICY_UNKNOWN を返す。登録していない /api/privacy/<x> には handler が無く guard も通らないため、
 # privacy-admin 以外の管理者は403（MenuPermissionFilter）、privacy-admin は Spring の404になる。
-# privacy.dsar.enabled はW3-14では設定値だけを持つ（入口と Feature 登録は A2a で追加する）。
+# privacy.dsar.enabled は機能スイッチ Feature.NF07_DSAR の設定値（A2a）。OFFの間は /privacy/dsar・/api/privacy/dsar が404で、
+# 期限通知の scheduler も止まる。prodでONにする前提（package-max-age 等）は A2b まで未実装のため、prodではONで起動しない。
 # 法的な値（保持期間・期限・本人確認基準等）はここへ書かない（署名後に人が別の設定で与える）。
 # prodで1つでもONにすると PrivacyProductionConfigurationValidator が、下の決定ID束縛（approval）の完全性、
 # privacy-admin の有効な管理者2名以上、privacy-admin 以外のgroupに privacy.* 系の許可行が無いことを検査し、
@@ -603,6 +604,11 @@ privacy:
     enabled: ${PRIVACY_RETENTION_ENABLED:false}
   dsar:
     enabled: ${PRIVACY_DSAR_ENABLED:false}
+    # D-06（DSAR SOP）の期限規則: 受付日（JST）から期限日までの暦日数。法的な値のため既定値を持たない（I-1）。
+    # 未設定・1〜366以外、または D-01・D-06 の決定が無効な間は期限日を計算しない（期限通知も出ない）。
+    due-days: ${PRIVACY_DSAR_DUE_DAYS:}
+    # 期限の何日前から privacy-admin へ通知するか（運用上の値で法的な期限ではない。1〜90に丸める）
+    deadline-warning-days: ${PRIVACY_DSAR_DEADLINE_WARNING_DAYS:7}
   # 決定ID束縛（PrivacyDecisionBinding）。値は署名済み決定書の転記で、秘密値を置かない。既定は全て未設定＝ONにできない。
   # retention は D-01・D-09、dsar は D-01・D-06・D-09 を必要とする。AI・実装者は値を設定しない。
   approval:

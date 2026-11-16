@@ -120,6 +120,40 @@ class FeatureSwitchMenuAndViewTest {
         assertThat(sliceAdvice.allowedMenus(admin())).containsExactlyElementsOf(ALL_MENU_KEYS);
     }
 
+    /** A2a: DSAR の導線は NF07_DSAR が ON で privacy.dsar.view を持つ管理者だけ（保全 hold の導線とは独立）。 */
+    @Test
+    void privacyの導線は機能ごとのスイッチとprivacy_actionの両方を満たす管理者だけに出す() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        UsernamePasswordAuthenticationToken privacyAdmin = admin();
+        when(authorizationService.isAllowed(privacyAdmin, "privacy.dsar.view")).thenReturn(true);
+        when(authorizationService.isAllowed(privacyAdmin, "privacy.hold.view")).thenReturn(true);
+        GlobalControllerAdvice advice = new GlobalControllerAdvice(menuProvider, authorizationProvider);
+
+        ReflectionTestUtils.setField(advice, "featureSwitchesProvider", provider(enabledOnly(Feature.NF07_DSAR)));
+        assertThat(advice.privacyDsarMenuAllowed(privacyAdmin)).isTrue();
+        assertThat(advice.privacyHoldMenuAllowed(privacyAdmin)).isFalse();
+
+        ReflectionTestUtils.setField(advice, "featureSwitchesProvider", provider(enabledOnly(Feature.NF07_RETENTION)));
+        assertThat(advice.privacyDsarMenuAllowed(privacyAdmin)).isFalse();
+        assertThat(advice.privacyHoldMenuAllowed(privacyAdmin)).isTrue();
+
+        ReflectionTestUtils.setField(advice, "featureSwitchesProvider", provider(allOn()));
+        UsernamePasswordAuthenticationToken otherAdmin = new UsernamePasswordAuthenticationToken("other-admin", null,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        assertThat(advice.privacyDsarMenuAllowed(otherAdmin)).as("privacy.dsar.view が無い管理者").isFalse();
+        UsernamePasswordAuthenticationToken sales = new UsernamePasswordAuthenticationToken("sales", null,
+                List.of(new SimpleGrantedAuthority("ROLE_営業")));
+        when(authorizationService.isAllowed(sales, "privacy.dsar.view")).thenReturn(true);
+        assertThat(advice.privacyDsarMenuAllowed(sales)).as("管理者 role 以外").isFalse();
+        when(authorizationService.isAllowed(privacyAdmin, "privacy.dsar.view")).thenThrow(new IllegalStateException("x"));
+        assertThat(advice.privacyDsarMenuAllowed(privacyAdmin)).as("判定の例外は出さない").isFalse();
+    }
+
     @Test
     void ログイン後の着地先はOFFの機能のメニューを選ばない() {
         MenuCacheService menuCache = mock(MenuCacheService.class);

@@ -220,6 +220,48 @@ class PrivacyDecisionWindowMonitorTest {
     void 本番profileだけで登録される() {
         Profile profile = PrivacyDecisionWindowMonitor.class.getAnnotation(Profile.class);
         assertArrayEquals(new String[]{"prod"}, profile.value());
+        Profile dsarProfile = PrivacyDsarDecisionWindowCondition.class.getAnnotation(Profile.class);
+        assertArrayEquals(new String[]{"prod"}, dsarProfile.value());
+    }
+
+    /** A2a: 機能スイッチ NF07_DSAR にも同じ有効期間の条件を掛ける（PrivacyDsarDecisionWindowCondition）。 */
+    @Test
+    void DSARの機能スイッチにも同じ有効期間の条件が掛かり失効日から閉じる() {
+        MutableClock clock = new MutableClock(NOW);
+        PrivacyFeatureProperties flags = flags(true);
+        flags.getDsar().setEnabled(true);
+        PrivacyDecisionWindowMonitor monitor = started(flags, approvedWithDsar(), clock, new SimpleMeterRegistry());
+        PrivacyDsarDecisionWindowCondition condition = new PrivacyDsarDecisionWindowCondition(monitor);
+        FeatureSwitchProperties properties = new FeatureSwitchProperties();
+        properties.usePrivacyFeatureProperties(flags);
+        FeatureSwitches switches = new FeatureSwitches(properties);
+        switches.setRuntimeConditions(List.of(monitor, condition));
+
+        assertEquals(Feature.NF07_DSAR, condition.feature());
+        assertTrue(switches.isEnabled(Feature.NF07_DSAR));
+        assertTrue(switches.isEnabled(Feature.NF07_RETENTION));
+
+        clock.set(EXPIRY_DAY_START);
+        assertFalse(switches.isEnabled(Feature.NF07_DSAR), "失効日（JST）からDSARも閉じる");
+        assertEquals(Feature.NF07_DSAR, switches.blockingFeature("/api/privacy/dsar").orElseThrow());
+
+        // dsar を承認していない束縛のまま dsar を ON にした場合も閉じる（束縛の不足）
+        PrivacyDecisionWindowMonitor retentionOnly = started(flags, approved(), new MutableClock(NOW),
+                new SimpleMeterRegistry());
+        FeatureSwitches notApproved = new FeatureSwitches(properties);
+        notApproved.setRuntimeConditions(List.of(retentionOnly, new PrivacyDsarDecisionWindowCondition(retentionOnly)));
+        assertFalse(notApproved.isEnabled(Feature.NF07_DSAR));
+    }
+
+    /** retention と dsar を承認した完全な束縛（D-06: 2026-11-05〜2027-11-04。最も早い失効は D-09 の 2027-05-31）。 */
+    private static PrivacyApprovalProperties approvedWithDsar() {
+        PrivacyApprovalProperties approval = approved();
+        approval.setCapabilities(new ArrayList<>(List.of("retention", "dsar")));
+        approval.getD06().setDecisionId("D06-NF07-2026-0006");
+        approval.getD06().setSignedOn("2026-11-05");
+        approval.getD06().setExpiresOn("2027-11-04");
+        approval.setApprovalDigest(PrivacyDecisionBinding.computeDigest(approval));
+        return approval;
     }
 
     // ---------------------------------------------------------------- helpers
@@ -246,10 +288,8 @@ class PrivacyDecisionWindowMonitorTest {
     private static PrivacyAccessGuard guard(FeatureSwitches switches) {
         ObjectProvider<FeatureSwitches> switchesProvider = mock(ObjectProvider.class);
         when(switchesProvider.getIfAvailable()).thenReturn(switches);
-        ObjectProvider<PrivacyFeatureProperties> propertiesProvider = mock(ObjectProvider.class);
-        when(propertiesProvider.getIfAvailable()).thenReturn(flags(true));
         ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
-        return new PrivacyAccessGuard(switchesProvider, propertiesProvider, authorizationProvider);
+        return new PrivacyAccessGuard(switchesProvider, authorizationProvider);
     }
 
     @SuppressWarnings("unchecked")
