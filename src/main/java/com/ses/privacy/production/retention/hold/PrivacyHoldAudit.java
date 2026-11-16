@@ -20,7 +20,13 @@ import java.util.Objects;
  */
 final class PrivacyHoldAudit {
 
-    static final String METHOD = "PRIVACY_HOLD";
+    /**
+     * 監査の method 列の値。{@code t_audit_log.method} は {@code VARCHAR(10)}（V11）のため10文字以内にする（以前の
+     * {@code PRIVACY_HOLD} は12文字で、MySQL の strict mode では監査の insert が失敗し、required 監査を書く hold の開始・解除が
+     * 常に失敗していた。fast・MySQL の test は監査を mock にしていたため検出できなかった。NF07-REL 第3 commit で発見）。
+     * 経路の識別は application code（{@code NF07_HOLD_<event>}）で行う。
+     */
+    static final String METHOD = "PRIV_HOLD";
     static final String URI_PREFIX = "/api/privacy/holds#";
     private static final int MAX_URI = 500;
 
@@ -40,12 +46,16 @@ final class PrivacyHoldAudit {
     static final String RELEASE_REASON = "RELEASE_REASON";
     /** 解除の開放の前提にした D-03・D-05 の決定ID（1行の上限に収めるため別の行にする）。 */
     static final String RELEASE_DECISIONS = "RELEASE_DECISIONS";
+    /** 判定に使った D-05 の解除の承認者規則と許容ずれ（separation・unknownStarter・skewSeconds）。 */
+    static final String RELEASE_RULES = "RELEASE_RULES";
     static final String RELEASED = "RELEASED";
     /** proof・束縛・状態の拒否（理由は {@code HoldReleaseRejection} 等の固定 code）。 */
     static final String RELEASE_REJECTED = "RELEASE_REJECTED";
     static final String RELEASE_ACK_UNKNOWN = "RELEASE_ACK_UNKNOWN";
     static final String RECONCILE_RELEASE_PROJECTED = "RECONCILE_RELEASE_PROJECTED";
     static final String RECONCILE_RELEASE_CAUGHT_UP = "RECONCILE_RELEASE_CAUGHT_UP";
+    /** reconciler が復元した行の開始者を、開始要求の監査から戻した（delta review P2-1）。 */
+    static final String RECONCILE_STARTER_RESTORED = "RECONCILE_STARTER_RESTORED";
 
     private final AuditLogService auditLogService;
 

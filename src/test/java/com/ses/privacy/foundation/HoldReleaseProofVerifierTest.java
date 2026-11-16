@@ -350,6 +350,18 @@ class HoldReleaseProofVerifierTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void 対になっていないsurrogateは理由のhashの正規形に入れない() {
+        assertThatThrownBy(() -> HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001", "理由\uD800"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001", "\uDC00理由"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(HoldReleaseBinding.isWellFormed("理由\uD800x")).isFalse();
+        // 対になった surrogate（絵文字等）は Java と Web Crypto で同じ 4 byte になるので受け付ける
+        assertThat(HoldReleaseBinding.isWellFormed("理由😀")).isTrue();
+        assertThat(HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001", "理由😀")).hasSize(64);
+    }
+
     /** deploy-runbook §4.5 の test vector（Java とは独立に Node.js で計算した値）。 */
     @Test
     void 署名の正規形はrunbookのtest_vectorと一致する() {

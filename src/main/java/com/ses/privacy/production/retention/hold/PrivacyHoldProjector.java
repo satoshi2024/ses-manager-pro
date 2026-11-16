@@ -93,15 +93,19 @@ final class PrivacyHoldProjector {
         String journalId = journal.journalId();
         Boolean inserted = requiresNew.execute(status -> {
             Instant now = clock.instant();
-            if (store.lockState(tenantId, journalId).isEmpty()) {
+            java.util.Optional<PrivacyHoldProjectionStore.StateRow> state = store.lockState(tenantId, journalId);
+            if (state.isEmpty()) {
                 store.ensureStateLocked(tenantId, journalId, now);
             }
             boolean written = false;
             if (!store.holdExists(tenantId, hold.holdId())) {
                 store.insertHold(tenantId, hold);
                 written = true;
-            } else if (!PrivacyHoldService.RECONCILED.equals(hold.reasonCode())) {
-                // ACK と projection の間に reconciler が先に復元した行は、開始者自身の値に置き換える（Review P3-2）
+            } else if (!PrivacyHoldService.RECONCILED.equals(hold.reasonCode())
+                    && !PrivacyHoldPartitions.isReleaseCommand(state.map(PrivacyHoldProjectionStore.StateRow::pendingCommandId)
+                    .orElse(null))) {
+                // ACK と projection の間に reconciler が先に復元した行は、開始者自身の値に置き換える（Review P3-2）。
+                // 解除の予約・append の途中（解除の pending がある間）は開始者を変えない（NF07-REL delta review P3-3）
                 store.adoptReconciledMetadata(tenantId, hold);
             }
             List<PrivacyHoldProjectionStore.HoldRow> holds = store.holds(tenantId, true);

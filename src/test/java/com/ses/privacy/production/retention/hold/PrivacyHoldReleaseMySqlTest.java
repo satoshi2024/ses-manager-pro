@@ -168,7 +168,10 @@ class PrivacyHoldReleaseMySqlTest {
         PrivacyHoldGate.Decision decision = components.gate.evaluate(components.tenantId);
         assertThat(decision.state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
         assertThat(decision.heldSubjects()).isEmpty();
-        assertThat(components.auditUris).allSatisfy(uri -> assertThat(uri).doesNotContain("ENGINEER").doesNotContain("801"));
+        // subject の ID は値の境界で判定する（STARTED の監査の event hash の先頭16桁に「801」が現れて誤検出した。Runner 0fd7ef52）
+        assertThat(components.auditUris).allSatisfy(uri -> assertThat(java.net.URLDecoder.decode(uri,
+                java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("ENGINEER")
+                .doesNotContainPattern("(^|[^0-9A-Za-z])801([^0-9A-Za-z]|$)"));
     }
 
     @Test

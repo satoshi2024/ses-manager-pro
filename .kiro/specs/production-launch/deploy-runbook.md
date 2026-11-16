@@ -474,9 +474,12 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 | `privacy.hold.release.unknown-starter` | `REJECT` / `ACCEPT` | `REJECT` | 開始者が不明の hold の解除。`ACCEPT` なら開始者との分離は判定しない |
 
 - 解釈できない値は既定（厳しい側）として扱う。値を変えるのは D-05 の署名で決めた場合だけ。
-- 開始者が不明の hold（一覧の開始者が `sys_user:0`。reconciler が Journal から復元した行で、開始時の値が projection に戻っていない）は、既定では 409（`error.privacy.holdReleaseStarterUnknown`）になる。運用は次のどちらか。
-  1. 開始者の値を戻す: 開始時の監査（`NF07_HOLD_START_REQUESTED`・`START_REASON`、hold ID で引ける）で開始者を確かめ、開始の service が同じ event を projection し直す経路（`adoptReconciledMetadata`）で値が戻るのを待つ。値が戻った後は、新しい開始者で署名し直す。
-  2. D-05 の規則で `unknown-starter=ACCEPT` にする（開始者との分離を判定しないことを D-05 owner が署名で受理した場合だけ）。
+- 開始者の自動の復元: hold 開始の ACK が不明（503）で終わり reconciler が Journal から行を復元した場合、reconciler は開始の予約で append より前に書かれる開始要求の監査（`NF07_HOLD_START_REQUESTED`。hold ID で引ける）の username から `sys_user.id` を引き、開始者として記録する。監査が無い・username が1つに定まらない・`sys_user` の行が1つでない・tenant が違う・監査の実行者 id（`human_user_id`）と一致しない場合は不明（`sys_user:0`）のまま残し、以後の reconciler の回でも同じ条件で引き直す（pending の途中は書き換えない）。戻した行は監査 `NF07_HOLD_RECONCILE_STARTER_RESTORED` に残る。戻らない行は reconciler の WARN（`NF07_PRIVACY_HOLD_RECONCILER`、`outcome=STARTER_UNKNOWN`）と metric `ses.privacy.hold.reconciler.outcomes` に出る。
+- 開始者が不明のまま（一覧の開始者が `sys_user:0`）の hold の解除は、既定では 409（`error.privacy.holdReleaseStarterUnknown`）になる。開始の service が同じ event を後から projection し直したとき（`adoptReconciledMetadata`）にも値は戻るが、開始の要求が 503 で終わった場合にこの経路は通らないため、待っても戻らない。運用は次のどちらか。
+  1. 監査付きのデータ修正の手続き: 開始要求の監査で開始者を確かめ、変更票（hold ID・旧値 0・新値・根拠の監査 id）を D-05 owner が承認したうえで、DBA が `t_legal_hold.requested_by` を書き換える。書き換えは projection の値で Journal では確かめられないため（plan §11 の残余）、作業の記録を必ず残す。書き換えた後は新しい開始者で署名し直す。
+  2. D-05 の規則で `unknown-starter=ACCEPT` にする（開始者との分離を判定しないことを D-05 owner が署名で受理した場合だけ。全ての開始者が不明の hold に効く。解除の予約から append までの間（解除の pending がある間）は、reconciler も開始の service も開始者を書き換えない）。
+- 画面の理由の hash は Web Crypto（`crypto.subtle`）で計算するため、https か localhost の画面でだけ表示される。それ以外（http）では「計算できません」と表示され、署名依頼の JSON の `reasonHash` は `null` になる。その場合は上の正規形で理由の hash を計算して記入する（`HoldReleaseProofVerifierTest` と `PrivacyHoldReleaseHashJsTest` が同じ test vector と照合する）。
+- 理由本文に対になっていない surrogate（不正な文字）を含む要求は 400 になる（Java と Web Crypto で byte 列が一致しないため）。
 - 帰属できない element の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除できない（409 `error.privacy.holdReleaseDependency`）。受理するか DDL lane で選択の保存を足すかは plan §11 の未決事項。
 
 ## 5. 初回bootstrap（期限付きbootstrap mode）

@@ -49,6 +49,9 @@ class PrivacyFoundationIsolationTest {
                 "new HoldReleaseProofVerifier(", java.util.Set.of(
                         "com/ses/privacy/foundation/ProductionPrivacyComponents.java"),
                 "new VerifiedHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseProofVerifier.java"));
+        // 方法参照（{@code ::appendHoldRelease} 等）は呼出しの "(" を含まないため、どこにも書かせない（delta review P3-6）
+        java.util.List<String> forbiddenReferences = java.util.List.of("::holdReleaseVerifier", "::appendHoldRelease",
+                "::productionPrivacyJournal");
         Path root = Path.of("src/main/java");
         java.util.List<String> violations = new java.util.ArrayList<>();
         java.util.Map<String, java.util.Set<String>> found = new java.util.HashMap<>();
@@ -56,6 +59,11 @@ class PrivacyFoundationIsolationTest {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String source = Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
                 String relative = root.relativize(file).toString().replace('\\', '/');
+                for (String reference : forbiddenReferences) {
+                    if (source.contains(reference)) {
+                        violations.add(relative + " " + reference);
+                    }
+                }
                 for (java.util.Map.Entry<String, java.util.Set<String>> entry : allowed.entrySet()) {
                     if (source.contains(entry.getKey())) {
                         found.computeIfAbsent(entry.getKey(), key -> new java.util.HashSet<>()).add(relative);

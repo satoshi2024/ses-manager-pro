@@ -96,11 +96,14 @@ public record HoldReleaseBinding(String tenantId, String subjectRef, String hold
     /**
      * 理由の hash: domain・理由コード・ticket・理由本文の長さ付き field 列（UTF-8 の byte 長と {@code :} と値）の SHA-256。
      *
-     * @throws IllegalArgumentException いずれかが null
+     * @throws IllegalArgumentException いずれかが null、または対になっていない surrogate を含む（{@link #isWellFormed}）
      */
     public static String reasonHash(String reasonCode, String ticketRef, String reasonText) {
         if (reasonCode == null || ticketRef == null || reasonText == null) {
             throw new IllegalArgumentException("理由の hash の項目が不足しています");
+        }
+        if (!isWellFormed(reasonCode) || !isWellFormed(ticketRef) || !isWellFormed(reasonText)) {
+            throw new IllegalArgumentException("理由の hash の項目に対になっていない surrogate があります");
         }
         StringBuilder canonical = new StringBuilder();
         field(canonical, REASON_DOMAIN);
@@ -108,6 +111,29 @@ public record HoldReleaseBinding(String tenantId, String subjectRef, String hold
         field(canonical, ticketRef);
         field(canonical, reasonText);
         return sha256(canonical.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 対になっていない surrogate を含まないか。Java の {@code getBytes(UTF_8)} はそれを {@code ?}（1 byte）に、Web Crypto 側の
+     * {@code TextEncoder} は U+FFFD（3 byte）に置き換え、同じ入力でも正規形の byte 列が一致しないため、正規形に入れない
+     * （NF07-REL delta review P3-1）。
+     */
+    public static boolean isWellFormed(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isHighSurrogate(c)) {
+                if (i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(i + 1))) {
+                    return false;
+                }
+                i++;
+            } else if (Character.isLowSurrogate(c)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static void field(StringBuilder target, String value) {
