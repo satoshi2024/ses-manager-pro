@@ -32,6 +32,38 @@ class ComplianceReviewerFingerprintKeyProviderImplTest {
     }
 
     @Test
+    void prodではOS環境変数だけでもtenant一覧を通じてtenantの鍵を解決する() {
+        // FINAL-FIX: OS環境変数の名前は compliance.gate.fingerprint-keys. で始まらないため列挙されなかった。
+        // tenant一覧（COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS）を足せば、version・鍵は環境変数の名前で解決できる
+        org.springframework.core.env.StandardEnvironment env = new org.springframework.core.env.StandardEnvironment();
+        env.getPropertySources().addFirst(new org.springframework.core.env.SystemEnvironmentPropertySource(
+                "osEnvironmentForTest", java.util.Map.of(
+                "COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS", "default",
+                "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "v2",
+                "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V2", KEY_V2_URL)));
+        env.setActiveProfiles("prod");
+        ComplianceReviewerFingerprintKeyProviderImpl provider = new ComplianceReviewerFingerprintKeyProviderImpl(env);
+        provider.init();
+
+        assertEquals("v2", provider.getCurrentKeyVersion("default"));
+        assertArrayEquals(decode(KEY_V2_URL), provider.getKey("default", "v2"));
+    }
+
+    @Test
+    void prodではtenant一覧のtenantの鍵がOS環境変数に無ければ起動時failFastする() {
+        org.springframework.core.env.StandardEnvironment env = new org.springframework.core.env.StandardEnvironment();
+        env.getPropertySources().addFirst(new org.springframework.core.env.SystemEnvironmentPropertySource(
+                "osEnvironmentForTest", java.util.Map.of(
+                "COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS", "default",
+                "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "v2")));
+        env.setActiveProfiles("prod");
+        ComplianceReviewerFingerprintKeyProviderImpl provider = new ComplianceReviewerFingerprintKeyProviderImpl(env);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, provider::init);
+        assertEquals(true, ex.getMessage().contains("missing fingerprint key for tenant default"), ex.getMessage());
+    }
+
+    @Test
     void tenant別keyNamespaceからversion別に解決する() {
         MockEnvironment env = new MockEnvironment();
         env.setActiveProfiles("test");

@@ -371,6 +371,11 @@ app:
   # ===== スキルシート取込設定 =====
   resume:
     retention-days: 30
+    # 原本の purge（02:00）に合わせて文書台帳の副本（RESUME_INGESTION、V197）の保存期限を当日にする処理。既定 true（従来どおり）。
+    # false は副本の調整だけを止め、原本・抽出本文の purge は続ける。既に合わせた副本は戻さない。
+    # 真偽値として解釈できない値は起動失敗になる。手順: .kiro/specs/production-launch/deploy-runbook.md §4.3
+    ledger-copy-alignment:
+      enabled: ${RESUME_LEDGER_COPY_ALIGNMENT_ENABLED:true}
   # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
   # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
   # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。
@@ -503,6 +508,9 @@ cloudsign:
 # 秘密値は環境変数からのみ供給する。api-base-url はS11/S15が使う会計API等の共通resource base（意味不変）。
 # OAuthはaccounts host、人事労務APIはhr host へ分離する（HFP-01-R02/R03）。
 freee:
+  # freee連携（給与・会計のOAuth接続）を使うか。dev/testの既定はtrue（従来どおり）。prodの既定はfalse（application-prod.yml）。
+  # falseの間は認可の開始・code交換を行わず（MISCONFIGURED）、prodの起動時にclient設定一式を要求しない。
+  enabled: ${FREEE_ENABLED:true}
   client-id: ${FREEE_CLIENT_ID:}
   client-secret: ${FREEE_CLIENT_SECRET:}
   redirect-uri: ${FREEE_REDIRECT_URI:http://localhost:8080/integrations/freee/callback}
@@ -527,6 +535,11 @@ compliance:
 # tenant別専用key namespace: compliance.gate.fingerprint-keys.{tenantId}
 # 値はdeployment secret storeから注入すること。prodプロファイルではtenant設定の欠損・不正で起動時にfail-fastする。
 # dev/testプロファイルはtenant未設定時のみテスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
+# OS環境変数で渡すときはtenant一覧も要る（環境変数の名前からtenantを列挙できないため。FINAL-FIX）:
+#   COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS=default
+#   COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION=<version>
+#   COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>=<鍵>
+    fingerprint-key-tenants: ${COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS:}
     fingerprint-keys:
       # default:
       #   current-key-version: ${COMPLIANCE_FINGERPRINT_CURRENT_KEY_VERSION:}

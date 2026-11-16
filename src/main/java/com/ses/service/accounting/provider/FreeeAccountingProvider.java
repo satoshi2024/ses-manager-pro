@@ -70,19 +70,38 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Value("${spring.profiles.active:}")
     private String activeProfiles;
 
+    /**
+     * freee連携を使うか（{@code freee.enabled}。{@code FreeeIntegrationServiceImpl} と同じ値、prodの既定はfalse。FINAL-FIX）。
+     * falseの間は、prodでもclient設定を起動時に要求せず、tokenの更新でfreeeへclient設定を送らない（認可の開始・code交換は
+     * {@code FreeeIntegrationServiceImpl} が止めるため、接続そのものが作られない）。初期値trueは、Springの外でnewした場合に
+     * 従来の挙動を保つため。
+     */
+    @Value("${freee.enabled:true}")
+    private boolean freeeEnabled = true;
+
+    /** 有効profileの判定（{@code @ActiveProfiles("prod")} の試験でもprodの検査を走らせる）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.core.env.Environment environment;
+
     @jakarta.annotation.PostConstruct
     void rejectDummyOrMissingCredentialsInProd() {
-        boolean prod = activeProfiles != null
+        boolean prod = (activeProfiles != null
                 && java.util.Arrays.stream(activeProfiles.split(","))
                 .map(String::trim)
-                .anyMatch("prod"::equalsIgnoreCase);
+                .anyMatch("prod"::equalsIgnoreCase))
+                || (environment != null
+                && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod")));
         if (!prod) {
+            return;
+        }
+        if (!freeeEnabled) {
+            log.info("freee連携は無効です（freee.enabled=false）。freee会計のclient設定の起動時検査を行いません");
             return;
         }
         if (clientId == null || clientId.isBlank() || "dummy-client-id".equals(clientId)
                 || clientSecret == null || clientSecret.isBlank() || "dummy-client-secret".equals(clientSecret)) {
             throw new IllegalStateException(
-                    "Fail-fast: freee.client-id / freee.client-secret (FREEE_CLIENT_ID/SECRET) must be set in prod; dummy defaults are forbidden");
+                    "Fail-fast: freee.enabled=true requires freee.client-id / freee.client-secret (FREEE_CLIENT_ID/SECRET) in prod; dummy defaults are forbidden");
         }
     }
 
@@ -1126,6 +1145,10 @@ public class FreeeAccountingProvider implements AccountingProvider {
     }
 
     private IntegrationTokensDto refreshFreeeTokens(IntegrationTokensDto currentTokens) {
+        if (!freeeEnabled) {
+            // 無効の間はclient設定が無いことがあり、空のclient設定をfreeeへ送らない（呼出し側は元の401として扱う）
+            throw new IllegalStateException("freee連携は無効です（freee.enabled=false）。tokenを更新しません");
+        }
         if (currentTokens == null || currentTokens.getRefreshToken() == null || currentTokens.getRefreshToken().isBlank()) {
             throw new IllegalStateException("リフレッシュトークンが存在しません");
         }

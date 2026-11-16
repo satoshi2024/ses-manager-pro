@@ -161,6 +161,14 @@ public interface DocumentService {
     com.ses.dto.document.DocumentDetailDTO getDocumentDetail(Long documentId);
 
     /**
+     * 文書の閲覧ACL。詳細取得と版のdownload（{@code DocumentApiController} は詳細取得を通してからdownloadする）と同じ判定
+     * （法人境界・専用種別・HRの除外種別・link先のdata scope）を現在の認証で行い、許されなければ {@code BusinessException}
+     * （403・404）を投げる。tenant内に限ることは呼出側が先に確かめる。他の画面から文書の情報を返す前にも同じ判定を通す
+     * （NF01 W3-02 P2-2: ライフサイクルの証跡版一覧）。
+     */
+    void assertDocumentAccessAllowed(com.ses.entity.Document document);
+
+    /**
      * 最新または指定版のファイルをダウンロード用ストリームとして開く。
      *
      * @param documentId 文書ID

@@ -24,7 +24,7 @@
   - NF08 B2c-1（W3-13）: `V194__nf08_copilot_dispatch_claim_and_cost_ledger.sql`（summary dispatchのclaim列、費用ledgerの `t_ai_external_send_cost_bucket` / `t_ai_external_send_cost_entry`、`t_audit_log.idx_audit_dispatch_key`。行は作らない）。外部送信は未開放のままで、prodは `AI_EXTERNAL_SEND_ENABLED=true` を `dispatch.permitOnlyNotWired` で起動拒否する（B2c-2の完了と独立Reviewまで。設定では解除できない）。`AI_EXTERNAL_SEND_COST_LEDGER`（`ai.external-send-cost-ledger`）は既定の `persistent` のまま設定しない（`persistent` 以外は解除後も起動拒否）。
   - NF01 B0（W3-18）: `V195__nf01_dual_confirmation_coordinator.sql`（二者確認coordinatorの7表 `t_lifecycle_dual_submission` / `_submission_document` / `_submission_org_fence` / `_confirmation` / `_projection` / `_idempotency` / `_event`。行は作らない。projection以外の不変6表へUPDATE・DELETEを拒否するtrigger 12件を追加する。冪等性keyは `ascii_bin` で、CHECK `ck_dual_idem_key` が空文字と `[A-Za-z0-9._~-]` 以外の文字を拒否する）。アプリ側は `AppendOnlyMapper`・`AppendOnlySqlInjector` で同じ6表の更新・削除を拒否する。二者確認の画面・APIはまだ無く（W3-21a/b）、表は空のまま配備する。trigger件数は §1.2・§3.4 の 67件に含まれる（`DeployRunbookMigrationCountTest` がmigrationのCREATE/DROP TRIGGERから数えて照合する）。自由記述列の保存期間はPrivacyの署名事項（NF01計画 §10・§12 O-8）。
   - NF07 F2（read-only provider）: `V196__nf07_privacy_data_element_catalog_seed.sql`（`m_pii_data_element` に、`sys_user` に存在する tenant ごとの data element の構造行と `subject_attribution` だけを入れる。owner・データ分類・inventory 状態は UNKNOWN のまま、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` に文書以外の固定27件＋文書種別ごとの `DOCUMENT:<code>`（`m_document_type` の全種別。V197 の2種別を含む）。catalog API `GET /api/privacy/catalog` は `privacy.retention.enabled` がOFFの間404で、初回リリースはOFFのまま配備する。外部 provider（Gemini・CloudSign・freee・mailbox・backup）は登録しない。
-  - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT`（NOT_ATTRIBUTABLE。取込CSVは本人を導出できない）を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。取込センターCSV（IMPORT）は取引日を設定しないため保存期限は NULL のままで、処分候補にはならない（保持期間は開放前に Privacy が書面で受理する条件のまま）。履歴取込の副本（RESUME_INGESTION）は、取込原本を `app.resume.retention-days` で purge する日次清理（02:00）が保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が廃棄候補（PENDING）にし、管理者の承認・執行で処分する（2026-11-16 依頼者決定。legal hold 中の副本は変えない。plan §3.4.1「D4 と文書台帳の副本」）。**署名事項**：この副本の処分方針について Privacy owner と文書 owner の書面署名を、scheduler の有効化（`APP_SCHEDULING_ENABLED=true`）の前に得る。署名が得られない場合は副本処理を外す変更を出してから有効化する。有効化後の監視（失敗の metric・ERROR log）と定期確認の SQL は §4.3。
+  - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT`（NOT_ATTRIBUTABLE。取込CSVは本人を導出できない）を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。取込センターCSV（IMPORT）は取引日を設定しないため保存期限は NULL のままで、処分候補にはならない（保持期間は開放前に Privacy が書面で受理する条件のまま）。履歴取込の副本（RESUME_INGESTION）は、取込原本を `app.resume.retention-days` で purge する日次清理（02:00）が保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が廃棄候補（PENDING）にし、管理者の承認・執行で処分する（2026-11-16 依頼者決定。legal hold 中の副本は変えない。plan §3.4.1「D4 と文書台帳の副本」）。**署名事項**：この副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（FINAL-FIX (a)-3）。副本の調整は廃棄候補（PENDING）を作るだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`。中核jobと共用）を止めなくてよい。副本の調整だけを止める停止口 `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED`（既定 `true`）もある。確認の SQL、停止口、有効化後の監視（失敗の metric・ERROR log）と定期確認は §4.3。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -39,6 +39,116 @@
 | 6 | 失敗時・ロールバック（§6） | SRE / DBA | — |
 
 ## 1. 前提条件（配備前に確認する）
+
+### 1.0 prod 必須設定（無い・形式が違うとアプリが起動しない。一覧の正本）
+
+`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。
+
+- 一覧はコードを走査して作った（FINAL-FIX、2026-11-17）。走査した出処は3つ: prod profile の validator の必須項目、`@Value` のうち既定値が空・開発用で prod では拒否されるもの、`application-prod.yml` の `${...}` のうち既定値が空で prod では拒否されるもの。
+- 既定値を全く持たない `@Value` と、既定値の無い `application-prod.yml` の `${...}` は、どちらも0件だった。どの項目も空か開発用の既定値を持つため、Spring の解決では止まらない。止めるのは validator である。
+- `infra/ecs/task-definition.prod.json` は placeholder だけを書いた雛形で、正本はこの表である。値（secret）は本書・task definition・repository のどれにも書かない。
+- **secret** 欄の「〇」は secret store（Secrets Manager・SSM）から注入する。
+
+**DB・転送ヘッダー**
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 1 | `DB_URL`（`spring.datasource.url`） | アプリDBのJDBC URL | `jdbc:mysql://<host>:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo`。`autoReconnect=true` / `autoReconnectForPools=true`（`yes` も）を付けない（付けると起動を中止する）。未設定だと開発用の localhost へ接続し、起動時 schema guard（§4）で止まる | 〇（接続先） | `application.yml:122`、`ImportJdbcReconnectGuard.java:31,46` |
+| 2 | `DB_USERNAME`（`spring.datasource.username`） | アプリaccount（§1.2。DDL権限なし） | 既定は開発用の値。必ず上書きする | 〇 | `application.yml:123` |
+| 3 | `DB_PASSWORD`（`spring.datasource.password`） | 同上 | 同上 | 〇 | `application.yml:124` |
+| 4 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`） | 転送ヘッダーを信頼する接続元（ALBのsubnet） | カンマ区切りのCIDR。IPv4は private（10/8・172.16/12・192.168/16）か 100.64/10 で /16 以下、IPv6は /48 以下、host部は0。`127.0.0.1` を入れない（SRE-3） | × | `application-prod.yml:76`、`ForwardedHeaderProductionValidator.java:67-105` |
+
+**OIDC・MFA・session・break-glass**（毎回の起動で `ProductionSecurityConfigurationValidator` が検査する。§4.1）
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 5 | `OIDC_TENANT_ID`（`app.security.oidc.tenant-id`） | OIDC login・外部identity・MFA・sessionの照合tenant | `default`（SRE-1） | × | `application.yml:269`、validator `:120-122` |
+| 6〜10 | `OIDC_ISSUER_URI`・`OIDC_AUTHORIZATION_URI`・`OIDC_TOKEN_URI`・`OIDC_JWK_SET_URI`・`OIDC_USER_INFO_URI` | IdPの固定metadata（5項目） | どれもHTTPS、hostがあり、userinfo（`user:pass@`）を含まない | × | `application-prod.yml:83-87`、validator `:355-385` |
+| 11 | `OIDC_CLIENT_ID` | OIDC client | 空でない | × | `application-prod.yml:88`、validator `:358-366` |
+| 12 | `OIDC_CLIENT_SECRET` | 同上 | 空でない | 〇 | `application-prod.yml:89`、validator `:358-366` |
+| 13 | `MFA_ENCRYPTION_KEY` | MFA secretの暗号鍵（`MFA_CURRENT_KEY_VERSION` の既定 `v1` の鍵） | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:97`、validator `:150,284-298,400-404` |
+| 14 | `SESSION_HASH_KEY` | 永続sessionのhash鍵 | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:101`、validator `:151,400-404` |
+| 15 | `BREAK_GLASS_USERNAMES` | break-glass管理者のusername | bootstrap中（§4.2）は**空**でなければ起動しない。bootstrap終了後（§5.5）は**ちょうど2件**（カンマ区切り）。各名は ASCII の `[A-Za-z0-9._-]+` だけで、有効な管理者の `sys_user.username` と大文字小文字まで完全一致し、MFA登録済みであること | × | `application-prod.yml:82`、validator `:312-352` |
+
+**アプリの secret**
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 16 | `BATCH_TOKEN_SECRET`（`app.batch.token-secret`） | 一括操作のpreview tokenのHMAC鍵 | 空でない（十分な長さの乱数） | 〇 | `application-prod.yml:113`、`BatchOperationServiceImpl.java:46-51` |
+| 17 | `PWA_CONTEXT_SECRET`（`app.pwa.context-secret`） | PWA利用者文脈のHMAC鍵（NF04がOFFでも必要） | 空でなく、開発用の既定値でない | 〇 | `application-prod.yml:115`、`PwaUserContextService.java:28,39-45` |
+| 18 | `BP_BANK_ACCOUNT_ENCRYPTION_KEY`（`bp.bank-account-encryption-key`） | BP口座番号の暗号鍵（AES。UTF-8の先頭32 byteを使う） | `dev-only` で始まらない32文字以上の乱数。**検査は起動完了の直後（`ApplicationReadyEvent`）に行うため、portを開いた後に停止する** | 〇 | ymlに定義なし。`BpCompanyServiceImpl.java:61-74,339` |
+
+**暗号鍵（key version と鍵の組）**
+
+鍵はどれも、32 byte を `=` 無しの base64url で書く（空白・改行を含めない）。key version は `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` に従う。ただし環境変数名では `.`・`-` が `_` になるため、`v1` 等の英数字にする。
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 19 | `CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION`（`certification.number-crypto.current-key-version`） | 資格番号の暗号鍵の現行version。NF03の子スイッチがOFFでも必要（`feature-switches.md` 4.1） | 上記のversion | × | ymlに定義なし。`CertificationNumberKeyProviderImpl.java:26,45,54-58` |
+| 20 | `CERTIFICATION_NUMBER_CRYPTO_KEYS_<VERSION>`（`certification.number-crypto.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | `CertificationNumberKeyProviderImpl.java:89,111-126` |
+| 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:529`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
+| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。`application.yml:532` の `COMPLIANCE_CREDENTIAL_KEY_V1` はcommentで**配線されていない**ため、この名前で渡す | 〇 | `application.yml:530-532`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
+| 23 | `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS`（`compliance.gate.fingerprint-key-tenants`） | reviewer fingerprintの鍵を持つtenantの一覧 | `default`（カンマ区切り） | × | `application.yml:542`、`ComplianceReviewerFingerprintKeyProviderImpl.java:167-199` |
+| 24 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION`（`compliance.gate.fingerprint-keys.default.current-key-version`） | reviewer fingerprintのHMAC鍵の現行version（tenant `default`） | 上記のversion | × | `ComplianceReviewerFingerprintKeyProviderImpl.java:65-75,141-160` |
+| 25 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>`（`compliance.gate.fingerprint-keys.default.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | 同上 |
+| 26 | `ACCOUNTING_TENANT_IDS`（`app.accounting.tenants.ids`） | 定期処理の対象tenant（freeeの有無に関係しない） | 1件以上（SRE-1 により `default` の1件）。test以外の全profileで検査する | × | `application.yml:230`、`AccountingTenantInventoryStartupValidator.java:7-13` |
+
+- **23〜25の注（OS環境変数で渡せなかった理由と対処。FINAL-FIX）**:
+  - 原因は relaxed binding でも、名前の `-`・大文字小文字でもない。tenant を、Map型の property source にある property 名のうち `compliance.gate.fingerprint-keys.` で始まるものだけから列挙していた。
+  - OS環境変数の名前は `COMPLIANCE_GATE_FINGERPRINT_KEYS_...` の形でこの接頭辞に一致しない。しかも `.`・`-` が `_` になり大文字化されるため、名前から tenant ID を復元できない。そのため 24・25 だけを環境変数で渡すと、`Fail-fast: missing compliance.gate.fingerprint-keys configuration in prod profile` で止まっていた。
+  - tenant一覧（23）を足した。一覧にある tenant の version と鍵は `Environment#getProperty` の名前解決で読むため、24・25 は上の環境変数名でそのまま渡せる。
+- 一覧にある tenant の version・鍵が欠けると、起動時に止まる（`missing fingerprint current-key-version for tenant ...` / `missing fingerprint key for tenant ...`）。
+- 従来の経路（設定file・`SPRING_APPLICATION_JSON` で `compliance.gate.fingerprint-keys.<tenant>.*` を渡す）も引き続き使える。その場合は23は要らない。`-D` は process一覧に出るため使わない。
+
+**freee連携を使う場合だけ必須**（`FREEE_ENABLED=true`。prodの既定は `false`。FINAL-FIX）
+
+- `FREEE_ENABLED`（`freee.enabled`）が `false` の間（prodの既定）:
+  - 下の4項目が無くても起動する。給与・会計の freee 接続は認可の開始と code 交換を行わず、状態は MISCONFIGURED になる。
+  - 接続が作られないため、会計送信・入金明細・勤怠連携は接続が無いものとして扱われ、freee を呼ばない。既存の接続が残っていても、token の更新で空の client 設定を freee へ送らない（元の401として扱う）。
+  - `ACCOUNTING_TENANT_IDS`（26）は freee の有無に関係なく要る。
+- 公式host・HTTPS の検査は、ON・OFF のどちらでも行う（`freee.*-base-url` を上書きした場合だけ止まる）。
+- `true` にすると、次の4項目のどれかが欠けたとき起動しない。
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 27 | `FREEE_CLIENT_ID`（`freee.client-id`） | freee会計・給与のOAuth client | 空でなく `dummy-client-id` でない | × | `application.yml:514`、`FreeeAccountingProvider.java:79-107`、`FreeeIntegrationServiceImpl.java:199-221` |
+| 28 | `FREEE_CLIENT_SECRET`（`freee.client-secret`） | 同上 | 空でなく `dummy-client-secret` でない | 〇 | `application.yml:515`、同上 |
+| 29 | `FREEE_REDIRECT_URI`（`freee.redirect-uri`） | OAuthのredirect URI | HTTPS | × | `application-prod.yml:163`、`FreeeIntegrationServiceImpl.java:199-221` |
+| 30 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数 | 〇 | `application.yml:520`、`FreeeIntegrationServiceImpl.java:199-221`、`IntegrationConnectionServiceImpl.java:46` |
+
+**検査の効き方と試験の範囲（注意）**
+- 18 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験ではこの検査が走らず、CI はその未設定を検出しない。配備では task definition の `SPRING_PROFILES_ACTIVE=prod` で効く。
+- 27〜30（freee）の検査は、FINAL-FIX で有効profileも見るようにした。CI は次の2つで確かめる。
+  - `ProductionSecurityConfigurationTest`: freee が無効で4項目が無くても、prod の完全な context が起動する。
+  - `FreeeProductionStartupTest`: freee が有効で4項目が無いと、prod の起動が止まる。
+- FINAL-FIX までは、freee を使わない配備でも 27〜29 が必須だった。`application-prod.yml` の旧comment「client-id未設定でも起動は可能」は誤りだった。
+
+**設定してはいけない値**（設定すると起動しない）:
+- `SPRING_FLYWAY_ENABLED=true`（§4）。
+- `LOCAL_LOGIN_ENABLED=true`、`OIDC_ENABLED=false`、`BREAK_GLASS_LOGIN_ENABLED=false`、`OIDC_REQUIRE_MFA_ASSURANCE=false`、`MFA_ENABLED=false`、`MFA_REQUIRED_FOR_BREAK_GLASS=false`、`ALLOW_UNTRACKED_SESSIONS=true`（validator `:114-148`）。
+- `server.forward-headers-strategy` を `framework` 以外にする（`ForwardedHeaderProductionValidator.java:77`）。
+- `ai.outbound-probe.enabled=true`（`AiOutboundProbeProdGuardConfig.java:18-22`）。
+- `AI_EXTERNAL_SEND_ENABLED=true`（B2c-2 の完了まで常に拒否。冒頭の NF08 B2c-1 の項）。
+- `freee.*-base-url` を公式host以外にする（`FreeeIntegrationServiceImpl.java:192-195`）。
+- `CLOUDSIGN_ENABLED=true` のまま `CLOUDSIGN_CLIENT_ID` を設定しない、または `cloudsign.base-url` を公式のallow-list外にする（`CloudSignProperties.java:86-112`）。
+
+**ONにした時だけ必須になる設定**（OFFのままなら不要。手順は各正本）:
+- bootstrap: `SECURITY_BOOTSTRAP_EXPIRES_AT`（§4.2）。
+- NF01 二者確認: `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（§1.7）。
+- NF06: `IMPORT_ROW_REFERENCE_HMAC_KEY` と admission の承認設定（`feature-switches.md` 4.8.2）。
+- NF07: 決定ID束縛 `PRIVACY_APPROVAL_*`。DSARでは加えて `PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`（同 4.7）。
+- NF05: `INTEGRATION_HUB_PUBLIC_ID_KEY`、`INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION` と鍵、truststore 等（DG-05）。
+
+**起動は止めないが運用で設定するもの**:
+- `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。
+- `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。
+- `SMTP_HOST` 等: 通知メール。
+
+**環境変数ではないが起動時に検査されるDBの状態**: 次は §5 の手順で揃える。bootstrap中は、break-glass管理者とOIDC管理者の人数の検査を省略する（§4.2）。
+- 有効なOIDC provider（`m_identity_provider`）。
+- OIDCでログインできる管理者3名以上。
+- default permission group 5件。
+- 全体baseline `'*'` を持つgroupの `privacy.*` の拒否行。
 
 ### 1.1 DBサーバー（DBA）
 
@@ -140,23 +250,60 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
 | SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
+| SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
+| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
+| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
+| SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。task definitionの雛形とも照合する（`infra/ecs/offline/validate-task-definition.ps1` が名前の有無を検査する） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
 
-**DBA の前提**: migrator accountのtrigger権限（binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当、DEFINERとmigrator accountを残すこと）は§1.2、server タイムゾーン `+09:00` と空schemaは§1.1。
+**DBA の前提**
+- migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
+- serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
+- **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
+  - 対象: 退社完了の `LifecycleCaseServiceImpl.completeCase`、ポータル紐付け登録の `PortalEngineerLinkServiceImpl.register` 等。一覧は `WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS`。
+  - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
+  - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
+  - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
+- **Backup・PITR**:
+  - RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**。
+  - prodの `.env.backup` に `CONTENT_HASH_TABLES` を設定する（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+  - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`CONTENT_HASH_TABLES` の形式）。
+
+**初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
+
+| 対象 | 要るもの | 正本 |
+|---|---|---|
+| NF04 のうちスイッチOFFでも止まらない部分（pwa-queueの保存経路、lock中の下書きの復元（local password sessionだけ）、台帳の清掃、restore-sessionのlistener）。スイッチはService Workerとmanifestだけを止める | 次のうちこの部分にかかる署名と真機受入が初回配備の前提になる（全行が未署名）。<br>(1) Privacy: 端末内30日保存（P3-13 を含む）。<br>(2) SRE/Ops: 単一instance・sticky session（SRE-5）。<br>(3) Owner/Security: B-NF04-4（失効の制限。決定待ち）。<br>(4) 業務の受入担当: 真機受入 S-01〜S-15 | `feature-switches.md` 4.4「次はOFFでも止めない」、`mobile-pwa-self-service/first-release-user-and-operations-notes.md` §4、`mobile-pwa-self-service/real-device-browser-acceptance-template.md` |
+| 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197） | 保存年数（3年・TRANSACTION_DATE）は暫定値で、文書ownerの確認待ち。<br>副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（確認SQLは §4.3）。<br>副本の調整がするのは廃棄候補（PENDING）を作ることだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`）を止めなくてよい。この scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用で、止めると通常運用が再開できない。<br>`IMPORT` の保持期間は、Privacy の書面受理まで開放の条件のまま | 冒頭の V197 の項、§4.3 |
 
 **機能スイッチをONにする前に要る署名・受理**（揃うまでOFFのまま。ONの手順は各正本）
 
 | 機能（設定） | ONの前に要るもの | 正本 |
 |---|---|---|
-| NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`） | (1) Privacy署名: comment 2列（`business_comment`・`decision_comment`）の保存期間と削除・匿名化経路（O-8）、**表示範囲がrole級**であること（本文を読めるのは案件を閲覧できる全ての管理者・HR）、**代理提出の差戻し理由は営業が要員へ伝える**運用（要員本人には「コメントあり」だけが見える。HRの手順に含める）。(2) **NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録**: V196 と `com.ses.privacy` にはまだ無く、署名だけでなく**実装が要る**（V198以降の独立batchでseedする。ONの前提）。(3) 下の §1.7.1 の手動確認9項目。(4) W3-21a・W3-21b のPASS。prodは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと起動しない（内容は検証しない） | `feature-switches.md` 4.9.2、NF01細粒度epoch計画 §10・§12 O-8、§1.7.1 |
+| NF01 本体（`FEATURE_NF01_ENABLED`）。`feature-switches.md` 4.2 にはONの条件が無いため、本行を索引とする | (1) NF01計画 §10 の署名（全て未署名）。<br>　・Identity/Security: 確認者は admin/HR（B-NF01-5）。1213/1205 を含む3回のbudgetと409の扱い。attemptのtimeout・error key・拒否eventの項目。RR-1・RR-2・RR-4・RR-8・RR-11・RR-14 の受理。O-1、session台帳のtenant基準、NF01外のIdP停止、失効失敗の通知先、行の法人ごとの失効（§5.13）。<br>　・SRE: RR-14、RR-13、失効のalert閾値とworker間隔、`LOCK_CONFLICT` の率の監視（SRE-8）。<br>　・Document Owner: SKILL_SHEET×単一ENGINEER、対象状態、epoch規則、scan_statusだけをscan根拠にすること、retention jobのservice経由、RR-8。<br>　・HR: REJECTを含む手順、担当・role変更後の再提出、世代の失効、外部失効のworkflow、RR-11、未連携のportal利用者、`released_at`。<br>　・DBA: V189/V195・trigger 12件のDEFINERとbinlog、charset、`ascii_bin` の冪等性key、`innodb_print_all_deadlocks=ON`（RR-15）、RR-13。<br>(2) lifecycle runbook §6.4 の実測と確認。<br>　・P3-1: M6 を5回以上、skip 0、両順序で1213/1205無し。<br>　・P3-9(4): 外部アカウントの事後登録が退社完了の要員Xを待ってから登録することを、両順序で `InnoDbRecordLockWaits` により実測する。M10 と `AssetMySqlIntegrationTest` も5回以上。<br>　・P3-5: 案件IDの作成順を時間順の根拠にしてよいことをHRが確認する。<br>(3) 同 §6.6 の R-1〜R-3。<br>(4) 残るP3: W3-02 P3-3（`lifecycleType` をenumで検査しない）、w1b4 P3-5（tenantを持たない `selectByIdForUpdate(Long)`）。<br>W3-02 P2-1(b)（紐付け登録が退社完了を見落とす）と P2-2（証跡版一覧の文書ACL）は FINAL-FIX で修正した。M6 の新しいcaseを含め、Runnerの実測で確定する | NF01細粒度epoch計画 §10、`engineer-lifecycle-workflow/runbook.md` §6.4・§6.6、`feature-switches.md` 4.2 |
+| NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`） | (1) Privacy署名: comment 2列（`business_comment`・`decision_comment`）の保存期間と削除・匿名化経路（O-8）、**表示範囲がrole級**であること（本文を読めるのは案件を閲覧できる全ての管理者・HR）、**代理提出の差戻し理由は営業が要員へ伝える**運用（要員本人には「コメントあり」だけが見える。HRの手順に含める）。(2) **NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録**: V196 と `com.ses.privacy` にはまだ無く、署名だけでなく**実装が要る**（V198以降の独立batchでseedする。ONの前提）。(3) 下の §1.7.1 の手動確認9項目。(4) W3-21a・W3-21b のPASS。(5) **Security の判断（未取得）**: break-glass incident の scope に lifecycle の action を含められるため、break-glass 口座で二者確認の提出・確認ができる（W3-15 P3-7、`BreakGlassServiceImpl.java:316-330`）。許すか止めるかを決める。(6) **Document Owner・Security の受理または修正（未取得）**: 提出の discovery に存在 oracle が残る（W3-21a P3-5）。計画の error 表は「推測できない」と書いており、実装と一致しない。prodは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと起動しない（内容は検証しない） | `feature-switches.md` 4.9.2、NF01細粒度epoch計画 §10・§12 O-8、§1.7.1 |
+| NF03 資格・学習・skill gap（`FEATURE_NF03_ENABLED`）と子の資格番号（`FEATURE_NF03_CERTIFICATION_PII_ENABLED`） | `feature-switches.md` 4.6 には署名の一覧が無い。<br>本体: 業務Owner の承認（同 3.2）。<br>子: DG-07 の承認（同 3.4）。あわせて、証憑文書について Privacy が確認する（同 4.6.1）。<br>子をONにする前に、試験の穴を埋める: 「マネージャー・営業は `certification.pii.view` を拒否される」ことを断言する試験が無い（FINAL P3-4-1。`ActionPermissionMatrixTest` へ加える）。<br>資格番号の暗号鍵は、OFFでも§1.0 の19・20が要る | `feature-switches.md` 3.2・3.4・4.6 |
+| NF04 本人セルフサービス（`FEATURE_NF04_ENABLED`。Service Worker・manifest） | 署名表の全行（現在すべて空欄）。<br>(1) 業務Owner: 利用者向けの文言（1章）。<br>(2) SRE/Ops: 単一instance・sticky session。<br>(3) Privacy: 端末内30日保存（P3-13）。<br>(4) Owner/Security: B-NF04-4 の決定、P1-N4-1 の案A、P1-W309-1 (a)。<br>(5) 業務の受入担当: 真機受入 S-01〜S-15。<br>スイッチOFFでも有効な部分の署名は、上の「初回配備から有効になる部分」の表にある | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §4、`mobile-pwa-self-service/real-device-browser-acceptance-template.md`、`feature-switches.md` 4.4 |
+| NF10 定期管理レポート（`FEATURE_NF10_ENABLED`） | (1) Report Owner の署名（ONの前）。<br>(2) alert rule と通知先の設定（SRE。`RETRY_EXHAUSTED_DISABLED` は Report Owner へ通知する）。<br>(3) NTP の前提（SRE）。<br>(4) tenant のタイムゾーンを変えるときの方針（Report Owner。未決）。<br>(5) 確定版の配布方針（Report Owner）。<br>(6) 排水草案の SRE/DBA 承認（計画 §10）。<br>completion-matrix の未完了の行も参照する。新旧versionを同時に動かさない（SRE-5） | `scheduled-management-reporting/scheduler-claim-fence-plan.md` §10・§14・§14.5、`scheduled-management-reporting/completion-matrix.md`、`feature-switches.md` 4.5 |
 | NF02（`FEATURE_NF02_ENABLED`。子の顧客ポータルを含む） | DG-02（CS Owner。B3 休日の運用事項 H-1・H-2 を含む）と、当年度を含む全社共通カレンダーの登録 | `customer-success-service-desk/dg-02-first-release-decision-package.md`、`feature-switches.md` 4.3 |
-| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
-| NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5 | `feature-switches.md` 4.8.2 |
-| NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放はD-05 ownerの受理事項（§4.4末尾）と合わせ、解除の開放はD-03・D-05の署名後（§4.5） | `feature-switches.md` 4.7、§4.4・§4.5 |
-| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8) を D-06 owner と受理する: D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する） | `feature-switches.md` 4.7.2 の #5、§4.4（D14 と受理事項） |
+| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる。<br>次は DG-05 草案にまだ無い。署名の時に受理するか、実装で埋める。<br>(a) 決定IDは形式だけを検査し、承認内容の digest に束縛しない（`IntegrationHubProductionEnablementPolicy.java:73-75,107-108`）。<br>(b) ownership の MySQL 試験は engineer の分岐だけを扱う。<br>(c) 実wireの TLS・XFF の E2E 試験が無い。<br>(d) SRE の負荷実測 | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
+| NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5。<br>次はまだ4.8.2に無い。ONの前に埋める。<br>(a) 4.8.2 #7 は autoReconnect と透過proxyだけを禁止している。multi-host・failover・loadbalance の JDBC URL も禁止として書く。<br>(b) W3-12 §6 の人手確認のうち未了のもの: LB の timeout 後の回復、鍵が欠けたときの503。<br>(c) digest 正規形の golden vector（4.8.2 #1 の二人による再計算に要る） | `feature-switches.md` 4.8.2 |
+| NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放は、D-05 ownerの受理事項（§4.4末尾）と合わせる。<br>**解除の開放は、D-03・D-05 の署名だけでなく NF07-TRUST の実装が要る**（§4.5）。第1期は trust anchor registry が空で、失効 provider は常に UNKNOWN を返すため、解除の API は NF07-TRUST（registry と失効 provider）の実装まで404のままである。<br>REL の P3-6・P3-8・P3-9・P3-10 も NF07-TRUST の前に処理する。<br>あわせて D-05 owner が「holdを開放した後、NF07-TRUST が終わるまで解除できない」ことを受理する（未取得） | `feature-switches.md` 4.7、§4.4・§4.5 |
+| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8) を D-06 owner と受理する: D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する）。<br>さらに次も要る（未取得）。<br>(a) SELF 交付区分の確認（D-06 owner。F2 r4 P3-I）: WORK_REPORT・RECEIPT は第三者の情報を含み得る。<br>(b) 「承認者は承認の前に全内容を取得できる」という不変条件を計画に書き、Privacy が受理する。<br>(c) 4.7.2 の人手確認 (a)(c) を行う。<br>`POST /resolution` の応答に警告が出ないこと（HYG-FINAL P3-F）も受理または修正する | `feature-switches.md` 4.7.2 の #5、§4.4（D14 と受理事項） |
 | NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）と、**B2c-2 実装開始前の人手承認**（B2c-2 の着手条件）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項） | `ai-management-copilot/external-send-approval-gate.md` §8、`.kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md`（B2c-2 の開始条件） |
-| 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197）。schedulerの有効化（`APP_SCHEDULING_ENABLED=true`）の前 | 保存年数（3年・TRANSACTION_DATE）は暫定値で文書ownerの確認待ち。副本の処分方針についてPrivacy ownerと文書ownerの書面署名（得られなければ副本処理を外す変更を出してから有効化する）。`IMPORT` の保持期間はPrivacyの書面受理まで開放の条件のまま | 冒頭のV197の項、§4.3 |
 
-- NF03・NF04・NF10 のONの条件は `feature-switches.md` の 4.6・4.4・4.5 を参照する。
+**書面受理（未取得）**
+
+W1-B1（backup toolchain）で「書面での受理が要る」とされた事項である。受理の記録は見つかっていない（FINAL review §7 (a)-5）。Owner/SRE が書面で受理するか、backlog として明示する。
+
+| # | 事項 | 出処 |
+|---|---|---|
+| W-1 | G-04: schema fingerprint が未実装（内容hashだけを実装した） | W1-B1 r2 報告 §5、W1-B1 review |
+| W-2 | noclobber: 事前検査と open の間の微小な窓に、FIFO・device への symlink を置かれると開き得る | 同上 |
+| W-3 | `tool-image.sh` の残り: 検査と実行の間に tag を付け替えられる（TOCTOU）。`pull_policy` は「1行以上あるか」しか見ない。flow-style の YAML を解釈しない | 同上 |
+| W-4 | 「Essential は base の版を保つ」は厳密でない（依存解決で更新され得る） | 同上 |
+| W-5 | apt lock の enforced 経路・不一致経路に単体試験が無い（初回 build で実測するだけ） | 同上 |
+| W-6 | 同じ MSYS の別利用者・別 session の判定。`kill -0` の EPERM を「終了済み」として扱う | 同上 |
+| W-7 | content ID が覆う設定の範囲（Env・Entrypoint・Cmd・WorkingDir・User・Labels だけで、Volumes・ExposedPorts 等を含まない） | 同上 |
 
 #### 1.7.1 NF01 二者確認をONにする前の手動確認（browser、9項目。W3-21b review §6）
 
@@ -362,7 +509,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
 
 ## 4. アプリ起動（SRE）
 
-- 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodのsecret（§4.1）。
+- 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodの必須設定（一覧は §1.0。常に必須の26項目と、freeeを使う場合の4項目。security設定の注意は §4.1）。
 - **`SPRING_FLYWAY_ENABLED` は設定しない**。`true` にしても `ProductionSchemaGuardConfiguration` がSpring BootのFlyway初期化でmigrateを拒否し、1件も適用せずに起動を止める。
 - **JVMのタイムゾーンを `Asia/Tokyo` に固定する（必須）**。`JAVA_TOOL_OPTIONS` に `-Duser.timezone=Asia/Tokyo` を加える（imageの既定 `-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0` を消さないよう、両方を書く）か、container環境変数 `TZ=Asia/Tokyo` を設定する。起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
@@ -372,11 +519,15 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。
-- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。履歴取込の清理（02:00）は文書台帳の副本を処分対象にするため、Privacy owner・文書 owner の書面署名（V197 の行の署名事項）もこの前提に含める。機能スイッチは `feature-switches.md` に従い1機能ずつONにする。
+- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。
+  - scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用なので、有効化は通常運用の再開を意味する。
+  - 履歴取込の清理（02:00）は、文書台帳の副本を廃棄候補にする。ただし処分には管理者の承認と執行が要るため、V197 の署名事項は scheduler の有効化の前提にしない。
+  - 署名までは、`RESUME_INGESTION` の副本の廃棄申請を承認しない（§4.3）。
+- 機能スイッチは `feature-switches.md` に従い1機能ずつONにする。
 
 ### 4.1 常に必要なsecurity設定（初回・以後とも。外さない）
 
-OIDCの固定metadata・client credential、MFA鍵、session hash key等のprodのsecurity設定は、bootstrap中も以後も全て設定する（毎回の起動時に `ProductionSecurityConfigurationValidator` が検査する）。特に次は**初回だけでなく永久に必要**で、bootstrapを終える再起動（§5.5）でも外さない（D1 review P2-B）。
+OIDCの固定metadata・client credential、MFA鍵、session hash key等のprodのsecurity設定は、bootstrap中も以後も全て設定する（毎回の起動時に `ProductionSecurityConfigurationValidator` が検査する。項目と形式の一覧は §1.0 の5〜15）。特に次は**初回だけでなく永久に必要**で、bootstrapを終える再起動（§5.5）でも外さない（D1 review P2-B）。
 
 | 環境変数（property） | 値 | 外した場合 |
 |---|---|---|
@@ -405,7 +556,37 @@ OIDCの固定metadata・client credential、MFA鍵、session hash key等のprod�
 
 ### 4.3 履歴取込の副本の処分（scheduler 有効化後の監視・定期確認）
 
-前提: V197 の行の署名事項（Privacy owner・文書 owner の書面署名）を scheduler の有効化の前に得ていること。日次清理（02:00）が原本を purge した取込ジョブの副本（`RESUME_INGESTION`）の保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が CONFIRMED の副本を廃棄候補（PENDING、`requested_by = -1`）にする。処分は管理者の承認・執行で行う（plan §3.4.1「D4 と文書台帳の副本」）。
+処理の流れ（plan §3.4.1「D4 と文書台帳の副本」）:
+1. 日次清理（02:00）が、原本を purge した取込ジョブの副本（`RESUME_INGESTION`）の保存期限を当日に合わせる。
+2. 02:30 の `DocumentRetentionJob` が、CONFIRMED の副本を廃棄候補（PENDING、`requested_by = -1`）にする。
+3. 削除は、管理者の承認（APPROVED）と執行（DISPOSED）を経てはじめて起きる。副本の調整だけで、取り消せない削除が自動で起きることは無い。
+
+**署名前の運用（FINAL-FIX (a)-3）**
+
+V197 の署名事項（Privacy owner・文書 owner の書面署名）を得るまで:
+- `RESUME_INGESTION` の副本の廃棄申請を**承認も執行もしない**。他の文書種別の廃棄申請は従来どおり扱う。
+- scheduler（`APP_SCHEDULING_ENABLED`）は止めずに有効化してよい。
+- 廃棄申請を承認・執行する前に、毎回、次の (0) の SQL で対象を確認する。
+  - 承認しようとする申請が結果に出たら、承認しない。
+  - 署名前に APPROVED になっていた申請は執行しない。理由を書いて却下する（`POST /api/documents/disposal/{requestId}/reject`、理由は必須）。
+- 却下した副本は、次回の `DocumentRetentionJob` で再び廃棄候補になり得る。署名までは、同じ確認を続ける。
+
+**副本の調整だけを止める停止口**（`RESUME_LEDGER_COPY_ALIGNMENT_ENABLED`、property `app.resume.ledger-copy-alignment.enabled`、既定 `true`）
+- `false` にすると、日次清理（02:00）のうち副本の保存期限を合わせる処理だけを止める。原本・抽出本文の purge と BP 取込の清理は続く。scheduler 全体（`APP_SCHEDULING_ENABLED`）を止めずに済む。
+- 使う場面: 署名が長く得られない場合や、廃棄候補が作られること自体を避けたいと判断した場合。
+- 既に保存期限を合わせた副本と、既にある廃棄申請は戻らない。(0) の確認は止めた後も続ける。
+- 停止中は、上の定期確認の (2) が0行にならない。これは正常である。再開（`true`）すると、次の実行で拾い直す。
+- 切替は再起動で反映する。停止中は tenant ごとに日次で INFO log `文書台帳の副本の保存期限の調整は停止中です` が出る。真偽値として解釈できない値（例 `ture`）では起動しない。
+
+```sql
+-- (0) 署名前に承認・執行してはいけない副本の廃棄申請（PENDING・APPROVED）。署名後はこの確認を外す
+SELECT r.id AS request_id, r.status, r.requested_by, r.created_at, d.tenant_id, d.id AS document_id,
+       d.status AS document_status, d.retention_until
+  FROM t_document_disposal_request r JOIN t_document d ON d.id = r.document_id
+ WHERE d.document_type = 'RESUME_INGESTION' AND r.deleted_flag = 0 AND d.deleted_flag = 0
+   AND r.status IN ('PENDING', 'APPROVED')
+ ORDER BY r.status, r.id;
+```
 
 - **アラート**: metric `ses.resume.ledger.retention.failures`（tag `stage`: `document`＝副本ごとの失敗、`batch`＝照会自体の失敗）が1件でも増えたら調べる。同時に app log の ERROR `履歴取込原本の purge に合わせた文書台帳の副本の処理に失敗した副本があります`（件数）または `文書台帳の副本の保存期限を合わせられませんでした`（照会の失敗）が出る。失敗した副本は翌日の実行で再試行されるため、2日続けて増える場合は DB の lock 待ち・障害を疑う。legal hold 中の副本は失敗に数えず、副本ごとの WARN だけを出す。
 - **定期確認（週次）**: 次の SQL を実行する。
@@ -577,6 +758,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 - 「OIDCでログインできる」の起動時判定はDB側の条件だけ（設定tenant・issuerの有効なOIDC provider、APPROVEDの外部identity link、有効な `管理者`）。IdP側のaccount状態・MFA assuranceは起動時に確かめられないため、§5.3の5で実際にloginして確認する。
 - SESのTOTPを登録するのはbreak-glass口座（A・B）だけ。C〜EはIdP側のMFA（MFA assurance claim）でloginする。bootstrap終了後は、break-glass username以外はSESのTOTPを登録できない。
 - 人の割当: 推奨は5名とも別人（break-glass口座の保持者と、起票者・承認者を分ける）。兼務を認めるかはOwner/Securityが決める。口座名は例であり、実際の名前はOwner/Securityが決める。
+- **break-glass口座（A・B）の username は ASCII の英数字と `.`・`_`・`-` だけにする**（`[A-Za-z0-9._-]+`。§1.0 の15）。§5.3でBを作るときもこの形にする。`BREAK_GLASS_USERNAMES` には DB の username を大文字小文字まで同じに書く。全角・アクセント等を含む名前は、§5.5 の起動時検査で拒否される（DOC-FINAL r3 P3-2）。
 - **`admin`（A）は削除・改名・無効化・role変更しない**（break-glass管理者Aとして使い続ける。D1 review N-9）。bootstrapのlocal login（`ProductionBootstrapMode.isBootstrapLoginAllowed`）と起動時検査（`validateBootstrap`）は、username `admin`・role `管理者`・有効（`status = 1`）の口座だけを初期管理者として認めるため、これを崩すとbootstrapの再開（§5.7）でも誰もlocal loginできず、break-glassも使えない状態では復旧がDBAによる口座の復元だけになる。ユーザー管理の既存guardは本人による自分自身の削除・無効化・role変更だけを止め、他の管理者による操作は止めない。定期確認（§5.6の集計と同じ頻度）:
   ```sql
   SELECT username, role, status, deleted_flag FROM sys_user

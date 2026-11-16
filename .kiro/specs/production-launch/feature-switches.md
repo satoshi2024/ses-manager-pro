@@ -182,7 +182,7 @@
 #### 4.6.1 資格番号の子スイッチ（`nf03-certification-pii`）
 
 - OFF中（初回リリース）も、資格の申請・取得日・有効期限・証憑upload・HR確認（verify/reject）・訂正・取消・更新、学習計画、skill gapは従来どおり使える。止めるのは**資格番号の入力だけ**である。
-- 資格番号の入力経路は本人の申請と再申請の2つだけ（管理側API・CSV取込・他画面に資格番号の入力経路は無い。入口の一覧は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.1）。OFF中にAPIへ資格番号を付けて送ると、書込み・lock・暗号化の前に400で拒否する（黙って捨てない）。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致の再申請は409が先に返る。message key `certification.record.numberEntryDisabled` はbundle未登録のため、登録されるまでは400の汎用文言「入力内容を確認してください。」が表示される（正常な画面は資格番号を送らないため、直接API呼出しか、子スイッチON時に開いた古い画面だけが該当する）。
+- 資格番号の入力経路は本人の申請と再申請の2つだけ（管理側API・CSV取込・他画面に資格番号の入力経路は無い。入口の一覧は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.1）。OFF中にAPIへ資格番号を付けて送ると、書込み・lock・暗号化の前に400で拒否する（黙って捨てない）。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致の再申請は409が先に返る。400の message key `certification.record.numberEntryDisabled` は4つのbundleに登録済みで、資格番号を空欄にして申請するよう案内する文言が表示される（正常な画面は資格番号を送らないため、直接API呼出しか、子スイッチON時に開いた古い画面だけが該当する）。
 - 新規構築でOFFのまま運用した期間は資格番号の暗号文が作られないため、一覧・詳細は「未登録」表示になる。
 - 証憑（資格証の画像・PDF）は資格番号や氏名を含み得るが、`CERTIFICATION_EVIDENCE` 文書として既存の文書台帳・retention/legal hold・scanに従う（本スイッチの対象外）。Privacyの確認事項として残す。
 - ONにするには `FEATURE_NF03_ENABLED=true` と `FEATURE_NF03_CERTIFICATION_PII_ENABLED=true` の両方が必要。OFFへ戻しても既に保存した暗号文は削除されない（表示はmaskのまま、`certification.pii.view` 権限者は従来どおり復号表示できる）。

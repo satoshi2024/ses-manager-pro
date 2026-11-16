@@ -10,6 +10,7 @@ import com.ses.dto.lifecycle.LifecycleEvidenceVersionDto;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
+import com.ses.service.DocumentService;
 import com.ses.service.lifecycle.LifecycleScopeService;
 import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.security.epoch.ActorShareLock;
@@ -17,6 +18,7 @@ import com.ses.service.security.epoch.AuthorizationEpochFence;
 import com.ses.service.security.epoch.TaskGenerationAnchors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final AuthorizationEpochFence authorizationEpochFence;
     /** 担当変更の新担当（rank 3 S、NF01 W3-16b）。 */
     private final ActorShareLock actorShareLock;
+    /** 証跡版一覧の文書ACL（文書のdownloadと同じ判定。NF01 W3-02 P2-2）。循環参照を避けるため遅延取得する。 */
+    private final ObjectProvider<DocumentService> documentServiceProvider;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -649,6 +653,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (document == null) {
             throw BusinessException.of(400, "error.document.notFound");
         }
+        // 文書のdownloadと同じACL（FINAL-FIX、W3-02 P2-2 と同じ）。閲覧できない文書は存在しない文書と同じ400にする
+        assertEvidenceDocumentReadable(document, 400);
         if (documentVersionId == null) {
             throw BusinessException.of(400, "error.lifecycle.evidenceVersionRequired",
                     "証跡文書の版を選択してください");
@@ -673,6 +679,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
      * （閲覧scope・本人公開・担当者）。文書はactorのtenant内に限り、他tenant・存在しない文書は区別せず404とする。
      * 返すのは版ID・版番号・登録日時だけで、元ファイル名・storage key・hashは返さない
      * （文書台帳の閲覧権限を持たない担当者にも、完了時に指定できる範囲以上の情報を出さない）。</p>
+     *
+     * <p>文書は、文書のdownloadと同じACL（{@link DocumentService#assertDocumentAccessAllowed}）も通す（W3-02 P2-2）。タスクを
+     * 編集できても、閲覧できない文書（他要員・scope外のlink先・専用種別）の版の有無と版番号は出さない。要員本人の経路
+     * （{@code MyLifecycleApiController}）も同じ判定を通る。ACLの拒否は存在しない文書と同じ404にし、存在を推測させない。</p>
      */
     @Override
     public List<LifecycleEvidenceVersionDto> listEvidenceVersions(Long taskId, Long documentId, SysUser currentUser) {
@@ -698,6 +708,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (document == null) {
             throw BusinessException.of(404, "error.document.notFound");
         }
+        assertEvidenceDocumentReadable(document, 404);
         List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, document.getId());
         if (versions == null) {
             return List.of();
@@ -714,6 +725,23 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                         .createdAt(version.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 文書のdownloadと同じACLを通す。拒否（403・404）とACLを判定できない状態は、どれも呼出し経路で存在しない文書に返すのと
+     * 同じ応答（{@code notFoundStatus} と {@code error.document.notFound}）にする。版一覧（404）と完了報告の証跡（400）の
+     * どちらでも存在を推測させない（fail-closed）。
+     */
+    private void assertEvidenceDocumentReadable(Document document, int notFoundStatus) {
+        DocumentService documentService = documentServiceProvider.getIfAvailable();
+        if (documentService == null) {
+            throw BusinessException.of(notFoundStatus, "error.document.notFound");
+        }
+        try {
+            documentService.assertDocumentAccessAllowed(document);
+        } catch (BusinessException denied) {
+            throw BusinessException.of(notFoundStatus, "error.document.notFound");
+        }
     }
 
     private record LockedTask(LifecycleCase lcCase, LifecycleTask task) {

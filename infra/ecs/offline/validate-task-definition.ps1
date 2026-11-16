@@ -189,10 +189,34 @@ Ok 'uploads EFS accessPointId placeholder present'
 Ok 'EFS-ACTUAL=DEFERRED (template static only)'
 
 $envNames = @($c.environment | ForEach-Object { $_.name })
-foreach ($f in @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET')) {
+$secretNames = @($c.secrets | ForEach-Object { $_.name })
+$secretOnly = @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET',
+  'SESSION_HASH_KEY','MFA_ENCRYPTION_KEY','PWA_CONTEXT_SECRET','BP_BANK_ACCOUNT_ENCRYPTION_KEY',
+  'CERTIFICATION_NUMBER_CRYPTO_KEYS_V1','COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1',
+  'COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1','FREEE_CLIENT_SECRET','FREEE_TOKEN_ENCRYPTION_KEY')
+foreach ($f in $secretOnly) {
   if ($envNames -contains $f) { Fail "$f in environment" }
 }
 Ok 'no secrets in environment[] (Secrets Manager/SSM placeholders only)'
+
+# deploy-runbook.md section 1.0: rows 1-26 are always required; rows 27-30 (freee) only with FREEE_ENABLED=true.
+# Only the presence of each name is checked here; values stay placeholders in the template.
+$requiredStartup = @('DB_URL','DB_USERNAME','DB_PASSWORD','TRUSTED_PROXIES','OIDC_TENANT_ID',
+  'OIDC_ISSUER_URI','OIDC_AUTHORIZATION_URI','OIDC_TOKEN_URI','OIDC_JWK_SET_URI','OIDC_USER_INFO_URI',
+  'OIDC_CLIENT_ID','OIDC_CLIENT_SECRET','MFA_ENCRYPTION_KEY','SESSION_HASH_KEY','BREAK_GLASS_USERNAMES',
+  'BATCH_TOKEN_SECRET','PWA_CONTEXT_SECRET','BP_BANK_ACCOUNT_ENCRYPTION_KEY',
+  'CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION','CERTIFICATION_NUMBER_CRYPTO_KEYS_V1',
+  'COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION','COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1',
+  'COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS','COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION',
+  'COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1','ACCOUNTING_TENANT_IDS')
+$freeeEnabled = @($c.environment | Where-Object { $_.name -eq 'FREEE_ENABLED' } | ForEach-Object { [string]$_.value })
+if ($freeeEnabled -contains 'true') {
+  $requiredStartup += @('FREEE_CLIENT_ID','FREEE_CLIENT_SECRET','FREEE_REDIRECT_URI','FREEE_TOKEN_ENCRYPTION_KEY')
+}
+$allNames = $envNames + $secretNames
+$missing = @($requiredStartup | Where-Object { $allNames -notcontains $_ })
+if ($missing.Count -gt 0) { Fail ("prod startup settings missing (deploy-runbook 1.0): " + ($missing -join ',')) }
+Ok "prod startup settings present ($($requiredStartup.Count) names for deploy-runbook 1.0; FREEE_ENABLED=$($freeeEnabled -join ','))"
 
 if ($c.logConfiguration.logDriver -ne 'awslogs') { Fail 'awslogs driver' } else { Ok 'awslogs placeholder present' }
 Ok 'CloudWatch-ACTUAL=DEFERRED (no log delivery verified)'

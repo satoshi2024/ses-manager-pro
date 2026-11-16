@@ -2,6 +2,7 @@ package com.ses.service.security.epoch;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
+import com.ses.dto.portal.PortalUserEngineerLinkDto;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
@@ -12,6 +13,8 @@ import com.ses.entity.ExternalAccountSystem;
 import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
 import com.ses.entity.LifecycleTemplate;
+import com.ses.entity.PortalOrganization;
+import com.ses.entity.PortalUser;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
@@ -23,6 +26,8 @@ import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.LifecycleTemplateMapper;
+import com.ses.mapper.PortalOrganizationMapper;
+import com.ses.mapper.PortalUserMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.EngineerAccountLinkService;
@@ -38,6 +43,7 @@ import com.ses.service.lifecycle.evidence.LifecycleLockPlan;
 import com.ses.service.lifecycle.evidence.LifecycleLockPlan.LockKey;
 import com.ses.service.lifecycle.evidence.LifecycleLockPlan.Mode;
 import com.ses.service.lifecycle.evidence.LifecycleLockPlan.Rank;
+import com.ses.service.portal.PortalEngineerLinkService;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.security.LegalEntityContextService;
 import com.ses.test.InnoDbRecordLockWaits;
@@ -98,7 +104,9 @@ import static org.mockito.Mockito.reset;
  * 要員削除（3 X → 7 X）、所属登録・所属更新・異動（3 X → 6 X → 7 X → 8）、所属解除（3 X → 7 X → 8）、組織統合
  * （3 X → 6 X → 7 X → 8）、利用者の無効化・削除（3 X → 所属close 7 X → 8）、変更申請の承認によるprofile反映
  * （3 X{email} → 6 S → 7 X）。旧実装の退社完了は 4 X → 7 X → 3 X で、いずれとも同じ要員・連携ユーザーで循環し得た。
- * CONFIRMのreaderを模すplan（1 S → 3 S → 4 X → 5 X → 7 S）とも両順序で直列化されることを確かめる。</p>
+ * CONFIRMのreaderを模すplan（1 S → 3 S → 4 X → 5 X → 7 S）とも両順序で直列化されることを確かめる。
+ * ポータル紐付けの登録（7 X → 12、READ_COMMITTED。W3-02 P2-1(b)）は、退社完了が先行したとき要員行で待ち、lock後の読取で
+ * 完了を見て「要確認」を返すことを確かめる（登録は外側transactionなしで呼ぶ）。</p>
  *
  * <p>待ちの判定は {@code performance_schema.data_lock_waits} のrequester/blocker対（{@link InnoDbRecordLockWaits}）で行い、
  * {@code LOCK_DATA} を連結条件にしない（見えている場合だけ期待の主キーと照合する）。外部キー検査が別の記録・別の表に付ける
@@ -159,6 +167,9 @@ class ResignationCompletionLockOrderMySqlTest {
     @Autowired private EngineerChangeRequestMapper changeRequestMapper;
     @Autowired private ExternalAccountSystemMapper externalAccountSystemMapper;
     @Autowired private ExternalAccountReferenceMapper externalAccountReferenceMapper;
+    @Autowired private PortalEngineerLinkService portalEngineerLinkService;
+    @Autowired private PortalOrganizationMapper portalOrganizationMapper;
+    @Autowired private PortalUserMapper portalUserMapper;
 
     @MockBean private LegalEntityContextService legalEntityContextService;
     @MockBean private ExternalAccountProviderClient providerClient;
@@ -260,6 +271,28 @@ class ResignationCompletionLockOrderMySqlTest {
         assertSucceeded("退社完了", o.first());
         assertSucceeded("紐付け解除", o.second());
         assertCompleted(f);
+    }
+
+    // ===== ポータル紐付けの登録（7 X → 12。W3-02 P2-1(b)） =====
+
+    @Test
+    void 退社完了が先行するとポータル紐付けの登録は要員行で待ち完了を読んで要確認を返す() throws Exception {
+        Fixture f = fixture();
+        long portalUser = insertPortalUser();
+        AtomicReference<PortalUserEngineerLinkDto> registered = new AtomicReference<>();
+
+        // 登録は外側transactionを作らずに呼び、宣言どおりのREAD_COMMITTEDで動かす（外側に参加すると宣言が効かない）
+        Outcomes o = raceWithOwnTransaction("退社完了先行 × ポータル紐付け登録", complete(f),
+                () -> registered.set(portalEngineerLinkService.register(portalUser, f.engineer())),
+                "t_engineer", f.engineer());
+
+        assertSucceeded("退社完了", o.first());
+        assertSucceeded("ポータル紐付け登録", o.second());
+        assertCompleted(f);
+        assertTrue(registered.get().isEngineerResigned(), "lock待ちの間にcommitされた退社完了を読み「要確認」を返す");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_audit_log WHERE application_code = "
+                + "'PORTAL_ENGINEER_LINK_REGISTERED' AND reference_id = ? AND after_state LIKE '%engineerResigned=true%'",
+                Integer.class, registered.get().getId()), "監査にも要確認が残る");
     }
 
     @Test
@@ -627,6 +660,75 @@ class ResignationCompletionLockOrderMySqlTest {
         }
     }
 
+    /**
+     * {@link #race} と同じく先行側をcommit前に止め、後続側が {@code table} の主キー {@code rowId} の排他lockで先行側を待つことを
+     * 確かめてから先行側を解放する。後続側は外側のtransactionを作らずに呼ぶ（serviceが宣言した分離レベルで動かすため）。
+     * そのため後続側の接続IDは取れず、待機辺は先行側の接続をblockerとする全requesterから探す（同じ行を待つ接続は後続側だけ）。
+     */
+    private Outcomes raceWithOwnTransaction(String label, Step first, Runnable second, String table, long rowId)
+            throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch firstDone = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicLong firstConnection = new AtomicLong();
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        try {
+            Future<Throwable> firstFuture = pool.submit(() -> capture(() -> {
+                bindContexts();
+                first.template().get().executeWithoutResult(status -> {
+                    firstConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
+                    try {
+                        first.action().run();
+                    } catch (RuntimeException failure) {
+                        firstFailure.set(failure);
+                        status.setRollbackOnly();
+                    }
+                    firstDone.countDown();
+                    awaitQuietly(releaseFirst);
+                });
+            }));
+            if (!firstDone.await(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS) || firstFuture.isDone()) {
+                fail(label + ": 先行側がcommit前で止まらなかった: " + outcome(firstFuture));
+            }
+            Future<Throwable> secondFuture = pool.submit(() -> capture(() -> {
+                bindContexts();
+                second.run();
+            }));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(EpochFenceMySqlSupport.WAIT_SECONDS);
+            boolean waited = false;
+            while (!waited && System.nanoTime() < deadline) {
+                if (secondFuture.isDone()) {
+                    fail(label + ": 後続側が" + table + "#" + rowId + "で待たずに終了した: " + outcome(secondFuture));
+                }
+                for (InnoDbRecordLockWaits.WaitEdge edge
+                        : InnoDbRecordLockWaits.waitEdges(jdbc, null, firstConnection.get(), table, "PRIMARY")) {
+                    if ("RECORD".equals(edge.requesterType()) && "WAITING".equals(edge.requesterStatus())
+                            && EXCLUSIVE.contains(edge.requesterMode()) && EXCLUSIVE.contains(edge.blockerMode())
+                            && InnoDbRecordLockWaits.keyVisibleAndMatches(edge.requesterData(),
+                            InnoDbRecordLockWaits.primaryKey(rowId))) {
+                        waited = true;
+                    }
+                }
+                if (!waited) {
+                    Thread.sleep(25);
+                }
+            }
+            assertTrue(waited, label + ": 後続側の" + table + "#" + rowId + "の待機を確認できなかった: "
+                    + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, firstConnection.get()));
+            assertFalse(secondFuture.isDone(), label + ": 後続側は先行側のcommitまで待つこと");
+            releaseFirst.countDown();
+            Throwable firstOutcome = firstFuture.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            Throwable secondOutcome = secondFuture.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            Throwable firstResult = firstOutcome != null ? firstOutcome : firstFailure.get();
+            assertNoLockFailure(label + "（先行側）", firstResult);
+            assertNoLockFailure(label + "（後続側）", secondOutcome);
+            return new Outcomes(firstResult, secondOutcome);
+        } finally {
+            releaseFirst.countDown();
+            pool.shutdownNow();
+        }
+    }
+
     private static Throwable capture(Runnable action) {
         try {
             action.run();
@@ -836,6 +938,29 @@ class ResignationCompletionLockOrderMySqlTest {
                 .status("Bench").employmentType("正社員").build();
         engineerMapper.insert(engineer);
         return engineer.getId();
+    }
+
+    /** 操作者のtenantの顧客組織に属するポータルユーザー（紐付けは持たない）。各文はautocommit。 */
+    private long insertPortalUser() {
+        long seq = SEQUENCE.incrementAndGet();
+        String customer = "W302-PEL-" + seq;
+        jdbc.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, ?)", customer, TENANT);
+        long customerId = jdbc.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, customer);
+        PortalOrganization org = new PortalOrganization();
+        org.setType("CUSTOMER");
+        org.setCustomerId(customerId);
+        org.setTenantId(TENANT);
+        org.setStatus("ACTIVE");
+        portalOrganizationMapper.insert(org);
+        PortalUser user = new PortalUser();
+        user.setPortalOrgId(org.getId());
+        user.setEmail("w302-pel-" + seq + "@example.test");
+        user.setDisplayName("W3-02紐付け検証");
+        user.setPasswordHash("not-a-login-hash");
+        user.setStatus("ACTIVE");
+        user.setMfaPolicy("REQUIRED");
+        portalUserMapper.insert(user);
+        return user.getId();
     }
 
     private void insertLink(long engineerId, long userId) {

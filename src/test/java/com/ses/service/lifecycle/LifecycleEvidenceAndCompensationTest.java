@@ -74,6 +74,7 @@ class LifecycleEvidenceAndCompensationTest {
     @AfterEach
     void clearTenantContext() {
         AccountingTenantContextHolder.clear();
+        com.ses.test.TenantTestSecurity.clear();
     }
 
     @BeforeEach
@@ -89,6 +90,9 @@ class LifecycleEvidenceAndCompensationTest {
                 .tenantId("default")
                 .build();
         sysUserMapper.insert(adminUser);
+        // 完了報告の証跡は文書のdownloadと同じACL（認証の主体で判定する）を通る（FINAL-FIX）。API経由と同じく、完了する管理者を
+        // 認証の主体として束縛する
+        com.ses.test.TenantTestSecurity.bindAs(adminUser.getId(), adminUser.getUsername(), "default", "管理者");
 
         SysUser hrUser = SysUser.builder()
                 .username("hr_b2_test")

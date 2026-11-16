@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +52,14 @@ class ResumeIngestionLedgerRetentionTest {
     private com.ses.mapper.DocumentMapper documentMapper;
     @Autowired
     private com.ses.privacy.production.retention.hold.HoldSubjectResolver holdSubjectResolver;
+
+    @Test
+    void 副本の調整の停止口は設定が無ければ有効で従来どおり副本を合わせる() {
+        // app.resume.ledger-copy-alignment.enabled（FINAL-FIX (a)-3）。既定 true を実際の設定の解決で確かめる
+        // @SchedulerLock の proxy の field ではなく、設定を注入した本体を読む
+        Object target = AopTestUtils.getTargetObject(cleanup);
+        assertThat(ReflectionTestUtils.getField(target, "ledgerCopyAlignmentEnabled")).isEqualTo(true);
+    }
 
     @Test
     void 原本のpurge後に副本は保存期限が当日になり既存の廃棄候補作成が受け付ける() {

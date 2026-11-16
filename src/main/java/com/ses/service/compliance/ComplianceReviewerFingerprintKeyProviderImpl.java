@@ -25,6 +25,13 @@ import java.util.regex.Pattern;
  *   <li>dev/test profile: tenant未設定時のみ既定テスト鍵へfallback（prodはfallbackしない）</li>
  *   <li>key rotation: version別に解決・古いversionも参照可能・currentは1つ</li>
  *   <li>未知key version・tenant設定欠損はfail-closed（nullを返さず例外）</li>
+ *   <li>tenantの列挙（FINAL-FIX）: 名前に {@code compliance.gate.fingerprint-keys.} を含むMap型property source（設定file・
+ *       {@code SPRING_APPLICATION_JSON}・試験のproperty）と、tenant一覧 {@code compliance.gate.fingerprint-key-tenants}
+ *       （カンマ区切り。OS環境変数 {@code COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS}）の和集合。OS環境変数の名前は
+ *       {@code COMPLIANCE_GATE_FINGERPRINT_KEYS_...} の形で上の接頭辞に一致せず、tenant IDも名前から復元できない
+ *       （{@code .}・{@code -} が {@code _} になり大文字化される）ため、環境変数だけで渡すときは一覧が要る。一覧のtenantの
+ *       version・鍵は {@code Environment#getProperty} の緩い名前解決で読むため、
+ *       {@code COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_CURRENT_KEY_VERSION}・{@code ..._KEYS_<VERSION>} で渡せる。</li>
  * </ul>
  */
 @Component
@@ -63,7 +70,8 @@ public class ComplianceReviewerFingerprintKeyProviderImpl
         }
         if (isProd && keysByTenant.isEmpty()) {
             throw new IllegalStateException(
-                    "Fail-fast: missing compliance.gate.fingerprint-keys configuration in prod profile");
+                    "Fail-fast: missing compliance.gate.fingerprint-keys configuration in prod profile"
+                            + " (OS環境変数で渡す場合は compliance.gate.fingerprint-key-tenants も設定する)");
         }
         // dev/test: 'default' tenantのみ既定テスト鍵へfallback（他tenantは未設定のまま・解決時fail-closed）
         if (!isProd && !currentVersions.containsKey("default")) {
@@ -155,8 +163,19 @@ public class ComplianceReviewerFingerprintKeyProviderImpl
         currentVersions.put(tenant, configuredVersion);
     }
 
+    /** OS環境変数でも渡せるtenant一覧（カンマ区切り。クラスの説明）。 */
+    static final String TENANT_LIST_PROPERTY = "compliance.gate.fingerprint-key-tenants";
+
     private java.util.Set<String> configuredTenants() {
         java.util.Set<String> tenants = new java.util.TreeSet<>();
+        String listed = environment.getProperty(TENANT_LIST_PROPERTY);
+        if (StringUtils.hasText(listed)) {
+            for (String tenant : listed.split(",")) {
+                if (StringUtils.hasText(tenant)) {
+                    tenants.add(tenant.trim());
+                }
+            }
+        }
         if (!(environment instanceof org.springframework.core.env.ConfigurableEnvironment)) {
             return tenants;
         }
