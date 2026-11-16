@@ -158,8 +158,10 @@ class LifecycleDualConfirmationScreenTest {
         }
         keys.add("lifecycle.dual.decision.CONFIRM");
         keys.add("lifecycle.dual.decision.REJECT");
+        // error.lifecycle.idempotencyConflict はserverのmessageをそのまま表示するため画面部品からは参照しない
+        // （W3-21b review P3-2で文言比較による競合判定を廃止した）。
         assertThat(keys).contains("lifecycle.dual.button.open", "lifecycle.dual.comment.present",
-                "error.lifecycle.evidenceVersionRequired", "error.lifecycle.idempotencyConflict");
+                "error.lifecycle.evidenceVersionRequired");
 
         List<String> missing = new ArrayList<>();
         for (Map.Entry<String, String> bundle : BUNDLES.entrySet()) {
