@@ -456,6 +456,32 @@ class PrivacyExportPackageServiceTest {
         assertThat(packages(id)).extracting(PrivacyExportPackage::getStatus).containsExactly("PURGED", "DRAFT");
     }
 
+    /**
+     * D14（deploy-runbook §4.4、plan §3.4.1）: 開示 package は交付用の副本で hold の対象ではないため、本人に SUBJECT hold があっても
+     * 期限超過の削除と交付記録の削除は gate を照会せずに消す（原本は D1〜D11 が守る）。
+     */
+    @Test
+    void 本人がhold中でも開示packageの削除はgateを見ずに期限で消す() {
+        PrivacyHoldGate gate = mock(PrivacyHoldGate.class);
+        holdGate.set(gate);
+        long expiring = previewedRequest("T-HELD-EXPIRE");
+        PrivacyExportPackage expiringPackage = onlyPackage(expiring);
+        long delivering = approvedRequest("T-HELD-DELIVER");
+        PrivacyExportPackage deliveringPackage = onlyPackage(delivering);
+
+        // 交付記録の削除（期限内の承認済み package の実体を同じ tx で消す）
+        actor.set(adminA());
+        service.recordDelivery(delivering, delivery(6L, deliveringPackage));
+        assertThat(packageMapper.selectById(deliveringPackage.getId()).getStatus()).isEqualTo("PURGED");
+        assertThat(Files.exists(published(deliveringPackage.getStoredName()))).isFalse();
+
+        // 期限超過の削除（scheduler の経路）
+        assertThat(service.purgeDue(NOW.plusDays(31))).isEqualTo(1);
+        assertThat(packageMapper.selectById(expiringPackage.getId()).getStatus()).isEqualTo("PURGED");
+        assertThat(Files.exists(published(expiringPackage.getStoredName()))).isFalse();
+        org.mockito.Mockito.verifyNoInteractions(gate);
+    }
+
     @Test
     void 終了した本人請求に残ったpackageは期限前でも削除する() {
         long id = previewedRequest("T-CLOSED");

@@ -12,6 +12,10 @@ import java.util.Objects;
  * 実体を消す（{@link PrivacyExportPackageService#purgeDue}）。機能スイッチ {@code NF07_DSAR} では止めない（OFF に戻した後も期限を
  * 超えて package を残さない。I-9。{@code FeatureSwitchRouteCoverageTest} の UNGATED_SCHEDULERS）。package が1件も無ければ照会1回で
  * 終わる。test profile は {@code app.scheduling.enabled=false} で定期実行そのものが止まる。
+ *
+ * <p>破壊的経路 D14（deploy-runbook §4.4・plan §3.4.1）で、NF07 hold の gate には接続しない（対象外）。package は F2 provider が
+ * 読んだ値の交付用の副本で原本は別に保存され（D1〜D11 が守る）、package の表は catalog に無く hold の対象ではない。接続すると hold を
+ * 使った tenant では UNCLASSIFIED で1件も消せず、D-06 の最長保存期間を超えて副本を残す（I-9。I-4 も対象外とする）。
  */
 public class PrivacyExportPackagePurgeScheduler {
 

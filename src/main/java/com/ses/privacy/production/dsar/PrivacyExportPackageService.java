@@ -72,6 +72,8 @@ import java.util.regex.Pattern;
  *       id と hash の照合付きで記録する。同じ transaction で package を PURGED にし、実体を消す（消せなければ記録ごと巻き戻す）。</li>
  *   <li>削除（{@link #purgeDue}、scheduler）: {@code purge_after} を過ぎた package と、終了状態の case の package を PURGED にして実体を消す。</li>
  * </ol>
+ * package の実体の削除（期限超過・交付記録・作り直し）は破壊的経路 D14 で、NF07 hold の gate に接続しない（交付用の副本で hold の
+ * 対象ではない。deploy-runbook §4.4。gate は {@link #section} の hold の表示にだけ読む）。
  * system から外部へ送る経路は持たない（I-4）。監査は同じ transaction で必須記録し、本文は受付番号と状態遷移だけにする
  * （保存名・内容 hash・subject 参照を入れない）。状態を変える操作は request 行の「現状態・{@code row_version}」の CAS を先に通す。
  */
