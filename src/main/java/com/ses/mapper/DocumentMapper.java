@@ -61,11 +61,13 @@ public interface DocumentMapper extends BaseMapper<Document> {
      * 履歴・スキルシート取込の原本を purge 済み（{@code stored_file_name IS NULL}、確定済・却下）のジョブに link した
      * 文書台帳の副本（{@code RESUME_INGESTION}）のうち、保存期限をまだ取込原本に合わせていないものの ID
      * （DRAFT、または保存期限が未設定・{@code retentionUntil} より後）。tenant は引数で明示し、link・ジョブも同じ tenant に限る。
-     * 1回の件数は {@code limit} までで、残りは次の実行で拾う（再実行で同じ副本を重ねて処理しない）。
+     * {@code afterId} より大きい ID を昇順に {@code limit} 件まで返す（keyset。呼出側は返った最後の ID を次の {@code afterId}
+     * にして繰り返す。legal hold 中・失敗し続ける副本が先頭に溜まっても、後ろの副本の処理を止めない）。
      */
     @Select("SELECT d.id FROM t_document d WHERE d.tenant_id = #{tenantId} AND d.document_type = 'RESUME_INGESTION' "
             + "AND d.deleted_flag = 0 AND d.status IN ('DRAFT', 'CONFIRMED', 'AMENDED', 'CANCELLED') "
             + "AND (d.status = 'DRAFT' OR d.retention_until IS NULL OR d.retention_until > #{retentionUntil}) "
+            + "AND d.id > #{afterId} "
             + "AND EXISTS (SELECT 1 FROM t_document_link l JOIN t_resume_ingestion r "
             + "ON r.id = l.target_id AND r.tenant_id = l.tenant_id "
             + "WHERE l.document_id = d.id AND l.tenant_id = d.tenant_id AND l.target_type = 'RESUME_INGESTION' "
@@ -73,6 +75,7 @@ public interface DocumentMapper extends BaseMapper<Document> {
             + "ORDER BY d.id LIMIT #{limit}")
     List<Long> selectResumeCopiesAwaitingRetention(@Param("tenantId") String tenantId,
                                                    @Param("retentionUntil") LocalDate retentionUntil,
+                                                   @Param("afterId") long afterId,
                                                    @Param("limit") int limit);
 
     /**

@@ -513,7 +513,9 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 
 - D4 の原本 purge の後に `ResumeIngestionLedgerRetentionService.alignPurgedCopies` を呼ぶ。対象は、原本を purge 済み（`stored_file_name IS NULL`、確定済・却下）のジョブに同じ tenant の link を持つ副本で、DRAFT は `DocumentEligibilityService.confirm` で CONFIRMED・保存期限＝当日にし、CONFIRMED・AMENDED・CANCELLED は状態を変えず保存期限を当日に早める（`DocumentEligibilityService.alignRetention`。保存期限が既に当日以前なら変えない）。
 - 処分は既存の D3（02:30、`registerRetentionDisposalCandidate`。CONFIRMED のみ）→ 管理者の承認 → D1（`executeDisposal`）で行う。AMENDED・CANCELLED は D2（手動の申請）の対象になる。D1〜D3 は lock 後に legal hold を再確認し、NF07 hold の gate（A1H）も D1〜D3 に入るため、本経路は hold を迂回しない。
-- legal hold 中の副本は保存期限も変えず WARN を出す。毎回の実行で未処理の副本を照会し直すので、hold の解除後・一時的な失敗の後の実行で拾い直し、処理済みの副本は照会に出ない（再実行で重ねて変えず、D3 の申請も重複しない）。副本ごとに短い transaction で処理し、失敗しても原本の purge を戻さない。
+- legal hold 中の副本は保存期限も変えず WARN を出す。毎回の実行で未処理の副本を照会し直すので、hold の解除後・一時的な失敗の後の実行で拾い直し、処理済みの副本は照会に出ない（再実行で重ねて変えず、D3 の申請も重複しない）。副本ごとに短い transaction で処理し、失敗しても原本の purge を戻さない。照会は ID の keyset（`d.id > 直前の最後の ID`、500件ずつ）で全件を進めるため、hold 中・失敗し続ける副本が先頭に溜まっても後ろの副本は処理される。
+- 失敗は `DocumentRetentionJob` と同じく件数を ERROR で1件残し、metric `ses.resume.ledger.retention.failures`（tag `stage`=`document`/`batch`）に数える。AMENDED・CANCELLED の期限到来と、合わせられずに残った副本は deploy-runbook §4.3 の定期確認 SQL で拾う。
+- 実 MySQL の根拠は `ResumeIngestionLedgerRetentionMySqlTest`（shard-2）：外側 transaction の無い日次清理での副本ごとの失敗の隔離（lock 待ちの timeout）、`changeLegalHold` との両順序の直列化、link・ジョブの tenant 境界、清理 → D3 → 承認 → 執行の端から端まで（保存期限は延ばさない、AMENDED は状態を変えない、epoch は進まない）。
 - NF07 の SUBJECT hold は、副本にも原本と同じ本人導出（D4 と同じ和集合。下の表の `RESUME_INGESTION`）で効く。DATA_ELEMENT hold は element が別（原本は `RESUME_INGESTION_ORIGINAL`、副本は `DOCUMENT:RESUME_INGESTION`）のため、原本の element だけを hold しても副本は D1〜D3 で止まらない。A1H で hold の対象を選ぶ所と runbook に両方を並べ、この扱いを D-05 owner が受理する。
 - 開放前に Privacy owner と文書 owner の書面署名を得る（deploy-runbook の V197 行・署名事項）。署名が得られない場合は `ResumeRetentionCleanupServiceImpl` の副本処理を外す変更を出す。
 

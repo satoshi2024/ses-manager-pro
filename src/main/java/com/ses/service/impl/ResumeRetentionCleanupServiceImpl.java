@@ -105,12 +105,17 @@ public class ResumeRetentionCleanupServiceImpl {
         try {
             ResumeIngestionLedgerRetentionService.Result result =
                     ledgerRetention.alignPurgedCopies(tenantId, LocalDate.now());
-            if (result.aligned() > 0 || result.held() > 0 || result.failed() > 0) {
-                log.info("履歴取込原本の purge に合わせて文書台帳の副本を処分対象にしました: tenantId={}, aligned={}, "
-                        + "held={}, failed={}", tenantId, result.aligned(), result.held(), result.failed());
+            if (result.failed() > 0) {
+                // 副本ごとのWARNだけではDB障害等の系統的な失敗が埋もれるため、DocumentRetentionJob と同じく件数をERRORで1件残す
+                log.error("履歴取込原本の purge に合わせた文書台帳の副本の処理に失敗した副本があります。次の実行で再試行します: "
+                        + "tenantId={}, failed={}, aligned={}, held={}", tenantId, result.failed(), result.aligned(),
+                        result.held());
+            } else if (result.aligned() > 0 || result.held() > 0) {
+                log.info("履歴取込原本の purge に合わせて文書台帳の副本を処分対象にしました: tenantId={}, aligned={}, held={}",
+                        tenantId, result.aligned(), result.held());
             }
         } catch (RuntimeException e) {
-            log.warn("文書台帳の副本の保存期限を合わせられませんでした。次の実行で再試行します: tenantId={}, exceptionType={}",
+            log.error("文書台帳の副本の保存期限を合わせられませんでした。次の実行で再試行します: tenantId={}, exceptionType={}",
                     tenantId, LogRedaction.exceptionType(e));
         }
     }

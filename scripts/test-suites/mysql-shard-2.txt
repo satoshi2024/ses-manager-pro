@@ -31,3 +31,4 @@ ReportScheduleDispatchPolicyMySqlTest
 LifecycleResignationUniquenessMySqlTest
 ResignationRevocationOutboxMySqlTest
 EngineerScopeFenceMySqlTest
+ResumeIngestionLedgerRetentionMySqlTest
