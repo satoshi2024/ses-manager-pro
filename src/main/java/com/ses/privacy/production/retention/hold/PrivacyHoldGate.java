@@ -115,6 +115,37 @@ public class PrivacyHoldGate {
         return decide(tenantId, false);
     }
 
+    /**
+     * tenant を持たない全体の batch 経路用（D7・D9・D10。A1H-2）。hold 機構を使った tenant を1回の照会で列挙し、その tenant
+     * ごとに {@link #evaluate} を返す。どの tenant も使っていなければ照会はこの1回だけで空を返す（未使用の環境では挙動が
+     * 変わらない）。列挙できなければ tenant を持たない UNAVAILABLE を1件返す（fail-closed）。lock しない。
+     */
+    public List<TenantDecision> evaluateEngagedTenants() {
+        List<String> tenants;
+        try {
+            tenants = store.engagedTenantIds();
+        } catch (RuntimeException e) {
+            return List.of(new TenantDecision(null, observe(Decision.unavailable(REASON_STATE_UNREADABLE))));
+        }
+        List<TenantDecision> decisions = new ArrayList<>(tenants.size());
+        for (String tenant : tenants) {
+            decisions.add(new TenantDecision(tenant, evaluate(tenant)));
+        }
+        return List.copyOf(decisions);
+    }
+
+    /**
+     * hold 機構を使った tenant 1つの判定。
+     *
+     * @param tenantId tenant（列挙に失敗したときだけ null）
+     * @param decision 判定
+     */
+    public record TenantDecision(String tenantId, Decision decision) {
+        public TenantDecision {
+            Objects.requireNonNull(decision, "decision");
+        }
+    }
+
     private Decision evaluate(String tenantId, boolean lock) {
         return observe(decide(tenantId, lock));
     }

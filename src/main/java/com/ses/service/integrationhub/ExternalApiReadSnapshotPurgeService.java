@@ -1,6 +1,9 @@
 package com.ses.service.integrationhub;
 
 import com.ses.mapper.ExternalApiReadSnapshotMapper;
+import com.ses.privacy.production.retention.hold.PrivacyHoldGate;
+import com.ses.privacy.production.retention.hold.PrivacyHoldPath;
+import com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,13 +11,21 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 
-/** A1 read snapshotを公開requestから分離して有限batchでpurgeするservice。 */
+/**
+ * A1 read snapshotを公開requestから分離して有限batchでpurgeするservice。
+ *
+ * <p>NF07 A1H-2（D9）: 回の初めに保全 hold の gate を1回だけ照会し（hold 機構を使った全 tenant。使っていなければ照会1回）、
+ * {@code EXTERNAL_API_READ_SNAPSHOT}（NOT_ATTRIBUTABLE）に DATA_ELEMENT hold がある・分類が UNKNOWN・gate が判定できない
+ * 場合はその回を消さずに件数を警告する。snapshot は本人へ帰属できないため SUBJECT hold では止めない。
+ */
 @Service
 @RequiredArgsConstructor
 public class ExternalApiReadSnapshotPurgeService {
     public static final int MAX_BATCH_SIZE = 32;
+    static final String DATA_ELEMENT = "EXTERNAL_API_READ_SNAPSHOT";
 
     private final ExternalApiReadSnapshotMapper mapper;
+    private final PrivacyHoldPathGuard privacyHoldPathGuard;
 
     /**
      * expiry indexで最大32 headerだけを選び、FK cascadeによりitemsと一緒に短いtransactionで削除する。
@@ -26,17 +37,27 @@ public class ExternalApiReadSnapshotPurgeService {
             throw new IllegalArgumentException("invalid read snapshot purge request");
         }
         int limit = Math.min(requestedBatchSize, MAX_BATCH_SIZE);
-        List<String> snapshotIds = mapper.selectExpiredSnapshotIds(now, limit);
-        if (snapshotIds == null || snapshotIds.isEmpty()) {
-            return 0;
+        PrivacyHoldPathGuard.Batch hold = privacyHoldPathGuard.openGlobalBatch(PrivacyHoldPath.D9);
+        try {
+            List<String> snapshotIds = mapper.selectExpiredSnapshotIds(now, limit);
+            if (snapshotIds == null || snapshotIds.isEmpty()) {
+                return 0;
+            }
+            PrivacyHoldGate.Verdict verdict = hold.elementVerdict(DATA_ELEMENT);
+            if (verdict != PrivacyHoldGate.Verdict.ALLOW) {
+                hold.skip(verdict, snapshotIds.size());
+                return 0;
+            }
+            if (snapshotIds.size() > limit || snapshotIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+                throw new IllegalStateException("read snapshot purge batch is invalid");
+            }
+            int deleted = mapper.deleteSnapshotsById(snapshotIds);
+            if (deleted != snapshotIds.size()) {
+                throw new IllegalStateException("read snapshot purge batch was partially deleted");
+            }
+            return deleted;
+        } finally {
+            hold.close();
         }
-        if (snapshotIds.size() > limit || snapshotIds.stream().anyMatch(id -> id == null || id.isBlank())) {
-            throw new IllegalStateException("read snapshot purge batch is invalid");
-        }
-        int deleted = mapper.deleteSnapshotsById(snapshotIds);
-        if (deleted != snapshotIds.size()) {
-            throw new IllegalStateException("read snapshot purge batch was partially deleted");
-        }
-        return deleted;
     }
 }

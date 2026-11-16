@@ -384,6 +384,55 @@ SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
  ORDER BY d.tenant_id, d.id;
 ```
 
+### 4.4 NF07 保全holdと破壊的経路（D1〜D13。NF07-A1H-2）
+
+hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も使っていない間は、どの経路も従来どおり動き、増える照会は gate の1回だけである（journal の設定が無い prod でも同じ）。hold を使った tenant では、gate が Journal と一致を確かめられない（`UNAVAILABLE`）と、その tenant の gate 対象の削除が止まる。gate と経路は `privacy.retention.enabled` に依存しない（OFF に戻しても掛けた hold は守る）。plan §3.4.1・§3.4.3。
+
+| # | 経路 | hold の扱い | 当たったとき |
+|---|---|---|---|
+| D1・D2 | 文書の廃棄執行・廃棄申請（手動） | 同じ tx の中・更新の前に `evaluateLocked`。`legal_hold_flag` と独立に判定し、`legal_hold_flag` が先に当たれば従来の 400 | 409 `error.privacy.holdActive`（HELD・分類 UNKNOWN・UNAVAILABLE・本人の導出失敗）。`legal_hold_flag` は立てない |
+| D3 | `DocumentRetentionJob`（02:30） | 文書の tenant ごとに回の初めに1回 | 申請を作らず件数を WARN。履歴取込の副本（`DOCUMENT:RESUME_INGESTION`）も同じ本人導出で止まる |
+| D4・D5 | `ResumeRetentionCleanupServiceImpl`（02:00） | tenant ごとに1回（D4 と D5 で共有） | 行を残し件数を WARN。帰属しない行は SUBJECT hold では消える |
+| D6 | `AiRecommendationRetentionServiceImpl` | tenant ごとに1回（scheduler の Bean に依らない） | 本人の run だけを除いて消す。DATA_ELEMENT hold・UNKNOWN・UNAVAILABLE はその回を消さない |
+| D7 | `IntegrationHubRetentionPurgeScheduler` の record | 回の初めに1回（hold を使った全 tenant） | その kind を全体で止める（record に tenant が無いため） |
+| D8 | 同 nonce | 接続しない（個人情報を含まない） | — |
+| D9 | `ExternalApiReadSnapshotPurgeService` | 回の初めに1回（全 tenant） | その回を消さない |
+| D10 | `FileCleanupService.cleanupOrphanFiles`（両 scheduler） | `PrivacyHoldFileReferenceProvider` が hold の対象の保存名を参照に足す | gate が UNAVAILABLE・保存名を解決できない場合は例外で清掃のその回を中止（1件も消さない） |
+
+- **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）と WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`、gate の `ses.privacy.hold.gate.unavailable`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。log に tenant・subject は出ない。
+- **回の途中で開始された hold**: batch 経路は回の初めの snapshot を使うため、次の回から効く（最大で1回分の実行時間）。
+- **DATA_ELEMENT hold の対**: 履歴取込の原本（`RESUME_INGESTION_ORIGINAL`）だけを hold しても文書台帳の副本（`DOCUMENT:RESUME_INGESTION`）は D1〜D3 で止まらない。副本も止めるなら両方に DATA_ELEMENT hold を掛ける（D-05 owner の受理事項。F2 delta review P3-G）。
+- **D10 を止め続ける hold**: 保存先を application の upload root に持たない `FILE_OBJECT`（`CLOUDSIGN_REMOTE_DOCUMENT`・`FREEE_REMOTE_RECORD`・`MAILBOX_SOURCE_MESSAGE` 等）への DATA_ELEMENT hold と、catalog に行の無い element への hold は保存名を解決できず、hold が続く間 孤児清掃を毎回中止させる（保守側）。
+
+**D11: 業務 record の削除で参照が外れる実体**（各 `FileReferenceProvider` が論理削除行を参照に数えるか。2026-11-16 時点）
+
+| provider | 読む列 | 論理削除行 | その他 |
+|---|---|---|---|
+| `BpAvailabilityFileReferenceProvider` | `t_bp_availability_ingestion.stored_file_name` | 数えない | 貼付け（`PASTE`）を除く |
+| `DocumentArchiveFileReferenceProvider` | `t_document_version.storage_key` | 数えない | 末尾の名前も足す |
+| `EngineerFileReferenceProvider` | `t_engineer.photo_url` | 数えない | — |
+| `FileSecurityMetadataReferenceProvider` | `t_file_security_metadata.stored_name` | 数えない | `FileStorageServiceImpl.delete` が metadata を論理削除する |
+| `ProjectIngestionFileReferenceProvider` | `t_project_ingestion.stored_file_name` | 数えない | 現在の tenant・`EML` だけ |
+| `ProposalFileReferenceProvider` | `t_proposal.skill_sheet_path` | 数えない | — |
+| `ResumeIngestionFileReferenceProvider` | `t_resume_ingestion.stored_file_name` | 数えない | 現在の tenant・却下以外だけ（却下したジョブの原本は孤児になる） |
+| `ServiceRequestFileReferenceProvider` | `t_service_attachment_link` → `t_document_version.storage_key` | 版は数えない | link を物理削除した後の版は守らない |
+| `PrivacyHoldFileReferenceProvider`（A1H-2） | hold の対象（F2 provider の解決。論理削除行・状態を問わない） | 数える | 参照を足すだけ |
+
+held な本人・element の実体は、論理削除・却下・link の削除で既存の provider から外れても `PrivacyHoldFileReferenceProvider` が守る（`PrivacyHoldFileReferenceProviderTest`）。守れないのは、参照元の行が物理削除され F2 provider が解決できなくなった実体（plan §9 R-15 の残余）。
+
+**D12: 対象外**（業務 record に結び付く前の新規実体の補償削除。hold の対象になり得るデータになる前の実体）: `DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`、`FileStorageServiceImpl.store` の失敗時の quarantine 実体、`ImportRawTempFileStore`（取込要求ごとの一時 CSV）、`ImportStageReconcileScheduler` → `DocumentServiceImpl.discardImportStage`（commit されなかった取込 stage の実体と台帳 file）、`CloudSignArtifactService` の一時 file（原本は別に保存）。
+
+**D13: 他 NF の破壊的経路**（A1H-2 では gate に接続しない。対象外の理由と、D-05 owner の受理が要るもの）
+
+| 経路 | 消すもの | 判断 |
+|---|---|---|
+| `PwaClientMutationCleanupScheduler`（`app.pwa.cleanup-cron`、既定30日）と `PwaClientMutationLedgerService.abandon` | `t_pwa_client_mutation`（`user_id`・`response_json`）の物理削除 | **要判断**。catalog に element が無い（未登録）。端末の再送制御の台帳で短期保持だが、`response_json` に応答の個人データが残り得る。SYS_USER の hold で止めるなら catalog の行と gate の接続を別 batch で足す。足さない場合は残余として D-05 owner が受理する |
+| `FreeeIntegrationServiceImpl.unlink`・`link` | `t_freee_employee_link`（要員と freee 従業員IDの対応）の物理削除 | **要判断**。管理者の設定操作で保持期限による消去ではない。対応表を hold の対象にするかは D-05 owner が決める |
+| `EngineerChangeRequestApprovalAdapter.applyCareers` | 承認した変更申請による `t_engineer_career` の置換 | 対象外（本人の申請による現在値の訂正で、保持期限による消去ではない）。hold 中の訂正の扱いは DSAR（訂正請求、A2）と合わせて D-05 で決める |
+| 業務 CRUD の明細・対応表の物理削除・置換（勤怠の休憩、作業実績の日次、請求明細、権限・スキルの対応 等） | 現在値の編集 | 対象外（業務上の編集で保持期限による消去ではない。主要 entity は論理削除で行が残り、F2 provider が論理削除済みを含めて返す） |
+| MFA・portal の資格情報の初期化（列の NULL 化） | secret | 対象外（保持する個人データではない） |
+| `db/migration-prod/R__remove_v2_sample_data.sql` | V2 の見本行 | 対象外（初回・FRESH の状態でだけ動き、hold の対象のデータが存在する前） |
+
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 
 §4.1・§4.2の設定で起動した後、次の順に行う。bootstrap中にlocal password loginできるのは初期管理者 `admin` だけで、他のユーザーのlocal loginは拒否される。OIDC loginは通常どおり使える。

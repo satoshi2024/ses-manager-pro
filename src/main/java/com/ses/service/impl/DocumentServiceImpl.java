@@ -89,6 +89,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.service.document.DocumentEligibilityService documentEligibilityService;
     /** linkの書込み（文書行のX lockと証跡利用可否epoch。NF01 F3）。 */
     private final com.ses.service.document.DocumentLinkCommandService documentLinkCommandService;
+    /** NF07 保全hold（subject・data element 単位。正本は Journal）の判定。廃棄の申請・執行（D1・D2）で使う（A1H-2）。 */
+    private final com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard privacyHoldPathGuard;
 
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
             "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
@@ -681,6 +683,12 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         Long currentUserId = SecurityUtils.currentUserId();
 
+        // D2: NF07 保全hold は legal_hold_flag と独立に、同じ transaction の中・申請の作成の前に判定する（plan §3.4.2）。
+        // 当たれば（または判定できなければ）409 で申請を作らない。hold 機構を使っていない tenant では照会は gate の1回だけ
+        privacyHoldPathGuard.requireDocumentDisposable(
+                com.ses.privacy.production.retention.hold.PrivacyHoldPath.D2, doc.getTenantId(), doc.getId(),
+                doc.getDocumentType());
+
         // 文書行のX lock → 条件の再確認 → 申請insert → 証跡利用可否epochの増分（NF01 F3）
         DocumentDisposalRequest req = documentEligibilityService.requestDisposal(
                 doc.getTenantId(), doc.getId(), currentUserId, reason);
@@ -764,6 +772,12 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         if ("DISPOSED".equals(doc.getStatus())) {
             return;
         }
+
+        // D1: NF07 保全hold は legal_hold_flag と独立に、同じ transaction の中・DISPOSED への更新の前に判定する（plan §3.4.2）。
+        // 当たれば（または判定できなければ）409。legal_hold_flag は立てない（正本を2つにしない）
+        privacyHoldPathGuard.requireDocumentDisposable(
+                com.ses.privacy.production.retention.hold.PrivacyHoldPath.D1, doc.getTenantId(), doc.getId(),
+                doc.getDocumentType());
 
         // 文書行のX lock → holdと状態の再確認 → DISPOSED・申請CAS → 証跡利用可否epochの増分（NF01 F3）。
         // storageの物理削除はcommit後に行うため、証跡readerはDISPOSEDを必ず先に観測する。

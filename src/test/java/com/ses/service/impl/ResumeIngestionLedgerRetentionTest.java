@@ -47,6 +47,10 @@ class ResumeIngestionLedgerRetentionTest {
     private DocumentEligibilityService documentEligibilityService;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private com.ses.mapper.DocumentMapper documentMapper;
+    @Autowired
+    private com.ses.privacy.production.retention.hold.HoldSubjectResolver holdSubjectResolver;
 
     @Test
     void 原本のpurge後に副本は保存期限が当日になり既存の廃棄候補作成が受け付ける() {
@@ -199,6 +203,43 @@ class ResumeIngestionLedgerRetentionTest {
         cleanup.cleanupTenant(TENANT, LocalDateTime.now().minusDays(30));
         assertThat(document(held).get("STATUS")).as("hold 解除後の実行で拾い直す").isEqualTo("CONFIRMED");
         assertThat(retentionUntil(held)).isBetween(releasedBefore, LocalDate.now());
+    }
+
+    /**
+     * NF07 A1H-2（F2 13af9afe delta review C-c）: 原本の purge に合わせて保存期限を早めた副本でも、SUBJECT hold の本人の副本は
+     * D3（{@code DocumentRetentionJob}）で廃棄候補にならない。hold は原本の purge の後に開始された想定（原本が先に hold されて
+     * いれば D4 が purge せず副本も合わせないため、D1〜D3 だけが副本を守る場合）。本人の導出は本物の {@link HoldSubjectResolver}
+     * （F2 {@code DocumentFileProvider} の RESUME_INGESTION 規則）、gate の判定だけを差し替える。
+     */
+    @Test
+    void NF07_SUBJECT_holdの本人の副本は保存期限を合わせた後もD3で廃棄候補にならず他者の副本はなる() {
+        long candidateId = BASE + 9_001;
+        jdbc.update("INSERT INTO t_candidate (id, tenant_id, name, contact_email, current_stage, deleted_flag) "
+                + "VALUES (?, ?, '候補 保全', 'c@example.invalid', '応募受付', 0)", candidateId, TENANT);
+        long heldCopy = resumeWithCopy(51, TENANT, OLD, "DRAFT", false);
+        long otherCopy = resumeWithCopy(52, TENANT, OLD, "DRAFT", false);
+        jdbc.update("UPDATE t_resume_ingestion SET candidate_id = ? WHERE id = ?", candidateId, BASE + 51);
+        cleanup.cleanupTenant(TENANT, LocalDateTime.now().minusDays(30));
+        assertThat(document(heldCopy).get("STATUS")).as("hold 開始前に保存期限を合わせ済み").isEqualTo("CONFIRMED");
+        assertThat(document(otherCopy).get("STATUS")).isEqualTo("CONFIRMED");
+
+        com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.Stub hold =
+                com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.stub().tenant(TENANT,
+                        com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.verified(
+                                java.util.Set.of("CANDIDATE:" + candidateId), java.util.Set.of(),
+                                Map.of("DOCUMENT:RESUME_INGESTION",
+                                        com.ses.privacy.production.retention.catalog.SubjectAttribution.ATTRIBUTABLE)));
+        new com.ses.service.job.DocumentRetentionJob(documentMapper, documentEligibilityService,
+                new com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard(hold.gate, holdSubjectResolver, null))
+                .processExpiredDocuments();
+
+        assertThat(pendingRequests(heldCopy)).as("held な本人の副本は廃棄候補にしない").isZero();
+        assertThat(pendingRequests(otherCopy)).isEqualTo(1L);
+    }
+
+    private long pendingRequests(long documentId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM t_document_disposal_request WHERE document_id = ? "
+                + "AND status = 'PENDING'", Long.class, documentId);
     }
 
     /** 原本を持つ履歴取込ジョブと、文書台帳の副本（同じ tenant の link 付き）を作る。 */

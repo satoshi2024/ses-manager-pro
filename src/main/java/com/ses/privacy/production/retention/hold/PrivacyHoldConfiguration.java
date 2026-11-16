@@ -66,6 +66,24 @@ public class PrivacyHoldConfiguration {
                 holdSubjectResolver, meterRegistry);
     }
 
+    /** 破壊的経路（D1〜D7・D9）の入口（A1H-2）。gate と同じく profile・機能スイッチに依存しない。 */
+    @Bean
+    public PrivacyHoldPathGuard privacyHoldPathGuard(PrivacyHoldGate privacyHoldGate,
+                                                     HoldSubjectResolver holdSubjectResolver,
+                                                     ObjectProvider<MeterRegistry> meterRegistry) {
+        return new PrivacyHoldPathGuard(privacyHoldGate, holdSubjectResolver, meterRegistry);
+    }
+
+    /**
+     * D10: 孤児 file の清掃から hold の対象の実体を守る provider（A1H-2）。{@code FileCleanupServiceImpl} と
+     * {@code LegacyUploadMigrationService} が {@code List<FileReferenceProvider>} として受け取る（参照を足すだけで減らさない）。
+     */
+    @Bean
+    public PrivacyHoldFileReferenceProvider privacyHoldFileReferenceProvider(PrivacyHoldGate privacyHoldGate,
+                                                                             HoldSubjectResolver holdSubjectResolver) {
+        return new PrivacyHoldFileReferenceProvider(privacyHoldGate, holdSubjectResolver);
+    }
+
     @Bean
     public PrivacyHoldService privacyHoldService(PrivacyAccessGuard accessGuard,
                                                  ObjectProvider<OidcSecurityProperties> oidcProperties,

@@ -503,9 +503,9 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 | D8 | 同 nonce purge（`ApiNonceReplayService.purgeExpired`） | 自動（60秒） | replay 防止用 nonce の削除 | 個人情報を含まない | — | gate に接続しない |
 | D9 | `ExternalApiReadSnapshotPurgeScheduler` | 自動（60秒） | read snapshot の削除 | 帰属不能 | `EXTERNAL_API_READ_SNAPSHOT` | D7 と同じ。F2 の inventory で個人情報を含まないと確認できれば D8 と同じく接続しない |
 | D10 | `FileCleanupService.cleanupOrphanFiles()`（`FileCleanupScheduler` と `DocumentArchiveFileCleanupScheduler` の両方が呼ぶ） | 自動 | どの `FileReferenceProvider` も参照しない実体の削除 | 参照元の行が無いので、この経路自体では導出できない | — | 両 scheduler を同じ扱いにするため、scheduler ではなく `FileReferenceProvider` の側で守る。新規 `PrivacyHoldFileReferenceProvider` が、有効な hold の subject / data element に帰属する stored name（F2 provider が論理削除済みの行も含めて解決）を「参照あり」として返す。gate が `UNAVAILABLE` のときは provider が例外を返し、cleanup をその回は中止させる（既存の cleanup が provider 例外で中止することを A1H で確認し、しない場合は合わせて直す） |
-| D11 | 業務 record の削除で file 参照が外れる経路 | 手動 | 参照が外れた実体は D10 で消える | 各 `FileReferenceProvider` | — | `FileReferenceProvider` ごとに、論理削除行を参照に数えるかを A1H で一覧化する。held subject の実体は D10 の provider で守る。参照元の行が物理削除された実体は帰属できず守れない（残余、§9 R-15） |
-| D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
-| D13 | 他 NF の破壊的経路 | — | — | — | — | A1H 着手時に本表へ追記して同じ規則で分類する。対象外とするものは理由を書いて D-05 owner の受理を得る |
+| D11 | 業務 record の削除で file 参照が外れる経路 | 手動 | 参照が外れた実体は D10 で消える | 各 `FileReferenceProvider` | — | `FileReferenceProvider` ごとに、論理削除行を参照に数えるかを A1H で一覧化する。held subject の実体は D10 の provider で守る。参照元の行が物理削除された実体は帰属できず守れない（残余、§9 R-15）。一覧は A1H-2 で deploy-runbook §4.4 に置いた（既存の8 provider はいずれも論理削除行を数えない。却下した履歴取込の原本・link を消した依頼の添付も外れる） |
+| D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`。A1H-2 で同じ種類の `FileStorageServiceImpl.store` の失敗時・`ImportRawTempFileStore`・`ImportStageReconcileScheduler`・CloudSign の一時 file を追加） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
+| D13 | 他 NF の破壊的経路 | — | — | — | — | A1H-2 で deploy-runbook §4.4 に分類した。PWA の再送台帳（`t_pwa_client_mutation`）と freee の従業員対応（`t_freee_employee_link`）の物理削除は catalog に element が無く、接続するか残余とするかを D-05 owner が決める（要判断）。業務上の現在値の編集・資格情報の初期化・初回だけの見本行の削除は理由付きで対象外 |
 
 **D4 と文書台帳の副本（2026-11-16 依頼者決定、NF07-F2 delta review P2-C。Privacy・文書 owner の署名待ち）**
 
@@ -653,10 +653,10 @@ catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMEN
 | Demo | 示す test | batch |
 |---|---|---|
 | 1（開始 → 帰属できない element と件数 → ACTIVE） | `PrivacyHoldServiceMySqlTest`（ACK の後に projection、一覧・帰属できない element、gate が Journal と一致）、`PrivacyHoldServiceTest`（決定の欠落・選択の欠落・監査本文） | A1H-1 |
-| 2（D1 の 409、`legal_hold_flag` は 0） | 経路ごとの test（`DocumentServiceImplDisposalHoldTest`） | A1H-2 |
-| 3（D4・D5 で対象者だけ残る、nonce purge は動く） | 経路ごとの test（`ResumeRetentionCleanupServiceImplTest`、`IntegrationHubRetentionPurgeSchedulerTest`） | A1H-2 |
-| 4（journal 停止で skip・409、未使用 tenant は従来どおり） | gate 部分は `PrivacyHoldServiceMySqlTest`（Journal に届かない索引で UNAVAILABLE、未使用 tenant は「hold なし」）と `PrivacyHoldGateTest`（照会1回）。経路の skip・409 は A1H-2 | A1H-1 / A1H-2 |
-| 5（flag OFF でも残る） | gate 部分は `PrivacyHoldGateTest`（入口を閉じても VERIFIED、gate と reconciler が flag・guard に依存しない）。経路は A1H-2 | A1H-1 / A1H-2 |
+| 2（D1 の 409、`legal_hold_flag` は 0） | `DocumentServiceImplDisposalHoldTest`（D1・D2: NF07 hold 単独で 409・`legal_hold_flag` は 0 のまま、`legal_hold_flag` 単独で従来の 400・gate を照会しない、両方で 400、UNAVAILABLE・UNKNOWN・導出失敗で 409）、`PrivacyHoldPathGuardTest`（本物の gate で開始した hold が同じ tx の 409 になる） | A1H-2 |
+| 3（D4・D5 で対象者だけ残る、nonce purge は動く） | `ResumeRetentionCleanupServiceImplTest`（要員・候補者の hold の行だけ残り、他者と未変換の行は消える）、`HoldSubjectResolverPathTest`（和集合の導出を実 provider で）、`IntegrationHubRetentionPurgeSchedulerTest`（nonce は hold に関係なく消す） | A1H-2 |
+| 4（journal 停止で skip・409、未使用 tenant は従来どおり） | gate 部分は `PrivacyHoldServiceMySqlTest`（Journal に届かない索引で UNAVAILABLE、未使用 tenant は「hold なし」）と `PrivacyHoldGateTest`（照会1回）。経路は `PrivacyHoldPathGuardTest`（Journal 不達で batch・全体・D1・D10 が止まり、未使用 tenant は照会1回で ALLOW）と各経路の test の UNAVAILABLE の例 | A1H-1 / A1H-2 |
+| 5（flag OFF でも残る） | gate 部分は `PrivacyHoldGateTest`（入口を閉じても VERIFIED、gate と reconciler が flag・guard に依存しない）。経路は `PrivacyHoldPathGuardTest`（入口の guard を閉じた後も経路の判定は HELD、D10 は保存名を守る） | A1H-1 / A1H-2 |
 | 6（pending の解消） | `PrivacyHoldProjectionReconcilerMySqlTest`（ACK 済み → projection・pending 解消、未 append → timeout 後に解消、Journal 不達 → 残す、projection 欠落の追い付き） | A1H-1 |
 
 **A1H の分割（総括決定 2026-11-16）**: 本節は A1H-1「hold 開始・gate・pending/reconciler・API・画面」（経路に接続しない）と A1H-2「D1〜D13 への gate の接続、`PrivacyHoldFileReferenceProvider`、経路ごとの test」に分ける。解除（NF07-REL）はどちらにも含めない。
@@ -675,6 +675,18 @@ catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMEN
 - 根拠の test: fast は `PrivacyHoldServiceTest`（instance の比較の間隔が予約と append の間で切れても append の時点の `pending_since` が append の開始時刻と一致する、再送の直前の lock 待ちの時間が `pending_since` に入らない、lock した行の pending が自分の command でなければ時刻を書かず再送しない）。実 lock の待ちは `PrivacyHoldServiceMySqlTest`（shard-1。別の接続が状態行を `FOR UPDATE` で持つ間に時計を進め、解放の後の再送の時点で `pending_since` が解放の時刻以後）。
 - 実行中の誤接続の検出（§3.4.6 の8 の決定、review P3-8）: Journal と application DB の `@@server_uuid` を、reconciler の実行ごとと、各 process で前回から1分を過ぎた最初の利用時に比べ、同じなら gate を `UNAVAILABLE`（`JOURNAL_SAME_INSTANCE`）、hold 開始を 503 にし、固定 code の WARN（`NF07_PRIVACY_JOURNAL_SAME_INSTANCE`）を出す。比べられなければ（どちらかが照会不能）も `UNAVAILABLE`（`NF07_PRIVACY_JOURNAL_INSTANCE_UNVERIFIABLE`）。hold 機構を使っていない tenant の gate はこの比較に触れない。残余: 権限（GRANT の過不足・role）・耐久設定以外の構成の実行中の変化は再検査しない（権限は起動時検査だけ、耐久設定は adapter が append ごとに検査する）。比較の間隔の間（最長1分）と、process 内の判定結果を保持する間は、DSN の付け替えを検出できない。DBA の GRANT 手順で実行中の権限変更を行わないことを運用の前提とする。
 - D-05 は `privacy.approval.d05.*` に足し、capability の承認 digest（D-09）には含めない（policy 説明・catalog は D-05 無しで開けるため）。hold 開始の入口で `PrivacyDecisionBinding.evaluateStandalone` が capability の決定と同じ規則で検査する。
+
+**A1H-2 実装記録（2026-11-16）**:
+
+- 入口は `PrivacyHoldPathGuard`（hold package、Bean は gate と同じく profile・flag に依存しない）。経路の宣言は `PrivacyHoldPath`（D1〜D7・D9・D10。接続点の source と判定する data element）で、`PrivacyHoldPathClassificationTest` が宣言から逆に「接続点の source に経路の定数がある」「data element が seed の catalog で UNKNOWN でも NO_PERSONAL_DATA でもない（provider の宣言と照合した実効の分類）」を固定する（C-2 の分類 test）。
+- 手動経路（D1・D2）: `DocumentServiceImpl` の `executeDisposal`（DISPOSED の早期 return の後）と `requestDisposal`（状態の確認の後）で、`DocumentEligibilityService`（NF01 F3。変更しない）を呼ぶ前に、同じ tx の中で `evaluateLocked` を呼ぶ。`legal_hold_flag` の既存の確認（400）が先で、NF07 は独立の判定（409 `error.privacy.holdActive`。HELD・UNCLASSIFIED・UNAVAILABLE・本人の導出失敗のどれでも同じ key で、文言は「対象であるか、確認できない」）。
+- batch 経路: tenant ごとの経路（D3〜D6）は回の初めに `evaluate` を1回（D3 は文書の tenant ごとに最初の文書で1回、D4 と D5 は1回を共有）、tenant を持たない経路（D7・D9・D10）は `PrivacyHoldGate.evaluateEngagedTenants`（追随位置の行を持つ tenant の列挙1回＋その tenant ごとの `evaluate`）。D7・D9 は tenant のどれか1つでも ALLOW でなければその kind・その回を全体で止める（record に tenant が無いため。他 tenant の過剰停止は残余として受け入れる）。
+- 本人の導出: `HoldSubjectResolver` の `documentSubjects`（D1〜D3）・`resumeIngestionSubjects`（D4）・`bpAvailabilityIngestionSubjects`（D5）・`aiRecommendationRunSubjects`（D6）は、held な subject ごとに F2 provider の `findBySubject`（論理削除済みを含む）を引き、表の行 ID → 当たった subject を返す（行から本人を逆に導く規則を別に書かない）。SUBJECT hold が無ければ provider を呼ばない。導出に失敗した回は、その回の行を全て UNAVAILABLE として残す。
+- D6 は1文の purge（`AiRecommendationRunMapper.purgeExpiredSummaries`。NF08 の mapper は変更しない）を hold が無いときと、SUBJECT hold があっても当たる run が無いときにそのまま使う。当たる run があれば、MyBatis-Plus の wrapper で held な run を候補の選択の段階で除き（先頭に溜まって batch を埋め続けないため）、ID を指定して消す。
+- D10: `PrivacyHoldFileReferenceProvider`（`FileReferenceProvider` の Bean）が、SUBJECT hold の本人の保存名（`HoldSubjectResolver.resolveStoredNames`、F2 provider の和集合）と DATA_ELEMENT hold の element の保存名（`resolveElementStoredNames`。catalog の `storage_kind` が `FILE_OBJECT` の element のうち文書種別・履歴取込原本・BP 取込原本・要員写真・案件メール取込原本。保存先を解決できない `FILE_OBJECT` は例外）を、区切りの後の名前と合わせて返す。gate が UNAVAILABLE・解決できない場合は例外を投げ、`FileCleanupServiceImpl` は参照の集約を削除の前に行うためその回は1件も消さない（両 scheduler とも例外をそのまま返すことを `FileCleanupServiceImplTest` で確認。中止の修正は不要だった）。`LegacyUploadMigrationService` も同じ provider 一覧を受け取り、例外ではその回の移行を中止する（既存の挙動）。
+- D11〜D13 の一覧は deploy-runbook §4.4。
+- 「未使用 tenant の挙動は変わらない」の根拠: `PrivacyHoldPathGuardTest`（本物の gate と statement を数える DataSource で、batch の50行・全体の batch・D10・手動経路の照会がどれも1回、provider を呼ばない。Journal の設定が無い prod 相当も同じ）と、経路ごとの test の「hold 機構を使っていない」例（照会1回・従来と同じ mapper 呼出し・resolver を呼ばない）。
+- 残余: (1) D1 は READ_COMMITTED で動くため、追随位置の行が無い tenant の `evaluateLocked` は範囲 lock を取らない。その tenant の最初の hold の開始と同時に走った D1 は、hold の ACK と処分の commit の順序を保証しない（tx 1回分の窓。行ができた後は行 lock で直列化される）。(2) D1・D2 の本人の導出は文書行の lock（NF01 の `DocumentEligibilityService` の中）より前に読むため、その間に commit された link の追加は見えない。(3) D7・D9 の全体停止は hold を使った他 tenant の DATA_ELEMENT hold・UNAVAILABLE でも止まる。(4) hold の画面での原本・副本の element の並列表示（F2 P3-G）は A1H-2 では行っていない（runbook に記載）。
 
 **規模**: XL（main 12 前後、既存コードの接続 8 か所、test 15 class 前後、画面1）。必要なら「hold 開始・gate・reconciler」と「経路の接続」に分ける（Plan Review で決める）。
 

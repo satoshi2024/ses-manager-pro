@@ -287,7 +287,7 @@ class DocumentEligibilityFenceMySqlTest {
         AccountingTenantContextHolder.clear();
 
         // ShedLockのproxyを通さずjob本体を実行する（文書ごとにserviceの短いtransactionでcommitする）
-        new DocumentRetentionJob(documentMapper, eligibility).processExpiredDocuments();
+        new DocumentRetentionJob(documentMapper, eligibility, com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.noHoldsGuard()).processExpiredDocuments();
 
         assertEquals(1L, epoch(a.documentId()));
         assertEquals(1L, epoch(b.documentId()));
