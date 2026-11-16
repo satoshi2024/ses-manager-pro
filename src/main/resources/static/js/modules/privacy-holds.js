@@ -477,6 +477,11 @@
         });
     }
 
+    // 理由の hash の正規形を test（src/test/resources/js/privacy-hold-release-hash-test.js）が test vector と照合する
+    if (window.SES) {
+        window.SES.privacyHoldRelease = {reasonHash: reasonHash};
+    }
+
     $(function () {
         $('#hold-target-type').on('change', toggleTargetFields);
         $('#privacy-hold-form').on('submit', submit);

@@ -168,9 +168,11 @@ public class PrivacyHoldConfiguration {
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
         Clock resolvedClock = clockOf(clock);
+        // 復元した行の開始者を開始要求の監査（t_audit_log）と sys_user から引く（NF07-REL delta review P2-1）
         return new PrivacyHoldProjectionReconciler(privacyHoldJournal, store,
                 new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock),
-                privacyHoldDecisions, audit, requiresNew, resolvedClock, meterRegistry);
+                privacyHoldDecisions, audit, requiresNew, resolvedClock, meterRegistry,
+                new PrivacyHoldStarterLookup(jdbcTemplate));
     }
 
     static TransactionTemplate requiresNew(PlatformTransactionManager transactionManager) {

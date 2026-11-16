@@ -41,7 +41,9 @@ import java.util.Set;
  *       あれば判断せず残す。</li>
  *   <li>Journal の HOLD_STARTED のうち projection に無いもの（ACK 後に projection が失敗した hold、pending を消した後に遅れて
  *       確定した append）を projection へ書く。復元した行は Journal に元の値が無いことを印で示す: 理由コード・ticket は
- *       {@code RECONCILED}、理由 hash は 0×64（値を持たない）、開始者は 0（sentinel）、開始日時は Journal の event 時刻。
+ *       {@code RECONCILED}、理由 hash は 0×64（値を持たない）、開始日時は Journal の event 時刻。開始者は、開始の予約で
+ *       append より前に書かれる開始要求の監査（{@code NF07_HOLD_START_REQUESTED}）から一意に定まる {@code sys_user.id}
+ *       （{@link PrivacyHoldStarterLookup}。定まらなければ 0 = 不明のまま。後の回でも戻せれば戻す。NF07-REL delta review P2-1）。
  *       開始時の理由コード・ticket・D-05 の決定ID・選択は hold ID で開始要求の監査から引ける（理由 hash は監査にも残さない）。
  *       開始の service が後から同じ event を projection しに来た場合は、開始者自身の値で置き換える（Review P3-2）。</li>
  *   <li>解除（NF07-REL）: pending が解除の command（{@code hr-}）なら、Journal の HOLD_RELEASED（{@code case_id} が hold ID）から
@@ -80,7 +82,14 @@ public class PrivacyHoldProjectionReconciler {
         /** hold として解釈できない HOLD_STARTED がある（projection へ書かない。gate は UNAVAILABLE のまま）。 */
         UNRECOGNIZED,
         /** 照合が一致した。 */
-        CONSISTENT
+        CONSISTENT,
+        /** 復元した行の開始者を開始要求の監査から戻した（NF07-REL delta review P2-1）。 */
+        STARTER_RESTORED,
+        /**
+         * 復元した行の開始者を戻せない（監査が一意でない・pending の途中）。状態を変えないため WARN と metric だけに出し、
+         * 判定の一覧には入れない。
+         */
+        STARTER_UNKNOWN
     }
 
     private final PrivacyHoldJournal journal;
@@ -91,11 +100,23 @@ public class PrivacyHoldProjectionReconciler {
     private final TransactionTemplate requiresNew;
     private final Clock clock;
     private final ObjectProvider<MeterRegistry> meterRegistry;
+    private final PrivacyHoldStarterLookup starters;
 
     PrivacyHoldProjectionReconciler(PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
                                     PrivacyHoldProjector projector, PrivacyHoldDecisions decisions,
                                     PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock,
                                     ObjectProvider<MeterRegistry> meterRegistry) {
+        this(journal, store, projector, decisions, audit, requiresNew, clock, meterRegistry, null);
+    }
+
+    /**
+     * @param starters 復元した行の開始者を開始要求の監査から引く部品（null なら開始者を戻さず不明のまま）
+     */
+    PrivacyHoldProjectionReconciler(PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
+                                    PrivacyHoldProjector projector, PrivacyHoldDecisions decisions,
+                                    PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock,
+                                    ObjectProvider<MeterRegistry> meterRegistry, PrivacyHoldStarterLookup starters) {
+        this.starters = starters;
         this.journal = Objects.requireNonNull(journal, "journal");
         this.store = Objects.requireNonNull(store, "store");
         this.projector = Objects.requireNonNull(projector, "projector");
@@ -153,6 +174,7 @@ public class PrivacyHoldProjectionReconciler {
             outcomes.add(resolvePending(tenantId, state.get()));
         }
         outcomes.addAll(catchUp(tenantId));
+        outcomes.addAll(restoreStarters(tenantId));
         if (outcomes.stream().noneMatch(outcome -> outcome == Outcome.PENDING_KEPT || outcome == Outcome.PENDING_AMBIGUOUS
                 || outcome == Outcome.UNRECOGNIZED)) {
             List<PrivacyHoldProjectionStore.HoldRow> holds = store.holds(tenantId, false);
@@ -306,14 +328,72 @@ public class PrivacyHoldProjectionReconciler {
         if (event == null || !PrivacyHoldProjector.isHoldStart(event, holdId)) {
             return hold(Outcome.UNRECOGNIZED, "eventNotHoldStart");
         }
+        // 開始者は開始要求の監査から引く（一意に定まらなければ 0 = 不明。delta review P2-1）
+        long starter = resolveStarter(tenantId, holdId).orElse(0L);
         PrivacyHoldProjectionStore.NewHold hold = new PrivacyHoldProjectionStore.NewHold(holdId, target.get().type(),
-                target.get().value(), PrivacyHoldService.RECONCILED, NO_REASON_HASH, PrivacyHoldService.RECONCILED, 0L,
-                event.createdAt(), event.revision(), event.eventHash());
+                target.get().value(), PrivacyHoldService.RECONCILED, NO_REASON_HASH, PrivacyHoldService.RECONCILED,
+                starter, event.createdAt(), event.revision(), event.eventHash());
         projector.project(tenantId, hold, clearCommandId, SYSTEM_ACTOR, auditEvent, PrivacyHoldAudit.fields(
                 "hold", holdId, "target", target.get().type().name(),
                 "element", target.get().type() == PrivacyHoldTargetType.DATA_ELEMENT ? target.get().value() : null,
-                "revision", Long.toString(event.revision())));
+                "revision", Long.toString(event.revision()), "starter", starter > 0 ? "AUDIT" : "UNKNOWN"));
         return mark(success, reason);
+    }
+
+    /**
+     * 開始者が不明のまま（{@code requested_by = 0}・{@code RECONCILED}）の行に、開始要求の監査から一意に定めた開始者を戻す
+     * （以前の回で照会できなかった行・本変更より前に復元した行）。追随位置の行を lock し、pending（開始・解除）が無いときだけ
+     * 書く（解除の予約・append の途中で開始者を変えない。delta review P3-3）。戻せなければ状態を変えないので監査に残さず、
+     * WARN と metric だけを出す（戻すまで解除は D-05 の規則で拒否されたまま）。
+     */
+    private List<Outcome> restoreStarters(String tenantId) {
+        List<Outcome> outcomes = new ArrayList<>();
+        if (starters == null) {
+            return outcomes;
+        }
+        for (PrivacyHoldProjectionStore.HoldRow row : store.holds(tenantId, false)) {
+            if (row.requestedBy() > 0 || !PrivacyHoldService.RECONCILED.equals(row.reasonCode())) {
+                continue;
+            }
+            Optional<Long> starter = resolveStarter(tenantId, row.holdId());
+            if (starter.isEmpty()) {
+                hold(Outcome.STARTER_UNKNOWN, "starterNotUnique");
+                continue;
+            }
+            Boolean restored = requiresNew.execute(status -> {
+                PrivacyHoldProjectionStore.StateRow state = store.lockState(tenantId, journal.journalId()).orElse(null);
+                if (state == null || state.pendingCommandId() != null) {
+                    return false;
+                }
+                if (store.restoreReconciledStarter(tenantId, row.holdId(), starter.get()) != 1) {
+                    return false;
+                }
+                audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_STARTER_RESTORED,
+                        PrivacyHoldAudit.fields("hold", row.holdId(), "source", "START_REQUESTED"), 200, true);
+                return true;
+            });
+            if (Boolean.TRUE.equals(restored)) {
+                outcomes.add(mark(Outcome.STARTER_RESTORED, "auditStartRequested"));
+            } else {
+                hold(Outcome.STARTER_UNKNOWN, "starterRestoreDeferred");
+            }
+        }
+        return outcomes;
+    }
+
+    /** 開始要求の監査から開始者の sys_user.id を引く（部品が無い・照会できない・一意でなければ空）。 */
+    private Optional<Long> resolveStarter(String tenantId, String holdId) {
+        if (starters == null) {
+            return Optional.empty();
+        }
+        try {
+            java.util.OptionalLong id = starters.starterOf(tenantId, holdId);
+            return id.isPresent() ? Optional.of(id.getAsLong()) : Optional.empty();
+        } catch (RuntimeException e) {
+            log.warn("[privacy-hold] 開始者を開始要求の監査から引けません: code={} exceptionClass={}", LOG_CODE,
+                    e.getClass().getSimpleName());
+            return Optional.empty();
+        }
     }
 
     /** 状態を変えない判定: 固定 code の WARN と metric（監査には残さない）。 */

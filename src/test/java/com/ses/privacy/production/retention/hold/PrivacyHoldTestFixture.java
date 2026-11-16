@@ -87,6 +87,13 @@ final class PrivacyHoldTestFixture {
         clockProperties.setMaxSkew(Duration.ofSeconds(1));
         doAnswer(invocation -> {
             auditUris.add(invocation.getArgument(2));
+            if (persistAudit) {
+                // 本物の監査と同じく呼出し側の transaction の中で t_audit_log へ書く（開始者の復元が読む。delta review P2-1）
+                jdbc.update("INSERT INTO t_audit_log (username, method, uri, status, application_code, success_flag) "
+                                + "VALUES (?, ?, ?, ?, ?, ?)", invocation.getArgument(0), invocation.getArgument(1),
+                        invocation.getArgument(2), (Integer) invocation.getArgument(3), invocation.getArgument(4),
+                        (Boolean) invocation.getArgument(5));
+            }
             return null;
         }).when(auditLog).recordRequired(any(), any(), any(), anyInt(), any(), anyBoolean());
 
@@ -108,7 +115,19 @@ final class PrivacyHoldTestFixture {
         this.service = new PrivacyHoldService(guard, null, decisions, holdJournal, store, resolver, gate, projector, audit,
                 independent, clock, () -> actor);
         this.reconciler = new PrivacyHoldProjectionReconciler(holdJournal, store, projector, decisions, audit,
-                independent, clock, noMetrics);
+                independent, clock, noMetrics, new PrivacyHoldStarterLookup(jdbc));
+    }
+
+    /**
+     * 監査を {@code t_audit_log} にも書くか（既定は書かない。開始者の復元を確かめる test だけが true にする。書く場合も
+     * {@link #user} で {@code sys_user} の行を足さなければ開始者は一意に定まらない）。
+     */
+    volatile boolean persistAudit;
+
+    /** {@code sys_user} の行を足す（開始者の復元が username から id を引く）。 */
+    void user(long id, String username) {
+        jdbc.update("INSERT INTO sys_user (id, username, tenant_id, deleted_flag) VALUES (?, ?, ?, 0)", id, username,
+                TENANT);
     }
 
     private final TransactionTemplate independent;
@@ -133,7 +152,7 @@ final class PrivacyHoldTestFixture {
     /** metric を数える reconciler（同じ store・Journal・projector）。 */
     PrivacyHoldProjectionReconciler reconcilerWith(io.micrometer.core.instrument.MeterRegistry registry) {
         return new PrivacyHoldProjectionReconciler(holdJournal, store, projector, decisions, audit, independent, clock,
-                providerOf(registry));
+                providerOf(registry), new PrivacyHoldStarterLookup(jdbc));
     }
 
     @SuppressWarnings("unchecked")
@@ -202,6 +221,13 @@ final class PrivacyHoldTestFixture {
                 + "subject_attribution VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN', deleted_flag TINYINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE t_document (id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, "
                 + "document_type VARCHAR(50) NOT NULL)");
+        // 列の長さは本番（V11・V25）と同じにする（長すぎる値で insert が失敗することを fast でも検出する）
+        jdbc.execute("CREATE TABLE t_audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50), "
+                + "method VARCHAR(10) NOT NULL, uri VARCHAR(500) NOT NULL, status INT NOT NULL, "
+                + "application_code VARCHAR(64) NULL, success_flag BOOLEAN NOT NULL DEFAULT TRUE, "
+                + "human_user_id BIGINT NULL)");
+        jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, username VARCHAR(50) NOT NULL UNIQUE, "
+                + "tenant_id VARCHAR(100) NULL, deleted_flag TINYINT DEFAULT 0)");
     }
 
     @SuppressWarnings("unchecked")

@@ -100,8 +100,13 @@ class PrivacyHoldReleaseServiceTest {
                 && uri.contains("issuer=" + ISSUER) && uri.contains("approver=" + APPROVER));
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_DECISIONS") && uri.contains("d03=D03-NF07-TEST-001"));
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#RELEASED?"));
-        assertThat(fixture.auditUris).allSatisfy(uri -> assertThat(uri).doesNotContain("ENGINEER").doesNotContain("7041")
-                .doesNotContain(command));
+        // 判定に使った D-05 の規則と許容ずれを残す（delta review P3-5）
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#RELEASE_RULES?") && uri.contains("separation=REQUIRED")
+                && uri.contains("unknownStarter=REJECT") && uri.contains("skewSeconds=1"));
+        // subject の ID は値の境界で判定する（乱数の hash の一部に同じ数字列が現れても誤検出しない）
+        assertThat(fixture.auditUris).allSatisfy(uri -> assertThat(java.net.URLDecoder.decode(uri,
+                java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("ENGINEER")
+                .doesNotContainPattern("(^|[^0-9A-Za-z])7041([^0-9A-Za-z]|$)").doesNotContain(command));
     }
 
     @Test
@@ -360,25 +365,112 @@ class PrivacyHoldReleaseServiceTest {
     }
 
     @Test
-    void 開始者が不明の復元行は既定で解除を拒否し開始者の値が戻れば解除できる() {
+    void reconcilerは開始要求の監査から復元行の開始者を戻し既定の規則のまま解除できる() {
+        fixture.persistAudit = true;
+        fixture.user(1L, "privacy-admin-a");
+
         String holdId = reconciledHold("ENGINEER:7073");
+
+        PrivacyHoldProjectionStore.HoldRow row = fixture.store.hold(TENANT, holdId).orElseThrow();
+        assertThat(row.reasonCode()).isEqualTo(PrivacyHoldService.RECONCILED);
+        assertThat(row.requestedBy()).as("開始要求の監査の username から sys_user.id を引いた").isEqualTo(1L);
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.RECONCILE_PROJECTED)
+                && uri.contains("starter=AUDIT"));
+        PrivacyHoldReleaseResult released = release.release(holdId, request(holdId, newCommandId(), REASON));
+        assertThat(released.status()).isEqualTo("RELEASED");
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_REQUESTED") && uri.contains("starter=KNOWN"));
+    }
+
+    @Test
+    void 開始者が一意に定まらない復元行は不明のまま解除を拒否し後で定まればreconcilerが戻す() {
+        fixture.persistAudit = true;
+        String holdId = reconciledHold("ENGINEER:7077");
         assertThat(PrivacyHoldReleaseService.starterRef(fixture.store.hold(TENANT, holdId).orElseThrow()))
-                .isEqualTo(HoldReleaseBinding.UNKNOWN_STARTER);
+                .as("sys_user に開始者の行が無い").isEqualTo(HoldReleaseBinding.UNKNOWN_STARTER);
 
         assertBusiness(() -> release.release(holdId, request(holdId, newCommandId(), REASON)), 409,
                 "error.privacy.holdReleaseStarterUnknown");
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("reason=HOLD_STARTER_UNKNOWN"));
-        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7073")).isEqualTo(1);
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7077")).isEqualTo(1);
+        assertThat(fixture.reconciler.reconcileAll()).doesNotContainKey(
+                PrivacyHoldProjectionReconciler.Outcome.STARTER_RESTORED);
 
-        // 開始の service が同じ event を projection しに来て開始者の値を戻す（adoptReconciledMetadata）
+        // 後の回で開始者が一意に定まれば戻す（以前の回で照会できなかった行も同じ）
+        fixture.user(1L, "privacy-admin-a");
+        assertThat(fixture.reconciler.reconcileAll()).containsEntry(
+                PrivacyHoldProjectionReconciler.Outcome.STARTER_RESTORED, 1);
+        assertThat(fixture.store.hold(TENANT, holdId).orElseThrow().requestedBy()).isEqualTo(1L);
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.RECONCILE_STARTER_RESTORED));
+        assertThat(release.release(holdId, request(holdId, newCommandId(), REASON)).status()).isEqualTo("RELEASED");
+    }
+
+    @Test
+    void 開始要求の監査が別人を指す_実行者idが食い違う_他のtenantの利用者なら開始者は定めない() {
+        fixture.persistAudit = true;
+        fixture.user(1L, "privacy-admin-a");
+        fixture.user(2L, "privacy-admin-b");
+        PrivacyHoldStarterLookup lookup = new PrivacyHoldStarterLookup(fixture.jdbc);
+        String holdId = startSubject("ENGINEER:7078").holdId();
+        assertThat(lookup.starterOf(TENANT, holdId)).hasValue(1L);
+        assertThat(lookup.starterOf("other-tenant", holdId)).as("sys_user の tenant が違う").isEmpty();
+        assertThat(lookup.starterOf(TENANT, "ph-" + "0".repeat(32))).as("監査が無い").isEmpty();
+
+        // 同じ hold の開始要求の監査が別の username を指す
+        fixture.jdbc.update("INSERT INTO t_audit_log (username, method, uri, status, application_code, success_flag) "
+                + "SELECT 'privacy-admin-b', method, uri, status, application_code, success_flag FROM t_audit_log "
+                + "WHERE application_code = 'NF07_HOLD_START_REQUESTED'");
+        assertThat(lookup.starterOf(TENANT, holdId)).isEmpty();
+
+        String other = startSubject("ENGINEER:7079").holdId();
+        // 監査の実行者 id が username の id と食い違う
+        fixture.jdbc.update("UPDATE t_audit_log SET human_user_id = 2 WHERE uri LIKE ?", "%hold=" + other + "&%");
+        assertThat(lookup.starterOf(TENANT, other)).isEmpty();
+    }
+
+    @Test
+    void 検証の後に開始者の値が変われば予約で409にして署名し直させる() {
+        String holdId = reconciledHold("ENGINEER:7080");
+        fixture.holdProperties.getRelease().setUnknownStarter("ACCEPT");
         PrivacyHoldProjectionStore.HoldRow row = fixture.store.hold(TENANT, holdId).orElseThrow();
-        assertThat(fixture.store.adoptReconciledMetadata(TENANT, new PrivacyHoldProjectionStore.NewHold(holdId,
-                PrivacyHoldTargetType.SUBJECT, "ENGINEER:7073", "LITIGATION", "1".repeat(64), "TICKET-1001", 1L,
-                PrivacyHoldTestFixture.T0, row.journalRevision(), row.journalEventHash()))).isEqualTo(1);
+        java.util.concurrent.atomic.AtomicBoolean armed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        // 解除の予約の最初の statement（追随位置の行の作成・lock）の直前に、開始の service が開始者の値を戻した状態を作る
+        fixture.dataSource.beforePrepare = sql -> {
+            if (sql.toLowerCase(java.util.Locale.ROOT).startsWith("insert into t_privacy_projection_state")
+                    && armed.getAndSet(false)) {
+                fixture.store.adoptReconciledMetadata(TENANT, new PrivacyHoldProjectionStore.NewHold(holdId,
+                        PrivacyHoldTargetType.SUBJECT, "ENGINEER:7080", "LITIGATION", "1".repeat(64), "TICKET-1001", 1L,
+                        PrivacyHoldTestFixture.T0, row.journalRevision(), row.journalEventHash()));
+            }
+        };
 
-        PrivacyHoldReleaseResult released = release.release(holdId, request(holdId, newCommandId(), REASON));
-        assertThat(released.status()).isEqualTo("RELEASED");
-        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_REQUESTED") && uri.contains("starter=KNOWN"));
+        assertBusiness(() -> release.release(holdId, request(holdId, newCommandId(), REASON)), 409,
+                "error.privacy.holdReleaseStale");
+        assertThat(armed.get()).as("予約の前に開始者が変わった").isFalse();
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7080")).isEqualTo(1);
+        assertThat(fixture.state().pendingCommandId()).isNull();
+    }
+
+    @Test
+    void 解除のpendingの間はreconcilerが開始者を書き換えない() {
+        fixture.persistAudit = true;
+        String holdId = reconciledHold("ENGINEER:7081");
+        fixture.holdProperties.getRelease().setUnknownStarter("ACCEPT");
+        PrivacyHoldReleaseRequest request = request(holdId, newCommandId(), REASON);
+        java.util.concurrent.atomic.AtomicLong starterDuringAppend = new java.util.concurrent.atomic.AtomicLong(-1);
+        fixture.journal.beforeAppend = () -> {
+            fixture.journal.beforeAppend = () -> { };
+            // 解除の予約の後・append の前に開始者が一意に定まるようになり、reconciler が走る
+            fixture.user(1L, "privacy-admin-a");
+            fixture.reconciler.reconcileAll();
+            starterDuringAppend.set(fixture.store.hold(TENANT, holdId).orElseThrow().requestedBy());
+        };
+
+        assertThat(release.release(holdId, request).status()).isEqualTo("RELEASED");
+
+        assertThat(starterDuringAppend.get()).as("pending の間は戻さない").isZero();
+        assertThat(fixture.reconciler.reconcileAll()).containsEntry(
+                PrivacyHoldProjectionReconciler.Outcome.STARTER_RESTORED, 1);
+        assertThat(fixture.store.hold(TENANT, holdId).orElseThrow().requestedBy()).isEqualTo(1L);
     }
 
     @Test
@@ -624,6 +716,9 @@ class PrivacyHoldReleaseServiceTest {
                 good.approver()));
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), " ", "TICKET-1", b,
                 good.issuer(), good.approver()));
+        // 対になっていない surrogate は Java と画面で正規形の byte 列が一致しないため 400（delta review P3-1）
+        assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), "理由\uD800", "TICKET-1", b,
+                good.issuer(), good.approver()));
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1",
                 new PrivacyHoldReleaseRequest.Binding(b.tenantId(), b.subjectRef(), b.holdId(), b.expectedHoldRevision(),
                         b.reasonHash(), "hs-" + "1".repeat(32), b.expectedJournalRevision(), b.expectedJournalHash(),
@@ -701,7 +796,10 @@ class PrivacyHoldReleaseServiceTest {
         return "hr-" + UUID.randomUUID().toString().replace("-", "");
     }
 
-    /** ACK 不明が続いた hold 開始を reconciler が Journal から復元した行（開始者は不明の 0）を作る。 */
+    /**
+     * ACK 不明が続いた hold 開始を reconciler が Journal から復元した行を作る（reconciler の実際の経路。開始者は、
+     * {@code persistAudit} と {@code sys_user} の行があれば開始要求の監査から戻り、無ければ不明の 0）。
+     */
     private String reconciledHold(String subjectRef) {
         fixture.journal.commitThenFail.set(2);
         assertThatThrownBy(() -> fixture.service.start(fixture.subjectRequest(subjectRef, "ACCEPT_RISK", "ACCEPT_RISK")))
@@ -709,7 +807,7 @@ class PrivacyHoldReleaseServiceTest {
         fixture.reconciler.reconcileAll();
         PrivacyHoldProjectionStore.HoldRow row = fixture.store.holds(TENANT, false).stream()
                 .filter(hold -> subjectRef.equals(hold.subjectRef())).findFirst().orElseThrow();
-        assertThat(row.requestedBy()).isZero();
+        assertThat(row.reasonCode()).isEqualTo(PrivacyHoldService.RECONCILED);
         assertThat(fixture.state().pendingCommandId()).isNull();
         return row.holdId();
     }

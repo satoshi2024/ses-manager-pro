@@ -131,7 +131,10 @@ class PrivacyHoldServiceMySqlTest {
         assertThat(overview.holds()).extracting(PrivacyHoldOverview.HoldEntry::holdId).containsExactly(result.holdId());
         assertThat(overview.unattributableElements()).extracting(PrivacyHoldOverview.ElementEntry::dataElementId)
                 .containsExactly("INTEGRATION_HUB_AUDIT");
-        assertThat(components.auditUris).allSatisfy(uri -> assertThat(uri).doesNotContain("ENGINEER").doesNotContain("501"));
+        // subject の ID は値の境界で判定する（乱数の event hash の一部に同じ数字列が現れても誤検出しない）
+        assertThat(components.auditUris).allSatisfy(uri -> assertThat(java.net.URLDecoder.decode(uri,
+                java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("ENGINEER")
+                .doesNotContainPattern("(^|[^0-9A-Za-z])501([^0-9A-Za-z]|$)"));
     }
 
     @Test

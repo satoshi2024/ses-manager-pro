@@ -148,8 +148,10 @@ class PrivacyHoldServiceTest {
 
         assertThat(fixture.auditUris).isNotEmpty();
         assertThat(fixture.auditUris).allSatisfy(uri -> {
-            assertThat(uri).doesNotContain("ENGINEER").doesNotContain("4242").doesNotContain("hs-")
-                    .doesNotContain("訴訟");
+            // subject の ID は値の境界で判定する（乱数の hash の一部に同じ数字列が現れても誤検出しない）
+            assertThat(java.net.URLDecoder.decode(uri, java.nio.charset.StandardCharsets.UTF_8))
+                    .doesNotContain("ENGINEER").doesNotContainPattern("(^|[^0-9A-Za-z])4242([^0-9A-Za-z]|$)")
+                    .doesNotContain("hs-").doesNotContain("訴訟");
             assertThat(uri).startsWith(PrivacyHoldAudit.URI_PREFIX);
         });
         // 開始要求の監査から hold ID で、D-05 の決定ID・理由コード・ticket を引ける（Review P3-1）。理由 hash は残さない

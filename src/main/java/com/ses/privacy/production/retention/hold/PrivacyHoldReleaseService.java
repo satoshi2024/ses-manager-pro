@@ -7,6 +7,7 @@ import com.ses.privacy.foundation.HoldReleaseBinding;
 import com.ses.privacy.foundation.HoldReleaseJournalPort;
 import com.ses.privacy.foundation.HoldReleaseRejectedException;
 import com.ses.privacy.foundation.HoldReleaseRejection;
+import com.ses.privacy.foundation.HoldReleaseRules;
 import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.HoldReleaseVerifier;
 import com.ses.privacy.foundation.JournalConflictException;
@@ -199,9 +200,11 @@ public class PrivacyHoldReleaseService {
         } catch (IllegalArgumentException e) {
             throw BusinessException.of(503, "error.privacy.sourceUnavailable");
         }
+        // verifier と監査に同じ規則を使う（判定に使った規則を RELEASE_RULES に残す。delta review P3-5）
+        HoldReleaseRules rules = decisions.releaseRules();
         VerifiedHoldRelease proof;
         try {
-            proof = verifier.verify(validated.presented(), expected, hold.targetType().name(), decisions.releaseRules(),
+            proof = verifier.verify(validated.presented(), expected, hold.targetType().name(), rules,
                     validated.issuer(), validated.approver());
         } catch (HoldReleaseRejectedException e) {
             BusinessException mapped = rejection(e.reason());
@@ -214,7 +217,7 @@ public class PrivacyHoldReleaseService {
             throw BusinessException.of(503, "error.privacy.sourceUnavailable");
         }
 
-        reservePending(tenantId, hold, proof, validated, readiness, catalog, actor);
+        reservePending(tenantId, hold, proof, validated, readiness, rules, catalog, actor);
 
         JournalAck ack;
         try {
@@ -298,7 +301,8 @@ public class PrivacyHoldReleaseService {
 
     private void reservePending(String tenantId, PrivacyHoldProjectionStore.HoldRow hold, VerifiedHoldRelease proof,
                                 Validated validated, PrivacyHoldDecisions.ReleaseReadiness readiness,
-                                Map<String, SubjectAttribution> catalog, PrivacyHoldService.Actor actor) {
+                                HoldReleaseRules rules, Map<String, SubjectAttribution> catalog,
+                                PrivacyHoldService.Actor actor) {
         String journalId = journal.journalId();
         String commandId = proof.binding().commandId();
         try {
@@ -341,6 +345,11 @@ public class PrivacyHoldReleaseService {
                 audit.record(actor.username(), PrivacyHoldAudit.RELEASE_DECISIONS, PrivacyHoldAudit.fields(
                         "hold", locked.holdId(), "d03", readiness.d03DecisionId(), "d05", readiness.d05DecisionId()),
                         202, true);
+                audit.record(actor.username(), PrivacyHoldAudit.RELEASE_RULES, PrivacyHoldAudit.fields(
+                        "hold", locked.holdId(),
+                        "separation", rules.starterSeparationRequired() ? "REQUIRED" : "NOT_REQUIRED",
+                        "unknownStarter", rules.rejectUnknownStarter() ? "REJECT" : "ACCEPT",
+                        "skewSeconds", Long.toString(rules.notBeforeTolerance().toSeconds())), 202, true);
                 // pending_since は lock・確認・監査の後、CAS の直前の時刻（hold 開始と同じ順序。P2-N1）
                 Instant pendingSince = clock.instant();
                 int updated = resend ? store.refreshPending(tenantId, journalId, commandId, pendingSince)
@@ -480,7 +489,9 @@ public class PrivacyHoldReleaseService {
             throw invalid();
         }
         String reasonText = request.reasonText();
-        if (!StringUtils.hasText(reasonText) || reasonText.length() > PrivacyHoldService.MAX_REASON_TEXT_LENGTH) {
+        // 対になっていない surrogate は Java と画面（Web Crypto）で正規形の byte 列が一致しないため受け付けない（delta review P3-1）
+        if (!StringUtils.hasText(reasonText) || reasonText.length() > PrivacyHoldService.MAX_REASON_TEXT_LENGTH
+                || !HoldReleaseBinding.isWellFormed(reasonText)) {
             throw invalid();
         }
         PrivacyHoldReleaseRequest.Binding binding = request.binding();

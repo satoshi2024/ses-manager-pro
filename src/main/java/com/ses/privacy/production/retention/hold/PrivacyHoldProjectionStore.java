@@ -181,6 +181,18 @@ final class PrivacyHoldProjectionStore {
     }
 
     /**
+     * reconciler が復元し開始者の値が無い行（{@code requested_by = 0}・理由コード {@code RECONCILED}）に、開始要求の監査から
+     * 一意に定めた開始者を書く（NF07-REL delta review P2-1）。既に開始者の値がある行・開始の service が値を戻した行は変えない。
+     *
+     * @return 更新した行数
+     */
+    int restoreReconciledStarter(String tenantId, String holdId, long starterUserId) {
+        return jdbc.update("UPDATE t_legal_hold SET requested_by = ? WHERE tenant_id = ? AND hold_id = ? "
+                        + "AND requested_by = 0 AND reason_code = ?",
+                starterUserId, tenantId, holdId, PrivacyHoldService.RECONCILED);
+    }
+
+    /**
      * ACK 済みの HOLD_RELEASED を projection へ書く（NF07-REL）。開始の revision と event hash が一致する ACTIVE な行だけを
      * RELEASED にする（hold revision の CAS）。解除日時は Journal の event 時刻。
      *
