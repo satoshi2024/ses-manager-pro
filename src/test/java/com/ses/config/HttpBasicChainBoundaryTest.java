@@ -179,6 +179,49 @@ class HttpBasicChainBoundaryTest {
                 UsernamePasswordAuthenticationToken.unauthenticated(ADMIN_USER, "secret"))).isNull();
     }
 
+    /**
+     * DOC-FINAL review N-2: bootstrap期間はbreak-glass名が空で初期管理者のlocal loginが許されるため、metrics chainのBasicが
+     * 初期管理者のパスワードを照合すると、失敗回数にも監査にも残らない推測口になる。初期管理者の名前はbreak-glass名の設定に
+     * 依らず、表記揺れを含めてパスワード照合の前に拒否する。
+     */
+    @Test
+    void bootstrapの初期管理者はbreakGlass名が空でも表記揺れでもBasicのパスワード照合の前に拒否される() {
+        for (Set<String> breakGlassUsernames : java.util.Arrays.asList(new LinkedHashSet<String>(), null)) {
+            OidcSecurityProperties properties = new OidcSecurityProperties();
+            properties.setBreakGlassUsernames(breakGlassUsernames);
+            SecurityConfig.BreakGlassBasicRejectingProvider provider =
+                    new SecurityConfig.BreakGlassBasicRejectingProvider(properties);
+
+            for (String variant : List.of(ProductionBootstrapMode.BOOTSTRAP_USERNAME, " ADMIN ", "Admin")) {
+                assertThatThrownBy(() -> provider.authenticate(
+                        UsernamePasswordAuthenticationToken.unauthenticated(variant, "secret")))
+                        .as("%s / breakGlass=%s", variant, breakGlassUsernames)
+                        .isInstanceOf(DisabledException.class);
+            }
+            // bootstrap名でもbreak-glass名でもない管理者は判定せず、scraper/DB利用者の通常の認証へ委ねる
+            assertThat(provider.authenticate(
+                    UsernamePasswordAuthenticationToken.unauthenticated(ADMIN_USER, "secret"))).isNull();
+            assertThat(provider.authenticate(
+                    UsernamePasswordAuthenticationToken.unauthenticated("administrator", "secret"))).isNull();
+        }
+    }
+
+    @Test
+    void bootstrapの初期管理者はmetrics経路で正しいパスワードでも誤ったパスワードでも同じ401になる() throws Exception {
+        upsertUser(ProductionBootstrapMode.BOOTSTRAP_USERNAME, "bootstrap-pass", "管理者");
+
+        for (String password : List.of("bootstrap-pass", "wrong-pass")) {
+            mockMvc.perform(get("/actuator/prometheus")
+                            .header(HttpHeaders.AUTHORIZATION, basic(ProductionBootstrapMode.BOOTSTRAP_USERNAME, password)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("SES Metrics")));
+        }
+        // 初期管理者以外の管理者は従来どおりscrapeできる（既存の防護・経路を狭めない）
+        mockMvc.perform(get("/actuator/prometheus")
+                        .header(HttpHeaders.AUTHORIZATION, basic(ADMIN_USER, ADMIN_PASS)))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void Basic認証filterは自前filterを持たないmetrics専用chainだけに存在する() {
         List<SecurityFilterChain> chains = filterChainProxy.getFilterChains();
