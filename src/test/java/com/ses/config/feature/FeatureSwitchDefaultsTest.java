@@ -36,10 +36,11 @@ class FeatureSwitchDefaultsTest {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
         }
         assertThat(switches.disabledKeys()).containsExactly("nf01", "nf01-dual-confirmation", "nf02",
-                "nf02-customer-portal", "nf03", "nf03-certification-pii", "nf04", "nf06", "nf07-retention", "nf10");
+                "nf02-customer-portal", "nf03", "nf03-certification-pii", "nf04", "nf06", "nf07-retention",
+                "nf07-dsar", "nf10");
         assertThat(switches.describe()).isEqualTo("NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, "
                 + "NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, "
-                + "NF07_RETENTION=OFF, NF10=OFF");
+                + "NF07_RETENTION=OFF, NF07_DSAR=OFF, NF10=OFF");
     }
 
     @Test
@@ -99,7 +100,10 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF02.parent()).isEmpty();
         assertThat(Feature.NF02.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.topLevel()).containsExactly(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF04,
-                Feature.NF06, Feature.NF07_RETENTION, Feature.NF10);
+                Feature.NF06, Feature.NF07_RETENTION, Feature.NF07_DSAR, Feature.NF10);
+        // NF-07 の2機能は親子にしない（片方だけを公開できる。C-1）
+        assertThat(Feature.NF07_DSAR.parent()).isEmpty();
+        assertThat(Feature.NF07_DSAR.root()).isEqualTo(Feature.NF07_DSAR);
         // 子はメニューを持たない（メニューの表示可否は親スイッチで決まる）。
         assertThat(Feature.NF02_CUSTOMER_PORTAL.menuKeys()).isEmpty();
         assertThat(Feature.NF03_CERTIFICATION_PII.menuKeys()).isEmpty();
@@ -220,7 +224,10 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF07_RETENTION.key()).isEqualTo("nf07-retention");
         assertThat(Feature.NF07_RETENTION.propertyName()).isEqualTo("privacy.retention.enabled");
         assertThat(Feature.NF07_RETENTION.environmentVariable()).isEqualTo("PRIVACY_RETENTION_ENABLED");
-        assertThat(Set.of(Feature.values())).hasSize(10);
+        assertThat(Feature.NF07_DSAR.key()).isEqualTo("nf07-dsar");
+        assertThat(Feature.NF07_DSAR.propertyName()).isEqualTo("privacy.dsar.enabled");
+        assertThat(Feature.NF07_DSAR.environmentVariable()).isEqualTo("PRIVACY_DSAR_ENABLED");
+        assertThat(Set.of(Feature.values())).hasSize(11);
     }
 
     @Test
@@ -234,12 +241,35 @@ class FeatureSwitchDefaultsTest {
                 "application.yml", "application-prod.yml");
         assertThat(byProperty.isEnabled(Feature.NF07_RETENTION)).isTrue();
 
-        // DSARはW3-14では機能スイッチ未登録。privacy.dsar.enabled をONにしても機能スイッチは何もONにならない。
+        // DSAR は A2a で Feature.NF07_DSAR として登録した。privacy.dsar.enabled だけをONにすると NF07_DSAR だけがONになり、
+        // app.features.* の別名では何もONにならない。
         FeatureSwitches dsarOnly = bind(Map.of("PRIVACY_DSAR_ENABLED", "true"),
                 "application.yml", "application-prod.yml");
         for (Feature feature : Feature.values()) {
-            assertThat(dsarOnly.isEnabled(feature)).as(feature.name()).isFalse();
+            assertThat(dsarOnly.isEnabled(feature)).as(feature.name()).isEqualTo(feature == Feature.NF07_DSAR);
         }
+        FeatureSwitches dsarAlias = bind(Map.of("app.features.nf07-dsar.enabled", "true",
+                        "FEATURE_NF07_DSAR_ENABLED", "true"),
+                "application.yml", "application-prod.yml");
+        assertThat(dsarAlias.isEnabled(Feature.NF07_DSAR)).isFalse();
+    }
+
+    @Test
+    void DSARの期限規則は既定値を持たず通知日数は既定7日である() throws IOException {
+        com.ses.privacy.production.PrivacyFeatureProperties defaults =
+                bindPrivacy(Map.of(), "application.yml", "application-prod.yml");
+        assertThat(defaults.getDsar().getDueDays()).as("法的な値の既定値を持たない（I-1）").isNull();
+        assertThat(defaults.getDsar().getDeadlineWarningDays()).isEqualTo(7);
+
+        com.ses.privacy.production.PrivacyFeatureProperties configured = bindPrivacy(
+                Map.of("PRIVACY_DSAR_DUE_DAYS", "30", "PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "5"),
+                "application.yml", "application-prod.yml");
+        assertThat(configured.getDsar().getDueDays()).isEqualTo(30);
+        assertThat(configured.getDsar().getDeadlineWarningDays()).isEqualTo(5);
+
+        assertThatThrownBy(() -> bindPrivacy(Map.of("PRIVACY_DSAR_DUE_DAYS", "3O"),
+                "application.yml", "application-prod.yml"))
+                .as("整数として解釈できない期限規則は起動を止める").isInstanceOf(BindException.class);
     }
 
     @Test
@@ -270,6 +300,27 @@ class FeatureSwitchDefaultsTest {
      * system環境変数は混ぜない（実行環境の値に左右されないようにする）。
      */
     private static FeatureSwitches bind(Map<String, Object> environment, String... yamlResources) throws IOException {
+        Binder binder = binder(environment, yamlResources);
+        FeatureSwitchProperties properties = binder.bind("app.features", Bindable.of(FeatureSwitchProperties.class))
+                .orElseGet(FeatureSwitchProperties::new);
+        // NF-07 は privacy.* を正本にする（Spring contextでは同じbeanを usePrivacyFeatureProperties で受け取る）。
+        properties.usePrivacyFeatureProperties(bindPrivacy(binder));
+        return new FeatureSwitches(properties);
+    }
+
+    /** {@code privacy.*} だけを bind する（DSAR の期限規則・通知日数の既定値の検査用）。 */
+    private static com.ses.privacy.production.PrivacyFeatureProperties bindPrivacy(Map<String, Object> environment,
+                                                                                 String... yamlResources)
+            throws IOException {
+        return bindPrivacy(binder(environment, yamlResources));
+    }
+
+    private static com.ses.privacy.production.PrivacyFeatureProperties bindPrivacy(Binder binder) {
+        return binder.bind("privacy", Bindable.of(com.ses.privacy.production.PrivacyFeatureProperties.class))
+                .orElseGet(com.ses.privacy.production.PrivacyFeatureProperties::new);
+    }
+
+    private static Binder binder(Map<String, Object> environment, String... yamlResources) throws IOException {
         MutablePropertySources sources = new MutablePropertySources();
         sources.addFirst(new MapPropertySource("testEnvironment", environment));
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
@@ -280,15 +331,6 @@ class FeatureSwitchDefaultsTest {
                 sources.addAfter("testEnvironment", source);
             }
         }
-        Binder binder = new Binder(ConfigurationPropertySources.from(sources),
-                new PropertySourcesPlaceholdersResolver(sources));
-        FeatureSwitchProperties properties = binder.bind("app.features", Bindable.of(FeatureSwitchProperties.class))
-                .orElseGet(FeatureSwitchProperties::new);
-        // NF-07 は privacy.* を正本にする（Spring contextでは同じbeanを usePrivacyFeatureProperties で受け取る）。
-        com.ses.privacy.production.PrivacyFeatureProperties privacy = binder.bind("privacy",
-                        Bindable.of(com.ses.privacy.production.PrivacyFeatureProperties.class))
-                .orElseGet(com.ses.privacy.production.PrivacyFeatureProperties::new);
-        properties.usePrivacyFeatureProperties(privacy);
-        return new FeatureSwitches(properties);
+        return new Binder(ConfigurationPropertySources.from(sources), new PropertySourcesPlaceholdersResolver(sources));
     }
 }

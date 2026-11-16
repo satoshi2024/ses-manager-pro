@@ -67,7 +67,18 @@ public final class NotificationLinks {
     /** サービスデスク問い合わせ一覧（/service-desk/requests） */
     public static final String SERVICE_DESK_REQUESTS = "/service-desk/requests";
 
+    /** NF07 本人請求（DSAR）一覧（/privacy/dsar）— 期限通知の遷移先。 */
+    public static final String PRIVACY_DSAR = "/privacy/dsar";
+
     private NotificationLinks() {
+    }
+
+    /** 本人請求（DSAR）詳細への遷移リンク（/privacy/dsar/{id}。本文に subject 参照を入れないため ID だけ） */
+    public static String privacyDsarDetail(Long id) {
+        if (id == null) {
+            return PRIVACY_DSAR;
+        }
+        return PRIVACY_DSAR + "/" + id;
     }
 
     /** サービスリクエスト詳細への遷移リンク（/service-desk/requests/{id}） */

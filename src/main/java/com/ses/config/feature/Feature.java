@@ -134,13 +134,28 @@ public enum Feature {
      * {@code PrivacyAccessGuard} が同じ本文の404にする。登録していない {@code /api/privacy/<x>} には handler が無く
      * guard も通らないため、privacy-admin 以外の管理者は {@code MenuPermissionFilter} の403、privacy-admin は Spring の404になる
      * （入口を足す batch は必ずここへ prefix を登録し、guard を通す）。
-     * DSAR（{@code privacy.dsar.enabled}）は入口を持つ A2a で別の最上位機能として登録する（C-1）。
+     * DSAR（{@code privacy.dsar.enabled}）は親子にしない別の最上位機能 {@link #NF07_DSAR} である（A2a、C-1）。
      */
     NF07_RETENTION("プライバシー保持・保全（policy説明・catalog・hold）",
             List.of("/privacy/holds"),
             List.of("/api/privacy/policies", "/api/privacy/catalog", "/api/privacy/holds"),
             List.of(),
             List.of("privacy-retention")),
+
+    /**
+     * NF-07 本人請求（DSAR）。production-bridge-phased-plan.md §3.1.2・§3.5（A2a で受付〜SCOPED、A2b で検索〜交付記録）。
+     *
+     * <p>{@link #NF07_RETENTION} とは親子にしない（片方だけを公開できる）。設定キーは {@code privacy.dsar.enabled}
+     * （環境変数 {@code PRIVACY_DSAR_ENABLED}）で、値の正本は {@code PrivacyFeatureProperties}。{@code app.features.*} に
+     * 別名は作らない。入口は A2a の {@code /privacy/dsar}・{@code /api/privacy/dsar}。A2b の承認・package の入口もこの配下に
+     * 置くため、OFF の間は {@code FeatureSwitchFilter} と service 層の {@code PrivacyAccessGuard} が同じ本文の404にし、
+     * 期限の通知（{@code PrivacyDsarDeadlineScheduler}）も止まる。</p>
+     */
+    NF07_DSAR("プライバシー本人請求（DSAR）",
+            List.of("/privacy/dsar"),
+            List.of("/api/privacy/dsar"),
+            List.of(),
+            List.of("privacy-dsar")),
 
     /** NF-10 定期管理レポート。 */
     NF10("定期管理レポート",
@@ -203,18 +218,30 @@ public enum Feature {
         return Arrays.stream(values()).filter(Feature::isTopLevel).toList();
     }
 
-    /** 設定プロパティ名（例: {@code app.features.nf01.enabled}。NF-07は {@code privacy.retention.enabled}）。 */
+    /**
+     * 設定プロパティ名（例: {@code app.features.nf01.enabled}。NF-07は {@code privacy.retention.enabled} と
+     * {@code privacy.dsar.enabled}）。
+     */
     public String propertyName() {
         if (this == NF07_RETENTION) {
             return "privacy.retention.enabled";
         }
+        if (this == NF07_DSAR) {
+            return "privacy.dsar.enabled";
+        }
         return "app.features." + key() + ".enabled";
     }
 
-    /** 運用で上書きする環境変数名（例: {@code FEATURE_NF01_ENABLED}。NF-07は {@code PRIVACY_RETENTION_ENABLED}）。 */
+    /**
+     * 運用で上書きする環境変数名（例: {@code FEATURE_NF01_ENABLED}。NF-07は {@code PRIVACY_RETENTION_ENABLED} と
+     * {@code PRIVACY_DSAR_ENABLED}）。
+     */
     public String environmentVariable() {
         if (this == NF07_RETENTION) {
             return "PRIVACY_RETENTION_ENABLED";
+        }
+        if (this == NF07_DSAR) {
+            return "PRIVACY_DSAR_ENABLED";
         }
         return "FEATURE_" + name() + "_ENABLED";
     }

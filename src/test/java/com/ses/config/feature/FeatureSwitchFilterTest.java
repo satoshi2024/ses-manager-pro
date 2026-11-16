@@ -52,33 +52,38 @@ class FeatureSwitchFilterTest {
             "/api/portal/customer/service-desk/requests/5/attachments",
             "/api/portal/customer/service-desk/requests/5/attachments/8/download");
 
-    /** 各機能の代表的なAPI入口（内部・本人・portal・管理者専用を含む）。 */
-    private static final Map<Feature, List<String>> API_SAMPLES = Map.of(
+    /** 各機能の代表的なAPI入口（内部・本人・portal・管理者専用を含む）。11機能を超えるため Map.ofEntries にする。 */
+    private static final Map<Feature, List<String>> API_SAMPLES = Map.ofEntries(
             // 二者確認のAPIも親のNF-01に属する（親OFFで404。子だけOFFならfilterは通し、service層が400にする）
-            Feature.NF01, List.of("/api/lifecycle/cases", "/api/lifecycle/templates/3",
+            Map.entry(Feature.NF01, List.of("/api/lifecycle/cases", "/api/lifecycle/templates/3",
                     "/api/my/lifecycle/tasks/pending", "/api/lifecycle/tasks/5/dual-confirmation/submissions",
-                    "/api/my/lifecycle/tasks/5/dual-confirmation"),
+                    "/api/my/lifecycle/tasks/5/dual-confirmation")),
             // 二者確認の子スイッチはURLを遮断しない
-            Feature.NF01_DUAL_CONFIRMATION, List.of(),
-            Feature.NF02, List.of("/api/service-desk/requests", "/api/service-desk/health/snapshots",
-                    "/api/customer-success/health/9", "/api/customer-success/qbrs"),
+            Map.entry(Feature.NF01_DUAL_CONFIRMATION, List.of()),
+            Map.entry(Feature.NF02, List.of("/api/service-desk/requests", "/api/service-desk/health/snapshots",
+                    "/api/customer-success/health/9", "/api/customer-success/qbrs")),
             // 顧客ポータルの問い合わせ（起票・一覧・返信・CSAT・添付）はNF-02の子スイッチで遮断する
-            Feature.NF02_CUSTOMER_PORTAL, PORTAL_SERVICE_DESK_APIS,
-            Feature.NF03, List.of("/api/certification-learning-gap/count",
+            Map.entry(Feature.NF02_CUSTOMER_PORTAL, PORTAL_SERVICE_DESK_APIS),
+            Map.entry(Feature.NF03, List.of("/api/certification-learning-gap/count",
                     "/api/certification-learning-gap/export",
-                    "/api/my/certification-learning-gap/learning-plans"),
+                    "/api/my/certification-learning-gap/learning-plans")),
             // 資格番号の子スイッチはURLを遮断しない（service層で資格番号の入力だけを拒否する）
-            Feature.NF03_CERTIFICATION_PII, List.of(),
+            Map.entry(Feature.NF03_CERTIFICATION_PII, List.of()),
             // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
-            Feature.NF04, List.of(),
+            Map.entry(Feature.NF04, List.of()),
             // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
-            Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
-                    "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings"),
+            Map.entry(Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
+                    "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings")),
             // NF-07 保持・保全は policy説明API（W3-14）、catalog API（F2）、hold API（A1H-1）を持つ
-            Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
+            Map.entry(Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
                     "/api/privacy/policies/evaluate", "/api/privacy/catalog", "/api/privacy/holds",
-                    "/api/privacy/holds/x/release"),
-            Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
+                    "/api/privacy/holds/x/release")),
+            // NF-07 DSAR（A2a の受付〜SCOPED。A2b の承認・package の入口も同じ prefix の配下で遮断する）
+            Map.entry(Feature.NF07_DSAR, List.of("/api/privacy/dsar", "/api/privacy/dsar/3",
+                    "/api/privacy/dsar/3/identity", "/api/privacy/dsar/3/candidates/5", "/api/privacy/dsar/3/scope",
+                    "/api/privacy/dsar/3/package/download")),
+            Map.entry(Feature.NF10, List.of("/api/management-reports/runs",
+                    "/api/management-reports/schedules/7/enable")));
 
     /**
      * 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。
@@ -87,21 +92,23 @@ class FeatureSwitchFilterTest {
     private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of();
 
     /** 各機能の代表的な画面・静的入口。 */
-    private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
-            Feature.NF01, List.of("/lifecycle", "/lifecycle/12", "/lifecycle/templates", "/my/lifecycle"),
-            Feature.NF01_DUAL_CONFIRMATION, List.of(),
-            Feature.NF02, List.of("/service-desk/requests", "/service-desk/requests/4",
-                    "/customer-success/health", "/service-desk/health"),
+    private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.ofEntries(
+            Map.entry(Feature.NF01, List.of("/lifecycle", "/lifecycle/12", "/lifecycle/templates", "/my/lifecycle")),
+            Map.entry(Feature.NF01_DUAL_CONFIRMATION, List.of()),
+            Map.entry(Feature.NF02, List.of("/service-desk/requests", "/service-desk/requests/4",
+                    "/customer-success/health", "/service-desk/health")),
             // portal画面（/portal/customer）は検収・請求等と共用のため遮断せず、問い合わせタブだけをtemplateで隠す
-            Feature.NF02_CUSTOMER_PORTAL, List.of(),
-            Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
-            Feature.NF03_CERTIFICATION_PII, List.of(),
-            Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
+            Map.entry(Feature.NF02_CUSTOMER_PORTAL, List.of()),
+            Map.entry(Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap")),
+            Map.entry(Feature.NF03_CERTIFICATION_PII, List.of()),
+            Map.entry(Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest")),
             // NF-06の画面（取込センター、W3-12）
-            Feature.NF06, List.of("/import-center"),
+            Map.entry(Feature.NF06, List.of("/import-center")),
             // NF-07 の hold 画面（A1H-1）
-            Feature.NF07_RETENTION, List.of("/privacy/holds"),
-            Feature.NF10, List.of("/management-reports"));
+            Map.entry(Feature.NF07_RETENTION, List.of("/privacy/holds")),
+            // NF-07 の DSAR 画面（A2a: 一覧・受付と詳細）
+            Map.entry(Feature.NF07_DSAR, List.of("/privacy/dsar", "/privacy/dsar/3")),
+            Map.entry(Feature.NF10, List.of("/management-reports")));
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
     private static final Map<Feature, List<String>> CHILD_HOST_PAGES = Map.of(

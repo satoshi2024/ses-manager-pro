@@ -59,7 +59,7 @@ class PrivacyAccessGuardTest {
 
     @Test
     void 保持保全のスイッチがOFFなら権限を確認せず404にする() {
-        PrivacyAccessGuard guard = guard(switches(false), new PrivacyFeatureProperties(), authorizationService);
+        PrivacyAccessGuard guard = guard(switches(false), authorizationService);
 
         assertThrows(PrivacyAccessGuard.PrivacyEntryNotFoundException.class,
                 () -> guard.requireAllowed(PrivacyAccessGuard.Capability.RETENTION, "privacy.policy.view"));
@@ -68,7 +68,7 @@ class PrivacyAccessGuardTest {
 
     @Test
     void 機能スイッチを取得できない場合もOFFとして404にする() {
-        PrivacyAccessGuard guard = guard(null, new PrivacyFeatureProperties(), authorizationService);
+        PrivacyAccessGuard guard = guard(null, authorizationService);
 
         assertFalse(guard.isEnabled(PrivacyAccessGuard.Capability.RETENTION));
         assertFalse(guard.isEnabled(null));
@@ -79,7 +79,7 @@ class PrivacyAccessGuardTest {
     @Test
     void スイッチONでprivacy_actionが許可されていれば通す() {
         when(authorizationService.isAllowed(authentication, "privacy.policy.view")).thenReturn(true);
-        PrivacyAccessGuard guard = guard(switches(true), new PrivacyFeatureProperties(), authorizationService);
+        PrivacyAccessGuard guard = guard(switches(true), authorizationService);
 
         assertDoesNotThrow(() -> guard.requireAllowed(PrivacyAccessGuard.Capability.RETENTION, "privacy.policy.view"));
         verify(authorizationService).isAllowed(authentication, "privacy.policy.view");
@@ -88,25 +88,25 @@ class PrivacyAccessGuardTest {
     @Test
     void スイッチONでもaction権限が無い_判定部品が無い_例外_未認証なら403にする() {
         when(authorizationService.isAllowed(any(), eq("privacy.policy.view"))).thenReturn(false);
-        assertForbidden(guard(switches(true), new PrivacyFeatureProperties(), authorizationService),
+        assertForbidden(guard(switches(true), authorizationService),
                 "privacy.policy.view");
 
-        assertForbidden(guard(switches(true), new PrivacyFeatureProperties(), null), "privacy.policy.view");
+        assertForbidden(guard(switches(true), null), "privacy.policy.view");
 
         AuthorizationService failing = mock(AuthorizationService.class);
         when(failing.isAllowed(any(), any())).thenThrow(new IllegalStateException("db unavailable"));
-        assertForbidden(guard(switches(true), new PrivacyFeatureProperties(), failing), "privacy.policy.view");
+        assertForbidden(guard(switches(true), failing), "privacy.policy.view");
 
         SecurityContextHolder.clearContext();
         AuthorizationService allowAll = mock(AuthorizationService.class);
         when(allowAll.isAllowed(any(), any())).thenReturn(true);
-        assertForbidden(guard(switches(true), new PrivacyFeatureProperties(), allowAll), "privacy.policy.view");
+        assertForbidden(guard(switches(true), allowAll), "privacy.policy.view");
     }
 
     @Test
     void privacy接頭辞でないactionは権限を確認せず403にする() {
         when(authorizationService.isAllowed(any(), any())).thenReturn(true);
-        PrivacyAccessGuard guard = guard(switches(true), new PrivacyFeatureProperties(), authorizationService);
+        PrivacyAccessGuard guard = guard(switches(true), authorizationService);
 
         assertForbidden(guard, "dashboard.view");
         assertForbidden(guard, "privacyx.view");
@@ -114,18 +114,30 @@ class PrivacyAccessGuardTest {
         verify(authorizationService, never()).isAllowed(any(), any());
     }
 
+    /** A2a: DSAR は機能スイッチ {@code NF07_DSAR} の実効値で判定し、保持・保全のスイッチとは親子にしない。 */
     @Test
-    void DSARは機能スイッチ未登録のためprivacy_dsar_enabledを直接見る() {
+    void DSARは機能スイッチNF07_DSARの実効値で判定し保持保全とは独立している() {
         when(authorizationService.isAllowed(any(), eq("privacy.dsar.view"))).thenReturn(true);
-        PrivacyFeatureProperties properties = new PrivacyFeatureProperties();
-        PrivacyAccessGuard guard = guard(switches(true), properties, authorizationService);
+        PrivacyFeatureProperties privacy = new PrivacyFeatureProperties();
+        FeatureSwitchProperties properties = new FeatureSwitchProperties();
+        properties.usePrivacyFeatureProperties(privacy);
+        privacy.getRetention().setEnabled(true);
+        PrivacyAccessGuard guard = guard(new FeatureSwitches(properties), authorizationService);
 
         assertThrows(PrivacyAccessGuard.PrivacyEntryNotFoundException.class,
                 () -> guard.requireAllowed(PrivacyAccessGuard.Capability.DSAR, "privacy.dsar.view"));
-        properties.getDsar().setEnabled(true);
+        verify(authorizationService, never()).isAllowed(any(), any());
+        assertTrue(guard.isEnabled(PrivacyAccessGuard.Capability.RETENTION));
+
+        privacy.getDsar().setEnabled(true);
         assertTrue(guard.isEnabled(PrivacyAccessGuard.Capability.DSAR));
         assertDoesNotThrow(() -> guard.requireAllowed(PrivacyAccessGuard.Capability.DSAR, "privacy.dsar.view"));
-        assertFalse(guard(switches(true), null, authorizationService).isEnabled(PrivacyAccessGuard.Capability.DSAR));
+        assertTrue(properties.toggle(Feature.NF07_DSAR) == privacy.getDsar(), "別名を作らず同じ値を返す");
+
+        privacy.getRetention().setEnabled(false);
+        assertTrue(guard.isEnabled(PrivacyAccessGuard.Capability.DSAR), "DSARは保持・保全の子ではない");
+        assertFalse(guard(null, authorizationService).isEnabled(PrivacyAccessGuard.Capability.DSAR),
+                "機能スイッチが取れなければOFF");
     }
 
     @Test
@@ -168,14 +180,11 @@ class PrivacyAccessGuardTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static PrivacyAccessGuard guard(FeatureSwitches switches, PrivacyFeatureProperties properties,
-                                            AuthorizationService authorizationService) {
+    private static PrivacyAccessGuard guard(FeatureSwitches switches, AuthorizationService authorizationService) {
         ObjectProvider<FeatureSwitches> switchesProvider = mock(ObjectProvider.class);
         when(switchesProvider.getIfAvailable()).thenReturn(switches);
-        ObjectProvider<PrivacyFeatureProperties> propertiesProvider = mock(ObjectProvider.class);
-        when(propertiesProvider.getIfAvailable()).thenReturn(properties);
         ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
         when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
-        return new PrivacyAccessGuard(switchesProvider, propertiesProvider, authorizationProvider);
+        return new PrivacyAccessGuard(switchesProvider, authorizationProvider);
     }
 }

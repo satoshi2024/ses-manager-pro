@@ -58,14 +58,19 @@ public class CertificationExpiryNotificationScheduler {
         this.timezoneResolver = timezoneResolver;
     }
 
+    /**
+     * 定期実行の入口。ShedLock の PROXY_METHOD は primitive を返す method を lock できず、呼出しごとに
+     * {@code LockingNotSupportedException} になるため {@code void} にする（件数は {@link #dispatch} が返す）。
+     */
     @Scheduled(cron = "0 15 3 * * ?", zone = "Asia/Tokyo")
     @SchedulerLock(name = "certificationExpiryNotificationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT20M")
-    public int dispatchToday() {
+    public void dispatchToday() {
         if (!FeatureSwitches.allows(featureSwitches, Feature.NF03)) {
             log.debug("[機能スイッチ] NF03がOFFのため資格期限通知をスキップしました");
-            return 0;
+            return;
         }
-        return dispatch(null);
+        int attempted = dispatch(null);
+        log.debug("資格期限通知の定期dispatch完了: attempted={}", attempted);
     }
 
     public int dispatch(LocalDate asOf) {

@@ -31,7 +31,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class PrivacyAccessGuard {
 
-    /** 判定対象の公開単位。DSAR は W3-14 では機能スイッチ未登録のため {@code privacy.dsar.enabled} を直接見る。 */
+    /**
+     * 判定対象の公開単位。RETENTION は {@code Feature.NF07_RETENTION}、DSAR は {@code Feature.NF07_DSAR}（A2a で登録）の
+     * 実効値で判定する（{@code FeatureSwitchFilter}・sidebar・prod の実行時条件と同じ値になる）。
+     */
     public enum Capability {
         RETENTION,
         DSAR
@@ -40,14 +43,11 @@ public class PrivacyAccessGuard {
     private static final String PRIVACY_ACTION_PREFIX = "privacy.";
 
     private final ObjectProvider<FeatureSwitches> featureSwitchesProvider;
-    private final ObjectProvider<PrivacyFeatureProperties> privacyPropertiesProvider;
     private final ObjectProvider<AuthorizationService> authorizationServiceProvider;
 
     public PrivacyAccessGuard(ObjectProvider<FeatureSwitches> featureSwitchesProvider,
-                              ObjectProvider<PrivacyFeatureProperties> privacyPropertiesProvider,
                               ObjectProvider<AuthorizationService> authorizationServiceProvider) {
         this.featureSwitchesProvider = featureSwitchesProvider;
-        this.privacyPropertiesProvider = privacyPropertiesProvider;
         this.authorizationServiceProvider = authorizationServiceProvider;
     }
 
@@ -84,15 +84,13 @@ public class PrivacyAccessGuard {
         if (capability == null) {
             return false;
         }
+        FeatureSwitches switches = featureSwitchesProvider.getIfAvailable();
+        if (switches == null) {
+            return false;
+        }
         return switch (capability) {
-            case RETENTION -> {
-                FeatureSwitches switches = featureSwitchesProvider.getIfAvailable();
-                yield switches != null && switches.isEnabled(Feature.NF07_RETENTION);
-            }
-            case DSAR -> {
-                PrivacyFeatureProperties properties = privacyPropertiesProvider.getIfAvailable();
-                yield properties != null && properties.getDsar() != null && properties.getDsar().isEnabled();
-            }
+            case RETENTION -> switches.isEnabled(Feature.NF07_RETENTION);
+            case DSAR -> switches.isEnabled(Feature.NF07_DSAR);
         };
     }
 
