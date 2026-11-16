@@ -137,8 +137,8 @@ public enum Feature {
      * DSAR（{@code privacy.dsar.enabled}）は入口を持つ A2a で別の最上位機能として登録する（C-1）。
      */
     NF07_RETENTION("プライバシー保持・保全（policy説明・catalog・hold）",
-            List.of(),
-            List.of("/api/privacy/policies", "/api/privacy/catalog"),
+            List.of("/privacy/holds"),
+            List.of("/api/privacy/policies", "/api/privacy/catalog", "/api/privacy/holds"),
             List.of(),
             List.of("privacy-retention")),
 

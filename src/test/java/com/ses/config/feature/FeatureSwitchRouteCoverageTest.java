@@ -119,7 +119,10 @@ class FeatureSwitchRouteCoverageTest {
             "com.ses.service.pwa.PwaClientMutationCleanupScheduler",
             "常時有効な保存経路が書くidempotency ledgerの保持期限を守るため、NF-04 OFF中も削除を続ける",
             "com.ses.importcenter.metadata.ImportStageReconcileScheduler",
-            "照合台帳に残った取込stage objectの回収は公開可否と無関係に続ける（NF-06 OFFへ切り替えた後も原本objectを残さない）");
+            "照合台帳に残った取込stage objectの回収は公開可否と無関係に続ける（NF-06 OFFへ切り替えた後も原本objectを残さない）",
+            "com.ses.privacy.production.retention.hold.PrivacyHoldProjectionReconciler",
+            "掛けたholdはflagをOFFに戻しても守るため、gateと同じくprojectionの追い付きとpendingの解消は公開可否と無関係に続ける"
+                    + "（NF07-A1H §3.4.4。Journalが使えなければ何もしない）");
 
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {
@@ -197,8 +200,16 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(privacyRoutes).as("F2 の catalog API").anyMatch(route -> route.normalized().equals("/api/privacy/catalog"));
         assertThat(Feature.forPath("/api/privacy/catalog")).contains(Feature.NF07_RETENTION);
         assertThat(Feature.forPath("/api/privacy/catalog-like")).isEmpty();
-        assertThat(Feature.NF07_RETENTION.apiPrefixes()).containsExactly("/api/privacy/policies", "/api/privacy/catalog");
-        assertThat(Feature.NF07_RETENTION.pagePrefixes()).isEmpty();
+        // A1H-1: hold の API と画面。解除（release）は handler を持たないが、prefix の配下なので OFF なら 404 になる
+        assertThat(privacyRoutes).as("A1H の hold API").anyMatch(route -> route.normalized().equals("/api/privacy/holds"));
+        assertThat(privacyRoutes).as("A1H の hold 画面").anyMatch(route -> route.normalized().equals("/privacy/holds"));
+        assertThat(privacyRoutes).as("hold 解除の入口は持たない")
+                .noneMatch(route -> route.normalized().contains("/release"));
+        assertThat(Feature.forPath("/api/privacy/holds/x/release")).contains(Feature.NF07_RETENTION);
+        assertThat(Feature.forPath("/privacy/holds-like")).isEmpty();
+        assertThat(Feature.NF07_RETENTION.apiPrefixes())
+                .containsExactly("/api/privacy/policies", "/api/privacy/catalog", "/api/privacy/holds");
+        assertThat(Feature.NF07_RETENTION.pagePrefixes()).containsExactly("/privacy/holds");
         assertThat(Feature.NF07_RETENTION.menuKeys()).containsExactly("privacy-retention");
         assertThat(NF_ACTION_RESOURCES).doesNotContainKey("privacy");
     }
@@ -386,7 +397,7 @@ class FeatureSwitchRouteCoverageTest {
         }
 
         assertThat(linkedFeatures).containsExactlyInAnyOrder(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF06,
-                Feature.NF10);
+                Feature.NF07_RETENTION, Feature.NF10);
         assertThat(violations).as("NF導線がFeature.menuKeys以外の条件で表示されている: %s", violations).isEmpty();
     }
 

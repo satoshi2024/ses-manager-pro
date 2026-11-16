@@ -90,8 +90,12 @@ public class GlobalControllerAdvice {
             new NavRoute("/management-accounting", "/management-accounting"),
             new NavRoute("/user", "/user"),
             new NavRoute("/system-config", "/system-config"),
-            new NavRoute("/audit-log", "/audit-log")
+            new NavRoute("/audit-log", "/audit-log"),
+            new NavRoute("/privacy/holds", "/privacy/holds")
     );
+
+    /** NF07 保全 hold の画面の action（privacy-admin だけが許可される）。 */
+    private static final String PRIVACY_HOLD_VIEW_ACTION = "privacy.hold.view";
 
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
@@ -178,6 +182,33 @@ public class GlobalControllerAdvice {
     public java.util.Set<String> disabledFeatures() {
         com.ses.config.feature.FeatureSwitches switches = featureSwitches();
         return switches == null ? Collections.emptySet() : switches.disabledKeys();
+    }
+
+    /**
+     * NF07 保全 hold の導線を出すか（production-bridge-phased-plan.md §6.8）。{@code allowedMenus} は管理者に全 menu を返すため、
+     * それだけでは privacy-admin 以外の管理者にも出てしまう。機能スイッチ ON の管理者についてだけ privacy action を判定し、
+     * 判定部品が取れない・例外の場合は出さない（fail-closed。到達可否そのものは action 層と service 層が決める）。
+     */
+    @ModelAttribute("privacyHoldMenuAllowed")
+    public boolean privacyHoldMenuAllowed(Authentication authentication) {
+        if (authentication == null || authentication.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_管理者".equals(authority.getAuthority()))) {
+            return false;
+        }
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        if (switches == null || !switches.isEnabled(com.ses.config.feature.Feature.NF07_RETENTION)) {
+            return false;
+        }
+        com.ses.service.security.AuthorizationService authorizationService =
+                authorizationServiceProvider == null ? null : authorizationServiceProvider.getIfAvailable();
+        if (authorizationService == null) {
+            return false;
+        }
+        try {
+            return authorizationService.isAllowed(authentication, PRIVACY_HOLD_VIEW_ACTION);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private com.ses.config.feature.FeatureSwitches featureSwitches() {
