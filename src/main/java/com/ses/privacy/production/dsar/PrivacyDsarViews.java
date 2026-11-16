@@ -57,11 +57,12 @@ public final class PrivacyDsarViews {
      * 名寄せの候補。
      *
      * @param footprintAvailable provider の照会に成功したか（失敗した場合は件数を出さない）
+     * @param footprintOmitted   別人と判定済み、または裁定を終えた case のため provider を照会しなかったか
      * @param footprint          provider・data element ごとの件数（行の値は含めない）
      */
     public record Candidate(long linkId, String subjectRef, String subjectType, String linkState,
                             String resolutionCode, String resolvedAt, boolean footprintAvailable,
-                            List<FootprintEntry> footprint) {
+                            boolean footprintOmitted, List<FootprintEntry> footprint) {
         public Candidate {
             footprint = footprint == null ? List.of() : List.copyOf(footprint);
         }

@@ -20,6 +20,16 @@ public final class PrivacyDsarVocabulary {
     static final Pattern REFERENCE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:#/-]{0,127}");
     /** 判定コード（V190 の列長 50 以内）。 */
     static final Pattern CODE = Pattern.compile("[A-Z][A-Z0-9_]{1,49}");
+    /**
+     * 参照に転記された書類の番号・電話番号に見える値（A2a review P3-1）。参照の形式は D-06 の SOP で決まるまで広く受け付けるため、
+     * 誤検知の少ない明らかな形だけを拒否する: 数字だけで10桁以上（マイナンバー・運転免許証番号・電話番号・カード番号）、
+     * 4桁区切りの12桁（マイナンバー・免許証の表記）、0 で始まる区切り付きの電話番号、英字2文字＋数字7桁（旅券番号）。
+     */
+    private static final List<Pattern> DOCUMENT_NUMBER_LIKE = List.of(
+            Pattern.compile("[0-9]{10,}"),
+            Pattern.compile("[0-9]{4}-[0-9]{4}-[0-9]{4}"),
+            Pattern.compile("0[0-9]{1,4}-[0-9]{1,4}-[0-9]{3,4}"),
+            Pattern.compile("[A-Za-z]{2}[0-9]{7}"));
 
     /** A2a が扱う状態。BLOCKED / CANCELLED は終了状態で、再開は新しい case（{@code reopen_of_request_id}）で行う。 */
     static final Set<PrivacyCaseState> CLOSABLE_STATES = EnumSet.of(PrivacyCaseState.REQUESTED,
@@ -105,6 +115,11 @@ public final class PrivacyDsarVocabulary {
             }
         }
         return Optional.empty();
+    }
+
+    /** 参照が書類の番号・電話番号に見えるか（{@link #DOCUMENT_NUMBER_LIKE}）。 */
+    static boolean looksLikeDocumentNumber(String value) {
+        return value != null && DOCUMENT_NUMBER_LIKE.stream().anyMatch(pattern -> pattern.matcher(value).matches());
     }
 
     /** 保存済みの状態値。解釈できない値は空（呼出し側は遷移を拒否する）。 */

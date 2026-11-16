@@ -716,7 +716,7 @@ A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway j
 |---|---|---|---|
 | REQUESTED | 受付（`intake_ticket_ref` 必須。D-06 の期限規則から `due_date` を計算） | privacy-admin | A2a |
 | IDENTITY_VERIFIED | 本人確認の記録（`identity_evidence_ref`、適用した D-06 基準の決定ID）。基準未設定なら `DECISION_UNKNOWN` で進めない | privacy-admin | A2a |
-| SCOPED | 名寄せの人手裁定（候補は F2 provider が提示し、氏名一致だけでは自動結合しない。SELECTED が1件でない場合は BLOCKED）と scope snapshot（provider 一覧・data element・as-of の hash） | privacy-admin | A2a |
+| SCOPED | 名寄せの人手裁定（候補は F2 provider が提示し、氏名一致だけでは自動結合しない。SELECTED が1件でなければ 409 で状態を変えず、本人を特定できなければ privacy-admin が理由コード付きで BLOCKED を記録する。A2a review §3.3・P3-7）と scope snapshot（provider 一覧・data element・as-of・本人確認時の D-06 決定ID（`identity_rule_ref`）の hash。現在の D-06 が `identity_rule_ref` と違えば 409 で確定しない。A2a review P2-1） | privacy-admin | A2a |
 | PREVIEWED | F2 provider の read-only 検索 → redaction 済み草案 package（未登録 provider・規則未設定の項目は「要手動確認」一覧として添付） | privacy-admin（作成者 = `prepared_by`） | A2b |
 | APPROVAL_PENDING → APPROVED | 作成者以外の privacy-admin が特定の package を承認（DB の CHECK と service の両方で作成者≠承認者。承認した package の id と hash を request に書く。§3.1.5） | 別の privacy-admin | A2b |
 | CONFIRMED | system 外での交付後に交付記録（方法・証跡参照、承認 package の hash 照合）。package は記録と同時に PURGED | privacy-admin | A2b |

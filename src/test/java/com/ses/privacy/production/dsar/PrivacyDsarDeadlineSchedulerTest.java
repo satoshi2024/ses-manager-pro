@@ -117,7 +117,7 @@ class PrivacyDsarDeadlineSchedulerTest {
         PrivacyDsarDeadlineScheduler scheduler = new PrivacyDsarDeadlineScheduler(mapper, resolver, notifications,
                 decisions(), oidc(TENANT), CLOCK, switches(false));
 
-        assertThat(scheduler.notifyDaily()).isZero();
+        scheduler.notifyDaily();
 
         verifyNoInteractions(mapper, resolver, notifications);
     }
@@ -133,9 +133,9 @@ class PrivacyDsarDeadlineSchedulerTest {
         request(OTHER_TENANT, "DSAR-20261001-OTHR0001", "REQUESTED", TODAY.minusDays(1));
         link(soon, "ENGINEER:101");
 
-        int attempted = scheduler(TENANT, switches(true)).notifyDaily();
+        // 定期実行の入口（void）は機能スイッチ ON なら dispatch する。件数は dispatch の戻り値で確かめる
+        scheduler(TENANT, switches(true)).notifyDaily();
 
-        assertThat(attempted).isEqualTo(2);
         ArgumentCaptor<Long> users = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<String> titles = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
@@ -161,6 +161,26 @@ class PrivacyDsarDeadlineSchedulerTest {
                 String.join("|", keys.getAllValues()))) {
             assertThat(text).as("subject 参照・ticket 参照を入れない").doesNotContain("ENGINEER").doesNotContain("T-DSAR-");
         }
+        assertThat(scheduler(TENANT, switches(true)).dispatch(TODAY)).as("送信を試みた件数（宛先ごと）").isEqualTo(2);
+    }
+
+    @Test
+    void 期限の早い通知済みのcaseが多くても後の頁の期限接近caseを落とさない() {
+        for (int i = 0; i < PrivacyDsarDeadlineScheduler.PAGE_SIZE; i++) {
+            request(TENANT, String.format("DSAR-20260901-OLD%05d", i), "REQUESTED", TODAY.minusDays(30));
+        }
+        PrivacyRequest soon = request(TENANT, "DSAR-20261110-PAGE0002", "REQUESTED", TODAY.plusDays(2));
+
+        int attempted = scheduler(TENANT, switches(true)).dispatch(TODAY);
+
+        assertThat(attempted).isEqualTo(PrivacyDsarDeadlineScheduler.PAGE_SIZE + 1);
+        verify(notifications).publishToUser(eqLong(privacyAdmin), anyString(), anyString(),
+                org.mockito.ArgumentMatchers.eq("受付番号 DSAR-20261110-PAGE0002 の期限は 2026-11-18 です。"),
+                org.mockito.ArgumentMatchers.eq("/privacy/dsar/" + soon.getId()), anyString(), anyString());
+    }
+
+    private static Long eqLong(long value) {
+        return org.mockito.ArgumentMatchers.eq(value);
     }
 
     @Test
@@ -172,7 +192,7 @@ class PrivacyDsarDeadlineSchedulerTest {
         PrivacyDsarDeadlineScheduler noAuthorization = new PrivacyDsarDeadlineScheduler(requestMapper,
                 new PrivacyDsarRecipientResolver(jdbcTemplate, unavailable), notifications, decisions(), oidc(TENANT),
                 CLOCK, switches(true));
-        assertThat(noAuthorization.notifyDaily()).isZero();
+        assertThat(noAuthorization.dispatch(TODAY)).isZero();
 
         AuthorizationService failing = mock(AuthorizationService.class);
         when(failing.isAllowedForActor(any(), any(), any(), any())).thenThrow(new IllegalStateException("db down"));
@@ -206,6 +226,8 @@ class PrivacyDsarDeadlineSchedulerTest {
     @Test
     void 定期実行の入口はSchedulerLock付きでFeatureSwitchesをfieldに持つ() throws Exception {
         var method = PrivacyDsarDeadlineScheduler.class.getMethod("notifyDaily");
+        // ShedLock の PROXY_METHOD は primitive を返す method を lock できない（A2a review P1-1）
+        assertThat(method.getReturnType()).isEqualTo(void.class);
         assertThat(method.getAnnotation(Scheduled.class).zone()).isEqualTo("Asia/Tokyo");
         assertThat(method.getAnnotation(SchedulerLock.class).name()).isEqualTo("privacyDsarDeadlineDaily");
         assertThat(PrivacyDsarDeadlineScheduler.class.getDeclaredField("featureSwitches").getType())

@@ -50,12 +50,15 @@ import java.util.function.Supplier;
  * <ol>
  *   <li>受付（REQUESTED）: {@code intake_ticket_ref} 必須。D-01・D-06 が有効で期限規則が設定されていれば期限日を計算し、
  *       それ以外は NULL のまま受け付ける（受付日時は決定の有無に関係なく記録する）。</li>
- *   <li>本人確認（IDENTITY_VERIFIED）: 証跡の参照と、適用した D-06 の決定ID（設定値）を記録する。</li>
+ *   <li>本人確認（IDENTITY_VERIFIED）: 証跡の参照と、適用した D-06 の決定ID（設定値）を {@code identity_rule_ref} に記録する。
+ *       受付時に期限規則が無く期限日が NULL の case は、この時点の規則で受付日から期限日を補う（review P3-6）。</li>
  *   <li>名寄せ: privacy-admin が subject 参照で候補を登録し（F2 provider に記録が1件以上あるものだけ）、SELECTED / REJECTED を
  *       人が裁定する。氏名の一致で自動結合する経路は持たない（同姓同名の別人は候補にもならない）。</li>
  *   <li>範囲確定（SCOPED）: SELECTED がちょうど1件のときだけ進み、範囲 snapshot の hash を request と MANUAL_ACTION 行に書く。
  *       1件でなければ 409 で状態を変えない（誤操作で終了状態へ落とさない。本人不明・複数候補で進められないと判断したら、
- *       privacy-admin が BLOCKED として記録する）。</li>
+ *       privacy-admin が BLOCKED として記録する）。snapshot の D-06 は {@code identity_rule_ref}（本人確認時の決定）で、
+ *       現在の D-06 がそれと違えば 409 {@code error.privacy.dsarDecisionChanged} で確定しない（A2b が DB の値だけで
+ *       snapshot を再計算できるようにする。review P2-1）。</li>
  *   <li>終了（BLOCKED / CANCELLED）: REQUESTED・IDENTITY_VERIFIED・SCOPED から、理由コード付きで記録する。</li>
  * </ol>
  * 本人確認以降（本人確認・候補の登録と裁定・範囲確定）は D-01・D-06 が欠ければ 409 {@code error.privacy.dsarDecisionUnknown}
@@ -79,8 +82,14 @@ public class PrivacyRequestService {
     static final String ACTION_TYPE_MANUAL = "MANUAL_ACTION";
     static final String ACTION_STATUS_SUCCEEDED = "SUCCEEDED";
     static final String ACTION_STATUS_BLOCKED = "BLOCKED";
-    /** 範囲確定の MANUAL_ACTION 行の印（{@code evidence_ref}）。 */
+    /** 範囲確定の MANUAL_ACTION 行の印（{@code evidence_ref}）。終了の証跡の参照には使わせない（review P3-4）。 */
     static final String SCOPE_EVIDENCE = "SCOPE_SNAPSHOT";
+    /**
+     * 範囲確定・終了の MANUAL_ACTION 行の冪等 key の接頭辞。行の種類は {@code evidence_ref}・{@code blocked_reason} ではなく
+     * この接頭辞で識別する（A2b が理由付きの MANUAL_ACTION を書いても取り違えない。review P3-4・P3-5）。
+     */
+    static final String SCOPE_KEY_PREFIX = "DSAR-SCOPE:";
+    static final String CLOSE_KEY_PREFIX = "DSAR-CLOSE:";
     static final String DEFAULT_SELECTED_CODE = "MANUAL_SELECTED";
     static final String DEFAULT_REJECTED_CODE = "MANUAL_REJECTED";
 
@@ -88,6 +97,8 @@ public class PrivacyRequestService {
     static final String ERROR_NOT_FOUND = "error.privacy.dsarNotFound";
     static final String ERROR_CONFLICT = "error.privacy.dsarConflict";
     static final String ERROR_DECISION_UNKNOWN = "error.privacy.dsarDecisionUnknown";
+    static final String ERROR_DECISION_CHANGED = "error.privacy.dsarDecisionChanged";
+    static final String ERROR_REFERENCE_NUMBER = "error.privacy.dsarReferenceLooksLikeNumber";
     static final String ERROR_SUBJECT_NOT_UNIQUE = "error.privacy.dsarSubjectNotUnique";
     static final String ERROR_CANDIDATE_NOT_FOUND = "error.privacy.dsarCandidateNotFound";
     static final String ERROR_CANDIDATE_DUPLICATE = "error.privacy.dsarCandidateDuplicate";
@@ -174,11 +185,15 @@ public class PrivacyRequestService {
         List<PrivacyRequestSubjectLink> links = links(context.tenantId(), requestId);
         List<PrivacyDsarViews.Candidate> candidates = new ArrayList<>();
         int selected = 0;
+        // 記録の所在は裁定中（IDENTITY_VERIFIED）の、別人と判定していない候補だけを照会する（データ最小化。review P3-2）
+        boolean adjudicating = PrivacyCaseState.IDENTITY_VERIFIED.name().equals(request.getStatus());
         for (PrivacyRequestSubjectLink link : links) {
             if (PrivacyDsarVocabulary.LinkState.SELECTED.name().equals(link.getLinkState())) {
                 selected++;
             }
-            candidates.add(candidateView(context.tenantId(), link));
+            boolean lookUp = adjudicating
+                    && !PrivacyDsarVocabulary.LinkState.REJECTED.name().equals(link.getLinkState());
+            candidates.add(candidateView(context.tenantId(), link, lookUp));
         }
         List<PrivacyAction> actions = actionMapper.selectList(new LambdaQueryWrapper<PrivacyAction>()
                 .eq(PrivacyAction::getTenantId, context.tenantId())
@@ -188,9 +203,10 @@ public class PrivacyRequestService {
         PrivacyDsarViews.ScopeRecord scope = null;
         PrivacyDsarViews.ClosureRecord closure = null;
         for (PrivacyAction action : actions) {
-            if (SCOPE_EVIDENCE.equals(action.getEvidenceRef()) && action.getBlockedReason() == null) {
+            String key = action.getIdempotencyKey() == null ? "" : action.getIdempotencyKey();
+            if (key.startsWith(SCOPE_KEY_PREFIX)) {
                 scope = new PrivacyDsarViews.ScopeRecord(display(action.getCreatedAt()), action.getResultCount());
-            } else if (action.getBlockedReason() != null) {
+            } else if (key.startsWith(CLOSE_KEY_PREFIX)) {
                 closure = new PrivacyDsarViews.ClosureRecord(request.getStatus(), action.getBlockedReason(),
                         action.getEvidenceRef(), display(action.getCreatedAt()));
             }
@@ -278,7 +294,12 @@ public class PrivacyRequestService {
             PrivacyRequest request = load(context.tenantId(), requestId);
             requireState(request, PrivacyCaseState.REQUESTED, version);
             LocalDateTime now = now();
+            // 期限規則が無いまま受け付けた case は、この時点で有効な規則で受付日から期限日を補う（review P3-6）
+            LocalDate backfilledDueDate = request.getDueDate() == null && readiness.dueDays() != null
+                    && request.getReceivedAt() != null
+                    ? request.getReceivedAt().toLocalDate().plusDays(readiness.dueDays()) : null;
             cas(context.tenantId(), requestId, PrivacyCaseState.REQUESTED, version, now, update -> update
+                    .set(backfilledDueDate != null, PrivacyRequest::getDueDate, backfilledDueDate)
                     .set(PrivacyRequest::getStatus, PrivacyCaseState.IDENTITY_VERIFIED.name())
                     .set(PrivacyRequest::getIdentityState, PrivacyDsarVocabulary.IdentityState.VERIFIED.name())
                     .set(PrivacyRequest::getIdentityEvidenceRef, evidenceRef)
@@ -299,6 +320,10 @@ public class PrivacyRequestService {
         long version = requireVersion(command == null ? null : command.rowVersion());
         PrivacySubjectRef subject = PrivacySubjectRef.parse(command.subjectRef())
                 .orElseThrow(PrivacyRequestService::invalid);
+        // 対象者の記録を読む前に、lock を取らない事前確認で状態・版・重複・上限を確かめる（受け付けられない要求で
+        // 記録を読まない。review P3-3）。確定は下の transaction の中の CAS が行う。
+        requireState(load(context.tenantId(), requestId), PrivacyCaseState.IDENTITY_VERIFIED, version);
+        requireCandidateAcceptable(links(context.tenantId(), requestId), subject);
         // provider の照会は read-only で、transaction の外で行う（記録が無い subject は候補にしない）
         Footprint footprint = footprint(context.tenantId(), subject);
         if (footprint.recordCount() == 0) {
@@ -307,13 +332,7 @@ public class PrivacyRequestService {
         return execute(() -> {
             PrivacyRequest request = load(context.tenantId(), requestId);
             requireState(request, PrivacyCaseState.IDENTITY_VERIFIED, version);
-            List<PrivacyRequestSubjectLink> existing = links(context.tenantId(), requestId);
-            if (existing.stream().anyMatch(link -> subject.ref().equals(link.getSubjectRef()))) {
-                throw BusinessException.of(409, ERROR_CANDIDATE_DUPLICATE);
-            }
-            if (existing.size() >= MAX_CANDIDATES) {
-                throw BusinessException.of(409, ERROR_CANDIDATE_LIMIT);
-            }
+            requireCandidateAcceptable(links(context.tenantId(), requestId), subject);
             cas(context.tenantId(), requestId, PrivacyCaseState.IDENTITY_VERIFIED, version, now(), update -> { });
             PrivacyRequestSubjectLink link = new PrivacyRequestSubjectLink();
             link.setTenantId(context.tenantId());
@@ -386,13 +405,19 @@ public class PrivacyRequestService {
         return execute(() -> {
             PrivacyRequest request = load(context.tenantId(), requestId);
             requireState(request, PrivacyCaseState.IDENTITY_VERIFIED, version);
+            // snapshot には本人確認時に記録した D-06（identity_rule_ref）を入れ、A2b が DB の値だけで再計算できるようにする。
+            // 本人確認の後に D-06 が差し替わっていれば、適用した基準が食い違うため確定しない（review P2-1）
+            String identityRule = request.getIdentityRuleRef();
+            if (identityRule == null || !identityRule.equals(readiness.d06DecisionId())) {
+                throw BusinessException.of(409, ERROR_DECISION_CHANGED);
+            }
             List<PrivacyRequestSubjectLink> selected = selectedLinks(context.tenantId(), requestId);
             if (selected.size() != 1) {
                 throw BusinessException.of(409, ERROR_SUBJECT_NOT_UNIQUE);
             }
             LocalDateTime asOf = now().truncatedTo(ChronoUnit.MICROS);
             PrivacyDsarScopeSnapshot.Snapshot snapshot = PrivacyDsarScopeSnapshot.of(context.tenantId(), requestId,
-                    selected.get(0).getSubjectRef(), readiness.d06DecisionId(), asOf, providers);
+                    selected.get(0).getSubjectRef(), identityRule, asOf, providers);
             cas(context.tenantId(), requestId, PrivacyCaseState.IDENTITY_VERIFIED, version, asOf, update -> update
                     .set(PrivacyRequest::getStatus, PrivacyCaseState.SCOPED.name())
                     .set(PrivacyRequest::getScopeSnapshotHash, snapshot.hash()));
@@ -400,7 +425,7 @@ public class PrivacyRequestService {
             if (selectedLinks(context.tenantId(), requestId).size() != 1) {
                 throw BusinessException.of(409, ERROR_SUBJECT_NOT_UNIQUE);
             }
-            PrivacyAction action = manualAction(context.tenantId(), requestId, "DSAR-SCOPE:" + requestId + ":"
+            PrivacyAction action = manualAction(context.tenantId(), requestId, SCOPE_KEY_PREFIX + requestId + ":"
                     + (version + 1), ACTION_STATUS_SUCCEEDED, null, SCOPE_EVIDENCE, asOf);
             action.setResultCount(snapshot.elementCount());
             action.setResultHash(snapshot.hash());
@@ -431,6 +456,10 @@ public class PrivacyRequestService {
                 .filter(candidate -> candidate.target() == target)
                 .orElseThrow(PrivacyRequestService::invalid);
         String evidenceRef = optionalReference(command.evidenceRef());
+        if (SCOPE_EVIDENCE.equals(evidenceRef)) {
+            // 範囲確定の行の印と同じ値は終了の証跡に使わせない（review P3-4）
+            throw invalid();
+        }
         return execute(() -> {
             PrivacyRequest request = load(context.tenantId(), requestId);
             PrivacyCaseState current = PrivacyDsarVocabulary.state(request.getStatus())
@@ -440,7 +469,7 @@ public class PrivacyRequestService {
             LocalDateTime now = now();
             cas(context.tenantId(), requestId, current, version, now, update -> update
                     .set(PrivacyRequest::getStatus, target.name()));
-            insertAction(manualAction(context.tenantId(), requestId, "DSAR-CLOSE:" + requestId + ":" + (version + 1),
+            insertAction(manualAction(context.tenantId(), requestId, CLOSE_KEY_PREFIX + requestId + ":" + (version + 1),
                     target == PrivacyCaseState.BLOCKED ? ACTION_STATUS_BLOCKED : ACTION_STATUS_SUCCEEDED,
                     reason.name(), evidenceRef, now.truncatedTo(ChronoUnit.MICROS)));
             audit.transition(context.actor().username(), PrivacyDsarAudit.CLOSED, request.getRequestNo(),
@@ -556,12 +585,15 @@ public class PrivacyRequestService {
         }
     }
 
-    /** 候補の表示（subject 参照と記録の件数だけ。provider の照会に失敗した候補は件数を出さない）。 */
-    private PrivacyDsarViews.Candidate candidateView(String tenantId, PrivacyRequestSubjectLink link) {
+    /**
+     * 候補の表示（subject 参照と記録の件数だけ。provider の照会に失敗した候補は件数を出さない）。{@code lookUp} が false の候補
+     * （別人と判定済み・裁定を終えた case）は provider を照会せず、{@code footprintOmitted} として返す（review P3-2）。
+     */
+    private PrivacyDsarViews.Candidate candidateView(String tenantId, PrivacyRequestSubjectLink link, boolean lookUp) {
         Optional<PrivacySubjectRef> subject = PrivacySubjectRef.parse(link.getSubjectRef());
         boolean available = false;
         List<PrivacyDsarViews.FootprintEntry> entries = List.of();
-        if (subject.isPresent()) {
+        if (lookUp && subject.isPresent()) {
             try {
                 entries = footprint(tenantId, subject.get()).entries();
                 available = true;
@@ -571,7 +603,17 @@ public class PrivacyRequestService {
         }
         return new PrivacyDsarViews.Candidate(link.getId(), link.getSubjectRef(),
                 subject.map(ref -> ref.type().name()).orElse(null), link.getLinkState(), link.getResolutionCode(),
-                display(link.getResolvedAt()), available, entries);
+                display(link.getResolvedAt()), available, !lookUp, entries);
+    }
+
+    /** 候補として受け付けられるか（同じ subject が未登録で、上限に達していない）。 */
+    private static void requireCandidateAcceptable(List<PrivacyRequestSubjectLink> existing, PrivacySubjectRef subject) {
+        if (existing.stream().anyMatch(link -> subject.ref().equals(link.getSubjectRef()))) {
+            throw BusinessException.of(409, ERROR_CANDIDATE_DUPLICATE);
+        }
+        if (existing.size() >= MAX_CANDIDATES) {
+            throw BusinessException.of(409, ERROR_CANDIDATE_LIMIT);
+        }
     }
 
     /** subject の記録の所在（provider・data element ごとの件数。行の値は持ち出さない）。 */
@@ -661,6 +703,10 @@ public class PrivacyRequestService {
     private static String requireReference(String raw) {
         if (raw == null || !PrivacyDsarVocabulary.REFERENCE.matcher(raw).matches()) {
             throw invalid();
+        }
+        if (PrivacyDsarVocabulary.looksLikeDocumentNumber(raw)) {
+            // 参照の代わりに書類の番号・電話番号を転記した値は保存しない（review P3-1）
+            throw BusinessException.of(400, ERROR_REFERENCE_NUMBER);
         }
         return raw;
     }

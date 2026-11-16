@@ -262,14 +262,133 @@ class PrivacyRequestServiceTest {
         assertThat(scope.getResultHash()).isEqualTo(row.getScopeSnapshotHash());
         assertThat(scope.getResultCount()).isEqualTo(2);
         assertThat(scope.getIdempotencyKey()).isEqualTo("DSAR-SCOPE:" + id + ":7");
-        PrivacyDsarScopeSnapshot.Snapshot recomputed = PrivacyDsarScopeSnapshot.of(TENANT, id, "ENGINEER:101", D06_ID,
-                scope.getCreatedAt(), registry.providers());
+        // 再計算は DB の値だけで行う（D-06 は本人確認時の identity_rule_ref。review P2-1）
+        PrivacyDsarScopeSnapshot.Snapshot recomputed = PrivacyDsarScopeSnapshot.of(row.getTenantId(), id,
+                linkMapper.selectById(first).getSubjectRef(), row.getIdentityRuleRef(), scope.getCreatedAt(),
+                registry.providers());
         assertThat(recomputed.hash()).isEqualTo(row.getScopeSnapshotHash());
 
-        // SCOPED の後は候補を変えられない
+        // SCOPED の後は候補を変えられず、詳細の表示でも provider を照会しない（review P3-2）
+        int callsBeforeDetail = provider.calls.size();
+        assertThat(service.detail(id).candidates()).allMatch(PrivacyDsarViews.Candidate::footprintOmitted)
+                .noneMatch(PrivacyDsarViews.Candidate::footprintAvailable);
+        assertThat(provider.calls).hasSize(callsBeforeDetail);
         assertConflict(() -> service.resolveCandidate(id, first,
                 new PrivacyDsarCommands.CandidateResolution(7L, "REJECTED", null)));
         assertConflict(() -> service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(7L, "ENGINEER:102")));
+        assertThat(provider.calls).as("受け付けられない候補の登録では記録を読まない（review P3-3）")
+                .hasSize(callsBeforeDetail);
+    }
+
+    @Test
+    void 本人確認の後にD06が差し替わると範囲を確定せず元の決定に戻れば確定する() {
+        long id = verifiedRequest("T-D06-CHANGED");
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        service.resolveCandidate(id, linkId(id, "ENGINEER:101"),
+                new PrivacyDsarCommands.CandidateResolution(2L, "SELECTED", null));
+
+        approval.getD06().setDecisionId("D06-NF07-2026-0016");
+        assertThatThrownBy(() -> service.scope(id, new PrivacyDsarCommands.ScopeConfirmation(3L)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(409);
+                    assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDecisionChanged");
+                });
+        PrivacyRequest row = requestMapper.selectById(id);
+        assertThat(row.getStatus()).isEqualTo("IDENTITY_VERIFIED");
+        assertThat(row.getScopeSnapshotHash()).isNull();
+        assertThat(row.getIdentityRuleRef()).isEqualTo(D06_ID);
+        assertThat(actions(id)).isEmpty();
+
+        approval.getD06().setDecisionId(D06_ID);
+        service.scope(id, new PrivacyDsarCommands.ScopeConfirmation(3L));
+        row = requestMapper.selectById(id);
+        PrivacyAction scope = actions(id).get(0);
+        assertThat(PrivacyDsarScopeSnapshot.of(TENANT, id, "ENGINEER:101", row.getIdentityRuleRef(),
+                scope.getCreatedAt(), registry.providers()).hash()).isEqualTo(row.getScopeSnapshotHash());
+    }
+
+    @Test
+    void 別人と判定した候補は詳細の表示で記録を照会しない() {
+        long id = verifiedRequest("T-REJECTED-VIEW");
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(2L, "ENGINEER:102"));
+        service.resolveCandidate(id, linkId(id, "ENGINEER:102"),
+                new PrivacyDsarCommands.CandidateResolution(3L, "REJECTED", "NOT_SAME_PERSON"));
+        provider.calls.clear();
+
+        PrivacyDsarViews.Detail detail = service.detail(id);
+
+        PrivacyDsarViews.Candidate selectedCandidate = detail.candidates().get(0);
+        PrivacyDsarViews.Candidate rejected = detail.candidates().get(1);
+        assertThat(selectedCandidate.footprintOmitted()).isFalse();
+        assertThat(selectedCandidate.footprintAvailable()).isTrue();
+        assertThat(rejected.linkState()).isEqualTo("REJECTED");
+        assertThat(rejected.footprintOmitted()).isTrue();
+        assertThat(rejected.footprint()).isEmpty();
+        assertThat(provider.calls).containsExactly("ENGINEER:101");
+    }
+
+    @Test
+    void 受け付けられない候補の登録は対象者の記録を読む前に拒否する() {
+        long requested = service.intake(intake("T-PRECHECK", null)).requestId();
+        assertConflict(() -> service.addCandidate(requested,
+                new PrivacyDsarCommands.CandidateAddition(0L, "ENGINEER:101")));
+        assertThat(provider.calls).isEmpty();
+
+        long id = verifiedRequest("T-PRECHECK-DUP");
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        provider.calls.clear();
+        assertConflict(() -> service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:102")));
+        assertThatThrownBy(() -> service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(2L, "ENGINEER:101")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarCandidateDuplicate"));
+        assertThat(provider.calls).as("古い版・重複の要求では記録を読まない").isEmpty();
+    }
+
+    @Test
+    void 参照に書類の番号や電話番号に見える値は保存しない() {
+        for (String numberLike : List.of("123456789012", "1234-5678-9012", "090-1234-5678", "03-1234-5678",
+                "TK1234567", "4111111111111111")) {
+            assertThatThrownBy(() -> service.intake(intake(numberLike, null))).as(numberLike)
+                    .isInstanceOfSatisfying(BusinessException.class, e -> {
+                        assertThat(e.getCode()).isEqualTo(400);
+                        assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarReferenceLooksLikeNumber");
+                    });
+        }
+        long id = 0;
+        for (String reference : List.of("TKT-0001", "2026-11-16-0001", "123456789", "SR-2026-0001234", "INC0012345")) {
+            id = service.intake(intake(reference, null)).requestId();
+            assertThat(requestMapper.selectById(id).getIntakeTicketRef()).isEqualTo(reference);
+        }
+        long verify = id;
+        assertThatThrownBy(() -> service.verifyIdentity(verify,
+                new PrivacyDsarCommands.IdentityVerification(0L, "123456789012")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarReferenceLooksLikeNumber"));
+        assertThatThrownBy(() -> service.cancel(verify, new PrivacyDsarCommands.Closure(0L, "WITHDRAWN", "AB1234567")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarReferenceLooksLikeNumber"));
+        assertThat(requestMapper.selectById(verify).getStatus()).isEqualTo("REQUESTED");
+    }
+
+    @Test
+    void 期限規則が無いまま受け付けたcaseは本人確認の時点の規則で受付日から期限日を補う() {
+        approval.getD06().setDecisionId("");
+        long id = service.intake(new PrivacyDsarCommands.Intake("ACCESS", "EMAIL", "2026-11-10T09:00", "T-BACKFILL",
+                null)).requestId();
+        assertThat(requestMapper.selectById(id).getDueDate()).isNull();
+
+        approval.getD06().setDecisionId(D06_ID);
+        service.verifyIdentity(id, new PrivacyDsarCommands.IdentityVerification(0L, "EV-BACKFILL"));
+
+        assertThat(requestMapper.selectById(id).getDueDate()).isEqualTo(LocalDate.of(2026, 12, 10));
+
+        // 受付時に計算した期限日は書き換えない
+        features.getDsar().setDueDays(10);
+        long computed = service.intake(intake("T-NO-OVERWRITE", null)).requestId();
+        features.getDsar().setDueDays(60);
+        service.verifyIdentity(computed, new PrivacyDsarCommands.IdentityVerification(0L, "EV-NO-OVERWRITE"));
+        assertThat(requestMapper.selectById(computed).getDueDate()).isEqualTo(LocalDate.of(2026, 11, 26));
     }
 
     @Test
@@ -425,6 +544,10 @@ class PrivacyRequestServiceTest {
         assertInvalid(() -> service.block(id, new PrivacyDsarCommands.Closure(1L, "WITHDRAWN", null)));
         assertInvalid(() -> service.cancel(id, new PrivacyDsarCommands.Closure(1L, "MULTIPLE_CANDIDATES", null)));
         assertInvalid(() -> service.block(id, new PrivacyDsarCommands.Closure(1L, "MULTIPLE_CANDIDATES", "has space")));
+        // 範囲確定の行の印は終了の証跡に使わせない（review P3-4）
+        assertInvalid(() -> service.block(id, new PrivacyDsarCommands.Closure(1L, "MULTIPLE_CANDIDATES",
+                "SCOPE_SNAPSHOT")));
+        assertThat(actions(id)).isEmpty();
 
         PrivacyDsarViews.Transition blocked = service.block(id,
                 new PrivacyDsarCommands.Closure(1L, "MULTIPLE_CANDIDATES", "CASE-NOTE-9"));

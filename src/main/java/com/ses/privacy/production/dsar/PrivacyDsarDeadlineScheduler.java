@@ -1,6 +1,8 @@
 package com.ses.privacy.production.dsar;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.constant.NotificationLinks;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitches;
@@ -17,6 +19,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,8 +28,8 @@ import java.util.Objects;
  *
  * <p>機能スイッチ {@code NF07_DSAR} が OFF なら何もしない（{@code FeatureSwitchRouteCoverageTest} の gated scheduler）。
  * test profile は {@code app.scheduling.enabled=false} で定期実行そのものが止まる。対象は権限評価の設定 tenant の、期限を追う状態
- * （{@link PrivacyDsarVocabulary#DEADLINE_TRACKED_STATES}）で期限日が「今日 + 通知日数」以内の case。期限日の無い case
- * （D-06 の期限規則が未設定のまま受け付けたもの）は対象にしない。
+ * （{@link PrivacyDsarVocabulary#DEADLINE_TRACKED_STATES}）で期限日が「今日 + 通知日数」以内の case。期限日の無い case は
+ * 対象にしない（D-06 の期限規則が未設定のまま受け付けた case は、本人確認を記録する時に期限日を補う）。
  *
  * <p>宛先は {@link PrivacyDsarRecipientResolver}（{@code privacy-admin} group の所属者のうち {@code privacy.dsar.view} を持つ者）で、
  * 管理者 role の全員には送らない。本文は受付番号と期限日だけで、subject 参照・氏名・ticket を入れない。同じ case・期限日・段階
@@ -41,8 +44,12 @@ public class PrivacyDsarDeadlineScheduler {
     static final String STAGE_DUE_SOON = "DUE_SOON";
     static final String STAGE_OVERDUE = "OVERDUE";
     static final String LOG_CODE_NO_RECIPIENT = "NF07_DSAR_DEADLINE_NO_RECIPIENT";
-    /** 1回の実行で扱う case の上限（期限日の早い順）。 */
-    static final int MAX_REQUESTS_PER_RUN = 500;
+    /**
+     * 1回の実行で読む case の頁の大きさと頁数の上限（期限日の早い順に最大 {@code PAGE_SIZE * MAX_PAGES} 件）。
+     * 通知済みの古い超過 case が上限を占めて新しい期限接近の case を落とさないよう、1頁で打ち切らない（review P3-10）。
+     */
+    static final int PAGE_SIZE = 500;
+    static final int MAX_PAGES = 20;
 
     private final PrivacyRequestMapper requestMapper;
     private final PrivacyDsarRecipientResolver recipientResolver;
@@ -66,14 +73,21 @@ public class PrivacyDsarDeadlineScheduler {
         this.featureSwitches = featureSwitches;
     }
 
+    /**
+     * 定期実行の入口。ShedLock の PROXY_METHOD は primitive を返す method を lock できず、呼出しごとに
+     * {@code LockingNotSupportedException} になるため {@code void} にする（件数は {@link #dispatch} が返す。A2a review P1-1）。
+     */
     @Scheduled(cron = "0 30 8 * * ?", zone = "Asia/Tokyo")
     @SchedulerLock(name = "privacyDsarDeadlineDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
-    public int notifyDaily() {
+    public void notifyDaily() {
         if (!FeatureSwitches.allows(featureSwitches, Feature.NF07_DSAR)) {
             log.debug("[機能スイッチ] NF07_DSARがOFFのためDSARの期限通知をスキップしました");
-            return 0;
+            return;
         }
-        return dispatch(PrivacyDecisionBinding.businessDate(clock));
+        int attempted = dispatch(PrivacyDecisionBinding.businessDate(clock));
+        if (attempted > 0) {
+            log.info("[privacy-dsar] 期限通知を登録しました: attempted={}", attempted);
+        }
     }
 
     /** {@code today}（JST 業務日）時点の通知を送る。送信を試みた件数（宛先ごと）を返す。 */
@@ -85,16 +99,23 @@ public class PrivacyDsarDeadlineScheduler {
 
     private int dispatchTenant(String tenantId, LocalDate today) {
         LocalDate horizon = today.plusDays(decisions.deadlineWarningDays());
-        List<PrivacyRequest> due = requestMapper.selectList(new LambdaQueryWrapper<PrivacyRequest>()
-                .select(PrivacyRequest::getId, PrivacyRequest::getRequestNo, PrivacyRequest::getStatus,
-                        PrivacyRequest::getDueDate)
-                .eq(PrivacyRequest::getTenantId, tenantId)
-                .in(PrivacyRequest::getStatus, PrivacyDsarVocabulary.DEADLINE_TRACKED_STATES)
-                .isNotNull(PrivacyRequest::getDueDate)
-                .le(PrivacyRequest::getDueDate, horizon)
-                .orderByAsc(PrivacyRequest::getDueDate)
-                .orderByAsc(PrivacyRequest::getId)
-                .last("LIMIT " + MAX_REQUESTS_PER_RUN));
+        List<PrivacyRequest> due = new ArrayList<>();
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            List<PrivacyRequest> batch = requestMapper.selectPage(new Page<>(page, PAGE_SIZE, false),
+                    new LambdaQueryWrapper<PrivacyRequest>()
+                            .select(PrivacyRequest::getId, PrivacyRequest::getRequestNo, PrivacyRequest::getStatus,
+                                    PrivacyRequest::getDueDate)
+                            .eq(PrivacyRequest::getTenantId, tenantId)
+                            .in(PrivacyRequest::getStatus, PrivacyDsarVocabulary.DEADLINE_TRACKED_STATES)
+                            .isNotNull(PrivacyRequest::getDueDate)
+                            .le(PrivacyRequest::getDueDate, horizon)
+                            .orderByAsc(PrivacyRequest::getDueDate)
+                            .orderByAsc(PrivacyRequest::getId)).getRecords();
+            due.addAll(batch);
+            if (batch.size() < PAGE_SIZE) {
+                break;
+            }
+        }
         if (due.isEmpty()) {
             return 0;
         }
@@ -115,7 +136,7 @@ public class PrivacyDsarDeadlineScheduler {
             for (Long userId : recipients) {
                 try {
                     notificationService.publishToUser(userId, NOTIFICATION_TYPE, title, message,
-                            "/privacy/dsar/" + request.getId(), dedupeKey, MENU_KEY);
+                            NotificationLinks.privacyDsarDetail(request.getId()), dedupeKey, MENU_KEY);
                     attempted++;
                 } catch (RuntimeException e) {
                     log.warn("[privacy-dsar] 期限通知を登録できません: exceptionClass={}", e.getClass().getSimpleName());

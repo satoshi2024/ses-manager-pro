@@ -116,7 +116,7 @@ class PrivacyDsarApiControllerTest {
                 "IDENTITY_VERIFIED", "EMAIL", "2026-11-16 10:00", "2026-12-16", false, "T-1", "VERIFIED", "EV-1",
                 "D06-NF07-2026-0006", "2026-11-16 11:00", null, 3L,
                 List.of(new PrivacyDsarViews.Candidate(5L, "ENGINEER:7", "ENGINEER", "CANDIDATE", null, null, true,
-                        List.of(new PrivacyDsarViews.FootprintEntry("engineer-profile", "ENGINEER_PROFILE", 1,
+                        false, List.of(new PrivacyDsarViews.FootprintEntry("engineer-profile", "ENGINEER_PROFILE", 1,
                                 "MIXED_THIRD_PARTY")))),
                 0, null, null, List.of("ADD_CANDIDATE", "SCOPE"),
                 new PrivacyDsarViews.Readiness(true, List.of(), true, 30));
@@ -127,6 +127,7 @@ class PrivacyDsarApiControllerTest {
                 .andExpect(jsonPath("$.data.candidates[0].subjectRef").value("ENGINEER:7"))
                 .andExpect(jsonPath("$.data.candidates[0].footprint[0].rowCount").value(1))
                 .andExpect(jsonPath("$.data.candidates[0].footprint[0].fields").doesNotExist())
+                .andExpect(jsonPath("$.data.candidates[0].footprintOmitted").value(false))
                 .andExpect(jsonPath("$.data.nextActions[1]").value("SCOPE"));
     }
 

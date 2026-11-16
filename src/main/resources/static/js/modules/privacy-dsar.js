@@ -11,6 +11,9 @@
     'use strict';
 
     var REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:#\/-]{0,127}$/;
+    /** 書類の番号・電話番号に見える参照（server の PrivacyDsarVocabulary.looksLikeDocumentNumber と同じ規則）。 */
+    var DOCUMENT_NUMBER_LIKE = [/^[0-9]{10,}$/, /^[0-9]{4}-[0-9]{4}-[0-9]{4}$/, /^0[0-9]{1,4}-[0-9]{1,4}-[0-9]{3,4}$/,
+        /^[A-Za-z]{2}[0-9]{7}$/];
     var POSITIVE_ID = /^[1-9][0-9]{0,17}$/;
     var list = {page: 1, size: 20, total: 0};
     var detail = null;
@@ -21,6 +24,17 @@
 
     function esc(value) {
         return SES.escapeHtml(value === null || value === undefined ? '' : String(value));
+    }
+
+    /** 参照の入力の誤り（無ければ null）。書類の番号・電話番号の転記は保存しない。 */
+    function referenceError(value) {
+        if (!REFERENCE.test(value)) {
+            return t('privacyDsar.validation.reference');
+        }
+        var numberLike = DOCUMENT_NUMBER_LIKE.some(function (pattern) {
+            return pattern.test(value);
+        });
+        return numberLike ? t('privacyDsar.validation.documentNumber') : null;
     }
 
     /** 列挙値の表示名。辞書に無い値は値そのものを出す。 */
@@ -170,8 +184,8 @@
             SES.toast.error(t('privacyDsar.validation.required'));
             return;
         }
-        if (!REFERENCE.test(ticketRef)) {
-            SES.toast.error(t('privacyDsar.validation.reference'));
+        if (referenceError(ticketRef)) {
+            SES.toast.error(referenceError(ticketRef));
             return;
         }
         if (reopenOf && !POSITIVE_ID.test(reopenOf)) {
@@ -301,7 +315,9 @@
         } else {
             $('#dsar-candidate-body').html(candidates.map(function (candidate) {
                 var footprint;
-                if (!candidate.footprintAvailable) {
+                if (candidate.footprintOmitted) {
+                    footprint = '<span class="text-secondary">' + esc(t('privacyDsar.candidates.footprintOmitted')) + '</span>';
+                } else if (!candidate.footprintAvailable) {
                     footprint = '<span class="text-warning">' + esc(t('privacyDsar.candidates.footprintUnavailable')) + '</span>';
                 } else {
                     footprint = '<ul class="list-unstyled mb-0">' + (candidate.footprint || []).map(function (entry) {
@@ -323,7 +339,7 @@
                 }
                 return '<tr>'
                     + '<td class="text-break"><code>' + esc(candidate.subjectRef) + '</code><br><span class="text-secondary">'
-                    + esc(label('privacyHold.subjectType.', candidate.subjectType)) + '</span></td>'
+                    + esc(label('privacyDsar.subjectType.', candidate.subjectType)) + '</span></td>'
                     + '<td>' + esc(label('privacyDsar.link.', candidate.linkState)) + '</td>'
                     + '<td>' + footprint + '</td>'
                     + '<td>' + operations + '</td>'
@@ -353,8 +369,8 @@
     function submitIdentity(event) {
         event.preventDefault();
         var evidence = $.trim($('#dsar-identity-evidence-ref').val());
-        if (!REFERENCE.test(evidence)) {
-            SES.toast.error(evidence ? t('privacyDsar.validation.reference') : t('privacyDsar.validation.required'));
+        if (!evidence || referenceError(evidence)) {
+            SES.toast.error(evidence ? referenceError(evidence) : t('privacyDsar.validation.required'));
             return;
         }
         mutate('POST', '/identity', {rowVersion: detail.rowVersion, identityEvidenceRef: evidence},
@@ -386,8 +402,8 @@
         event.preventDefault();
         var option = $('#dsar-close-reason option:selected');
         var evidence = $.trim($('#dsar-close-evidence').val());
-        if (evidence && !REFERENCE.test(evidence)) {
-            SES.toast.error(t('privacyDsar.validation.reference'));
+        if (evidence && referenceError(evidence)) {
+            SES.toast.error(referenceError(evidence));
             return;
         }
         var path = option.attr('data-target') === 'CANCELLED' ? '/cancel' : '/block';

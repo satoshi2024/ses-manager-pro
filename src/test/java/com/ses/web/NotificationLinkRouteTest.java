@@ -61,5 +61,7 @@ class NotificationLinkRouteTest {
         assertResolves(NotificationLinks.engineerDetail(1L));
         assertResolves(NotificationLinks.customer(1L));
         assertResolves(NotificationLinks.serviceDeskDetail(1L));
+        // NF07-A2a: DSAR の期限通知の遷移先（review P3-10）
+        assertResolves(NotificationLinks.privacyDsarDetail(1L));
     }
 }
