@@ -2,6 +2,8 @@ package com.ses.service.lifecycle.impl;
 
 import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
+import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import lombok.RequiredArgsConstructor;
@@ -9,7 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -20,7 +25,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class LifecycleNotificationServiceImpl implements LifecycleNotificationService {
 
+    /** 二者確認の確認者になれるrole（LifecycleDualConfirmationAttemptService の確認者の述語と同じ）。 */
+    private static final List<String> DUAL_CONFIRMER_ROLES = List.of("管理者", "HR");
+
     private final NotificationService notificationService;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     public void notifyTaskDueSoon(LifecycleTask task, LifecycleCase lcCase, long daysLeft) {
@@ -87,8 +96,10 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
     }
 
     /**
-     * 確認者（管理者・HR）はlifecycle menuの利用者なので、lifecycle menuを持つ利用者へ配信する。
+     * 確認待ちの通知は、案件のtenantの有効な確認者（管理者・HR）とタスクの担当者だけへ個別に配信する
+     * （W3-21a review P3-7。lifecycle menuの全利用者への配信では範囲外の営業・マネージャーにも案件番号とタスク名が届く）。
      * 案件title（氏名を含み得る）・業務comment・文書titleは載せず、案件番号とタスク名だけを出す。
+     * dedupe keyは {@link NotificationService#publishToUser} が宛先ごとに一意化する。
      */
     @Override
     public void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId) {
@@ -97,7 +108,32 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
         String message = String.format("案件番号:%s のタスク「%s」の二者確認の証跡が提出されました。内容を確認してください。",
                 lcCase.getCaseNo(), task.getTaskName());
         String link = "/lifecycle/" + lcCase.getId();
-        notificationService.publish("DUAL_CONFIRMATION_PENDING", title, message, link, dedupeKey, "lifecycle");
+        for (Long recipient : dualConfirmationPendingRecipients(task, lcCase)) {
+            notificationService.publishToUser(recipient, "DUAL_CONFIRMATION_PENDING", title, message, link, dedupeKey,
+                    "lifecycle");
+        }
+    }
+
+    /** 確認待ちの宛先: 案件のtenantの有効な管理者・HR（確認者）と、タスクの担当者。tenantが無ければ担当者だけ。 */
+    private Set<Long> dualConfirmationPendingRecipients(LifecycleTask task, LifecycleCase lcCase) {
+        Set<Long> recipients = new LinkedHashSet<>();
+        String tenantId = lcCase.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            log.warn("[二者確認] 案件のtenantが無いため確認者へ確認待ちを通知できません: caseId={} taskId={}",
+                    lcCase.getId(), task.getId());
+        } else {
+            for (String role : DUAL_CONFIRMER_ROLES) {
+                List<SysUser> confirmers = sysUserMapper.selectActiveByRoleAndTenant(role, tenantId.trim());
+                if (confirmers != null) {
+                    confirmers.stream().filter(Objects::nonNull).map(SysUser::getId).filter(Objects::nonNull)
+                            .forEach(recipients::add);
+                }
+            }
+        }
+        if (task.getAssigneeUserId() != null) {
+            recipients.add(task.getAssigneeUserId());
+        }
+        return recipients;
     }
 
     @Override

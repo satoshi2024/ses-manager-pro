@@ -88,6 +88,46 @@ class FeatureSwitchChildTemplateRenderingTest {
         assertThat(on).contains("id=\"my-cert-number\"");
     }
 
+    @Test
+    void 二者確認の子スイッチOFFなら案件詳細と本人詳細のモーダルとscriptとテンプレートの選択肢を描画しない() {
+        Set<String> off = disabledOnly(Feature.NF01_DUAL_CONFIRMATION).disabledKeys();
+
+        assertDualConfirmationHidden(off);
+        assertThat(render("lifecycle/detail", off)).contains("id=\"completeTaskModal\"", "id=\"waiveTaskModal\"",
+                "/js/modules/lifecycle.js");
+        assertThat(render("my/lifecycle-detail", off)).contains("id=\"myDetailCompleteModal\"",
+                "/js/modules/my-lifecycle.js");
+        assertThat(render("lifecycle/templates", off)).contains("id=\"templateModal\"", "id=\"templateTasks\"");
+    }
+
+    @Test
+    void NF01本体がOFFでも二者確認の導線は描画しない() {
+        assertDualConfirmationHidden(disabledOnly(Feature.NF01).disabledKeys());
+    }
+
+    @Test
+    void 二者確認の子スイッチONなら社内詳細に提出と確認差戻しを本人詳細に提出だけをテンプレートに選択肢を描画する() {
+        Set<String> on = allOn().disabledKeys();
+
+        assertThat(render("lifecycle/detail", on)).contains("id=\"dualConfirmModal\"", "id=\"dualSubmitSection\"",
+                "id=\"dualDecisionSection\"", "id=\"dualConfirmButton\"", "id=\"dualRejectButton\"",
+                "/js/modules/lifecycle-dual.js");
+        assertThat(render("my/lifecycle-detail", on)).contains("id=\"dualConfirmModal\"", "id=\"dualSubmitSection\"",
+                        "/js/modules/lifecycle-dual.js")
+                .doesNotContain("id=\"dualDecisionSection\"", "id=\"dualConfirmButton\"", "id=\"dualRejectButton\"");
+        assertThat(render("lifecycle/templates", on)).contains("id=\"dualEvidenceOptionTemplate\"",
+                "value=\"DUAL_CONFIRMATION\"");
+    }
+
+    private static void assertDualConfirmationHidden(Set<String> disabledFeatures) {
+        assertThat(render("lifecycle/detail", disabledFeatures))
+                .doesNotContain("id=\"dualConfirmModal\"", "/js/modules/lifecycle-dual.js", "dualDecisionSection");
+        assertThat(render("my/lifecycle-detail", disabledFeatures))
+                .doesNotContain("id=\"dualConfirmModal\"", "/js/modules/lifecycle-dual.js");
+        assertThat(render("lifecycle/templates", disabledFeatures))
+                .doesNotContain("id=\"dualEvidenceOptionTemplate\"", "value=\"DUAL_CONFIRMATION\"");
+    }
+
     private static String render(String template, Set<String> disabledFeatures) {
         Context context = new Context(Locale.JAPANESE);
         context.setVariable("disabledFeatures", disabledFeatures);

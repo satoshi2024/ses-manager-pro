@@ -8,6 +8,10 @@ SES.lifecycle = {
         const container = document.querySelector('[data-case-id]');
         if (container) {
             this.currentCaseId = container.getAttribute('data-case-id');
+            if (SES.lifecycleDual) {
+                // 二者確認の提出・確認・差戻しの後にタスク一覧（状態・後続の昇格）を読み直す
+                SES.lifecycleDual.onChanged = () => this.loadDetail(this.currentCaseId);
+            }
             this.loadDetail(this.currentCaseId);
         } else if (document.getElementById('casesTableBody')) {
             this.loadCases();
@@ -327,17 +331,24 @@ SES.lifecycle = {
             const sLabel = statusLabelMap[t.status] || t.status;
 
             let actionBtns = '';
+            const isDual = this.isDualConfirmationTask(t);
             if (caseStatus === 'ACTIVE') {
                 if (t.status === 'PENDING') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="SES.lifecycle.startTask(${t.id})">着手</button>`;
                 }
-                if (t.status === 'IN_PROGRESS') {
+                if (t.status === 'IN_PROGRESS' && isDual) {
+                    // 二者確認タスクは通常の完了APIでは完了できない（409）。提出・確認・差戻しの画面を開く
+                    actionBtns += this.dualConfirmationAction(t);
+                } else if (t.status === 'IN_PROGRESS') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-success" onclick="SES.lifecycle.openCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了</button>`;
                 }
                 if (t.status === 'PENDING' || t.status === 'IN_PROGRESS') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-warning" onclick="SES.lifecycle.openWaiveModal(${t.id})">免除</button>`;
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-info" onclick="SES.lifecycle.openReassignModal(${t.id})">担当変更</button>`;
                 }
+            }
+            if (isDual && t.status === 'COMPLETED') {
+                actionBtns += this.dualConfirmationAction(t);
             }
 
             const assignee = t.assigneeNameSnapshot
@@ -368,6 +379,24 @@ SES.lifecycle = {
             `;
         });
         tbody.innerHTML = html;
+    },
+
+    isDualConfirmationTask: function(task) {
+        return Boolean(task) && task.evidenceType === 'DUAL_CONFIRMATION';
+    },
+
+    /**
+     * 二者確認タスクの操作（進行中は「二者確認」、完了後は「確認記録」）。子スイッチOFFでモーダルが無ければ無効の表示だけ。
+     * 確認・差戻しボタンの表示はモーダルがA1の canDecide（管理者・HRかつ提出者以外）で決める。
+     */
+    dualConfirmationAction: function(task) {
+        if (!SES.lifecycleDual || !SES.lifecycleDual.available()) {
+            return task.status === 'IN_PROGRESS'
+                ? `<span class="text-muted small">${SES.escapeHtml(SES.i18n.t('lifecycle.dual.disabled'))}</span>`
+                : '';
+        }
+        const label = SES.i18n.t(task.status === 'IN_PROGRESS' ? 'lifecycle.dual.button.open' : 'lifecycle.dual.button.history');
+        return `<button type="button" class="btn btn-sm ${task.status === 'IN_PROGRESS' ? 'btn-success' : 'btn-outline-secondary'}" onclick="SES.lifecycleDual.open(this)" data-task-id="${SES.escapeHtml(String(task.id))}" data-task-name="${SES.escapeHtml(task.taskName || '')}"><i class="bi bi-people me-1"></i>${SES.escapeHtml(label)}</button>`;
     },
 
     renderEvents: function(events) {
@@ -838,6 +867,7 @@ SES.lifecycle = {
                     <label class="form-check"><input type="checkbox" class="form-check-input task-engineer-visible" checked> 要員に公開</label>
                 </div>
             </div>`;
+        this.addDualEvidenceOption(row.querySelector('.task-evidence-type'), task.evidenceType);
         const set = (selector, value) => { const element = row.querySelector(selector); if (element && value != null) element.value = value; };
         set('.task-code', task.taskCode || '');
         set('.task-name', task.taskName || '');
@@ -853,6 +883,23 @@ SES.lifecycle = {
         row.querySelector('.task-engineer-visible').checked = task.isEngineerVisible == null || task.isEngineerVisible === 1;
         row.querySelector('.remove-template-task').addEventListener('click', () => row.remove());
         document.getElementById('templateTasks').appendChild(row);
+    },
+
+    /**
+     * 証跡種別「二者確認」は子スイッチONのときだけ選べる（テンプレートが #dualEvidenceOptionTemplate を描画する）。
+     * OFFでも既存のDUALタスクを改定する場合は値を失わないよう「無効」と示して残し、保存はサーバーの400に任せる。
+     */
+    addDualEvidenceOption: function(select, currentValue) {
+        if (!select) return;
+        const optionTemplate = document.getElementById('dualEvidenceOptionTemplate');
+        if (optionTemplate && optionTemplate.content) {
+            select.appendChild(optionTemplate.content.cloneNode(true));
+        } else if (currentValue === 'DUAL_CONFIRMATION') {
+            const option = document.createElement('option');
+            option.value = 'DUAL_CONFIRMATION';
+            option.textContent = SES.i18n.t('lifecycle.dual.evidenceOptionDisabled');
+            select.appendChild(option);
+        }
     },
 
     saveTemplate: async function() {

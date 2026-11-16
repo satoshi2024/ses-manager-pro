@@ -102,6 +102,11 @@
                         </button>
                     </div>
                     <div id="templateTasks"></div>
+                    <!-- 証跡種別「二者確認」の選択肢。子スイッチ nf01-dual-confirmation がONのときだけ描画し、JSが各タスク行の選択肢へ追加する（W3-21b） -->
+                    <template id="dualEvidenceOptionTemplate"
+                              th:unless="${disabledFeatures != null and disabledFeatures.contains('nf01-dual-confirmation')}">
+                        <option value="DUAL_CONFIRMATION" th:text="#{lifecycle.dual.evidenceOption}">二者確認</option>
+                    </template>
                 </form>
             </div>
             <div class="modal-footer bg-tertiary border-theme">

@@ -419,6 +419,16 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(count(myCertificationJs, "getElementById('my-cert-number')")).isEqualTo(1);
         // NF-01: 要員詳細のライフサイクル欄
         assertThat(count(engineerDetail, "disabledFeatures.contains('nf01')")).isEqualTo(1);
+        // NF-01の子（二者確認、W3-21b）: 案件詳細・本人詳細のモーダルとscript、テンプレート画面の選択肢。
+        // 子キーだけで判定する（親がOFFなら子の識別子も disabledFeatures に入る）
+        String lifecycleDetail = read("src/main/resources/templates/lifecycle/detail.html");
+        String myLifecycleDetail = read("src/main/resources/templates/my/lifecycle-detail.html");
+        String lifecycleTemplates = read("src/main/resources/templates/lifecycle/templates.html");
+        assertThat(count(lifecycleDetail, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(2);
+        assertThat(count(myLifecycleDetail, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(2);
+        assertThat(count(lifecycleTemplates, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(1);
+        assertThat(count(lifecycleDetail + myLifecycleDetail + lifecycleTemplates, "disabledFeatures.contains('nf01')"))
+                .isZero();
     }
 
     // ---------------------------------------------------------------- helpers

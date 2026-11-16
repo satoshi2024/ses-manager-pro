@@ -8,6 +8,10 @@ SES.myLifecycle = {
         const container = document.querySelector('[data-case-id]');
         if (container) {
             this.currentCaseId = container.getAttribute('data-case-id');
+            if (SES.lifecycleDual) {
+                // 二者確認の提出後にタスク一覧を読み直す（本人画面に確認・差戻しの操作は無い）
+                SES.lifecycleDual.onChanged = () => this.loadDetail(this.currentCaseId);
+            }
             this.loadDetail(this.currentCaseId);
         } else if (document.getElementById('myCasesTableBody')) {
             this.loadCases();
@@ -113,6 +117,12 @@ SES.myLifecycle = {
 
         let html = '';
         tasks.forEach(tk => {
+            // 二者確認タスクは完了APIでは完了できない（409）。提出は案件詳細の二者確認モーダルで行う
+            const action = tk.evidenceType === 'DUAL_CONFIRMATION'
+                ? `<a href="/my/lifecycle/${encodeURIComponent(tk.caseId)}" class="btn btn-sm btn-outline-info"><i class="bi bi-people me-1"></i>${SES.escapeHtml(SES.i18n.t('lifecycle.dual.button.openDetail'))}</a>`
+                : `<button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openCompleteModal(this)" data-task-id="${tk.id}" data-task-name="${SES.escapeHtml(tk.taskName || '')}" data-task-description="${SES.escapeHtml(tk.description || '')}" data-evidence-type="${SES.escapeHtml(tk.evidenceType || 'NONE')}" title="タスクを提出" aria-label="タスクを提出">
+                            <i class="bi bi-check2 me-1"></i>提出・完了
+                        </button>`;
             html += `
                 <li class="list-group-item bg-transparent border-dark d-flex justify-content-between align-items-center py-3">
                     <div>
@@ -120,9 +130,7 @@ SES.myLifecycle = {
                         <div class="text-muted small">期日: ${SES.escapeHtml(tk.dueDate || '-')}</div>
                     </div>
                     <div>
-                        <button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openCompleteModal(this)" data-task-id="${tk.id}" data-task-name="${SES.escapeHtml(tk.taskName || '')}" data-task-description="${SES.escapeHtml(tk.description || '')}" data-evidence-type="${SES.escapeHtml(tk.evidenceType || 'NONE')}" title="タスクを提出" aria-label="タスクを提出">
-                            <i class="bi bi-check2 me-1"></i>提出・完了
-                        </button>
+                        ${action}
                     </div>
                 </li>
             `;
@@ -311,7 +319,10 @@ SES.myLifecycle = {
             const sLabel = statusLabelMap[t.status] || t.status;
 
             let actionBtn = '-';
-            if (caseStatus === 'ACTIVE' && (t.status === 'IN_PROGRESS' || t.status === 'PENDING')) {
+            if (t.evidenceType === 'DUAL_CONFIRMATION') {
+                // 二者確認タスク: 進行中は提出（確認・差戻しの操作は本人画面に出さない）、完了後は確認記録の閲覧だけ
+                actionBtn = this.dualConfirmationAction(t, caseStatus);
+            } else if (caseStatus === 'ACTIVE' && (t.status === 'IN_PROGRESS' || t.status === 'PENDING')) {
                 actionBtn = `<button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openDetailCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了・提出</button>`;
             }
 
@@ -330,6 +341,21 @@ SES.myLifecycle = {
             `;
         });
         tbody.innerHTML = html;
+    },
+
+    /** 二者確認タスクの操作。子スイッチOFFでモーダルが無ければ無効の表示だけ。 */
+    dualConfirmationAction: function(task, caseStatus) {
+        const inProgress = caseStatus === 'ACTIVE' && task.status === 'IN_PROGRESS';
+        if (!inProgress && task.status !== 'COMPLETED') {
+            return '-';
+        }
+        if (!SES.lifecycleDual || !SES.lifecycleDual.available()) {
+            return inProgress
+                ? `<span class="text-muted small">${SES.escapeHtml(SES.i18n.t('lifecycle.dual.disabled'))}</span>`
+                : '-';
+        }
+        const label = SES.i18n.t(inProgress ? 'lifecycle.dual.button.submit' : 'lifecycle.dual.button.history');
+        return `<button type="button" class="btn btn-sm ${inProgress ? 'btn-success' : 'btn-outline-secondary'}" onclick="SES.lifecycleDual.open(this)" data-task-id="${SES.escapeHtml(String(task.id))}" data-task-name="${SES.escapeHtml(task.taskName || '')}"><i class="bi bi-people me-1"></i>${SES.escapeHtml(label)}</button>`;
     },
 
     openDetailCompleteModal: function(buttonOrTaskId, evidenceType) {

@@ -251,7 +251,10 @@ public class LifecycleDualConfirmationCoordinator {
 
     // ===================================================================== 照会（A1・A5、A2・A6）
 
-    /** 現在のprojection・提出の要約・操作可否（A1・A5）。拒否eventは記録しない（照会）。 */
+    /**
+     * 現在のprojection・提出の要約・操作可否（A1・A5）。拒否eventは記録しない（照会）。
+     * 業務commentの本文は {@link DualConfirmationCommentDisclosure} の表示範囲外の照会者には返さない（有無だけ）。
+     */
     public DualConfirmationViewDto view(long taskId, Principal principal, DualConfirmationChannel channel) {
         requireNoAmbientTransaction();
         requireEnabled();
@@ -283,9 +286,14 @@ public class LifecycleDualConfirmationCoordinator {
         LifecycleDualSubmission submission = dependencyReader.findSubmission(actor.tenantId(), context.taskId(),
                 projection.getSubmissionId());
         if (submission != null) {
+            // 業務commentの本文は確認者のrole・その提出の提出者にだけ返す（W3-21b、review P3-3の最小公開）
+            boolean commentsVisible = DualConfirmationCommentDisclosure.canReadBody(actor.role(), actor.userId(),
+                    submission.getSubmitterUserId());
             view.submitterUserId(submission.getSubmitterUserId())
                     .submittedAt(submission.getCreatedAt())
-                    .submissionComment(submission.getBusinessComment());
+                    .commentsVisible(commentsVisible)
+                    .submissionCommentPresent(DualConfirmationCommentDisclosure.present(submission.getBusinessComment()))
+                    .submissionComment(commentsVisible ? submission.getBusinessComment() : null);
             LifecycleDualSubmissionDocument document = submissionDocumentMapper.selectOne(
                     new LambdaQueryWrapper<LifecycleDualSubmissionDocument>()
                             .eq(LifecycleDualSubmissionDocument::getTenantId, actor.tenantId())
@@ -304,7 +312,9 @@ public class LifecycleDualConfirmationCoordinator {
                 view.decision(confirmation.getDecision())
                         .confirmerUserId(confirmation.getConfirmerUserId())
                         .decidedAt(confirmation.getDecidedAt())
-                        .decisionComment(confirmation.getDecisionComment());
+                        .decisionCommentPresent(DualConfirmationCommentDisclosure.present(
+                                confirmation.getDecisionComment()))
+                        .decisionComment(commentsVisible ? confirmation.getDecisionComment() : null);
             }
             view.canDecide(channel == DualConfirmationChannel.INTERNAL && active && !stale
                     && LifecycleDualConfirmationAttemptService.STATE_PENDING.equals(projection.getState())

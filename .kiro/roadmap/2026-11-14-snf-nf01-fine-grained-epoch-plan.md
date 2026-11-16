@@ -552,12 +552,14 @@ key名はW3-02（9f6d7c0e）の `messages.properties` で確認した（`error.l
 - 基準HEADでは完了modalはdocumentIdだけを送る（src/main/resources/static/js/modules/lifecycle.js:482、my-lifecycle.js:162,297）。
 - W3-02（9f6d7c0e）: DOCUMENT_LINKの完了で版IDを必須にし、CLEANでない版を拒否し、画面に版の選択を追加した（N1-3）。CONFIRMの開放でversionlessを拒否する決定（B-NF01-4）は、NF01の本番公開がCONFIRM完成後である（B-NF01-1）ため、公開時点では常に拒否と同じ結果になる。
 - W3-21b: DUAL taskの行に「提出」（A2で候補を取り、文書とCLEAN版を選んでA3/A7へ版IDを送る）、管理者・HRに「確認」「差戻し」（A4）を追加する。W3-02の版選択部品を再利用する。templates: `templates/lifecycle/detail.html`、`templates/my/lifecycle-detail.html`。JS: `static/js/modules/lifecycle.js`、`static/js/modules/my-lifecycle.js`。390px表示、二重送信防止、Idempotency-Keyは画面操作ごとに生成して再送時に再利用する。
+- **実装の補足（W3-21b）**: 社内・本人の両画面が共有する部品を `static/js/modules/lifecycle-dual.js`（`SES.lifecycleDual`）に置いた。W3-02の版選択は文書IDの手入力が前提で、A2の候補（文書と版の組）とは形が違うため、部品は再利用せず同じ方針（CLEAN版だけ・版IDを必ず送る）で候補の選択欄を作った。モーダル `#dualConfirmModal` とscriptは子スイッチOFFでは描画しない（`disabledFeatures.contains('nf01-dual-confirmation')`）。確認・差戻しの欄は社内テンプレートにだけ置き（本人画面には欄自体が無い）、表示はA1の `canDecide`（管理者・HRかつ提出者以外・PENDING）で決める。共通の `SES.api` は403の本文を捨て任意のheaderを付けられないため、二者確認の要求は専用のfetch（`headers: SES.csrf.header()` に `Idempotency-Key` を足す）で送り、HTTP statusに関係なくサーバーのmessage（§5.9のkeyを解決した文言）を表示する。Idempotency-Keyは「操作・タスク・送信内容」が同じ間は再利用し、内容が変わるか成功したら破棄する。
 
 ### 5.11 機能スイッチとテンプレートAPI
 
 - 子スイッチ `NF01_DUAL_CONFIRMATION`（親NF01、設定キー `app.features.nf01-dual-confirmation.enabled`、既定false）を新設する。routeは持たず（NF03_CERTIFICATION_PII と同じ形、Feature.java）、service層で判定する。
 - OFF: A1〜A7は400 `error.lifecycle.dualConfirmationDisabled`。テンプレートAPIでDUAL_CONFIRMATIONを含むtaskの作成・更新は400（W3-02で無条件に実装済み、W3-21bでスイッチ連動へ変更）。
 - ON: テンプレートでDUALを選べ、A1〜A7が動く。ONにするのは§10の署名とW3-21のPASS後。
+- **実装の補足（W3-21b）**: テンプレートAPIの判定は子スイッチの実効値（親NF-01との論理積。`FeatureSwitches` を取得できなければOFF）による。ONでも表記揺れ（大文字小文字・前後空白）のDUALは保存時に `DUAL_CONFIRMATION` へそろえる（完了経路 `LifecycleTaskServiceImpl` とcoordinatorは完全一致で判定するため、揺れたまま保存すると通常完了の409を迂回できる）。テンプレート画面の証跡種別の選択肢「二者確認」は子スイッチONのときだけ描画する。ONからOFFへ戻しても、DUALを含む有効なテンプレートは残り、新しい案件にDUALタスクが展開される（OFF中は提出・確認できず免除だけ）。OFFへ戻す運用は配備runbook 4.9.4に書いた。
 - 空DB新規導入のため既存のDUAL taskは0件の前提（preflight `LIFECYCLE_DUAL_TASK_UNFINISHED`）。
 
 ### 5.12 B0 DDL草案（番号なし `V?`）
@@ -969,7 +971,7 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 | Document Owner | SKILL_SHEET×単一ENGINEER×1件だけの受理と他種別・他link形の明示拒否（§5.1）、起点writerの緩和と生成者の固定、適格な状態集合 `{DRAFT, CONFIRMED, AMENDED}`、hold・廃棄・link・版追加とepochの規則（§2.2）、`t_document_version.scan_status` を唯一のscan根拠とすること、保存期限jobのservice経由化、資産・紛失・service requestからSKILL_SHEETへlinkした場合に不適格となる扱い、RR-8の受容 |
 | HR | 差戻し（REJECT）を含む二者確認の手順、確認者の役割、提出後の担当・所属・権限変更で再提出が必要になる運用（細粒度化で対象は当該要員・当該利用者に限られる）、保留・担当変更・免除でのgeneration失効、外部失効要求の登録で完了を通す運用と未処理一覧の確認・再要求、別法人所有の外部アカウントの扱い（§5.13）、RR-11の受容、linkの無いportal利用者の「要確認」の扱い、`released_at` に退社基準日を残すこと |
 | DBA | 2つのmigration（epoch A = V189、B0 = V195）、B0の不変trigger 12件（W3-18で採用。§12 O-4）とtrigger権限・binlog条件・DEFINER、tenant列の文字集合・照合順序、`idempotency_key` の `ascii_bin`（PAD SPACE）と `ck_dual_idem_key`、lock待ちの監視（`innodb_print_all_deadlocks=ON` でdeadlockの待機graphを記録する。RR-15）、RR-13 |
-| Privacy | B0の不変6表は trigger（V195）と mapper（`AppendOnlyMapper`・`AppendOnlySqlInjector`）で更新・削除できないこと。個人情報になり得る自由記述は `t_lifecycle_dual_submission.business_comment` と `t_lifecycle_dual_confirmation.decision_comment` の2列だけで、canonical JSON はIDとhashだけ、拒否eventはIDと理由codeだけである（§5.8）。これらの保存期間（無期限保存を認めるか、NF07のretentionとの整合）、および削除・匿名化が必要な場合の経路（§12 O-8）。**W3-21aがcommentを書き込む経路を実装する前に、また子スイッチをONにする前に署名を得る**。NF07のPII inventory・data element catalogへのB0の7表と2列の登録はNF07の担当へ引継ぐ |
+| Privacy | B0の不変6表は trigger（V195）と mapper（`AppendOnlyMapper`・`AppendOnlySqlInjector`）で更新・削除できないこと。個人情報になり得る自由記述は `t_lifecycle_dual_submission.business_comment` と `t_lifecycle_dual_confirmation.decision_comment` の2列だけで、canonical JSON はIDとhashだけ、拒否eventはIDと理由codeだけである（§5.8）。これらの保存期間（無期限保存を認めるか、NF07のretentionとの整合）、および削除・匿名化が必要な場合の経路（§12 O-8）。**W3-21aがcommentを書き込む経路を実装する前に、また子スイッチをONにする前に署名を得る**。NF07のPII inventory・data element catalogへのB0の7表と2列の登録はNF07の担当へ引継ぐ。**commentの表示範囲（W3-21b、W3-21a review P3-3。主控の決定で最小公開を既定とし、署名で確定または緩和する）**: 2列の本文は、確認者のrole（管理者・HR）と、その提出の提出者本人にだけA1・A5の応答で返す。範囲内の他の利用者（他の営業・マネージャー）と、営業が代理提出したときの要員本人には本文を返さず、記入の有無（`submissionCommentPresent`・`decisionCommentPresent`）だけを返し、画面は「コメントあり」と表示する（`DualConfirmationCommentDisclosure`。画面で隠すだけにしない）。緩和する場合は同classの判定を変える（設定項目ではない） |
 
 ## 11. 静的確認で見つかった既存の問題（対処バッチを割当）
 

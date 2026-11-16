@@ -9,6 +9,12 @@ import com.ses.config.feature.FeatureSwitches;
 import com.ses.dto.lifecycle.dual.DualConfirmationResultDto;
 import com.ses.dto.lifecycle.dual.DualConfirmationSubmitRequest;
 import com.ses.dto.lifecycle.dual.DualConfirmationViewDto;
+import com.ses.entity.Engineer;
+import com.ses.entity.LifecycleCase;
+import com.ses.entity.LifecycleDualConfirmation;
+import com.ses.entity.LifecycleDualProjection;
+import com.ses.entity.LifecycleDualSubmission;
+import com.ses.entity.LifecycleTask;
 import com.ses.entity.SysUser;
 import com.ses.mapper.AuthorizationEpochMapper;
 import com.ses.mapper.DocumentLinkMapper;
@@ -28,9 +34,12 @@ import com.ses.service.lifecycle.dual.LifecycleDualConfirmationDenyRecorder;
 import com.ses.service.lifecycle.dual.LifecycleDualConfirmationDependencyReader;
 import com.ses.service.security.ActionPermissionResolver;
 import com.ses.service.security.ExplicitActorAuthorizationEvaluator;
+import com.ses.service.security.ExplicitActorAuthorizationEvaluator.ExplicitActor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -47,13 +56,18 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.test.context.TestSecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -79,6 +93,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>coordinatorは実物（{@link SpyBean}）で、協力部品だけをmockにする。子スイッチOFF・headerとbodyの形式違反はDBへ触れる前に
  * 拒否されるため、実物の判定順（スイッチ → Idempotency-Key → body → 主体）をMVC経由で確かめられる。route対応の試験だけは
  * coordinatorの結果を差し替える。</p>
+ *
+ * <p>W3-21b: 照会（A1・A5）の応答でのcomment本文の表示範囲（review P3-3の最小公開）を、実物のcoordinatorの照会経路で確かめる。</p>
  */
 @WebMvcTest(LifecycleDualConfirmationApiController.class)
 @Import({LifecycleDualConfirmationCoordinator.class, LifecycleDualConfirmationApiControllerTest.Switches.class})
@@ -314,6 +330,94 @@ class LifecycleDualConfirmationApiControllerTest {
                 .andExpect(status().isForbidden());
         verify(coordinator, never()).submit(anyLong(), any(), any(), any(), any());
         verify(coordinator, never()).decide(anyLong(), anyLong(), any(), any(), any());
+    }
+
+    // ===================================================================== commentの表示範囲（W3-21b、review P3-3）
+
+    /**
+     * 照会（A1・A5）の応答でcomment本文を返すのは確認者のrole（管理者・HR）とその提出の提出者本人だけ。
+     * 範囲内の他の営業・マネージャーと、営業が代理提出したときの要員本人には本文を返さず有無だけを返す。
+     * 本文は応答のどこにも含めない（画面で隠すだけにしない）。
+     */
+    @ParameterizedTest(name = "{0} 照会者={1}(id={2}) 提出者id={3} → 本文={4}")
+    @CsvSource({
+            "/api/lifecycle,    管理者,       1, 2, true",
+            "/api/lifecycle,    HR,          1, 2, true",
+            "/api/lifecycle,    営業,         1, 1, true",
+            "/api/lifecycle,    営業,         1, 2, false",
+            "/api/lifecycle,    マネージャー, 1, 2, false",
+            "/api/my/lifecycle, 要員,         1, 1, true",
+            "/api/my/lifecycle, 要員,         1, 2, false"
+    })
+    void commentの本文は確認者のroleとその提出の提出者だけに返し他の照会者には有無だけを返す(
+            String entry, String viewerRole, long viewerUserId, long submitterUserId, boolean bodyVisible)
+            throws Exception {
+        stubView(viewerRole, viewerUserId, submitterUserId, "提出の説明-W321B", "差戻しの理由-W321B");
+
+        MvcResult result = mockMvc.perform(get(entry + "/tasks/7/dual-confirmation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.state").value("REJECTED"))
+                .andExpect(jsonPath("$.data.decision").value("REJECT"))
+                .andExpect(jsonPath("$.data.commentsVisible").value(bodyVisible))
+                .andExpect(jsonPath("$.data.submissionCommentPresent").value(true))
+                .andExpect(jsonPath("$.data.decisionCommentPresent").value(true))
+                .andReturn();
+        String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        if (bodyVisible) {
+            assertThat(body).contains("提出の説明-W321B", "差戻しの理由-W321B");
+        } else {
+            assertThat(body).doesNotContain("提出の説明-W321B", "差戻しの理由-W321B");
+        }
+    }
+
+    @Test
+    void 空白だけのcommentは記入なしとして有無もfalseで返す() throws Exception {
+        stubView("営業", 1L, 2L, "   ", null);
+
+        mockMvc.perform(get("/api/lifecycle/tasks/7/dual-confirmation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.commentsVisible").value(false))
+                .andExpect(jsonPath("$.data.submissionCommentPresent").value(false))
+                .andExpect(jsonPath("$.data.decisionCommentPresent").value(false));
+    }
+
+    /** 差し戻された提出（REJECTED）を照会できる状態を、実物のcoordinatorの照会経路に沿って用意する。 */
+    private void stubView(String viewerRole, long viewerUserId, long submitterUserId, String submissionComment,
+                          String decisionComment) {
+        SysUser viewer = new SysUser();
+        viewer.setId(viewerUserId);
+        viewer.setRole(viewerRole);
+        viewer.setStatus(1);
+        viewer.setTenantId(TENANT);
+        when(sysUserMapper.selectById(viewerUserId)).thenReturn(viewer);
+        when(evaluator.resolveActor(eq(TENANT), eq(viewerUserId), any(LocalDate.class)))
+                .thenReturn(Optional.of(new ExplicitActor(TENANT, viewerUserId, viewerRole, LocalDate.now())));
+
+        LifecycleTask task = LifecycleTask.builder().caseId(30L).taskCode("DUAL").taskName("二者確認")
+                .evidenceType("DUAL_CONFIRMATION").status("IN_PROGRESS").isEngineerVisible(1).build();
+        task.setId(7L);
+        LifecycleCase lcCase = LifecycleCase.builder().tenantId(TENANT).caseNo("LC-W321B").engineerId(40L)
+                .status("ACTIVE").build();
+        lcCase.setId(30L);
+        Engineer engineer = Engineer.builder().tenantId(TENANT).build();
+        engineer.setId(40L);
+        when(dependencyReader.readTaskContext(TENANT, 7L))
+                .thenReturn(Optional.of(new LifecycleDualConfirmationDependencyReader.TaskContext(task, lcCase, engineer)));
+        when(evaluator.canViewCase(any(), any(), any())).thenReturn(true);
+        when(evaluator.isTaskVisible(any(), any())).thenReturn(true);
+        when(epochMapper.selectTaskGeneration(anyLong(), anyLong(), anyString()))
+                .thenReturn(new AuthorizationEpochMapper.EpochRow(3L, 0));
+        when(projectionMapper.selectOne(any())).thenReturn(LifecycleDualProjection.builder().tenantId(TENANT)
+                .taskId(7L).caseId(30L).taskGeneration(3L).revision(1).submissionId(55L)
+                .evidenceSha256("a".repeat(64)).state("REJECTED").projectionVersion(1L).build());
+        when(dependencyReader.findSubmission(TENANT, 7L, 55L)).thenReturn(LifecycleDualSubmission.builder().id(55L)
+                .tenantId(TENANT).caseId(30L).taskId(7L).engineerId(40L).taskGeneration(3L).revision(1)
+                .submitterUserId(submitterUserId).submitterRoleSnapshot("営業").businessComment(submissionComment)
+                .createdAt(LocalDateTime.now()).build());
+        when(confirmationMapper.selectOne(any())).thenReturn(LifecycleDualConfirmation.builder().tenantId(TENANT)
+                .taskId(7L).submissionId(55L).confirmerUserId(9L).decision("REJECT").decisionComment(decisionComment)
+                .decidedAt(LocalDateTime.now()).build());
     }
 
     // ===================================================================== helpers

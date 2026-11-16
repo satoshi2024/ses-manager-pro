@@ -331,10 +331,13 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 - 親NF-01がOFF: 二者確認のAPIも親の遮断表で404（2章）。
 - 親ONで子OFF: 照会・候補・提出・確認/差戻しの全routeが400 `error.lifecycle.dualConfirmationDisabled`。拒否event（`t_lifecycle_dual_event`）は記録しない。既存のタスク完了API（`/api/lifecycle/tasks/{id}/complete` 等）はDUALタスクに対して子スイッチに関係なく409のまま。
+- 親ONで子OFF（テンプレート・画面、W3-21b）: DUAL_CONFIRMATIONを含むテンプレートの作成・改定は400 `error.lifecycle.dualConfirmationDisabled`（ONなら受け付け、表記揺れは `DUAL_CONFIRMATION` にそろえて保存する）。テンプレート画面の証跡種別に「二者確認」を出さない。案件詳細・本人画面は二者確認のモーダルとscript（`/js/modules/lifecycle-dual.js`）を描画せず、DUALタスクの行には「二者確認は現在無効です」とだけ出す。
 
 #### 4.9.2 ONの条件（prodでは起動時に強制）
 
-- Privacyの署名（comment 2列の保存期間・削除/匿名化の経路）と、W3-21（W3-21a・W3-21b）のPASS。
+- Privacyの署名（comment 2列の保存期間・削除/匿名化の経路・**表示範囲**）と、W3-21（W3-21a・W3-21b）のPASS。
+  - 表示範囲の既定（W3-21b、最小公開。署名で確定または緩和する）: 提出commentと確認/差戻しcommentの本文は、確認者（管理者・HR）とその提出の提出者本人にだけ返す。範囲内の他の営業・マネージャーと、営業が代理提出したときの要員本人には「コメントあり」（記入の有無）だけを返す。判定はAPI（照会A1・A5）の応答側で行い、画面で隠すだけではない（`DualConfirmationCommentDisclosure`）。緩和はコード変更で行う（設定項目は無い）。
+  - 「確認待ち」の通知は案件のtenantの有効な管理者・HRとタスクの担当者だけへ個別に送る（W3-21a review P3-7）。通知に業務comment・案件title・文書titleは載せない。
 - 署名の参照を `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（設定キー `app.features.nf01-dual-confirmation.privacy-sign-off-ref`）へ設定する。値は英数字で始まる4〜128文字（英数字と `._:/#-`）で**英字と数字の両方を含む**review文書ID・ticket番号等（例: `PRIV-REVIEW-2026-11-20`）。placeholderとみなす値は受け付けない: `todo`・`tbd`・`xxx`・`placeholder`・`changeme`（`change-me`・`change_me`）・`dummy`・`fixme`・`sample`・`example`・`unsigned`・`replace`・`your-` を一部にでも含む値、`test`・`pending`・`tmp`・`temp`・`none`・`null`・`n/a`・`dev`・`local` で始まる値（大文字小文字を区別しない。例: `TODO-1`・`TBD2026`・`test-ref-1` は不可）。
 - prod profileでは `LifecycleDualConfirmationReleaseGate` が、子スイッチの実効値がONなのに参照が無い・形式不正・placeholderの場合に起動を止める（固定コード `NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING`）。参照値は秘密情報ではないため、起動ログ `[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef=...` に出す（監査で署名と配備を突き合わせる）。
 - gateは「署名を記録したこと」を強制するだけで、署名の内容は検証しない。参照の値は署名者（Privacy）が発行したものを配備担当が転記する。
@@ -349,6 +352,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 #### 4.9.4 OFF
 
 - 問題時は `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` を外して再起動する。保存済みの提出・確認・拒否eventは追記専用のため残る（OFFで消えない）。未確認の提出はON後も世代・epochの判定に従う。
+- OFFに戻しても、ONの間に作ったDUAL_CONFIRMATIONを含む有効なテンプレートは残り、新しい案件へDUALタスクが展開される。OFFの間それらのタスクは提出・確認できず免除だけで進む。OFFに戻すときは、該当テンプレートを無効化するか、DUALを含まない版へ改定する（DUALを含まない改定はOFFでも受け付ける）。
 
 ## 5. 新しい入口を追加するとき
 
@@ -371,7 +375,9 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 | `FeatureSwitchRouteCoverageTest` | Docker不要 | 登録漏れ・誤遮断の検出（controller・静的ファイル・scheduler・サイドバー導線）、prefixの重複・古い登録の検出、子スイッチが一致するcontrollerの固定とportal配下のNF-02入口が全て子スイッチに属すること、portal問い合わせタブ・資格番号入力欄の埋込み判定 |
 | `EngineerCertificationNumberEntrySwitchTest` | Docker不要 | 資格番号の子スイッチOFF時に申請・再申請を書込み・暗号化前に400で拒否、空欄は受付、ON時は従来どおり暗号化保存 |
 | `MyCertificationNumberEntryDisabledApiTest` | Docker不要 | 子スイッチOFF時、本人API（controller → 本人service → 資格service）の申請・再申請がHTTP 400の `ApiResult` になる |
-| `FeatureSwitchChildTemplateRenderingTest` | Docker不要 | 実templateをThymeleafで描画し、子スイッチOFFでportalの問い合わせ導線・本人画面の資格番号欄が出ないこと |
+| `FeatureSwitchChildTemplateRenderingTest` | Docker不要 | 実templateをThymeleafで描画し、子スイッチOFFでportalの問い合わせ導線・本人画面の資格番号欄・二者確認のモーダル/script/テンプレートの選択肢が出ないこと（NF-01本体OFFでも同じ） |
+| `LifecycleTemplateDualPolicyTest` | Docker不要（H2） | 二者確認の子スイッチOFF（または親NF-01 OFF）でDUAL_CONFIRMATIONを含むテンプレートの作成・改定が400で1件も書かれず、ONでは受け付けて表記揺れを `DUAL_CONFIRMATION` で保存する |
+| `LifecycleDualConfirmationScreenTest` / `LifecycleDualConfirmationScriptTest` | Docker不要（後者はNode必須） | 二者確認の画面: 社内詳細に提出・確認・差戻し、本人詳細に提出だけ、4言語の翻訳、画面が参照するkeyの存在、Idempotency-Keyの再利用・二重送信防止・版IDの無い提出の抑止・403/409のmessage表示・comment本文の非表示 |
 | `PortalServiceRequestVisibilityPolicyTest` | Docker不要 | portal公開範囲の判定（portal起票・公開開始時刻・timezone・不正値の起動失敗・一覧条件） |
 | `PortalServiceRequestVisibilityIntegrationTest` | Docker不要（H2） | 公開開始時刻未設定の実context。portalの一覧・詳細・返信・CSAT・添付uploadが社内登録分を404/非表示にし、内部サービスデスクは従来どおり |
 | `FeatureSwitchServletContainerIntegrationTest` | Docker不要・実Tomcat起動（Windowsでは **PowerShell環境** で実行） | NF-01をproperty形式、NF-04を環境変数形式でOFFにした実context。未認証の画面404（login誘導されない・no-store）、管理者と未認証で同一の404 JSON、存在しないURLの404との同一性、ONの機能・中核APIはSpring Securityへ届くこと、PWA静的入口の遮断範囲、filter登録順 |

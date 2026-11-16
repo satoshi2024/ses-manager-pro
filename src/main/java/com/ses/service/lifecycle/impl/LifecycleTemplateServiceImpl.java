@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.LifecycleTemplate;
@@ -18,6 +20,7 @@ import com.ses.service.lifecycle.LifecycleDagValidator;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +37,7 @@ import java.util.stream.Collectors;
 public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateMapper, LifecycleTemplate>
         implements LifecycleTemplateService {
 
-    /** 確認機能（CONFIRM）の公開まで新規作成・改定を受け付けない証跡種別。 */
+    /** 子スイッチ {@code nf01-dual-confirmation} がONの間だけ新規作成・改定を受け付ける証跡種別。 */
     private static final String DUAL_CONFIRMATION = "DUAL_CONFIRMATION";
 
     private final LifecycleTemplateMapper templateMapper;
@@ -42,6 +45,8 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     private final LifecycleTemplateTaskDepMapper templateTaskDepMapper;
     private final LifecycleDagValidator dagValidator;
     private final SysUserMapper sysUserMapper;
+    /** 二者確認の子スイッチの判定に使う。取得できなければOFFとして扱う（fail-closed）。 */
+    private final ObjectProvider<FeatureSwitches> featureSwitches;
 
     @Override
     public LifecycleTemplate findActiveByTypeAndDate(String templateType, LocalDate asOf) {
@@ -255,23 +260,45 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     }
 
     /**
-     * 確認機能（CONFIRM）の公開前は、二者確認（DUAL_CONFIRMATION）タスクを持つテンプレートの新規作成・改定を拒否する
-     * （決定 B-NF01-3）。DUAL_CONFIRMATIONは通常完了経路で完了できず（LifecycleTaskServiceImpl.completeTask は409）、
-     * 新しい案件へ展開されると免除以外に進めない。CONFIRM公開の批次で本判定を開放する。
-     * 値は前後空白・大文字小文字を畳んで照合する（小文字等で登録されると完了経路の完全一致判定をすり抜けるため）。
-     * 拒否は1件も書き込む前に行う。
+     * 二者確認（DUAL_CONFIRMATION）タスクを持つテンプレートの新規作成・改定は、子スイッチ
+     * {@code app.features.nf01-dual-confirmation.enabled} の実効値（親NF-01との論理積）がONのときだけ受け付ける
+     * （NF01細粒度epoch計画 §5.11、W3-21b。W3-02（決定 B-NF01-3）の無条件拒否をスイッチ連動に変更）。
+     * OFFでは400 {@code error.lifecycle.dualConfirmationDisabled}。DUAL_CONFIRMATIONは通常完了経路で完了できず
+     * （LifecycleTaskServiceImpl.completeTask は409）、二者確認のAPIもOFFでは400のため、展開されると免除以外に進めない。
+     * 値は前後空白・大文字小文字を畳んで照合する（小文字等の表記を許すと完了経路の完全一致判定をすり抜けるため。
+     * ONのときは保存時に {@link #canonicalEvidenceType(String)} で正規の表記へそろえる）。拒否は1件も書き込む前に行う。
      */
     private void rejectUnavailableEvidenceTypes(List<LifecycleTemplateTaskDto> tasks) {
         if (tasks == null) {
             return;
         }
-        for (LifecycleTemplateTaskDto task : tasks) {
-            String evidenceType = task == null ? null : task.getEvidenceType();
-            if (evidenceType != null && DUAL_CONFIRMATION.equalsIgnoreCase(evidenceType.trim())) {
-                throw BusinessException.of(400, "error.lifecycle.dualConfirmationDisabled",
-                        "二者確認タスクは確認機能の公開前のため作成・改定できません");
-            }
+        boolean hasDual = tasks.stream()
+                .anyMatch(task -> task != null && isDualConfirmation(task.getEvidenceType()));
+        if (hasDual && !dualConfirmationEnabled()) {
+            throw BusinessException.of(400, "error.lifecycle.dualConfirmationDisabled",
+                    "二者確認の機能が無効のため、二者確認タスクを作成・改定できません");
         }
+    }
+
+    private boolean dualConfirmationEnabled() {
+        FeatureSwitches switches = featureSwitches == null ? null : featureSwitches.getIfAvailable();
+        return switches != null && switches.isEnabled(Feature.NF01_DUAL_CONFIRMATION);
+    }
+
+    private static boolean isDualConfirmation(String evidenceType) {
+        return evidenceType != null && DUAL_CONFIRMATION.equalsIgnoreCase(evidenceType.trim());
+    }
+
+    /**
+     * 保存する証跡種別。DUAL_CONFIRMATIONの表記揺れ（大文字小文字・前後空白）は正規の表記にそろえる
+     * （完了経路・二者確認のAPIは完全一致で判定するため、揺れたまま保存すると通常完了の409を迂回できる）。
+     * 他の種別は従来どおり（未指定はNONE）。
+     */
+    static String canonicalEvidenceType(String evidenceType) {
+        if (evidenceType == null) {
+            return "NONE";
+        }
+        return isDualConfirmation(evidenceType) ? DUAL_CONFIRMATION : evidenceType;
     }
 
     private void requireTemplateManager(Long userId) {
@@ -301,7 +328,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
                     .assigneeRuleValue(tDto.getAssigneeRuleValue())
                     .isMandatory(tDto.getIsMandatory() != null ? tDto.getIsMandatory() : 1)
                     .isBlocking(tDto.getIsBlocking() != null ? tDto.getIsBlocking() : 1)
-                    .evidenceType(tDto.getEvidenceType() != null ? tDto.getEvidenceType() : "NONE")
+                    .evidenceType(canonicalEvidenceType(tDto.getEvidenceType()))
                     .isEngineerVisible(tDto.getIsEngineerVisible() != null ? tDto.getIsEngineerVisible() : 1)
                     .targetEmploymentTypes(tDto.getTargetEmploymentTypes())
                     .sortOrder(tDto.getSortOrder() != null ? tDto.getSortOrder() : order)
