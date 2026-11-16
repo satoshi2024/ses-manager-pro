@@ -27,6 +27,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     // NF-06はONのprodで署名済みadmission承認設定を必須とする（ImportAdmissionStartupValidator）ため、
     // 本番既定と同じOFFへ戻す（本番既定がOFFであることはFeatureSwitchDefaultsTestが検証する）。
     "app.features.nf06.enabled=false",
+    // NF01の二者確認も、ONのprodでPrivacy署名の参照を必須とする（LifecycleDualConfirmationReleaseGate）ため、
+    // 本番既定と同じOFFへ戻す。
+    "app.features.nf01-dual-confirmation.enabled=false",
     "spring.flyway.enabled=false",
     "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
     "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",
