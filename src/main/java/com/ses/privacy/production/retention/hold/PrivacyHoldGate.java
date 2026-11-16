@@ -48,6 +48,8 @@ public class PrivacyHoldGate {
     static final String REASON_JOURNAL_NOT_CONFIGURED = "JOURNAL_NOT_CONFIGURED";
     static final String REASON_JOURNAL_UNAVAILABLE = "JOURNAL_UNAVAILABLE";
     static final String REASON_JOURNAL_MISMATCH = "JOURNAL_MISMATCH";
+    /** Journal と application DB が同じ instance（{@code @@server_uuid} が一致。Review P3-8）。 */
+    static final String REASON_JOURNAL_SAME_INSTANCE = "JOURNAL_SAME_INSTANCE";
     static final String REASON_PENDING = "PENDING";
     static final String REASON_PROJECTION_MISMATCH = "PROJECTION_MISMATCH";
     static final String REASON_PROJECTION_LAG = "PROJECTION_LAG";
@@ -102,59 +104,73 @@ public class PrivacyHoldGate {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("evaluateLockedは削除と同じtransactionの中から呼び出してください");
         }
-        return evaluate(tenantId, true);
+        return observe(decide(tenantId, true));
+    }
+
+    /**
+     * 画面の表示用（{@code GET /api/privacy/holds}）。判定は {@link #evaluate} と同じだが、破壊的経路の skip ではないため
+     * UNAVAILABLE の metric と WARN に数えない（§3.4.3 の7 の監視項目を表示で汚さない。Review P3-4）。
+     */
+    public Decision inspect(String tenantId) {
+        return decide(tenantId, false);
     }
 
     private Decision evaluate(String tenantId, boolean lock) {
+        return observe(decide(tenantId, lock));
+    }
+
+    /** 判定だけを行う（log・metric を出さない）。 */
+    private Decision decide(String tenantId, boolean lock) {
         Objects.requireNonNull(tenantId, "tenantId");
         List<PrivacyHoldProjectionStore.StateRow> rows;
         try {
             rows = lock ? store.lockStateRows(tenantId) : store.stateRows(tenantId);
         } catch (RuntimeException e) {
-            return unavailable(REASON_STATE_UNREADABLE);
+            return Decision.unavailable(REASON_STATE_UNREADABLE);
         }
         if (rows.isEmpty()) {
             return Decision.noHolds();
         }
         PrivacyHoldJournal.Availability availability = journal.availability();
         if (availability == PrivacyHoldJournal.Availability.NOT_CONFIGURED) {
-            return unavailable(REASON_JOURNAL_NOT_CONFIGURED);
+            return Decision.unavailable(REASON_JOURNAL_NOT_CONFIGURED);
         }
         if (availability != PrivacyHoldJournal.Availability.AVAILABLE) {
-            return unavailable(REASON_JOURNAL_UNAVAILABLE);
+            return Decision.unavailable(journal.sameInstanceDetected()
+                    ? REASON_JOURNAL_SAME_INSTANCE : REASON_JOURNAL_UNAVAILABLE);
         }
         String journalId = journal.journalId();
         if (rows.size() != 1 || !rows.get(0).journalId().equals(journalId)) {
-            return unavailable(REASON_JOURNAL_MISMATCH);
+            return Decision.unavailable(REASON_JOURNAL_MISMATCH);
         }
         PrivacyHoldProjectionStore.StateRow state = rows.get(0);
         if (state.pendingCommandId() != null) {
-            return unavailable(REASON_PENDING);
+            return Decision.unavailable(REASON_PENDING);
         }
         List<PrivacyHoldProjectionStore.HoldRow> holds;
         try {
             holds = store.holds(tenantId, lock);
         } catch (RuntimeException e) {
-            return unavailable(REASON_STATE_UNREADABLE);
+            return Decision.unavailable(REASON_STATE_UNREADABLE);
         }
         String reason = projectionMismatch(state, holds);
         if (reason != null) {
-            return unavailable(reason);
+            return Decision.unavailable(reason);
         }
         PrivacyHoldJournalIndex.TenantView view;
         try {
             view = journal.index().tenantView(tenantId);
         } catch (RuntimeException e) {
-            return unavailable(REASON_JOURNAL_UNAVAILABLE);
+            return Decision.unavailable(REASON_JOURNAL_UNAVAILABLE);
         }
         if (!journalMatches(state, holds, view)) {
-            return unavailable(REASON_PROJECTION_LAG);
+            return Decision.unavailable(REASON_PROJECTION_LAG);
         }
         Map<String, SubjectAttribution> catalog;
         try {
             catalog = resolver.catalog(tenantId);
         } catch (RuntimeException e) {
-            return unavailable(REASON_CATALOG_UNREADABLE);
+            return Decision.unavailable(REASON_CATALOG_UNREADABLE);
         }
         Set<String> subjects = new LinkedHashSet<>();
         Set<String> elements = new LinkedHashSet<>();
@@ -224,18 +240,22 @@ public class PrivacyHoldGate {
         return seen.size() == projected.size();
     }
 
-    private Decision unavailable(String reason) {
+    /** 破壊的経路の判定として UNAVAILABLE を WARN と metric に数える（判定は変えない）。 */
+    private Decision observe(Decision decision) {
+        if (decision.state() != State.UNAVAILABLE) {
+            return decision;
+        }
         log.warn("[privacy-hold] gateを判定できないためUNAVAILABLEとして扱います: code={} reason={}",
-                LOG_CODE_UNAVAILABLE, reason);
+                LOG_CODE_UNAVAILABLE, decision.reason());
         MeterRegistry registry = meterRegistry == null ? null : meterRegistry.getIfAvailable();
         if (registry != null) {
             try {
-                registry.counter(UNAVAILABLE_METRIC, "reason", reason).increment();
+                registry.counter(UNAVAILABLE_METRIC, "reason", decision.reason()).increment();
             } catch (RuntimeException ignored) {
                 // metric の失敗は判定を変えない
             }
         }
-        return Decision.unavailable(reason);
+        return decision;
     }
 
     /**

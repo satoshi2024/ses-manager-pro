@@ -51,7 +51,9 @@ import java.util.regex.Pattern;
  *       選んだ element に ACTIVE な DATA_ELEMENT hold があることを確かめ、pending を CAS で記録し、required 監査（開始要求・
  *       element ごとの選択）を書いて commit する。CAS が0件なら 409 {@code error.privacy.holdStartInProgress}。</li>
  *   <li>Journal に HOLD_STARTED を append する（command の {@code request_hash} が対象・理由 hash・ticket・開始者・D-05・選択を
- *       束縛する）。ACK 不明なら同じ command で1回だけ再送し、なお不明なら pending を残して 503（reconciler に任せる）。</li>
+ *       束縛する）。ACK 不明なら {@code pending_since} を CAS で進めてから同じ command で1回だけ再送し（CAS が0件なら再送しない）、
+ *       なお不明なら pending を残して 503（reconciler に任せる）。revision の競合は、held なら
+ *       {@code error.privacy.holdAlreadyActive}、それ以外は {@code error.privacy.holdStartInProgress}（再試行）の 409。</li>
  *   <li>ACK 後に chain を検証し、別の独立 transaction で projection を書き、追随位置を進め、pending を消す（{@link PrivacyHoldProjector}）。</li>
  * </ol>
  * 先に書く pending は成功応答ではなく、gate を fail-closed に倒すための印である。監査本文と log に subject 識別子を入れない。
@@ -63,13 +65,20 @@ public class PrivacyHoldService {
 
     static final String VIEW_ACTION = "privacy.hold.view";
     static final String MANAGE_ACTION = "privacy.hold.manage";
-    /** reconciler が Journal から復元した行の理由コード・ticket（開始時の値は開始要求の監査にある）。 */
+    /**
+     * reconciler が Journal から復元した行の理由コード・ticket の印（Journal には request hash しか無く、元の値を復元できないため）。
+     * 開始時の理由コード・ticket・D-05 の決定ID・選択は、hold ID で開始要求の監査（{@code START_REQUESTED}・{@code START_REASON}・
+     * {@code CHOICE}）から引ける。理由本文とその hash は監査に残さないため、復元した行の理由 hash は再現できない。
+     */
     static final String RECONCILED = "RECONCILED";
     static final String LOG_CODE_ACK_UNKNOWN = "NF07_PRIVACY_HOLD_ACK_UNKNOWN";
     static final int MAX_REASON_TEXT_LENGTH = 2000;
     private static final Pattern REASON_CODE = Pattern.compile("[A-Z][A-Z0-9_]{1,49}");
     private static final Pattern TICKET_REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:#/-]{0,99}");
     private static final String REQUEST_DOMAIN = "NF07-HOLD-REQUEST-V1";
+    /** 画面の日時表示（JST。他の画面と同じ。Review P3-11）。 */
+    private static final java.time.format.DateTimeFormatter DISPLAY_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(PrivacyHoldProjectionStore.ZONE);
 
     /** 同じ実体の別 element（片方の DATA_ELEMENT hold では他方を守れない組。F2 delta Review P3-G）。 */
     static final List<PrivacyHoldOverview.RelatedElements> RELATED_ELEMENTS = List.of(
@@ -118,7 +127,8 @@ public class PrivacyHoldService {
         String tenantId = requireCallerTenant(actorSource.get());
         PrivacyHoldDecisions.Readiness readiness = decisions.evaluate();
         PrivacyHoldJournal.Availability availability = journal.availability();
-        PrivacyHoldGate.Decision decision = gate.evaluate(tenantId);
+        // 画面の表示は破壊的経路の skip ではないため、gate の UNAVAILABLE の metric・WARN に数えない（Review P3-4）
+        PrivacyHoldGate.Decision decision = gate.inspect(tenantId);
         List<PrivacyHoldProjectionStore.HoldRow> holds;
         Map<String, SubjectAttribution> catalog;
         try {
@@ -140,7 +150,7 @@ public class PrivacyHoldService {
                     entries.add(new PrivacyHoldOverview.HoldEntry(hold.holdId(),
                             hold.targetType() == null ? null : hold.targetType().name(), hold.subjectRef(),
                             hold.dataElementId(), hold.status(), hold.reasonCode(), hold.ticketRef(),
-                            hold.requestedAt() == null ? null : hold.requestedAt().toString(), hold.journalRevision(),
+                            hold.requestedAt() == null ? null : DISPLAY_TIME.format(hold.requestedAt()), hold.journalRevision(),
                             RECONCILED.equals(hold.reasonCode())));
                 });
         List<PrivacyHoldOverview.ElementEntry> unattributable = new ArrayList<>();
@@ -233,15 +243,17 @@ public class PrivacyHoldService {
         JournalCommand command = JournalCommand.create(ids.commandId(), partition, head.revision(),
                 PrivacyJournalPort.CommandType.HOLD_STARTED, ids.holdId(), null, requestHash, null, 0, null);
 
-        reservePending(tenantId, ids, type, validated, choices, requestHash, requestedAt, actor);
+        reservePending(tenantId, ids, type, validated, choices, requestHash, requestedAt, readiness.d05DecisionId(), actor);
 
         JournalAck ack;
         try {
-            ack = appendWithOneReplay(command);
+            ack = appendWithRefreshedReplay(command, tenantId, ids.commandId());
         } catch (JournalConflictException e) {
             // Journal の transaction 内で拒否された（append されていない）ので pending を戻してよい
             releasePending(tenantId, ids, actor);
-            throw BusinessException.of(409, "error.privacy.holdAlreadyActive");
+            // held なら同じ対象の hold が既にある。それ以外（revision の競合）は再試行を求める（Review P3-7）
+            throw BusinessException.of(409, headHeldQuietly(partition)
+                    ? "error.privacy.holdAlreadyActive" : "error.privacy.holdStartInProgress");
         } catch (RuntimeException e) {
             ackUnknown(ids, actor);
             throw BusinessException.of(503, "error.privacy.holdAckUnknown");
@@ -278,7 +290,7 @@ public class PrivacyHoldService {
 
     private void reservePending(String tenantId, PrivacyHoldPartitions.Ids ids, PrivacyHoldTargetType type,
                                 Validated validated, Map<String, PrivacyHoldChoice> choices, String requestHash,
-                                Instant requestedAt, Actor actor) {
+                                Instant requestedAt, String d05DecisionId, Actor actor) {
         String journalId = journal.journalId();
         try {
             requiresNew.executeWithoutResult(status -> {
@@ -297,14 +309,21 @@ public class PrivacyHoldService {
                         throw BusinessException.of(409, "error.privacy.holdChoicesStale");
                     }
                 }
-                if (store.recordPending(tenantId, journalId, ids.commandId(), requestedAt) != 1) {
+                // pending_since は lock を取った後・CAS の直前の時刻（Journal の head 照会や lock 待ちの時間を、reconciler が
+                // 待つ append の在途時間に含めない。Review P2-1）。requestedAt は request hash と projection にだけ使う
+                Instant pendingSince = clock.instant();
+                if (store.recordPending(tenantId, journalId, ids.commandId(), pendingSince) != 1) {
                     throw BusinessException.of(409, "error.privacy.holdStartInProgress");
                 }
                 audit.record(actor.username(), PrivacyHoldAudit.START_REQUESTED, PrivacyHoldAudit.fields(
                         "hold", ids.holdId(), "target", type.name(),
                         "element", type == PrivacyHoldTargetType.DATA_ELEMENT ? validated.target() : null,
-                        "ticket", validated.ticketRef(), "request", requestHash.substring(0, 16),
+                        "d05", d05DecisionId, "request", requestHash.substring(0, 16),
                         "choices", Integer.toString(choices.size())), 202, true);
+                // 理由コードと ticket は別の行にする（1行の上限 500 文字に収めるため）。理由本文と理由 hash は監査に残さない
+                audit.record(actor.username(), PrivacyHoldAudit.START_REASON, PrivacyHoldAudit.fields(
+                        "hold", ids.holdId(), "reason", validated.reasonCode(), "ticket", validated.ticketRef()),
+                        202, true);
                 for (Map.Entry<String, PrivacyHoldChoice> choice : choices.entrySet()) {
                     audit.record(actor.username(), PrivacyHoldAudit.CHOICE, PrivacyHoldAudit.fields(
                             "hold", ids.holdId(), "element", choice.getKey(), "choice", choice.getValue().name()),
@@ -324,15 +343,47 @@ public class PrivacyHoldService {
         }
     }
 
-    private JournalAck appendWithOneReplay(JournalCommand command) {
+    /**
+     * append し、ACK 不明なら同じ command で1回だけ再送する（先の append が確定していれば元の ACK が返り、二重に append しない）。
+     *
+     * <p>再送の直前に {@code pending_since} を CAS で現在時刻へ進める（Review P2-1 の方針 a）。reconciler が「Journal に command が
+     * 無い」pending を消してよいのは {@code pending_since} から append の在途時間の上限（1回分）を過ぎた後なので、再送の在途時間も
+     * その窓に収まる。CAS が0件（reconciler が既に pending を消した）・失敗なら再送せず、最初の ACK 不明をそのまま返す
+     * （先の append が後から確定しても、reconciler の追い付きと gate の追随遅れ判定が拾う）。
+     */
+    private JournalAck appendWithRefreshedReplay(JournalCommand command, String tenantId, String commandId) {
         PrivacyJournalPort port = journal.port();
         try {
             return port.append(command);
         } catch (JournalConflictException e) {
             throw e;
         } catch (RuntimeException firstUnknown) {
-            // 同じ command ID の再送は、先の append が確定していれば元の ACK を返す（二重に append しない）
+            if (!refreshPendingSince(tenantId, commandId)) {
+                throw firstUnknown;
+            }
             return port.append(command);
+        }
+    }
+
+    private boolean refreshPendingSince(String tenantId, String commandId) {
+        try {
+            Integer updated = requiresNew.execute(status ->
+                    store.refreshPending(tenantId, journal.journalId(), commandId, clock.instant()));
+            return updated != null && updated == 1;
+        } catch (RuntimeException e) {
+            log.warn("[privacy-hold] 再送前にpendingの時刻を進められないため再送しません: exceptionClass={}",
+                    e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /** partition の head が held か（照会できなければ false。409 の文言の選択にだけ使う）。 */
+    private boolean headHeldQuietly(JournalPartition partition) {
+        try {
+            JournalHead head = journal.port().head(partition);
+            return head != null && head.held();
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

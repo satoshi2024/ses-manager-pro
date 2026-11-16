@@ -212,6 +212,66 @@ class PrivacyHoldGateTest {
         assertThat(decision.heldSubjects()).containsExactly("ENGINEER:10");
     }
 
+    @Test
+    void 画面の表示は破壊的経路のUNAVAILABLEとして数えない() {
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PrivacyHoldGate counted = fixture.gateWith(registry);
+        fixture.store.ensureStateLocked(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, PrivacyHoldTestFixture.T0);
+        fixture.store.recordPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, "hs-" + "c".repeat(32),
+                PrivacyHoldTestFixture.T0);
+
+        assertThat(counted.inspect(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_PENDING);
+        assertThat(registry.find(PrivacyHoldGate.UNAVAILABLE_METRIC).counter()).isNull();
+
+        assertThat(counted.evaluate(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_PENDING);
+        assertThat(registry.get(PrivacyHoldGate.UNAVAILABLE_METRIC).tag("reason", PrivacyHoldGate.REASON_PENDING)
+                .counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void Journalとapplication_DBが同じinstanceならreconcilerの実行でUNAVAILABLEになり開始も拒否する() {
+        fixture.service.start(fixture.subjectRequest("ENGINEER:10", "ACCEPT_RISK", "ACCEPT_RISK"));
+        fixture.applicationServerUuid = () -> fixture.journal.serverUuid;
+
+        assertThat(fixture.reconciler.reconcileAll())
+                .containsEntry(PrivacyHoldProjectionReconciler.Outcome.JOURNAL_UNAVAILABLE, 1);
+        assertThat(fixture.gate.evaluate(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_JOURNAL_SAME_INSTANCE);
+        assertThatThrownBy(() -> fixture.service.start(
+                fixture.subjectRequest("ENGINEER:11", "ACCEPT_RISK", "ACCEPT_RISK")))
+                .isInstanceOfSatisfying(com.ses.common.exception.BusinessException.class,
+                        e -> assertThat(e.getCode()).isEqualTo(503));
+        // 未使用の tenant は instance の判定にも触れず「hold なし」のまま
+        assertThat(fixture.gate.evaluate("unused-tenant").state()).isEqualTo(PrivacyHoldGate.State.NO_HOLDS);
+
+        fixture.applicationServerUuid = () -> "application-server-uuid";
+        fixture.reconciler.reconcileAll();
+        assertThat(fixture.gate.evaluate(TENANT).state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
+    }
+
+    @Test
+    void reconcilerを動かさないprocessでも間隔を過ぎた最初の判定でinstanceを比べ直す() {
+        fixture.service.start(fixture.subjectRequest("ENGINEER:10", "ACCEPT_RISK", "ACCEPT_RISK"));
+        fixture.applicationServerUuid = () -> fixture.journal.serverUuid;
+
+        // 前回の比較から1分以内は比べ直さない（毎回の照会を増やさない）
+        assertThat(fixture.gate.evaluate(TENANT).state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
+        fixture.clock.advance(PrivacyHoldJournal.INSTANCE_CHECK_INTERVAL);
+        assertThat(fixture.gate.evaluate(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_JOURNAL_SAME_INSTANCE);
+    }
+
+    @Test
+    void server_uuidを比べられなければUNAVAILABLE() {
+        fixture.service.start(fixture.subjectRequest("ENGINEER:10", "ACCEPT_RISK", "ACCEPT_RISK"));
+        fixture.applicationServerUuid = () -> {
+            throw new IllegalStateException("application DB unreachable");
+        };
+
+        fixture.reconciler.reconcileAll();
+
+        assertThat(fixture.gate.evaluate(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_JOURNAL_UNAVAILABLE);
+    }
+
     /** service を通さずに Journal へ hold を入れる（ACK 後に projection が失敗した状態の再現）。 */
     private void appendOutsideService(String subjectRef) {
         PrivacyJournalPort.JournalPartition partition = new PrivacyJournalPort.JournalPartition(TENANT, subjectRef);

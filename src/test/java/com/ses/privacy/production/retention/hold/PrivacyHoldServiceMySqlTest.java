@@ -266,6 +266,22 @@ class PrivacyHoldServiceMySqlTest {
         long sales = insertUser(tenant, "dp34-sales", "営業");
         member(tenant, sales, privacyAdmin);
         identity(identityTenant, sales, provider, "APPROVED");
+        // Review P3-9: 論理削除された identity・無効な利用者は数えず、無効な group の拒否行では除外しない
+        long deletedIdentity = insertUser(tenant, "dp34-deleted-identity", "管理者");
+        member(tenant, deletedIdentity, privacyAdmin);
+        identity(identityTenant, deletedIdentity, provider, "APPROVED");
+        components.app.update("UPDATE t_user_external_identity SET deleted_flag = 1 WHERE user_id = ?", deletedIdentity);
+        long inactive = insertUser(tenant, "dp34-inactive", "管理者");
+        member(tenant, inactive, privacyAdmin);
+        identity(identityTenant, inactive, provider, "APPROVED");
+        components.app.update("UPDATE sys_user SET status = 0 WHERE id = ?", inactive);
+        long disabledDenyGroup = insertGroup(tenant, "disabled-deny");
+        insertAction(tenant, disabledDenyGroup, "privacy.*", 1);
+        components.app.update("UPDATE m_permission_group SET enabled = 0 WHERE id = ?", disabledDenyGroup);
+        long disabledDenyMember = insertUser(tenant, "dp34-disabled-deny", "管理者");
+        member(tenant, disabledDenyMember, privacyAdmin);
+        member(tenant, disabledDenyMember, disabledDenyGroup);
+        identity(identityTenant, disabledDenyMember, provider, "APPROVED");
 
         String sql = sqlOf(UserPermissionGroupMapper.class, "selectEffectivePrivacyAdminUsernames",
                 String.class, String.class, String.class, Long.class);
@@ -273,7 +289,8 @@ class PrivacyHoldServiceMySqlTest {
                 .addValue("tenantId", tenant).addValue("adminRole", "管理者")
                 .addValue("identityTenantId", identityTenant).addValue("providerId", provider), String.class);
 
-        assertThat(usernames).containsExactly(username(tenant, "dp34-approved"));
+        assertThat(usernames).containsExactly(username(tenant, "dp34-approved"),
+                username(tenant, "dp34-disabled-deny"));
     }
 
     @Test

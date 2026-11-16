@@ -30,6 +30,7 @@ final class JdbcPrivacyHoldJournalIndex implements PrivacyHoldJournalIndex {
     private static final String HOLD_EVENTS = "SELECT subject_ref, revision, command_id, case_id, event_hash "
             + "FROM pj_event WHERE tenant_id = ? AND event_type = 'HOLD_STARTED'";
     private static final String HEADS = "SELECT subject_ref, revision, event_hash, held FROM pj_head WHERE tenant_id = ?";
+    private static final String SERVER_UUID = "SELECT @@server_uuid";
 
     private final DataSource journalDataSource;
 
@@ -80,6 +81,16 @@ final class JdbcPrivacyHoldJournalIndex implements PrivacyHoldJournalIndex {
         });
     }
 
+    @Override
+    public String serverUuid() {
+        return readSnapshot(connection -> {
+            try (PreparedStatement statement = prepare(connection, SERVER_UUID);
+                 ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        });
+    }
+
     private static PreparedStatement prepare(Connection connection, String sql) throws SQLException {
         PreparedStatement statement = connection.prepareStatement(sql);
         statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
@@ -111,7 +122,8 @@ final class JdbcPrivacyHoldJournalIndex implements PrivacyHoldJournalIndex {
                 connection.setReadOnly(readOnly);
             }
         } catch (SQLException | RuntimeException e) {
-            throw new JournalUnavailableException("journalのhold索引を照会できません", e);
+            // driver の例外（権限不足等では principal・接続先を含み得る）を cause に残さない（§3.4.6 の7、Review P3-5）
+            throw new JournalUnavailableException("journalのhold索引を照会できません", null);
         }
     }
 

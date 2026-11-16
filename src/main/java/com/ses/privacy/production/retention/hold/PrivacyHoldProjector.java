@@ -99,6 +99,9 @@ final class PrivacyHoldProjector {
             if (!store.holdExists(tenantId, hold.holdId())) {
                 store.insertHold(tenantId, hold);
                 written = true;
+            } else if (!PrivacyHoldService.RECONCILED.equals(hold.reasonCode())) {
+                // ACK と projection の間に reconciler が先に復元した行は、開始者自身の値に置き換える（Review P3-2）
+                store.adoptReconciledMetadata(tenantId, hold);
             }
             List<PrivacyHoldProjectionStore.HoldRow> holds = store.holds(tenantId, true);
             store.advance(tenantId, journalId, holds.size(), PrivacyHoldProjectionStore.projectionDigest(holds),

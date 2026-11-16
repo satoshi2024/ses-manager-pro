@@ -43,9 +43,13 @@ public class PrivacyHoldConfiguration {
     public PrivacyHoldJournal privacyHoldJournal(PrivacyJournalConnections privacyJournalConnections,
                                                  PrivacyJournalStartupVerifier privacyJournalStartupVerifier,
                                                  PrivacyJournalProperties privacyJournalProperties,
-                                                 Environment environment, ObjectProvider<Clock> clock) {
+                                                 Environment environment, ObjectProvider<Clock> clock,
+                                                 JdbcTemplate jdbcTemplate) {
+        // application DB の @@server_uuid（Journal と同じ instance への誤接続を実行中に検出する。Review P3-8）。
+        // Journal が使える前提が揃ったときだけ呼ばれる（未設定・prod 以外では application DB に照会しない）
         return PrivacyHoldJournal.create(privacyJournalConnections, privacyJournalStartupVerifier,
-                privacyJournalProperties, environment, clockOf(clock));
+                privacyJournalProperties, environment, clockOf(clock),
+                () -> jdbcTemplate.queryForObject("SELECT @@server_uuid", String.class));
     }
 
     @Bean

@@ -49,6 +49,10 @@ class PrivacyHoldProjectionReconcilerTest {
         assertThat(fixture.state().pendingCommandId()).isNull();
         assertThat(fixture.jdbc.queryForObject("SELECT reason_code FROM t_legal_hold", String.class))
                 .isEqualTo(PrivacyHoldService.RECONCILED);
+        // 復元した行の理由 hash は「値を持たない」0×64（request hash を理由 hash の列に入れない。Review P3-1）
+        assertThat(fixture.jdbc.queryForObject("SELECT reason_hash FROM t_legal_hold", String.class))
+                .isEqualTo(PrivacyHoldProjectionReconciler.NO_REASON_HASH);
+        assertThat(fixture.jdbc.queryForObject("SELECT requested_by FROM t_legal_hold", Long.class)).isZero();
         PrivacyHoldGate.Decision decision = fixture.gate.evaluate(TENANT);
         assertThat(decision.state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
         assertThat(decision.heldSubjects()).containsExactly("ENGINEER:10");
@@ -125,6 +129,49 @@ class PrivacyHoldProjectionReconcilerTest {
                 .contains(PrivacyHoldProjectionReconciler.Outcome.UNRECOGNIZED);
         assertThat(fixture.count("SELECT COUNT(*) FROM t_legal_hold")).isEqualTo(1);
         assertThat(fixture.gate.evaluate(TENANT).reason()).isEqualTo(PrivacyHoldGate.REASON_PROJECTION_LAG);
+        // 状態が続く間毎回出る判定なので監査には残さない（Review P3-3）
+        int audits = fixture.auditUris.size();
+        fixture.reconciler.reconcileTenant(TENANT);
+        assertThat(fixture.auditUris).hasSize(audits);
+    }
+
+    @Test
+    void 状態を変えない判定は監査に残さずreason付きのmetricに数える() {
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PrivacyHoldProjectionReconciler counted = fixture.reconcilerWith(registry);
+        fixture.store.ensureStateLocked(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, fixture.clock.instant());
+        fixture.store.recordPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, PrivacyHoldPartitions.newIds().commandId(),
+                fixture.clock.instant());
+        fixture.store.ensureStateLocked("other-tenant", PrivacyHoldTestFixture.JOURNAL_ID, fixture.clock.instant());
+        fixture.store.recordPending("other-tenant", PrivacyHoldTestFixture.JOURNAL_ID, "not-a-command-id",
+                fixture.clock.instant());
+
+        counted.reconcileAll();
+        counted.reconcileAll();
+
+        assertThat(registry.get(PrivacyHoldProjectionReconciler.OUTCOME_METRIC)
+                .tags("outcome", "PENDING_KEPT", "reason", "pendingNotExpired").counter().count()).isEqualTo(2.0);
+        assertThat(registry.get(PrivacyHoldProjectionReconciler.OUTCOME_METRIC)
+                .tags("outcome", "PENDING_AMBIGUOUS", "reason", "commandIdUnparsable").counter().count()).isEqualTo(2.0);
+        assertThat(fixture.auditUris).isEmpty();
+    }
+
+    @Test
+    void 判定の後にpending_sinceが進められていればtimeoutのpendingを消さない() {
+        fixture.store.ensureStateLocked(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, fixture.clock.instant());
+        String commandId = PrivacyHoldPartitions.newIds().commandId();
+        fixture.store.recordPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, commandId, fixture.clock.instant());
+        java.time.Instant observed = fixture.state().pendingSince();
+        // reconciler の判定と消去の間に、開始側が再送の直前の CAS で時刻を進めた
+        assertThat(fixture.store.refreshPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, commandId,
+                fixture.clock.instant().plusSeconds(1))).isEqualTo(1);
+
+        assertThat(fixture.store.clearExpiredPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, commandId, observed))
+                .isZero();
+        assertThat(fixture.state().pendingCommandId()).isEqualTo(commandId);
+        assertThat(fixture.store.clearExpiredPending(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, commandId,
+                fixture.state().pendingSince())).isEqualTo(1);
     }
 
     @Test

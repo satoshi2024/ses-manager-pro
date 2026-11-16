@@ -57,6 +57,8 @@ final class PrivacyHoldTestFixture {
             new PrivacyJournalStartupVerifier.Result(PrivacyJournalStartupVerifier.Availability.AVAILABLE, List.of());
     volatile Duration pendingTimeout = Duration.ofMinutes(2);
     volatile PrivacyHoldService.Actor actor = new PrivacyHoldService.Actor(TENANT, 1L, "privacy-admin-a");
+    /** application DB の {@code @@server_uuid}（H2 には無いため差し替える。Journal と同じ値なら同じ instance の扱い）。 */
+    volatile java.util.function.Supplier<String> applicationServerUuid = () -> "application-server-uuid";
 
     final PrivacyHoldProjectionStore store;
     final PrivacyHoldJournal holdJournal;
@@ -84,7 +86,7 @@ final class PrivacyHoldTestFixture {
 
         this.store = new PrivacyHoldProjectionStore(jdbc);
         this.holdJournal = new PrivacyHoldJournal(() -> startupResult, () -> journal, journal, JOURNAL_ID,
-                null, Duration.ofSeconds(35)) {
+                null, Duration.ofSeconds(35), () -> applicationServerUuid.get(), clock) {
             @Override
             Duration pendingTimeout() {
                 return PrivacyHoldTestFixture.this.pendingTimeout;
@@ -94,13 +96,36 @@ final class PrivacyHoldTestFixture {
         this.decisions = new PrivacyHoldDecisions(approval, holdProperties, clockProperties, clock);
         ObjectProvider<io.micrometer.core.instrument.MeterRegistry> noMetrics = emptyProvider();
         this.gate = new PrivacyHoldGate(store, holdJournal, resolver, noMetrics);
-        TransactionTemplate independent = PrivacyHoldConfiguration.requiresNew(new DataSourceTransactionManager(dataSource));
-        PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLog);
-        PrivacyHoldProjector projector = new PrivacyHoldProjector(store, holdJournal, independent, audit, clock);
+        this.independent = PrivacyHoldConfiguration.requiresNew(new DataSourceTransactionManager(dataSource));
+        this.audit = new PrivacyHoldAudit(auditLog);
+        this.projector = new PrivacyHoldProjector(store, holdJournal, independent, audit, clock);
         this.service = new PrivacyHoldService(guard, null, decisions, holdJournal, store, resolver, gate, projector, audit,
                 independent, clock, () -> actor);
         this.reconciler = new PrivacyHoldProjectionReconciler(holdJournal, store, projector, decisions, audit,
                 independent, clock, noMetrics);
+    }
+
+    private final TransactionTemplate independent;
+    private final PrivacyHoldAudit audit;
+    private final PrivacyHoldProjector projector;
+
+    /** metric を数える gate（同じ store・Journal・resolver）。 */
+    PrivacyHoldGate gateWith(io.micrometer.core.instrument.MeterRegistry registry) {
+        return new PrivacyHoldGate(store, holdJournal, resolver, providerOf(registry));
+    }
+
+    /** metric を数える reconciler（同じ store・Journal・projector）。 */
+    PrivacyHoldProjectionReconciler reconcilerWith(io.micrometer.core.instrument.MeterRegistry registry) {
+        return new PrivacyHoldProjectionReconciler(holdJournal, store, projector, decisions, audit, independent, clock,
+                providerOf(registry));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<io.micrometer.core.instrument.MeterRegistry> providerOf(
+            io.micrometer.core.instrument.MeterRegistry registry) {
+        ObjectProvider<io.micrometer.core.instrument.MeterRegistry> provider = mock(ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(registry);
+        return provider;
     }
 
     /** catalog の行を足す（provider は登録しないため、ATTRIBUTABLE の行は UNKNOWN として扱われる）。 */
