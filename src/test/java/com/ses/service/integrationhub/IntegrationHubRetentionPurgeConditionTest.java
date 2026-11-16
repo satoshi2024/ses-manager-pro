@@ -36,6 +36,9 @@ class IntegrationHubRetentionPurgeConditionTest {
             .withBean(ApiNonceReplayService.class, () -> mock(ApiNonceReplayService.class))
             .withBean(IntegrationHubExternalApiProperties.class, () -> mock(IntegrationHubExternalApiProperties.class))
             .withBean(Clock.class, Clock::systemUTC)
+            // NF07-A1H-2: D7 の保全hold gate（生成条件には関係しない）
+            .withBean(com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard.class,
+                    com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards::noHoldsGuard)
             .withUserConfiguration(IntegrationHubRetentionPurgeScheduler.class);
 
     @Test

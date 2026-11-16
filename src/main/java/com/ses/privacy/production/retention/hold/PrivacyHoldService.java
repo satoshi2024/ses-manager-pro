@@ -226,9 +226,13 @@ public class PrivacyHoldService {
         PrivacyHoldPartitions.Ids ids = PrivacyHoldPartitions.newIds();
         Instant requestedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         JournalPartition partition = new JournalPartition(tenantId, validated.partitionRef());
+        // adapter は予約の前に1回だけ取り、append（再送を含む）まで同じものを使う。append の経路で可用性と instance の比較を
+        // 評価し直さないため、比較の I/O が pending_since と append の開始の間に入らない（A1H-1 delta review P2-N1）
+        PrivacyJournalPort port;
         JournalHead head;
         try {
-            head = journal.port().head(partition);
+            port = journal.port();
+            head = port.head(partition);
         } catch (RuntimeException e) {
             throw BusinessException.of(503, "error.privacy.journalUnavailable");
         }
@@ -247,7 +251,7 @@ public class PrivacyHoldService {
 
         JournalAck ack;
         try {
-            ack = appendWithRefreshedReplay(command, tenantId, ids.commandId());
+            ack = appendWithRefreshedReplay(port, command, tenantId, ids.commandId());
         } catch (JournalConflictException e) {
             // Journal の transaction 内で拒否された（append されていない）ので pending を戻してよい
             releasePending(tenantId, ids, actor);
@@ -309,12 +313,8 @@ public class PrivacyHoldService {
                         throw BusinessException.of(409, "error.privacy.holdChoicesStale");
                     }
                 }
-                // pending_since は lock を取った後・CAS の直前の時刻（Journal の head 照会や lock 待ちの時間を、reconciler が
-                // 待つ append の在途時間に含めない。Review P2-1）。requestedAt は request hash と projection にだけ使う
-                Instant pendingSince = clock.instant();
-                if (store.recordPending(tenantId, journalId, ids.commandId(), pendingSince) != 1) {
-                    throw BusinessException.of(409, "error.privacy.holdStartInProgress");
-                }
+                // 監査は同じ transaction に入る（CAS が0件なら監査ごと戻る）。pending_since の取得と CAS は監査の後に置き、
+                // 監査の insert の時間も reconciler が待つ append の在途時間に含めない（P2-N1）
                 audit.record(actor.username(), PrivacyHoldAudit.START_REQUESTED, PrivacyHoldAudit.fields(
                         "hold", ids.holdId(), "target", type.name(),
                         "element", type == PrivacyHoldTargetType.DATA_ELEMENT ? validated.target() : null,
@@ -334,6 +334,13 @@ public class PrivacyHoldService {
                             "hold", ids.holdId(), "element", validated.target(), "acknowledged", "purgeStopUntilRelease"),
                             202, true);
                 }
+                // pending_since は lock を取った後・監査の後・CAS の直前の時刻（Journal の head 照会・lock 待ち・監査の時間を、
+                // reconciler が待つ append の在途時間に含めない。Review P2-1・P2-N1）。requestedAt は request hash と projection
+                // にだけ使う。ここから append の開始までに残るのはこの transaction の commit だけ（plan §3.4.4 の余裕）
+                Instant pendingSince = clock.instant();
+                if (store.recordPending(tenantId, journalId, ids.commandId(), pendingSince) != 1) {
+                    throw BusinessException.of(409, "error.privacy.holdStartInProgress");
+                }
             });
         } catch (BusinessException e) {
             throw e;
@@ -350,9 +357,13 @@ public class PrivacyHoldService {
      * 無い」pending を消してよいのは {@code pending_since} から append の在途時間の上限（1回分）を過ぎた後なので、再送の在途時間も
      * その窓に収まる。CAS が0件（reconciler が既に pending を消した）・失敗なら再送せず、最初の ACK 不明をそのまま返す
      * （先の append が後から確定しても、reconciler の追い付きと gate の追随遅れ判定が拾う）。
+     *
+     * <p>{@code port} は head の照会に使ったもの（予約の前に取得済み）。ここで {@link PrivacyHoldJournal#port()} を呼び直すと、
+     * 可用性の評価に伴う instance の比較（Journal pool の接続取得と2つの {@code @@server_uuid} 照会）が {@code pending_since}
+     * の後・append の前に入り、在途時間の上限の外の時間が窓に加わる（P2-N1）。
      */
-    private JournalAck appendWithRefreshedReplay(JournalCommand command, String tenantId, String commandId) {
-        PrivacyJournalPort port = journal.port();
+    private JournalAck appendWithRefreshedReplay(PrivacyJournalPort port, JournalCommand command, String tenantId,
+                                                 String commandId) {
         try {
             return port.append(command);
         } catch (JournalConflictException e) {
@@ -365,10 +376,23 @@ public class PrivacyHoldService {
         }
     }
 
+    /**
+     * 再送の直前に {@code pending_since} を進める。予約と同じ順序で、追随位置の行を {@code FOR UPDATE} で取り、自分の command が
+     * まだ pending であることを確かめてから時計を読み、CAS で書く（P2-N1）。時計を先に読むと、gate の
+     * {@code evaluateLocked}（破壊的経路の transaction が行 lock を終了まで持つ）を待つ時間だけ {@code pending_since} が
+     * 再送の実際の開始より古くなり、その分 reconciler が再送の在途中に pending を消し得る。
+     */
     private boolean refreshPendingSince(String tenantId, String commandId) {
+        String journalId = journal.journalId();
         try {
-            Integer updated = requiresNew.execute(status ->
-                    store.refreshPending(tenantId, journal.journalId(), commandId, clock.instant()));
+            Integer updated = requiresNew.execute(status -> {
+                PrivacyHoldProjectionStore.StateRow state = store.lockState(tenantId, journalId).orElse(null);
+                if (state == null || !commandId.equals(state.pendingCommandId())) {
+                    // reconciler が既に消した（または別の command に替わった）。再送しない
+                    return 0;
+                }
+                return store.refreshPending(tenantId, journalId, commandId, clock.instant());
+            });
             return updated != null && updated == 1;
         } catch (RuntimeException e) {
             log.warn("[privacy-hold] 再送前にpendingの時刻を進められないため再送しません: exceptionClass={}",

@@ -96,6 +96,35 @@ class AiRecommendationRetentionTenantIsolationH2Test {
         assertNotNull(runMapper.selectById(runB).getRedactedSummaryJson());
     }
 
+    /**
+     * NF07 A1H-2 D6: SUBJECT hold の本人の run だけを候補から除いて残し、他の run は purge する（除外付きの選択と更新の SQL を
+     * H2 で実行する）。scheduler の Bean（{@code ai.retention.scheduler-enabled}）に依らず service で効く。
+     */
+    @Test
+    void D6_SUBJECT_holdの本人のrunだけを残し他のrunはpurgeする() {
+        Long versionId = activeVersionId();
+        Long held = insertExpired("tenant-a", versionId);
+        Long other = insertExpired("tenant-a", versionId);
+        com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.Stub hold =
+                com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.stub().tenant("tenant-a",
+                        com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.verified(
+                                java.util.Set.of("ENGINEER:7"), java.util.Set.of(), java.util.Map.of("AI_REDACTED_SUMMARY",
+                                        com.ses.privacy.production.retention.catalog.SubjectAttribution.ATTRIBUTABLE)));
+        org.mockito.Mockito.when(hold.resolver.aiRecommendationRunSubjects(org.mockito.ArgumentMatchers.eq("tenant-a"),
+                org.mockito.ArgumentMatchers.any())).thenReturn(java.util.Map.of(held, java.util.Set.of("ENGINEER:7")));
+        AiRecommendationRetentionServiceImpl service = new AiRecommendationRetentionServiceImpl(runMapper, 730, clock,
+                hold.guard);
+
+        int purged = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> service.purgeExpiredRedactedSummaries(LocalDateTime.now(clock), 100));
+
+        assertTrue(purged >= 1);
+        assertNotNull(runMapper.selectById(held).getRedactedSummaryJson(), "held な本人の summary は残る");
+        assertNull(runMapper.selectById(other).getRedactedSummaryJson());
+        assertEquals(1.0, hold.skipped(com.ses.privacy.production.retention.hold.PrivacyHoldPath.D6,
+                com.ses.privacy.production.retention.hold.PrivacyHoldGate.Verdict.HELD));
+    }
+
     @Test
     void mapperのnulltenantoverloadは存在しない() throws Exception {
         String source = java.nio.file.Files.readString(java.nio.file.Path.of(

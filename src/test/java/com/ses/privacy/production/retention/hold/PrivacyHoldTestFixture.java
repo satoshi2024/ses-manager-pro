@@ -69,6 +69,12 @@ final class PrivacyHoldTestFixture {
     final PrivacyHoldProjectionReconciler reconciler;
 
     PrivacyHoldTestFixture(String databaseName) {
+        this(databaseName, List.of());
+    }
+
+    /** provider を登録した resolver で組み立てる（catalog の行が provider の宣言と一致すれば実効の分類になる。A1H-2）。 */
+    PrivacyHoldTestFixture(String databaseName,
+                           List<? extends com.ses.privacy.production.provider.ProductionPrivacyProvider> providers) {
         DriverManagerDataSource h2 = new DriverManagerDataSource(
                 "jdbc:h2:mem:" + databaseName + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
         this.dataSource = new CountingDataSource(h2);
@@ -92,7 +98,7 @@ final class PrivacyHoldTestFixture {
                 return PrivacyHoldTestFixture.this.pendingTimeout;
             }
         };
-        this.resolver = new HoldSubjectResolver(jdbc, new ProductionPrivacyProviderRegistry(List.of()));
+        this.resolver = new HoldSubjectResolver(jdbc, new ProductionPrivacyProviderRegistry(providers));
         this.decisions = new PrivacyHoldDecisions(approval, holdProperties, clockProperties, clock);
         ObjectProvider<io.micrometer.core.instrument.MeterRegistry> noMetrics = emptyProvider();
         this.gate = new PrivacyHoldGate(store, holdJournal, resolver, noMetrics);
@@ -226,6 +232,8 @@ final class PrivacyHoldTestFixture {
     static final class CountingDataSource implements DataSource {
         private final DataSource delegate;
         final AtomicInteger statements = new AtomicInteger();
+        /** statement を準備する直前に SQL を受け取る（lock 待ちの模擬に使う。A1H-1 delta review P2-N1）。 */
+        volatile java.util.function.Consumer<String> beforePrepare = sql -> { };
 
         CountingDataSource(DataSource delegate) {
             this.delegate = delegate;
@@ -247,6 +255,9 @@ final class PrivacyHoldTestFixture {
                         String name = method.getName();
                         if (name.equals("prepareStatement") || name.equals("createStatement") || name.equals("prepareCall")) {
                             statements.incrementAndGet();
+                            if (args != null && args.length > 0 && args[0] instanceof String sql) {
+                                beforePrepare.accept(sql);
+                            }
                         }
                         try {
                             return method.invoke(connection, args);

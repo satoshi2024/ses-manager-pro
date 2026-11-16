@@ -3,6 +3,10 @@ package com.ses.service.impl;
 import com.ses.config.UploadProperties;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.privacy.production.provider.PrivacySubjectRef;
+import com.ses.privacy.production.provider.PrivacySubjectType;
+import com.ses.privacy.production.retention.hold.PrivacyHoldFileReferenceProvider;
+import com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards;
 import com.ses.service.FileReferenceProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,10 +20,14 @@ import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -136,5 +144,69 @@ class FileCleanupServiceImplTest {
         FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props, List.of());
 
         assertEquals(0, svc.cleanupOrphanFiles());
+    }
+
+    // ---- NF07 A1H-2 D10: PrivacyHoldFileReferenceProvider ----
+
+    @Test
+    void cleanupOrphanFiles_providerが例外ならその回は1件も消さず例外を返す() throws IOException {
+        Path orphan = createFile("orphan.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        Files.createDirectories(baseDir.resolve("published"));
+        Path published = baseDir.resolve("published").resolve("orphan-published.pdf");
+        Files.writeString(published, "dummy");
+        Files.setLastModifiedTime(published, FileTime.from(Instant.now().minus(48, ChronoUnit.HOURS)));
+        PrivacyHoldTestGuards.Stub hold = PrivacyHoldTestGuards.stub()
+                .tenant("tenant-a", PrivacyHoldTestGuards.unavailable());
+        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props(), List.of(hold.fileReferenceProvider));
+
+        assertThrows(PrivacyHoldFileReferenceProvider.PrivacyHoldCleanupAbortedException.class, svc::cleanupOrphanFiles);
+        // 2つの scheduler はどちらも例外をそのまま返す（その回の清掃は中止）
+        assertThrows(IllegalStateException.class, () -> new com.ses.service.scheduler.FileCleanupScheduler(svc).cleanupWeekly());
+        assertThrows(IllegalStateException.class, () -> new DocumentArchiveFileCleanupScheduler(
+                Mockito.mock(com.ses.service.storage.DocumentStorage.class), svc).cleanupOrphanStorageFiles());
+        assertTrue(Files.exists(orphan));
+        assertTrue(Files.exists(published));
+    }
+
+    @Test
+    void cleanupOrphanFiles_NF07_holdの本人の実体は両schedulerで残し他の孤児は消す() throws IOException {
+        createFile("held-version.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        createFile("held-resume.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        createFile("orphan-a.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        PrivacyHoldTestGuards.Stub hold = PrivacyHoldTestGuards.stub().tenant("tenant-a",
+                PrivacyHoldTestGuards.verified(Set.of("ENGINEER:7"), Set.of(), Map.of()));
+        // F2 provider は論理削除済みの版も含めて解決する（文書の保存名は区切り付きで、清掃は file 名だけで照合する）
+        when(hold.resolver.resolveStoredNames(eq("tenant-a"), eq(PrivacySubjectRef.of(PrivacySubjectType.ENGINEER, 7))))
+                .thenReturn(Set.of("documents/2026/held-version.pdf", "held-resume.pdf"));
+        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props(), List.of(hold.fileReferenceProvider));
+
+        new DocumentArchiveFileCleanupScheduler(Mockito.mock(com.ses.service.storage.DocumentStorage.class), svc)
+                .cleanupOrphanStorageFiles();
+        assertFalse(Files.exists(baseDir.resolve("orphan-a.pdf")));
+        createFile("orphan-b.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        new com.ses.service.scheduler.FileCleanupScheduler(svc).cleanupWeekly();
+
+        assertTrue(Files.exists(baseDir.resolve("held-version.pdf")));
+        assertTrue(Files.exists(baseDir.resolve("held-resume.pdf")));
+        assertFalse(Files.exists(baseDir.resolve("orphan-a.pdf")));
+        assertFalse(Files.exists(baseDir.resolve("orphan-b.pdf")));
+    }
+
+    @Test
+    void cleanupOrphanFiles_hold機構を使っていない環境では照会1回だけで参照を足さない() throws IOException {
+        createFile("orphan.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        PrivacyHoldTestGuards.Stub hold = PrivacyHoldTestGuards.stub();
+        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props(), List.of(hold.fileReferenceProvider));
+
+        assertEquals(1, svc.cleanupOrphanFiles());
+        assertEquals(1, hold.gateCalls.get());
+        Mockito.verifyNoInteractions(hold.resolver);
+    }
+
+    private UploadProperties props() {
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(baseDir.toString());
+        props.setCleanupSafetyHours(24);
+        return props;
     }
 }

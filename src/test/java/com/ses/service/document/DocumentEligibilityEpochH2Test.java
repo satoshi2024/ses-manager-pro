@@ -172,7 +172,7 @@ class DocumentEligibilityEpochH2Test {
         AccountingTenantContextHolder.clear();
 
         // ShedLockのproxyを通さずjob本体を実行する（serviceは実beanでtransaction境界を持つ）
-        new DocumentRetentionJob(documentMapper, eligibilityService).processExpiredDocuments();
+        new DocumentRetentionJob(documentMapper, eligibilityService, com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards.noHoldsGuard()).processExpiredDocuments();
 
         assertEquals(1L, epoch(expiredA));
         assertEquals(1L, epoch(expiredB));

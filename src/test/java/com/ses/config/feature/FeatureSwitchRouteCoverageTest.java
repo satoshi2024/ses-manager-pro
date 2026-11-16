@@ -122,7 +122,15 @@ class FeatureSwitchRouteCoverageTest {
             "照合台帳に残った取込stage objectの回収は公開可否と無関係に続ける（NF-06 OFFへ切り替えた後も原本objectを残さない）",
             "com.ses.privacy.production.retention.hold.PrivacyHoldProjectionReconciler",
             "掛けたholdはflagをOFFに戻しても守るため、gateと同じくprojectionの追い付きとpendingの解消は公開可否と無関係に続ける"
-                    + "（NF07-A1H §3.4.4。Journalが使えなければ何もしない）");
+                    + "（NF07-A1H §3.4.4。Journalが使えなければ何もしない）",
+            // NF07-A1H-2: 既存の保持期限の削除経路（D3・D4/D5・D7）。NF07 へ依存するのは保全holdのgateを呼ぶ部分だけで、
+            // gate は flag に依存しない（hold を使っていない tenant では従来どおり消す）。NF07 の flag で止めると既存の purge が止まる
+            "com.ses.service.job.DocumentRetentionJob",
+            "保存期限文書の廃棄候補の抽出は既存の経路で、NF07はhold gateの判定だけに使う（flagで止めると期限超過の保持になる。A1H-2 D3）",
+            "com.ses.service.impl.ResumeRetentionCleanupServiceImpl",
+            "取込原本・抽出本文の保持期限の清理は既存の経路で、NF07はhold gateの判定だけに使う（A1H-2 D4・D5）",
+            "com.ses.service.integrationhub.IntegrationHubRetentionPurgeScheduler",
+            "integration hubのrecord・nonceのpurgeはNF-05の経路で、NF07はrecordのkindのhold gateの判定だけに使う（A1H-2 D7・D8）");
 
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {

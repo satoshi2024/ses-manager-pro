@@ -5,6 +5,11 @@ import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.ResumeIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.ResumeIngestionMapper;
+import com.ses.privacy.production.provider.IngestionTextProvider;
+import com.ses.privacy.production.retention.hold.HoldSubjectResolver;
+import com.ses.privacy.production.retention.hold.PrivacyHoldGate;
+import com.ses.privacy.production.retention.hold.PrivacyHoldPath;
+import com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard;
 import com.ses.service.FileStorageService;
 import com.ses.service.document.ResumeIngestionLedgerRetentionService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
@@ -39,6 +44,8 @@ public class ResumeRetentionCleanupServiceImpl {
     private final FileStorageService fileStorageService;
     private final TenantAwareBatchRunner tenantAwareBatchRunner;
     private final ObjectProvider<ResumeIngestionLedgerRetentionService> ledgerRetentionProvider;
+    /** NF07 保全hold の gate（D4・D5。A1H-2）。 */
+    private final PrivacyHoldPathGuard privacyHoldPathGuard;
 
     /** 最小保持日数。 */
     @Value("${app.resume.retention-days:30}")
@@ -54,13 +61,43 @@ public class ResumeRetentionCleanupServiceImpl {
         tenantAwareBatchRunner.run(tenantId -> cleanupTenant(tenantId, threshold));
     }
 
-    /** 1 tenant 分の清理（test から tenant を限定して呼べるよう package-private）。 */
+    /**
+     * 1 tenant 分の清理（test から tenant を限定して呼べるよう package-private）。
+     *
+     * <p>NF07 A1H-2（D4・D5）: 回の初めに保全 hold の gate を1回だけ照会し（D4 と D5 で共有する snapshot）、hold に当たる・
+     * 分類が UNKNOWN・gate が判定できない行は消さずに件数を警告する。本人は F2 provider の宣言で導出する（履歴取込は
+     * {@code converted_engineer_id} と {@code candidate_id} の和集合、BP 取込は {@code converted_availability_id}）。
+     * どの本人にも帰属しない行は SUBJECT hold では止めず、DATA_ELEMENT hold のときだけ止める（§3.4.3 規則4）。
+     * hold 機構を使っていない tenant では増える照会はこの1回だけで、清理の結果は変わらない。
+     */
     void cleanupTenant(String tenantId, LocalDateTime threshold) {
+        PrivacyHoldPathGuard.Batch resumeHold = privacyHoldPathGuard.openBatch(PrivacyHoldPath.D4, tenantId);
+        PrivacyHoldPathGuard.Batch bpHold = resumeHold.forPath(PrivacyHoldPath.D5);
+        try {
+            cleanupTenant(tenantId, threshold, resumeHold, bpHold);
+        } finally {
+            resumeHold.close();
+            bpHold.close();
+        }
+    }
+
+    private void cleanupTenant(String tenantId, LocalDateTime threshold, PrivacyHoldPathGuard.Batch resumeHold,
+                               PrivacyHoldPathGuard.Batch bpHold) {
         List<ResumeIngestion> resumeTargets = resumeIngestionMapper
                 .selectExpiredOriginalsForTenant(tenantId, threshold);
         int purged = 0;
         for (ResumeIngestion job : resumeTargets) {
             String storedName = job.getStoredFileName();
+            // 原本の実体と抽出本文を同じ UPDATE で消すため、行が持つ element のどちらかが止まれば行ごと残す
+            List<String> elements = storedName != null && !storedName.isBlank()
+                    ? List.of(IngestionTextProvider.RESUME_ORIGINAL, IngestionTextProvider.RESUME_TEXT)
+                    : List.of(IngestionTextProvider.RESUME_TEXT);
+            PrivacyHoldGate.Verdict verdict = resumeHold.rowVerdict(elements,
+                    HoldSubjectResolver.RESUME_INGESTION_TABLE, job.getId());
+            if (verdict != PrivacyHoldGate.Verdict.ALLOW) {
+                resumeHold.skip(verdict);
+                continue;
+            }
             int updated = resumeIngestionMapper.purgeOriginalForTenant(
                     job.getId(), tenantId, job.getStatus(), job.getVersion());
             if (updated != 1) {
@@ -84,12 +121,20 @@ public class ResumeRetentionCleanupServiceImpl {
         // BP取込側も同じinventory境界でPIIを清理する。既存の監査行は論理削除しない。
         List<BpAvailabilityIngestion> bpTargets = bpAvailabilityIngestionMapper
                 .selectExpiredWithTextForTenant(tenantId, threshold);
+        int cleared = 0;
         for (BpAvailabilityIngestion job : bpTargets) {
+            PrivacyHoldGate.Verdict verdict = bpHold.rowVerdict(List.of(IngestionTextProvider.BP_TEXT),
+                    HoldSubjectResolver.BP_INGESTION_TABLE, job.getId());
+            if (verdict != PrivacyHoldGate.Verdict.ALLOW) {
+                bpHold.skip(verdict);
+                continue;
+            }
             bpAvailabilityIngestionMapper.clearExtractedTextForTenant(job.getId(), tenantId);
+            cleared++;
         }
-        if (purged > 0 || !bpTargets.isEmpty()) {
+        if (purged > 0 || cleared > 0) {
             log.info("保持期限清理を実行しました: tenantId={}, resumeJobs={}, bpJobs={}",
-                    tenantId, purged, bpTargets.size());
+                    tenantId, purged, cleared);
         }
     }
 

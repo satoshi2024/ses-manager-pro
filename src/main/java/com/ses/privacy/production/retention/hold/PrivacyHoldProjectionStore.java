@@ -46,6 +46,15 @@ final class PrivacyHoldProjectionStore {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     }
 
+    /**
+     * hold 機構を一度でも使った tenant（追随位置の行を持つ tenant。昇順）。tenant を持たない全体の破壊的経路（D7・D9・D10）が
+     * 判定する tenant の母集団で、行が無ければ照会はこの1回だけ（A1H-2）。lock しない。
+     */
+    List<String> engagedTenantIds() {
+        return jdbc.queryForList("SELECT DISTINCT tenant_id FROM t_privacy_projection_state ORDER BY tenant_id",
+                String.class);
+    }
+
     /** tenant の追随位置の行（journal ごと。通常は0件か1件）。lock しない。 */
     List<StateRow> stateRows(String tenantId) {
         return jdbc.query("SELECT " + STATE_COLUMNS + " FROM t_privacy_projection_state WHERE tenant_id = ?",

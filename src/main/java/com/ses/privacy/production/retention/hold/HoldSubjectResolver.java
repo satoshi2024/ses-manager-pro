@@ -1,6 +1,11 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
+import com.ses.privacy.production.provider.AiLogProvider;
+import com.ses.privacy.production.provider.DocumentFileProvider;
+import com.ses.privacy.production.provider.EngineerProfileProvider;
+import com.ses.privacy.production.provider.IngestionTextProvider;
+import com.ses.privacy.production.provider.PrivacyRecord;
 import com.ses.privacy.production.provider.PrivacySubjectRef;
 import com.ses.privacy.production.provider.ProductionPrivacyProvider;
 import com.ses.privacy.production.provider.ProviderDataElement;
@@ -8,6 +13,7 @@ import com.ses.privacy.production.retention.catalog.SubjectAttribution;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -32,6 +38,14 @@ import java.util.Set;
 public class HoldSubjectResolver {
 
     static final String DOCUMENT_PREFIX = "DOCUMENT:";
+    /** 破壊的経路が行を照合する表（F2 provider の {@code ProviderTable} と同じ名前）。 */
+    public static final String DOCUMENT_TABLE = "t_document";
+    public static final String RESUME_INGESTION_TABLE = "t_resume_ingestion";
+    public static final String BP_INGESTION_TABLE = "t_bp_availability_ingestion";
+    public static final String AI_RUN_TABLE = "t_ai_recommendation_run";
+    static final String FILE_OBJECT = "FILE_OBJECT";
+    /** provider の無い取込原本（catalog は UNKNOWN。DATA_ELEMENT hold の保存先だけを解決する）。 */
+    static final String PROJECT_INGESTION_ORIGINAL = "PROJECT_INGESTION_ORIGINAL";
 
     private final JdbcTemplate jdbc;
     private final ProductionPrivacyProviderRegistry registry;
@@ -109,6 +123,105 @@ public class HoldSubjectResolver {
             names.addAll(provider.resolveStoredNames(tenantId, subject));
         }
         return Collections.unmodifiableSet(names);
+    }
+
+    // ---- 破壊的経路ごとの本人導出（A1H-2。§3.4.1 の表。規則は F2 provider の宣言そのものを使い、ここで書き直さない） ----
+
+    /** D1〜D3: 文書（{@code t_document}）。{@link DocumentFileProvider} の link・逆参照の和集合（plan §3.4.1「D1〜D3 の本人導出」）。 */
+    public Map<Long, Set<String>> documentSubjects(String tenantId, Collection<String> heldSubjects) {
+        return heldSubjectsByRow(tenantId, heldSubjects, DocumentFileProvider.PROVIDER_ID, DOCUMENT_TABLE);
+    }
+
+    /** D4: 履歴取込（{@code t_resume_ingestion}）。{@link IngestionTextProvider} の {@code converted_engineer_id} と {@code candidate_id} の和集合。 */
+    public Map<Long, Set<String>> resumeIngestionSubjects(String tenantId, Collection<String> heldSubjects) {
+        return heldSubjectsByRow(tenantId, heldSubjects, IngestionTextProvider.PROVIDER_ID, RESUME_INGESTION_TABLE);
+    }
+
+    /** D5: BP 空き取込（{@code t_bp_availability_ingestion}）。{@link IngestionTextProvider} の {@code converted_availability_id}。 */
+    public Map<Long, Set<String>> bpAvailabilityIngestionSubjects(String tenantId, Collection<String> heldSubjects) {
+        return heldSubjectsByRow(tenantId, heldSubjects, IngestionTextProvider.PROVIDER_ID, BP_INGESTION_TABLE);
+    }
+
+    /** D6: AI 推薦の run（{@code t_ai_recommendation_run}）。{@link AiLogProvider} の rank 1 の要員と source 要員の照合。 */
+    public Map<Long, Set<String>> aiRecommendationRunSubjects(String tenantId, Collection<String> heldSubjects) {
+        return heldSubjectsByRow(tenantId, heldSubjects, AiLogProvider.PROVIDER_ID, AI_RUN_TABLE);
+    }
+
+    /**
+     * held な subject ごとに provider の {@code findBySubject}（論理削除済みを含む）を引き、表の行 ID → その行に帰属する held な
+     * subject を返す（行から本人を逆に導く規則を別に書かないため、subject → 行の向きで provider の宣言をそのまま使う）。
+     * 返らない行は「どの held subject にも帰属しない」（帰属できない行を含む）。subject 参照を解釈できない・provider が
+     * 未登録・照会に失敗した場合は例外（呼出し側が経路のその回を UNAVAILABLE として扱う）。
+     */
+    public Map<Long, Set<String>> heldSubjectsByRow(String tenantId, Collection<String> heldSubjects, String providerId,
+                                                    String table) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        if (heldSubjects == null || heldSubjects.isEmpty()) {
+            return Map.of();
+        }
+        ProductionPrivacyProvider provider = registry.require(providerId);
+        Map<Long, Set<String>> byRow = new LinkedHashMap<>();
+        for (String held : heldSubjects) {
+            PrivacySubjectRef subject = PrivacySubjectRef.parse(held)
+                    .orElseThrow(() -> new IllegalStateException("hold の subject 参照を解釈できません"));
+            for (PrivacyRecord record : provider.findBySubject(tenantId, subject)) {
+                if (table.equals(record.table())) {
+                    byRow.computeIfAbsent(record.rowId(), id -> new LinkedHashSet<>()).add(subject.ref());
+                }
+            }
+        }
+        Map<Long, Set<String>> result = new LinkedHashMap<>();
+        byRow.forEach((id, subjects) -> result.put(id, Collections.unmodifiableSet(subjects)));
+        return Collections.unmodifiableMap(result);
+    }
+
+    /**
+     * DATA_ELEMENT hold の element に属する保存名（D10。論理削除済みの行・状態を問わない）。実体 file を持たない element
+     * （catalog の {@code storage_kind} が {@code FILE_OBJECT} 以外）は空。{@code FILE_OBJECT} の element のうち保存先を
+     * 解決できないもの（外部 service 側の写し等）・catalog に行が無いものは例外（呼出し側は孤児清掃のその回を中止する）。
+     * 保存先は catalog の {@code storage_ref}（V196・V197）と F2 provider の {@code storedNameColumns} と同じ列。
+     */
+    public Set<String> resolveElementStoredNames(String tenantId, String dataElementId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        List<String> kinds = jdbc.queryForList("SELECT storage_kind FROM m_pii_data_element WHERE tenant_id = ? "
+                + "AND data_element_id = ? AND deleted_flag = 0", String.class, tenantId, dataElementId);
+        if (kinds.size() != 1) {
+            throw new IllegalStateException("hold の data element が catalog に1行ありません");
+        }
+        if (!FILE_OBJECT.equals(kinds.get(0))) {
+            return Set.of();
+        }
+        List<String> names;
+        if (dataElementId.startsWith(DOCUMENT_PREFIX)) {
+            names = jdbc.queryForList("SELECT v.storage_key FROM t_document_version v WHERE v.tenant_id = ? "
+                    + "AND v.document_id IN (SELECT d.id FROM t_document d WHERE d.tenant_id = ? AND d.document_type = ?)",
+                    String.class, tenantId, tenantId, dataElementId.substring(DOCUMENT_PREFIX.length()));
+        } else if (IngestionTextProvider.RESUME_ORIGINAL.equals(dataElementId)) {
+            names = jdbc.queryForList("SELECT stored_file_name FROM t_resume_ingestion WHERE tenant_id = ? "
+                    + "AND stored_file_name IS NOT NULL", String.class, tenantId);
+        } else if (IngestionTextProvider.BP_ORIGINAL.equals(dataElementId)) {
+            // 表に tenant 列が無い。F2 provider（変換先の tenant）と清理（作成者の tenant）の両方の境界を和集合で取る
+            names = jdbc.queryForList("SELECT b.stored_file_name FROM t_bp_availability_ingestion b "
+                    + "WHERE b.stored_file_name IS NOT NULL AND (b.file_ext IS NULL OR b.file_ext <> 'PASTE') "
+                    + "AND (b.converted_availability_id IN (SELECT a.id FROM t_bp_availability a WHERE a.tenant_id = ?) "
+                    + "OR b.created_by IN (SELECT u.id FROM sys_user u WHERE u.tenant_id = ?))",
+                    String.class, tenantId, tenantId);
+        } else if (EngineerProfileProvider.PHOTO.equals(dataElementId)) {
+            names = jdbc.queryForList("SELECT photo_url FROM t_engineer WHERE tenant_id = ? AND photo_url IS NOT NULL",
+                    String.class, tenantId);
+        } else if (PROJECT_INGESTION_ORIGINAL.equals(dataElementId)) {
+            names = jdbc.queryForList("SELECT stored_file_name FROM t_project_ingestion WHERE tenant_id = ? "
+                    + "AND stored_file_name IS NOT NULL", String.class, tenantId);
+        } else {
+            throw new IllegalStateException("hold の data element の保存先を解決できません");
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String name : names) {
+            if (name != null && !name.isBlank()) {
+                result.add(name.trim());
+            }
+        }
+        return Collections.unmodifiableSet(result);
     }
 
     private SubjectAttribution effective(String elementId, String providerId, SubjectAttribution stored) {

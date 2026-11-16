@@ -409,6 +409,99 @@ class PrivacyHoldServiceTest {
         assertThat(fixture.count("SELECT COUNT(*) FROM t_legal_hold")).isZero();
     }
 
+    // ---- A1H-1 delta review P2-N1: pending_since から append の開始までに在途時間の外の時間を入れない ----
+
+    @Test
+    void appendの経路ではinstanceの比較をやり直さず比較の時間がpending_sinceとappendの開始の間に入らない() {
+        java.util.concurrent.atomic.AtomicBoolean armed = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicInteger slowChecks = new AtomicInteger();
+        fixture.applicationServerUuid = () -> {
+            if (armed.get()) {
+                // 間隔の切れた後の比較（Journal pool の接続取得と2つの照会）に時間が掛かる
+                slowChecks.incrementAndGet();
+                fixture.clock.advance(java.time.Duration.ofMinutes(3));
+            }
+            return "application-server-uuid";
+        };
+        java.util.concurrent.atomic.AtomicBoolean firstHead = new java.util.concurrent.atomic.AtomicBoolean(true);
+        fixture.journal.beforeHead = () -> {
+            if (firstHead.getAndSet(false)) {
+                // head の照会の後に instance の比較の間隔（1分）が切れる。修正前は append の直前の port() で比較が走った
+                fixture.clock.advance(java.time.Duration.ofSeconds(61));
+                armed.set(true);
+            }
+        };
+        java.util.concurrent.atomic.AtomicReference<Instant> pendingAtAppend = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<Instant> appendStartedAt = new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicInteger checksBeforeAppend = new AtomicInteger(-1);
+        fixture.journal.beforeAppend = () -> {
+            if (appendStartedAt.get() == null) {
+                pendingAtAppend.set(fixture.state().pendingSince());
+                appendStartedAt.set(fixture.clock.instant());
+                checksBeforeAppend.set(slowChecks.get());
+            }
+        };
+
+        PrivacyHoldStartResult result = fixture.service.start(subject("ENGINEER:23"));
+
+        assertThat(result.status()).isEqualTo("ACTIVE");
+        assertThat(checksBeforeAppend.get()).as("予約から append までに instance の比較をしない").isZero();
+        assertThat(pendingAtAppend.get()).as("pending_since は append の開始時刻と一致する").isEqualTo(appendStartedAt.get());
+    }
+
+    @Test
+    void 再送の直前は追随位置の行のlockを取った後に時計を読むのでlock待ちの時間がpending_sinceに含まれない() {
+        java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean();
+        fixture.dataSource.beforePrepare = sql -> {
+            String normalized = sql.toLowerCase(java.util.Locale.ROOT);
+            boolean locksStateRow = normalized.contains("t_privacy_projection_state")
+                    && (normalized.contains("for update") || normalized.startsWith("update"));
+            if (locksStateRow && refreshing.getAndSet(false)) {
+                // 状態行の lock を最初に取る statement で、破壊的経路の evaluateLocked（tx の終了まで行 lock を持つ）を待つ。
+                // 修正前は時計を読んだ後の UPDATE で待ち、修正後は FOR UPDATE で待ってから時計を読む（実 lock は MySQL test）
+                fixture.clock.advance(java.time.Duration.ofMinutes(3));
+            }
+        };
+        fixture.journal.failWithoutCommit.set(1);
+        AtomicInteger calls = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<Instant> pendingAtResend = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<Instant> resendStartedAt = new java.util.concurrent.atomic.AtomicReference<>();
+        fixture.journal.beforeAppend = () -> {
+            if (calls.incrementAndGet() == 1) {
+                refreshing.set(true);
+            } else {
+                pendingAtResend.set(fixture.state().pendingSince());
+                resendStartedAt.set(fixture.clock.instant());
+            }
+        };
+
+        PrivacyHoldStartResult result = fixture.service.start(subject("ENGINEER:24"));
+
+        assertThat(result.status()).isEqualTo("ACTIVE");
+        assertThat(fixture.journal.appendCalls.get()).isEqualTo(2);
+        assertThat(pendingAtResend.get()).as("pending_since は再送の開始時刻（lock 待ちの後）と一致する")
+                .isEqualTo(resendStartedAt.get());
+    }
+
+    @Test
+    void 再送の直前にlockした行のpendingが自分のcommandでなければ時刻を書かず再送しない() {
+        fixture.journal.failWithoutCommit.set(1);
+        fixture.journal.beforeAppend = () -> {
+            // 1回目の append の在途中に reconciler が pending を消し、別の開始が pending を取った状態
+            PrivacyHoldProjectionStore.StateRow state = fixture.state();
+            fixture.store.clearPending(PrivacyHoldTestFixture.TENANT, PrivacyHoldTestFixture.JOURNAL_ID,
+                    state.pendingCommandId());
+            fixture.store.recordPending(PrivacyHoldTestFixture.TENANT, PrivacyHoldTestFixture.JOURNAL_ID,
+                    "hs-" + "9".repeat(32), PrivacyHoldTestFixture.T0);
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:25")), 503, "error.privacy.holdAckUnknown");
+        assertThat(fixture.journal.appendCalls.get()).as("再送しない").isEqualTo(1);
+        assertThat(fixture.state().pendingCommandId()).isEqualTo("hs-" + "9".repeat(32));
+        assertThat(fixture.state().pendingSince()).as("他の command の pending_since を進めない")
+                .isEqualTo(PrivacyHoldTestFixture.T0);
+    }
+
     // ---- Review P3-7: revision の競合と開始済みの区別 ----
 
     @Test
