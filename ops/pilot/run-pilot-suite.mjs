@@ -593,7 +593,7 @@ async function runPilot() {
   });
 
   // -----------------------------------------------------------
-  // Case 9: PILOT-09-E2E01-CORE-FLOW (Category: E2E 业务贯通)
+  // Case 9: PILOT-09-E2E01-CORE-FLOW (Category: E2E 業務の通し確認)
   // -----------------------------------------------------------
   await recordCase('PILOT-09-E2E01-CORE-FLOW', 'E2E 業務貫通', '顧客登録→案件登録→提案作成→契約作成の業務貫通検証', async () => {
     const client = new HttpClient();
@@ -650,7 +650,7 @@ async function runPilot() {
   });
 
   // -----------------------------------------------------------
-  // Case 10: PILOT-10-UI-BROWSER-SMOKE (Category: UI 实操作)
+  // Case 10: PILOT-10-UI-BROWSER-SMOKE (Category: UI 実操作)
   // -----------------------------------------------------------
   await recordCase('PILOT-10-UI-BROWSER-SMOKE', 'UI 実操作', 'Playwright実ブラウザによる5大代表画面のレンダリング・Console監視', async () => {
     const browser = await chromium.launch({ headless: true });

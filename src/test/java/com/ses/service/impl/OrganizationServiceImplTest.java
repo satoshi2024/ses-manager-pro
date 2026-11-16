@@ -553,7 +553,7 @@ class OrganizationServiceImplTest {
     }
 
     @Test
-    void 法人不一致的父子组织与統合を拒否する() {
+    void 法人が異なる親子組織と統合を拒否する() {
         OrganizationUnit parent = organization("LEGAL-1-PARENT", "法人一の親", null,
                 LocalDate.of(2026, 1, 1), null);
         parent.setLegalEntityId(1L);

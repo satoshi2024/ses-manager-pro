@@ -22,7 +22,7 @@ public class ParsedResumeDto {
     /** 経歴一覧 */
     private List<CareerPart> careers;
 
-    /** 抽出時の注意（単価単位不明・日付曘昧等） */
+    /** 抽出時の注意（単価単位不明・日付曖昧等） */
     private List<String> warnings;
 
     @Data
@@ -41,7 +41,7 @@ public class ParsedResumeDto {
         private String nearestStation;
         /** 都道府県 */
         private String prefecture;
-        /** 鱊道会社・路線 */
+        /** 鉄道会社・路線 */
         private String railwayCompany;
         /** 経験年数 */
         private Integer experienceYears;
