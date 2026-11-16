@@ -83,6 +83,34 @@ class LoginFailureHandlerLocalLoginRefusalTest {
     }
 
     @Test
+    void break_glass判定でASCIIの大文字小文字を区別しなくても_表記違いのbreak_glassは照合して数えOIDC管理者は数えない() throws Exception {
+        // MySQL の utf8mb4_unicode_ci では ASCII の表記違いの入力も同じ行へ解決される（mapper の mock で再現する）。break-glass 判定
+        // （OidcSecurityProperties.isBreakGlassUsername）を ASCII の大文字小文字を区別しない比較にした後も（X3-2）、break-glass 口座は正確な名前と
+        // 同じくパスワードを照合して数え、OIDC 管理者の表記違いはパスワード照合前に拒否して数えない（D-P3-1 の防護を弱めない）。
+        OidcSecurityProperties breakGlassNames = new OidcSecurityProperties();
+        breakGlassNames.setBreakGlassUsernames(java.util.Set.of(BREAK_GLASS));
+        when(breakGlassService.isLoginAllowed(anyString()))
+                .thenAnswer(invocation -> breakGlassNames.isBreakGlassUsername(invocation.getArgument(0)));
+        when(sysUserMapper.selectByUsername("BG-Operator")).thenReturn(user(BREAK_GLASS, "BreakGlass2026x"));
+        when(sysUserMapper.selectByUsername("OIDC-Admin")).thenReturn(user(OIDC_ADMIN, "Correct2026x"));
+        DaoAuthenticationProvider provider = provider(false);
+        LoginFailureHandler handler = new LoginFailureHandler(accountLockService);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            AuthenticationException breakGlassFailure = authenticate(provider, "BG-Operator", "wrong-" + attempt);
+            assertThat(breakGlassFailure).isInstanceOf(BadCredentialsException.class);
+            handler.onAuthenticationFailure(loginRequest("BG-Operator"), new MockHttpServletResponse(), breakGlassFailure);
+
+            AuthenticationException oidcFailure = authenticate(provider, "OIDC-Admin", "Correct2026x");
+            assertThat(LocalLoginDisabledException.isCauseOf(oidcFailure)).isTrue();
+            handler.onAuthenticationFailure(loginRequest("OIDC-Admin"), new MockHttpServletResponse(), oidcFailure);
+        }
+
+        verify(accountLockService, times(3)).onLoginFailure("BG-Operator");
+        verify(accountLockService, never()).onLoginFailure("OIDC-Admin");
+    }
+
+    @Test
     void local_login有効の利用者のパスワード誤りは従来どおり数える() throws Exception {
         DaoAuthenticationProvider provider = provider(true);
         when(sysUserMapper.selectByUsername("local-user")).thenReturn(user("local-user", "Local2026x"));

@@ -132,6 +132,25 @@ class LocalLoginRefusalLockoutIntegrationTest {
         assertThat(callerProvider().getCallerContext()).as("ロック中の local login 利用者は従来どおり拒否").isEmpty();
     }
 
+    @Test
+    void 前後に空白やタブを付けたusernameのパスワード誤りも同じ口座に数え5回でロックする() throws Exception {
+        // DOC-FINAL delta review N-1: 実 form login は username を trim して認証するため、計数も trim 後の名前で行う。
+        // 入力値のままだと先頭に空白を付けた名前の失敗が空振りし、lock されずに推測を続けられた。
+        String[] variants = {" " + BREAK_GLASS, BREAK_GLASS + " ", "\t" + BREAK_GLASS, " \t" + BREAK_GLASS};
+        for (int attempt = 0; attempt < variants.length; attempt++) {
+            mockMvc.perform(formLogin("/login").user(variants[attempt]).password("wrong-" + attempt))
+                    .andExpect(redirectedUrl("/login?error"));
+        }
+        assertThat(((Number) lockState(BREAK_GLASS).get("failed_count")).intValue()).isEqualTo(4);
+        assertThat(lockState(BREAK_GLASS).get("locked_until")).isNull();
+
+        mockMvc.perform(formLogin("/login").user("  " + BREAK_GLASS).password("wrong-5"))
+                .andExpect(redirectedUrl("/login?error"));
+        assertThat(lockState(BREAK_GLASS).get("locked_until")).as("表記の違う5回目でもロック").isNotNull();
+        mockMvc.perform(formLogin("/login").user(BREAK_GLASS).password("BreakGlass2026x"))
+                .andExpect(redirectedUrl("/login?locked"));
+    }
+
     private SecurityContextCallerContextProvider callerProvider() {
         LegalEntityContextService legalEntityContext = mock(LegalEntityContextService.class);
         when(legalEntityContext.requireCurrentLegalEntityId()).thenReturn(42L);

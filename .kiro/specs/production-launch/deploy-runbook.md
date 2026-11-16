@@ -1,14 +1,14 @@
 # 本番配備runbook（初回: 空DBへの新規導入・全停止・専用Flyway job）
 
 - 状態: **草案（SRE/DBA承認待ち）**。本書は承認・実施済みの手順ではない。本番は引き続きNO-GO。
-- 対象: SES Manager Pro 初回本番リリース（S-NF集成候補）。以後のreleaseも同じ全停止方式を前提とする。
+- 対象: SES Manager Pro 初回本番リリース（S-NF統合候補）。以後のreleaseも同じ全停止方式を前提とする。
 - 根拠となるユーザー決定（2026-11-13）:
   - P-2: 本番DBは未構築。初回は空DBへの新規導入（V1→LATEST）。
   - P-3: 全停止＋専用Flyway job。アプリinstanceは起動時にmigrationを実行しない。
   - 部署-1: V2の業務sampleはprod専用scriptで削除する（V2本体は変更しない）。修復queueの対応行も消す。
   - 部署-2: 修正したflyway-maven-pluginで `mvn flyway:migrate` を実行する。
   - 部署-3: 初期管理者パスワードは配備時にsecretからhashを注入し、初回ログインで変更させる。公開済みパスワードを残さない。
-  - DB時区: 本番MySQLのserver時区はDBAが `+09:00` に設定する（コードは変更しない）。
+  - DBタイムゾーン: 本番MySQLのserverタイムゾーンはDBAが `+09:00` に設定する（コードは変更しない）。
   - bootstrap方式A（2026-11-13）: 本番初回起動は期限付きbootstrap modeで行う（§5）。
   - bootstrapの完了と再開（2026-11-13、D1 第3回修正）: 初回bootstrapの完了後に再びbootstrapを有効にするには承認済みの変更ticketが必要（コードで強制。§5.7）。管理者は5名（break-glass 2名＋OIDCでログインする起票者1名・承認者2名）で準備する（§5.0）。
 - 実装（配備バッチD1）:
@@ -43,7 +43,7 @@
 ### 1.1 DBサーバー（DBA）
 
 - MySQL 8.0系（版はDBAが確定する。testは `mysql:8.0.36`。確定後は `-Dses.flyway.fresh-install.mysql-image` で同じ版を検証する）。
-- **server時区 `+09:00`**（ユーザー決定）。my.cnf / parameter groupで `default_time_zone = '+09:00'` を設定し、次で確認する。
+- **serverタイムゾーン `+09:00`**（ユーザー決定）。my.cnf / parameter groupで `default_time_zone = '+09:00'` を設定し、次で確認する。
   ```sql
   SELECT @@global.time_zone, @@session.time_zone, NOW(), UTC_TIMESTAMP();
   -- 期待: @@global.time_zone = '+09:00'、NOW() が UTC_TIMESTAMP() の9時間後
@@ -125,6 +125,52 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 2. §1.2のmigrator権限・trigger/binlog・DEFINERの扱い（DBA）。
 3. MySQLの版・collation・parameter group（DBA）。
 4. job実行環境（Maven・JDK・依存取得経路。§1.5のlocal repositoryの準備方法）（SRE）。
+
+### 1.7 配備前提と、機能スイッチをONにする前の署名（一覧。X3-4）
+
+各所に分かれている前提の索引である。手順と根拠は各リンク先を正本とし、本節では繰り返さない。初回リリースは全スイッチOFFで配備し（`feature-switches.md` 3.1）、下表の署名が揃ったスイッチから1つずつONにする（同 3.2）。
+
+**SRE の前提（初回配備から必要）**
+
+| # | 前提 | 理由 | 正本 |
+|---|---|---|---|
+| SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
+| SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
+| SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
+| SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
+| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
+| SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
+
+**DBA の前提**: migrator accountのtrigger権限（binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当、DEFINERとmigrator accountを残すこと）は§1.2、server タイムゾーン `+09:00` と空schemaは§1.1。
+
+**機能スイッチをONにする前に要る署名・受理**（揃うまでOFFのまま。ONの手順は各正本）
+
+| 機能（設定） | ONの前に要るもの | 正本 |
+|---|---|---|
+| NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`） | (1) Privacy署名: comment 2列（`business_comment`・`decision_comment`）の保存期間と削除・匿名化経路（O-8）、**表示範囲がrole級**であること（本文を読めるのは案件を閲覧できる全ての管理者・HR）、**代理提出の差戻し理由は営業が要員へ伝える**運用（要員本人には「コメントあり」だけが見える。HRの手順に含める）。(2) **NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録**: V196 と `com.ses.privacy` にはまだ無く、署名だけでなく**実装が要る**（V198以降の独立batchでseedする。ONの前提）。(3) 下の §1.7.1 の手動確認9項目。(4) W3-21a・W3-21b のPASS。prodは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと起動しない（内容は検証しない） | `feature-switches.md` 4.9.2、NF01細粒度epoch計画 §10・§12 O-8、§1.7.1 |
+| NF02（`FEATURE_NF02_ENABLED`。子の顧客ポータルを含む） | DG-02（CS Owner。B3 休日の運用事項 H-1・H-2 を含む）と、当年度を含む全社共通カレンダーの登録 | `customer-success-service-desk/dg-02-first-release-decision-package.md`、`feature-switches.md` 4.3 |
+| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
+| NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5 | `feature-switches.md` 4.8.2 |
+| NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放はD-05 ownerの受理事項（§4.4末尾）と合わせ、解除の開放はD-03・D-05の署名後（§4.5） | `feature-switches.md` 4.7、§4.4・§4.5 |
+| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8) を D-06 owner と受理する: D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する） | `feature-switches.md` 4.7.2 の #5、§4.4（D14 と受理事項） |
+| NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）と、**B2c-2 実装開始前の人手承認**（B2c-2 の着手条件）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項） | `ai-management-copilot/external-send-approval-gate.md` §8、`.kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md`（B2c-2 の開始条件） |
+| 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197）。schedulerの有効化（`APP_SCHEDULING_ENABLED=true`）の前 | 保存年数（3年・TRANSACTION_DATE）は暫定値で文書ownerの確認待ち。副本の処分方針についてPrivacy ownerと文書ownerの書面署名（得られなければ副本処理を外す変更を出してから有効化する）。`IMPORT` の保持期間はPrivacyの書面受理まで開放の条件のまま | 冒頭のV197の項、§4.3 |
+
+- NF03・NF04・NF10 のONの条件は `feature-switches.md` の 4.6・4.4・4.5 を参照する。
+
+#### 1.7.1 NF01 二者確認をONにする前の手動確認（browser、9項目。W3-21b review §6）
+
+子スイッチをONにした staging（実MySQL）で、自動browser試験の代わりに次を確かめ、結果を記録する（完全な流れはMySQLが要るため、fastのbrowser試験には入っていない）。
+
+1. **社内詳細（管理者）**: DUALタスクの行に「二者確認」が出て「完了」ボタンが無い → モーダルを開く → 候補はCLEANの版だけ → 提出 → 状態がPENDINGになる。DevToolsで要求に `X-XSRF-TOKEN` と `Idempotency-Key` があり、bodyに `documentVersionId` があること。
+2. **確認・差戻し**: 提出者以外のHRまたは管理者で確認 → タスクがCOMPLETEDになり、後続タスクが繰り上がり、一覧が更新される。提出者本人がHRのときはボタンが出ない。営業・マネージャーには確認欄が無く「確認・差戻しは提出者以外の管理者またはHRが行います」だけが出る。理由を書かずに差戻すと警告dialogが出る。
+3. **commentの表示範囲**: 他の営業・マネージャーで見ると「コメントあり」だけで、DevToolsの応答JSONに本文が無い。営業の代理提出の後、要員本人が `/my` で見ても「コメントあり」だけ。提出者本人とHRでは本文が出る。本文に `<img src=x onerror=alert(1)>` を書くと文字のまま表示される。
+4. **本人画面 `/my/lifecycle`**: 未完了一覧のDUALタスクが詳細へリンクし、要員の提出が成功し、確認・差戻しの欄が無い。
+5. **エラー表示**: 提出後に担当を変えてから確認すると409のmessageが出て状態が更新される。提出ボタンの連打で要求は1回だけ。通信を切って再送すると「処理済み」のtoastが出る（同じkey）。
+6. **390px幅**: モーダルが全画面になり、ボタンが折り返し、候補の長いlabelが画面をはみ出さず、タスク表は横スクロールできる。dark・lightの両テーマで確かめる。
+7. **テンプレート画面**: ONでは証跡種別に「二者確認」があり、OFFでは無い。OFFで既存のDUALテンプレートを編集すると「（現在は無効）」が出て、保存すると400のmessageが出る。
+8. **子スイッチOFF**: 詳細画面のHTMLに `dualConfirmModal` と `lifecycle-dual.js` が無く、DUALの行は「二者確認は現在無効です」だけ。
+9. **通知**: 提出後、「確認待ち」を受け取るのは管理者・HR・担当者だけで、範囲外の営業には届かない。本文に案件titleとcommentが無い。
 
 ## 2. 全停止とdrain（SRE）
 
@@ -310,7 +356,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   -- 期待: flyway_schema_history_privacy_journal・pj_action・pj_command・pj_event・pj_head・pj_lease、全て InnoDB
   SELECT COUNT(*) FROM pj_head;  -- 0
   ```
-- application の接続（hold 開始の開放時に設定。flag とは独立に、設定があれば起動時検査を行う）: `PRIVACY_JOURNAL_DATASOURCE_URL`（`jdbc:mysql://` だけ。`sslMode=VERIFY_IDENTITY` 必須、`autoReconnect`・時区 parameter・`socketTimeout`/`connectTimeout`・複数 host・URL 内の認証情報（`user@host`、`user=`・`password=`）・`%` による符号化・同じ parameter の重複は不可）、`PRIVACY_JOURNAL_DATASOURCE_USERNAME` / `PRIVACY_JOURNAL_DATASOURCE_PASSWORD`（principal は1組だけ。hold 開始を使うなら `nf07_journal_appender`、効力確認だけなら `nf07_journal_reader` または appender。secret store から注入）、`PRIVACY_JOURNAL_JOURNALID`（`privacy.journal.journal-id`。`[A-Za-z0-9._-]{4,64}`）。任意: `PRIVACY_JOURNAL_DATASOURCE_MAXPOOLSIZE`（1〜8、既定4）、`PRIVACY_JOURNAL_DATASOURCE_CONNECTIONTIMEOUT`（上限30秒、既定5秒）、`PRIVACY_JOURNAL_EXPECTEDSCHEMA`（既定 `privacy_journal`）、`PRIVACY_JOURNAL_PENDINGTIMEOUT`（設定するなら append の在途時間の上限 U＝接続待ち＋append の transaction 上限10秒＋socket timeout 20秒に、30秒以上の余裕を足した値。既定の接続待ち5秒なら65秒以上。起動時の契約検査が強制するのは U より長いことだけで、余裕はこの設定値で持たせる。plan §3.4 A1H-1 実装記録「不変条件と余裕」）。socket timeout（20秒）と append の transaction 上限（10秒）は固定値で、設定 key は無い。
+- application の接続（hold 開始の開放時に設定。flag とは独立に、設定があれば起動時検査を行う）: `PRIVACY_JOURNAL_DATASOURCE_URL`（`jdbc:mysql://` だけ。`sslMode=VERIFY_IDENTITY` 必須、`autoReconnect`・タイムゾーン parameter・`socketTimeout`/`connectTimeout`・複数 host・URL 内の認証情報（`user@host`、`user=`・`password=`）・`%` による符号化・同じ parameter の重複は不可）、`PRIVACY_JOURNAL_DATASOURCE_USERNAME` / `PRIVACY_JOURNAL_DATASOURCE_PASSWORD`（principal は1組だけ。hold 開始を使うなら `nf07_journal_appender`、効力確認だけなら `nf07_journal_reader` または appender。secret store から注入）、`PRIVACY_JOURNAL_JOURNALID`（`privacy.journal.journal-id`。`[A-Za-z0-9._-]{4,64}`）。任意: `PRIVACY_JOURNAL_DATASOURCE_MAXPOOLSIZE`（1〜8、既定4）、`PRIVACY_JOURNAL_DATASOURCE_CONNECTIONTIMEOUT`（上限30秒、既定5秒）、`PRIVACY_JOURNAL_EXPECTEDSCHEMA`（既定 `privacy_journal`）、`PRIVACY_JOURNAL_PENDINGTIMEOUT`（設定するなら append の在途時間の上限 U＝接続待ち＋append の transaction 上限10秒＋socket timeout 20秒に、30秒以上の余裕を足した値。既定の接続待ち5秒なら65秒以上。起動時の契約検査が強制するのは U より長いことだけで、余裕はこの設定値で持たせる。plan §3.4 A1H-1 実装記録「不変条件と余裕」）。socket timeout（20秒）と append の transaction 上限（10秒）は固定値で、設定 key は無い。
 - 起動時検査（`PrivacyJournalStartupVerifier`）: `server_uuid` の相違、上の耐久設定、`DATABASE()`、principal の権限（`information_schema` と `CURRENT_ROLE()`。role 経由の GRANT は不可）、本節の履歴表が artifact と一致（版・script 名・checksum）、`t_privacy_projection_state.journal_id` の一致を確かめる。prod で `privacy.retention.enabled=true` なら1つでも不適合（設定欠落を含む）で起動しない。この flag は決定ID束縛の有効期間を見ない生の値で判定する（署名日前・失効で NF07 が OFF 扱いでも、ON を設定していれば Journal を要求する。意図的な保守側の判定）。OFF なら起動を続け、WARN `NF07_PRIVACY_JOURNAL_UNAVAILABLE` と固定の理由code（接続文字列・user名・passwordは出さない）を出す。driver の接続失敗（認証失敗を含む）も固定文言に置き換えるため、Hikari の log に principal・接続先は出ない。`com.zaxxer.hikari` の log を DEBUG にしない。
 - 失敗した場合: Journal は業務dataを持たず、初回は空なので、DBA が `privacy_journal` schema を削除して空で作り直し、原因を直してから再実行する。`flyway repair` / `clean` は使わない。hold を一度でも記録した後の Journal は正本であり、作り直さない（B2 の recovery 手順による）。
 
@@ -318,8 +364,8 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
 
 - 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodのsecret（§4.1）。
 - **`SPRING_FLYWAY_ENABLED` は設定しない**。`true` にしても `ProductionSchemaGuardConfiguration` がSpring BootのFlyway初期化でmigrateを拒否し、1件も適用せずに起動を止める。
-- **JVMの時区を `Asia/Tokyo` に固定する（必須）**。`JAVA_TOOL_OPTIONS` に `-Duser.timezone=Asia/Tokyo` を加える（imageの既定 `-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0` を消さないよう、両方を書く）か、container環境変数 `TZ=Asia/Tokyo` を設定する。起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
-  - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定時区の `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定時区で日時を作る箇所は他にもある。testは `argLine` で時区を固定しているが、本番は配備側で固定しない限り固定されない。DB側の時区（§1.1、`+09:00`）とは別に必要。
+- **JVMのタイムゾーンを `Asia/Tokyo` に固定する（必須）**。`JAVA_TOOL_OPTIONS` に `-Duser.timezone=Asia/Tokyo` を加える（imageの既定 `-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0` を消さないよう、両方を書く）か、container環境変数 `TZ=Asia/Tokyo` を設定する。起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
+  - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
   - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V197 と一致しています`
@@ -350,8 +396,8 @@ OIDCの固定metadata・client credential、MFA鍵、session hash key等のprod�
 
 - **LB/ingressでアクセス元を作業端末に限定する（必須）**。bootstrap中は `admin` のlocal password loginが開いているため、次の危険がある（D1 review P3-k）。起動前にSREが制限を入れ、作業端末以外から `/login` に到達できないことを確認してから§5.1へ進む。bootstrapの再開（§5.7）でも同じ。
   - 初期パスワードの総当たり。
-  - **lockによる妨害（DoS）**: login失敗が5回で `admin` が30分lockされる（`AccountLockService`）。`sys_user` の照合順序は大小文字を区別しないため、`ADMIN` 等の綴りでの失敗も `admin` の失敗として数えられる。`/login` に到達できる者は誰でも `admin` をlockでき、作業を止められる。JVMの時区が固定されていないとlockが約9時間30分に延びる（§4）。
-  - 先回りの改密: 初期パスワードが漏れていると、正規の担当者より先にloginしてパスワードを変え、bootstrapを乗っ取れる（兆候と対応は§5.8）。
+  - **lockによる妨害（DoS）**: login失敗が5回で `admin` が30分lockされる（`AccountLockService`）。`sys_user` の照合順序は大小文字を区別しないため、`ADMIN` 等の綴りでの失敗も `admin` の失敗として数えられる。前後に空白やタブを付けた入力（`" admin"` 等）も、認証と同じ trim 後の名前で数える（`LoginFailureHandler`。以前は入力値のまま数えて空振りし、lock を回避した推測ができた。DOC-FINAL delta review N-1）。`/login` に到達できる者は誰でも `admin` をlockでき、作業を止められる。JVMのタイムゾーンが固定されていないとlockが約9時間30分に延びる（§4）。
+  - 先回りのパスワード変更: 初期パスワードが漏れていると、正規の担当者より先にloginしてパスワードを変え、bootstrapを乗っ取れる（兆候と対応は§5.8）。
 - 起動の拒否（fail-fast、Tomcatのportを開く前）: `SECURITY_BOOTSTRAP_ENABLED=true` なのに期限が未設定・offset無し・既に過ぎている・現在から24時間超、または初回bootstrapの完了marker（§5.5）が有るのに承認ticketが無い・形式が不正・再開の監査を残せない。ERROR/例外messageは `[bootstrap] ...` で始まる。
 - 起動時のWARN log: `[bootstrap] 期限付きbootstrap modeが有効です（期限: ...）` と `[bootstrap] 期限付きbootstrap mode中のため、break-glass管理者の登録検査とOIDC管理者の人数検査を省略します（期限: ...、再開ticket: なし（初回））`。この2行が出ていることを確認する。
 - 期限を過ぎると、**再起動しなくても** `admin` のlocal loginは拒否され、既存のbootstrap sessionも次の要求で失効する（API 401 / 画面はlogin画面へ）。作業が終わらなかった場合は、新しい期限（24時間以内）を設定して再起動する（完了markerが書かれる前なので承認ticketは不要）。
@@ -521,6 +567,11 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 - 「OIDCでログインできる」の起動時判定はDB側の条件だけ（設定tenant・issuerの有効なOIDC provider、APPROVEDの外部identity link、有効な `管理者`）。IdP側のaccount状態・MFA assuranceは起動時に確かめられないため、§5.3の5で実際にloginして確認する。
 - SESのTOTPを登録するのはbreak-glass口座（A・B）だけ。C〜EはIdP側のMFA（MFA assurance claim）でloginする。bootstrap終了後は、break-glass username以外はSESのTOTPを登録できない。
 - 人の割当: 推奨は5名とも別人（break-glass口座の保持者と、起票者・承認者を分ける）。兼務を認めるかはOwner/Securityが決める。口座名は例であり、実際の名前はOwner/Securityが決める。
+- **`admin`（A）は削除・改名・無効化・role変更しない**（break-glass管理者Aとして使い続ける。D1 review N-9）。bootstrapのlocal login（`ProductionBootstrapMode.isBootstrapLoginAllowed`）と起動時検査（`validateBootstrap`）は、username `admin`・role `管理者`・有効（`status = 1`）の口座だけを初期管理者として認めるため、これを崩すとbootstrapの再開（§5.7）でも誰もlocal loginできず、break-glassも使えない状態では復旧がDBAによる口座の復元だけになる。ユーザー管理の既存guardは本人による自分自身の削除・無効化・role変更だけを止め、他の管理者による操作は止めない。定期確認（§5.6の集計と同じ頻度）:
+  ```sql
+  SELECT username, role, status, deleted_flag FROM sys_user
+   WHERE username COLLATE utf8mb4_bin = 'admin';   -- 管理者 / 1 / 0 の1行
+  ```
 
 ### 5.1 adminのログイン・パスワード変更・MFA登録（A）
 
@@ -608,7 +659,12 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 
 ### 5.5 bootstrapの終了と完了marker
 
-1. **break-glass usernameを決める（ちょうど2件）**: A（`admin`）とB。いずれも有効な `管理者` で、local passwordとMFA登録を持つこと。
+1. **break-glass usernameを決める（ちょうど2件）**: A（`admin`）とB。いずれも有効な `管理者` で、local passwordとMFA登録を持つこと。`BREAK_GLASS_USERNAMES` には `sys_user.username` をそのままの表記で設定する。`sys_user` の照合順序は大文字小文字を区別しないが、起動時検査は設定値とDBの表記の完全一致を要求し、違えば起動しない（`break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: <設定値>`。D1 review N-1）。名前は ASCII の英数字と `.`・`_`・`-` だけにする（それ以外の文字を含む設定は `break-glass usernameはASCIIの英数字と「.」「_」「-」だけにしてください` で起動しない。実行時の判定は ASCII の大文字小文字だけを同一視するため、ASCII 以外の名前は DB の照合順序との細かな差に依存する。DOC-FINAL delta review P3-b）。設定前に次で確かめる。
+   ```sql
+   -- 設定する2件がそのままの表記で存在すること（2行）。照合順序を区別ありに切り替えて比較する
+   SELECT username, role, status FROM sys_user
+    WHERE username COLLATE utf8mb4_bin IN ('admin', 'bg-second') AND deleted_flag = 0;
+   ```
 2. **bootstrapを無効にして再起動する**。`SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT`（設定していれば `SECURITY_BOOTSTRAP_REOPEN_TICKET` も）を外し、`BREAK_GLASS_USERNAMES=admin,bg-second` を設定して再起動する。**`OIDC_TENANT_ID` は外さない**（§4.1）。LBのアクセス元制限は、この起動を確認してから通常の設定へ戻す。
 3. **完全な起動検査が通ることを確認する**。`[bootstrap] 期限付きbootstrap modeが有効です` のWARN logが出ず、`ProductionSecurityConfigurationValidator` の例外（`本番security configurationが安全な既定値を満たしません`）で停止しないこと。readinessがUPになり、C〜EがOIDCでログインできること。完全な検査が見るbootstrap関連の条件は次のとおり。
    - break-glass usernameがちょうど2件で、どちらも有効な管理者かつMFA登録済み（未登録なら `break-glass usernameはMFA enrollment完了済みでなければなりません`）。
@@ -618,21 +674,49 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 4. **完了markerが書かれたことを確認する**。完全な検査が初めて通った起動で、`m_system_config` に初回bootstrapの完了日時が書かれ、WARN log `[bootstrap] 初回bootstrapの完了markerを書き込みました（security.bootstrap.completed-at=...）` と監査 `BOOTSTRAP_COMPLETED` が残る。以後、bootstrapを再び有効にするには承認ticketが要る（§5.7）。markerはシステム設定画面には表示されず、画面から変更できない。
    ```sql
    SELECT config_value FROM m_system_config WHERE config_key = 'security.bootstrap.completed-at';   -- 完了日時（offset付きISO-8601）
-   SELECT created_at, method, uri FROM t_audit_log WHERE application_code = 'BOOTSTRAP_COMPLETED';  -- 1行
+   SELECT created_at, method, uri FROM t_audit_log WHERE application_code = 'BOOTSTRAP_COMPLETED';  -- 全停止・単一instance起動なら1行（同時に起動した場合は2行になり得る）
    ```
+   - markerは「必須監査 `BOOTSTRAP_COMPLETED` を残す → `m_system_config` へINSERTする」の順で書かれる（`ProductionBootstrapCompletionLatch.markCompletedIfAbsent`）。同時に2台をbootstrap無効で起動すると両方が監査を残し、INSERTは片方だけが成功する（もう片方は一意制約違反として何もしない）。markerが1行あれば問題ない（D1 review N-11）。監査とmarkerの対応を次で確かめる。
+     ```sql
+     SELECT (SELECT COUNT(*) FROM t_audit_log WHERE application_code = 'BOOTSTRAP_COMPLETED') AS completed_audits,
+            (SELECT COUNT(*) FROM m_system_config WHERE config_key = 'security.bootstrap.completed-at') AS marker_rows;
+     ```
+
+     | completed_audits | marker_rows | 意味と対応 |
+     |---|---|---|
+     | 1以上 | 1 | 正常（2行以上は同時起動・再書込の痕跡） |
+     | 1以上 | 0 | **書込の中断**（監査の後、INSERTの前に停止した）。bootstrapを無効にしたまま再起動してmarkerを書かせ、上のSQLで `marker_rows = 1` を確かめる。それまではbootstrapを有効にして起動しない（markerが無いため、承認ticket無しで初回bootstrapとして扱われる） |
+     | 0 | 1 | 想定外（アプリ以外がmarkerを書いた疑い）。Securityが§5.7末尾のDB監査logを確認する |
+     | 0 | 0 | 初回bootstrapは未完了 |
    - markerを書けない場合は起動しない（`[bootstrap] 初回bootstrapの完了markerを記録できないため起動しません`。監査 `BOOTSTRAP_COMPLETION_MARK_FAILED` はbest-effort）。markerが無いままだと、本番稼働後のbootstrap再開が承認も監査も無く行えてしまい、しかも誰も気づけないため、fail-closedにしている。DBAがアプリaccountの `m_system_config` へのINSERT権限とDBの状態を確認してから再起動する。
 5. **完全な検査が通らなかった場合**: markerはまだ書かれていないため、承認ticket無しでbootstrapを再開できる。新しい期限で `SECURITY_BOOTSTRAP_ENABLED=true` にし、**`BREAK_GLASS_USERNAMES` を再び空にして**（bootstrap中に設定したままだと起動しない）再起動し、不足を直して（例: Bの§5.4、C〜Eの作成・link）から2へ戻る。
 
 ### 5.6 運用上の注意・監査・アラート（Owner/Securityが確認する）
 
 - **break-glass usernameに指定した管理者はOIDCではログインできなくなる**（OIDCのsessionもincident未束縛のbreak-glass sessionとして失効させる既存仕様）。break-glass管理者はIdP障害時のlocal login専用の口座になる。
-- **OIDCでログインできる管理者（break-glass以外）を3名未満にしない**。退職・異動で無効化・削除・role変更する前に、後任を作成してlinkを承認する。3名未満になると、次の再起動で起動時検査により起動しない（break-glass管理者の無効化・MFA喪失も同じ）。復旧はDBA、またはbootstrapの再開（§5.7）。
+- **OIDCでログインできる管理者（break-glass以外）を3名未満にしない**。退職・異動で無効化・削除・role変更する前に、後任を作成してlinkを承認する。3名未満になると、次の再起動で起動時検査により起動しない（break-glass管理者の無効化・MFA喪失も同じ）。復旧はDBA、またはbootstrapの再開（§5.7）。無効化・role変更の前に、下のSQLで後任を含めて4名以上いることを確かめる。
+- **OIDC管理者の人数の定期集計（必須。D1 review N-2）**: 3名未満になっても（退職・無効化・role変更・外部identity linkの隔離・providerの無効化）、検知されるのは次の再起動の起動時検査だけである。計画外の再起動（OOM・host障害）で初めて判明すると、break-glass incidentを起票・承認できず、復旧は§5.7かDBAになる。次の集計を**毎日**と、計画した再起動の前、管理者の無効化・削除・role変更・link隔離・providerの変更の後に実行し、3未満ならwarningのアラートを出す。条件は起動時検査（`ProductionSecurityConfigurationValidator.validateOidcAdministrators`、`UserExternalIdentityMapper.selectApprovedActiveUsernamesByRole`、`IdentityProviderMapper.selectEnabledByTenantAndIssuer`）と同じにしてある。
+  ```sql
+  -- <tenant> は OIDC_TENANT_ID、<issuer> は OIDC_ISSUER_URI、<bg1>/<bg2> は BREAK_GLASS_USERNAMES の2件
+  SELECT COUNT(DISTINCT u.username) AS oidc_admins
+    FROM t_user_external_identity x
+    JOIN sys_user u ON u.id = x.user_id
+    JOIN m_identity_provider p ON p.id = x.provider_id
+   WHERE p.tenant_id = '<tenant>' AND p.issuer_uri = '<issuer>'
+     AND p.enabled = 1 AND p.deleted_flag = 0 AND p.provider_type = 'OIDC'
+     AND x.tenant_id = '<tenant>' AND x.review_status = 'APPROVED' AND x.deleted_flag = 0
+     AND u.deleted_flag = 0 AND u.status = 1 AND u.role = '管理者'
+     AND u.username NOT IN ('<bg1>', '<bg2>');   -- 3以上であること
+  ```
+  - 起動時検査は `sys_user.tenant_id` を見ない（D1 review N-6）ため、上のSQLも見ていない。単一tenant（`OIDC_TENANT_ID=default`、§1.7）の初回本番では差は出ない。
+  - 将来のコード対策（未実装）: ユーザー管理画面で管理者の無効化・削除・role変更により3名未満になる場合のWARNまたはguard。
 - **アラート（必須）**: 監視で `t_audit_log.application_code` の `BOOTSTRAP_LOGIN_SUCCESS` と `BOOTSTRAP_REOPENED`、およびapp logの `[bootstrap]` で始まるWARN/ERRORにアラートを設定する。§5.5の完了後にこれらが出たら、承認済みの再開ticket（§5.7）が無い限りsecurity incidentとして扱う。あわせて `BOOTSTRAP_LOGIN_FAILURE`・`BOOTSTRAP_LOGIN_LOCKED`・`BOOTSTRAP_SESSION_MISMATCH`・`BOOTSTRAP_COMPLETION_MARK_FAILED` もアラートを推奨する。監視queryの例:
   ```sql
   SELECT created_at, username, method, uri, application_code FROM t_audit_log
    WHERE application_code IN ('BOOTSTRAP_LOGIN_SUCCESS', 'BOOTSTRAP_REOPENED') AND created_at >= ?   -- 前回確認時刻
    ORDER BY created_at;
   ```
+- **`BOOTSTRAP_REOPENED` とbootstrapのWARN logは再開の「試行」を示す**（D1 review N-4）。必須監査 `BOOTSTRAP_REOPENED` と WARN log（`[bootstrap] 完了済みのbootstrapを承認ticket ... で再開します`・`[bootstrap] 期限付きbootstrap modeが有効です（期限: ...）`）は `ProductionBootstrapMode` の初期化時（bean生成中）に出て、起動時schema guard（全singleton生成後）と `ProductionSecurityConfigurationValidator`（起動完了直前）はその後に動く。このため、ticketが正しくても後続の起動失敗（DBとartifactの不一致によるschema guardの停止、`BREAK_GLASS_USERNAMES` の空にし忘れによる validator の停止など）で、監査とlogだけが残りアプリは起動していないことがある。実際に再開したかは、同じ起動でreadinessがUPになり、起動失敗（`APPLICATION FAILED TO START`、schema guard・validatorの例外）が出ていないことで判断し、WARN logだけでは判断しない。アラートの扱い（承認済みticketが無ければsecurity incident）は変えない。拒否文言が `bootstrap再開の必須監査（BOOTSTRAP_REOPENED）を永続化できないため、bootstrap modeは起動しません` の場合は、真の原因（監査表とartifactのentityの列の不一致など）がcause chainにしか出ないため、先に§3.4の適用結果（`flyway_schema_history` とschema guardのlog）を確認する。
 - 監査（`t_audit_log`）に残るbootstrapのapplication code: `BOOTSTRAP_LOGIN_SUCCESS` / `BOOTSTRAP_LOGIN_FAILURE` / `BOOTSTRAP_LOGIN_LOCKED` / `BOOTSTRAP_LOGIN_EXPIRED`（期限切れ後のlogin拒否）/ `BOOTSTRAP_SESSION_EXPIRED`（期限切れsessionの失効）/ `BOOTSTRAP_SESSION_MISMATCH`（別の主体へ引き継がれた印の失効）/ `BOOTSTRAP_WRITE_ATTEMPT`・`BOOTSTRAP_WRITE`（bootstrap sessionの書込操作。実行前の必須監査と結果）/ `BOOTSTRAP_READ`（bootstrap sessionの参照）/ `BOOTSTRAP_SCOPE_DENIED`（入口外の要求）/ `BOOTSTRAP_MFA_ENABLED`・`BOOTSTRAP_MFA_VERIFIED` / `IDENTITY_PROVIDER_REGISTERED` / `BOOTSTRAP_COMPLETED`（完了marker）/ `BOOTSTRAP_COMPLETION_MARK_FAILED` / `BOOTSTRAP_REOPENED`（承認ticketでの再開）。起動時の監査（`BOOTSTRAP_COMPLETED` 等）は `method = 'STARTUP'`、`username` はNULLで、`uri` に `app.security.bootstrap;...` として詳細が入る。bootstrap終了後にSecurityが一覧を確認し、§5.0の口座の作成・link・MFA登録以外の操作が無いことを確かめる。
   ```sql
   SELECT created_at, username, method, uri, status, application_code FROM t_audit_log
@@ -651,7 +735,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
   1. 作業者が変更ticket（例 `SEC-1234`）を起票する。記載: 理由、作業内容（例: OIDC管理者の補充1名、break-glass管理者BのTOTP再登録）、作業者、作業端末のアクセス元（LBで許可する値）、期限（24時間以内）、終了確認者。
   2. Owner（業務上の必要性）とSecurity（手順・期限・アクセス元制限）の2名が承認する。起票者は承認者を兼ねない。
   3. SREがLB/ingressのアクセス元制限を入れ、`BREAK_GLASS_USERNAMES` を**空にし**（設定したままだと起動しない）、`SECURITY_BOOTSTRAP_ENABLED=true`・`SECURITY_BOOTSTRAP_EXPIRES_AT=<24時間以内>`・`SECURITY_BOOTSTRAP_REOPEN_TICKET=SEC-1234` で再起動する。`OIDC_TENANT_ID` は外さない。
-  4. 起動logの `[bootstrap] 完了済みのbootstrapを承認ticket SEC-1234 で再開します（...）` と、監査 `BOOTSTRAP_REOPENED` を確認する。Securityは§5.6のアラートが鳴ったことを確認する（鳴らなければアラートの設定不備として直す）。
+  4. 起動logの `[bootstrap] 完了済みのbootstrapを承認ticket SEC-1234 で再開します（...）` と、監査 `BOOTSTRAP_REOPENED` を確認する。Securityは§5.6のアラートが鳴ったことを確認する（鳴らなければアラートの設定不備として直す）。これらは再開の試行を示すだけなので、readinessがUPになり起動失敗が出ていないことも確かめる（§5.6）。
   5. ticketの作業内容だけを行う（§5.1〜§5.4の該当手順）。
   6. §5.5の2と同じく `SECURITY_BOOTSTRAP_*` を全て外し、`BREAK_GLASS_USERNAMES` を戻して再起動する。完了markerは既に有るため上書きされない（`BOOTSTRAP_COMPLETED` は出ない）。
   7. Securityが§5.6の監査SQLで、期間中の操作がticketの作業内容と一致することを確認してticketを閉じる。
@@ -661,7 +745,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 ### 5.8 異常時の対応（侵害の疑い・TOTP喪失・lock）
 
 **侵害の疑いの兆候**:
-- §5.1の改密で「現在のパスワードが正しくありません」（初期パスワードを他者が先に変えた）。
+- §5.1のパスワード変更で「現在のパスワードが正しくありません」（初期パスワードを他者が先に変えた）。
 - 作業者が行っていない `BOOTSTRAP_LOGIN_SUCCESS`・`BOOTSTRAP_LOGIN_FAILURE`、LBのlogに作業端末以外からの到達。
 - 作業していないユーザー作成・`OIDC_BINDING_APPROVED`・`IDENTITY_PROVIDER_REGISTERED`・`BOOTSTRAP_MFA_ENABLED`、または `BOOTSTRAP_SESSION_MISMATCH`。
 
@@ -695,12 +779,29 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 - bootstrap終了後にbreak-glass管理者がTOTPとrecovery codeを両方失った場合: OIDC管理者が上のresetを行い、break-glass incident（起票C・承認D/E）を有効化して、本人がbreak-glass loginし `/mfa/setup` で登録し直す（未登録のbreak-glass loginはMFA登録へ進む既存の流れ）。再登録が済む前に再起動すると起動時検査（MFA enrollment完了済み）で止まるため、resetから再登録までを同じ作業枠で行う。止まった場合は§5.7の再開で登録する。
 
 **adminのlock（5回失敗で30分）**:
-- 30分待つ（JVMの時区が固定されていること。§4）。
-- 急ぐ場合、または時区が未固定でlockが延びている場合は、DBAが解除する。
+- 30分待つ（JVMのタイムゾーンが固定されていること。§4）。
+- 急ぐ場合、またはタイムゾーンが未固定でlockが延びている場合は、DBAが解除する。
   ```sql
   UPDATE sys_user SET failed_count = 0, locked_until = NULL WHERE username = 'admin';
   ```
 - 繰り返しlockされる場合は、作業端末以外から `/login` に到達している疑いがある。LBのアクセス元制限を確認し、侵害の疑いとして上の対応を検討する。
+
+**break-glass保持者の交代（例: Bの退職。D1 review N-9。草案・Owner/Securityの確認待ち）**:
+
+承認済みの変更ticket（§5.7の承認flow）の下で行う。既存の手順の組み合わせで、新しいcode経路は使わない。案Aを推奨する。
+
+- **案A（後任用の新しい口座を作り、bootstrap再開の作業枠で準備する）**: §5.3〜§5.5と同じ経路を使う。
+  1. 通常運用中に、OIDC管理者（C〜E）のsessionで後任の口座（例 `bg-third`、role `管理者`）を作成する。初期パスワードはSecurityが生成して後任だけに渡す。続けて後任のIdPの `sub` で外部identity linkを登録・承認する（§5.3の4と同じAPI）。
+  2. §5.7の承認flowでbootstrapを再開する（`BREAK_GLASS_USERNAMES` を空にする）。
+  3. 後任がOIDCでログインし、`/mfa/setup` でTOTPを登録し、local passwordを本人が変更する（§5.4の1・2）。
+  4. OIDC管理者のsessionで旧Bの口座を無効化し、`POST /api/security/mfa/<旧Bのsys_user.id>/reset` でTOTPとsessionを解除する。旧Bの外部identity linkは、DBAが上の `review_status = 'QUARANTINED'` のSQLで隔離する。
+  5. Securityが§5.4の3のSQLで、TOTPの登録者が `admin` と後任だけになったことを確かめる。
+  6. `SECURITY_BOOTSTRAP_*` を外し、`BREAK_GLASS_USERNAMES=admin,bg-third`（§5.5の1のとおりDBの表記どおり）で再起動し、§5.5の3の完全な起動検査が通ることを確かめる。
+  7. Securityが§5.6の監査SQLで、期間中の操作がticketの範囲と一致することを確かめてticketを閉じる。
+- **案B（同じ口座を後任へ引き継ぐ）**: 上の「bootstrap終了後にbreak-glass管理者がTOTPとrecovery codeを両方失った場合」と同じ経路を使う。
+  1. OIDC管理者のsessionで、ユーザー管理画面から旧Bの口座（`bg-second`）に新しいパスワード（Securityが生成し後任だけに渡す）を設定し、`POST /api/security/mfa/<id>/reset` でTOTPとsessionを解除する。
+  2. 同じ作業枠でbreak-glass incident（起票C・承認D/E）を有効化し、後任がbreak-glass loginして `/mfa/setup` で登録し、local passwordを本人が変更する。resetから再登録までの間に再起動すると、起動時検査（MFA enrollment完了済み）で止まる。
+  3. 注意: incidentの起票はIdP障害の確認（`idpOutageConfirmed`）を必須とする。IdP障害が無い交代でこの経路を使うのは手続上の例外であり、Owner/Securityが事前に認め、incidentの理由欄にその旨を記す。旧Bの外部identity linkが残る場合は案Aの4と同じく隔離する。
 
 ### 5.9 break-glass sessionでの初回パスワード変更
 

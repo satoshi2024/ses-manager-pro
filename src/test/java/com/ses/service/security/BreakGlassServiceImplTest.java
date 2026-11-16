@@ -46,6 +46,7 @@ class BreakGlassServiceImplTest {
     private final OidcSecurityProperties properties = new OidcSecurityProperties();
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC);
     private BreakGlassServiceImpl service;
+    private final java.util.List<SysUser> storedUsers = new java.util.ArrayList<>();
 
     @AfterEach
     void tearDown() {
@@ -62,7 +63,11 @@ class BreakGlassServiceImplTest {
         when(userMapper.selectById(any())).thenAnswer(invocation -> admin(invocation.getArgument(0)));
         when(userMapper.selectByIdAndTenant(any(), eq("default")))
                 .thenAnswer(invocation -> admin(invocation.getArgument(0)));
-        when(userMapper.selectByUsername(any())).thenReturn(admin(1L));
+        storedUsers.clear();
+        storedUsers.add(namedAdmin(1L, "BG-01"));
+        storedUsers.add(namedAdmin(2L, "BG-02"));
+        // 名前ごとに行を解決する（全ての名前へ同じ口座を返すと、解決した行が別口座の誤りを検出できない）
+        when(userMapper.selectByUsername(any())).thenAnswer(invocation -> storedUser(invocation.getArgument(0)));
         service = new BreakGlassServiceImpl(incidentMapper, userMapper, auditMapper,
                 sessionService, notificationService, properties, clock);
     }
@@ -84,6 +89,62 @@ class BreakGlassServiceImplTest {
                 eq("緊急アクセスが有効になりました"), any(), eq("/audit-log"), any(), eq("audit-log"));
         when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(incident);
         assertTrue(service.isLoginAllowed("BG-01"));
+    }
+
+    @Test
+    void 設定usernameの大文字小文字違いもDBの照合順序と同じくbreak_glassとして判定する() {
+        // sys_user の照合順序は大文字小文字を区別しないため、表記違いも同じ行へ解決される（X3-2）
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertTrue(service.isLoginAllowed("bg-01"));
+        assertTrue(service.isLoginAllowed("Bg-02 "), "末尾の空白は DB でも同じ行");
+        assertFalse(service.isLoginAllowed("bg-03"), "設定に無い名前は従来どおり拒否する");
+
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(null);
+        assertFalse(service.isLoginAllowed("bg-01"), "表記違いでもactiveなincidentが無ければ拒否する");
+    }
+
+    @Test
+    void 先頭に空白がある別口座の行はbreak_glassとして扱わない() {
+        // DOC-FINAL delta review P3-a: MySQL では先頭の空白に意味があり、" BG-01" は BG-01 と別の行になり得る。
+        // 入力名は trim して設定と比べるが、解決した行の username は前後空白を除かずに比べる。
+        storedUsers.add(namedAdmin(5L, " BG-01"));
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertFalse(service.isLoginAllowed(" BG-01"), "先頭に空白がある別口座へ local login を許さない");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertFalse(service.bindSession(request, " BG-01"), "先頭に空白がある別口座へ incident を束縛しない");
+        assertTrue(request.getSession(false) == null);
+        assertTrue(service.isLoginAllowed("BG-01"), "設定どおりの口座は従来どおり");
+    }
+
+    @Test
+    void 入力名が設定と一致しても解決した行が名前の近い別口座ならbreak_glassとして扱わない() {
+        // DOC-FINAL review P2-1: 照合順序が入力名を設定とは別の口座（ここでは全角の名前の口座）へ解決した場合
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+        when(userMapper.selectByUsername("BG-02")).thenReturn(namedAdmin(7L, "ＢＧ-02"));
+
+        assertFalse(service.isLoginAllowed("BG-02"), "設定の口座ではない行へ local login を許さない");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertFalse(service.bindSession(request, "BG-02"), "設定の口座ではない行へ incident を束縛しない");
+        assertTrue(request.getSession(false) == null);
+        assertTrue(service.isLoginAllowed("BG-01"), "設定どおりの口座は従来どおり");
+    }
+
+    @Test
+    void 無点のıを含む別口座はbreak_glassのadminとして扱わない() {
+        // DOC-FINAL review P2-1: equalsIgnoreCase は ı（U+0131）を I へ折り畳むが、DB では admin と別の行になる
+        properties.setBreakGlassUsernames(Set.of("admin", "BG-02"));
+        storedUsers.add(namedAdmin(8L, "admin"));
+        storedUsers.add(namedAdmin(9L, "admın"));
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertTrue(service.isLoginAllowed("ADMIN"), "ASCII の表記違いは同じ口座");
+        assertFalse(service.isLoginAllowed("admın"));
+        assertFalse(service.isLoginAllowed("ADMİN"), "点付きの İ も admin として扱わない（拒否側）");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertTrue(service.bindSession(request, "admın"), "break-glass でない口座は従来どおり束縛の対象外");
+        assertTrue(request.getSession(false) == null, "incident を束縛しない");
     }
 
     @Test
@@ -430,6 +491,32 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         request.setAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE, action);
         return request;
+    }
+
+    /**
+     * {@code sys_user}（{@code utf8mb4_unicode_ci}、PAD SPACE）の username 解決を模す。ASCII の大文字小文字の違いと末尾の
+     * 空白は同じ行になり、先頭の空白には意味がある（{@code " BG-01"} は {@code BG-01} と別の行）。無点の ı を含む名前も
+     * 別の行になる（DOC-FINAL delta review P3-e）。
+     */
+    private SysUser storedUser(String username) {
+        if (username == null) {
+            return null;
+        }
+        String key = collationKey(username);
+        return storedUsers.stream()
+                .filter(row -> collationKey(row.getUsername()).equals(key))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String collationKey(String value) {
+        return value.replaceAll(" +$", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private SysUser namedAdmin(Long id, String username) {
+        SysUser user = admin(id);
+        user.setUsername(username);
+        return user;
     }
 
     private SysUser admin(Long id) {

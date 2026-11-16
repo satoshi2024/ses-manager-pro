@@ -44,6 +44,12 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     private static final String DEFAULT_SESSION_KEY = "dev-only-change-this-session-key";
     private static final String ADMIN_ROLE = "管理者";
     private static final String OIDC_PROVIDER_TYPE = "OIDC";
+    /**
+     * break-glass username に許す文字（ASCII の英数字と {@code . _ -}）。実行時の判定は ASCII の大文字小文字だけを
+     * 同一視するため、ASCII 以外の名前は DB の照合順序（UCA 4.0.0）との細かな差に依存してしまう（DOC-FINAL delta review P3-b）。
+     */
+    private static final java.util.regex.Pattern BREAK_GLASS_USERNAME_CHARS =
+            java.util.regex.Pattern.compile("[A-Za-z0-9._-]+");
 
     /**
      * break-glass incidentの起票（1名）と、起票者以外の互いに異なる承認（2名）に要る管理者の人数
@@ -327,10 +333,15 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         String tenantId = StringUtils.hasText(oidcProperties.getTenantId())
                 ? oidcProperties.getTenantId().trim() : "default";
         for (String username : usernames) {
+            if (!BREAK_GLASS_USERNAME_CHARS.matcher(username).matches()) {
+                errors.add("break-glass usernameはASCIIの英数字と「.」「_」「-」だけにしてください: " + username);
+                continue;
+            }
             SysUser user = sysUserMapper.selectByUsername(username);
-            // selectByUsernameは大文字小文字を区別しないcollationで一致するが、実行時のbreak-glass判定
-            // （OidcSecurityProperties.isBreakGlassUsername）は区別する。表記が違うまま通すと、break-glassが
-            // 使えない、または通常管理者sessionになるため、DBのusernameと完全一致を要求する（D1 review N-1）。
+            // selectByUsernameは大文字小文字を区別しないcollationで一致し、実行時のbreak-glass判定
+            // （OidcSecurityProperties.isBreakGlassUsername）もASCIIの大文字小文字は区別しない（X3-2）。それでも設定値はDBのusernameとの
+            // 完全一致を要求する（D1 review N-1）。validateOidcAdministratorsはDBの表記の集合からbreak-glass名を
+            // 区別ありで除くため、表記違いの設定ではOIDCのlinkを持つbreak-glass口座（deploy-runbook §5.4のB）を数え、人数を多く見積もる。
             if (user == null || !username.equals(user.getUsername())
                     || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
                 errors.add("break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: "

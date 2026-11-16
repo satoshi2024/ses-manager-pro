@@ -131,7 +131,7 @@
 - MySQL修復はclean既存tree `C:\work\ses-nf02-remediation` を再利用し、base19bdbから
   `codex/snf-prod-mysql1023-remediation` を作成した。旧branch/target/user変更は削除しない。
   `5bdc23e5` は4classのlatest184 assertion修復、`00d1383b/3dd2ea36` はPrivacy診断。
-  元の同時CAS時序を保ち、別の双barrier caseと安全reason表示を追加した。Astraが限定CODE受理、固定3ddの5class実測中。
+  元の同時CASの実行順序を保ち、別の双barrier caseと安全reason表示を追加した。Astraが限定CODE受理、固定3ddの5class実測中。
   INSERT IGNOREからFOR UPDATEへのS→X lock昇格は候補原因であり、この時点で元失敗の確定根因とは呼ばない。
 - NF08 source `bda9fa984d507b251cd0abc7ca214d73c70009aa` はB2b限定CODE PASS。
   hostname false拒否、入力上限をclone前に検証、同じprivate request snapshotの送信/hash、outer/inner境界を補強した。
@@ -297,7 +297,7 @@
   `15907043..ae17928` の6commitをcontrol `ca02c84b` へ統合し、46証拠fileをhash一致で保存した。
   synthetic usage receiptの算術・card binding・拒否契約に限る。実usage認証/価格/process間冪等の証明ではない。
 - NF08 B1 fixed `a82ded74` は限定CODE PASS。NOT_SENT/UNKNOWN metadata、tenant/CAS、実Spring transaction、
-  stale時に未保存summaryを返さない経路を対象とし、定向fast・MySQLを待つ。ACTUAL/UPPER信頼経路は含まない。
+  stale時に未保存summaryを返さない経路を対象とし、対象限定fast・MySQLを待つ。ACTUAL/UPPER信頼経路は含まない。
   commit故障注入や二tenant実行の二行不変まで試験済みとはしない。
 - NF06 source競合証拠の初修復 `ba7e1f61` は固定索引仮定が残りCODE FAIL。
   `e12d43761e99e71072565f0db70527d5756f1c61` はmutation開始後の実wait graphを使い、接続・schema・表・
@@ -341,7 +341,7 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
 - **NO-GO**。control固定 `172a363d99c8920fcb55c0ca4ac7d3384759602c` の残留fast fixtureは
   **3 class、11/0/0/0**（IntegrationHub3、撤権反復2、隔離監査6）。UTC06:12:48.7870050〜06:14:49.3788411。
   log SHA-256 `519B35CE56392ABDEA96ED07F8290AFE94F5E108D6387BB9FEB0B111727131F0`、6 report hash一致。
-  これは定向gateで、全fast第6回FAILをPASSへ変更しない。
+  これは対象限定gateで、全fast第6回FAILをPASSへ変更しない。
 - NF06 F1b-1旧固定 `b766e3d1` のMySQLは **44/0/1/0、FAIL**。
   UTC06:08:52.9888783〜06:11:37.3274265、log
   `FC6EE4989B689BC6F380FB950C6FA352F4EDCEDCE8467F9D93AF870AEB801A7F`。
@@ -398,8 +398,8 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
   `0C2B7A2B2FAC7178BA5D025434749A929475A030867A49F4E51ADE8E31D981E8`。
   H2再初期化の連鎖errorは本runでは再現せず、IntegrationHubのreadiness前提2件と撤権poll状態1件が残った。
   AstraはFAIL証拠として受理した。Maven集計は4209件、XML集計は4210件であり、offboardingの反復実行
-  Run 2: PASSを伴う集計口径差を保持する。両方とも2 failure/1 error/0 skippedで、PASSではない。
-- H2修復source `fd628f6e` は定向8 class **27/0/0/0**、Astra限定CODE/証拠PASS。
+  Run 2: PASSを伴う集計基準の差を保持する。両方とも2 failure/1 error/0 skippedで、PASSではない。
+- H2修復source `fd628f6e` は対象限定8 class **27/0/0/0**、Astra限定CODE/証拠PASS。
   UTC05:31:43.3195066〜05:34:40.6311273、log
   `F1F000175900B9D0D2D7E2FD01FBEE3379336635779BF92FB22316145C68B400`。
   4 commitをcontrol `e09595c8` まで統合した。途中のcompile FAILも保存した。
@@ -437,7 +437,7 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
   証拠: `verification-evidence/20261016-control-performance-01/`。log SHA-256
   `356E56D42A61D242AA9532649308CBA98CB2BC478E9AC8B549F7EA2D2E5DC187`、2 report hash一致。
   この1件の性能回帰成功は全fastの失敗やproduction性能・容量試験の代替ではない。
-- H2修復candidate `a8045dea` の定向試験は **8 class、27/2/1/0、FAIL**。
+- H2修復candidate `a8045dea` の対象限定試験は **8 class、27/2/1/0、FAIL**。
   UTC2026-10-13T06:13:29.0946214Z〜06:15:42.4631753Z、起止SHA一致・clean、exit1。
   `verification-evidence/20261013-fast-v184-isolation-01/` の24 fileをhash一致で保存した。
   log SHA-256 `C392122B1911C6A123C6CA51F8D52604B5DAF08B75E846451005B1AD598E4C2C`。
@@ -968,7 +968,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - NF04 fixture修復 source `f919c0bc746a7aeb3c4ad554767c8ca5290f764c`、verify `0226ac542025144131a4024383cdd1cbfc0ee49a` の全browser02は
   **11 class、16/1/0/0、FAIL**。UTC04:44:09.9629886〜04:47:05.1993785、exit1、起止SHA一致・clean。
   log SHA-256 `F42FB6718494FCDAF4DC88B6AA5ACAF797FC0367BA79264A6E1F0C3BFC833AC2`。raw30 fileをhash一致保存した。
-  PWA 2 caseは合格したが、1on1業務400が残る。独立sales・精確関連だけで根本原因が解決したとは報告しない。
+  PWA 2 caseは合格したが、1on1業務400が残る。独立sales・正確性関連だけで根本原因が解決したとは報告しない。
   source `802964ac8bd0bd9e7b51dfdd73cb59a18e0a4d12` でtest-only resolverによる安全なmessageKey/status診断を追加し、実HTTPの通常例外処理を維持して再実行する。
 - NF07 D修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はAstra限定PLAN PASS。
   D1は永続partition fenceを先行実装する。D2の独立live witness読取/replay/final reread、全復元、production解除は未実装である。
@@ -1036,7 +1036,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   constructor/計数を先行修復し、総deadline/JDBC待機上限・追加競合matrix・復元ACL・実restartを未完gateとして残す。
 - NF08 C1候補 `df0aa935` は独立ReviewでdispatchのNOT_SENTへの逆行、未信頼public DTOからのUPPER_BOUND化、
   headers受領後の失敗でdispatch証拠欠落を指摘された。実production deny-allは維持され、外送迂回のfindingではない。
-  C1修復後に定向検証する。ACTUAL/rate card、outer usageとinner失敗の分離、完全な費用/失敗matrixはC2の未完項目である。
+  C1修復後に対象限定検証する。ACTUAL/rate card、outer usageとinner失敗の分離、完全な費用/失敗matrixはC2の未完項目である。
 
 ### 2026-10-13 metadata認可ロックの限定実証
 
@@ -1064,9 +1064,9 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   UTC05:42:28.4528486〜05:45:25.2562488、exit0、起止SHA一致・clean。
   log SHA-256 `BDA6A100D56917113EFA63B4981C4923347AA7C52E10885F18D377DA13053171`。
   Astraは22 report hash/時刻、統合差分、common.js非混入を独立照合し、ローカル統合の限定CODE・証拠PASS。
-  同じcontrolのNF04 fast定向は **13 class、85/0/0/0**、UTC05:45:41.8642789〜05:47:44.5791058、
+  同じcontrolのNF04 fastの対象限定実行は **13 class、85/0/0/0**、UTC05:45:41.8642789〜05:47:44.5791058、
   log SHA-256 `CBC4D46CCC44E8D1EF30AEDE25F45BEC4149DB8DA2A8B364D87E90AD68AAF1A8`。
-  Astraが26 report hash・XML・実行時刻を独立照合し、定向fastの証拠も限定受理した。最新control全fast/全MySQL/performance/backupやproduction多browserの証拠には拡張しない。
+  Astraが26 report hash・XML・実行時刻を独立照合し、対象限定fastの証拠も限定受理した。最新control全fast/全MySQL/performance/backupやproduction多browserの証拠には拡張しない。
 - NF07 D2a fixed `d83266af6a1e3044b5ab76ce120272c6a1f1c6a0` は実MySQL **26/0/0/0**。
   UTC05:31:40.4406508〜05:34:42.3743662、exit0、起止SHA一致・clean。
   log SHA-256 `0AC01EFC4F4E086057D057872391DECCB2547EE896ED31F3A0DA68F4C3E846AE`。
@@ -1080,7 +1080,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   UTC05:38:45.8608091〜05:40:07.4240290、log SHA-256 `FC6632A8151B0C012C37D5D857FA994941951A8CD71F8417403D30ACCE46D7AB`。
   completeSummaryAttemptの条件式でnull費用が自動unboxされNPEとなった。raw44 fileを保存し、
   `3d95d3f5` でenum switchによるnullable代入と旧actual/upper metadata消去・回帰を追加。Astra静的受理、再試験待ち。
-  C2のACTUAL/rate-card・outer usage/inner失敗の分離は未実装であり、C1の定向成功で完成としない。
+  C2のACTUAL/rate-card・outer usage/inner失敗の分離は未実装であり、C1の対象限定実行の成功で完成としない。
 - NF06実service撤権matrix候補 `a498b162/000b2574` はrace-matrix01で **compile FAIL・XMLなし**。
   UTC05:41:07.1109752〜05:41:44.2104230、log SHA-256 `0235FCD764BBBBA7E02DBE152334417A2B26BCFA261FDEB9A76C46423490FF95`。
   test method識別子内の空白を `1daff170` で修正し、単一file javacはexit0。raw6 fileを保存した。23件候補の実MySQL再試験前にPASSとしない。

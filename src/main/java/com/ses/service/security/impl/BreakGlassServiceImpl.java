@@ -66,7 +66,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
             return false;
         }
         try {
-            SysUser user = sysUserMapper.selectByUsername(username);
+            SysUser user = resolveBreakGlassUser(username);
             String tenantId = authenticatedTenant(user);
             return tenantId != null && oidcTenantMatches(tenantId)
                     && incidentMapper.selectActive(tenantId, LocalDateTime.now(clock)) != null;
@@ -147,7 +147,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!properties.isBreakGlassUsername(username)) {
             return true;
         }
-        SysUser user = sysUserMapper.selectByUsername(username);
+        SysUser user = resolveBreakGlassUser(username);
         String tenantId = authenticatedTenant(user);
         if (tenantId == null || !oidcTenantMatches(tenantId)) {
             return false;
@@ -369,6 +369,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
             return null;
         }
         return authenticatedTenant(loginUser.getSysUser());
+    }
+
+    /**
+     * 入力名が解決した {@code sys_user} の行。行の username も設定の break-glass 名と同じ規則で一致する場合だけ返し、
+     * それ以外は {@code null}（DOC-FINAL review P2-1）。照合順序が入力名を設定とは別の口座へ解決した場合に、その口座を
+     * break-glass として扱わないため（{@code OidcSecurityProperties#isBreakGlassUsername} の比較は照合順序と等価ではない）。
+     * 行の username は前後空白を除かずに比べる（先頭の空白に意味がある別の行を設定の口座とみなさない。delta review P3-a）。
+     */
+    private SysUser resolveBreakGlassUser(String username) {
+        SysUser user = sysUserMapper.selectByUsername(username);
+        if (user == null || !properties.isBreakGlassStoredUsername(user.getUsername())) {
+            return null;
+        }
+        return user;
     }
 
     private String authenticatedTenant(SysUser user) {

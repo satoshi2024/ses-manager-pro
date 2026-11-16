@@ -3,17 +3,17 @@
 本番 ECS/Fargate 向けアプリコンテナイメージの**ローカル**ビルド手順。
 **AWS アカウントなし — ECR push / ECS deploy / AWS API は OUT-OF-SCOPE。**
 
-## Digest 语义
+## Digest の意味
 
-| 字段 | 含义 |
+| 項目 | 意味 |
 |---|---|
-| `localImageId` | 本地 `docker build` 得到的 **LOCAL_IMAGE_ID**（`docker inspect` Id） |
-| `baseImageDigest` | 基础 JRE 镜像 digest（Dockerfile `FROM @sha256:…`） |
-| `jarSha256` | 打入镜像的 JAR SHA256 |
-| `gitRevision` | 构建时 git HEAD |
-| `registryDigest` | **ABSENT** — 不得将 `localImageId` 当作 ECR digest 或 `IMAGE_DIGEST` |
+| `localImageId` | ローカルの `docker build` で得た **LOCAL_IMAGE_ID**（`docker inspect` の Id） |
+| `baseImageDigest` | ベース JRE イメージの digest（Dockerfile の `FROM @sha256:…`） |
+| `jarSha256` | イメージに含めた JAR の SHA256 |
+| `gitRevision` | ビルド時の git HEAD |
+| `registryDigest` | **ABSENT** — `localImageId` を ECR digest や `IMAGE_DIGEST` として扱ってはならない |
 
-`task-definition.prod.json` 保持 `...@sha256:IMAGE_DIGEST` 占位。
+`task-definition.prod.json` は `...@sha256:IMAGE_DIGEST` のプレースホルダーのままにする。
 
 ## Probe 規約
 

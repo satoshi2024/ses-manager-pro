@@ -1,6 +1,6 @@
 # 本番配備runbookへの追記候補（W3-07 HYG1）
 
-- 状態: **草案（DOC-FINALで `deploy-runbook.md` へ統合する）**。本書は手順の正本ではない。正本は `deploy-runbook.md` で、本書の内容は統合されるまで運用手順として扱わない。
+- 状態: **統合済み（DOC-FINAL。§1〜§5 は `deploy-runbook.md` §5.0・§5.5・§5.6・§5.7・§5.8 へ、§6 の語は同書へ反映した）**。本書は作成時の記録として残し、手順の正本は `deploy-runbook.md` とする。§1 の「理由」にある実行時の判定（大文字小文字を区別する）は、DOC-FINAL で `OidcSecurityProperties.isBreakGlassUsername` を ASCII の大文字小文字だけを区別しない比較（両辺 `toLowerCase(Locale.ROOT)`。`equalsIgnoreCase` は無点の ı を I と同一視するため使わない）にし、`BreakGlassServiceImpl` が解決した行の username も同じ規則で設定値と一致することを要求するようにした。起動時検査の完全一致の要求は変えていない。
 - 出典: D1独立レビュー（`637a9c6a`）のN-2・N-4・N-9・N-11（いずれもP3、本番投入前にrunbookへ補うよう勧められた項目）。あわせて、同レビューN-1を本batchでコード修正したことに伴う運用上の注意を§1に記す。
 - 節番号（§5.5等）は、本書作成時点の `deploy-runbook.md` のもの。統合時に番号がずれていれば読み替える。
 - `deploy-runbook.md` の版数・件数行はDDL laneが保持するため、本batchでは同書を変更していない。
@@ -96,7 +96,7 @@
 
 ## 6. DOC-FINALへの申し送り（`deploy-runbook.md` 内の中国語由来の語）
 
-`deploy-runbook.md` は本batchで変更できないため、統合時に次の語を日本語の表現へ改めることを提案する（X3-3と同じ方針）。
+`deploy-runbook.md` は本batchで変更できないため、統合時に次の語を日本語の表現へ改めることを提案する（X3-3と同じ方針）。DOC-FINAL で「集成候補」「時区」「改密」を改めた。決定ID「部署-1〜部署-3」は `pom.xml`・`ProductionFlywayJobConfigurationTest` の Javadoc・決定記録が同じIDで参照しているため変えていない。
 
 | 現在の語 | 箇所（本書作成時点の行） | 改め方の例 |
 |---|---|---|

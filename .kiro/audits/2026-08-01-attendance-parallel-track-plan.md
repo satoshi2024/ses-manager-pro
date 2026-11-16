@@ -227,7 +227,7 @@ A1〜A3は相互に重複しないため**同時並行可**。
 5. **禁触ファイル**: `SecurityConfig.java` / `BaseEntity.java` / `ContractServiceImpl.java` /
    `InvoiceServiceImpl.java` / `WorkRecordServiceImpl.java` / `m_menu`関連migration /
    `layout/sidebar.html` / `layout/base.html`。
-6. **test方針**: 通常taskはL0〜L3（定向test＋直接回帰）。全量は各トラックの最終PRで1回。
+6. **test方針**: 通常taskはL0〜L3（対象限定テスト＋直接回帰）。全量は各トラックの最終PRで1回。
    `test-execution-policy-s03-s17.md` に準じる。
 
 ---
@@ -334,7 +334,7 @@ branchは origin/main から `claude/attendance-track-a2` を切ってくださ�
 - 対象の抽出は既存の勤怠グリッドと同じ条件に揃える（契約期間内・status が 稼動中/終了）。
   勤怠レコードが存在しない契約＝未提出であることに注意する。
 
-テスト要件: L1〜L2。generatorの定向test（対象抽出、dedupe_keyの冪等、未紐付け時に配信しないこと）
+テスト要件: L1〜L2。generatorの対象限定テスト（対象抽出、dedupe_keyの冪等、未紐付け時に配信しないこと）
 ＋ MessageBundleConsistencyTest。
 
 Demo: 未提出の要員が居る状態で generateAll() を実行し、本人にだけ通知が出ること、
@@ -390,7 +390,7 @@ S09 には「勤怠確定→検収差戻し→再提出→検収済」があり�
   組織scope（OrganizationScopeService）の絞り込みを既存経路と同一に保つこと。
 - 一覧系のためページサイズは PageUtils.safePage を通す。
 
-テスト要件: L1〜L2。集計の定向test＋既存 WorkRecordServiceImplTest の回帰が無傷であること。
+テスト要件: L1〜L2。集計の対象限定テスト＋既存 WorkRecordServiceImplTest の回帰が無傷であること。
 
 Demo: 提出済みの勤怠がある状態で /work-record を開き、件数と滞留日数が出ること。
 承認・差戻しの既存動作が変わっていないこと。

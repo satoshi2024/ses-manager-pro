@@ -77,6 +77,19 @@ class MfaServiceImplTest {
     }
 
     @Test
+    void 無点のıを含む別口座はbreakGlassとしてMFA登録の対象にしない() {
+        // DOC-FINAL delta review P3-c: SecuritySessionApiController の TOTP 登録は isRequired を許可条件にする。
+        // principal は DB の表記なので、名前の近い別口座 admın を break-glass の admin と同一視しない。
+        UsernamePasswordAuthenticationToken lookalike =
+                new UsernamePasswordAuthenticationToken("admın", "n/a", List.of());
+        UsernamePasswordAuthenticationToken upperCase =
+                new UsernamePasswordAuthenticationToken("ADMIN", "n/a", List.of());
+
+        assertFalse(service.isRequired(lookalike));
+        assertTrue(service.isRequired(upperCase), "ASCII の大文字小文字の違いは同じ口座");
+    }
+
+    @Test
     void setup_enableでsecretを暗号化保存しrecoveryCodeを一度だけ発行する() {
         SysUser user = new SysUser();
         user.setId(1L);

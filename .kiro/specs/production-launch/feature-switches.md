@@ -102,7 +102,7 @@
 | `PRIVACY_DSAR_DEADLINE_WARNING_DAYS` | 7 | 期限の何日前から privacy-admin へ通知するか（運用上の値。法的な期限ではない） | 運用者が 1〜90 の範囲で決める（範囲外は丸める） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
-| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（主控の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
+| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（統括の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
 | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
 
 - 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=OFF`、`NF03=ON, NF03_CERTIFICATION_PII=OFF` となることを確認する（NF-02/NF-03をONにした場合）。
@@ -131,7 +131,7 @@
 
 ### 4.3 NF-02
 
-- **ON前の必須確認（2026-11-14 DG-02-B3実装方針）**: 当年度を含む全社共通カレンダーを事前登録する。法人既定が無い場合のfallbackと週末出勤日・祝日を確認し、missing_calendar WARN（tenant・法人ID・問い合わせID・相関ID）が無いことを監視する。正式なDG-02署名はCS Ownerが行う。
+- **ON前の必須確認（2026-11-14 DG-02-B3実装方針）**: 当年度を含む全社共通カレンダーを事前登録する。法人既定が無い場合のfallbackと週末出勤日・祝日を確認し（法人既定を登録した法人は、その有効期間に全社共通を参照しないため、法人既定に祝日・会社休日が含まれていることも確認する）、missing_calendar WARN（tenant・法人ID・問い合わせID・相関ID）が無いことを監視する。正式なDG-02署名はCS Ownerが行う。
 
 - ON期間中に作成された問い合わせ添付は文書台帳に登録済みのため、OFF中も既存の文書API（顧客DataScopeを持つ利用者）から参照できる。権限は変わらない（新たな公開にはならない）。
 - 添付補償の再試行（`RETRY` 台帳）はOFF中は止まり、ON復帰後の次回実行で再開する。台帳は削除されない。添付ファイル自体は文書台帳・file security metadataに登録済みのため、cleanupで削除されない。
@@ -347,6 +347,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 - 署名の参照を `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（設定キー `app.features.nf01-dual-confirmation.privacy-sign-off-ref`）へ設定する。値は英数字で始まる4〜128文字（英数字と `._:/#-`）で**英字と数字の両方を含む**review文書ID・ticket番号等（例: `PRIV-REVIEW-2026-11-20`）。placeholderとみなす値は受け付けない: `todo`・`tbd`・`xxx`・`placeholder`・`changeme`（`change-me`・`change_me`）・`dummy`・`fixme`・`sample`・`example`・`unsigned`・`replace`・`your-` を一部にでも含む値、`test`・`pending`・`tmp`・`temp`・`none`・`null`・`n/a`・`dev`・`local` で始まる値（大文字小文字を区別しない。例: `TODO-1`・`TBD2026`・`test-ref-1` は不可）。
 - prod profileでは `LifecycleDualConfirmationReleaseGate` が、子スイッチの実効値がONなのに参照が無い・形式不正・placeholderの場合に起動を止める（固定コード `NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING`）。参照値は秘密情報ではないため、起動ログ `[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef=...` に出す（監査で署名と配備を突き合わせる）。
 - gateは「署名を記録したこと」を強制するだけで、署名の内容は検証しない。参照の値は署名者（Privacy）が発行したものを配備担当が転記する。
+- ONの前に、NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録（V196 に無く、実装が要る）と、browser の手動確認9項目（`deploy-runbook.md` §1.7.1）を済ませる。ONの前提の一覧は同 §1.7。
 
 #### 4.9.3 ONにする手順
 

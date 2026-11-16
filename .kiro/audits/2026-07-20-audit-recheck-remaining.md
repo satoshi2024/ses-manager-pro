@@ -93,7 +93,7 @@
 - 対象ファイル／行:
   - `src/main/resources/messages_en.properties:494-495` — `dashboard.chart.sales_label=Revenue (10k JPY)` / `profit_label=Profit (10k JPY)`
   - `src/main/resources/messages_en.properties:676-679` — `project.modal.price_min=Min Price (10k JPY)` / `price_max=Max Price (10k JPY)`（placeholderは `600000`/`800000` の円生値）
-  - `src/main/resources/messages_zh_CN.properties:487-488, 669-672` — `销售额 (万日元)` 等
+  - `src/main/resources/messages_zh_CN.properties:487-488, 669-672` — `\u9500\u552e\u989d (\u4e07\u65e5\u5143)` 等
   - `src/main/resources/messages_ko.properties:487-488, 669-672` — `매출 (만 엔)` 等
 - 現状の証拠: 日本語 `messages.properties:498-499, 680-683` は「(円)」へ修正済み。チャート・保存値は円の生値のため、en/zh/ko ロケールでは監査時と同じ1万倍誤読がそのまま残る。
 - 対応方法: 3ロケールのラベルを円建て表記（`JPY` / `日元` / `엔`）へ修正する。単位換算はしない（値は円のまま）。同時に、`grep -rn "10k\|万日元\|만 엔\|만엔" src/main/resources/messages_*.properties` で他の金額キー（契約・見積・ダッシュボード関連）に同種の残存がないか横断確認する。

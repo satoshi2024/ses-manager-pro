@@ -34,7 +34,7 @@ public class LoginFailureHandler extends SimpleUrlAuthenticationFailureHandler {
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
                                         AuthenticationException exception) throws IOException, ServletException {
-        String username = request.getParameter("username");
+        String username = authenticatedUsername(request.getParameter("username"));
         boolean locked = exception instanceof LockedException;
         if (auditLogService != null) {
             String applicationCode = locked ? "LOGIN_LOCKED" : "LOGIN_FAILURE";
@@ -58,5 +58,16 @@ public class LoginFailureHandler extends SimpleUrlAuthenticationFailureHandler {
         }
         setDefaultFailureUrl(target);
         super.onAuthenticationFailure(request, response, exception);
+    }
+
+    /**
+     * 認証に使われた username。Spring Security の {@code UsernamePasswordAuthenticationFilter} は入力値を
+     * {@link String#trim()} してから認証するため、失敗の計数・bootstrap の判定・監査も同じ値で行う
+     * （DOC-FINAL delta review N-1）。入力値のままだと、先頭に空白やタブを付けた {@code " admin"} で認証は
+     * {@code admin} のパスワードを照合する一方、計数は別の名前を探して空振りし（MySQL では先頭の空白に意味がある）、
+     * lock されずに推測を続けられた。bootstrap の失敗も {@code LOGIN_FAILURE} に分類され、bootstrap の警報から漏れた。
+     */
+    private static String authenticatedUsername(String rawUsername) {
+        return rawUsername == null ? null : rawUsername.trim();
     }
 }
