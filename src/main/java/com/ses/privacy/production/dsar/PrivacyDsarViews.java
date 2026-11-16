@@ -110,7 +110,9 @@ public final class PrivacyDsarViews {
      *                              review P3-4）
      * @param manualResolution      開示以外の請求の手動対応の完了の記録（review P2-2。無ければ null）
      * @param actions               この区画で行える操作（PREVIEW / REVIEW_DRAFT / APPROVE / DOWNLOAD / RECORD_DELIVERY /
-     *                              RECORD_MANUAL_RESOLUTION）
+     *                              RECORD_MANUAL_RESOLUTION。RECORD_DELIVERY は承認した package を取得した後だけ）
+     * @param holdConflictResolutions 本人が HELD のとき、記録すると警告になる手動対応の結果コード（この請求の種別に当てはまる
+     *                              DELETED / RESTRICTED。HELD でなければ空。記録は拒否しない。HYG-FINAL P3-F）
      */
     public record DeliverySection(String status, long rowVersion, boolean exportSupported, boolean previewReady,
                                   boolean packageRuleConfigured, boolean decisionChanged, HoldStatus hold,
@@ -118,11 +120,14 @@ public final class PrivacyDsarViews {
                                   String approvedAt, String redactionReason, Integer autoReleasedCount,
                                   List<ProviderCount> providers, List<ManualReviewItem> manualReview,
                                   DeliveryRecord delivery, boolean approvedPackageDownloaded,
-                                  ManualResolutionRecord manualResolution, List<String> actions) {
+                                  ManualResolutionRecord manualResolution, List<String> actions,
+                                  List<String> holdConflictResolutions) {
         public DeliverySection {
             providers = providers == null ? List.of() : List.copyOf(providers);
             manualReview = manualReview == null ? List.of() : List.copyOf(manualReview);
             actions = actions == null ? List.of() : List.copyOf(actions);
+            holdConflictResolutions = holdConflictResolutions == null ? List.of()
+                    : List.copyOf(holdConflictResolutions);
         }
     }
 
@@ -139,8 +144,13 @@ public final class PrivacyDsarViews {
     public record ProviderCount(String providerId, int recordCount) {
     }
 
-    /** 開示以外の請求の手動対応の完了の記録（結果のコード・証跡の参照・記録日時）。 */
-    public record ManualResolutionRecord(String resolutionCode, String evidenceRef, String resolvedAt) {
+    /**
+     * 開示以外の請求の手動対応の完了の記録（結果のコード・証跡の参照・記録日時）。
+     *
+     * @param holdConflict 記録した結果が削除・利用停止で、本人が現在 HELD か（警告の表示だけ。HYG-FINAL P3-F）
+     */
+    public record ManualResolutionRecord(String resolutionCode, String evidenceRef, String resolvedAt,
+                                         boolean holdConflict) {
     }
 
     /**

@@ -493,7 +493,11 @@ public class FileScopeValidationService {
      * （{@code GET /api/privacy/dsar/{id}/package/download}）だけに限定する（production-bridge-phased-plan.md §3.5.2 P2-5）。
      * 状態（PURGED を含む）・tenant・role・group に関係なく一律に拒否する。保存名は大文字小文字・末尾の {@code .}／空白の違いで
      * 同じ実体を指し得る（照合順序・file system による）ため、正規化した名前でも照合する（package の保存名は小文字の16進と
-     * 小文字の拡張子で作られる）。mapper が無い・照会に失敗した場合も拒否する（fail-closed）。
+     * 小文字の拡張子で作られる）。mapper が無い・tenant が無い・照会に失敗した場合も拒否する（fail-closed）。
+     *
+     * <p>package の行は全 tenant で照合し、PRIVACY_EXPORT の metadata は照会者の tenant だけで照合する（索引
+     * {@code uk_file_security_stored_name} を使い全表走査を避ける。HYG-FINAL P3-D）。他 tenant の metadata だけを持つ名前は、
+     * この後の汎用の {@code load}・{@code rescan} が照会者の tenant の metadata を要して拒否するため、tenant をまたぐ遮断は弱まらない。
      */
     private void assertPrivacyPackageNotAccessibleThroughGenericFilePath(String storedName) {
         if (storedName == null || storedName.isBlank()) {
@@ -504,7 +508,8 @@ public class FileScopeValidationService {
         }
         long matches;
         try {
-            matches = privacyExportPackageMapper.countByStoredNames(storedName, normalizedStoredName(storedName));
+            matches = privacyExportPackageMapper.countByStoredNames(currentTenant(), storedName,
+                    normalizedStoredName(storedName));
         } catch (RuntimeException e) {
             throw BusinessException.of(403, "error.forbidden");
         }

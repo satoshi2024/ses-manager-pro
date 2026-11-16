@@ -493,9 +493,13 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 | `PrivacyExportPackageService.preview`（作り直し） | 期限切れの草案の実体（作り直しの前に行を PURGED にし、実体は CAS・記録・監査の後に消す） | privacy-admin の手動 |
 | `FileStorageServiceImpl.store`（草案の保存の scan 失敗） | server 生成の種別（`PRIVACY_EXPORT`）は再scanの対象にせず、quarantine の実体を消して拒否を書いた metadata を論理削除する（review P2-1 (a)） | 同一要求内（D12 と同じ種類） |
 | 同 `preview` の記録の失敗時 | 保存した後に package の行を書けなかった実体（best-effort で消す） | 同一要求内（D12 と同じ種類） |
-| `PrivacyExportPackageService.purgeDue` の孤児の削除 | PURGED でない package の行を持たない `PRIVACY_EXPORT` の file と metadata（上の2行で消し損ねたもの。DB の時計で1時間の猶予の後。review P2-1 (c)） | 自動（毎時 :15 の同じ回） |
+| `PrivacyExportPackageService.purgeDue` の孤児の削除 | PURGED でない package の行を持たない `PRIVACY_EXPORT` の file と metadata（上の2行で消し損ねたもの。`created_at` を書いた application の時計で1時間の猶予の後。境界は application が同じ時計から計算して SQL へ渡し、DB の時計とは比べないため、JVM と DB の時刻帯が違っても猶予はずれない。review P2-1 (c)・HYG-FINAL P3-A） | 自動（毎時 :15 の同じ回） |
 
-汎用の file 経路（`GET /api/files/{name}`・`POST /api/files/{name}/rescan`）は、package の行（PURGED を含む）と `PRIVACY_EXPORT` の metadata（論理削除済みを含む）のどちらかに当たる保存名を role・tenant に関係なく拒否する（review P2-1 (b)）。保存層でも汎用の `load`・`rescan` は `PRIVACY_EXPORT` を開かず、package 専用の `loadServerGenerated` だけが読む（review P3-8）。
+汎用の file 経路（`GET /api/files/{name}`・`POST /api/files/{name}/rescan`）は、package の行（PURGED を含む。tenant に関係なく）と、照会者の tenant の `PRIVACY_EXPORT` の metadata（論理削除済みを含む）のどちらかに当たる保存名を role に関係なく拒否する（review P2-1 (b)）。metadata を照会者の tenant に絞るのは一意索引 `uk_file_security_stored_name (tenant_id, stored_name)` を使い全表走査を避けるため（HYG-FINAL P3-D。DDL なし）で、他 tenant の metadata だけを持つ名前は、次の保存層の `load`・`rescan` が照会者の tenant の metadata を要して拒否する。保存層でも汎用の `load`・`rescan` は `PRIVACY_EXPORT` を開かず、package 専用の `loadServerGenerated` だけが読む（review P3-8）。
+
+- **交付の記録の前提（HYG-FINAL P3-B）**: 交付の記録（`POST /api/privacy/dsar/{id}/delivery`）は、承認した package を専用ダウンロードで取得した印（`DSAR-DOWNLOAD:`）を要し、無ければ 409 `error.privacy.dsarDeliveryNotDownloaded`。画面は取得の前に「交付を記録」を出さない。取得しないまま期限切れ・PURGED になった承認 package は交付を記録できないため、作り直す（外れた承認は `DSAR-SUPERSEDED:` に残る）。交付記録の hash を、system から実際に取り出した内容に結び付けるため。
+- **承認者による草案の確認の hash（HYG-FINAL P3-C）**: `GET /api/privacy/dsar/{id}/approve/preview` は内容 hash を `X-Content-Sha256` header で受け取り、URL の query には置かない（ALB・proxy の access log は query を残し、header は残さない）。URL に残るのは request ID と package ID だけ。
+- **`PRIVACY_EXPORT` が INFECTED と判定されたとき（HYG-FINAL P3-F）**: 開示 package は server が業務 DB・file から読んだ値で生成する JSON で、利用者の upload ではない。INFECTED は、F2 provider が読んだ元の記録（業務表の値・添付の実体）に既知の signature と一致する文字列が入っていることを意味する。保存の失敗時に実体は quarantine にも残さず、拒否の結果（`scan_status`・`rejection_reason`・`scanner_version`・`scanned_at`）を書いた metadata の行が論理削除で残るだけなので、**調査は quarantine ではなく元の記録に対して行う**: (1) 論理削除済みの metadata の行で判定の時刻・理由・scanner の版を確かめる、(2) その case の本人と範囲から、元の業務表の行と添付を特定し、元の file の scan の状態（`t_file_security_metadata`）を確かめる、(3) 混入した値の除去・訂正は業務の手順で行い、system 側は草案を作り直すだけ（server 生成の種別は再scanの対象にしない）、(4) 誤検知なら scanner の定義の更新の後に作り直す。調査のために package の内容を system の外へ取り出さない。
 
 判断の理由:
 

@@ -298,6 +298,18 @@
         } else {
             $('#dsar-resolution-record').addClass('d-none').text('');
         }
+        renderResolutionHoldWarning();
+    }
+
+    /** 選んだ結果が本人の保全 hold（HELD）と矛盾し得るか（判定は server の holdConflictResolutions。HYG-FINAL P3-F）。 */
+    function selectedResolutionConflictsWithHold() {
+        return sectionCan('RECORD_MANUAL_RESOLUTION')
+            && (section.holdConflictResolutions || []).indexOf($('#dsar-resolution-code').val()) >= 0;
+    }
+
+    function renderResolutionHoldWarning() {
+        var recorded = section && section.manualResolution && section.manualResolution.holdConflict;
+        $('#dsar-resolution-hold-warning').toggleClass('d-none', !(recorded || selectedResolutionConflictsWithHold()));
     }
 
     function renderDelivery() {
@@ -353,6 +365,7 @@
             && !pkg.expired && (pkg.createdByMe || section.preparedByMe)));
         $('#dsar-download-submit').toggleClass('d-none', !sectionCan('DOWNLOAD'));
         $('#dsar-delivery-form').toggleClass('d-none', !sectionCan('RECORD_DELIVERY'));
+        $('#dsar-download-first').toggleClass('d-none', !(sectionCan('DOWNLOAD') && !sectionCan('RECORD_DELIVERY')));
         $('#dsar-downloaded-expired').toggleClass('d-none', !(section.status === 'APPROVED'
             && section.approvedPackageDownloaded && pkg && (pkg.expired || pkg.status === 'PURGED')));
 
@@ -390,7 +403,10 @@
             ? 'privacyDsar.confirm.redraftApproved' : 'privacyDsar.confirm.preview'));
     }
 
-    /** 承認者による承認前の草案の確認（review P2-3）。内容は text として表示し、保存しない。 */
+    /**
+     * 承認者による承認前の草案の確認（review P2-3）。内容は text として表示し、保存しない。内容 hash は URL に置かず
+     * X-Content-Sha256 header で送る（query は ALB・proxy の access log に残るため。HYG-FINAL P3-C）。
+     */
     function submitReview() {
         var pkg = section.currentPackage;
         if (!pkg) {
@@ -401,7 +417,8 @@
             method: 'GET',
             dataType: 'json',
             cache: false,
-            data: {packageId: pkg.id, contentSha256: pkg.contentSha256},
+            data: {packageId: pkg.id},
+            headers: {'X-Content-Sha256': pkg.contentSha256},
             success: function (draft) {
                 $('#dsar-review-content').text(JSON.stringify(draft, null, 2));
                 $('#dsar-review-panel').removeClass('d-none');
@@ -419,11 +436,15 @@
             SES.toast.error(evidence ? referenceError(evidence) : t('privacyDsar.validation.required'));
             return;
         }
+        // 本人が HELD で削除・利用停止を記録するときは確認の文に hold の警告を足す（記録は止めない。HYG-FINAL P3-F）
+        var confirmText = selectedResolutionConflictsWithHold()
+            ? t('privacyDsar.resolution.holdWarning') + ' ' + t('privacyDsar.confirm.resolution')
+            : t('privacyDsar.confirm.resolution');
         mutate('POST', '/resolution', {
             rowVersion: section.rowVersion,
             resolutionCode: $('#dsar-resolution-code').val(),
             evidenceRef: evidence
-        }, t('privacyDsar.confirm.resolution'));
+        }, confirmText);
     }
 
     function submitApprove() {
@@ -440,8 +461,13 @@
         if (!pkg) {
             return;
         }
+        // 交付の記録は取得の後だけ出る（HYG-FINAL P3-B）ため、取得できたら区画を読み直す
         SES.download('/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/package/download?packageId='
-            + encodeURIComponent(pkg.id), (detail ? detail.requestNo : 'dsar') + '.json');
+            + encodeURIComponent(pkg.id), (detail ? detail.requestNo : 'dsar') + '.json').then(function (ok) {
+            if (ok) {
+                loadDetail();
+            }
+        });
     }
 
     function submitDelivery(event) {
@@ -632,6 +658,7 @@
         $('#dsar-delivery-form').on('submit', submitDelivery);
         $('#dsar-review-submit').on('click', submitReview);
         $('#dsar-resolution-form').on('submit', submitResolution);
+        $('#dsar-resolution-code').on('change', renderResolutionHoldWarning);
         loadDetail();
     }
 

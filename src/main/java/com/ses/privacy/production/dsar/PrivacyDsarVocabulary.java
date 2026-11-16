@@ -154,6 +154,15 @@ public final class PrivacyDsarVocabulary {
         public boolean appliesTo(String requestType) {
             return parse(RequestType.class, requestType).filter(requestTypes::contains).isPresent();
         }
+
+        /**
+         * 本人が保全 hold の対象（HELD）のときに警告する結果か（削除した・利用を停止した）。hold は記録の削除・処分を止めるもので、
+         * system の外で行ったこれらの対応が hold で保全すべき記録に及んでいないかを人が確かめる必要がある。記録は拒否せず、
+         * 画面と API（{@code GET /{id}/delivery}）で警告だけを出す（system は処分しないため。HYG-FINAL P3-F）。
+         */
+        public boolean conflictsWithHold() {
+            return this == DELETED || this == RESTRICTED;
+        }
     }
 
     /**

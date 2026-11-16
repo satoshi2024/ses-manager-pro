@@ -283,6 +283,46 @@ class FileStorageServiceImplTest {
                 "server 生成の file は再scanで公開しない");
     }
 
+    /**
+     * HYG-FINAL P3-D: 汎用経路の遮断の照会が PRIVACY_EXPORT の metadata を照会者の tenant だけで数えても、tenant をまたぐ遮断は
+     * 弱まらない。他 tenant の metadata だけを持つ保存名は、汎用の load・再scan・専用経路のどれも照会者の tenant の metadata を
+     * 要し、無ければ拒否する（他 tenant の行は照会もしない）。
+     */
+    @Test
+    void load_他tenantのmetadataだけを持つ保存名は照会者のtenantでは汎用の取得も再scanも開かない() throws java.io.IOException {
+        String storedName = "dsarpackage0000000000000000000002.json";
+        java.nio.file.Files.createDirectories(tempDir.resolve("published"));
+        java.nio.file.Files.createDirectories(tempDir.resolve("quarantine"));
+        java.nio.file.Files.writeString(tempDir.resolve("published").resolve(storedName), "{\"format\":\"x\"}");
+        java.nio.file.Files.writeString(tempDir.resolve("quarantine").resolve(storedName), "{\"format\":\"x\"}");
+        com.ses.entity.FileSecurityMetadata metadata = new com.ses.entity.FileSecurityMetadata();
+        metadata.setId(31L);
+        metadata.setTenantId("tenant-b");
+        metadata.setStoredName(storedName);
+        metadata.setFileKind(FileKind.PRIVACY_EXPORT.name());
+        metadata.setStorageState("PUBLISHED");
+        metadata.setScanStatus("CLEAN");
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.when(mapper.selectByStoredName("tenant-b", storedName)).thenReturn(metadata);
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        FileStorageServiceImpl storage = new FileStorageServiceImpl(props,
+                (path, kind) -> com.ses.service.security.FileScanResult.clean("test-scanner"), mapper);
+
+        BusinessException generic = assertThrows(BusinessException.class,
+                () -> AccountingTenantContextHolder.runWithTenant("tenant-a", () -> storage.load(storedName)));
+        assertEquals(403, generic.getCode());
+        assertEquals("error.file.scanNotReady", generic.getMessageKey());
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "tenant-a", () -> storage.loadServerGenerated(storedName, FileKind.PRIVACY_EXPORT))).getCode());
+        assertEquals(404, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "tenant-a", () -> storage.rescan(storedName))).getCode());
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never())
+                .selectByStoredName(org.mockito.ArgumentMatchers.eq("tenant-b"), org.mockito.ArgumentMatchers.any());
+        assertTrue(java.nio.file.Files.exists(tempDir.resolve("quarantine").resolve(storedName)));
+    }
+
     private long regularFileCount(Path directory) {
         try (java.util.stream.Stream<Path> files = java.nio.file.Files.list(directory)) {
             return files.filter(java.nio.file.Files::isRegularFile).count();
