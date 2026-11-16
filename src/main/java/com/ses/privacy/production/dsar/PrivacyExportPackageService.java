@@ -100,7 +100,16 @@ public class PrivacyExportPackageService {
     static final int PURGE_BATCH = 200;
     static final String LOG_CODE_PURGE_FAILED = "NF07_DSAR_PACKAGE_PURGE_FAILED";
     static final String LOG_CODE_FILE_CLEANUP_FAILED = "NF07_DSAR_PACKAGE_FILE_CLEANUP_FAILED";
+    /** package の行を持たない PRIVACY_EXPORT の file を削除した（件数だけ。review P2-1 (c)）。 */
+    static final String LOG_CODE_ORPHAN_PURGED = "NF07_DSAR_PACKAGE_ORPHAN_FILE_PURGED";
     static final String PACKAGE_FILE_NAME = "dsar-export-package.json";
+    /** package の行を持たない file を孤児とみなすまでの猶予（草案の保存と行の記録の間の file を消さない）。 */
+    static final int ORPHAN_GRACE_HOURS = 1;
+    /** 専用ダウンロードで取得した印の MANUAL_ACTION 行（{@code DSAR-DOWNLOAD:<request>:<package>}。review P3-4）。 */
+    static final String DOWNLOAD_KEY_PREFIX = "DSAR-DOWNLOAD:";
+    /** 期限切れで作り直したときに外れた承認の MANUAL_ACTION 行（review P3-4）。 */
+    static final String SUPERSEDED_KEY_PREFIX = "DSAR-SUPERSEDED:";
+    static final String SUPERSEDED_REASON = "APPROVAL_EXPIRED";
 
     static final String ERROR_PACKAGE_RULE_UNSET = "error.privacy.dsarPackageRuleUnset";
     static final String ERROR_EXPORT_ACCESS_ONLY = "error.privacy.dsarExportAccessOnly";
@@ -111,6 +120,8 @@ public class PrivacyExportPackageService {
     static final String ERROR_PACKAGE_EXPIRED = "error.privacy.dsarPackageExpired";
     static final String ERROR_PACKAGE_INTEGRITY = "error.privacy.dsarPackageIntegrity";
     static final String ERROR_PACKAGE_FILE_UNAVAILABLE = "error.privacy.dsarPackageFileUnavailable";
+    static final String ERROR_PREVIEW_BY_PREPARER = "error.privacy.dsarDraftReviewByPreparer";
+    static final String ERROR_REDRAFT_AFTER_DOWNLOAD = "error.privacy.dsarRedraftAfterDownload";
 
     static final String HOLD_NONE = "NONE";
     static final String HOLD_HELD = "HELD";
@@ -210,12 +221,55 @@ public class PrivacyExportPackageService {
                 request.getDeliveryEvidenceRef(), me != null && me.equals(request.getDeliveredBy()))
                 : null;
         boolean preparedByMe = me != null && me.equals(request.getPreparedBy());
+        boolean downloaded = request.getApprovedPackageId() != null
+                && downloaded(context.tenantId(), requestId, request.getApprovedPackageId());
+        PrivacyDsarViews.ManualResolutionRecord resolution = access ? null
+                : manualResolution(context.tenantId(), requestId);
         return new PrivacyDsarViews.DeliverySection(request.getStatus(), version(request), access,
                 readiness.ready() && packageRule && !decisionChanged, packageRule, decisionChanged,
                 holdStatus(context.tenantId(), requestId), summary, preparedByMe,
                 me != null && me.equals(request.getApprovedBy()), display(request.getApprovedAt()),
                 export == null ? null : export.getEvidenceRef(), export == null ? null : export.getResultCount(),
-                providers, manual, delivery, actions(state, access, request, current, summary, me));
+                providers, manual, access ? delivery : null, downloaded, resolution,
+                actions(state, access, request, current, summary, me, downloaded));
+    }
+
+    // ---------------------------------------------------------------- 承認者による草案の確認
+
+    /**
+     * 承認者による承認前の草案の確認（{@code GET /api/privacy/dsar/{id}/approve/preview}、{@code privacy.dsar.approve}。review P2-3）。
+     * D-06 の規則で自動交付の値が入った草案を、承認者が値を見たうえで承認できるようにする。条件: case が PREVIEWED（承認待ち）、
+     * 要求の package id と内容 hash が最新の DRAFT と一致し期限内、保存実体の hash と大きさが一致。草案の作成者（request の
+     * {@code prepared_by}・package の {@code created_by}）は確認できない（403。承認前に値を見られるのを独立の承認者に限る。作成者は
+     * 承認後に専用ダウンロードで取得する）。確認は監査に必須記録する（{@value PrivacyDsarAudit#DRAFT_REVIEWED}）。状態は変えない。
+     */
+    public PrivacyDsarViews.PackageDownload reviewDraft(long requestId, Long packageId, String contentSha256) {
+        Context context = beginManage(APPROVE_ACTION);
+        long requested = requirePositive(packageId);
+        String sha = requireSha(contentSha256);
+        Long reviewer = context.actor().userId();
+        PrivacyRequest request = load(context.tenantId(), requestId);
+        PrivacyDsarVocabulary.state(request.getStatus()).filter(APPROVABLE::contains)
+                .orElseThrow(PrivacyExportPackageService::conflict);
+        if (reviewer.equals(request.getPreparedBy())) {
+            throw BusinessException.of(403, ERROR_PREVIEW_BY_PREPARER);
+        }
+        PrivacyExportPackage draft = findPackage(context.tenantId(), requestId, requested);
+        if (draft == null || !PACKAGE_DRAFT.equals(draft.getStatus()) || !sha.equals(draft.getContentSha256())) {
+            throw BusinessException.of(409, ERROR_PACKAGE_MISMATCH);
+        }
+        if (reviewer.equals(draft.getCreatedBy())) {
+            throw BusinessException.of(403, ERROR_PREVIEW_BY_PREPARER);
+        }
+        if (expired(draft, now())) {
+            throw BusinessException.of(409, ERROR_PACKAGE_EXPIRED);
+        }
+        byte[] content = readVerified(draft);
+        execute(() -> {
+            audit.event(context.actor().username(), PrivacyDsarAudit.DRAFT_REVIEWED, request.getRequestNo());
+            return null;
+        });
+        return new PrivacyDsarViews.PackageDownload(request.getRequestNo() + "-draft.json", content);
     }
 
     // ---------------------------------------------------------------- 草案
@@ -247,7 +301,11 @@ public class PrivacyExportPackageService {
             return execute(() -> {
                 PrivacyRequest locked = load(context.tenantId(), requestId);
                 PrivacyCaseState from = requirePreviewable(locked, version);
-                purgeExpiredOf(context.tenantId(), locked, now, context.actor().username());
+                // 期限切れの package は行を PURGED にし、実体は CAS・記録・監査の後に消す（review P3-1）
+                List<String> expiredFiles = purgeExpiredOf(context.tenantId(), locked, now, context.actor().username());
+                if (from == PrivacyCaseState.APPROVED) {
+                    recordSupersededApproval(context.tenantId(), locked, version + 1, now);
+                }
                 LocalDate backfilledDueDate = PrivacyRequestService.backfilledDueDate(locked, readiness);
                 cas(context.tenantId(), requestId, from, version, now, update -> update
                         .set(backfilledDueDate != null, PrivacyRequest::getDueDate, backfilledDueDate)
@@ -275,6 +333,7 @@ public class PrivacyExportPackageService {
                 writeSearchRows(context.tenantId(), requestId, version + 1, search, built, now);
                 audit.transition(context.actor().username(), PrivacyDsarAudit.PREVIEWED, locked.getRequestNo(),
                         from.name(), PrivacyCaseState.PREVIEWED.name());
+                expiredFiles.forEach(this::deleteFile);
                 return new PrivacyDsarViews.Transition(requestId, locked.getRequestNo(),
                         PrivacyCaseState.PREVIEWED.name(), version + 1);
             });
@@ -346,6 +405,8 @@ public class PrivacyExportPackageService {
         byte[] content = readVerified(approved);
         execute(() -> {
             audit.event(context.actor().username(), PrivacyDsarAudit.PACKAGE_DOWNLOADED, request.getRequestNo());
+            // 取得した印（以後、期限切れでも作り直さず、この package の交付を記録する。review P3-4）
+            markDownloaded(context.tenantId(), request.getId(), approved, now());
             return null;
         });
         return new PrivacyDsarViews.PackageDownload(request.getRequestNo() + ".json", content);
@@ -420,10 +481,46 @@ public class PrivacyExportPackageService {
                         LOG_CODE_PURGE_FAILED, e.getClass().getSimpleName());
             }
         }
+        int orphans = purgeOrphanFiles();
         if (purged > 0 || failed > 0) {
             log.info("[privacy-dsar] 開示packageを削除しました: purged={} failed={}", purged, failed);
         }
+        if (orphans > 0) {
+            log.warn("{}: packageの行を持たないDSAR開示packageの実体を削除しました: files={}", LOG_CODE_ORPHAN_PURGED, orphans);
+        }
         return purged;
+    }
+
+    /**
+     * PURGED でない package の行を持たない PRIVACY_EXPORT の file（草案の記録に失敗した・行だけが PURGED になった等）を、
+     * {@value #ORPHAN_GRACE_HOURS} 時間の猶予の後に実体と metadata ごと消す（review P2-1 (c)。case が無いため監査は書かず件数だけを
+     * log に出す）。失敗した file は次の回に回す。
+     */
+    private int purgeOrphanFiles() {
+        List<com.ses.entity.FileSecurityMetadata> orphans;
+        try {
+            orphans = packageMapper.selectOrphanFiles(-ORPHAN_GRACE_HOURS, PURGE_BATCH);
+        } catch (RuntimeException e) {
+            log.warn("{}: 行を持たない開示packageの実体を照会できません: exceptionClass={}", LOG_CODE_PURGE_FAILED,
+                    e.getClass().getSimpleName());
+            return 0;
+        }
+        int removed = 0;
+        for (com.ses.entity.FileSecurityMetadata orphan : orphans == null
+                ? List.<com.ses.entity.FileSecurityMetadata>of() : orphans) {
+            if (orphan == null || !StringUtils.hasText(orphan.getTenantId()) || !StringUtils.hasText(orphan.getStoredName())) {
+                continue;
+            }
+            try {
+                AccountingTenantContextHolder.runWithTenant(orphan.getTenantId(), PrivacyDecisionBinding.BUSINESS_ZONE,
+                        () -> fileStorage.delete(orphan.getStoredName()));
+                removed++;
+            } catch (RuntimeException e) {
+                log.warn("{}: 行を持たない開示packageの実体を消せません。次の回に再試行します: exceptionClass={}",
+                        LOG_CODE_PURGE_FAILED, e.getClass().getSimpleName());
+            }
+        }
+        return removed;
     }
 
     private Boolean purgeOne(PrivacyExportPackage target, LocalDateTime now) {
@@ -456,6 +553,12 @@ public class PrivacyExportPackageService {
             if (live) {
                 throw conflict();
             }
+        }
+        if (state == PrivacyCaseState.APPROVED && request.getApprovedPackageId() != null
+                && downloaded(request.getTenantId(), request.getId(), request.getApprovedPackageId())) {
+            // 取得済みの承認 package は system の外で交付された可能性があるため、作り直しで承認を外さない（review P3-4）。
+            // 交付したならその package の hash の照合で交付を記録し、交付していないなら終了を記録して再申立とする
+            throw BusinessException.of(409, ERROR_REDRAFT_AFTER_DOWNLOAD);
         }
         return state;
     }
@@ -603,8 +706,12 @@ public class PrivacyExportPackageService {
         return hit.providerId() + "\n" + String.join("\n", lines);
     }
 
-    /** 期限切れの package を PURGED にして実体を消す（草案の作り直しの前）。期限内の package が残っていれば 409。 */
-    private void purgeExpiredOf(String tenantId, PrivacyRequest request, LocalDateTime now, String username) {
+    /**
+     * 期限切れの package の行を PURGED にし、消す実体の保存名を返す（草案の作り直しの前。実体は呼出し側が CAS・記録・監査の後に
+     * 消す。review P3-1）。期限内の package が残っていれば 409。
+     */
+    private List<String> purgeExpiredOf(String tenantId, PrivacyRequest request, LocalDateTime now, String username) {
+        List<String> storedNames = new ArrayList<>();
         for (PrivacyExportPackage candidate : livePackages(tenantId, request.getId())) {
             if (!expired(candidate, now)) {
                 throw conflict();
@@ -613,8 +720,69 @@ public class PrivacyExportPackageService {
                 throw conflict();
             }
             audit.event(username, PrivacyDsarAudit.PACKAGE_PURGED, request.getRequestNo());
-            deleteFile(candidate.getStoredName());
+            storedNames.add(candidate.getStoredName());
         }
+        return storedNames;
+    }
+
+    /**
+     * 期限切れの承認済み package を作り直すときに外れる承認を MANUAL_ACTION 行に残す（package の ID・内容 hash。review P3-4）。
+     * package の行も承認者・承認日時・hash を持ったまま PURGED になる。
+     */
+    private void recordSupersededApproval(String tenantId, PrivacyRequest request, long newVersion, LocalDateTime now) {
+        if (request.getApprovedPackageId() == null) {
+            return;
+        }
+        PrivacyAction row = action(tenantId, request.getId(), PrivacyRequestService.ACTION_TYPE_MANUAL,
+                SUPERSEDED_KEY_PREFIX + request.getId() + ":" + newVersion, PrivacyRequestService.ACTION_STATUS_SUCCEEDED,
+                now.truncatedTo(ChronoUnit.MICROS));
+        row.setBlockedReason(SUPERSEDED_REASON);
+        row.setEvidenceRef("PKG:" + request.getApprovedPackageId());
+        row.setResultHash(request.getApprovedContentSha256());
+        insertAction(row);
+    }
+
+    /** 専用ダウンロードで取得した印（package ごとに1行。並行の取得で重なっても印は1つ）。 */
+    private void markDownloaded(String tenantId, long requestId, PrivacyExportPackage approved, LocalDateTime now) {
+        if (downloaded(tenantId, requestId, approved.getId())) {
+            return;
+        }
+        PrivacyAction row = action(tenantId, requestId, PrivacyRequestService.ACTION_TYPE_MANUAL,
+                DOWNLOAD_KEY_PREFIX + requestId + ":" + approved.getId(), PrivacyRequestService.ACTION_STATUS_SUCCEEDED,
+                now.truncatedTo(ChronoUnit.MICROS));
+        row.setEvidenceRef("PKG:" + approved.getId());
+        row.setResultHash(approved.getContentSha256());
+        try {
+            actionMapper.insert(row);
+        } catch (DuplicateKeyException e) {
+            // 並行の取得が先に印を書いた
+        }
+    }
+
+    /** package を専用ダウンロードで取得したか。 */
+    private boolean downloaded(String tenantId, long requestId, long packageId) {
+        Long count = actionMapper.selectCount(new LambdaQueryWrapper<PrivacyAction>()
+                .eq(PrivacyAction::getTenantId, tenantId)
+                .eq(PrivacyAction::getRequestId, requestId)
+                .eq(PrivacyAction::getActionType, PrivacyRequestService.ACTION_TYPE_MANUAL)
+                .eq(PrivacyAction::getIdempotencyKey, DOWNLOAD_KEY_PREFIX + requestId + ":" + packageId));
+        return count != null && count > 0;
+    }
+
+    /** 開示以外の請求の手動対応の完了の記録（{@code DSAR-MANUAL:} の MANUAL_ACTION 行。無ければ null）。 */
+    private PrivacyDsarViews.ManualResolutionRecord manualResolution(String tenantId, long requestId) {
+        List<PrivacyAction> rows = actionMapper.selectList(new LambdaQueryWrapper<PrivacyAction>()
+                .eq(PrivacyAction::getTenantId, tenantId)
+                .eq(PrivacyAction::getRequestId, requestId)
+                .eq(PrivacyAction::getActionType, PrivacyRequestService.ACTION_TYPE_MANUAL)
+                .likeRight(PrivacyAction::getIdempotencyKey, PrivacyRequestService.MANUAL_KEY_PREFIX + requestId + ":")
+                .orderByDesc(PrivacyAction::getId));
+        if (rows.isEmpty()) {
+            return null;
+        }
+        PrivacyAction row = rows.get(0);
+        return new PrivacyDsarViews.ManualResolutionRecord(row.getBlockedReason(), row.getEvidenceRef(),
+                display(row.getCreatedAt()));
     }
 
     private int markPurged(String tenantId, PrivacyExportPackage target, String fromStatus, LocalDateTime purgedAt) {
@@ -647,7 +815,8 @@ public class PrivacyExportPackageService {
     private byte[] readVerified(PrivacyExportPackage target) {
         byte[] content;
         try {
-            Resource resource = fileStorage.load(target.getStoredName());
+            // 汎用の load は server 生成の種別を開かない（review P3-8）。package 専用の経路で読む
+            Resource resource = fileStorage.loadServerGenerated(target.getStoredName(), FileKind.PRIVACY_EXPORT);
             try (InputStream in = resource.getInputStream()) {
                 content = in.readNBytes((int) Math.min(Integer.MAX_VALUE - 8L, FileKind.PRIVACY_EXPORT.getMaxBytes() + 1));
             }
@@ -679,7 +848,7 @@ public class PrivacyExportPackageService {
         try {
             fileStorage.delete(storedName);
         } catch (RuntimeException e) {
-            // 行を書けなかった package の実体。metadata が残るため孤児清掃では消えない。監視の code で拾う
+            // 行を書けなかった package の実体。metadata が残るため孤児清掃では消えないが、purgeDue が猶予の後に消す（review P2-1 (c)）
             log.warn("{}: 記録できなかった開示packageの実体を消せません: exceptionClass={}", LOG_CODE_FILE_CLEANUP_FAILED,
                     e.getClass().getSimpleName());
         }
@@ -688,9 +857,17 @@ public class PrivacyExportPackageService {
     // ---------------------------------------------------------------- 内部
 
     private List<String> actions(PrivacyCaseState state, boolean access, PrivacyRequest request,
-                                 PrivacyExportPackage current, PrivacyDsarViews.PackageSummary summary, Long me) {
+                                 PrivacyExportPackage current, PrivacyDsarViews.PackageSummary summary, Long me,
+                                 boolean downloaded) {
         List<String> actions = new ArrayList<>();
-        if (state == null || !access) {
+        if (state == null) {
+            return actions;
+        }
+        if (!access) {
+            // 開示以外の請求は SCOPED から手動対応の完了を記録する（review P2-2）
+            if (state == PrivacyCaseState.SCOPED) {
+                actions.add(PrivacyDsarVocabulary.NextAction.RECORD_MANUAL_RESOLUTION.name());
+            }
             return actions;
         }
         boolean live = current != null && !PACKAGE_PURGED.equals(current.getStatus()) && !summary.expired();
@@ -701,20 +878,22 @@ public class PrivacyExportPackageService {
                     actions.add(PrivacyDsarVocabulary.NextAction.PREVIEW.name());
                 } else if (PACKAGE_DRAFT.equals(current.getStatus()) && me != null && !me.equals(current.getCreatedBy())
                         && !me.equals(request.getPreparedBy())) {
+                    // 承認者は承認の前に草案の内容を確認できる（review P2-3）
+                    actions.add(PrivacyDsarVocabulary.NextAction.REVIEW_DRAFT.name());
                     actions.add(PrivacyDsarVocabulary.NextAction.APPROVE.name());
                 }
             }
             case APPROVED -> {
-                if (!live) {
-                    actions.add(PrivacyDsarVocabulary.NextAction.PREVIEW.name());
-                } else if (PACKAGE_APPROVED.equals(current.getStatus())
+                if (live && PACKAGE_APPROVED.equals(current.getStatus())
                         && current.getId().equals(request.getApprovedPackageId())) {
                     actions.add(PrivacyDsarVocabulary.NextAction.DOWNLOAD.name());
                     actions.add(PrivacyDsarVocabulary.NextAction.RECORD_DELIVERY.name());
-                }
-                if (!live && request.getApprovedPackageId() != null) {
-                    // 期限で消えた後でも、承認した package の hash の照合で交付を記録できる
+                } else if (!live && downloaded) {
+                    // 取得済みなら作り直さず、承認した package の hash の照合で交付を記録する（review P3-4）
                     actions.add(PrivacyDsarVocabulary.NextAction.RECORD_DELIVERY.name());
+                } else if (!live) {
+                    // 取得していない期限切れの承認 package は交付されていないため作り直す（承認は外れ、行に残す）
+                    actions.add(PrivacyDsarVocabulary.NextAction.PREVIEW.name());
                 }
             }
             default -> {

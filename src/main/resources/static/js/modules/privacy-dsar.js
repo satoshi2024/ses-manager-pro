@@ -275,11 +275,43 @@
         return value ? String(value).substring(0, 12) : '-';
     }
 
+    /** 開示以外の請求の手動対応の完了の区画（review P2-2）。結果の選択肢は請求の種別に合うものだけを出す。 */
+    function renderResolution() {
+        var holdText = label('privacyDsar.hold.', section.hold ? section.hold.state : null);
+        $('#dsar-resolution-hold').text(holdText);
+        var requestType = detail ? detail.requestType : '';
+        $('#dsar-resolution-code option').each(function () {
+            var types = ($(this).attr('data-types') || '').split(' ');
+            var applies = types.indexOf(requestType) >= 0;
+            $(this).prop('hidden', !applies).prop('disabled', !applies);
+        });
+        var first = $('#dsar-resolution-code option:not(:disabled)').first();
+        if ($('#dsar-resolution-code option:selected').prop('disabled') && first.length) {
+            $('#dsar-resolution-code').val(first.val());
+        }
+        $('#dsar-resolution-form').toggleClass('d-none', !sectionCan('RECORD_MANUAL_RESOLUTION'));
+        if (section.manualResolution) {
+            $('#dsar-resolution-record').removeClass('d-none').text(t('privacyDsar.resolution.recorded',
+                section.manualResolution.resolvedAt || '-',
+                label('privacyDsar.resolution.', section.manualResolution.resolutionCode),
+                section.manualResolution.evidenceRef || '-'));
+        } else {
+            $('#dsar-resolution-record').addClass('d-none').text('');
+        }
+    }
+
     function renderDelivery() {
         if (!section) {
             return;
         }
         $('#dsar-decision-changed').toggleClass('d-none', !section.decisionChanged);
+        // 開示請求は開示資料の区画、それ以外の請求は手動対応の完了の区画を出す
+        $('#dsar-delivery-card').toggleClass('d-none', !section.exportSupported);
+        $('#dsar-resolution-card').toggleClass('d-none', section.exportSupported);
+        if (!section.exportSupported) {
+            renderResolution();
+            return;
+        }
         $('#dsar-delivery-hold').text(label('privacyDsar.hold.', section.hold ? section.hold.state : null));
         $('#dsar-delivery-package-rule').text(section.packageRuleConfigured
             ? t('privacyDsar.readiness.ready') : t('privacyDsar.delivery.packageRuleUnset'));
@@ -312,10 +344,17 @@
             : '');
         $('#dsar-preview-submit').toggleClass('d-none', !sectionCan('PREVIEW')).prop('disabled', !section.previewReady);
         $('#dsar-approve-submit').toggleClass('d-none', !sectionCan('APPROVE'));
+        $('#dsar-review-submit').toggleClass('d-none', !sectionCan('REVIEW_DRAFT'));
+        if (!sectionCan('REVIEW_DRAFT')) {
+            $('#dsar-review-panel').addClass('d-none');
+            $('#dsar-review-content').text('');
+        }
         $('#dsar-approve-own').toggleClass('d-none', !(section.status === 'PREVIEWED' && pkg && pkg.status === 'DRAFT'
             && !pkg.expired && (pkg.createdByMe || section.preparedByMe)));
         $('#dsar-download-submit').toggleClass('d-none', !sectionCan('DOWNLOAD'));
         $('#dsar-delivery-form').toggleClass('d-none', !sectionCan('RECORD_DELIVERY'));
+        $('#dsar-downloaded-expired').toggleClass('d-none', !(section.status === 'APPROVED'
+            && section.approvedPackageDownloaded && pkg && (pkg.expired || pkg.status === 'PURGED')));
 
         var providers = section.providers || [];
         $('#dsar-delivery-providers').html(providers.length === 0
@@ -346,7 +385,45 @@
     }
 
     function submitPreview() {
-        mutate('POST', '/preview', {rowVersion: section.rowVersion}, t('privacyDsar.confirm.preview'));
+        // 期限切れの承認済み資料の作り直しは承認を外すため、交付していないことを確かめてもらう（review P3-4）
+        mutate('POST', '/preview', {rowVersion: section.rowVersion}, t(section.status === 'APPROVED'
+            ? 'privacyDsar.confirm.redraftApproved' : 'privacyDsar.confirm.preview'));
+    }
+
+    /** 承認者による承認前の草案の確認（review P2-3）。内容は text として表示し、保存しない。 */
+    function submitReview() {
+        var pkg = section.currentPackage;
+        if (!pkg) {
+            return;
+        }
+        $.ajax({
+            url: '/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/approve/preview',
+            method: 'GET',
+            dataType: 'json',
+            cache: false,
+            data: {packageId: pkg.id, contentSha256: pkg.contentSha256},
+            success: function (draft) {
+                $('#dsar-review-content').text(JSON.stringify(draft, null, 2));
+                $('#dsar-review-panel').removeClass('d-none');
+            },
+            error: function (xhr) {
+                SES.toast.error(errorMessage(xhr));
+            }
+        });
+    }
+
+    function submitResolution(event) {
+        event.preventDefault();
+        var evidence = $.trim($('#dsar-resolution-evidence').val());
+        if (!evidence || referenceError(evidence)) {
+            SES.toast.error(evidence ? referenceError(evidence) : t('privacyDsar.validation.required'));
+            return;
+        }
+        mutate('POST', '/resolution', {
+            rowVersion: section.rowVersion,
+            resolutionCode: $('#dsar-resolution-code').val(),
+            evidenceRef: evidence
+        }, t('privacyDsar.confirm.resolution'));
     }
 
     function submitApprove() {
@@ -553,6 +630,8 @@
         $('#dsar-approve-submit').on('click', submitApprove);
         $('#dsar-download-submit').on('click', submitDownload);
         $('#dsar-delivery-form').on('submit', submitDelivery);
+        $('#dsar-review-submit').on('click', submitReview);
+        $('#dsar-resolution-form').on('submit', submitResolution);
         loadDetail();
     }
 

@@ -239,7 +239,8 @@ class PrivacyDsarApiControllerTest {
         }
         assertThat(paths).containsExactlyInAnyOrder("", "/{id}", "", "/{id}/identity", "/{id}/candidates",
                 "/{id}/candidates/{linkId}", "/{id}/scope", "/{id}/block", "/{id}/cancel",
-                "/{id}/delivery", "/{id}/preview", "/{id}/approve", "/{id}/package/download", "/{id}/delivery");
+                "/{id}/delivery", "/{id}/preview", "/{id}/approve", "/{id}/package/download", "/{id}/delivery",
+                "/{id}/approve/preview", "/{id}/resolution");
         assertThat(paths).filteredOn(path -> path.contains("package")).containsExactly("/{id}/package/download");
         assertThat(paths).noneMatch(path -> path.contains("export") || path.contains("send")
                 || path.contains("mail") || path.contains("files"));
@@ -257,7 +258,7 @@ class PrivacyDsarApiControllerTest {
                 false, false, null, "REDACTION_RULES_UNSET", 0,
                 List.of(new PrivacyDsarViews.ProviderCount("engineer-profile", 2)),
                 List.of(new PrivacyDsarViews.ManualReviewItem(null, "MAILBOX", "PROVIDER_UNREGISTERED", null)),
-                null, List.of("APPROVE"));
+                null, false, null, List.of("APPROVE"));
         when(packageService.section(12L)).thenReturn(section);
 
         mockMvc.perform(get("/api/privacy/dsar/12/delivery"))
@@ -303,6 +304,56 @@ class PrivacyDsarApiControllerTest {
         verify(packageService).preview(eq(12L), any());
         verify(packageService).approve(eq(12L), any());
         verify(packageService).recordDelivery(eq(12L), any());
+    }
+
+    /** review P2-3: 承認者の草案の確認は inline の JSON で返し、保存させない。拒否は ApiResult の JSON。 */
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 承認者の草案の確認はinlineで保存させず拒否はApiResultで返す() throws Exception {
+        byte[] content = "{\"format\":\"nf07-dsar-export-package-v1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String sha = "c".repeat(64);
+        when(packageService.reviewDraft(12L, 7L, sha))
+                .thenReturn(new PrivacyDsarViews.PackageDownload("DSAR-20261116-ABCDEFGH-draft.json", content));
+        when(packageService.reviewDraft(12L, 8L, sha))
+                .thenThrow(BusinessException.of(403, "error.privacy.dsarDraftReviewByPreparer"));
+
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7").param("contentSha256", sha))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(content))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Content-Disposition", org.hamcrest.Matchers.startsWith("inline;")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("X-Content-Type-Options", "nosniff"));
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "8").param("contentSha256", sha))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7"))
+                .andExpect(status().is4xxClientError());
+    }
+
+    /** review P2-2: 手動対応の完了は本文をそのまま渡し、CSRF token が無ければ拒否する。 */
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 手動対応の完了は本文をそのままserviceへ渡しCSRF_tokenが無ければ拒否する() throws Exception {
+        when(requestService.recordManualResolution(eq(12L), any()))
+                .thenReturn(new PrivacyDsarViews.Transition(12L, "DSAR-1", "CONFIRMED", 5L));
+
+        mockMvc.perform(post("/api/privacy/dsar/12/resolution").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":4,\"resolutionCode\":\"DELETED\",\"evidenceRef\":\"ANS-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+        ArgumentCaptor<PrivacyDsarCommands.ManualResolution> resolution =
+                ArgumentCaptor.forClass(PrivacyDsarCommands.ManualResolution.class);
+        verify(requestService).recordManualResolution(eq(12L), resolution.capture());
+        assertThat(resolution.getValue().resolutionCode()).isEqualTo("DELETED");
+        assertThat(resolution.getValue().evidenceRef()).isEqualTo("ANS-1");
+
+        mockMvc.perform(post("/api/privacy/dsar/12/resolution").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":4,\"resolutionCode\":\"DELETED\",\"evidenceRef\":\"ANS-1\"}"))
+                .andExpect(status().isForbidden());
+        verify(requestService).recordManualResolution(eq(12L), any());
     }
 
     @Test

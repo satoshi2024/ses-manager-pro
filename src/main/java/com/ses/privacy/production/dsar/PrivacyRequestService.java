@@ -94,6 +94,9 @@ public class PrivacyRequestService {
      */
     static final String SCOPE_KEY_PREFIX = "DSAR-SCOPE:";
     static final String CLOSE_KEY_PREFIX = "DSAR-CLOSE:";
+    /** 開示以外の請求の手動対応の完了の MANUAL_ACTION 行（NF07-A2b review P2-2）。 */
+    static final String MANUAL_KEY_PREFIX = "DSAR-MANUAL:";
+    static final String ERROR_MANUAL_RESOLUTION_ACCESS = "error.privacy.dsarManualResolutionAccess";
     static final String DEFAULT_SELECTED_CODE = "MANUAL_SELECTED";
     static final String DEFAULT_REJECTED_CODE = "MANUAL_REJECTED";
 
@@ -440,6 +443,46 @@ public class PrivacyRequestService {
             audit.transition(context.actor().username(), PrivacyDsarAudit.SCOPED, request.getRequestNo(),
                     PrivacyCaseState.IDENTITY_VERIFIED.name(), PrivacyCaseState.SCOPED.name());
             return new PrivacyDsarViews.Transition(requestId, request.getRequestNo(), PrivacyCaseState.SCOPED.name(),
+                    version + 1);
+        });
+    }
+
+    /**
+     * 開示以外の請求（訂正・削除・利用停止・異議）の手動対応の完了を記録する（SCOPED → CONFIRMED。NF07-A2b review P2-2、
+     * plan §3.5「手動対応の記録」）。system は処分・訂正を実行せず、人が行った対応の結果コードと証跡の参照だけを
+     * {@code MANUAL_ACTION} 行（{@value #MANUAL_KEY_PREFIX}）に残す。開示請求（ACCESS）は開示資料の交付記録で完了するため 409。
+     * 進める方向の操作のため、D-01・D-06 が有効で本人確認時の D-06 が変わっていないことを要する。
+     */
+    public PrivacyDsarViews.Transition recordManualResolution(long requestId,
+                                                              PrivacyDsarCommands.ManualResolution command) {
+        Context context = beginManage();
+        PrivacyDsarDecisions.Readiness readiness = requireDecisions();
+        long version = requireVersion(command == null ? null : command.rowVersion());
+        PrivacyDsarVocabulary.ManualResolution resolution = PrivacyDsarVocabulary
+                .parse(PrivacyDsarVocabulary.ManualResolution.class, command.resolutionCode())
+                .orElseThrow(PrivacyRequestService::invalid);
+        String evidenceRef = requireReference(command.evidenceRef());
+        if (SCOPE_EVIDENCE.equals(evidenceRef)) {
+            throw invalid();
+        }
+        return execute(() -> {
+            PrivacyRequest request = load(context.tenantId(), requestId);
+            requireState(request, PrivacyCaseState.SCOPED, version);
+            if (PrivacyDsarVocabulary.RequestType.ACCESS.name().equals(request.getRequestType())) {
+                throw BusinessException.of(409, ERROR_MANUAL_RESOLUTION_ACCESS);
+            }
+            if (!resolution.appliesTo(request.getRequestType())) {
+                throw invalid();
+            }
+            requireSameIdentityRule(request, readiness);
+            LocalDateTime now = now();
+            cas(context.tenantId(), requestId, PrivacyCaseState.SCOPED, version, now, update -> update
+                    .set(PrivacyRequest::getStatus, PrivacyCaseState.CONFIRMED.name()));
+            insertAction(manualAction(context.tenantId(), requestId, MANUAL_KEY_PREFIX + requestId + ":" + (version + 1),
+                    ACTION_STATUS_SUCCEEDED, resolution.name(), evidenceRef, now.truncatedTo(ChronoUnit.MICROS)));
+            audit.transition(context.actor().username(), PrivacyDsarAudit.MANUAL_RESOLVED, request.getRequestNo(),
+                    PrivacyCaseState.SCOPED.name(), PrivacyCaseState.CONFIRMED.name());
+            return new PrivacyDsarViews.Transition(requestId, request.getRequestNo(), PrivacyCaseState.CONFIRMED.name(),
                     version + 1);
         });
     }

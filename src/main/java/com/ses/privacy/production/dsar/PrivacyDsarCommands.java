@@ -100,4 +100,14 @@ public final class PrivacyDsarCommands {
     public record Delivery(Long rowVersion, Long packageId, String contentSha256, String deliveryMethod,
                            String deliveryEvidenceRef) {
     }
+
+    /**
+     * 開示以外の請求の手動対応の完了（SCOPED → CONFIRMED。review P2-2）。system は処分・訂正を実行しない。
+     *
+     * @param rowVersion     画面表示時の版
+     * @param resolutionCode 対応の結果（{@link PrivacyDsarVocabulary.ManualResolution}。請求の種別に合うものだけ）
+     * @param evidenceRef    対応の証跡の参照（必須。対応記録・回答書等の ID）
+     */
+    public record ManualResolution(Long rowVersion, String resolutionCode, String evidenceRef) {
+    }
 }

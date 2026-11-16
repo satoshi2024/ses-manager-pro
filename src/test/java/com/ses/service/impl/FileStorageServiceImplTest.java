@@ -214,6 +214,75 @@ class FileStorageServiceImplTest {
         assertFalse(java.nio.file.Files.exists(tempDir.resolve("quarantine").resolve(storedName)));
     }
 
+    /** NF07-A2b review P2-1 (a): server 生成の種別は scan できなければ quarantine に残さず、拒否を書いた metadata を論理削除する。 */
+    @Test
+    void store_server生成の種別はscanできなければ実体を残さずmetadataを論理削除する() throws java.io.IOException {
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((com.ses.entity.FileSecurityMetadata) invocation.getArgument(0)).setId(20L);
+            return 1;
+        }).when(mapper).insert(org.mockito.ArgumentMatchers.any(com.ses.entity.FileSecurityMetadata.class));
+        org.mockito.Mockito.when(mapper.updateScanResult(org.mockito.ArgumentMatchers.eq(20L),
+                org.mockito.ArgumentMatchers.eq("QUARANTINED"), org.mockito.ArgumentMatchers.eq("UNAVAILABLE"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        FileStorageServiceImpl unavailable = new FileStorageServiceImpl(
+                props, new com.ses.service.security.impl.UnavailableFileScanner(), mapper);
+
+        assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant("default",
+                () -> unavailable.store("{\"format\":\"x\"}".getBytes(StandardCharsets.UTF_8), "p.json",
+                        FileKind.PRIVACY_EXPORT)));
+
+        assertEquals(0, regularFileCount(tempDir.resolve("quarantine")), "server 生成の実体は quarantine に残さない");
+        assertEquals(0, regularFileCount(tempDir.resolve("published")));
+        org.mockito.Mockito.verify(mapper).updateScanResult(org.mockito.ArgumentMatchers.eq(20L),
+                org.mockito.ArgumentMatchers.eq("QUARANTINED"), org.mockito.ArgumentMatchers.eq("UNAVAILABLE"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(mapper).markDeletedForTenant(20L, "default");
+    }
+
+    /** NF07-A2b review P3-8・P2-1: 汎用の load と rescan は server 生成の種別を開かず、専用の経路は種別の一致を要する。 */
+    @Test
+    void load_汎用の取得と再scanはserver生成の種別を開かず専用の経路だけが読める() throws java.io.IOException {
+        String storedName = "dsarpackage0000000000000000000001.json";
+        java.nio.file.Files.createDirectories(tempDir.resolve("published"));
+        java.nio.file.Files.writeString(tempDir.resolve("published").resolve(storedName), "{\"format\":\"x\"}");
+        com.ses.entity.FileSecurityMetadata metadata = new com.ses.entity.FileSecurityMetadata();
+        metadata.setId(30L);
+        metadata.setTenantId("default");
+        metadata.setStoredName(storedName);
+        metadata.setFileKind(FileKind.PRIVACY_EXPORT.name());
+        metadata.setStorageState("PUBLISHED");
+        metadata.setScanStatus("CLEAN");
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.when(mapper.selectByStoredName("default", storedName)).thenReturn(metadata);
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        FileStorageServiceImpl storage = new FileStorageServiceImpl(props,
+                (path, kind) -> com.ses.service.security.FileScanResult.clean("test-scanner"), mapper);
+
+        BusinessException generic = assertThrows(BusinessException.class,
+                () -> AccountingTenantContextHolder.runWithTenant("default", () -> storage.load(storedName)));
+        assertEquals(403, generic.getCode());
+        assertEquals("error.forbidden", generic.getMessageKey());
+        assertNotNull(AccountingTenantContextHolder.runWithTenant("default",
+                () -> storage.loadServerGenerated(storedName, FileKind.PRIVACY_EXPORT)));
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.loadServerGenerated(storedName, FileKind.PHOTO))).getCode());
+
+        metadata.setStorageState("QUARANTINED");
+        java.nio.file.Files.createDirectories(tempDir.resolve("quarantine"));
+        java.nio.file.Files.writeString(tempDir.resolve("quarantine").resolve(storedName), "{\"format\":\"x\"}");
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.rescan(storedName))).getCode());
+        assertTrue(java.nio.file.Files.exists(tempDir.resolve("quarantine").resolve(storedName)),
+                "server 生成の file は再scanで公開しない");
+    }
+
     private long regularFileCount(Path directory) {
         try (java.util.stream.Stream<Path> files = java.nio.file.Files.list(directory)) {
             return files.filter(java.nio.file.Files::isRegularFile).count();

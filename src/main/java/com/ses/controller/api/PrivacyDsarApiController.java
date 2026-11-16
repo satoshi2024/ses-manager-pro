@@ -140,6 +140,30 @@ public class PrivacyDsarApiController {
         return ApiResult.success(packageService.recordDelivery(id, request));
     }
 
+    /**
+     * 承認者による承認前の草案の確認（{@code privacy.dsar.approve}。review P2-3）。保存させない inline の JSON で返し、
+     * 作成者・承認待ち以外・hash の不一致は service が拒否する。
+     */
+    @GetMapping("/{id}/approve/preview")
+    public ResponseEntity<byte[]> reviewDraft(@PathVariable long id, @RequestParam Long packageId,
+                                              @RequestParam String contentSha256) {
+        PrivacyDsarViews.PackageDownload draft = packageService.reviewDraft(id, packageId, contentSha256);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                        .filename(draft.filename(), StandardCharsets.UTF_8).build().toString())
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(draft.content());
+    }
+
+    /** 開示以外の請求の手動対応の完了（SCOPED → CONFIRMED。system は処分しない。review P2-2）。 */
+    @PostMapping("/{id}/resolution")
+    public ApiResult<PrivacyDsarViews.Transition> recordManualResolution(
+            @PathVariable long id, @RequestBody PrivacyDsarCommands.ManualResolution request) {
+        return ApiResult.success(requestService.recordManualResolution(id, request));
+    }
+
     /** 公開スイッチ OFF は存在しないURLと同じ404（{@code FeatureSwitchFilter} と同じ本文）。 */
     @ExceptionHandler(PrivacyAccessGuard.PrivacyEntryNotFoundException.class)
     public ResponseEntity<ApiResult<Void>> handleDisabled(PrivacyAccessGuard.PrivacyEntryNotFoundException e) {

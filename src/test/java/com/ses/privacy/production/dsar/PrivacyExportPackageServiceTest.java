@@ -67,6 +67,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -112,6 +113,8 @@ class PrivacyExportPackageServiceTest {
     private FileStorageService fileStorageService;
     @Autowired
     private UploadProperties uploadProperties;
+    @Autowired
+    private com.ses.service.security.impl.FileScopeValidationService fileScopeValidationService;
     @Autowired
     private PlatformTransactionManager transactionManager;
     @Autowired
@@ -272,7 +275,18 @@ class PrivacyExportPackageServiceTest {
         assertThatThrownBy(() -> service.preview(deletion, new PrivacyDsarCommands.Preview(4L)))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarExportAccessOnly"));
-        assertThat(service.section(deletion).actions()).isEmpty();
+        // 開示以外の請求は草案を作らず、手動対応の完了だけを出す（review P2-2）
+        PrivacyDsarViews.DeliverySection deletionSection = service.section(deletion);
+        assertThat(deletionSection.exportSupported()).isFalse();
+        assertThat(deletionSection.actions()).containsExactly("RECORD_MANUAL_RESOLUTION");
+        assertThat(deletionSection.manualResolution()).isNull();
+        requestService.recordManualResolution(deletion, new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "ANS-77"));
+        PrivacyDsarViews.DeliverySection resolved = service.section(deletion);
+        assertThat(resolved.status()).isEqualTo("CONFIRMED");
+        assertThat(resolved.manualResolution().resolutionCode()).isEqualTo("DELETED");
+        assertThat(resolved.manualResolution().evidenceRef()).isEqualTo("ANS-77");
+        assertThat(resolved.actions()).isEmpty();
+        assertThat(resolved.delivery()).as("交付の記録は開示請求だけ").isNull();
 
         long id = scopedRequest("T-SCOPE-CHANGED");
         registry = new ProductionPrivacyProviderRegistry(List.of(provider, new ExtraProvider()));
@@ -318,7 +332,7 @@ class PrivacyExportPackageServiceTest {
                 });
 
         actor.set(adminB());
-        assertThat(service.section(id).actions()).containsExactly("APPROVE");
+        assertThat(service.section(id).actions()).containsExactly("REVIEW_DRAFT", "APPROVE");
         assertThatThrownBy(() -> service.approve(id, new PrivacyDsarCommands.Approval(5L, pkg.getId(), "0".repeat(64))))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarPackageMismatch"));
@@ -462,10 +476,15 @@ class PrivacyExportPackageServiceTest {
      */
     @Test
     void 本人がhold中でも開示packageの削除はgateを見ずに期限で消す() {
+        // 本人（ENGINEER:101）に SUBJECT hold がある状態を gate に持たせる（stub の設定は照会に数えない doReturn で行う）
         PrivacyHoldGate gate = mock(PrivacyHoldGate.class);
+        org.mockito.Mockito.doReturn(new PrivacyHoldGate.Decision(PrivacyHoldGate.State.VERIFIED, null,
+                Set.of("ENGINEER:101"), Set.of(), Map.of())).when(gate).inspect(TENANT);
         holdGate.set(gate);
         long expiring = previewedRequest("T-HELD-EXPIRE");
         PrivacyExportPackage expiringPackage = onlyPackage(expiring);
+        long redrafting = previewedRequest("T-HELD-REDRAFT");
+        PrivacyExportPackage redraftedPackage = onlyPackage(redrafting);
         long delivering = approvedRequest("T-HELD-DELIVER");
         PrivacyExportPackage deliveringPackage = onlyPackage(delivering);
 
@@ -475,11 +494,192 @@ class PrivacyExportPackageServiceTest {
         assertThat(packageMapper.selectById(deliveringPackage.getId()).getStatus()).isEqualTo("PURGED");
         assertThat(Files.exists(published(deliveringPackage.getStoredName()))).isFalse();
 
+        // 期限切れの草案の作り直し（作り直しの前に旧 package の実体を消す）
+        PrivacyExportPackageService afterExpiry = service(Clock.fixed(Instant.parse("2026-12-17T01:00:00Z"),
+                ZoneId.of("Asia/Tokyo")));
+        afterExpiry.preview(redrafting, new PrivacyDsarCommands.Preview(5L));
+        assertThat(packageMapper.selectById(redraftedPackage.getId()).getStatus()).isEqualTo("PURGED");
+        assertThat(Files.exists(published(redraftedPackage.getStoredName()))).isFalse();
+
         // 期限超過の削除（scheduler の経路）
-        assertThat(service.purgeDue(NOW.plusDays(31))).isEqualTo(1);
+        assertThat(service.purgeDue(NOW.plusDays(31))).isGreaterThanOrEqualTo(1);
         assertThat(packageMapper.selectById(expiringPackage.getId()).getStatus()).isEqualTo("PURGED");
         assertThat(Files.exists(published(expiringPackage.getStoredName()))).isFalse();
         org.mockito.Mockito.verifyNoInteractions(gate);
+
+        // hold は表示の上では本人に掛かっている（削除の経路だけが gate を見ない）
+        assertThat(service.section(expiring).hold().state()).isEqualTo("HELD");
+    }
+
+    // ---------------------------------------------------------------- review 対応（P2-1・P2-3・P3-2・P3-4・P3-5・P3-8）
+
+    @Test
+    void scanが使えず保存できない草案は実体を残さず汎用経路と再scanも種別で拒否する() throws IOException {
+        long id = scopedRequest("T-SCAN-FAIL");
+        PrivacyExportPackageService unscannable = service(CLOCK, unscannableStorage());
+
+        assertThatThrownBy(() -> unscannable.preview(id, new PrivacyDsarCommands.Preview(4L)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(503);
+                    assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarPackageFileUnavailable");
+                });
+        assertThat(packages(id)).isEmpty();
+        List<Map<String, Object>> metadata = jdbcTemplate.queryForList("SELECT stored_name, scan_status, deleted_flag "
+                + "FROM t_file_security_metadata WHERE tenant_id = ? AND file_kind = 'PRIVACY_EXPORT'", TENANT);
+        assertThat(metadata).singleElement().satisfies(row -> {
+            assertThat(row.get("scan_status")).isEqualTo("UNAVAILABLE");
+            assertThat(((Number) row.get("deleted_flag")).intValue()).as("拒否を記録して論理削除").isEqualTo(1);
+        });
+        String storedName = (String) metadata.get(0).get("stored_name");
+        assertThat(Files.exists(base().resolve("quarantine").resolve(storedName))).as("quarantine に残さない").isFalse();
+        assertThat(Files.exists(published(storedName))).isFalse();
+        // package の行が無くても、PRIVACY_EXPORT の metadata で汎用の取得と再scanを拒否する（review P2-1 (b)）
+        assertThat(catchThrowable(() -> fileScopeValidationService.assertDownloadAllowed(storedName)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo(403));
+        assertThat(catchThrowable(() -> fileScopeValidationService.assertRescanAllowed(storedName)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo(403));
+        assertThat(requestMapper.selectById(id).getStatus()).isEqualTo("SCOPED");
+    }
+
+    @Test
+    void package行を持たないPRIVACY_EXPORTの実体は猶予の後に削除で消し生きているpackageの実体は残す() throws IOException {
+        long id = previewedRequest("T-ORPHAN");
+        PrivacyExportPackage live = onlyPackage(id);
+        String orphan = "a2borphan000000000000000000000001.json";
+        Files.createDirectories(base().resolve("published"));
+        Files.writeString(published(orphan), "{\"orphan\":true}");
+        jdbcTemplate.update("INSERT INTO t_file_security_metadata (tenant_id, stored_name, file_kind, storage_state, "
+                + "scan_status, created_at, deleted_flag) VALUES (?, ?, 'PRIVACY_EXPORT', 'PUBLISHED', 'CLEAN', ?, 0)",
+                TENANT, orphan, LocalDateTime.of(2000, 1, 1, 0, 0));
+        // 生きている package の実体は、metadata が古くても package の行があるため孤児ではない
+        jdbcTemplate.update("UPDATE t_file_security_metadata SET created_at = ? WHERE tenant_id = ? AND stored_name = ?",
+                LocalDateTime.of(2000, 1, 1, 0, 0), TENANT, live.getStoredName());
+
+        service.purgeDue(NOW);
+
+        assertThat(Files.exists(published(orphan))).isFalse();
+        assertThat(jdbcTemplate.queryForObject("SELECT deleted_flag FROM t_file_security_metadata WHERE tenant_id = ? "
+                + "AND stored_name = ?", Integer.class, TENANT, orphan)).isEqualTo(1);
+        assertThat(Files.exists(published(live.getStoredName()))).isTrue();
+        assertThat(packageMapper.selectById(live.getId()).getStatus()).isEqualTo("DRAFT");
+        // 猶予（1時間）より新しい metadata は消さない
+        String fresh = "a2borphan000000000000000000000002.json";
+        Files.writeString(published(fresh), "{\"orphan\":true}");
+        jdbcTemplate.update("INSERT INTO t_file_security_metadata (tenant_id, stored_name, file_kind, storage_state, "
+                + "scan_status, deleted_flag) VALUES (?, ?, 'PRIVACY_EXPORT', 'PUBLISHED', 'CLEAN', 0)", TENANT, fresh);
+        service.purgeDue(NOW);
+        assertThat(Files.exists(published(fresh))).isTrue();
+        Files.deleteIfExists(published(fresh));
+    }
+
+    @Test
+    void 汎用のloadは開示packageを開かず専用の経路だけが読める() {
+        long id = previewedRequest("T-GENERIC-LOAD");
+        PrivacyExportPackage pkg = onlyPackage(id);
+
+        assertThat(catchThrowable(() -> fileStorageService.load(pkg.getStoredName())))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(403);
+                    assertThat(e.getMessageKey()).isEqualTo("error.forbidden");
+                });
+        assertThat(fileStorageService.loadServerGenerated(pkg.getStoredName(),
+                com.ses.common.enums.FileKind.PRIVACY_EXPORT)).isNotNull();
+    }
+
+    @Test
+    void 承認者は承認前に草案の内容を確認でき作成者とhash違いと承認後は確認できない() throws Exception {
+        rules.set(new ThirdPartyRedactor.Rules(D06_ID, Set.of("t_engineer_skill.skill_note")));
+        long id = previewedRequest("T-REVIEW");
+        PrivacyExportPackage pkg = onlyPackage(id);
+
+        assertThatThrownBy(() -> service.reviewDraft(id, pkg.getId(), pkg.getContentSha256()))
+                .as("作成者 A は承認前の内容を見られない").isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(403);
+                    assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDraftReviewByPreparer");
+                });
+
+        actor.set(adminB());
+        assertThat(service.section(id).actions()).containsExactly("REVIEW_DRAFT", "APPROVE");
+        assertThatThrownBy(() -> service.reviewDraft(id, pkg.getId(), "0".repeat(64)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarPackageMismatch"));
+        PrivacyDsarViews.PackageDownload draft = service.reviewDraft(id, pkg.getId(), pkg.getContentSha256());
+
+        assertThat(PrivacyExportPackageContent.sha256(draft.content())).isEqualTo(pkg.getContentSha256());
+        assertThat(new ObjectMapper().readTree(draft.content()).get("autoReleased").get(0).get("fields")
+                .get("t_engineer_skill.skill_note").asText()).as("承認者は自動で入る値を見て承認できる").isEqualTo(SKILL_NOTE);
+        assertThat(auditLog.codes).endsWith("NF07_DSAR_DRAFT_REVIEWED");
+        assertThat(requestMapper.selectById(id).getStatus()).as("確認は状態を変えない").isEqualTo("PREVIEWED");
+
+        service.approve(id, approval(5L, pkg));
+        assertConflict(() -> service.reviewDraft(id, pkg.getId(), pkg.getContentSha256()));
+    }
+
+    @Test
+    void 交付記録で実体を消せなければ交付記録ごと巻き戻しpackageと実体を残す() {
+        long id = approvedRequest("T-DELETE-FAIL");
+        PrivacyExportPackage pkg = onlyPackage(id);
+        actor.set(adminA());
+        PrivacyExportPackageService failing = service(CLOCK, new FailingDeleteStorage(fileStorageService));
+
+        assertThatThrownBy(() -> failing.recordDelivery(id, delivery(6L, pkg)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(503);
+                    assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarPackageFileUnavailable");
+                });
+
+        PrivacyRequest row = requestMapper.selectById(id);
+        assertThat(row.getStatus()).isEqualTo("APPROVED");
+        assertThat(row.getRowVersion()).isEqualTo(6L);
+        assertThat(row.getDeliveredAt()).isNull();
+        assertThat(packageMapper.selectById(pkg.getId()).getStatus()).isEqualTo("APPROVED");
+        assertThat(Files.exists(published(pkg.getStoredName()))).isTrue();
+        // 再試行は自己回復する（実体の削除は冪等）
+        assertThat(service.recordDelivery(id, delivery(6L, pkg)).status()).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    void 取得済みの承認packageは期限切れでも作り直さず交付を記録させ取得していなければ外れた承認を行に残して作り直す() {
+        long downloadedId = approvedRequest("T-DOWNLOADED-EXPIRE");
+        PrivacyExportPackage downloadedPackage = onlyPackage(downloadedId);
+        actor.set(adminA());
+        service.download(downloadedId, downloadedPackage.getId());
+        service.download(downloadedId, downloadedPackage.getId());
+        long untouchedId = approvedRequest("T-UNTOUCHED-EXPIRE");
+        PrivacyExportPackage untouchedPackage = onlyPackage(untouchedId);
+        PrivacyExportPackageService afterExpiry = service(Clock.fixed(Instant.parse("2026-12-17T01:00:00Z"),
+                ZoneId.of("Asia/Tokyo")));
+
+        actor.set(adminA());
+        PrivacyDsarViews.DeliverySection downloaded = afterExpiry.section(downloadedId);
+        assertThat(downloaded.approvedPackageDownloaded()).isTrue();
+        assertThat(downloaded.actions()).containsExactly("RECORD_DELIVERY");
+        assertThatThrownBy(() -> afterExpiry.preview(downloadedId, new PrivacyDsarCommands.Preview(6L)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarRedraftAfterDownload"));
+        assertThat(actions(downloadedId, "MANUAL_ACTION")).filteredOn(action -> action.getIdempotencyKey()
+                .startsWith("DSAR-DOWNLOAD:")).as("取得の印は package ごとに1行").hasSize(1);
+
+        assertThat(afterExpiry.section(untouchedId).actions()).containsExactly("PREVIEW");
+        afterExpiry.preview(untouchedId, new PrivacyDsarCommands.Preview(6L));
+        PrivacyRequest redone = requestMapper.selectById(untouchedId);
+        assertThat(redone.getStatus()).isEqualTo("PREVIEWED");
+        assertThat(redone.getApprovedPackageId()).isNull();
+        assertThat(actions(untouchedId, "MANUAL_ACTION")).filteredOn(action -> action.getIdempotencyKey()
+                .startsWith("DSAR-SUPERSEDED:")).singleElement().satisfies(action -> {
+                    assertThat(action.getBlockedReason()).isEqualTo("APPROVAL_EXPIRED");
+                    assertThat(action.getEvidenceRef()).isEqualTo("PKG:" + untouchedPackage.getId());
+                    assertThat(action.getResultHash()).isEqualTo(untouchedPackage.getContentSha256());
+                });
+    }
+
+    @Test
+    void 列を持たない記録も要手動確認に数え一覧から落とさない() {
+        provider.emptyRecord = true;
+        long id = previewedRequest("T-NO-FIELDS");
+
+        assertThat(service.section(id).manualReview()).contains(new PrivacyDsarViews.ManualReviewItem(SubjectProvider.ID,
+                SubjectProvider.SKILL, "RECORD_NO_FIELDS", 1));
     }
 
     @Test
@@ -540,6 +740,10 @@ class PrivacyExportPackageServiceTest {
     }
 
     private PrivacyExportPackageService service(Clock clock) {
+        return service(clock, fileStorageService);
+    }
+
+    private PrivacyExportPackageService service(Clock clock, FileStorageService storage) {
         @SuppressWarnings("unchecked")
         ObjectProvider<PrivacyApprovalProperties> approvalProvider = mock(ObjectProvider.class);
         when(approvalProvider.getIfAvailable()).thenAnswer(invocation -> approval);
@@ -549,8 +753,62 @@ class PrivacyExportPackageServiceTest {
         return new PrivacyExportPackageService(mock(PrivacyAccessGuard.class), oidc(),
                 new PrivacyDsarDecisions(approval, features, clock), requestMapper, linkMapper, actionMapper,
                 packageMapper, new PrivacySearchService(registry, dataElementMapper), registry,
-                new ThirdPartyRedactor(approvalProvider, rulesProvider), fileStorageService, holdGate::get,
+                new ThirdPartyRedactor(approvalProvider, rulesProvider), storage, holdGate::get,
                 new PrivacyDsarAudit(auditLog), nested(), clock, actor::get);
+    }
+
+    /** scanner が使えない実 {@link com.ses.service.impl.FileStorageServiceImpl}（同じ upload 先・実 metadata mapper）。 */
+    private FileStorageService unscannableStorage() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.ses.service.security.FileScanner> scanner = mock(ObjectProvider.class);
+        when(scanner.getIfAvailable(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.ses.service.security.impl.UnavailableFileScanner());
+        @SuppressWarnings("unchecked")
+        ObjectProvider<FileSecurityMetadataMapper> metadata = mock(ObjectProvider.class);
+        when(metadata.getIfAvailable()).thenReturn(metadataMapper);
+        return new com.ses.service.impl.FileStorageServiceImpl(uploadProperties, scanner, metadata);
+    }
+
+    /** 実体の削除だけが失敗する storage（交付記録の巻き戻しの確認用。review P3-2）。 */
+    private static final class FailingDeleteStorage implements FileStorageService {
+
+        private final FileStorageService delegate;
+
+        FailingDeleteStorage(FileStorageService delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public com.ses.dto.file.StoredFile store(org.springframework.web.multipart.MultipartFile file,
+                                                 com.ses.common.enums.FileKind kind) {
+            return delegate.store(file, kind);
+        }
+
+        @Override
+        public com.ses.dto.file.StoredFile store(byte[] data, String originalName, com.ses.common.enums.FileKind kind) {
+            return delegate.store(data, originalName, kind);
+        }
+
+        @Override
+        public org.springframework.core.io.Resource load(String storedName) {
+            return delegate.load(storedName);
+        }
+
+        @Override
+        public org.springframework.core.io.Resource loadServerGenerated(String storedName,
+                                                                        com.ses.common.enums.FileKind kind) {
+            return delegate.loadServerGenerated(storedName, kind);
+        }
+
+        @Override
+        public void delete(String storedName) {
+            throw BusinessException.of("error.file.deleteFailed");
+        }
+
+        @Override
+        public boolean rescan(String storedName) {
+            return delegate.rescan(storedName);
+        }
     }
 
     private TransactionTemplate nested() {
@@ -675,6 +933,8 @@ class PrivacyExportPackageServiceTest {
         static final String SKILL = "PKG_FIXTURE_SKILL";
 
         final List<String> calls = new ArrayList<>();
+        /** 列を1つも持たない行も返す（review P3-5）。 */
+        boolean emptyRecord;
 
         @Override
         public String providerId() {
@@ -711,6 +971,11 @@ class PrivacyExportPackageServiceTest {
             skill.put("id", 1010L);
             skill.put("tenant_id", TENANT);
             skill.put("skill_note", SKILL_NOTE);
+            if (emptyRecord) {
+                return List.of(new PrivacyRecord(ID, "t_engineer", 101L, List.of(PROFILE, SKILL), false, profile, Set.of()),
+                        new PrivacyRecord(ID, "t_engineer_skill", 1010L, List.of(SKILL), false, skill, Set.of()),
+                        new PrivacyRecord(ID, "t_engineer_skill", 2020L, List.of(SKILL), false, Map.of(), Set.of()));
+            }
             return List.of(new PrivacyRecord(ID, "t_engineer", 101L, List.of(PROFILE, SKILL), false, profile, Set.of()),
                     new PrivacyRecord(ID, "t_engineer_skill", 1010L, List.of(SKILL), false, skill, Set.of()));
         }

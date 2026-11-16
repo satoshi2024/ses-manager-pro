@@ -144,10 +144,17 @@
             <p class="text-warning mb-2 d-none" id="dsar-delivery-not-ready"></p>
             <div class="d-grid gap-2 d-sm-flex justify-content-sm-end mb-2">
                 <button type="button" class="btn btn-primary btn-sm d-none" id="dsar-preview-submit" th:text="#{privacyDsar.delivery.preview}">検索して草案を作成</button>
+                <button type="button" class="btn btn-outline-info btn-sm d-none" id="dsar-review-submit" th:text="#{privacyDsar.delivery.reviewDraft}">草案の内容を確認</button>
                 <button type="button" class="btn btn-success btn-sm d-none" id="dsar-approve-submit" th:text="#{privacyDsar.delivery.approve}">この草案を承認</button>
                 <button type="button" class="btn btn-outline-light btn-sm d-none" id="dsar-download-submit" th:text="#{privacyDsar.delivery.download}">開示資料をダウンロード</button>
             </div>
             <p class="text-secondary mb-2 d-none" id="dsar-approve-own" th:text="#{privacyDsar.delivery.ownDraft}">自分が作成した草案は承認できません</p>
+            <p class="text-warning mb-2 d-none" id="dsar-downloaded-expired" th:text="#{privacyDsar.delivery.downloadedExpired}">取得済みの承認資料は期限切れです</p>
+            <div class="d-none mb-2" id="dsar-review-panel">
+                <h3 class="h6 text-light mt-2" th:text="#{privacyDsar.delivery.reviewHeading}">草案の内容（承認前の確認）</h3>
+                <p class="text-secondary mb-1" th:text="#{privacyDsar.delivery.reviewHint}">説明</p>
+                <pre class="bg-dark border border-secondary rounded p-2 text-light small mb-0 text-break" style="white-space: pre-wrap; max-height: 24rem; overflow: auto;" id="dsar-review-content"></pre>
+            </div>
 
             <h3 class="h6 text-light mt-3" th:text="#{privacyDsar.delivery.providers}">検索した記録の件数</h3>
             <div class="table-responsive">
@@ -199,6 +206,42 @@
                 <div class="col-12 form-text text-secondary" th:text="#{privacyDsar.delivery.recordHint}">説明</div>
             </form>
             <p class="mb-0 mt-2 d-none" id="dsar-delivery-record"></p>
+        </div>
+    </div>
+
+    <!-- 開示以外の請求（訂正・削除・利用停止・異議）の手動対応の完了（NF07-A2b review P2-2。system は処分しない） -->
+    <div class="card bg-card border-dark shadow-sm mb-3 d-none" id="dsar-resolution-card">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.resolution.heading}">手動対応の完了</div>
+        <div class="card-body small text-light">
+            <p class="text-secondary mb-2" th:text="#{privacyDsar.resolution.description}">説明</p>
+            <dl class="row mb-2">
+                <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.hold}">保全 hold</dt>
+                <dd class="col-12 col-sm-8 mb-0" id="dsar-resolution-hold">…</dd>
+            </dl>
+            <form id="dsar-resolution-form" class="row g-2 align-items-end d-none" novalidate>
+                <div class="col-12 col-md-5">
+                    <label class="form-label" for="dsar-resolution-code" th:text="#{privacyDsar.resolution.code}">対応の結果</label>
+                    <select id="dsar-resolution-code" class="form-select bg-dark border-secondary text-light">
+                        <option value="CORRECTED" data-types="CORRECTION" th:text="#{privacyDsar.resolution.CORRECTED}">訂正した</option>
+                        <option value="CORRECTION_NOT_NEEDED" data-types="CORRECTION" th:text="#{privacyDsar.resolution.CORRECTION_NOT_NEEDED}">訂正の必要が無かった</option>
+                        <option value="DELETED" data-types="DELETION" th:text="#{privacyDsar.resolution.DELETED}">削除した</option>
+                        <option value="DELETION_REFUSED_RETENTION" data-types="DELETION" th:text="#{privacyDsar.resolution.DELETION_REFUSED_RETENTION}">保存義務のため削除しなかった</option>
+                        <option value="RESTRICTED" data-types="RESTRICTION" th:text="#{privacyDsar.resolution.RESTRICTED}">利用を停止した</option>
+                        <option value="RESTRICTION_REFUSED" data-types="RESTRICTION" th:text="#{privacyDsar.resolution.RESTRICTION_REFUSED}">利用停止に応じなかった</option>
+                        <option value="OBJECTION_UPHELD" data-types="OBJECTION" th:text="#{privacyDsar.resolution.OBJECTION_UPHELD}">異議を認めた</option>
+                        <option value="OBJECTION_REJECTED" data-types="OBJECTION" th:text="#{privacyDsar.resolution.OBJECTION_REJECTED}">異議を認めなかった</option>
+                        <option value="OTHER_RESOLVED" data-types="CORRECTION DELETION RESTRICTION OBJECTION" th:text="#{privacyDsar.resolution.OTHER_RESOLVED}">その他の対応</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label" for="dsar-resolution-evidence" th:text="#{privacyDsar.resolution.evidenceRef}">対応の証跡の参照</label>
+                    <input type="text" id="dsar-resolution-evidence" class="form-control bg-dark border-secondary text-light" maxlength="128" autocomplete="off">
+                </div>
+                <div class="col-12 col-md-3 d-grid">
+                    <button type="submit" class="btn btn-outline-success" th:text="#{privacyDsar.resolution.submit}">対応の完了を記録</button>
+                </div>
+            </form>
+            <p class="mb-0 mt-2 d-none" id="dsar-resolution-record"></p>
         </div>
     </div>
 

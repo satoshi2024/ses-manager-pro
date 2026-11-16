@@ -490,17 +490,23 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 |---|---|---|
 | `PrivacyExportPackagePurgeScheduler` → `PrivacyExportPackageService.purgeDue` | `purge_after`（`privacy.dsar.package-max-age`）を過ぎた package と、終了状態（CONFIRMED・BLOCKED・CANCELLED 等）の case に残った package の実体（`FileStorageService.delete`。package の行は消さず PURGED にする） | 自動（毎時 :15。flag で止めない） |
 | `PrivacyExportPackageService.recordDelivery` | 交付を記録した package の実体（同じ tx の最後。消せなければ交付記録ごと巻き戻す） | privacy-admin の手動 |
-| `PrivacyExportPackageService.preview`（作り直し） | 期限切れの草案の実体（作り直しの前） | privacy-admin の手動 |
-| 同 `preview` の失敗時 | 行を書けなかった package の実体 | 同一要求内（D12 と同じ種類） |
+| `PrivacyExportPackageService.preview`（作り直し） | 期限切れの草案の実体（作り直しの前に行を PURGED にし、実体は CAS・記録・監査の後に消す） | privacy-admin の手動 |
+| `FileStorageServiceImpl.store`（草案の保存の scan 失敗） | server 生成の種別（`PRIVACY_EXPORT`）は再scanの対象にせず、quarantine の実体を消して拒否を書いた metadata を論理削除する（review P2-1 (a)） | 同一要求内（D12 と同じ種類） |
+| 同 `preview` の記録の失敗時 | 保存した後に package の行を書けなかった実体（best-effort で消す） | 同一要求内（D12 と同じ種類） |
+| `PrivacyExportPackageService.purgeDue` の孤児の削除 | PURGED でない package の行を持たない `PRIVACY_EXPORT` の file と metadata（上の2行で消し損ねたもの。DB の時計で1時間の猶予の後。review P2-1 (c)） | 自動（毎時 :15 の同じ回） |
+
+汎用の file 経路（`GET /api/files/{name}`・`POST /api/files/{name}/rescan`）は、package の行（PURGED を含む）と `PRIVACY_EXPORT` の metadata（論理削除済みを含む）のどちらかに当たる保存名を role・tenant に関係なく拒否する（review P2-1 (b)）。保存層でも汎用の `load`・`rescan` は `PRIVACY_EXPORT` を開かず、package 専用の `loadServerGenerated` だけが読む（review P3-8）。
 
 判断の理由:
 
 1. **package は交付用の副本で、原本は別に保存されている。** package は F2 provider が業務表・file から読んだ値を草案として書き出したものである。読んだ元の行・実体は残り、hold は原本の側で D1〜D11 が守る。package を消しても、hold が保全する原本は1件も減らない。
-2. **package 自体は hold の対象（subject / data element）ではない。** hold は catalog（`m_pii_data_element`）の data element と、F2 provider が本人に帰属させる行・実体に効く。package の表（`t_privacy_export_package`）は catalog に無く、F2 provider も解決しない（NF07 自身の作業データ）。gate に接続すると、hold を使った tenant では分類が UNCLASSIFIED（fail-closed）になり、その tenant の package を1件も消せなくなる。
-3. **接続すると期限超過の保持になる。** D-06 が決める最長保存期間（`package-max-age`）と「交付記録と同時に PURGED」（plan §3.5）を超えて PII の副本が残る。plan の I-9（期限超過の保持を避ける）に反し、I-4 も「NF07 自身が作った一時 package を交付記録・期限で消すことは対象外」としている。
-4. **交付の証跡は残る。** package の行（内容 hash・作成者・承認者・承認日時・削除日時）と request の交付記録（方法・証跡の参照・承認した package の id と hash）は消さない。何を・いつ・誰の承認で交付したかは hash で照合できる。
+2. **package 自体は hold の対象（subject / data element）ではない。** hold は catalog（`m_pii_data_element`）の data element と、F2 provider が本人に帰属させる行・実体に効く。package の表（`t_privacy_export_package`）は catalog に無く、F2 provider も解決しない（NF07 自身の作業データ。pii-inventory §6 に除外として記す）。ただし「catalog に無い」は現在の模型の結果で、D4 の「原本と副本は別 element」の考え方では副本も別 element になり得るため、実質の根拠は 1・3・4 である。package の実体の metadata（`t_file_security_metadata`）は catalog の `FILE_SECURITY_METADATA` に当たり、削除で論理削除される（その owner は privacy-admin で本人ではない）。gate に接続すると、hold を使った tenant では分類が UNCLASSIFIED（fail-closed）になり、その tenant の package を1件も消せなくなる。
+3. **接続すると期限超過の保持になる。** D-06 が決める最長保存期間（`package-max-age`）と「交付記録と同時に PURGED」（plan §3.5）を超えて PII の副本が残り、plan の I-9（期限超過の保持を避ける）に反する。plan の I-4 は「NF07 自身が作った一時 package を交付記録・期限・case の終了で消すこと」を業務データの削除 writer の禁止の対象外とするだけで、hold との関係は決めていない（hold との関係は本節の 1〜4 で決める）。
+4. **交付の証跡は残る。** package の行（内容 hash・作成者・承認者・承認日時・削除日時）と request の交付記録（方法・証跡の参照・承認した package の id と hash）は消さない。取得の印（`DSAR-DOWNLOAD:`）と、期限切れの作り直しで外れた承認（`DSAR-SUPERSEDED:`）も `t_privacy_action` に残る。何を・いつ・誰の承認で交付したかは hash で照合できる。
 
-`PrivacyExportPackageServiceTest#本人がhold中でも開示packageの削除はgateを見ずに期限で消す` が、本人の SUBJECT hold があっても削除が gate を照会しないことを固定する。
+`PrivacyExportPackageServiceTest#本人がhold中でも開示packageの削除はgateを見ずに期限で消す` が、本人の SUBJECT hold（gate の `inspect` が HELD を返す）があっても、交付記録・作り直し・期限超過の3経路の削除が gate を照会しないことを固定する。
+
+- **drain 中の遅れ**: 削除の scheduler は毎時だが、`APP_SCHEDULING_ENABLED=false`（drain・全停止）の間は動かない。終了した case・期限を過ぎた package の実体はその間残る（取得・交付記録は状態の確認で拒否される）。再開後の最初の回で消える。
 
 **D-05 owner の受理事項（A1H-2。hold 開始の開放の署名と合わせて受理する）**: (1) 原本と副本の DATA_ELEMENT hold は別 element（上の「DATA_ELEMENT hold の対」）、(2) 外部にある実体は D10 の範囲外（上の「外部にある実体」）、(3) D7・D9 は1つの tenant の停止で全 tenant の kind を止める（過剰停止）、(4) D1 の READ_COMMITTED による最初の hold との順序の窓と、D1・D2 の本人の導出が文書行の lock より前であること（plan §3.4 A1H-2 実装記録の残余）、(5) 帰属できない element の行は SUBJECT hold で守られない（plan §3.4.3 規則6）、(6) D13 の PWA の台帳と freee の従業員対応の物理削除（上の表）、(7) 参照元の行が物理削除された実体は D10 で守れない（D11、plan §9 R-15）、(8) D14 の開示 package は hold で止めない（NF07-A2b。D-06 owner と合わせて受理する）。本人請求そのものが争いになり、交付した内容が証拠になる場合でも、system は `package-max-age` を超えて内容を残さず、内容 hash と交付記録だけを残す。内容を残すなら、交付の時点で system の外の保全手続で保管する。
 

@@ -45,6 +45,10 @@ public class PrivacyDsarAudit {
     static final String DELIVERY_RECORDED = "DELIVERY_RECORDED";
     /** NF07-A2b: 期限超過・終了した case の package の削除（scheduler）。 */
     static final String PACKAGE_PURGED = "PACKAGE_PURGED";
+    /** NF07-A2b（review P2-3）: 承認者による承認前の草案の確認（状態は変えない）。 */
+    static final String DRAFT_REVIEWED = "DRAFT_REVIEWED";
+    /** NF07-A2b（review P2-2）: 開示以外の請求の手動対応の完了（SCOPED → CONFIRMED）。 */
+    static final String MANUAL_RESOLVED = "MANUAL_RESOLVED";
 
     private final AuditLogService auditLogService;
 
