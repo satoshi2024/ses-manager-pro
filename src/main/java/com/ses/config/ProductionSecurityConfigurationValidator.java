@@ -328,9 +328,10 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
                 ? oidcProperties.getTenantId().trim() : "default";
         for (String username : usernames) {
             SysUser user = sysUserMapper.selectByUsername(username);
-            // selectByUsernameは大文字小文字を区別しないcollationで一致するが、実行時のbreak-glass判定
-            // （OidcSecurityProperties.isBreakGlassUsername）は区別する。表記が違うまま通すと、break-glassが
-            // 使えない、または通常管理者sessionになるため、DBのusernameと完全一致を要求する（D1 review N-1）。
+            // selectByUsernameは大文字小文字を区別しないcollationで一致し、実行時のbreak-glass判定
+            // （OidcSecurityProperties.isBreakGlassUsername）も区別しない（X3-2）。それでも設定値はDBのusernameとの
+            // 完全一致を要求する（D1 review N-1）。validateOidcAdministratorsはDBの表記の集合からbreak-glass名を
+            // 区別ありで除くため、表記違いの設定ではOIDCのlinkを持つbreak-glass口座（deploy-runbook §5.4のB）を数え、人数を多く見積もる。
             if (user == null || !username.equals(user.getUsername())
                     || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
                 errors.add("break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: "

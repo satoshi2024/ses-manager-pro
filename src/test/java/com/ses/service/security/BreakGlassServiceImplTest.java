@@ -87,6 +87,19 @@ class BreakGlassServiceImplTest {
     }
 
     @Test
+    void 設定usernameの大文字小文字違いもDBの照合順序と同じくbreak_glassとして判定する() {
+        // sys_user の照合順序は大文字小文字を区別しないため、表記違いも同じ行へ解決される（X3-2）
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertTrue(service.isLoginAllowed("bg-01"));
+        assertTrue(service.isLoginAllowed(" Bg-02 "));
+        assertFalse(service.isLoginAllowed("bg-03"), "設定に無い名前は従来どおり拒否する");
+
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(null);
+        assertFalse(service.isLoginAllowed("bg-01"), "表記違いでもactiveなincidentが無ければ拒否する");
+    }
+
+    @Test
     void 同一管理者による二重承認は拒否する() {
         BreakGlassIncident incident = pending();
         incident.setApprovedBy1(1L);

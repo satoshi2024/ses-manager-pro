@@ -45,7 +45,23 @@ public class OidcSecurityProperties {
     private Set<String> acceptedMfaAmr = new LinkedHashSet<>(Set.of("mfa", "otp", "fido", "fido2"));
     private Set<String> acceptedMfaAcr = new LinkedHashSet<>();
 
+    /**
+     * break-glass username か。{@code sys_user.username} の照合順序（{@code utf8mb4_unicode_ci}）は大文字小文字と末尾空白を
+     * 区別せず、表記違いの入力も同じ行へ解決されるため、ここでも前後空白を除いて大文字小文字を区別せずに比べる
+     * （{@code SecurityConfig} の HTTP Basic 防護と同じ比較。X3-2・NF07-A1J review P3-2）。区別すると、入力・設定・DB の
+     * 表記が違うだけで経路ごとに判定が食い違う（login 時は入力値、login 後は DB の username で判定する）。その結果
+     * break-glass 口座の session が incident の束縛・MFA の要求から外れ得る。prod の起動時検査は設定値と DB の表記の
+     * 完全一致を別に要求する（{@code ProductionSecurityConfigurationValidator}）。
+     */
     public boolean isBreakGlassUsername(String username) {
-        return username != null && breakGlassUsernames != null && breakGlassUsernames.contains(username);
+        if (username == null || breakGlassUsernames == null) {
+            return false;
+        }
+        String candidate = username.trim();
+        if (candidate.isEmpty()) {
+            return false;
+        }
+        return breakGlassUsernames.stream()
+                .anyMatch(name -> name != null && name.trim().equalsIgnoreCase(candidate));
     }
 }
