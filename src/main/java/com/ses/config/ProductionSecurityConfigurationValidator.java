@@ -329,7 +329,7 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         for (String username : usernames) {
             SysUser user = sysUserMapper.selectByUsername(username);
             // selectByUsernameは大文字小文字を区別しないcollationで一致し、実行時のbreak-glass判定
-            // （OidcSecurityProperties.isBreakGlassUsername）も区別しない（X3-2）。それでも設定値はDBのusernameとの
+            // （OidcSecurityProperties.isBreakGlassUsername）もASCIIの大文字小文字は区別しない（X3-2）。それでも設定値はDBのusernameとの
             // 完全一致を要求する（D1 review N-1）。validateOidcAdministratorsはDBの表記の集合からbreak-glass名を
             // 区別ありで除くため、表記違いの設定ではOIDCのlinkを持つbreak-glass口座（deploy-runbook §5.4のB）を数え、人数を多く見積もる。
             if (user == null || !username.equals(user.getUsername())

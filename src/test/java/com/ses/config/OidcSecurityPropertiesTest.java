@@ -9,8 +9,9 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * X3-2: break-glass username の判定を {@code sys_user.username} の照合順序（大文字小文字・末尾空白を区別しない）に合わせる。
- * 表記違いの入力も DB では同じ行へ解決されるため、判定も同じ口座として扱う（{@code SecurityConfig} の HTTP Basic 防護と同じ比較）。
+ * X3-2: break-glass username の判定は、前後空白を除き {@code toLowerCase(Locale.ROOT)} で ASCII の大文字小文字の違いを
+ * 同一視する。{@code equalsIgnoreCase} のように無点の ı を I へ折り畳むと、DB では別の行になる口座を break-glass として
+ * 扱ってしまう（DOC-FINAL review P2-1）。
  */
 class OidcSecurityPropertiesTest {
 
@@ -41,5 +42,21 @@ class OidcSecurityPropertiesTest {
 
         properties.setBreakGlassUsernames(null);
         assertThat(properties.isBreakGlassUsername("bg-operator")).isFalse();
+    }
+
+    @Test
+    void 無点のıや点付きのİを含む名前はadminと同じ口座として扱わない() {
+        OidcSecurityProperties properties = new OidcSecurityProperties();
+        properties.setBreakGlassUsernames(new LinkedHashSet<>(Set.of("admin")));
+
+        assertThat("admın".equalsIgnoreCase("admin")).as("前提: equalsIgnoreCase は ı を I と同一視する").isTrue();
+        assertThat(properties.isBreakGlassUsername("admın")).isFalse();
+        assertThat(properties.isBreakGlassUsername("ADMıN")).isFalse();
+        assertThat(properties.isBreakGlassUsername("ADMİN")).isFalse();
+        assertThat(properties.isBreakGlassUsername("ADMIN")).isTrue();
+
+        properties.setBreakGlassUsernames(new LinkedHashSet<>(Set.of("admın")));
+        assertThat(properties.isBreakGlassUsername("admin")).as("逆向きも同一視しない").isFalse();
+        assertThat(properties.isBreakGlassUsername("ADMIN")).isFalse();
     }
 }

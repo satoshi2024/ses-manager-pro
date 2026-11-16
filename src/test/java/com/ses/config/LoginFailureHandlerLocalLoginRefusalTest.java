@@ -83,9 +83,9 @@ class LoginFailureHandlerLocalLoginRefusalTest {
     }
 
     @Test
-    void break_glass判定を照合順序に合わせても_表記違いのbreak_glassは照合して数えOIDC管理者は数えない() throws Exception {
-        // MySQL の utf8mb4_unicode_ci では表記違いの入力も同じ行へ解決される（mapper の mock で再現する）。break-glass 判定
-        // （OidcSecurityProperties.isBreakGlassUsername）を区別しない比較にした後も（X3-2）、break-glass 口座は正確な名前と
+    void break_glass判定でASCIIの大文字小文字を区別しなくても_表記違いのbreak_glassは照合して数えOIDC管理者は数えない() throws Exception {
+        // MySQL の utf8mb4_unicode_ci では ASCII の表記違いの入力も同じ行へ解決される（mapper の mock で再現する）。break-glass 判定
+        // （OidcSecurityProperties.isBreakGlassUsername）を ASCII の大文字小文字を区別しない比較にした後も（X3-2）、break-glass 口座は正確な名前と
         // 同じくパスワードを照合して数え、OIDC 管理者の表記違いはパスワード照合前に拒否して数えない（D-P3-1 の防護を弱めない）。
         OidcSecurityProperties breakGlassNames = new OidcSecurityProperties();
         breakGlassNames.setBreakGlassUsernames(java.util.Set.of(BREAK_GLASS));

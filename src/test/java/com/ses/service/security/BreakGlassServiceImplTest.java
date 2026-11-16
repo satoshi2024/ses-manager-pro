@@ -46,6 +46,7 @@ class BreakGlassServiceImplTest {
     private final OidcSecurityProperties properties = new OidcSecurityProperties();
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC);
     private BreakGlassServiceImpl service;
+    private final java.util.List<SysUser> storedUsers = new java.util.ArrayList<>();
 
     @AfterEach
     void tearDown() {
@@ -62,7 +63,11 @@ class BreakGlassServiceImplTest {
         when(userMapper.selectById(any())).thenAnswer(invocation -> admin(invocation.getArgument(0)));
         when(userMapper.selectByIdAndTenant(any(), eq("default")))
                 .thenAnswer(invocation -> admin(invocation.getArgument(0)));
-        when(userMapper.selectByUsername(any())).thenReturn(admin(1L));
+        storedUsers.clear();
+        storedUsers.add(namedAdmin(1L, "BG-01"));
+        storedUsers.add(namedAdmin(2L, "BG-02"));
+        // 名前ごとに行を解決する（全ての名前へ同じ口座を返すと、解決した行が別口座の誤りを検出できない）
+        when(userMapper.selectByUsername(any())).thenAnswer(invocation -> storedUser(invocation.getArgument(0)));
         service = new BreakGlassServiceImpl(incidentMapper, userMapper, auditMapper,
                 sessionService, notificationService, properties, clock);
     }
@@ -97,6 +102,35 @@ class BreakGlassServiceImplTest {
 
         when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(null);
         assertFalse(service.isLoginAllowed("bg-01"), "表記違いでもactiveなincidentが無ければ拒否する");
+    }
+
+    @Test
+    void 入力名が設定と一致しても解決した行が名前の近い別口座ならbreak_glassとして扱わない() {
+        // DOC-FINAL review P2-1: 照合順序が入力名を設定とは別の口座（ここでは全角の名前の口座）へ解決した場合
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+        when(userMapper.selectByUsername("BG-02")).thenReturn(namedAdmin(7L, "ＢＧ-02"));
+
+        assertFalse(service.isLoginAllowed("BG-02"), "設定の口座ではない行へ local login を許さない");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertFalse(service.bindSession(request, "BG-02"), "設定の口座ではない行へ incident を束縛しない");
+        assertTrue(request.getSession(false) == null);
+        assertTrue(service.isLoginAllowed("BG-01"), "設定どおりの口座は従来どおり");
+    }
+
+    @Test
+    void 無点のıを含む別口座はbreak_glassのadminとして扱わない() {
+        // DOC-FINAL review P2-1: equalsIgnoreCase は ı（U+0131）を I へ折り畳むが、DB では admin と別の行になる
+        properties.setBreakGlassUsernames(Set.of("admin", "BG-02"));
+        storedUsers.add(namedAdmin(8L, "admin"));
+        storedUsers.add(namedAdmin(9L, "admın"));
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertTrue(service.isLoginAllowed("ADMIN"), "ASCII の表記違いは同じ口座");
+        assertFalse(service.isLoginAllowed("admın"));
+        assertFalse(service.isLoginAllowed("ADMİN"), "点付きの İ も admin として扱わない（拒否側）");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertTrue(service.bindSession(request, "admın"), "break-glass でない口座は従来どおり束縛の対象外");
+        assertTrue(request.getSession(false) == null, "incident を束縛しない");
     }
 
     @Test
@@ -443,6 +477,27 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         request.setAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE, action);
         return request;
+    }
+
+    /**
+     * {@code sys_user}（{@code utf8mb4_unicode_ci}）の username 解決を模す。ASCII の大文字小文字と前後空白の違いは同じ行、
+     * 無点の ı を含む名前は別の行になる。
+     */
+    private SysUser storedUser(String username) {
+        if (username == null) {
+            return null;
+        }
+        String key = username.trim().toLowerCase(java.util.Locale.ROOT);
+        return storedUsers.stream()
+                .filter(row -> row.getUsername().toLowerCase(java.util.Locale.ROOT).equals(key))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private SysUser namedAdmin(Long id, String username) {
+        SysUser user = admin(id);
+        user.setUsername(username);
+        return user;
     }
 
     private SysUser admin(Long id) {

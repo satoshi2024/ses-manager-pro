@@ -138,7 +138,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
 | SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
-| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、§6 |
+| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
 
 **DBA の前提**: migrator accountのtrigger権限（binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当、DEFINERとmigrator accountを残すこと）は§1.2、server タイムゾーン `+09:00` と空schemaは§1.1。
@@ -147,16 +147,30 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 | 機能（設定） | ONの前に要るもの | 正本 |
 |---|---|---|
-| NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`） | Privacy署名（comment 2列の保存期間と削除・匿名化経路）。prodは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと起動しない | `feature-switches.md` 4.9.2、NF01細粒度epoch計画 §10・§12 O-8 |
+| NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`） | (1) Privacy署名: comment 2列（`business_comment`・`decision_comment`）の保存期間と削除・匿名化経路（O-8）、**表示範囲がrole級**であること（本文を読めるのは案件を閲覧できる全ての管理者・HR）、**代理提出の差戻し理由は営業が要員へ伝える**運用（要員本人には「コメントあり」だけが見える。HRの手順に含める）。(2) **NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録**: V196 と `com.ses.privacy` にはまだ無く、署名だけでなく**実装が要る**（V198以降の独立batchでseedする。ONの前提）。(3) 下の §1.7.1 の手動確認9項目。(4) W3-21a・W3-21b のPASS。prodは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと起動しない（内容は検証しない） | `feature-switches.md` 4.9.2、NF01細粒度epoch計画 §10・§12 O-8、§1.7.1 |
 | NF02（`FEATURE_NF02_ENABLED`。子の顧客ポータルを含む） | DG-02（CS Owner。B3 休日の運用事項 H-1・H-2 を含む）と、当年度を含む全社共通カレンダーの登録 | `customer-success-service-desk/dg-02-first-release-decision-package.md`、`feature-switches.md` 4.3 |
-| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。inboundはSRE-2の遮断の置換と合わせる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
+| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
 | NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5 | `feature-switches.md` 4.8.2 |
 | NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放はD-05 ownerの受理事項（§4.4末尾）と合わせ、解除の開放はD-03・D-05の署名後（§4.5） | `feature-switches.md` 4.7、§4.4・§4.5 |
-| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09 と計画 §5.1 の追加前提（prodはA2bのマージまでONでは起動しない） | `feature-switches.md` 4.7.2 |
-| NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項） | `ai-management-copilot/external-send-approval-gate.md` §8 |
+| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09 と計画 §5.1 の追加前提（prodで起動できる条件の現状は `feature-switches.md` 4.7.2 の #5 に従う。本書の作成時点では A2b のマージまでONでは起動しない） | `feature-switches.md` 4.7.2 |
+| NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）と、**B2c-2 実装開始前の人手承認**（B2c-2 の着手条件）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項） | `ai-management-copilot/external-send-approval-gate.md` §8、`.kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md`（B2c-2 の開始条件） |
 | 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197）。schedulerの有効化（`APP_SCHEDULING_ENABLED=true`）の前 | 保存年数（3年・TRANSACTION_DATE）は暫定値で文書ownerの確認待ち。副本の処分方針についてPrivacy ownerと文書ownerの書面署名（得られなければ副本処理を外す変更を出してから有効化する）。`IMPORT` の保持期間はPrivacyの書面受理まで開放の条件のまま | 冒頭のV197の項、§4.3 |
 
 - NF03・NF04・NF10 のONの条件は `feature-switches.md` の 4.6・4.4・4.5 を参照する。
+
+#### 1.7.1 NF01 二者確認をONにする前の手動確認（browser、9項目。W3-21b review §6）
+
+子スイッチをONにした staging（実MySQL）で、自動browser試験の代わりに次を確かめ、結果を記録する（完全な流れはMySQLが要るため、fastのbrowser試験には入っていない）。
+
+1. **社内詳細（管理者）**: DUALタスクの行に「二者確認」が出て「完了」ボタンが無い → モーダルを開く → 候補はCLEANの版だけ → 提出 → 状態がPENDINGになる。DevToolsで要求に `X-XSRF-TOKEN` と `Idempotency-Key` があり、bodyに `documentVersionId` があること。
+2. **確認・差戻し**: 提出者以外のHRまたは管理者で確認 → タスクがCOMPLETEDになり、後続タスクが繰り上がり、一覧が更新される。提出者本人がHRのときはボタンが出ない。営業・マネージャーには確認欄が無く「確認・差戻しは提出者以外の管理者またはHRが行います」だけが出る。理由を書かずに差戻すと警告dialogが出る。
+3. **commentの表示範囲**: 他の営業・マネージャーで見ると「コメントあり」だけで、DevToolsの応答JSONに本文が無い。営業の代理提出の後、要員本人が `/my` で見ても「コメントあり」だけ。提出者本人とHRでは本文が出る。本文に `<img src=x onerror=alert(1)>` を書くと文字のまま表示される。
+4. **本人画面 `/my/lifecycle`**: 未完了一覧のDUALタスクが詳細へリンクし、要員の提出が成功し、確認・差戻しの欄が無い。
+5. **エラー表示**: 提出後に担当を変えてから確認すると409のmessageが出て状態が更新される。提出ボタンの連打で要求は1回だけ。通信を切って再送すると「処理済み」のtoastが出る（同じkey）。
+6. **390px幅**: モーダルが全画面になり、ボタンが折り返し、候補の長いlabelが画面をはみ出さず、タスク表は横スクロールできる。dark・lightの両テーマで確かめる。
+7. **テンプレート画面**: ONでは証跡種別に「二者確認」があり、OFFでは無い。OFFで既存のDUALテンプレートを編集すると「（現在は無効）」が出て、保存すると400のmessageが出る。
+8. **子スイッチOFF**: 詳細画面のHTMLに `dualConfirmModal` と `lifecycle-dual.js` が無く、DUALの行は「二者確認は現在無効です」だけ。
+9. **通知**: 提出後、「確認待ち」を受け取るのは管理者・HR・担当者だけで、範囲外の営業には届かない。本文に案件titleとcommentが無い。
 
 ## 2. 全停止とdrain（SRE）
 

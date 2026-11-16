@@ -5,6 +5,7 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -46,22 +47,27 @@ public class OidcSecurityProperties {
     private Set<String> acceptedMfaAcr = new LinkedHashSet<>();
 
     /**
-     * break-glass username か。{@code sys_user.username} の照合順序（{@code utf8mb4_unicode_ci}）は大文字小文字と末尾空白を
-     * 区別せず、表記違いの入力も同じ行へ解決されるため、ここでも前後空白を除いて大文字小文字を区別せずに比べる
-     * （{@code SecurityConfig} の HTTP Basic 防護と同じ比較。X3-2・NF07-A1J review P3-2）。区別すると、入力・設定・DB の
-     * 表記が違うだけで経路ごとに判定が食い違う（login 時は入力値、login 後は DB の username で判定する）。その結果
-     * break-glass 口座の session が incident の束縛・MFA の要求から外れ得る。prod の起動時検査は設定値と DB の表記の
-     * 完全一致を別に要求する（{@code ProductionSecurityConfigurationValidator}）。
+     * break-glass username か。前後空白を除き、両辺を {@code toLowerCase(Locale.ROOT)} にしてから比べる（X3-2・NF07-A1J
+     * review P3-2）。ASCII の大文字小文字の表記違い（{@code BG-Ops} と {@code bg-ops}）は {@code sys_user.username} の照合順序
+     * （{@code utf8mb4_unicode_ci}）でも同じ行へ解決されるため、同じ口座として扱う。区別すると、login 時（入力値）と login 後
+     * （DB の username）で判定が食い違い、break-glass 口座の session が incident の束縛・MFA の要求から外れ得る。
+     *
+     * <p>照合順序と等価ではない。{@code equalsIgnoreCase} は使わない: 文字ごとに大文字へも折り畳むため、無点の
+     * {@code ı}（U+0131）を {@code I} と同一視し、DB では別の行になる {@code admın} を break-glass の {@code admin} として
+     * 扱ってしまう（DOC-FINAL review P2-1）。逆に DB が同じ行とみなす非 ASCII の表記違い（全角・アクセント等）は false
+     * になり、拒否側に倒れる。名前が一致しても別の口座へ解決されないよう、{@code BreakGlassServiceImpl} は解決した行の
+     * username も同じ規則で設定値と一致することを要求する。prod の起動時検査は設定値と DB の表記の完全一致を別に要求する
+     * （{@code ProductionSecurityConfigurationValidator}）。
      */
     public boolean isBreakGlassUsername(String username) {
         if (username == null || breakGlassUsernames == null) {
             return false;
         }
-        String candidate = username.trim();
+        String candidate = username.trim().toLowerCase(Locale.ROOT);
         if (candidate.isEmpty()) {
             return false;
         }
         return breakGlassUsernames.stream()
-                .anyMatch(name -> name != null && name.trim().equalsIgnoreCase(candidate));
+                .anyMatch(name -> name != null && name.trim().toLowerCase(Locale.ROOT).equals(candidate));
     }
 }
