@@ -379,6 +379,11 @@ app:
     # NF-01 ライフサイクル管理・退社ゲート
     nf01:
       enabled: ${FEATURE_NF01_ENABLED:false}
+    # NF-01の子: 二者確認（DUAL_CONFIRMATION）の提出・確認・差戻し。NF-01がOFFなら本値に関係なくOFF。
+    # 業務commentを保存するため、prodではPrivacy署名の参照（privacy-sign-off-ref）が無いとONで起動しない（計画 §10・§12 O-8）
+    nf01-dual-confirmation:
+      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
+      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
     # NF-02 カスタマーサクセス・サービスデスク（内部画面）
     nf02:
       enabled: ${FEATURE_NF02_ENABLED:false}

@@ -128,6 +128,10 @@ app:
   features:
     nf01:
       enabled: ${FEATURE_NF01_ENABLED:false}
+    # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
+    nf01-dual-confirmation:
+      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
+      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
     nf02:
       enabled: ${FEATURE_NF02_ENABLED:false}
     # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）

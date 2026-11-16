@@ -36,6 +36,15 @@ public final class LifecycleCanonicalization {
         CONFIRM
     }
 
+    /**
+     * 確認者の判断（NF01細粒度epoch計画 §5.7）。差戻しも {@link Operation#CONFIRM} 操作として冪等性を記録し、
+     * 判断はrequest hashに含める（同じkeyで判断だけを変えた再送は409）。
+     */
+    public enum Decision {
+        CONFIRM,
+        REJECT
+    }
+
     /** clientが選べる識別子のみを保持する。他の文書事実はserver側で解決する。 */
     public record DocumentSelection(long documentId, long documentVersionId) {
         public DocumentSelection {
@@ -114,6 +123,11 @@ public final class LifecycleCanonicalization {
     /**
      * 業務操作のsemantic input。server採番submission ID/revisionを含めず、同じclient意図の
      * retryで同一request hashを得る。actor IDはbody値でなく、呼出側が認証済み主体から渡す。
+     *
+     * <p>CONFIRM（差戻しを含む）では、確認対象の {@link ConfirmationBinding}（clientが画面で見た提出ID・revision・証跡hash）と
+     * {@link Decision} を含める（W3-21a、計画 §5.7）。SUBMITはどちらも持たない（SUBMITのcanonical JSONは従来と同じ）。
+     * 本値はhashにだけ使い、canonical JSON自体は保存しない（業務commentを含むため。保存するのは
+     * {@link EvidenceSnapshot#canonicalJson()} だけで、そちらはcommentを持たない）。</p>
      */
     public record Request(
             String tenantId,
@@ -123,13 +137,37 @@ public final class LifecycleCanonicalization {
             long actorUserId,
             String idempotencyKey,
             String businessComment,
-            List<DocumentSelection> documentSelections) {
+            List<DocumentSelection> documentSelections,
+            ConfirmationBinding confirmation,
+            Decision decision) {
+
+        /** SUBMIT用（確認の束縛と判断を持たない）。 */
+        public Request(String tenantId, long taskId, long taskGeneration, Operation operation, long actorUserId,
+                       String idempotencyKey, String businessComment, List<DocumentSelection> documentSelections) {
+            this(tenantId, taskId, taskGeneration, operation, actorUserId, idempotencyKey, businessComment,
+                    documentSelections, null, null);
+        }
+
+        /** CONFIRM（差戻しを含む）の要求。文書選択は持たない（確認対象は提出が固定した版）。 */
+        public static Request confirm(String tenantId, long taskId, long taskGeneration, long actorUserId,
+                                      String idempotencyKey, String decisionComment,
+                                      ConfirmationBinding confirmation, Decision decision) {
+            return new Request(tenantId, taskId, taskGeneration, Operation.CONFIRM, actorUserId, idempotencyKey,
+                    decisionComment, List.of(), confirmation, decision);
+        }
+
         public Request {
             requireText(tenantId, "tenantId");
             if (taskId <= 0 || taskGeneration < 0 || actorUserId <= 0) {
                 throw new IllegalArgumentException("操作対象またはactor識別子が不正です");
             }
             Objects.requireNonNull(operation, "operation");
+            if (operation == Operation.CONFIRM) {
+                Objects.requireNonNull(confirmation, "confirmation");
+                Objects.requireNonNull(decision, "decision");
+            } else if (confirmation != null || decision != null) {
+                throw new IllegalArgumentException("SUBMITは確認の束縛と判断を持ちません");
+            }
             requireText(idempotencyKey, "idempotencyKey");
             businessComment = businessComment == null ? "" : businessComment;
             requireWellFormedUnicode(businessComment, "businessComment");
@@ -166,6 +204,14 @@ public final class LifecycleCanonicalization {
                     generator.writeEndObject();
                 }
                 generator.writeEndArray();
+                if (operation == Operation.CONFIRM) {
+                    generator.writeObjectFieldStart("confirmation");
+                    generator.writeNumberField("submissionId", confirmation.submissionId());
+                    generator.writeNumberField("submissionRevision", confirmation.submissionRevision());
+                    generator.writeStringField("evidenceSha256", confirmation.evidenceSha256());
+                    generator.writeEndObject();
+                    generator.writeStringField("decision", decision.name());
+                }
                 generator.writeEndObject();
             });
         }

@@ -85,4 +85,34 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
             notificationService.publish("CASE_COMPLETED", title, message, link, dedupeKey);
         }
     }
+
+    /**
+     * 確認者（管理者・HR）はlifecycle menuの利用者なので、lifecycle menuを持つ利用者へ配信する。
+     * 案件title（氏名を含み得る）・業務comment・文書titleは載せず、案件番号とタスク名だけを出す。
+     */
+    @Override
+    public void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId) {
+        String dedupeKey = String.format("lifecycle-dual-submitted-%d", submissionId);
+        String title = String.format("【確認待ち】タスク「%s」の証跡が提出されました", task.getTaskName());
+        String message = String.format("案件番号:%s のタスク「%s」の二者確認の証跡が提出されました。内容を確認してください。",
+                lcCase.getCaseNo(), task.getTaskName());
+        String link = "/lifecycle/" + lcCase.getId();
+        notificationService.publish("DUAL_CONFIRMATION_PENDING", title, message, link, dedupeKey, "lifecycle");
+    }
+
+    @Override
+    public void notifyDualConfirmationDecided(LifecycleTask task, LifecycleCase lcCase, long submissionId,
+                                              long submitterUserId, boolean confirmed, boolean selfService) {
+        String dedupeKey = String.format("lifecycle-dual-decided-%d", submissionId);
+        String title = confirmed
+                ? String.format("【確認完了】タスク「%s」の証跡が確認されました", task.getTaskName())
+                : String.format("【差戻し】タスク「%s」の証跡が差し戻されました", task.getTaskName());
+        String message = confirmed
+                ? String.format("案件番号:%s のタスク「%s」の二者確認が完了しました。", lcCase.getCaseNo(), task.getTaskName())
+                : String.format("案件番号:%s のタスク「%s」の証跡が差し戻されました。内容を確認して再提出してください。",
+                        lcCase.getCaseNo(), task.getTaskName());
+        String link = selfService ? "/my/lifecycle" : "/lifecycle/" + lcCase.getId();
+        notificationService.publishToUser(submitterUserId, confirmed ? "DUAL_CONFIRMATION_CONFIRMED"
+                : "DUAL_CONFIRMATION_REJECTED", title, message, link, dedupeKey);
+    }
 }

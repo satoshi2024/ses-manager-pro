@@ -24,6 +24,12 @@ public class FeatureSwitchProperties {
     /** NF-01 ライフサイクル管理・退社ゲート。 */
     private Toggle nf01 = new Toggle();
 
+    /**
+     * NF-01の子: 二者確認の提出・確認（{@code app.features.nf01-dual-confirmation.enabled}）。
+     * prodでONにする場合のPrivacy署名の記録 {@code app.features.nf01-dual-confirmation.privacy-sign-off-ref} も持つ。
+     */
+    private DualConfirmationToggle nf01DualConfirmation = new DualConfirmationToggle();
+
     /** NF-02 カスタマーサクセス・サービスデスク（内部画面）。 */
     private Toggle nf02 = new Toggle();
 
@@ -72,6 +78,7 @@ public class FeatureSwitchProperties {
     public Toggle toggle(Feature feature) {
         return switch (feature) {
             case NF01 -> nf01;
+            case NF01_DUAL_CONFIRMATION -> nf01DualConfirmation;
             case NF02 -> nf02;
             case NF02_CUSTOMER_PORTAL -> nf02CustomerPortal;
             case NF03 -> nf03;
@@ -87,6 +94,21 @@ public class FeatureSwitchProperties {
     public static class Toggle {
         /** 既定OFF。明示的にtrueを設定した機能だけを公開する。 */
         private boolean enabled = false;
+    }
+
+    /**
+     * 二者確認の子スイッチ。ON/OFFに加えて、prodでONにする根拠となるPrivacy署名の記録を持つ。
+     *
+     * <p>{@code privacySignOffRef} は業務comment（{@code business_comment}・{@code decision_comment}）の保存期間と
+     * 削除・匿名化経路についてPrivacyが署名した決定の参照（例: review文書のID）。値の妥当性は
+     * {@code LifecycleDualConfirmationReleaseGate} が起動時に検査し、本classは保持だけを行う。</p>
+     */
+    @Data
+    @EqualsAndHashCode(callSuper = true)
+    @ToString(callSuper = true)
+    public static class DualConfirmationToggle extends Toggle {
+        /** Privacy署名の参照。未設定・空ならprodではONで起動できない。 */
+        private String privacySignOffRef;
     }
 
     /**

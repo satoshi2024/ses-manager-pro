@@ -109,6 +109,8 @@ class FeatureSwitchRouteCoverageTest {
      * 子スイッチの遮断範囲を広げる・狭めるときはここを更新する（意図しない入口の遮断を検出するため）。
      */
     private static final Map<Feature, Set<String>> CHILD_FEATURE_CONTROLLERS = Map.of(
+            // 二者確認のAPI（LifecycleDualConfirmationApiController）は親のNF-01の遮断表に属し、子はservice層で判定する
+            Feature.NF01_DUAL_CONFIRMATION, Set.of(),
             Feature.NF02_CUSTOMER_PORTAL, Set.of("PortalCustomerServiceDeskApiController"),
             Feature.NF03_CERTIFICATION_PII, Set.of());
 

@@ -35,6 +35,22 @@ public enum Feature {
             List.of("lifecycle", "myLifecycle")),
 
     /**
+     * NF-01の子: 二者確認（DUAL_CONFIRMATION）の提出・確認・差戻し（NF01細粒度epoch計画 §5.11、W3-21a）。
+     *
+     * <p>遮断するURLは持たない（{@link #NF03_CERTIFICATION_PII} と同じ形）。二者確認のAPI
+     * （{@code /api/lifecycle/tasks/{id}/dual-confirmation/**}、{@code /api/my/lifecycle/tasks/{id}/dual-confirmation/**}）は
+     * 親のNF-01の遮断表に属し、本スイッチがOFFの間はservice層（{@code LifecycleDualConfirmationCoordinator}）が
+     * 400 {@code error.lifecycle.dualConfirmationDisabled} で拒否する。業務commentを書き込む経路であるため、
+     * prodではPrivacyの署名（計画 §10・§12 O-8）の記録が無い限りONで起動できない
+     * （{@code LifecycleDualConfirmationReleaseGate}）。</p>
+     */
+    NF01_DUAL_CONFIRMATION(NF01, "二者確認（DUAL_CONFIRMATION）の提出・確認",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of()),
+
+    /**
      * NF-02 カスタマーサクセス・サービスデスク（内部画面）。
      * 顧客ポータルの問い合わせは子スイッチ {@link #NF02_CUSTOMER_PORTAL} で別に公開する。
      */
