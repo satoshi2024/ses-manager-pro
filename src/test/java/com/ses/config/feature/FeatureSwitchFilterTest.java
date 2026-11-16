@@ -70,13 +70,17 @@ class FeatureSwitchFilterTest {
             // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
             Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
                     "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings"),
-            // NF-07 保持・保全は policy説明API（W3-14）と catalog API（F2）を持つ（holdは後続batchが入口と同時に登録する）
+            // NF-07 保持・保全は policy説明API（W3-14）、catalog API（F2）、hold API（A1H-1）を持つ
             Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
-                    "/api/privacy/policies/evaluate", "/api/privacy/catalog"),
+                    "/api/privacy/policies/evaluate", "/api/privacy/catalog", "/api/privacy/holds",
+                    "/api/privacy/holds/x/release"),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
 
-    /** 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。 */
-    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF07_RETENTION);
+    /**
+     * 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。
+     * NF07_RETENTION は A1H-1 で hold 画面（{@code /privacy/holds}）を登録したため外した（{@code /privacy} 自体は登録しない）。
+     */
+    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of();
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
@@ -90,7 +94,8 @@ class FeatureSwitchFilterTest {
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
             // NF-06の画面（取込センター、W3-12）
             Feature.NF06, List.of("/import-center"),
-            Feature.NF07_RETENTION, List.of(),
+            // NF-07 の hold 画面（A1H-1）
+            Feature.NF07_RETENTION, List.of("/privacy/holds"),
             Feature.NF10, List.of("/management-reports"));
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */

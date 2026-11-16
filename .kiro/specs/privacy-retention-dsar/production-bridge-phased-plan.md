@@ -648,6 +648,29 @@ catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMEN
 5. journal を戻し、retention flag だけを OFF（journal 設定は残す）にして再起動・再実行 → 対象者の分は引き続き残る。
 6. pending を残した状態（append 前に process を止める）で再起動 → reconciler が pending を解消し、gate が復帰する。
 
+**Demo の示し方（総括決定 2026-11-16。A1J 引継ぎ §3.4.6 の4の決着）**: 本番 adapter は prod profile 以外では生成できず（`ProductionEnvironmentGuard`）、dev profile に実行時の経路を開かない。このため上の 1〜6 は「dev で操作する」のではなく、Testcontainers の MySQL test（application DB と Journal の別 container）で示す。本番 adapter は test の中で prod の `MockEnvironment` を渡して `ProductionPrivacyComponents.productionPrivacyJournal` から生成し、`PrivacyHoldJournal` の package-private な constructor（test 用の入口）へ渡す。起動時検査（`PrivacyJournalStartupVerifier`）そのものの適合・不適合は A1J の MySQL test が示しており、hold の test は `startupResult()` の値（`AVAILABLE` / `UNAVAILABLE` / `NOT_CONFIGURED`）を入力として与える。prod profile の検証環境で画面から操作する確認は、開放の手順（§7）で D-05 の署名後に行う。
+
+| Demo | 示す test | batch |
+|---|---|---|
+| 1（開始 → 帰属できない element と件数 → ACTIVE） | `PrivacyHoldServiceMySqlTest`（ACK の後に projection、一覧・帰属できない element、gate が Journal と一致）、`PrivacyHoldServiceTest`（決定の欠落・選択の欠落・監査本文） | A1H-1 |
+| 2（D1 の 409、`legal_hold_flag` は 0） | 経路ごとの test（`DocumentServiceImplDisposalHoldTest`） | A1H-2 |
+| 3（D4・D5 で対象者だけ残る、nonce purge は動く） | 経路ごとの test（`ResumeRetentionCleanupServiceImplTest`、`IntegrationHubRetentionPurgeSchedulerTest`） | A1H-2 |
+| 4（journal 停止で skip・409、未使用 tenant は従来どおり） | gate 部分は `PrivacyHoldServiceMySqlTest`（Journal に届かない索引で UNAVAILABLE、未使用 tenant は「hold なし」）と `PrivacyHoldGateTest`（照会1回）。経路の skip・409 は A1H-2 | A1H-1 / A1H-2 |
+| 5（flag OFF でも残る） | gate 部分は `PrivacyHoldGateTest`（入口を閉じても VERIFIED、gate と reconciler が flag・guard に依存しない）。経路は A1H-2 | A1H-1 / A1H-2 |
+| 6（pending の解消） | `PrivacyHoldProjectionReconcilerMySqlTest`（ACK 済み → projection・pending 解消、未 append → timeout 後に解消、Journal 不達 → 残す、projection 欠落の追い付き） | A1H-1 |
+
+**A1H の分割（総括決定 2026-11-16）**: 本節は A1H-1「hold 開始・gate・pending/reconciler・API・画面」（経路に接続しない）と A1H-2「D1〜D13 への gate の接続、`PrivacyHoldFileReferenceProvider`、経路ごとの test」に分ける。解除（NF07-REL）はどちらにも含めない。
+
+**A1H-1 実装記録（2026-11-16）**:
+
+- Journal の partition: SUBJECT hold は本人の partition（`(tenant, <種別>:<ID>)`。SF-W2 の `appendHoldStart` と同じで、本人の partition が held になれば以降の新規 dispatch 認可を Journal 自身が拒否する）、DATA_ELEMENT hold は `DATA_ELEMENT#<data element ID>`。HOLD_STARTED の `case_id` に hold ID（`ph-` + 32桁 hex）を入れ、`request_hash` が対象・理由 hash・ticket・開始者・開始日時・D-05 の決定ID・帰属できない element ごとの選択を束縛する。command ID は同じ乱数の `hs-` + 32桁 hex。
+- `t_privacy_projection_state` の `last_applied_seq` / `last_applied_hash` は tenant の要約とした（hold は対象ごとの partition に入り、partition の head は1つの hold ごとのため）。seq は反映済みの HOLD_STARTED の件数、hash は (partition, revision, event hash, hold ID) の集合の順序に依らない digest。gate は projection 側と Journal 側（索引の HOLD_STARTED と head）の両方から計算して一致を確かめる。
+- 「command ID で Journal を照会する」ため、`PrivacyJournalPort`（foundation。変更しない）とは別に、同じ package の読み取り専用索引（`JdbcPrivacyHoldJournalIndex`。`pj_command`・`pj_event`・`pj_head` を A1J の内部 pool＝方式A の1 principal で読む）を置いた。索引は位置と hash だけを返し、projection へ書く event は port の `events`・`head` と foundation の `JournalProjectionService.verifyChain`（新規の `ProductionJournalChainVerification` 経由。既存の foundation class は変更しない）を通したものだけを使う。
+- 帰属できない element の選択（C-2）: SUBJECT hold の要求は、catalog の NOT_ATTRIBUTABLE の element 全てに `DATA_ELEMENT_HOLD` か `ACCEPT_RISK` を1件ずつ持たなければならない（既定値なし。欠落・未知の値・重複は 400）。`DATA_ELEMENT_HOLD` は開始時点でその element の ACTIVE な DATA_ELEMENT hold を要する（画面は SUBJECT hold の前に DATA_ELEMENT hold を開始する）。選択は command の `request_hash`（Journal 正本）に束縛し、element ごとの required 監査（`CHOICE`）にも残す。
+- reconciler が Journal から復元した行（ACK 後に projection を書けなかった hold）は、理由コード・ticket を `RECONCILED`、開始者を 0 とする（元の値は開始要求の監査 `START_REQUESTED` に hold ID で残る）。
+- `privacy.clock.max-skew` は hold 開始の前提（未設定なら `DECISION_UNKNOWN`）で、reconciler は `pending_since` + `privacy.journal.pending-timeout` + max-skew を過ぎるまで「Journal に command が無い」pending を消さない（pending を書いた process と reconciler の process の時計の差の余裕）。
+- D-05 は `privacy.approval.d05.*` に足し、capability の承認 digest（D-09）には含めない（policy 説明・catalog は D-05 無しで開けるため）。hold 開始の入口で `PrivacyDecisionBinding.evaluateStandalone` が capability の決定と同じ規則で検査する。
+
 **規模**: XL（main 12 前後、既存コードの接続 8 か所、test 15 class 前後、画面1）。必要なら「hold 開始・gate・reconciler」と「経路の接続」に分ける（Plan Review で決める）。
 
 #### 3.4.6 NF07-A1J から引き継ぐ事項（A1J 独立 Review `9d7d1b4e` と総括の決定、2026-11-16）

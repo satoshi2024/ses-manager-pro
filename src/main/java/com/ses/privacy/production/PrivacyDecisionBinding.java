@@ -85,6 +85,11 @@ public final class PrivacyDecisionBinding {
     public enum Decision {
         /** 正式 Privacy Owner。 */
         D01("d01"),
+        /**
+         * hold の種類と権限者（NF07-A1H の hold 開始の前提）。capability の承認には含めない（{@link #requiredDecisions}
+         * に入れない）ため、D-09 の束縛内容 digest は変わらない。hold 開始の入口で {@link #evaluateStandalone} が検査する。
+         */
+        D05("d05"),
         /** DSAR SOP。 */
         D06("d06"),
         /** 本番 flag 開放。 */
@@ -171,6 +176,50 @@ public final class PrivacyDecisionBinding {
         content.decisions().forEach((decision, value) -> decisionIds.put(decision, value.decisionId()));
         return new Evaluation(true, List.of(), new Snapshot(content.tenantId(), content.capabilities(),
                 decisionIds, configuredDigest));
+    }
+
+    /**
+     * capability の承認に含めない単独の決定（D-05 等）を、capability の決定と同じ規則で評価する（NF07-A1H）。
+     * 決定ID の形式・placeholder の拒否、署名日・失効日の形式と期間、署名日前・失効、他の決定（D-01・D-06・D-09）の
+     * 決定ID との重複を検査する。違反コードは {@code d05.decisionId.missing} 等の固定値だけで、設定値を含めない。
+     *
+     * @param properties {@code privacy.approval.*}
+     * @param decision   評価する決定
+     * @param today      JST業務日
+     */
+    public static StandaloneEvaluation evaluateStandalone(PrivacyApprovalProperties properties, Decision decision,
+                                                          LocalDate today) {
+        if (properties == null || decision == null || today == null) {
+            return new StandaloneEvaluation(false, null, List.of("approval.unavailable"));
+        }
+        List<String> violations = new ArrayList<>();
+        DecisionContent content = readDecision(decision, properties.reference(decision), violations);
+        String prefix = decision.key();
+        if (content.signedOn() != null && content.signedOn().isAfter(today)) {
+            violations.add(prefix + TEMPORAL_SIGNED_ON_FUTURE);
+        }
+        if (content.expiresOn() != null && !today.isBefore(content.expiresOn())) {
+            violations.add(prefix + TEMPORAL_EXPIRED);
+        }
+        if (content.decisionId() != null) {
+            for (Decision other : Decision.values()) {
+                PrivacyApprovalProperties.DecisionReference reference = other == decision ? null
+                        : properties.reference(other);
+                if (reference != null && upper(content.decisionId()).equals(upper(reference.getDecisionId()))) {
+                    violations.add("decisionIds.notDistinct");
+                    break;
+                }
+            }
+        }
+        boolean valid = content.valid() && violations.isEmpty();
+        return new StandaloneEvaluation(valid, valid ? content.decisionId() : null, List.copyOf(violations));
+    }
+
+    /** {@link #evaluateStandalone} の結果。{@code decisionId} は有効な場合だけ入る。 */
+    public record StandaloneEvaluation(boolean valid, String decisionId, List<String> violations) {
+        public StandaloneEvaluation {
+            violations = violations == null ? List.of() : List.copyOf(violations);
+        }
     }
 
     /**

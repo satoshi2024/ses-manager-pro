@@ -35,6 +35,12 @@ public class PrivacyApprovalProperties {
     /** D-01 正式 Privacy Owner。全 capability の前提。 */
     private DecisionReference d01 = new DecisionReference();
 
+    /**
+     * D-05 hold の種類と権限者。hold 開始（NF07-A1H）の前提で、capability の承認 digest には含めない
+     * （{@link PrivacyDecisionBinding#evaluateStandalone} が hold 開始の入口で検査する）。
+     */
+    private DecisionReference d05 = new DecisionReference();
+
     /** D-06 DSAR SOP。{@code dsar} の前提。 */
     private DecisionReference d06 = new DecisionReference();
 
@@ -54,6 +60,7 @@ public class PrivacyApprovalProperties {
         }
         return switch (decision) {
             case D01 -> d01;
+            case D05 -> d05;
             case D06 -> d06;
             case D09 -> d09;
         };
