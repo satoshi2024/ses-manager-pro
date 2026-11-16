@@ -1,4 +1,4 @@
-# 機能スイッチ運用手順（NF-01 / NF-02 / NF-03 / NF-04 / NF-06 / NF-07 / NF-10、子スイッチ2件）
+# 機能スイッチ運用手順（NF-01 / NF-02 / NF-03 / NF-04 / NF-06 / NF-07 / NF-10、子スイッチ3件）
 
 - 対象: 初回本番リリース（新規構築・全停止デプロイ・専用Flyway job）で段階公開するS-NF機能
 - 位置づけ: **権限ではなく公開可否のスイッチ**。OFFの機能は管理者を含む全ロール・未認証利用者から見えなくなる
@@ -11,6 +11,7 @@
 | 機能 | 設定キー | 環境変数 | 既定値（application.yml / prod） | test profile |
 |---|---|---|---|---|
 | NF-01 ライフサイクル管理・退社ゲート | `app.features.nf01.enabled` | `FEATURE_NF01_ENABLED` | `false` | `true` |
+| └ NF-01の子: 二者確認（DUAL_CONFIRMATION）の提出・確認・差戻し（W3-21a）。**ONの条件: Privacy署名（NF01細粒度epoch計画 §10・§12 O-8）の参照**（prodでは起動時に強制。4.9） | `app.features.nf01-dual-confirmation.enabled` | `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | `false` | `true` |
 | NF-02 カスタマーサクセス・サービスデスク（内部画面） | `app.features.nf02.enabled` | `FEATURE_NF02_ENABLED` | `false` | `true` |
 | └ NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT・添付） | `app.features.nf02-customer-portal.enabled` | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | `false` | `true` |
 | NF-03 資格・学習・スキルギャップ | `app.features.nf03.enabled` | `FEATURE_NF03_ENABLED` | `false` | `true` |
@@ -50,6 +51,7 @@
 | 機能 | 遮断する画面・API・静的入口 | 止めるscheduler | 隠すメニュー・埋込み表示 |
 |---|---|---|---|
 | NF-01 | `/lifecycle/**`、`/my/lifecycle/**`、`/api/lifecycle/**`、`/api/my/lifecycle/**` | `LifecycleSlaScheduler#runSlaCheck`（毎朝8時） | menu `lifecycle`・`myLifecycle`、要員詳細画面のライフサイクル欄、ログイン後の着地先 |
+| NF-01の子 `nf01-dual-confirmation` | **URLは遮断しない**（二者確認のAPIは親NF-01の遮断表に属する）。`/api/lifecycle/tasks/{id}/dual-confirmation/**`・`/api/my/lifecycle/tasks/{id}/dual-confirmation/**`（照会・候補・提出・確認/差戻し）を `LifecycleDualConfirmationCoordinator` が400（message key `error.lifecycle.dualConfirmationDisabled`）で拒否する（lock・書込みの前。拒否eventは記録しない）。DUAL_CONFIRMATIONを含むtemplateの作成・改定は子スイッチに関係なく400のまま（W3-21bでスイッチ連動へ変更） | なし | 画面の提出・確認導線はW3-21bで追加する |
 | NF-02 | `/service-desk/**`、`/customer-success/**`、`/api/service-desk/**`、`/api/customer-success/**`（親がOFFなら下の子の入口も遮断） | `ServiceSlaScheduler#runSlaMonitoring`（5分毎）、`CustomerHealthScheduler#runDailySnapshot`（日次）、`ServiceRequestAttachmentCompensationScheduler#retryDue`（5分毎） | menu `service-desk`・`customer-success`、契約更新カレンダーの顧客ヘルス値（＋子の埋込み表示） |
 | NF-02の子 `nf02-customer-portal` | `/api/portal/customer/service-desk/**`（顧客ポータルの問い合わせAPI: 一覧・詳細・起票・返信・CSAT・添付upload/download）。ON中も公開範囲（`visible-since`）外の問い合わせは同じ404 | なし（schedulerは親NF-02に従う） | 顧客ポータル（`/portal/customer`）の「問い合わせ」タブ・画面・起票モーダル・CSATモーダル・scriptの参照。portal画面自体と検収・契約・請求・見積・注文請タブは止めない（`/portal/js/portal-service-desk.js` 自体のURLは遮断しないが、dataを含まない） |
 | NF-03 | `/certification-learning-skill-gap/**`、`/my/certification-learning-skill-gap/**`、`/api/certification-learning-gap/**`、`/api/my/certification-learning-gap/**` | `CertificationExpiryNotificationScheduler#dispatchToday`（日次） | menu `certification-learning-skill-gap`・`myCertificationLearningGap` |
@@ -66,7 +68,7 @@
 ### 3.1 初回デプロイ
 
 1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施する。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。
-2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
+2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
 
 ### 3.2 1機能ずつONにする
@@ -96,6 +98,7 @@
 | `PRIVACY_DSAR_ENABLED` | 未設定（OFF） | 同上。DSAR の入口と前提検査（D-06 の値・`privacy.dsar.*`・F2 provider）は A2a で追加する | A2a のマージまでは、prodでONにすると前提未実装（`dsar.prerequisitesNotImplemented`）として起動しない。A2a 以降は上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提 |
 | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
+| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（主控の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
 | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
 
 - 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=OFF`、`NF03=ON, NF03_CERTIFICATION_PII=OFF` となることを確認する（NF-02/NF-03をONにした場合）。
@@ -319,6 +322,33 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 - 問題時は `FEATURE_NF06_ENABLED` を外して再起動する（OFFでは admission と行参照鍵の検査で起動を止めない）。
 - 行参照の鍵を差し替えると、previewとエラーCSVの行参照は全て変わり、以前に出力したエラーCSVとは照合できなくなる。保存済みの検証行（内部の SHA-256）は変わらないため、再検証は不要。
+
+### 4.9 NF-01の子: 二者確認（`nf01-dual-confirmation`、W3-21a）
+
+二者確認は提出・確認の業務comment（`t_lifecycle_dual_submission.business_comment`・`t_lifecycle_dual_confirmation.decision_comment`）を追記専用表（V195。trigger と `AppendOnlyMapper` で更新・削除不可）へ保存する。これらの保存期間と削除・匿名化の経路はPrivacyの署名で決まる（NF01細粒度epoch計画 §10・§12 O-8）。実装は署名前に出荷し、子スイッチはOFFのままにする。
+
+#### 4.9.1 OFFのときの応答
+
+- 親NF-01がOFF: 二者確認のAPIも親の遮断表で404（2章）。
+- 親ONで子OFF: 照会・候補・提出・確認/差戻しの全routeが400 `error.lifecycle.dualConfirmationDisabled`。拒否event（`t_lifecycle_dual_event`）は記録しない。既存のタスク完了API（`/api/lifecycle/tasks/{id}/complete` 等）はDUALタスクに対して子スイッチに関係なく409のまま。
+
+#### 4.9.2 ONの条件（prodでは起動時に強制）
+
+- Privacyの署名（comment 2列の保存期間・削除/匿名化の経路）と、W3-21（W3-21a・W3-21b）のPASS。
+- 署名の参照を `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（設定キー `app.features.nf01-dual-confirmation.privacy-sign-off-ref`）へ設定する。値は英数字で始まる4〜128文字（英数字と `._:/#-`）のreview文書ID・ticket番号等で、`TODO`・`changeme`・`pending` 等のplaceholderは受け付けない。
+- prod profileでは `LifecycleDualConfirmationReleaseGate` が、子スイッチの実効値がONなのに参照が無い・形式不正・placeholderの場合に起動を止める（固定コード `NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING`）。参照値は秘密情報ではないため、起動ログ `[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef=...` に出す（監査で署名と配備を突き合わせる）。
+- gateは「署名を記録したこと」を強制するだけで、署名の内容は検証しない。参照の値は署名者（Privacy）が発行したものを配備担当が転記する。
+
+#### 4.9.3 ONにする手順
+
+1. `FEATURE_NF01_ENABLED=true` であることを確認する（親がOFFなら子の値は無効）。
+2. `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` に署名の参照を、`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=true` を設定して全停止で再起動する。
+3. 起動ログで `NF01=ON, NF01_DUAL_CONFIRMATION=ON` と上記の署名参照ログを確認する。
+4. 監視: 再試行の予算超過（409 `error.lifecycle.concurrentUpdateRetryExhausted`、WARN `[二者確認] 再試行の予算を使い切りました`）と拒否eventの `reason_code` の発生率を確認する。
+
+#### 4.9.4 OFF
+
+- 問題時は `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` を外して再起動する。保存済みの提出・確認・拒否eventは追記専用のため残る（OFFで消えない）。未確認の提出はON後も世代・epochの判定に従う。
 
 ## 5. 新しい入口を追加するとき
 

@@ -110,6 +110,17 @@ public interface AuthorizationEpochMapper {
     EpochRow selectTaskGenerationForUpdate(@Param("taskId") long taskId, @Param("caseId") long caseId,
                                            @Param("tenantId") String tenantId);
 
+    /**
+     * タスク世代をlockせずに読む（W3-21a）。二者確認の照会（A1）が提出bodyの {@code taskGeneration} を画面へ渡すためと、
+     * coordinatorのtransaction外discoveryのためだけに使う。認可・状態判定の根拠にはしない（attemptは
+     * {@link #selectTaskGenerationForUpdate} で読み直す）。案件のtenantで照合する。
+     */
+    @Select("SELECT t.task_generation AS epoch, t.deleted_flag AS deletedFlag FROM t_lifecycle_task t "
+            + "WHERE t.id = #{taskId} AND t.case_id = #{caseId} "
+            + "AND EXISTS (SELECT 1 FROM t_lifecycle_case c WHERE c.id = #{caseId} AND c.tenant_id = #{tenantId})")
+    EpochRow selectTaskGeneration(@Param("taskId") long taskId, @Param("caseId") long caseId,
+                                  @Param("tenantId") String tenantId);
+
     @Update("UPDATE t_lifecycle_task SET task_generation = task_generation + 1, updated_at = updated_at "
             + "WHERE id = #{taskId} AND case_id = #{caseId} AND task_generation < 9223372036854775807 "
             + "AND EXISTS (SELECT 1 FROM t_lifecycle_case c WHERE c.id = #{caseId} AND c.tenant_id = #{tenantId})")

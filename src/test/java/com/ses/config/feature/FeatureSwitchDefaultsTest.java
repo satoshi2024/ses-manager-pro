@@ -35,10 +35,11 @@ class FeatureSwitchDefaultsTest {
         for (Feature feature : Feature.values()) {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
         }
-        assertThat(switches.disabledKeys()).containsExactly("nf01", "nf02", "nf02-customer-portal", "nf03",
-                "nf03-certification-pii", "nf04", "nf06", "nf07-retention", "nf10");
-        assertThat(switches.describe()).isEqualTo("NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, "
-                + "NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF10=OFF");
+        assertThat(switches.disabledKeys()).containsExactly("nf01", "nf01-dual-confirmation", "nf02",
+                "nf02-customer-portal", "nf03", "nf03-certification-pii", "nf04", "nf06", "nf07-retention", "nf10");
+        assertThat(switches.describe()).isEqualTo("NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, "
+                + "NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, "
+                + "NF07_RETENTION=OFF, NF10=OFF");
     }
 
     @Test
@@ -60,11 +61,14 @@ class FeatureSwitchDefaultsTest {
         FeatureSwitchProperties properties = new FeatureSwitchProperties();
         properties.getNf02CustomerPortal().setEnabled(true);
         properties.getNf03CertificationPii().setEnabled(true);
+        properties.getNf01DualConfirmation().setEnabled(true);
         FeatureSwitches childOnly = new FeatureSwitches(properties);
 
         assertThat(childOnly.isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isFalse();
         assertThat(childOnly.isEnabled(Feature.NF03_CERTIFICATION_PII)).isFalse();
-        assertThat(childOnly.disabledKeys()).contains("nf02-customer-portal", "nf03-certification-pii");
+        assertThat(childOnly.isEnabled(Feature.NF01_DUAL_CONFIRMATION)).isFalse();
+        assertThat(childOnly.disabledKeys()).contains("nf02-customer-portal", "nf03-certification-pii",
+                "nf01-dual-confirmation");
 
         properties.getNf02().setEnabled(true);
         properties.getNf02CustomerPortal().setEnabled(false);
@@ -85,6 +89,13 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF02_CUSTOMER_PORTAL.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.NF03_CERTIFICATION_PII.parent()).contains(Feature.NF03);
         assertThat(Feature.NF03_CERTIFICATION_PII.root()).isEqualTo(Feature.NF03);
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.parent()).contains(Feature.NF01);
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.root()).isEqualTo(Feature.NF01);
+        // 二者確認の子スイッチもURLを遮断しない（APIはNF-01に属し、OFFの間はservice層が400にする）。
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.menuKeys()).isEmpty();
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.pagePrefixes()).isEmpty();
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.apiPrefixes()).isEmpty();
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.exactPaths()).isEmpty();
         assertThat(Feature.NF02.parent()).isEmpty();
         assertThat(Feature.NF02.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.topLevel()).containsExactly(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF04,
@@ -135,7 +146,8 @@ class FeatureSwitchDefaultsTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = {"NF02_CUSTOMER_PORTAL", "NF03_CERTIFICATION_PII"})
+    @EnumSource(value = Feature.class, names = {"NF01_DUAL_CONFIRMATION", "NF02_CUSTOMER_PORTAL",
+            "NF03_CERTIFICATION_PII"})
     void prodで子スイッチの環境変数だけを指定しても親がOFFなら何もONにならない(Feature child) throws IOException {
         FeatureSwitches switches = bind(Map.of(child.environmentVariable(), "true"),
                 "application.yml", "application-prod.yml");
@@ -146,7 +158,8 @@ class FeatureSwitchDefaultsTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = {"NF02_CUSTOMER_PORTAL", "NF03_CERTIFICATION_PII"})
+    @EnumSource(value = Feature.class, names = {"NF01_DUAL_CONFIRMATION", "NF02_CUSTOMER_PORTAL",
+            "NF03_CERTIFICATION_PII"})
     void prodで親だけONにしても子スイッチは既定OFFのまま(Feature child) throws IOException {
         Feature parent = child.parent().orElseThrow();
         FeatureSwitches switches = bind(Map.of(parent.environmentVariable(), "true"),
@@ -196,13 +209,18 @@ class FeatureSwitchDefaultsTest {
                 .isEqualTo("app.features.nf03-certification-pii.enabled");
         assertThat(Feature.NF03_CERTIFICATION_PII.environmentVariable())
                 .isEqualTo("FEATURE_NF03_CERTIFICATION_PII_ENABLED");
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.key()).isEqualTo("nf01-dual-confirmation");
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.propertyName())
+                .isEqualTo("app.features.nf01-dual-confirmation.enabled");
+        assertThat(Feature.NF01_DUAL_CONFIRMATION.environmentVariable())
+                .isEqualTo("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED");
         assertThat(Feature.NF06.propertyName()).isEqualTo("app.features.nf06.enabled");
         assertThat(Feature.NF06.environmentVariable()).isEqualTo("FEATURE_NF06_ENABLED");
         // NF-07 は privacy.* の設定キー・環境変数を使い、app.features.* には別名を作らない（§3.1.2）。
         assertThat(Feature.NF07_RETENTION.key()).isEqualTo("nf07-retention");
         assertThat(Feature.NF07_RETENTION.propertyName()).isEqualTo("privacy.retention.enabled");
         assertThat(Feature.NF07_RETENTION.environmentVariable()).isEqualTo("PRIVACY_RETENTION_ENABLED");
-        assertThat(Set.of(Feature.values())).hasSize(9);
+        assertThat(Set.of(Feature.values())).hasSize(10);
     }
 
     @Test

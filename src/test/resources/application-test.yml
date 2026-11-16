@@ -185,6 +185,8 @@ app:
   features:
     nf01:
       enabled: true
+    nf01-dual-confirmation:
+      enabled: true
     nf02:
       enabled: true
     nf02-customer-portal:

@@ -54,8 +54,12 @@ class FeatureSwitchFilterTest {
 
     /** 各機能の代表的なAPI入口（内部・本人・portal・管理者専用を含む）。 */
     private static final Map<Feature, List<String>> API_SAMPLES = Map.of(
+            // 二者確認のAPIも親のNF-01に属する（親OFFで404。子だけOFFならfilterは通し、service層が400にする）
             Feature.NF01, List.of("/api/lifecycle/cases", "/api/lifecycle/templates/3",
-                    "/api/my/lifecycle/tasks/pending"),
+                    "/api/my/lifecycle/tasks/pending", "/api/lifecycle/tasks/5/dual-confirmation/submissions",
+                    "/api/my/lifecycle/tasks/5/dual-confirmation"),
+            // 二者確認の子スイッチはURLを遮断しない
+            Feature.NF01_DUAL_CONFIRMATION, List.of(),
             Feature.NF02, List.of("/api/service-desk/requests", "/api/service-desk/health/snapshots",
                     "/api/customer-success/health/9", "/api/customer-success/qbrs"),
             // 顧客ポータルの問い合わせ（起票・一覧・返信・CSAT・添付）はNF-02の子スイッチで遮断する
@@ -81,6 +85,7 @@ class FeatureSwitchFilterTest {
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
             Feature.NF01, List.of("/lifecycle", "/lifecycle/12", "/lifecycle/templates", "/my/lifecycle"),
+            Feature.NF01_DUAL_CONFIRMATION, List.of(),
             Feature.NF02, List.of("/service-desk/requests", "/service-desk/requests/4",
                     "/customer-success/health", "/service-desk/health"),
             // portal画面（/portal/customer）は検収・請求等と共用のため遮断せず、問い合わせタブだけをtemplateで隠す
@@ -95,6 +100,7 @@ class FeatureSwitchFilterTest {
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
     private static final Map<Feature, List<String>> CHILD_HOST_PAGES = Map.of(
+            Feature.NF01_DUAL_CONFIRMATION, List.of("/lifecycle/12", "/my/lifecycle"),
             Feature.NF02_CUSTOMER_PORTAL, List.of("/portal/customer", "/service-desk/requests"),
             Feature.NF03_CERTIFICATION_PII, List.of("/my/certification-learning-skill-gap",
                     "/certification-learning-skill-gap"));
@@ -105,7 +111,8 @@ class FeatureSwitchFilterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = {"NF04", "NF03_CERTIFICATION_PII"}, mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = Feature.class, names = {"NF04", "NF03_CERTIFICATION_PII", "NF01_DUAL_CONFIRMATION"},
+            mode = EnumSource.Mode.EXCLUDE)
     void OFFの機能のAPIはCustomErrorControllerと同じApiResult形式の404になる(Feature feature) throws Exception {
         assertThat(API_SAMPLES.get(feature)).as("代表APIが空振りしないこと").isNotEmpty();
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
