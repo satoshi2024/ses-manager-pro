@@ -191,6 +191,20 @@ class LifecycleDualConfirmationCoordinatorTest {
     }
 
     @Test
+    void 実transactionを伴わないsynchronizationの中からの呼出しも拒否する() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(IllegalStateException.class, () -> submit(DualConfirmationChannel.INTERNAL, submitBody()));
+            assertThrows(IllegalStateException.class, () -> decide(decisionBody("REJECT")));
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.view(TASK, principal(SUBMITTER), DualConfirmationChannel.SELF));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        verifyNoInteractions(attempts, recorder, reader);
+    }
+
+    @Test
     void 試行とdeny_recorderの境界はREQUIRES_NEWでcoordinatorはtransactionを宣言しない() throws Exception {
         for (String name : List.of("submit", "confirm")) {
             Method method = Arrays.stream(LifecycleDualConfirmationAttemptService.class.getDeclaredMethods())

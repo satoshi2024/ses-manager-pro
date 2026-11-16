@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
-import java.util.Set;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -42,9 +42,19 @@ public class LifecycleDualConfirmationReleaseGate {
     /** 署名の参照の形式（英数字で始まる4〜128文字。review文書のID・ticket番号等）。 */
     static final Pattern SIGN_OFF_REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/#-]{3,127}");
 
-    /** 書式を満たしても署名の参照とみなさない値（小文字で比較）。 */
-    private static final Set<String> PLACEHOLDERS = Set.of("todo", "tbd", "changeme", "change-me", "dummy",
-            "none", "null", "pending", "unsigned", "xxxx", "test");
+    /**
+     * 一部にでも含めば署名の参照とみなさない語（小文字で比較。W3-21a review P3-6: 完全一致だけでは {@code TODO-1}・
+     * {@code TBD2026}・{@code xxxxx} が通った）。
+     */
+    private static final List<String> PLACEHOLDER_FRAGMENTS = List.of("todo", "tbd", "xxx", "placeholder", "changeme",
+            "change-me", "change_me", "dummy", "fixme", "sample", "example", "unsigned", "replace", "your-");
+
+    /** この語で始まる値は署名の参照とみなさない（小文字で比較）。 */
+    private static final List<String> PLACEHOLDER_PREFIXES = List.of("test", "pending", "tmp", "temp", "none", "null",
+            "n/a", "dev", "local");
+
+    private static final Pattern HAS_LETTER = Pattern.compile(".*[A-Za-z].*");
+    private static final Pattern HAS_DIGIT = Pattern.compile(".*[0-9].*");
 
     private final ObjectProvider<FeatureSwitches> featureSwitches;
     private final FeatureSwitchProperties properties;
@@ -69,16 +79,22 @@ public class LifecycleDualConfirmationReleaseGate {
         log.info("[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef={}", reference);
     }
 
-    /** 署名の参照として受け付ける値か（null・空・形式不正・placeholderは不可）。 */
+    /**
+     * 署名の参照として受け付ける値か。null・空・前後の空白・形式不正（{@link #SIGN_OFF_REF}）、英字と数字の両方を含まない値、
+     * placeholderの語を一部に含む値・placeholderの語で始まる値は不可。
+     */
     static boolean acceptable(String reference) {
         if (reference == null) {
             return false;
         }
         String trimmed = reference.trim();
-        if (!trimmed.equals(reference) || !SIGN_OFF_REF.matcher(trimmed).matches()) {
+        if (!trimmed.equals(reference) || !SIGN_OFF_REF.matcher(trimmed).matches()
+                || !HAS_LETTER.matcher(trimmed).matches() || !HAS_DIGIT.matcher(trimmed).matches()) {
             return false;
         }
-        return !PLACEHOLDERS.contains(trimmed.toLowerCase(Locale.ROOT));
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        return PLACEHOLDER_FRAGMENTS.stream().noneMatch(lower::contains)
+                && PLACEHOLDER_PREFIXES.stream().noneMatch(lower::startsWith);
     }
 
     private String signOffReference() {

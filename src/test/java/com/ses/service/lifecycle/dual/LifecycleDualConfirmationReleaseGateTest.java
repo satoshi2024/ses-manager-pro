@@ -34,7 +34,10 @@ class LifecycleDualConfirmationReleaseGateTest {
     @Test
     void 子スイッチの実効値がONで署名の参照が無いか不正なら起動を止める() {
         for (String reference : new String[]{null, "", "   ", "TODO", "changeme", "Pending", "abc", " PRIV-2026-001",
-                "PRIV-2026-001 ", "署名済み", "PRIV 2026 001"}) {
+                "PRIV-2026-001 ", "署名済み", "PRIV 2026 001",
+                // W3-21a review P3-6: 完全一致だけでは通っていた値（部分一致・前方一致・英字と数字の両方を要求）
+                "TODO-1", "pending-privacy-1", "test-ref-1", "xxxxx1", "TBD2026", "PLACEHOLDER-1", "PRIV-TODO-2026",
+                "review-abcd", "20261120", "tmp-2026", "CHANGE_ME-1", "sample-2026", "dev-signoff-1"}) {
             assertThatThrownBy(() -> gate(true, true, reference).validate())
                     .as(String.valueOf(reference))
                     .isInstanceOf(IllegalStateException.class)
@@ -44,9 +47,10 @@ class LifecycleDualConfirmationReleaseGateTest {
 
     @Test
     void 子スイッチの実効値がONでも署名の参照があれば起動する() {
-        assertThatCode(() -> gate(true, true, "PRIV-REVIEW-2026-11-20").validate()).doesNotThrowAnyException();
-        assertThatCode(() -> gate(true, true, "reviews/nf01-o8-privacy-signoff.md#v2").validate())
-                .doesNotThrowAnyException();
+        for (String reference : new String[]{"PRIV-REVIEW-2026-11-20", "PRIV-2026-001",
+                "reviews/nf01-o8-privacy-signoff.md#v2", "NF01:O8:2026-11-20"}) {
+            assertThatCode(() -> gate(true, true, reference).validate()).as(reference).doesNotThrowAnyException();
+        }
     }
 
     @SuppressWarnings("unchecked")

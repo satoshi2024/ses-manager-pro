@@ -13,7 +13,6 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.document.DocumentEvidenceStorageVerifier;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import com.ses.service.lifecycle.dual.DualConfirmationMySqlFixtures.Fixture;
-import com.ses.service.lifecycle.evidence.LifecycleLockExecutor;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,7 +23,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,7 +43,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.ses.service.lifecycle.dual.DualConfirmationMySqlFixtures.capture;
@@ -57,7 +55,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -73,13 +70,16 @@ import static org.mockito.Mockito.when;
  *   <li>拒否event（{@code DENIED}）は試行のrollback後も残り、提出・確認の行は残らない。</li>
  * </ul>
  *
- * <p>B0の不変表はtriggerが削除を拒否するため後始末で行を消さない。専用のMySQL containerを使い、試験ごとに一意のtenantで
- * 分離する。試行の数は {@link LifecycleLockExecutor#acquire} の呼出し（試行ごとに1回）で数える。</p>
+ * <p>B0の不変表はtriggerが削除を拒否するため後始末で行を消さない。専用のMySQL containerを使い、試験ごとに新しい
+ * 利用者・案件・タスク・文書で分離し、B0の行と拒否eventはタスクIDで絞って数える（tenantは配備の {@code default} に固定。
+ * {@link DualConfirmationMySqlFixtures}）。試行の数は {@link HookedLifecycleLockExecutor} のlock取得の呼出し
+ * （試行ごとに1回）で数える。</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers
+@Import(HookedLifecycleLockExecutor.Configuration.class)
 class DualConfirmationCoordinatorRetryMySqlTest {
 
     @Container
@@ -103,21 +103,6 @@ class DualConfirmationCoordinatorRetryMySqlTest {
 
     private static final long WAIT_SECONDS = 30;
 
-    /** 試行のlock取得の前後に差し込む処理（nは要求内の試行番号、1始まり）。 */
-    private interface Hook {
-        default void before(int n) throws Exception {
-        }
-
-        default void after(int n) throws Exception {
-        }
-
-        default void cleanup(int n) throws Exception {
-        }
-    }
-
-    private static final AtomicReference<Hook> HOOK = new AtomicReference<>();
-    private static final AtomicInteger ATTEMPTS = new AtomicInteger();
-
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private LifecycleDualConfirmationCoordinator coordinator;
@@ -129,7 +114,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
     @Autowired private LifecycleCaseMapper caseMapper;
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private LifecycleTaskDepMapper taskDepMapper;
-    @SpyBean private LifecycleLockExecutor lockExecutor;
+    @Autowired private HookedLifecycleLockExecutor lockExecutor;
     @MockBean private DocumentEvidenceStorageVerifier storageVerifier;
     @MockBean private LifecycleNotificationService notificationService;
 
@@ -141,31 +126,12 @@ class DualConfirmationCoordinatorRetryMySqlTest {
                 userOrganizationMapper, templateMapper, caseMapper, taskMapper, taskDepMapper);
         reset(storageVerifier);
         when(storageVerifier.verify(any())).thenReturn(DocumentEvidenceStorageVerifier.Outcome.MATCH);
-        HOOK.set(null);
-        ATTEMPTS.set(0);
-        doAnswer(invocation -> {
-            int n = ATTEMPTS.incrementAndGet();
-            Hook hook = HOOK.get();
-            try {
-                if (hook != null) {
-                    hook.before(n);
-                }
-                Object result = invocation.callRealMethod();
-                if (hook != null) {
-                    hook.after(n);
-                }
-                return result;
-            } finally {
-                if (hook != null) {
-                    hook.cleanup(n);
-                }
-            }
-        }).when(lockExecutor).acquire(any());
+        lockExecutor.reset(null);
     }
 
     @AfterEach
     void tearDown() {
-        HOOK.set(null);
+        lockExecutor.reset(null);
     }
 
     // ===================================================================== transaction境界
@@ -174,7 +140,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
     void 試行の中の分離レベルはREAD_COMMITTEDで外側transactionからの呼出しは拒否する() {
         Fixture f = fixtures.create("w321a-m9-iso");
         AtomicReference<String> isolation = new AtomicReference<>();
-        HOOK.set(new Hook() {
+        lockExecutor.reset(new HookedLifecycleLockExecutor.Hook() {
             @Override
             public void before(int n) {
                 isolation.set(jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
@@ -187,10 +153,10 @@ class DualConfirmationCoordinatorRetryMySqlTest {
         assertEquals("PENDING", submitted.getState());
 
         Fixture other = fixtures.create("w321a-m9-ambient");
-        ATTEMPTS.set(0);
+        lockExecutor.reset(null);
         TransactionTemplate outer = new TransactionTemplate(transactionManager);
         assertThrows(IllegalStateException.class, () -> outer.execute(status -> submit(other, 0L)));
-        assertEquals(0, ATTEMPTS.get(), "ambient transactionでは試行を始めない");
+        assertEquals(0, lockExecutor.calls(), "ambient transactionでは試行を始めない");
         assertEquals(0, submissions(other));
         assertEquals(List.of(), fixtures.deniedReasons(other));
     }
@@ -204,8 +170,8 @@ class DualConfirmationCoordinatorRetryMySqlTest {
         long extra = fixtures.extraTask(f, "EXTRA_SUCCESSOR");
         ExecutorService other = Executors.newSingleThreadExecutor();
         try {
-            ATTEMPTS.set(0);
-            HOOK.set(new Hook() {
+            lockExecutor.reset(null);
+            lockExecutor.reset(new HookedLifecycleLockExecutor.Hook() {
                 @Override
                 public void before(int n) throws Exception {
                     // discoveryの後・lockの前に、後続の依存を別の接続でcommitして増減させる（lock後の再読込がplanと食い違う）
@@ -225,13 +191,12 @@ class DualConfirmationCoordinatorRetryMySqlTest {
                     principal(f, f.hr1()), decisionBody(submitted, "CONFIRM", "確認"), "key-confirm-1"));
 
             assertBusiness(outcome, 409, "error.lifecycle.concurrentUpdateRetryExhausted");
-            assertEquals(3, ATTEMPTS.get(), "試行は3回まで");
+            assertEquals(3, lockExecutor.calls(), "試行は3回まで");
         } finally {
             other.shutdownNow();
         }
         assertDeniedOnce(f, "RETRY_EXHAUSTED", 409, 3, "CONFIRM");
-        assertEquals(0, fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_confirmation WHERE tenant_id = ?",
-                f.tenant()), "rollbackした試行の確認行は残らない");
+        assertEquals(0, fixtures.confirmations(f), "rollbackした試行の確認行は残らない");
         assertEquals("IN_PROGRESS", fixtures.taskStatus(f.taskId()));
     }
 
@@ -249,7 +214,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
                 return null;
             }));
             assertTrue(locked.await(WAIT_SECONDS, TimeUnit.SECONDS), "blockerが案件行をlockできない");
-            HOOK.set(new Hook() {
+            lockExecutor.reset(new HookedLifecycleLockExecutor.Hook() {
                 @Override
                 public void before(int n) {
                     jdbc.execute("SET SESSION innodb_lock_wait_timeout = 1");
@@ -264,7 +229,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
             Throwable outcome = capture(() -> submit(f, 0L));
 
             assertBusiness(outcome, 409, "error.lifecycle.concurrentUpdateRetryExhausted");
-            assertEquals(3, ATTEMPTS.get());
+            assertEquals(3, lockExecutor.calls());
             release.countDown();
             blocker.get(WAIT_SECONDS, TimeUnit.SECONDS);
         } finally {
@@ -279,7 +244,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
     @ValueSource(strings = {"deadlock", "statement-timeout"})
     void 一回目の1213や文の実行中timeoutは予算に数え次の試行で成功する(String failure) {
         Fixture f = fixtures.create("w321a-m9-" + failure);
-        HOOK.set(new Hook() {
+        lockExecutor.reset(new HookedLifecycleLockExecutor.Hook() {
             @Override
             public void before(int n) {
                 if (n == 1) {
@@ -293,7 +258,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
         DualConfirmationResultDto submitted = submit(f, 0L);
 
         assertEquals("PENDING", submitted.getState());
-        assertEquals(2, ATTEMPTS.get());
+        assertEquals(2, lockExecutor.calls());
         assertEquals(1, submissions(f));
         assertEquals(List.of(), fixtures.deniedReasons(f));
     }
@@ -301,7 +266,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
     @Test
     void 試行のtimeoutを超えた後の次の文のTransactionTimedOutExceptionを予算に数え次の試行で成功する() {
         Fixture f = fixtures.create("w321a-m9-txtimeout");
-        HOOK.set(new Hook() {
+        lockExecutor.reset(new HookedLifecycleLockExecutor.Hook() {
             @Override
             public void after(int n) throws Exception {
                 if (n == 1) {
@@ -314,7 +279,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
         DualConfirmationResultDto submitted = submit(f, 0L);
 
         assertEquals("PENDING", submitted.getState());
-        assertEquals(2, ATTEMPTS.get());
+        assertEquals(2, lockExecutor.calls());
         assertEquals(1, submissions(f));
         assertEquals(List.of(), fixtures.deniedReasons(f));
     }
@@ -328,17 +293,18 @@ class DualConfirmationCoordinatorRetryMySqlTest {
         Throwable outcome = capture(() -> submit(f, 5L));
 
         assertBusiness(outcome, 409, "error.lifecycle.submissionStale");
-        assertEquals(1, ATTEMPTS.get(), "決定的な拒否は再試行しない");
+        assertEquals(1, lockExecutor.calls(), "決定的な拒否は再試行しない");
         assertEquals(0, submissions(f), "rollbackした試行の提出行は残らない");
         assertDeniedOnce(f, "SUBMISSION_STALE", 409, 1, "SUBMIT");
         Map<String, Object> row = jdbc.queryForMap("SELECT case_id, requested_task_id, actor_user_id, "
-                + "task_generation FROM t_lifecycle_dual_event WHERE tenant_id = ? AND event_type = 'DENIED'", f.tenant());
+                + "task_generation FROM t_lifecycle_dual_event WHERE tenant_id = ? AND requested_task_id = ? "
+                + "AND event_type = 'DENIED'", f.tenant(), f.taskId());
         assertEquals(f.caseId(), ((Number) row.get("case_id")).longValue());
         assertEquals(f.taskId(), ((Number) row.get("requested_task_id")).longValue());
         assertEquals(f.sales(), ((Number) row.get("actor_user_id")).longValue());
         assertEquals(0L, ((Number) row.get("task_generation")).longValue());
-        assertFalse(fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_event WHERE tenant_id = ? "
-                + "AND event_type <> 'DENIED'", f.tenant()) > 0, "rollbackした試行のeventは残らない");
+        assertFalse(fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_event WHERE tenant_id = ? AND task_id = ? "
+                + "AND event_type <> 'DENIED'", f.tenant(), f.taskId()) > 0, "rollbackした試行のeventは残らない");
     }
 
     // ===================================================================== helpers
@@ -349,12 +315,13 @@ class DualConfirmationCoordinatorRetryMySqlTest {
     }
 
     private long submissions(Fixture f) {
-        return fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_submission WHERE tenant_id = ?", f.tenant());
+        return fixtures.submissions(f);
     }
 
     private void assertDeniedOnce(Fixture f, String reason, int status, int attempts, String operation) {
         List<Map<String, Object>> rows = jdbc.queryForList("SELECT reason_code, http_status, attempt_count, operation "
-                + "FROM t_lifecycle_dual_event WHERE tenant_id = ? AND event_type = 'DENIED'", f.tenant());
+                + "FROM t_lifecycle_dual_event WHERE tenant_id = ? AND requested_task_id = ? AND event_type = 'DENIED'",
+                f.tenant(), f.taskId());
         assertThat(rows).hasSize(1);
         Map<String, Object> row = rows.get(0);
         assertEquals(reason, row.get("reason_code"));

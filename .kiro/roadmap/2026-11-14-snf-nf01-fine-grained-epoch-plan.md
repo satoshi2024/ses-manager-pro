@@ -28,7 +28,7 @@
 | §9.3 第2段落のlock順とepoch照合項目 | §3.4、§5.5 |
 | §9.5 batch 1〜6 | §7 |
 
-置き換えずに引き続き有効とする部分: §1の事実記述、§3のうちexact version・CLEAN・storage検証・漏えい禁止・latest fallback禁止（第1段落の上記の文を除く）、§4の状態・冪等性・不変証跡の原則（第1段落の上記の文を除く）、§5のgeneration/current selectionの原則、§9.1のhistory表のFK方針（tenant複合FK、親削除cascadeにしない）、§9.3のcoordinator境界（`NEVER` + 毎回 `REQUIRES_NEW` + `READ_COMMITTED`、最大3回）、§9.4。
+置き換えずに引き続き有効とする部分: §1の事実記述、§3のうちexact version・CLEAN・storage検証・漏えい禁止・latest fallback禁止（第1段落の上記の文を除く）、§4の状態・冪等性・不変証跡の原則（第1段落の上記の文を除く）、§5のgeneration/current selectionの原則、§9.1のhistory表のFK方針（tenant複合FK、親削除cascadeにしない）、§9.3のcoordinator境界（`NEVER` + 毎回 `REQUIRES_NEW` + `READ_COMMITTED`、最大3回。`NEVER` はW3-21aの勘誤で「注釈を付けずambient transaction・synchronizationを明示拒否」に読み替える。§5.4）、§9.4。
 
 ## 1. 結論の要約
 
@@ -452,14 +452,15 @@ W3-17ではreader側の文書部品も作る: `DocumentEvidenceEligibility`（�
 | 層 | transaction | 役割 |
 |---|---|---|
 | controller | なし（ControllerTransactionalBanTest） | principalからactor IDを取り、coordinatorを呼ぶ |
-| `LifecycleDualConfirmationCoordinator`（新） | `Propagation.NEVER`。加えて `TransactionSynchronizationManager.isActualTransactionActive()` を明示検査 | スイッチ確認、試行ループ、discovery（transaction外の単文読取）、storage検証、例外の分類、deny recorderの呼出し |
+| `LifecycleDualConfirmationCoordinator`（新） | ~~`Propagation.NEVER`。加えて~~ transaction注釈を付けず、`TransactionSynchronizationManager.isActualTransactionActive()` と `isSynchronizationActive()` を明示検査して拒否する（**勘誤 W3-21a**、下記） | スイッチ確認、試行ループ、discovery（transaction外の単文読取）、storage検証、例外の分類、deny recorderの呼出し |
 | `LifecycleDualConfirmationAttemptService`（新、別bean） | `REQUIRES_NEW` + `Isolation.READ_COMMITTED` + `rollbackFor = Exception.class` + `timeout = 10`（秒、推奨値） | lock列の取得、locking再読込とdiscovery照合、述語・epoch・generation・文書適格性の判定、冪等性、書込み、afterCommit登録 |
 | `LifecycleDualConfirmationDenyRecorder`（新、別bean） | `REQUIRES_NEW` + `rollbackFor` | attemptのrollback後に拒否eventを追記。失敗はWARNだけで応答を変えない |
 | afterCommit | `TransactionTemplate(REQUIRES_NEW)` | 確認待ち・確認完了の通知（publishCaseCompletedAfterCommit、LifecycleCaseServiceImpl.java:742-767 と同じ形）。失敗はWARN |
 
 - discoveryはtransaction外の単文読取（autocommit）で行う。discovery結果はlock対象の列挙にだけ使い、認可の根拠にしない。
 - storage検証（open + SHA-256）はattemptの外で行い、lockを持ったままI/Oをしない。discovery時に読んだ版行の組 `(id, tenant_id, document_id, storage_key, sha256, scan_status)` を検証対象とし、attempt内では文書・版をS lockした状態でこの組の全項目が変わっていないこと、文書がDISPOSEDでないこと、版がCLEANであることを確認する。版の内容識別子はappend-onlyであり、廃棄のstorage削除はDISPOSED commit後のafterCommit（DocumentServiceImpl.java:778-852）なので、attemptは必ずDISPOSEDを観測できる。storage外部での改ざん・消失はRR-4として受容する。
-- H2の `@Transactional` テストからcoordinatorは呼べない（`NEVER`）。coordinatorのテストはmockによる単体テスト（U11）とMySQLテスト（M8、M9、非transactionalで後始末）で行う。TestIsolationAuditTestの規則に従う。
+- H2の `@Transactional` テストからcoordinatorは呼べない（ambient transactionの明示拒否）。coordinatorのテストはmockによる単体テスト（U11）とMySQLテスト（M8、M9、非transactionalで後始末）で行う。TestIsolationAuditTestの規則に従う。
+- **勘誤（W3-21a、review P3-1）**: coordinatorに `@Transactional(propagation = NEVER)` は付けない。Springの既定（`SYNCHRONIZATION_ALWAYS`）では `NEVER` でも実transactionの無い空transactionにsynchronizationが張られ、discoveryの最初の読取で接続が要求の終わりまでthreadへ束縛される。試行の `REQUIRES_NEW` は2本目の接続を要するため、同時要求が接続poolを使い切ると互いに待つ（pool枯渇）。拒否の意図（ambient transactionから呼ばせない）は明示検査で満たし、`SUPPORTS`・`NOT_SUPPORTED` 等の空transaction（synchronizationだけが有効）からの呼出しも同じ理由で拒否する。U11の受入条件の「`NEVER`」もこの明示検査に読み替える。
 
 ### 5.5 submit・confirmの処理順
 
@@ -800,7 +801,7 @@ M2〜M7はW3-21より前に実装されるため、confirm attemptと同じlock�
 | U8 | F2 writerの単体テスト（EngineerSales、AccountLink、Engineer、Organization、lifecycle generation） | W3-16a/b | 増分条件、lockの順序（InOrder）、保留・取消・担当変更・免除でgeneration+1、再開で不変、DUALの既存completeは409のまま、OrganizationServiceImpl.updateById overrideが無い（またはfence済み） |
 | U9 | `DocumentEvidenceEligibilityTest` とF3 writerの単体テスト | W3-17 | §5.1の条件3〜10の各否定が期待のkey、tenant不一致のlink行でfail-closed、版追加で不変、保存期限jobが文書自身のtenantで増分する |
 | U10 | `ResignationGateRevocationOutboxTest` | W3-11 | 登録済み・登録可能（別法人の行を含む）はブロックしない、法人不明の行はブロック、登録は完了と同じtransaction、rollback時に登録が残らない、afterCommitで送信、失敗で通知と一覧残存、通知の識別子がマスクされる。既存の `AssetOffboardingServiceTest:232`、`ExternalAccountFailClosedOffboardingIntegrationTest:127` を新契約で書き直す |
-| U11 | `LifecycleDualConfirmationCoordinatorTest` | W3-21a | `NEVER`、予算の計上対象（`TransactionTimedOutException` を含む）、決定的拒否は再試行しない、deny recorderがrollback後に呼ばれる、エラー対応表 |
+| U11 | `LifecycleDualConfirmationCoordinatorTest` | W3-21a | ambient transaction・synchronizationの明示拒否（`NEVER` 注釈は付けない。§5.4 の勘誤）、予算の計上対象（`TransactionTimedOutException` を含む）、決定的拒否は再試行しない、deny recorderがrollback後に呼ばれる、エラー対応表 |
 | U12 | `LifecycleDualConfirmationApiControllerTest` | W3-21a | routeとmenu、スイッチOFFで400、未知property 400（`@JsonAnySetter`）、Idempotency-Key検査、`/api/my` に確認routeが無い、CSRF |
 | U13 | `LifecycleTemplateDualPolicyTest` | W3-21b（W3-02の `LifecycleTemplateDualConfirmationGuardTest` を拡張） | スイッチOFFでDUALテンプレート400、ONで許可 |
 | U14 | 画面テスト（Thymeleaf/MVC）と新keyの4言語 | W3-21b | 提出・確認・差戻しの要素とkeyの存在、MessageBundleConsistencyTest |
@@ -902,7 +903,7 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
   - B0の列名 `task_generation`・`engineer_scope_epoch`・`org_scope_epoch`・`evidence_eligibility_epoch` は `AuthorizationEpochColumnIsolationTest` の監視対象と同名である。main側では注釈SQLや文字列に書かず、`LambdaQueryWrapper` 等（列名はentityのmetadataから得る）で扱うか、B0の表に限った理由付きの例外をguardへ足す。
   - hash列（`evidence_sha256`・`request_sha256`・`sha256`）は `utf8mb4_unicode_ci` で、FK・一意keyの比較は大文字小文字を区別しない。coordinatorは常に小文字hexで書き、比較する。
   - DBで束縛されない列がある: `t_lifecycle_dual_confirmation.case_id`、`t_lifecycle_dual_idempotency.task_id`・`submission_id`・`confirmation_id`、`t_lifecycle_dual_submission.engineer_id`。冪等の保存済み結果を返すときは、tenantを条件にsubmission・confirmationを読み直し、これらの列を検索の根拠にしない。
-  - canonical JSON（`LifecycleCanonicalization.Request.canonicalJson()`）はtenantId・文書ID・版ID・版番号・sha256・文書epochだけを持つ。文書title・氏名・commentを含まないことをテストで固定する（§12 O-8）。
+  - canonical JSON（~~`LifecycleCanonicalization.Request.canonicalJson()`~~ → `LifecycleCanonicalization.EvidenceSnapshot.canonicalJson()`。`t_lifecycle_dual_submission.evidence_canonical_json` 列に保存する値）はtenantId・文書ID・版ID・版番号・sha256・文書epochだけを持つ。文書title・氏名・commentを含まないことをテストで固定する（§12 O-8）。**勘誤（W3-21a、review P3-2）**: `Request.canonicalJson()` は冪等性のrequest hashの入力で、§5.7・§12 O-8(3) のとおり業務comment（と冪等key・各ID）を含む。保存はせず、そのSHA-256だけを `request_sha256` に保存する。`request_sha256` から元の値は逆算できないが、commentの派生値ではあるため、Privacyへの説明に含める。
   - `Idempotency-Key` の末尾空白・改行・許可外文字が400になるテストを置く（§5.7。DBの `ck_dual_idem_key` は最後の防御）。
   - B0の不変表はtriggerが削除を拒否するため、非transactionalのMySQLテスト（M8・M9）は後始末で行を消せない。専用のcontainer DBを使い、テストごとに一意のtenantで分離する。
 - Demo（API、子スイッチをテスト環境でON）: (1) OFFでA1〜A7が400。(2) ONで担当営業が提出→HRが確認→taskがCOMPLETEDになり後続が昇格。(3) 確認成功後に同じkeyで再送すると保存済みの結果、bodyを変えた同keyで409。(4) 提出者本人による確認、マネージャーによる確認が403。(5) 提出後に担当営業を解除→確認が409 `authorizationChanged`。別の要員の担当変更では確認できる（細粒度）。(6) SKILL_SHEET以外、版IDなし、未知のbody propertyが400。(7) 保留→再開後の旧提出が409 `submissionStale`。(8) 拒否eventがrollback後もDBに残る。

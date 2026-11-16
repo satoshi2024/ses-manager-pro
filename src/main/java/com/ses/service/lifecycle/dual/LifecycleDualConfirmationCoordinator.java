@@ -590,10 +590,16 @@ public class LifecycleDualConfirmationCoordinator {
 
     // ===================================================================== 入力の検査（拒否eventに記録しない）
 
+    /**
+     * 実transactionに加えて、実transactionを伴わないsynchronization（{@code SUPPORTS}・{@code NOT_SUPPORTED}・{@code NEVER} の
+     * 空transaction）の中からの呼出しも拒否する。synchronizationが有効だとdiscoveryの最初の読取で接続がthreadへ束縛され、
+     * 試行の {@code REQUIRES_NEW} と合わせて1要求が接続を2本持つため（W3-21a review P3-1）。
+     */
     private void requireNoAmbientTransaction() {
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("二者確認のcoordinatorはtransactionの外から呼び出してください"
-                    + "（試行ごとに新しいtransactionを使うため、ambient transactionを受け付けません）");
+                    + "（試行ごとに新しいtransactionを使うため、ambient transactionとsynchronizationを受け付けません）");
         }
     }
 

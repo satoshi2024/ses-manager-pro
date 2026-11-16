@@ -19,7 +19,6 @@ import com.ses.service.lifecycle.LifecycleCaseService;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.lifecycle.dual.DualConfirmationMySqlFixtures.Fixture;
-import com.ses.service.lifecycle.evidence.LifecycleLockExecutor;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
@@ -32,7 +31,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -56,6 +55,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -70,7 +70,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
@@ -91,13 +90,17 @@ import static org.mockito.Mockito.when;
  *       連結条件にしない。</li>
  * </ul>
  *
- * <p>B0の不変表はtriggerが削除を拒否するため後始末で行を消さない。専用のMySQL containerを使い、試験ごとに一意のtenantで
- * 分離する。storageの内容検証は本試験の対象外のためmockで一致とする。</p>
+ * <p>B0の不変表はtriggerが削除を拒否するため後始末で行を消さない。専用のMySQL containerを使い、試験ごとに新しい
+ * 利用者・要員・案件・タスク・文書で分離し、B0の行と拒否eventはタスクIDで絞って数える。tenantは配備のtenant（{@code default}）に
+ * 固定する（明示actorのaction判定が配備のtenant以外を拒否するため。{@link DualConfirmationMySqlFixtures}）。
+ * lock取得の前後のhookは {@link HookedLifecycleLockExecutor}（Mockitoのspyを使わない）。storageの内容検証は本試験の対象外の
+ * ためmockで一致とする。</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers
+@Import(HookedLifecycleLockExecutor.Configuration.class)
 class DualConfirmationRaceMySqlTest {
 
     @Container
@@ -200,15 +203,40 @@ class DualConfirmationRaceMySqlTest {
         }
     }
 
-    /** lock取得の前後に呼ぶhook（試行の接続IDの記録と、取得後の一時停止）。 */
-    private static final class Hook {
+    /** 試行のtimeout（10秒）より短い一時停止の上限（P3-10）。超えたら試行を進め、試験を失敗にする。 */
+    private static final long PAUSE_LIMIT_SECONDS = LifecycleDualConfirmationAttemptService.ATTEMPT_TIMEOUT_SECONDS - 2;
+    /** 待ちの検出の上限。試行が待っている間に試行のtimeoutへ達しないよう、一時停止の上限より短くする。 */
+    private static final long DETECT_MILLIS = TimeUnit.SECONDS.toMillis(6);
+
+    /**
+     * 試行のlock取得の前後に差し込むhook（{@link HookedLifecycleLockExecutor}）。最初の試行の接続IDを記録し、reader先行では
+     * lock取得後に一時停止する。
+     */
+    private final class Pause implements HookedLifecycleLockExecutor.Hook {
         private final boolean pauseAfterAcquire;
         private final AtomicLong connection = new AtomicLong();
         private final CountDownLatch acquired = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
+        private final AtomicBoolean pausedTooLong = new AtomicBoolean();
 
-        private Hook(boolean pauseAfterAcquire) {
+        private Pause(boolean pauseAfterAcquire) {
             this.pauseAfterAcquire = pauseAfterAcquire;
+        }
+
+        @Override
+        public void before(int attempt) {
+            // 試行のtransactionに束縛された接続で読む（attempt自身の接続ID）
+            connection.compareAndSet(0, connectionId());
+        }
+
+        @Override
+        public void after(int attempt) throws InterruptedException {
+            if (pauseAfterAcquire && acquired.getCount() > 0) {
+                acquired.countDown();
+                if (!release.await(PAUSE_LIMIT_SECONDS, TimeUnit.SECONDS)) {
+                    pausedTooLong.set(true);
+                }
+            }
         }
 
         Long connectionOrNull() {
@@ -217,8 +245,8 @@ class DualConfirmationRaceMySqlTest {
         }
     }
 
-    private static final AtomicReference<Hook> HOOK = new AtomicReference<>();
-    private static final AtomicReference<String> CURRENT_TENANT = new AtomicReference<>("default");
+    private static final AtomicReference<String> CURRENT_TENANT =
+            new AtomicReference<>(DualConfirmationMySqlFixtures.TENANT);
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -234,12 +262,13 @@ class DualConfirmationRaceMySqlTest {
     @Autowired private LifecycleCaseMapper caseMapper;
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private LifecycleTaskDepMapper taskDepMapper;
-    @SpyBean private LifecycleLockExecutor lockExecutor;
+    @Autowired private HookedLifecycleLockExecutor lockExecutor;
     @MockBean private DocumentEvidenceStorageVerifier storageVerifier;
     @MockBean private LifecycleNotificationService notificationService;
     @MockBean private LegalEntityContextService legalEntityContextService;
 
     private DualConfirmationMySqlFixtures fixtures;
+    private Pause pause;
 
     @BeforeEach
     void setUp() {
@@ -251,27 +280,16 @@ class DualConfirmationRaceMySqlTest {
         lenient().when(legalEntityContextService.requireCurrentLegalEntityId())
                 .thenReturn(DualConfirmationMySqlFixtures.LEGAL_ENTITY_ID);
         lenient().when(legalEntityContextService.requireTenantId()).thenAnswer(invocation -> CURRENT_TENANT.get());
-        HOOK.set(null);
-        doAnswer(invocation -> {
-            Hook hook = HOOK.get();
-            if (hook != null) {
-                hook.connection.compareAndSet(0, connectionId());
-            }
-            Object result = invocation.callRealMethod();
-            if (hook != null && hook.pauseAfterAcquire && hook.acquired.getCount() > 0) {
-                hook.acquired.countDown();
-                hook.release.await(WAIT_SECONDS, TimeUnit.SECONDS);
-            }
-            return result;
-        }).when(lockExecutor).acquire(any());
+        pause = null;
+        lockExecutor.reset(null);
     }
 
     @AfterEach
     void tearDown() {
-        Hook hook = HOOK.getAndSet(null);
-        if (hook != null) {
-            hook.release.countDown();
+        if (pause != null) {
+            pause.release.countDown();
         }
+        lockExecutor.reset(null);
         SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
     }
@@ -324,8 +342,7 @@ class DualConfirmationRaceMySqlTest {
         releaseSales(f, f.engineer(), f.salesAssignment());
         assertBusiness(capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認しました")), 409,
                 "error.lifecycle.authorizationChanged");
-        assertEquals(1, fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_confirmation WHERE tenant_id = ?",
-                f.tenant()));
+        assertEquals(1, fixtures.confirmations(f));
         assertThat(fixtures.deniedReasons(f)).contains("IDEMPOTENCY_CONFLICT")
                 .anyMatch(reason -> reason.startsWith("AUTHORIZATION_CHANGED_"));
     }
@@ -354,8 +371,7 @@ class DualConfirmationRaceMySqlTest {
         } finally {
             pool.shutdownNow();
         }
-        assertEquals(1, fixtures.count("SELECT COUNT(*) FROM t_lifecycle_dual_confirmation WHERE tenant_id = ?",
-                f.tenant()));
+        assertEquals(1, fixtures.confirmations(f));
         assertEquals("COMPLETED", fixtures.taskStatus(f.taskId()));
         assertEquals(List.of("SUBMISSION_STALE"), fixtures.deniedReasons(f));
     }
@@ -404,17 +420,15 @@ class DualConfirmationRaceMySqlTest {
         DualConfirmationResultDto submitted = submit(f, f.sales(), "key-submit-1");
         long before = fixtures.taskGeneration(f);
         bindOperator(f);
-        taskService.reassignTask(f.taskId(), f.admin(), f.admin(), "W3-21a検証");
+        // 担当roleは「営業」のまま担当者を未設定→提出者本人にする。担当が変わるので世代は進み、提出者はタスクを扱えるまま
+        // （担当roleが変わると提出者の再認可が先に409 authorizationChangedになり、世代の判定を確かめられない）。
+        taskService.reassignTask(f.taskId(), f.sales(), f.admin(), "W3-21a検証");
         SecurityContextHolder.clearContext();
         assertEquals(before + 1, fixtures.taskGeneration(f));
 
-        // 担当変更で提出者（担当roleの営業）がタスクを扱えなくなる場合は、§5.5 の順で提出者の再認可が世代の判定より先に
-        // 409 authorizationChanged になる。どちらでも旧提出は確認できない。
-        Throwable outcome = capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認"));
-        assertThat(outcome).isInstanceOf(BusinessException.class);
-        assertEquals(409, ((BusinessException) outcome).getCode());
-        assertThat(((BusinessException) outcome).getMessageKey())
-                .isIn("error.lifecycle.submissionStale", "error.lifecycle.authorizationChanged");
+        assertBusiness(capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認")), 409,
+                "error.lifecycle.submissionStale");
+        assertEquals(List.of("SUBMISSION_STALE"), fixtures.deniedReasons(f));
         assertThat(fixtures.taskStatus(f.taskId())).isNotEqualTo("COMPLETED");
     }
 
@@ -490,8 +504,9 @@ class DualConfirmationRaceMySqlTest {
     private Throwable writerFirst(Anchor anchor, Fixture f, java.util.concurrent.Callable<Throwable> operation)
             throws Exception {
         String label = "writer先行 " + anchor;
-        Hook hook = new Hook(false);
-        HOOK.set(hook);
+        Pause hook = new Pause(false);
+        pause = hook;
+        lockExecutor.reset(hook);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch releaseWriter = new CountDownLatch(1);
@@ -513,7 +528,7 @@ class DualConfirmationRaceMySqlTest {
             Future<Throwable> attempt = pool.submit(operation);
             InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, point,
                     hook::connectionOrNull, SHARED, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
-                    TimeUnit.SECONDS.toMillis(WAIT_SECONDS), () -> {
+                    DETECT_MILLIS, () -> {
                         if (attempt.isDone()) {
                             fail(label + ": 試行がwriterのcommitを待たずに終了した: " + attempt.get());
                         }
@@ -532,8 +547,9 @@ class DualConfirmationRaceMySqlTest {
     private Throwable readerFirst(Anchor anchor, Fixture f, java.util.concurrent.Callable<Throwable> operation)
             throws Exception {
         String label = "reader先行 " + anchor;
-        Hook hook = new Hook(true);
-        HOOK.set(hook);
+        Pause hook = new Pause(true);
+        pause = hook;
+        lockExecutor.reset(hook);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         AtomicLong writerConnection = new AtomicLong();
         try {
@@ -549,7 +565,7 @@ class DualConfirmationRaceMySqlTest {
             InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc,
                     () -> writerConnection.get() == 0 ? null : writerConnection.get(), hook::connectionOrNull,
                     anchor.table, "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, SHARED,
-                    InnoDbRecordLockWaits.primaryKey(anchor.rowId(f)), TimeUnit.SECONDS.toMillis(WAIT_SECONDS), () -> {
+                    InnoDbRecordLockWaits.primaryKey(anchor.rowId(f)), DETECT_MILLIS, () -> {
                         if (writer.isDone()) {
                             fail(label + ": writerが試行の共有lockを待たずに終了した: " + outcome(writer));
                         }
@@ -558,6 +574,9 @@ class DualConfirmationRaceMySqlTest {
             hook.release.countDown();
             Throwable result = attempt.get(WAIT_SECONDS, TimeUnit.SECONDS);
             writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertFalse(hook.pausedTooLong.get(), label + ": 一時停止が" + PAUSE_LIMIT_SECONDS
+                    + "秒を超えた（試行のtimeoutに近づくため、待ちの検出が遅すぎる）");
+            assertEquals(1, lockExecutor.calls(), label + ": 一時停止した試行のまま成功すること（再試行なし）");
             return result;
         } finally {
             hook.release.countDown();
