@@ -207,7 +207,7 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
         OidcSecurityProperties oidc = productionOidc();
         stubCompletedBootstrapUsers(oidc);
         // DBのcollationは大文字小文字を区別しないため、表記が違っても同じ行が返る。
-        // 実行時のbreak-glass判定は区別するので、設定値はDBのusernameと完全一致しなければならない。
+        // OIDC管理者の人数からbreak-glass名を区別ありで除くため、設定値はDBのusernameと完全一致しなければならない。
         when(sysUserMapper.selectByUsername("Breakglass2")).thenReturn(user(2L, "breakglass2", "管理者", 1));
         oidc.setBreakGlassUsernames(Set.of("admin", "Breakglass2"));
 
@@ -220,6 +220,22 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
         // DBと同じ表記に直せば通る
         oidc.setBreakGlassUsernames(Set.of("admin", "breakglass2"));
         assertThatCode(validator(oidc, bootstrapMode(false))::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void break_glass_usernameにASCIIの英数字と記号3種以外があれば完全な検査で起動しない() {
+        // DOC-FINAL delta review P3-b: 実行時の判定は ASCII の大文字小文字だけを同一視するため、ASCII 以外の名前は
+        // DB の照合順序との細かな差に依存する。DB の表記と完全一致していても起動を止める。
+        stubFreshInstall();
+        OidcSecurityProperties oidc = productionOidc();
+        stubCompletedBootstrapUsers(oidc);
+        when(sysUserMapper.selectByUsername("breakglassı")).thenReturn(user(2L, "breakglassı", "管理者", 1));
+        oidc.setBreakGlassUsernames(Set.of("admin", "breakglassı"));
+
+        assertThatThrownBy(validator(oidc, bootstrapMode(false))::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("break-glass usernameはASCIIの英数字と「.」「_」「-」だけにしてください: breakglassı");
+        verify(completionLatch, never()).markCompletedIfAbsent();
     }
 
     // ---------------------------------------------------------------- 完了marker（review P2-A）

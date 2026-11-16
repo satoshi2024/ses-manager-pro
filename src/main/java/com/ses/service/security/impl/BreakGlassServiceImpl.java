@@ -375,10 +375,11 @@ public class BreakGlassServiceImpl implements BreakGlassService {
      * 入力名が解決した {@code sys_user} の行。行の username も設定の break-glass 名と同じ規則で一致する場合だけ返し、
      * それ以外は {@code null}（DOC-FINAL review P2-1）。照合順序が入力名を設定とは別の口座へ解決した場合に、その口座を
      * break-glass として扱わないため（{@code OidcSecurityProperties#isBreakGlassUsername} の比較は照合順序と等価ではない）。
+     * 行の username は前後空白を除かずに比べる（先頭の空白に意味がある別の行を設定の口座とみなさない。delta review P3-a）。
      */
     private SysUser resolveBreakGlassUser(String username) {
         SysUser user = sysUserMapper.selectByUsername(username);
-        if (user == null || !properties.isBreakGlassUsername(user.getUsername())) {
+        if (user == null || !properties.isBreakGlassStoredUsername(user.getUsername())) {
             return null;
         }
         return user;

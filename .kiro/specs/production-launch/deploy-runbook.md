@@ -152,7 +152,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
 | NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5 | `feature-switches.md` 4.8.2 |
 | NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放はD-05 ownerの受理事項（§4.4末尾）と合わせ、解除の開放はD-03・D-05の署名後（§4.5） | `feature-switches.md` 4.7、§4.4・§4.5 |
-| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09 と計画 §5.1 の追加前提（prodで起動できる条件の現状は `feature-switches.md` 4.7.2 の #5 に従う。本書の作成時点では A2b のマージまでONでは起動しない） | `feature-switches.md` 4.7.2 |
+| NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8) を D-06 owner と受理する: D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する） | `feature-switches.md` 4.7.2 の #5、§4.4（D14 と受理事項） |
 | NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）と、**B2c-2 実装開始前の人手承認**（B2c-2 の着手条件）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項） | `ai-management-copilot/external-send-approval-gate.md` §8、`.kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md`（B2c-2 の開始条件） |
 | 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197）。schedulerの有効化（`APP_SCHEDULING_ENABLED=true`）の前 | 保存年数（3年・TRANSACTION_DATE）は暫定値で文書ownerの確認待ち。副本の処分方針についてPrivacy ownerと文書ownerの書面署名（得られなければ副本処理を外す変更を出してから有効化する）。`IMPORT` の保持期間はPrivacyの書面受理まで開放の条件のまま | 冒頭のV197の項、§4.3 |
 
@@ -396,7 +396,7 @@ OIDCの固定metadata・client credential、MFA鍵、session hash key等のprod�
 
 - **LB/ingressでアクセス元を作業端末に限定する（必須）**。bootstrap中は `admin` のlocal password loginが開いているため、次の危険がある（D1 review P3-k）。起動前にSREが制限を入れ、作業端末以外から `/login` に到達できないことを確認してから§5.1へ進む。bootstrapの再開（§5.7）でも同じ。
   - 初期パスワードの総当たり。
-  - **lockによる妨害（DoS）**: login失敗が5回で `admin` が30分lockされる（`AccountLockService`）。`sys_user` の照合順序は大小文字を区別しないため、`ADMIN` 等の綴りでの失敗も `admin` の失敗として数えられる。`/login` に到達できる者は誰でも `admin` をlockでき、作業を止められる。JVMのタイムゾーンが固定されていないとlockが約9時間30分に延びる（§4）。
+  - **lockによる妨害（DoS）**: login失敗が5回で `admin` が30分lockされる（`AccountLockService`）。`sys_user` の照合順序は大小文字を区別しないため、`ADMIN` 等の綴りでの失敗も `admin` の失敗として数えられる。前後に空白やタブを付けた入力（`" admin"` 等）も、認証と同じ trim 後の名前で数える（`LoginFailureHandler`。以前は入力値のまま数えて空振りし、lock を回避した推測ができた。DOC-FINAL delta review N-1）。`/login` に到達できる者は誰でも `admin` をlockでき、作業を止められる。JVMのタイムゾーンが固定されていないとlockが約9時間30分に延びる（§4）。
   - 先回りのパスワード変更: 初期パスワードが漏れていると、正規の担当者より先にloginしてパスワードを変え、bootstrapを乗っ取れる（兆候と対応は§5.8）。
 - 起動の拒否（fail-fast、Tomcatのportを開く前）: `SECURITY_BOOTSTRAP_ENABLED=true` なのに期限が未設定・offset無し・既に過ぎている・現在から24時間超、または初回bootstrapの完了marker（§5.5）が有るのに承認ticketが無い・形式が不正・再開の監査を残せない。ERROR/例外messageは `[bootstrap] ...` で始まる。
 - 起動時のWARN log: `[bootstrap] 期限付きbootstrap modeが有効です（期限: ...）` と `[bootstrap] 期限付きbootstrap mode中のため、break-glass管理者の登録検査とOIDC管理者の人数検査を省略します（期限: ...、再開ticket: なし（初回））`。この2行が出ていることを確認する。
@@ -640,7 +640,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
 
 ### 5.5 bootstrapの終了と完了marker
 
-1. **break-glass usernameを決める（ちょうど2件）**: A（`admin`）とB。いずれも有効な `管理者` で、local passwordとMFA登録を持つこと。`BREAK_GLASS_USERNAMES` には `sys_user.username` をそのままの表記で設定する。`sys_user` の照合順序は大文字小文字を区別しないが、起動時検査は設定値とDBの表記の完全一致を要求し、違えば起動しない（`break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: <設定値>`。D1 review N-1）。設定前に次で確かめる。
+1. **break-glass usernameを決める（ちょうど2件）**: A（`admin`）とB。いずれも有効な `管理者` で、local passwordとMFA登録を持つこと。`BREAK_GLASS_USERNAMES` には `sys_user.username` をそのままの表記で設定する。`sys_user` の照合順序は大文字小文字を区別しないが、起動時検査は設定値とDBの表記の完全一致を要求し、違えば起動しない（`break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: <設定値>`。D1 review N-1）。名前は ASCII の英数字と `.`・`_`・`-` だけにする（それ以外の文字を含む設定は `break-glass usernameはASCIIの英数字と「.」「_」「-」だけにしてください` で起動しない。実行時の判定は ASCII の大文字小文字だけを同一視するため、ASCII 以外の名前は DB の照合順序との細かな差に依存する。DOC-FINAL delta review P3-b）。設定前に次で確かめる。
    ```sql
    -- 設定する2件がそのままの表記で存在すること（2行）。照合順序を区別ありに切り替えて比較する
    SELECT username, role, status FROM sys_user

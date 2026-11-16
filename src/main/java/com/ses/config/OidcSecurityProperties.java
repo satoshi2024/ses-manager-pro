@@ -70,4 +70,20 @@ public class OidcSecurityProperties {
         return breakGlassUsernames.stream()
                 .anyMatch(name -> name != null && name.trim().toLowerCase(Locale.ROOT).equals(candidate));
     }
+
+    /**
+     * DB に保存された {@code sys_user.username} が break-glass 名か。入力名（{@link #isBreakGlassUsername}）と違い、保存値の
+     * 前後空白は除かない（DOC-FINAL delta review P3-a）: MySQL では先頭の空白に意味があり、{@code " admin"} は {@code admin}
+     * と別の行になり得る。保存値をそのまま、設定値（前後空白を除いたもの）と ASCII の大文字小文字だけを区別せずに比べる。
+     * 解決した行が設定の口座かを確かめる {@code BreakGlassServiceImpl} が使う。
+     */
+    public boolean isBreakGlassStoredUsername(String storedUsername) {
+        if (storedUsername == null || storedUsername.isEmpty() || breakGlassUsernames == null) {
+            return false;
+        }
+        String stored = storedUsername.toLowerCase(Locale.ROOT);
+        return breakGlassUsernames.stream()
+                .filter(name -> name != null && !name.trim().isEmpty())
+                .anyMatch(name -> name.trim().toLowerCase(Locale.ROOT).equals(stored));
+    }
 }

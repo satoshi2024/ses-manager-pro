@@ -97,11 +97,25 @@ class BreakGlassServiceImplTest {
         when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
 
         assertTrue(service.isLoginAllowed("bg-01"));
-        assertTrue(service.isLoginAllowed(" Bg-02 "));
+        assertTrue(service.isLoginAllowed("Bg-02 "), "末尾の空白は DB でも同じ行");
         assertFalse(service.isLoginAllowed("bg-03"), "設定に無い名前は従来どおり拒否する");
 
         when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(null);
         assertFalse(service.isLoginAllowed("bg-01"), "表記違いでもactiveなincidentが無ければ拒否する");
+    }
+
+    @Test
+    void 先頭に空白がある別口座の行はbreak_glassとして扱わない() {
+        // DOC-FINAL delta review P3-a: MySQL では先頭の空白に意味があり、" BG-01" は BG-01 と別の行になり得る。
+        // 入力名は trim して設定と比べるが、解決した行の username は前後空白を除かずに比べる。
+        storedUsers.add(namedAdmin(5L, " BG-01"));
+        when(incidentMapper.selectActive("default", java.time.LocalDateTime.now(clock))).thenReturn(active());
+
+        assertFalse(service.isLoginAllowed(" BG-01"), "先頭に空白がある別口座へ local login を許さない");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        assertFalse(service.bindSession(request, " BG-01"), "先頭に空白がある別口座へ incident を束縛しない");
+        assertTrue(request.getSession(false) == null);
+        assertTrue(service.isLoginAllowed("BG-01"), "設定どおりの口座は従来どおり");
     }
 
     @Test
@@ -480,18 +494,23 @@ class BreakGlassServiceImplTest {
     }
 
     /**
-     * {@code sys_user}（{@code utf8mb4_unicode_ci}）の username 解決を模す。ASCII の大文字小文字と前後空白の違いは同じ行、
-     * 無点の ı を含む名前は別の行になる。
+     * {@code sys_user}（{@code utf8mb4_unicode_ci}、PAD SPACE）の username 解決を模す。ASCII の大文字小文字の違いと末尾の
+     * 空白は同じ行になり、先頭の空白には意味がある（{@code " BG-01"} は {@code BG-01} と別の行）。無点の ı を含む名前も
+     * 別の行になる（DOC-FINAL delta review P3-e）。
      */
     private SysUser storedUser(String username) {
         if (username == null) {
             return null;
         }
-        String key = username.trim().toLowerCase(java.util.Locale.ROOT);
+        String key = collationKey(username);
         return storedUsers.stream()
-                .filter(row -> row.getUsername().toLowerCase(java.util.Locale.ROOT).equals(key))
+                .filter(row -> collationKey(row.getUsername()).equals(key))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static String collationKey(String value) {
+        return value.replaceAll(" +$", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     private SysUser namedAdmin(Long id, String username) {

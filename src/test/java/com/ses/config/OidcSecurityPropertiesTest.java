@@ -59,4 +59,23 @@ class OidcSecurityPropertiesTest {
         assertThat(properties.isBreakGlassUsername("admin")).as("逆向きも同一視しない").isFalse();
         assertThat(properties.isBreakGlassUsername("ADMIN")).isFalse();
     }
+
+    @Test
+    void DBの保存値は前後空白を除かずに設定値と比べる() {
+        // DOC-FINAL delta review P3-a: MySQL では先頭の空白に意味があり、" admin" は admin と別の行になり得る
+        OidcSecurityProperties properties = new OidcSecurityProperties();
+        properties.setBreakGlassUsernames(new LinkedHashSet<>(Arrays.asList(" admin ", "BG-02", null, " ")));
+
+        assertThat(properties.isBreakGlassStoredUsername("admin")).isTrue();
+        assertThat(properties.isBreakGlassStoredUsername("ADMIN")).as("ASCII の大文字小文字は同一視する").isTrue();
+        assertThat(properties.isBreakGlassStoredUsername("bg-02")).isTrue();
+        assertThat(properties.isBreakGlassStoredUsername(" admin")).as("先頭の空白がある別の行").isFalse();
+        assertThat(properties.isBreakGlassStoredUsername("admin ")).isFalse();
+        assertThat(properties.isBreakGlassStoredUsername("\tadmin")).isFalse();
+        assertThat(properties.isBreakGlassStoredUsername("admın")).isFalse();
+        assertThat(properties.isBreakGlassStoredUsername("")).isFalse();
+        assertThat(properties.isBreakGlassStoredUsername(" ")).as("空白だけの設定要素とも一致しない").isFalse();
+        assertThat(properties.isBreakGlassStoredUsername(null)).isFalse();
+        assertThat(properties.isBreakGlassUsername(" admin")).as("入力名は従来どおり trim して比べる").isTrue();
+    }
 }
