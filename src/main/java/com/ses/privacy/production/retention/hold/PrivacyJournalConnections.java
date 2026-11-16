@@ -160,7 +160,10 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         return ProductionPrivacyComponents.productionPrivacyJournal(environment, pool, clock);
     }
 
-    /** 同じ package の起動時検査だけが使う。public にしない（{@code DataSource} を外へ出さない）。 */
+    /**
+     * 同じ package の起動時検査と、hold の読み取り専用索引（{@code JdbcPrivacyHoldJournalIndex}。NF07-A1H）だけが使う。
+     * public にしない（{@code DataSource} を外へ出さない）。
+     */
     DataSource dataSource() {
         return pool;
     }

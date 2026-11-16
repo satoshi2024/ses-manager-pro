@@ -34,6 +34,10 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
     /** 次の N 回の append を「確定させずに ACK 不明にする」。 */
     final AtomicInteger failWithoutCommit = new AtomicInteger();
     volatile Runnable beforeAppend = () -> { };
+    /** head の照会の前に走る hook（head 照会の遅れ、ACK と projection の間の割込みの再現）。 */
+    volatile Runnable beforeHead = () -> { };
+    /** Journal instance の {@code @@server_uuid}。 */
+    volatile String serverUuid = "journal-server-uuid";
 
     InMemoryHoldJournal(Clock clock) {
         this.clock = clock;
@@ -86,6 +90,7 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
 
     @Override
     public synchronized JournalHead head(JournalPartition partition) {
+        beforeHead.run();
         requireAvailable();
         List<JournalEvent> events = partitions.getOrDefault(key(partition), List.of());
         String hash = events.isEmpty() ? ZERO : events.get(events.size() - 1).eventHash();
@@ -132,6 +137,12 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
             }
         });
         return new TenantView(holds, heads);
+    }
+
+    @Override
+    public synchronized String serverUuid() {
+        requireAvailable();
+        return serverUuid;
     }
 
     synchronized int eventCount(String tenantId, String subjectRef) {

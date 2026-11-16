@@ -19,6 +19,9 @@ interface PrivacyHoldJournalIndex {
     /** tenant の HOLD_STARTED event と全 partition の head を同じ読み取り snapshot で返す。 */
     TenantView tenantView(String tenantId);
 
+    /** Journal instance の {@code @@server_uuid}（application DB と同じ instance への誤接続を実行中に検出する。Review P3-8）。 */
+    String serverUuid();
+
     /** command の位置。 */
     record CommandLocation(String partitionRef, long revision, String eventHash) {
     }

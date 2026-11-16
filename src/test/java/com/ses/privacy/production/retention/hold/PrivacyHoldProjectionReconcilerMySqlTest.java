@@ -36,8 +36,11 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
 
     private static final String ROOT_PASSWORD = UUID.randomUUID().toString();
     private static final String JOURNAL_ID = "journal-a1h-reconcile";
-    private static final PrivacyHoldTestFixture.MutableClock CLOCK =
-            new PrivacyHoldTestFixture.MutableClock(java.time.Instant.parse("2026-11-16T03:00:00Z"));
+    private static final java.time.Instant T0 = java.time.Instant.parse("2026-11-16T03:00:00Z");
+    /** 本番 adapter の event 時刻の時計（進めない）。用例の時刻は用例ごとの {@link #clock} で進める（Review P3-10）。 */
+    private static final PrivacyHoldTestFixture.MutableClock ADAPTER_CLOCK = new PrivacyHoldTestFixture.MutableClock(T0);
+
+    private PrivacyHoldTestFixture.MutableClock clock;
 
     @Container
     static final MySQLContainer<?> JOURNAL = new MySQLContainer<>("mysql:8.0")
@@ -78,7 +81,7 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
         appPool.setMaximumPoolSize(6);
         MockEnvironment prod = new MockEnvironment();
         prod.setActiveProfiles("prod");
-        production = ProductionPrivacyComponents.productionPrivacyJournal(prod, appenderPool, CLOCK);
+        production = ProductionPrivacyComponents.productionPrivacyJournal(prod, appenderPool, ADAPTER_CLOCK);
     }
 
     @AfterAll
@@ -93,6 +96,7 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
 
     @BeforeEach
     void setUp() {
+        clock = new PrivacyHoldTestFixture.MutableClock(T0);
         components = newComponents("nf07-rcn-" + UUID.randomUUID().toString().substring(0, 8), appenderPool);
         components.seedCatalog();
     }
@@ -120,16 +124,16 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
 
     @Test
     void pendingが残りJournalにcommandが無ければtimeout前は残しtimeout後に消す() {
-        components.store.ensureStateLocked(components.tenantId, JOURNAL_ID, CLOCK.instant());
+        components.store.ensureStateLocked(components.tenantId, JOURNAL_ID, clock.instant());
         String commandId = PrivacyHoldPartitions.newIds().commandId();
-        components.store.recordPending(components.tenantId, JOURNAL_ID, commandId, CLOCK.instant());
+        components.store.recordPending(components.tenantId, JOURNAL_ID, commandId, clock.instant());
 
         assertThat(components.reconciler.reconcileTenant(components.tenantId))
                 .contains(PrivacyHoldProjectionReconciler.Outcome.PENDING_KEPT);
         assertThat(components.store.stateRows(components.tenantId).get(0).pendingCommandId()).isEqualTo(commandId);
 
         // pending-timeout（2分）+ max-skew（1秒）を過ぎてから、消す直前にもう一度照会して消す
-        CLOCK.advance(Duration.ofMinutes(2).plusSeconds(2));
+        clock.advance(Duration.ofMinutes(2).plusSeconds(2));
         assertThat(components.reconciler.reconcileTenant(components.tenantId))
                 .contains(PrivacyHoldProjectionReconciler.Outcome.PENDING_ABANDONED);
         assertThat(components.store.stateRows(components.tenantId).get(0).pendingCommandId()).isNull();
@@ -140,10 +144,10 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
     @Test
     void pending_timeoutが未設定ならJournalにcommandが無くてもpendingを消さない() {
         PrivacyHoldMySqlComponents unset = new PrivacyHoldMySqlComponents(components.tenantId, appPool, production,
-                appenderPool, JOURNAL_ID, null, CLOCK);
-        unset.store.ensureStateLocked(components.tenantId, JOURNAL_ID, CLOCK.instant());
+                appenderPool, JOURNAL_ID, null, clock);
+        unset.store.ensureStateLocked(components.tenantId, JOURNAL_ID, clock.instant());
         String commandId = PrivacyHoldPartitions.newIds().commandId();
-        unset.store.recordPending(components.tenantId, JOURNAL_ID, commandId, CLOCK.instant().minus(Duration.ofHours(1)));
+        unset.store.recordPending(components.tenantId, JOURNAL_ID, commandId, clock.instant().minus(Duration.ofHours(1)));
 
         assertThat(unset.reconciler.reconcileTenant(components.tenantId))
                 .contains(PrivacyHoldProjectionReconciler.Outcome.PENDING_KEPT);
@@ -152,9 +156,9 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
 
     @Test
     void Journalに届かなければpendingを残しgateはUNAVAILABLEのまま() {
-        components.store.ensureStateLocked(components.tenantId, JOURNAL_ID, CLOCK.instant());
+        components.store.ensureStateLocked(components.tenantId, JOURNAL_ID, clock.instant());
         String commandId = PrivacyHoldPartitions.newIds().commandId();
-        components.store.recordPending(components.tenantId, JOURNAL_ID, commandId, CLOCK.instant().minus(Duration.ofHours(1)));
+        components.store.recordPending(components.tenantId, JOURNAL_ID, commandId, clock.instant().minus(Duration.ofHours(1)));
         HikariDataSource closed = PrivacyJournalTestPools.pool(JOURNAL.getJdbcUrl(), appender, appenderPassword);
         closed.close();
         PrivacyHoldMySqlComponents unreachable = newComponents(components.tenantId, closed);
@@ -198,6 +202,6 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
 
     private PrivacyHoldMySqlComponents newComponents(String tenantId, javax.sql.DataSource journalDataSource) {
         return new PrivacyHoldMySqlComponents(tenantId, appPool, production, journalDataSource, JOURNAL_ID,
-                Duration.ofMinutes(2), CLOCK);
+                Duration.ofMinutes(2), clock);
     }
 }

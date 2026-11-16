@@ -75,11 +75,32 @@ final class PrivacyHoldProjectionStore {
                 tenantId, journalId, local(now));
     }
 
-    /** pending を CAS で記録する（他の command が pending なら0件）。 */
+    /** pending を CAS で記録する（他の command が pending なら0件）。時刻は micro 秒に切り詰めて書く（DATETIME(6) と一致させる）。 */
     int recordPending(String tenantId, String journalId, String commandId, Instant since) {
         return jdbc.update("UPDATE t_privacy_projection_state SET pending_command_id = ?, pending_since = ?, "
                         + "row_version = row_version + 1 WHERE tenant_id = ? AND journal_id = ? AND pending_command_id IS NULL",
-                commandId, local(since), tenantId, journalId);
+                commandId, local(micros(since)), tenantId, journalId);
+    }
+
+    /**
+     * reconciler が timeout を判定したときの {@code pending_since} のままのときだけ pending を消す。判定の後に開始側が再送の直前の
+     * CAS（{@link #refreshPending}）で時刻を進めていれば0件になり、消さない（Review P2-1）。
+     */
+    int clearExpiredPending(String tenantId, String journalId, String commandId, Instant observedSince) {
+        return jdbc.update("UPDATE t_privacy_projection_state SET pending_command_id = NULL, pending_since = NULL, "
+                        + "row_version = row_version + 1 WHERE tenant_id = ? AND journal_id = ? AND pending_command_id = ? "
+                        + "AND pending_since = ?",
+                tenantId, journalId, commandId, local(observedSince));
+    }
+
+    /**
+     * 指定の command が pending のときだけ {@code pending_since} を進める（ACK 不明の後の再送の直前。Review P2-1）。
+     * 0件なら（reconciler が既に消した等）再送してはならない。
+     */
+    int refreshPending(String tenantId, String journalId, String commandId, Instant since) {
+        return jdbc.update("UPDATE t_privacy_projection_state SET pending_since = ?, row_version = row_version + 1 "
+                        + "WHERE tenant_id = ? AND journal_id = ? AND pending_command_id = ?",
+                local(micros(since)), tenantId, journalId, commandId);
     }
 
     /** 指定の command が pending のときだけ消す。 */
@@ -126,6 +147,18 @@ final class PrivacyHoldProjectionStore {
     boolean holdExists(String tenantId, String holdId) {
         return !jdbc.query("SELECT hold_id FROM t_legal_hold WHERE tenant_id = ? AND hold_id = ? FOR UPDATE",
                 (rs, row) -> rs.getString(1), tenantId, holdId).isEmpty();
+    }
+
+    /**
+     * reconciler が先に {@code RECONCILED} の印で復元した行を、同じ event の開始者自身の値で置き換える（Review P3-2）。
+     * 同じ hold ID・revision・event hash で、まだ {@code RECONCILED} の行だけが対象（開始者の値を後から上書きしない）。
+     */
+    int adoptReconciledMetadata(String tenantId, NewHold hold) {
+        return jdbc.update("UPDATE t_legal_hold SET reason_code = ?, reason_hash = ?, ticket_ref = ?, requested_by = ?, "
+                        + "requested_at = ? WHERE tenant_id = ? AND hold_id = ? AND journal_revision = ? "
+                        + "AND journal_event_hash = ? AND reason_code = ?",
+                hold.reasonCode(), hold.reasonHash(), hold.ticketRef(), hold.requestedBy(), local(hold.requestedAt()),
+                tenantId, hold.holdId(), hold.journalRevision(), hold.journalEventHash(), PrivacyHoldService.RECONCILED);
     }
 
     /** ACK 済みの hold を projection へ書く。 */
@@ -192,6 +225,10 @@ final class PrivacyHoldProjectionStore {
         } else {
             target.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
         }
+    }
+
+    private static Instant micros(Instant instant) {
+        return instant == null ? null : instant.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     }
 
     static LocalDateTime local(Instant instant) {

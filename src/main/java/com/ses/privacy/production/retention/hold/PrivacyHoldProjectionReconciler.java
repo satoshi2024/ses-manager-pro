@@ -27,20 +27,27 @@ import java.util.Set;
  * <p>起動後（{@code initialDelay}）と定期的に、ShedLock で1 process だけが実行する。gate と同じく機能スイッチに依存しない
  * （flag を OFF に戻しても掛けた hold の projection を保つ）ため、{@code FeatureSwitchRouteCoverageTest} では理由付きの
  * 対象外 scheduler に登録する。test profile では scheduling 自体が無効で、test は {@link #reconcileAll} を直接呼ぶ（NF10 の方針）。
- * Journal が {@code AVAILABLE} でなければ何もしない（application DB にも触れない。pending は残り gate は UNAVAILABLE のまま）。
+ * 実行ごとに Journal と application DB の {@code @@server_uuid} を比べ直し（{@link PrivacyHoldJournal#refreshInstanceCheck}。
+ * 同じなら UNAVAILABLE、Review P3-8）、Journal が {@code AVAILABLE} でなければ何もしない（application DB の表にも触れない。
+ * pending は残り gate は UNAVAILABLE のまま）。
  *
  * <p>tenant ごとに:
  * <ol>
  *   <li>pending がある → command ID で Journal を照会する。ACK 済み（1件）なら chain を検証して projection を書き pending を消す。
  *       Journal に無く、{@code pending_since} + {@code privacy.journal.pending-timeout} + {@code privacy.clock.max-skew} を
  *       過ぎていれば、消す直前にもう一度照会して無いことを確かめてから pending を消す（どちらかが未設定・append の在途時間の
- *       上限以下なら消さない）。複数の partition に同じ command ID があれば判断せず残す。</li>
+ *       上限以下なら消さない）。{@code pending_since} は開始の予約 transaction の中で CAS の直前に取り、ACK 不明の後の再送の
+ *       直前にも CAS で進める（Review P2-1）ので、この窓は append 1回分の在途時間を覆う。複数の partition に同じ command ID が
+ *       あれば判断せず残す。</li>
  *   <li>Journal の HOLD_STARTED のうち projection に無いもの（ACK 後に projection が失敗した hold、pending を消した後に遅れて
- *       確定した append）を projection へ書く。復元した行の理由コード・ticket は {@code RECONCILED}、開始者は 0
- *       （元の値は開始要求の監査にある）。</li>
+ *       確定した append）を projection へ書く。復元した行は Journal に元の値が無いことを印で示す: 理由コード・ticket は
+ *       {@code RECONCILED}、理由 hash は 0×64（値を持たない）、開始者は 0（sentinel）、開始日時は Journal の event 時刻。
+ *       開始時の理由コード・ticket・D-05 の決定ID・選択は hold ID で開始要求の監査から引ける（理由 hash は監査にも残さない）。
+ *       開始の service が後から同じ event を projection しに来た場合は、開始者自身の値で置き換える（Review P3-2）。</li>
  * </ol>
- * 状態を変えた判定（projection・pending の解消・判断の保留）は required 監査に残す。状態を変えない保留（照会不能・timeout 前）は
- * 固定 code の WARN と metric にだけ出す（毎分の監査で監査表を埋めないため）。log・監査に subject 識別子を出さない。
+ * 監査と監視の規則（Review P3-3）: 状態を変えた判定（projection・pending の解消・追い付き）だけを required 監査に残す。状態を
+ * 変えない判定（保留・複数位置・解釈不能・照会不能）は、状態が続く間毎回出るため監査には残さず、固定 code の WARN と、
+ * {@code outcome}・{@code reason} の tag を持つ metric（{@value #OUTCOME_METRIC}）に出す。log・監査に subject 識別子を出さない。
  */
 public class PrivacyHoldProjectionReconciler {
 
@@ -50,7 +57,8 @@ public class PrivacyHoldProjectionReconciler {
     public static final String OUTCOME_METRIC = "ses.privacy.hold.reconciler.outcomes";
     public static final String LOG_CODE = "NF07_PRIVACY_HOLD_RECONCILER";
     private static final String SYSTEM_ACTOR = "system:privacy-hold-reconciler";
-    private static final String ZERO_HASH = "0".repeat(64);
+    /** 復元した行の理由 hash（Journal に理由 hash が無いため、値を持たないことを示す）。 */
+    static final String NO_REASON_HASH = "0".repeat(64);
 
     /** 判定の結果。 */
     public enum Outcome {
@@ -111,19 +119,20 @@ public class PrivacyHoldProjectionReconciler {
     /** 全 tenant を1回処理する（test から直接呼ぶ）。tenant ごとの判定の件数を返す。 */
     public Map<Outcome, Integer> reconcileAll() {
         Map<Outcome, Integer> counts = new EnumMap<>(Outcome.class);
-        if (journal.availability() != PrivacyHoldJournal.Availability.AVAILABLE) {
-            count(counts, Outcome.JOURNAL_UNAVAILABLE);
+        journal.refreshInstanceCheck();
+        PrivacyHoldJournal.Availability availability = journal.availability();
+        if (availability != PrivacyHoldJournal.Availability.AVAILABLE) {
+            String reason = journal.sameInstanceDetected() ? "sameInstance" : availability.name();
+            counts.merge(mark(Outcome.JOURNAL_UNAVAILABLE, reason), 1, Integer::sum);
             return counts;
         }
         for (String tenantId : store.tenantsWithState(journal.journalId())) {
             try {
                 for (Outcome outcome : reconcileTenant(tenantId)) {
-                    count(counts, outcome);
+                    counts.merge(outcome, 1, Integer::sum);
                 }
             } catch (RuntimeException e) {
-                log.warn("[privacy-hold] tenantの照合を中断しました（次回に再試行）: code={} exceptionClass={}", LOG_CODE,
-                        e.getClass().getSimpleName());
-                count(counts, Outcome.PENDING_KEPT);
+                counts.merge(hold(Outcome.PENDING_KEPT, "tenantAborted"), 1, Integer::sum);
             }
         }
         return counts;
@@ -150,7 +159,7 @@ public class PrivacyHoldProjectionReconciler {
                     && PrivacyHoldGate.projectionMismatch(latest, holds) == null
                     && PrivacyHoldGate.journalMatches(latest, holds, journal.index().tenantView(tenantId))) {
                 store.markVerified(tenantId, journal.journalId(), latest.lastAppliedSeq(), clock.instant());
-                outcomes.add(Outcome.CONSISTENT);
+                outcomes.add(mark(Outcome.CONSISTENT, "matched"));
             }
         }
         return outcomes;
@@ -159,45 +168,43 @@ public class PrivacyHoldProjectionReconciler {
     private Outcome resolvePending(String tenantId, PrivacyHoldProjectionStore.StateRow state) {
         String commandId = state.pendingCommandId();
         Optional<String> holdId = PrivacyHoldPartitions.holdIdOfCommand(commandId);
+        if (holdId.isEmpty()) {
+            return hold(Outcome.PENDING_AMBIGUOUS, "commandIdUnparsable");
+        }
         List<PrivacyHoldJournalIndex.CommandLocation> locations = journal.index().findCommand(tenantId, commandId);
-        if (locations.size() > 1 || holdId.isEmpty()) {
-            requiresNew.executeWithoutResult(status -> audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_AMBIGUOUS,
-                    PrivacyHoldAudit.fields("hold", holdId.orElse("unknown"),
-                            "locations", Integer.toString(locations.size())), 409, false));
-            return Outcome.PENDING_AMBIGUOUS;
+        if (locations.size() > 1) {
+            return hold(Outcome.PENDING_AMBIGUOUS, "multipleLocations");
         }
         if (locations.size() == 1) {
             String partitionRef = locations.get(0).partitionRef();
-            Optional<Outcome> projected = projectFromJournal(tenantId, partitionRef, commandId, holdId.get(), commandId,
-                    PrivacyHoldAudit.RECONCILE_PROJECTED, Outcome.PENDING_PROJECTED);
-            return projected.orElse(Outcome.UNRECOGNIZED);
+            return projectFromJournal(tenantId, partitionRef, commandId, holdId.get(), commandId,
+                    PrivacyHoldAudit.RECONCILE_PROJECTED, Outcome.PENDING_PROJECTED, "ackFound");
         }
         Duration pendingTimeout = journal.pendingTimeout();
         Duration maxSkew = decisions.maxSkew();
         if (pendingTimeout == null || maxSkew == null || state.pendingSince() == null
                 || pendingTimeout.compareTo(journal.appendInFlightUpperBound()) <= 0) {
-            keep("pendingTimeoutUnset");
-            return Outcome.PENDING_KEPT;
+            return hold(Outcome.PENDING_KEPT, "pendingTimeoutUnset");
         }
         Instant expiresAt = state.pendingSince().plus(pendingTimeout).plus(maxSkew);
         if (clock.instant().isBefore(expiresAt)) {
-            keep("pendingNotExpired");
-            return Outcome.PENDING_KEPT;
+            return hold(Outcome.PENDING_KEPT, "pendingNotExpired");
         }
         // 消す直前にもう一度照会する（server 側の遅れた確定を完全には否定できないため。§3.4.6 の1）
         if (!journal.index().findCommand(tenantId, commandId).isEmpty()) {
-            keep("pendingAppearedOnRecheck");
-            return Outcome.PENDING_KEPT;
+            return hold(Outcome.PENDING_KEPT, "pendingAppearedOnRecheck");
         }
         Integer cleared = requiresNew.execute(status -> {
-            int updated = store.clearPending(tenantId, journal.journalId(), commandId);
+            // pending_since が同時に進められていれば（再送の直前の CAS）消さない
+            int updated = store.clearExpiredPending(tenantId, journal.journalId(), commandId, state.pendingSince());
             if (updated == 1) {
                 audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_ABANDONED,
                         PrivacyHoldAudit.fields("hold", holdId.get()), 200, true);
             }
             return updated;
         });
-        return cleared != null && cleared == 1 ? Outcome.PENDING_ABANDONED : Outcome.PENDING_KEPT;
+        return cleared != null && cleared == 1 ? mark(Outcome.PENDING_ABANDONED, "commandAbsentAfterTimeout")
+                : hold(Outcome.PENDING_KEPT, "pendingChangedBeforeClear");
     }
 
     private List<Outcome> catchUp(String tenantId) {
@@ -212,57 +219,53 @@ public class PrivacyHoldProjectionReconciler {
                 continue;
             }
             if (event.caseId() == null || !PrivacyHoldPartitions.HOLD_ID.matcher(event.caseId()).matches()) {
-                outcomes.add(unrecognized(tenantId));
+                outcomes.add(hold(Outcome.UNRECOGNIZED, "caseIdInvalid"));
                 continue;
             }
-            Optional<Outcome> outcome = projectFromJournal(tenantId, event.partitionRef(), event.commandId(),
-                    event.caseId(), null, PrivacyHoldAudit.RECONCILE_CAUGHT_UP, Outcome.CAUGHT_UP);
-            outcomes.add(outcome.orElse(Outcome.UNRECOGNIZED));
+            outcomes.add(projectFromJournal(tenantId, event.partitionRef(), event.commandId(), event.caseId(), null,
+                    PrivacyHoldAudit.RECONCILE_CAUGHT_UP, Outcome.CAUGHT_UP, "projectionMissing"));
         }
         return outcomes;
     }
 
-    /** Journal の event から projection を書く。解釈できなければ空（監査に残す）。 */
-    private Optional<Outcome> projectFromJournal(String tenantId, String partitionRef, String commandId, String holdId,
-                                                 String clearCommandId, String auditEvent, Outcome success) {
+    /** Journal の event から projection を書く。解釈できなければ UNRECOGNIZED（監査には残さない）。 */
+    private Outcome projectFromJournal(String tenantId, String partitionRef, String commandId, String holdId,
+                                       String clearCommandId, String auditEvent, Outcome success, String reason) {
         Optional<PrivacyHoldPartitions.Target> target = PrivacyHoldPartitions.targetOf(partitionRef);
-        JournalEvent event = projector.acknowledgedEvent(tenantId, partitionRef, commandId);
-        if (target.isEmpty() || event == null || !PrivacyHoldProjector.isHoldStart(event, holdId)) {
-            unrecognized(tenantId);
-            return Optional.empty();
+        if (target.isEmpty()) {
+            return hold(Outcome.UNRECOGNIZED, "partitionUnparsable");
         }
-        String reasonHash = event.requestHash() != null && event.requestHash().matches("[0-9a-f]{64}")
-                ? event.requestHash() : ZERO_HASH;
+        JournalEvent event = projector.acknowledgedEvent(tenantId, partitionRef, commandId);
+        if (event == null || !PrivacyHoldProjector.isHoldStart(event, holdId)) {
+            return hold(Outcome.UNRECOGNIZED, "eventNotHoldStart");
+        }
         PrivacyHoldProjectionStore.NewHold hold = new PrivacyHoldProjectionStore.NewHold(holdId, target.get().type(),
-                target.get().value(), PrivacyHoldService.RECONCILED, reasonHash, PrivacyHoldService.RECONCILED, 0L,
+                target.get().value(), PrivacyHoldService.RECONCILED, NO_REASON_HASH, PrivacyHoldService.RECONCILED, 0L,
                 event.createdAt(), event.revision(), event.eventHash());
         projector.project(tenantId, hold, clearCommandId, SYSTEM_ACTOR, auditEvent, PrivacyHoldAudit.fields(
                 "hold", holdId, "target", target.get().type().name(),
                 "element", target.get().type() == PrivacyHoldTargetType.DATA_ELEMENT ? target.get().value() : null,
                 "revision", Long.toString(event.revision())));
-        return Optional.of(success);
+        return mark(success, reason);
     }
 
-    private Outcome unrecognized(String tenantId) {
-        log.warn("[privacy-hold] holdとして解釈できないJournal eventがあります（gateはUNAVAILABLEのまま）: code={}", LOG_CODE);
-        requiresNew.executeWithoutResult(status -> audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_UNRECOGNIZED,
-                PrivacyHoldAudit.fields("journal", "holdEvent"), 409, false));
-        return Outcome.UNRECOGNIZED;
+    /** 状態を変えない判定: 固定 code の WARN と metric（監査には残さない）。 */
+    private Outcome hold(Outcome outcome, String reason) {
+        log.warn("[privacy-hold] 判断を保留します（gateはUNAVAILABLEのまま）: code={} outcome={} reason={}", LOG_CODE,
+                outcome, reason);
+        return mark(outcome, reason);
     }
 
-    private void keep(String reason) {
-        log.warn("[privacy-hold] pendingを残します（gateはUNAVAILABLEのまま）: code={} reason={}", LOG_CODE, reason);
-    }
-
-    private void count(Map<Outcome, Integer> counts, Outcome outcome) {
-        counts.merge(outcome, 1, Integer::sum);
+    /** metric に {@code outcome}・{@code reason} の tag で数える。 */
+    private Outcome mark(Outcome outcome, String reason) {
         MeterRegistry registry = meterRegistry == null ? null : meterRegistry.getIfAvailable();
         if (registry != null) {
             try {
-                registry.counter(OUTCOME_METRIC, "outcome", outcome.name()).increment();
+                registry.counter(OUTCOME_METRIC, "outcome", outcome.name(), "reason", reason).increment();
             } catch (RuntimeException ignored) {
                 // metric の失敗は判定を変えない
             }
         }
+        return outcome;
     }
 }

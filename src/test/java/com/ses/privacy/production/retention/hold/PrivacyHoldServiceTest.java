@@ -1,6 +1,7 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.privacy.foundation.PrivacyJournalPort;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -151,8 +152,15 @@ class PrivacyHoldServiceTest {
                     .doesNotContain("訴訟");
             assertThat(uri).startsWith(PrivacyHoldAudit.URI_PREFIX);
         });
-        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.START_REQUESTED)
-                && uri.contains("hold=" + result.holdId()) && uri.contains("ticket=TICKET-1001"));
+        // 開始要求の監査から hold ID で、D-05 の決定ID・理由コード・ticket を引ける（Review P3-1）。理由 hash は残さない
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#" + PrivacyHoldAudit.START_REQUESTED + "?")
+                && uri.contains("hold=" + result.holdId()) && uri.contains("d05=D05-NF07-TEST-001"));
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#" + PrivacyHoldAudit.START_REASON + "?")
+                && uri.contains("hold=" + result.holdId()) && uri.contains("reason=LITIGATION")
+                && uri.contains("ticket=TICKET-1001"));
+        String reasonHash = PrivacyHoldService.sha256("訴訟対応のため保全する");
+        assertThat(fixture.auditUris).allSatisfy(uri -> assertThat(uri).doesNotContain(reasonHash.substring(0, 16)));
+        assertThat(fixture.auditUris).allSatisfy(uri -> assertThat(uri.length()).isLessThanOrEqualTo(500));
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.CHOICE)
                 && uri.contains("element=DOCUMENT%3AIMPORT") && uri.contains("choice=ACCEPT_RISK"));
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.CHOICE)
@@ -337,6 +345,155 @@ class PrivacyHoldServiceTest {
         assertThat(overview.unattributableElements().get(1).tenantRowCount()).isNull();
         assertThat(overview.unclassifiedElements()).containsExactly("AUDIT_LOG");
         assertThat(overview.holdableElements()).doesNotContain("API_NONCE").contains("DOCUMENT:IMPORT", "AUDIT_LOG");
+    }
+
+    // ---- Review P2-1: pending_since と再送の在途時間 ----
+
+    @Test
+    void pending_sinceは予約transactionの中で取りJournalのhead照会の時間を含めない() {
+        java.util.concurrent.atomic.AtomicBoolean slowHead = new java.util.concurrent.atomic.AtomicBoolean(true);
+        fixture.journal.beforeHead = () -> {
+            if (slowHead.getAndSet(false)) {
+                fixture.clock.advance(java.time.Duration.ofMinutes(1));
+            }
+        };
+        java.util.concurrent.atomic.AtomicReference<Instant> pendingAtAppend = new java.util.concurrent.atomic.AtomicReference<>();
+        fixture.journal.beforeAppend = () -> pendingAtAppend.set(fixture.state().pendingSince());
+
+        PrivacyHoldStartResult result = fixture.service.start(subject("ENGINEER:20"));
+
+        assertThat(pendingAtAppend.get()).isEqualTo(PrivacyHoldTestFixture.T0.plus(java.time.Duration.ofMinutes(1)));
+        // requestedAt（request hash と projection の値）は head 照会の前に取った開始の時刻のまま
+        assertThat(fixture.jdbc.queryForObject("SELECT requested_at FROM t_legal_hold WHERE hold_id = ?",
+                java.time.LocalDateTime.class, result.holdId()))
+                .isEqualTo(java.time.LocalDateTime.ofInstant(PrivacyHoldTestFixture.T0, PrivacyHoldProjectionStore.ZONE));
+    }
+
+    @Test
+    void 再送の直前にpending_sinceを進めるので再送の在途中にreconcilerが動いてもpendingを消さない() {
+        fixture.journal.failWithoutCommit.set(1);
+        AtomicInteger calls = new AtomicInteger();
+        List<PrivacyHoldProjectionReconciler.Outcome> duringResend = new java.util.ArrayList<>();
+        fixture.journal.beforeAppend = () -> {
+            if (calls.incrementAndGet() == 1) {
+                // 1回目の append が pending-timeout（2分）+ max-skew を超えて在途した後に ACK 不明になる
+                fixture.clock.advance(java.time.Duration.ofMinutes(2).plusSeconds(30));
+            } else {
+                // 再送が在途の間に reconciler が動く（Journal にはまだ command が無い）
+                duringResend.addAll(fixture.reconciler.reconcileTenant(PrivacyHoldTestFixture.TENANT));
+            }
+        };
+
+        PrivacyHoldStartResult result = fixture.service.start(subject("ENGINEER:21"));
+
+        assertThat(duringResend).containsExactly(PrivacyHoldProjectionReconciler.Outcome.PENDING_KEPT)
+                .doesNotContain(PrivacyHoldProjectionReconciler.Outcome.PENDING_ABANDONED);
+        assertThat(result.status()).isEqualTo("ACTIVE");
+        assertThat(fixture.journal.appendCalls.get()).isEqualTo(2);
+        assertThat(fixture.state().pendingCommandId()).isNull();
+        assertThat(fixture.gate.evaluate(PrivacyHoldTestFixture.TENANT).heldSubjects()).containsExactly("ENGINEER:21");
+    }
+
+    @Test
+    void 再送の直前のCASが0件ならreconcilerが消したpendingを信じて再送しない() {
+        fixture.journal.failWithoutCommit.set(1);
+        fixture.journal.beforeAppend = () -> {
+            // 1回目の append の在途中に reconciler が pending を消した状態
+            PrivacyHoldProjectionStore.StateRow state = fixture.state();
+            fixture.store.clearPending(PrivacyHoldTestFixture.TENANT, PrivacyHoldTestFixture.JOURNAL_ID,
+                    state.pendingCommandId());
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:22")), 503, "error.privacy.holdAckUnknown");
+        assertThat(fixture.journal.appendCalls.get()).as("再送しない").isEqualTo(1);
+        assertThat(fixture.count("SELECT COUNT(*) FROM t_legal_hold")).isZero();
+    }
+
+    // ---- Review P3-7: revision の競合と開始済みの区別 ----
+
+    @Test
+    void revisionの競合はheldでなければ再試行の409でpendingを戻す() {
+        java.util.concurrent.atomic.AtomicBoolean once = new java.util.concurrent.atomic.AtomicBoolean(true);
+        fixture.journal.beforeAppend = () -> {
+            if (once.getAndSet(false)) {
+                // 同じ partition に hold 以外の event（将来の dispatch・lease 等）が先に入る
+                PrivacyJournalPort.JournalPartition partition =
+                        new PrivacyJournalPort.JournalPartition(PrivacyHoldTestFixture.TENANT, "ENGINEER:23");
+                fixture.journal.append(PrivacyJournalPort.JournalCommand.create("lease-1", partition, 0,
+                        PrivacyJournalPort.CommandType.LEASE_CLAIMED, null, null, null, "worker-1", 0,
+                        PrivacyHoldTestFixture.T0.plus(java.time.Duration.ofMinutes(10))));
+            }
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:23")), 409, "error.privacy.holdStartInProgress");
+        assertThat(fixture.state().pendingCommandId()).isNull();
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.START_REJECTED));
+    }
+
+    @Test
+    void revisionの競合で先にholdが開始されていれば開始済みの409() {
+        java.util.concurrent.atomic.AtomicBoolean once = new java.util.concurrent.atomic.AtomicBoolean(true);
+        fixture.journal.beforeAppend = () -> {
+            if (once.getAndSet(false)) {
+                PrivacyJournalPort.JournalPartition partition =
+                        new PrivacyJournalPort.JournalPartition(PrivacyHoldTestFixture.TENANT, "ENGINEER:24");
+                PrivacyHoldPartitions.Ids other = PrivacyHoldPartitions.newIds();
+                fixture.journal.append(PrivacyJournalPort.JournalCommand.create(other.commandId(), partition, 0,
+                        PrivacyJournalPort.CommandType.HOLD_STARTED, other.holdId(), null, "f".repeat(64), null, 0, null));
+            }
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:24")), 409, "error.privacy.holdAlreadyActive");
+        assertThat(fixture.state().pendingCommandId()).isNull();
+    }
+
+    // ---- Review P3-2: reconciler が先に復元した行を開始者の値に置き換える ----
+
+    @Test
+    void ACKとprojectionの間にreconcilerが復元しても開始者の値で置き換える() {
+        AtomicInteger heads = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean ran = new java.util.concurrent.atomic.AtomicBoolean();
+        fixture.journal.beforeHead = () -> {
+            // 1回目は開始前の head、2回目は ACK 後の chain 検証。その間に reconciler が割り込む
+            if (heads.incrementAndGet() == 2 && !ran.getAndSet(true)) {
+                assertThat(fixture.reconciler.reconcileTenant(PrivacyHoldTestFixture.TENANT))
+                        .contains(PrivacyHoldProjectionReconciler.Outcome.PENDING_PROJECTED);
+            }
+        };
+
+        PrivacyHoldStartResult result = fixture.service.start(subject("ENGINEER:25"));
+
+        Map<String, Object> row = fixture.jdbc.queryForMap("SELECT * FROM t_legal_hold WHERE hold_id = ?", result.holdId());
+        assertThat(row.get("reason_code")).isEqualTo("LITIGATION");
+        assertThat(row.get("ticket_ref")).isEqualTo("TICKET-1001");
+        assertThat(((Number) row.get("requested_by")).longValue()).isEqualTo(1L);
+        assertThat(row.get("reason_hash")).isEqualTo(PrivacyHoldService.sha256("訴訟対応のため保全する"));
+        assertThat(fixture.count("SELECT COUNT(*) FROM t_legal_hold")).isEqualTo(1);
+        assertThat(fixture.gate.evaluate(PrivacyHoldTestFixture.TENANT).state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
+    }
+
+    // ---- Review P3-1・P3-11 ----
+
+    @Test
+    void 最長の値でも監査の各行は500文字以内に収まる() {
+        String element = "A".repeat(50) + ":" + "B".repeat(64);
+        fixture.catalog(element, "UNKNOWN");
+        fixture.approval.getD05().setDecisionId("D05:" + ":".repeat(59) + "X");
+        String ticket = "T" + "#".repeat(99);
+        PrivacyHoldStartRequest request = new PrivacyHoldStartRequest("DATA_ELEMENT", null, element,
+                "R" + "_".repeat(49), "理由", ticket, true, null);
+
+        fixture.service.start(request);
+
+        assertThat(fixture.auditUris).isNotEmpty()
+                .allSatisfy(uri -> assertThat(uri.length()).isLessThanOrEqualTo(500));
+    }
+
+    @Test
+    void 一覧の開始日時はJSTで表示する() {
+        fixture.service.start(fixture.elementRequest("DOCUMENT:IMPORT"));
+
+        assertThat(fixture.service.overview().holds().get(0).requestedAt()).isEqualTo("2026-11-16 12:00:00");
     }
 
     private PrivacyHoldStartRequest subject(String subjectRef) {
