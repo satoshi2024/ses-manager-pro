@@ -310,7 +310,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   -- 期待: flyway_schema_history_privacy_journal・pj_action・pj_command・pj_event・pj_head・pj_lease、全て InnoDB
   SELECT COUNT(*) FROM pj_head;  -- 0
   ```
-- application の接続（hold 開始の開放時に設定。flag とは独立に、設定があれば起動時検査を行う）: `PRIVACY_JOURNAL_DATASOURCE_URL`（`jdbc:mysql://` だけ。`sslMode=VERIFY_IDENTITY` 必須、`autoReconnect`・時区 parameter・`socketTimeout`/`connectTimeout`・複数 host・URL 内の認証情報（`user@host`、`user=`・`password=`）・`%` による符号化・同じ parameter の重複は不可）、`PRIVACY_JOURNAL_DATASOURCE_USERNAME` / `PRIVACY_JOURNAL_DATASOURCE_PASSWORD`（principal は1組だけ。hold 開始を使うなら `nf07_journal_appender`、効力確認だけなら `nf07_journal_reader` または appender。secret store から注入）、`PRIVACY_JOURNAL_JOURNALID`（`privacy.journal.journal-id`。`[A-Za-z0-9._-]{4,64}`）。任意: `PRIVACY_JOURNAL_DATASOURCE_MAXPOOLSIZE`（1〜8、既定4）、`PRIVACY_JOURNAL_DATASOURCE_CONNECTIONTIMEOUT`（上限30秒、既定5秒）、`PRIVACY_JOURNAL_EXPECTEDSCHEMA`（既定 `privacy_journal`）、`PRIVACY_JOURNAL_PENDINGTIMEOUT`（設定するなら append の在途時間の上限＝接続待ち＋append の transaction 上限10秒＋socket timeout 20秒より長く。既定の接続待ち5秒なら35秒を超える値）。socket timeout（20秒）と append の transaction 上限（10秒）は固定値で、設定 key は無い。
+- application の接続（hold 開始の開放時に設定。flag とは独立に、設定があれば起動時検査を行う）: `PRIVACY_JOURNAL_DATASOURCE_URL`（`jdbc:mysql://` だけ。`sslMode=VERIFY_IDENTITY` 必須、`autoReconnect`・時区 parameter・`socketTimeout`/`connectTimeout`・複数 host・URL 内の認証情報（`user@host`、`user=`・`password=`）・`%` による符号化・同じ parameter の重複は不可）、`PRIVACY_JOURNAL_DATASOURCE_USERNAME` / `PRIVACY_JOURNAL_DATASOURCE_PASSWORD`（principal は1組だけ。hold 開始を使うなら `nf07_journal_appender`、効力確認だけなら `nf07_journal_reader` または appender。secret store から注入）、`PRIVACY_JOURNAL_JOURNALID`（`privacy.journal.journal-id`。`[A-Za-z0-9._-]{4,64}`）。任意: `PRIVACY_JOURNAL_DATASOURCE_MAXPOOLSIZE`（1〜8、既定4）、`PRIVACY_JOURNAL_DATASOURCE_CONNECTIONTIMEOUT`（上限30秒、既定5秒）、`PRIVACY_JOURNAL_EXPECTEDSCHEMA`（既定 `privacy_journal`）、`PRIVACY_JOURNAL_PENDINGTIMEOUT`（設定するなら append の在途時間の上限 U＝接続待ち＋append の transaction 上限10秒＋socket timeout 20秒に、30秒以上の余裕を足した値。既定の接続待ち5秒なら65秒以上。起動時の契約検査が強制するのは U より長いことだけで、余裕はこの設定値で持たせる。plan §3.4 A1H-1 実装記録「不変条件と余裕」）。socket timeout（20秒）と append の transaction 上限（10秒）は固定値で、設定 key は無い。
 - 起動時検査（`PrivacyJournalStartupVerifier`）: `server_uuid` の相違、上の耐久設定、`DATABASE()`、principal の権限（`information_schema` と `CURRENT_ROLE()`。role 経由の GRANT は不可）、本節の履歴表が artifact と一致（版・script 名・checksum）、`t_privacy_projection_state.journal_id` の一致を確かめる。prod で `privacy.retention.enabled=true` なら1つでも不適合（設定欠落を含む）で起動しない。この flag は決定ID束縛の有効期間を見ない生の値で判定する（署名日前・失効で NF07 が OFF 扱いでも、ON を設定していれば Journal を要求する。意図的な保守側の判定）。OFF なら起動を続け、WARN `NF07_PRIVACY_JOURNAL_UNAVAILABLE` と固定の理由code（接続文字列・user名・passwordは出さない）を出す。driver の接続失敗（認証失敗を含む）も固定文言に置き換えるため、Hikari の log に principal・接続先は出ない。`com.zaxxer.hikari` の log を DEBUG にしない。
 - 失敗した場合: Journal は業務dataを持たず、初回は空なので、DBA が `privacy_journal` schema を削除して空で作り直し、原因を直してから再実行する。`flyway repair` / `clean` は使わない。hold を一度でも記録した後の Journal は正本であり、作り直さない（B2 の recovery 手順による）。
 
@@ -390,19 +390,22 @@ hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も
 
 | # | 経路 | hold の扱い | 当たったとき |
 |---|---|---|---|
-| D1・D2 | 文書の廃棄執行・廃棄申請（手動） | 同じ tx の中・更新の前に `evaluateLocked`。`legal_hold_flag` と独立に判定し、`legal_hold_flag` が先に当たれば従来の 400 | 409 `error.privacy.holdActive`（HELD・分類 UNKNOWN・UNAVAILABLE・本人の導出失敗）。`legal_hold_flag` は立てない |
+| D1・D2 | 文書の廃棄執行・廃棄申請（手動） | 同じ tx の中・更新の前に `evaluateLocked`。`legal_hold_flag` と独立に判定し、`legal_hold_flag` が先に当たれば従来の 400 | 409 `error.privacy.holdActive`（HELD・分類 UNKNOWN・本人の導出失敗。D2 は UNAVAILABLE も同じ key）。管理者だけが実行する D1 の UNAVAILABLE は 409 `error.privacy.holdUnverifiable`（時間をおいて再実行）。`legal_hold_flag` は立てない |
 | D3 | `DocumentRetentionJob`（02:30） | 文書の tenant ごとに回の初めに1回 | 申請を作らず件数を WARN。履歴取込の副本（`DOCUMENT:RESUME_INGESTION`）も同じ本人導出で止まる |
 | D4・D5 | `ResumeRetentionCleanupServiceImpl`（02:00） | tenant ごとに1回（D4 と D5 で共有） | 行を残し件数を WARN。帰属しない行は SUBJECT hold では消える |
 | D6 | `AiRecommendationRetentionServiceImpl` | tenant ごとに1回（scheduler の Bean に依らない） | 本人の run だけを除いて消す。DATA_ELEMENT hold・UNKNOWN・UNAVAILABLE はその回を消さない |
 | D7 | `IntegrationHubRetentionPurgeScheduler` の record | 回の初めに1回（hold を使った全 tenant） | その kind を全体で止める（record に tenant が無いため） |
 | D8 | 同 nonce | 接続しない（個人情報を含まない） | — |
 | D9 | `ExternalApiReadSnapshotPurgeService` | 回の初めに1回（全 tenant） | その回を消さない |
-| D10 | `FileCleanupService.cleanupOrphanFiles`（両 scheduler） | `PrivacyHoldFileReferenceProvider` が hold の対象の保存名を参照に足す | gate が UNAVAILABLE・保存名を解決できない場合は例外で清掃のその回を中止（1件も消さない） |
+| D10 | `FileCleanupService.cleanupOrphanFiles`（両 scheduler） | `PrivacyHoldFileReferenceProvider` が hold の対象の保存名を参照に足す | gate が UNAVAILABLE・catalog に行の無い element・保存先が表の列なのに解決できない element の場合は例外で清掃のその回を中止（1件も消さない）。実体が外部 service 側にある element は清掃を止めない（下の「外部にある実体」） |
 
-- **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）と WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`、gate の `ses.privacy.hold.gate.unavailable`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。log に tenant・subject は出ない。
+- **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）、`ses.privacy.hold.file.cleanup.aborted`（tag `stage`＝`gate`/`resolve`。D10 の中止）、`ses.privacy.hold.file.unprotectable`（tag `element`。D10 で守れない外部の実体）、gate の `ses.privacy.hold.gate.unavailable`。WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`・`NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。D7・D9 は1つの tenant の停止で全 tenant の kind が止まるため、`path=D7`・`path=D9` も監視に入れる。D10 の中止が続くと孤児清掃（PII を含む取込の一時 CSV・quarantine の失敗実体を含む）が全 tenant で止まるため、`ses.privacy.hold.file.cleanup.aborted` も同じく監視する。log に tenant・subject は出ない。
 - **回の途中で開始された hold**: batch 経路は回の初めの snapshot を使うため、次の回から効く（最大で1回分の実行時間）。
 - **DATA_ELEMENT hold の対**: 履歴取込の原本（`RESUME_INGESTION_ORIGINAL`）だけを hold しても文書台帳の副本（`DOCUMENT:RESUME_INGESTION`）は D1〜D3 で止まらない。副本も止めるなら両方に DATA_ELEMENT hold を掛ける（D-05 owner の受理事項。F2 delta review P3-G）。
-- **D10 を止め続ける hold**: 保存先を application の upload root に持たない `FILE_OBJECT`（`CLOUDSIGN_REMOTE_DOCUMENT`・`FREEE_REMOTE_RECORD`・`MAILBOX_SOURCE_MESSAGE` 等）への DATA_ELEMENT hold と、catalog に行の無い element への hold は保存名を解決できず、hold が続く間 孤児清掃を毎回中止させる（保守側）。
+- **外部にある実体（A1H-2 review P2-1）**: catalog の `storage_ref` が application の表の列でない `FILE_OBJECT`（`CLOUDSIGN_REMOTE_DOCUMENT`・`FREEE_REMOTE_RECORD`・`MAILBOX_SOURCE_MESSAGE`）は upload root に実体を持たず、孤児清掃では守れも消せもしない。DATA_ELEMENT hold を掛けても D10 は清掃を止めず、WARN `NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE` と metric `ses.privacy.hold.file.unprotectable` を出す。外部 service 側の保全（CloudSign・freee・mailbox での削除の停止）は D10 の範囲外で、hold を掛けた privacy-admin が外部の運用で行う（D-05 owner の受理事項）。catalog に行の無い element と、保存先が表の列なのに解決の規則を持たない element への hold は、従来どおり清掃を中止させる。
+- **tenant の最初の hold の前（review P3-2）**: D1 は READ_COMMITTED で動くため、hold を一度も使っていない tenant の最初の hold の開始と同時に走った廃棄執行は順序を保証しない（tx 1回分）。最初の hold を開始する前に、その tenant で実行中の廃棄執行が無いことを確かめる。2件目以降の hold は追随位置の行の lock で直列化される。
+- **新しい tenant（review P3-10）**: catalog（V196）は migration の時点で `sys_user` にあった tenant の行だけを持つ。後から作った tenant で hold を開始すると、catalog に行の無い接続経路の element は全て UNCLASSIFIED になり、その tenant の経路が止まり、D7・D9 は全 tenant で止まる。新しい tenant の最初の hold の前に、その tenant の catalog の行を用意する（coverage report の `CATALOG_MISSING` が0件であることを確かめる）。prod の初回導入は tenant `default` だけ。
+- **legacy upload 移行との関係（review P3-4）**: `LegacyUploadMigrationService` も同じ provider 一覧を受け取るため、held な本人の legacy file（upload root の直下）は移行の対象になり、読み取り・scan の後に `quarantine/` か `published/` へ移され `t_file_security_metadata` の行が作られる（削除はしない。provider の例外では移行を中止する）。作られた metadata の行は `FileSecurityMetadataReferenceProvider` が以後も参照に数えるため、hold の解除後もその file は孤児清掃の対象に戻らず、本来の保存期限を超えて残る。prod は空 DB への新規導入で legacy file が無いため、影響は無い。legacy file を持つ環境で hold を使う前に移行を済ませる。
 
 **D11: 業務 record の削除で参照が外れる実体**（各 `FileReferenceProvider` が論理削除行を参照に数えるか。2026-11-16 時点）
 
@@ -426,12 +429,15 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 
 | 経路 | 消すもの | 判断 |
 |---|---|---|
-| `PwaClientMutationCleanupScheduler`（`app.pwa.cleanup-cron`、既定30日）と `PwaClientMutationLedgerService.abandon` | `t_pwa_client_mutation`（`user_id`・`response_json`）の物理削除 | **要判断**。catalog に element が無い（未登録）。端末の再送制御の台帳で短期保持だが、`response_json` に応答の個人データが残り得る。SYS_USER の hold で止めるなら catalog の行と gate の接続を別 batch で足す。足さない場合は残余として D-05 owner が受理する |
-| `FreeeIntegrationServiceImpl.unlink`・`link` | `t_freee_employee_link`（要員と freee 従業員IDの対応）の物理削除 | **要判断**。管理者の設定操作で保持期限による消去ではない。対応表を hold の対象にするかは D-05 owner が決める |
+| `PwaClientMutationCleanupScheduler`（`app.pwa.cleanup-cron`、既定30日） | `t_pwa_client_mutation`（`user_id`・`response_json`）の物理削除 | **残余（D-05 owner の受理事項）**。端末の再送制御用の短期の台帳で、元の業務 record は別に保存される（論理削除で残り F2 provider が返す）。catalog に element が無い（未登録）。接続する場合は後の batch で catalog の element（`user_id` で SYS_USER へ帰属）と cleanup scheduler への gate を足す |
+| `PwaClientMutationLedgerService.abandon` | 処理中の1行の物理削除 | 対象外（要求の中の補償。D12 と同じ種類） |
+| `FreeeIntegrationServiceImpl.unlink`・`link` | `t_freee_employee_link`（要員と freee 従業員IDの対応）の物理削除 | **残余（D-05 owner の受理事項）**。管理者の設定操作で保持期限による消去ではない。unlink は監査を残さない。ENGINEER の SUBJECT hold では対応が証拠になり得るため、後の batch で少なくとも unlink を両方の ID 付きで監査に残すか、held な本人には 409 を返す |
 | `EngineerChangeRequestApprovalAdapter.applyCareers` | 承認した変更申請による `t_engineer_career` の置換 | 対象外（本人の申請による現在値の訂正で、保持期限による消去ではない）。hold 中の訂正の扱いは DSAR（訂正請求、A2）と合わせて D-05 で決める |
 | 業務 CRUD の明細・対応表の物理削除・置換（勤怠の休憩、作業実績の日次、請求明細、権限・スキルの対応 等） | 現在値の編集 | 対象外（業務上の編集で保持期限による消去ではない。主要 entity は論理削除で行が残り、F2 provider が論理削除済みを含めて返す） |
 | MFA・portal の資格情報の初期化（列の NULL 化） | secret | 対象外（保持する個人データではない） |
 | `db/migration-prod/R__remove_v2_sample_data.sql` | V2 の見本行 | 対象外（初回・FRESH の状態でだけ動き、hold の対象のデータが存在する前） |
+
+**D-05 owner の受理事項（A1H-2。hold 開始の開放の署名と合わせて受理する）**: (1) 原本と副本の DATA_ELEMENT hold は別 element（上の「DATA_ELEMENT hold の対」）、(2) 外部にある実体は D10 の範囲外（上の「外部にある実体」）、(3) D7・D9 は1つの tenant の停止で全 tenant の kind を止める（過剰停止）、(4) D1 の READ_COMMITTED による最初の hold との順序の窓と、D1・D2 の本人の導出が文書行の lock より前であること（plan §3.4 A1H-2 実装記録の残余）、(5) 帰属できない element の行は SUBJECT hold で守られない（plan §3.4.3 規則6）、(6) D13 の PWA の台帳と freee の従業員対応の物理削除（上の表）、(7) 参照元の行が物理削除された実体は D10 で守れない（D11、plan §9 R-15）。
 
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 

@@ -151,14 +151,15 @@ class DocumentServiceImplDisposalHoldTest {
     }
 
     @Test
-    void D1_gateがUNAVAILABLEなら409で処分しない() {
+    void D1_gateがUNAVAILABLEなら管理者向けの再実行を促す409で処分しない() {
         approvedTarget(0);
         hold.tenant(TENANT, PrivacyHoldTestGuards.unavailable());
 
         BusinessException ex = assertThrows(BusinessException.class, () -> sut.executeDisposal(200L));
 
         assertEquals(409, ex.getCode());
-        assertEquals(PrivacyHoldPathGuard.HOLD_ACTIVE, ex.getMessageKey());
+        // D1 は管理者だけが実行するため、判定できない場合は hold の有無と区別して再実行を促す（review P3-8）
+        assertEquals(PrivacyHoldPathGuard.HOLD_UNVERIFIABLE, ex.getMessageKey());
         verify(eligibility, never()).executeDisposal(anyString(), anyLong(), anyLong());
         verifyNoInteractions(hold.resolver);
         assertEquals(1.0, hold.skipped(PrivacyHoldPath.D1, PrivacyHoldGate.Verdict.UNAVAILABLE));
@@ -248,6 +249,8 @@ class DocumentServiceImplDisposalHoldTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(5L, "期限到来"));
 
         assertEquals(409, ex.getCode());
+        // 申請者は管理者とは限らないため、判定できない場合も hold の有無を推測させない同じ key（review P3-8）
+        assertEquals(PrivacyHoldPathGuard.HOLD_ACTIVE, ex.getMessageKey());
         verify(eligibility, never()).requestDisposal(anyString(), anyLong(), any(), any());
     }
 

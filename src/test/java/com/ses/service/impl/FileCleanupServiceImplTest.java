@@ -192,6 +192,42 @@ class FileCleanupServiceImplTest {
         assertFalse(Files.exists(baseDir.resolve("orphan-b.pdf")));
     }
 
+    /**
+     * A1H-2 review P3-5: 本番の生成経路（{@code TenantAwareBatchRunner} 付きの constructor。tenant ごとに provider を呼ぶ）でも、
+     * provider の例外は runner に飲まれず清掃のその回を中止させ、1件も消さない（runner に tenant ごとの catch が入ると
+     * 「その tenant の参照を全て失って大量削除」になるため固定する）。
+     */
+    @Test
+    void cleanupOrphanFiles_TenantAwareBatchRunner経由でもproviderの例外なら1件も消さない() throws IOException {
+        Path orphan = createFile("orphan-runner.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        Path referenced = createFile("referenced-runner.pdf", Instant.now().minus(48, ChronoUnit.HOURS));
+        com.ses.service.accounting.AccountingTenantInventoryProperties inventory =
+                Mockito.mock(com.ses.service.accounting.AccountingTenantInventoryProperties.class);
+        when(inventory.requireNormalizedIds()).thenReturn(new java.util.LinkedHashSet<>(List.of("tenant-a", "tenant-b")));
+        com.ses.service.accounting.AccountingTimezoneResolver timezone =
+                Mockito.mock(com.ses.service.accounting.AccountingTimezoneResolver.class);
+        when(timezone.resolve(Mockito.anyString())).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
+        com.ses.service.scheduler.TenantAwareBatchRunner runner =
+                new com.ses.service.scheduler.TenantAwareBatchRunner(inventory, timezone);
+        FileReferenceProvider other = Mockito.mock(FileReferenceProvider.class);
+        when(other.referencedFileNames()).thenReturn(Set.of("referenced-runner.pdf"));
+        PrivacyHoldTestGuards.Stub hold = PrivacyHoldTestGuards.stub()
+                .tenant("tenant-b", PrivacyHoldTestGuards.unavailable());
+        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props(), List.of(other, hold.fileReferenceProvider), runner);
+
+        assertThrows(PrivacyHoldFileReferenceProvider.PrivacyHoldCleanupAbortedException.class, svc::cleanupOrphanFiles);
+
+        assertTrue(Files.exists(orphan), "参照の無い file も、その回は消さない");
+        assertTrue(Files.exists(referenced));
+        assertEquals(1.0, hold.counter(PrivacyHoldFileReferenceProvider.ABORT_METRIC, "stage", "gate"));
+        // 対照: hold を使っていなければ同じ runner 経由で参照の無い file だけを消す
+        PrivacyHoldTestGuards.Stub unused = PrivacyHoldTestGuards.stub();
+        assertEquals(1, new FileCleanupServiceImpl(props(), List.of(other, unused.fileReferenceProvider), runner)
+                .cleanupOrphanFiles());
+        assertFalse(Files.exists(orphan));
+        assertTrue(Files.exists(referenced));
+    }
+
     @Test
     void cleanupOrphanFiles_hold機構を使っていない環境では照会1回だけで参照を足さない() throws IOException {
         createFile("orphan.pdf", Instant.now().minus(48, ChronoUnit.HOURS));

@@ -239,6 +239,20 @@ class PrivacyHoldPathGuardTest {
         assertThat(batch.subjectHeldRowIds("RESUME_INGESTION_TEXT", HoldSubjectResolver.RESUME_INGESTION_TABLE)).isNull();
     }
 
+    /** A1H-2 review P3-9: tenant の無い行の batch は例外で回を止めず、行ごとに UNAVAILABLE（消さない）を返す。 */
+    @Test
+    void tenantの無い行のbatchは例外を投げずUNAVAILABLEを返し全体のbatchでは行の判定を拒む() {
+        fixture.dataSource.statements.set(0);
+        PrivacyHoldPathGuard.Batch batch = guard.openBatch(PrivacyHoldPath.D3, null);
+
+        assertThat(batch.rowVerdict(List.of("DOCUMENT:CONTRACT"), HoldSubjectResolver.DOCUMENT_TABLE, 5L))
+                .isEqualTo(PrivacyHoldGate.Verdict.UNAVAILABLE);
+        assertThat(batch.elementVerdict("DOCUMENT:CONTRACT")).isEqualTo(PrivacyHoldGate.Verdict.UNAVAILABLE);
+        assertThat(fixture.dataSource.statements.get()).as("tenant が無ければ gate を照会しない").isZero();
+        assertThatThrownBy(() -> guard.openGlobalBatch(PrivacyHoldPath.D7).rowVerdict(List.of("INTEGRATION_HUB_AUDIT"),
+                HoldSubjectResolver.DOCUMENT_TABLE, 1L)).isInstanceOf(IllegalStateException.class);
+    }
+
     private void startSubjectHold() {
         fixture.service.start(fixture.subjectRequest(HELD_ENGINEER, "ACCEPT_RISK", "ACCEPT_RISK"));
         assertThat(fixture.gate.evaluate(PrivacyHoldTestFixture.TENANT).heldSubjects()).containsExactly(HELD_ENGINEER);

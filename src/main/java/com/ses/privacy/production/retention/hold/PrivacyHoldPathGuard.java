@@ -35,6 +35,11 @@ public class PrivacyHoldPathGuard {
 
     /** hold に当たる（または判定できない）ため処分しない（D1・D2 の 409）。 */
     public static final String HOLD_ACTIVE = "error.privacy.holdActive";
+    /**
+     * D1（管理者だけが実行する廃棄執行）で gate が判定できない場合の 409（時間をおいた再実行を促す。A1H-2 review P3-8）。
+     * 申請者が管理者とは限らない D2 は、hold の有無を推測させないため {@link #HOLD_ACTIVE} だけを返す。
+     */
+    public static final String HOLD_UNVERIFIABLE = "error.privacy.holdUnverifiable";
     /** 破壊的経路が hold で消さなかった件数の metric（tag {@code path}・{@code verdict}）。 */
     public static final String SKIPPED_METRIC = "ses.privacy.hold.path.skipped";
     /** batch 経路の skip の固定 log code。 */
@@ -58,8 +63,14 @@ public class PrivacyHoldPathGuard {
     /**
      * D1・D2: 文書の処分（申請・執行）の可否を、呼出し側の transaction の中で判定する。NO_HOLDS なら照会は gate の1回だけ。
      *
+     * <p>lock の順序（A1H-2 review P3-6）: {@link PrivacyHoldGate#evaluateLocked} は NF07 の追随位置の行と hold 行を
+     * {@code FOR UPDATE} で取り、transaction の終了まで持つ。NF01 の rank 付きの行（文書行 rank 15 等）を取る前に呼び、
+     * rank 付きの lock を持った後に呼ばない。NF07 の行を取る他の経路（hold 開始の予約・reconciler・projector）は rank 付きの
+     * 行を取らないため循環しない。同じ tenant の D1・D2・hold 開始・reconciler はこの行で直列化される。
+     *
      * @throws BusinessException 409 {@link #HOLD_ACTIVE}（SUBJECT・DATA_ELEMENT の hold に当たる、分類が UNKNOWN・catalog に
-     *                           無い、gate が UNAVAILABLE、本人を導出できない）
+     *                           無い、本人を導出できない。D2 は gate が UNAVAILABLE の場合も）、409 {@link #HOLD_UNVERIFIABLE}
+     *                           （D1 で gate が UNAVAILABLE）
      * @throws IllegalStateException transaction の外から呼んだ場合（{@link PrivacyHoldGate#evaluateLocked}）
      */
     public void requireDocumentDisposable(PrivacyHoldPath path, String tenantId, long documentId, String documentType) {
@@ -71,7 +82,7 @@ public class PrivacyHoldPathGuard {
         if (decision.state() == PrivacyHoldGate.State.NO_HOLDS) {
             return;
         }
-        Batch batch = new Batch(path, tenantId, List.of(decision), new HashMap<>());
+        Batch batch = new Batch(path, tenantId, false, List.of(decision), new HashMap<>());
         PrivacyHoldGate.Verdict verdict = batch.rowVerdict(List.of(PrivacyHoldPath.documentElement(documentType)),
                 HoldSubjectResolver.DOCUMENT_TABLE, documentId);
         if (verdict != PrivacyHoldGate.Verdict.ALLOW) {
@@ -85,7 +96,7 @@ public class PrivacyHoldPathGuard {
         PrivacyHoldGate.Decision decision = tenantId == null
                 ? new PrivacyHoldGate.Decision(PrivacyHoldGate.State.UNAVAILABLE, "TENANT_MISSING", null, null, null)
                 : gate.evaluate(tenantId);
-        return new Batch(path, tenantId, List.of(decision), new HashMap<>());
+        return new Batch(path, tenantId, false, List.of(decision), new HashMap<>());
     }
 
     /**
@@ -96,14 +107,15 @@ public class PrivacyHoldPathGuard {
         Objects.requireNonNull(path, "path");
         List<PrivacyHoldGate.Decision> decisions = gate.evaluateEngagedTenants().stream()
                 .map(PrivacyHoldGate.TenantDecision::decision).toList();
-        return new Batch(path, null, decisions, new HashMap<>());
+        return new Batch(path, null, true, decisions, new HashMap<>());
     }
 
     private void refuse(PrivacyHoldPath path, PrivacyHoldGate.Verdict verdict) {
         count(path, verdict, 1);
         log.warn("[privacy-hold] 保全holdの対象であるか判定できないため処分を拒否します: code={} path={} verdict={}",
                 LOG_CODE_REFUSED, path.name(), verdict);
-        throw BusinessException.of(409, HOLD_ACTIVE);
+        boolean unverifiable = path == PrivacyHoldPath.D1 && verdict == PrivacyHoldGate.Verdict.UNAVAILABLE;
+        throw BusinessException.of(409, unverifiable ? HOLD_UNVERIFIABLE : HOLD_ACTIVE);
     }
 
     private void count(PrivacyHoldPath path, PrivacyHoldGate.Verdict verdict, int amount) {
@@ -126,22 +138,25 @@ public class PrivacyHoldPathGuard {
 
         private final PrivacyHoldPath path;
         private final String tenantId;
+        /** tenant を持たない全体の batch（{@link #openGlobalBatch}）。行の判定は使えない。 */
+        private final boolean global;
         private final List<PrivacyHoldGate.Decision> decisions;
         private final Map<String, Map<Long, Set<String>>> subjectsByTable;
         private final EnumMap<PrivacyHoldGate.Verdict, Integer> skipped = new EnumMap<>(PrivacyHoldGate.Verdict.class);
         private boolean subjectsUnresolved;
 
-        private Batch(PrivacyHoldPath path, String tenantId, List<PrivacyHoldGate.Decision> decisions,
+        private Batch(PrivacyHoldPath path, String tenantId, boolean global, List<PrivacyHoldGate.Decision> decisions,
                       Map<String, Map<Long, Set<String>>> subjectsByTable) {
             this.path = path;
             this.tenantId = tenantId;
+            this.global = global;
             this.decisions = List.copyOf(decisions);
             this.subjectsByTable = subjectsByTable;
         }
 
         /** 同じ snapshot（gate の判定と本人の導出）を別の経路に使う（D4 と D5 は1回の照会を共有する）。 */
         public Batch forPath(PrivacyHoldPath other) {
-            return new Batch(Objects.requireNonNull(other, "path"), tenantId, decisions, subjectsByTable);
+            return new Batch(Objects.requireNonNull(other, "path"), tenantId, global, decisions, subjectsByTable);
         }
 
         /** hold 機構を使った tenant を含むか（false なら全て ALLOW）。 */
@@ -247,8 +262,12 @@ public class PrivacyHoldPathGuard {
                     skipped.getOrDefault(PrivacyHoldGate.Verdict.UNAVAILABLE, 0));
         }
 
+        /**
+         * tenant ごとの batch の判定。tenant を持たない行の batch（{@link #openBatch} に null）は UNAVAILABLE の判定を返し、
+         * 呼出し側の行ごとの判定を UNAVAILABLE にする（例外で batch 全体を止めない。A1H-2 review P3-9）。
+         */
         private PrivacyHoldGate.Decision single() {
-            if (decisions.size() != 1 || tenantId == null) {
+            if (global || decisions.size() != 1) {
                 throw new IllegalStateException("行の判定は tenant ごとの batch でだけ使えます");
             }
             return decisions.get(0);

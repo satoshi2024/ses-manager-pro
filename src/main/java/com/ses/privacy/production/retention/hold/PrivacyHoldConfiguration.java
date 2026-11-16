@@ -80,8 +80,9 @@ public class PrivacyHoldConfiguration {
      */
     @Bean
     public PrivacyHoldFileReferenceProvider privacyHoldFileReferenceProvider(PrivacyHoldGate privacyHoldGate,
-                                                                             HoldSubjectResolver holdSubjectResolver) {
-        return new PrivacyHoldFileReferenceProvider(privacyHoldGate, holdSubjectResolver);
+                                                                             HoldSubjectResolver holdSubjectResolver,
+                                                                             ObjectProvider<MeterRegistry> meterRegistry) {
+        return new PrivacyHoldFileReferenceProvider(privacyHoldGate, holdSubjectResolver, meterRegistry);
     }
 
     @Bean
