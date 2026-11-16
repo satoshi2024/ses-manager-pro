@@ -226,6 +226,8 @@ final class PrivacyHoldTestFixture {
     static final class CountingDataSource implements DataSource {
         private final DataSource delegate;
         final AtomicInteger statements = new AtomicInteger();
+        /** statement を準備する直前に SQL を受け取る（lock 待ちの模擬に使う。A1H-1 delta review P2-N1）。 */
+        volatile java.util.function.Consumer<String> beforePrepare = sql -> { };
 
         CountingDataSource(DataSource delegate) {
             this.delegate = delegate;
@@ -247,6 +249,9 @@ final class PrivacyHoldTestFixture {
                         String name = method.getName();
                         if (name.equals("prepareStatement") || name.equals("createStatement") || name.equals("prepareCall")) {
                             statements.incrementAndGet();
+                            if (args != null && args.length > 0 && args[0] instanceof String sql) {
+                                beforePrepare.accept(sql);
+                            }
                         }
                         try {
                             return method.invoke(connection, args);

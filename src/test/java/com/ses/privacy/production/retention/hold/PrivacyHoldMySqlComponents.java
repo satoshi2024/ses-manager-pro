@@ -120,6 +120,8 @@ final class PrivacyHoldMySqlComponents {
         volatile boolean unreachable;
         volatile CountDownLatch entered;
         volatile CountDownLatch release;
+        /** append の呼出しごとに、呼出しの番号（1始まり）を受け取る（A1H-1 delta review P2-N1）。 */
+        volatile java.util.function.IntConsumer beforeAppend = call -> { };
 
         FaultyPort(PrivacyJournalPort delegate) {
             this.delegate = delegate;
@@ -127,7 +129,7 @@ final class PrivacyHoldMySqlComponents {
 
         @Override
         public JournalAck append(JournalCommand command) {
-            appendCalls.incrementAndGet();
+            beforeAppend.accept(appendCalls.incrementAndGet());
             CountDownLatch gate = release;
             if (gate != null) {
                 entered.countDown();

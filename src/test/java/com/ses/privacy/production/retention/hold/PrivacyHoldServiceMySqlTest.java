@@ -220,6 +220,76 @@ class PrivacyHoldServiceMySqlTest {
                 .isEqualTo(PrivacyHoldGate.State.NO_HOLDS);
     }
 
+    /**
+     * A1H-1 delta review P2-N1: 再送の直前の {@code pending_since} は、追随位置の行の lock を取った後に時計から取る。
+     * 別の接続（破壊的経路の {@code evaluateLocked} と同じく行の {@code FOR UPDATE} を transaction の終了まで持つ）が lock を
+     * 持つ間に時計を進め、解放の後に再送した append の時点で {@code pending_since} が解放の時刻以後であることを確かめる。
+     * 待ちの確認は {@code InnoDbRecordLockWaits}（LOCK_DATA に依存しない）。
+     */
+    @Test
+    void 再送の直前は追随位置の行のlockを待った後に時計を読むのでpending_sinceは解放の時刻より古くならない() throws Exception {
+        PrivacyHoldTestFixture.MutableClock clock = new PrivacyHoldTestFixture.MutableClock(
+                Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
+        PrivacyHoldMySqlComponents local = new PrivacyHoldMySqlComponents(components.tenantId, appPool, production,
+                appenderPool, JOURNAL_ID, Duration.ofMinutes(2), clock);
+        JdbcTemplate observer = new JdbcTemplate(new DriverManagerDataSource(APP.getJdbcUrl(), "root", ROOT_PASSWORD));
+        TransactionTemplate blockerTransaction = new TransactionTemplate(new DataSourceTransactionManager(appPool));
+        java.util.concurrent.atomic.AtomicReference<Instant> releasedAt = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<Instant> pendingAtResend = new java.util.concurrent.atomic.AtomicReference<>();
+        CountDownLatch locked = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        java.util.concurrent.atomic.AtomicReference<Future<Boolean>> blocker = new java.util.concurrent.atomic.AtomicReference<>();
+        local.port.loseAckAfterCommit.set(1);
+        local.port.beforeAppend = call -> {
+            if (call == 1) {
+                blocker.set(executor.submit(() -> blockerTransaction.execute(status -> {
+                    JdbcTemplate held = new JdbcTemplate(appPool);
+                    long connectionId = held.queryForObject("SELECT CONNECTION_ID()", Long.class);
+                    held.queryForList("SELECT tenant_id FROM t_privacy_projection_state WHERE tenant_id = ? "
+                            + "AND journal_id = ? FOR UPDATE", local.tenantId, JOURNAL_ID);
+                    locked.countDown();
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    boolean waited = false;
+                    while (!waited && System.nanoTime() < deadline) {
+                        waited = !com.ses.test.InnoDbRecordLockWaits.waitEdgesOwnedBy(observer, connectionId,
+                                "t_privacy_projection_state", "PRIMARY").isEmpty();
+                        if (!waited) {
+                            try {
+                                Thread.sleep(50);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                return false;
+                            }
+                        }
+                    }
+                    // 再送の直前の CAS が lock を待っている間に時間が過ぎる
+                    clock.advance(Duration.ofMinutes(3));
+                    releasedAt.set(clock.instant());
+                    return waited;
+                })));
+                try {
+                    assertThat(locked.await(30, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            } else {
+                pendingAtResend.set(local.store.stateRows(local.tenantId).get(0).pendingSince());
+            }
+        };
+        try {
+            PrivacyHoldStartResult result = local.service.start(local.subject("ENGINEER:506"));
+
+            assertThat(result.status()).isEqualTo("ACTIVE");
+            assertThat(blocker.get().get(60, TimeUnit.SECONDS)).as("再送の直前の CAS が行 lock を待った").isTrue();
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(local.port.appendCalls.get()).isEqualTo(2);
+        assertThat(pendingAtResend.get()).as("pending_since は lock の解放より後の時計の値").isAfterOrEqualTo(releasedAt.get());
+        assertThat(journalEvents(local.tenantId)).isEqualTo(1);
+    }
+
     // ---- W3-14b delta Review D-P3-4: PrivacyProductionConfigurationValidator の3 SQL を MySQL で ----
 
     @Test
