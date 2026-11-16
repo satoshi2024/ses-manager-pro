@@ -276,7 +276,7 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 4. MySQL 必須実行集合の固定取得 (shard 1, 2, 3 の全量87クラス)
+# 4. MySQL 必須実行集合の固定取得 (shard 1, 2, 3 の全量。件数はここに書かず、MySqlTestShardInventoryTest が照合する)
 # ------------------------------------------------------------------------------
 $mysqlExpectedClasses = Get-RequiredMysqlClasses -RepoRoot $repoRoot
 

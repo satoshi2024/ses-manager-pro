@@ -218,6 +218,16 @@ $missing = @($requiredStartup | Where-Object { $allNames -notcontains $_ })
 if ($missing.Count -gt 0) { Fail ("prod startup settings missing (deploy-runbook 1.0): " + ($missing -join ',')) }
 Ok "prod startup settings present ($($requiredStartup.Count) names for deploy-runbook 1.0; FREEE_ENABLED=$($freeeEnabled -join ','))"
 
+# deploy-runbook.md sections 1.0 / 4: the JVM time zone must be Asia/Tokyo (account lock expiry and audit timestamps use it).
+# TZ=Asia/Tokyo is required; a JAVA_TOOL_OPTIONS override must also keep -Duser.timezone=Asia/Tokyo.
+$tz = @($c.environment | Where-Object { $_.name -eq 'TZ' } | ForEach-Object { [string]$_.value })
+if (-not ($tz -contains 'Asia/Tokyo')) { Fail 'TZ=Asia/Tokyo missing in environment (deploy-runbook 1.0 / 4)' }
+$jto = @($c.environment | Where-Object { $_.name -eq 'JAVA_TOOL_OPTIONS' } | ForEach-Object { [string]$_.value })
+foreach ($value in $jto) {
+  if ($value -notmatch '-Duser\.timezone=Asia/Tokyo') { Fail 'JAVA_TOOL_OPTIONS override drops -Duser.timezone=Asia/Tokyo' }
+}
+Ok 'JVM time zone Asia/Tokyo (TZ)'
+
 if ($c.logConfiguration.logDriver -ne 'awslogs') { Fail 'awslogs driver' } else { Ok 'awslogs placeholder present' }
 Ok 'CloudWatch-ACTUAL=DEFERRED (no log delivery verified)'
 Ok 'executionRoleArn/taskRoleArn=IAM placeholders (IAM-ACTUAL=DEFERRED)'

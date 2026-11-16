@@ -388,6 +388,28 @@ class FreeeOAuthContractTest {
     }
 
     @Test
+    @DisplayName("freee連携が無効なら、期限切れの接続行が残っていてもtoken endpointへ空のclient設定を送らず状態も変えない（FINAL-FIX P3-1）")
+    void freee無効ならrefreshと失効はtoken_endpointを呼ばず行と状態を変えない() throws Exception {
+        ReflectionTestUtils.setField(service, "enabled", false);
+        ReflectionTestUtils.setField(service, "clientId", "");
+        ReflectionTestUtils.setField(service, "clientSecret", "");
+        FreeeConnection expired = connectedRow();
+        expired.setTokenExpiresAt(LocalDateTime.now().minusMinutes(1));
+        stubLatestRow(expired);
+
+        BusinessException refresh = assertThrows(BusinessException.class, () -> service.refresh());
+        assertEquals("error.payroll.configIncomplete", refresh.getMessage());
+        BusinessException forced = assertThrows(BusinessException.class, () -> service.refreshForced());
+        assertEquals("error.payroll.configIncomplete", forced.getMessage());
+        assertThrows(BusinessException.class, () -> service.disconnect());
+
+        // 期待を置いていないため、token endpoint への要求があれば MockRestServiceServer が失敗させる
+        server.verify();
+        verify(connectionMapper, never()).updateById(any(FreeeConnection.class));
+        verify(connectionMapper, never()).deleteById(any(Long.class));
+    }
+
+    @Test
     @DisplayName("refresh: 新refresh tokenへrotation保存され外部使用は1回（AC04）")
     void refreshはrotation保存する() throws Exception {
         FreeeConnection expired = connectedRow();
