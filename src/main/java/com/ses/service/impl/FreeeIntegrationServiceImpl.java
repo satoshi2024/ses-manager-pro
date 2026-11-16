@@ -1379,6 +1379,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
      * timeout/5xx/応答不明は503 BusinessException。秘密は例外message/ログへ出さない。
      */
     private JsonNode tokenEndpointPost(String path, MultiValueMap<String, String> form, String correlationId) {
+        if (!enabled) {
+            // freee連携が無効の間はclient設定が無いことがあり、token endpoint（code交換・更新・失効）へ空のclient設定を
+            // 送らない（FINAL-FIX P3-1）。接続行が残っていても使えない扱いにし、行と状態は変えない
+            throw BusinessException.of("error.payroll.configIncomplete");
+        }
         HttpHeaders h = new HttpHeaders();
         h.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         if (correlationId != null && !correlationId.isBlank()) {

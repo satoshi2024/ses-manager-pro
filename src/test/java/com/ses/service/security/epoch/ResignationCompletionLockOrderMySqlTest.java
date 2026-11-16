@@ -106,7 +106,7 @@ import static org.mockito.Mockito.reset;
  * （3 X{email} → 6 S → 7 X）。旧実装の退社完了は 4 X → 7 X → 3 X で、いずれとも同じ要員・連携ユーザーで循環し得た。
  * CONFIRMのreaderを模すplan（1 S → 3 S → 4 X → 5 X → 7 S）とも両順序で直列化されることを確かめる。
  * ポータル紐付けの登録（7 X → 12、READ_COMMITTED。W3-02 P2-1(b)）は、退社完了が先行したとき要員行で待ち、lock後の読取で
- * 完了を見て「要確認」を返すことを確かめる（登録は外側transactionなしで呼ぶ）。</p>
+ * 完了を見て「要確認」を返すことを確かめる（登録はREAD_COMMITTEDの後続側transactionに参加させ、待機を後続側の接続で特定する）。</p>
  *
  * <p>待ちの判定は {@code performance_schema.data_lock_waits} のrequester/blocker対（{@link InnoDbRecordLockWaits}）で行い、
  * {@code LOCK_DATA} を連結条件にしない（見えている場合だけ期待の主キーと照合する）。外部キー検査が別の記録・別の表に付ける
@@ -281,10 +281,12 @@ class ResignationCompletionLockOrderMySqlTest {
         long portalUser = insertPortalUser();
         AtomicReference<PortalUserEngineerLinkDto> registered = new AtomicReference<>();
 
-        // 登録は外側transactionを作らずに呼び、宣言どおりのREAD_COMMITTEDで動かす（外側に参加すると宣言が効かない）
-        Outcomes o = raceWithOwnTransaction("退社完了先行 × ポータル紐付け登録", complete(f),
-                () -> registered.set(portalEngineerLinkService.register(portalUser, f.engineer())),
-                "t_engineer", f.engineer());
+        // 登録は READ_COMMITTED の外側transaction（race の後続側）に参加させ、待機辺を後続側の接続IDで特定する
+        // （FINAL-FIX P3-4: 任意のrequesterを許すと、別の接続の待ちを登録の待ちと取り違え得る）。register の宣言
+        // （isolation=READ_COMMITTED）は WriterIsolationPolicyTest と PortalEngineerLinkServiceLockOrderTest が固定する
+        Outcomes o = race("退社完了先行 × ポータル紐付け登録", complete(f),
+                readCommitted(() -> registered.set(portalEngineerLinkService.register(portalUser, f.engineer()))),
+                "t_engineer", f.engineer(), EXCLUSIVE, EXCLUSIVE);
 
         assertSucceeded("退社完了", o.first());
         assertSucceeded("ポータル紐付け登録", o.second());
@@ -646,75 +648,6 @@ class ResignationCompletionLockOrderMySqlTest {
                             fail(label + ": 後続側が" + table + "#" + rowId + "で待たずに終了した: " + outcome(secondFuture));
                         }
                     }, label);
-            assertFalse(secondFuture.isDone(), label + ": 後続側は先行側のcommitまで待つこと");
-            releaseFirst.countDown();
-            Throwable firstOutcome = firstFuture.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
-            Throwable secondOutcome = secondFuture.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
-            Throwable firstResult = firstOutcome != null ? firstOutcome : firstFailure.get();
-            assertNoLockFailure(label + "（先行側）", firstResult);
-            assertNoLockFailure(label + "（後続側）", secondOutcome);
-            return new Outcomes(firstResult, secondOutcome);
-        } finally {
-            releaseFirst.countDown();
-            pool.shutdownNow();
-        }
-    }
-
-    /**
-     * {@link #race} と同じく先行側をcommit前に止め、後続側が {@code table} の主キー {@code rowId} の排他lockで先行側を待つことを
-     * 確かめてから先行側を解放する。後続側は外側のtransactionを作らずに呼ぶ（serviceが宣言した分離レベルで動かすため）。
-     * そのため後続側の接続IDは取れず、待機辺は先行側の接続をblockerとする全requesterから探す（同じ行を待つ接続は後続側だけ）。
-     */
-    private Outcomes raceWithOwnTransaction(String label, Step first, Runnable second, String table, long rowId)
-            throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        CountDownLatch firstDone = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        AtomicLong firstConnection = new AtomicLong();
-        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
-        try {
-            Future<Throwable> firstFuture = pool.submit(() -> capture(() -> {
-                bindContexts();
-                first.template().get().executeWithoutResult(status -> {
-                    firstConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
-                    try {
-                        first.action().run();
-                    } catch (RuntimeException failure) {
-                        firstFailure.set(failure);
-                        status.setRollbackOnly();
-                    }
-                    firstDone.countDown();
-                    awaitQuietly(releaseFirst);
-                });
-            }));
-            if (!firstDone.await(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS) || firstFuture.isDone()) {
-                fail(label + ": 先行側がcommit前で止まらなかった: " + outcome(firstFuture));
-            }
-            Future<Throwable> secondFuture = pool.submit(() -> capture(() -> {
-                bindContexts();
-                second.run();
-            }));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(EpochFenceMySqlSupport.WAIT_SECONDS);
-            boolean waited = false;
-            while (!waited && System.nanoTime() < deadline) {
-                if (secondFuture.isDone()) {
-                    fail(label + ": 後続側が" + table + "#" + rowId + "で待たずに終了した: " + outcome(secondFuture));
-                }
-                for (InnoDbRecordLockWaits.WaitEdge edge
-                        : InnoDbRecordLockWaits.waitEdges(jdbc, null, firstConnection.get(), table, "PRIMARY")) {
-                    if ("RECORD".equals(edge.requesterType()) && "WAITING".equals(edge.requesterStatus())
-                            && EXCLUSIVE.contains(edge.requesterMode()) && EXCLUSIVE.contains(edge.blockerMode())
-                            && InnoDbRecordLockWaits.keyVisibleAndMatches(edge.requesterData(),
-                            InnoDbRecordLockWaits.primaryKey(rowId))) {
-                        waited = true;
-                    }
-                }
-                if (!waited) {
-                    Thread.sleep(25);
-                }
-            }
-            assertTrue(waited, label + ": 後続側の" + table + "#" + rowId + "の待機を確認できなかった: "
-                    + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, firstConnection.get()));
             assertFalse(secondFuture.isDone(), label + ": 後続側は先行側のcommitまで待つこと");
             releaseFirst.countDown();
             Throwable firstOutcome = firstFuture.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);

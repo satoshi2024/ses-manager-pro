@@ -27,6 +27,8 @@
   - reviewer fingerprint の鍵（§1.0 の23〜25）を OS 環境変数で渡すときは、tenant一覧 `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS` も要る。環境変数の名前からは tenant を列挙できないためである。
   - `BREAK_GLASS_USERNAMES` は、bootstrap の初回起動では空にする。runbook §5.5 でちょうど2名にする。
   - 雛形は `FREEE_ENABLED=false` で、freee の4項目を載せていない。freee を使うときは `true` にし、4項目（§1.0 の27〜30）を足す。足さないと起動しない。
+  - `TZ=Asia/Tokyo` は必須である（runbook §1.0・§4）。image も `TZ` と `-Duser.timezone=Asia/Tokyo` を持つ。`JAVA_TOOL_OPTIONS` を上書きするときは `-Duser.timezone=Asia/Tokyo` を残す。validator はどちらが欠けても Fail する。
+  - `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false` は、V197 の署名を得るまでの値である。署名後に `true` にする（runbook §4.3）。
 
 ## Probe 規約
 

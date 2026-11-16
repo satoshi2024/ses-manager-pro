@@ -43,7 +43,9 @@
         { "name": "CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION", "value": "v1" },
         { "name": "COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION", "value": "v1" },
         { "name": "COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS", "value": "default" },
-        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "value": "v1" }
+        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "TZ", "value": "Asia/Tokyo" },
+        { "name": "RESUME_LEDGER_COPY_ALIGNMENT_ENABLED", "value": "false" }
       ],
       "secrets": [
         {
@@ -155,7 +157,7 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
-    "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start.",
+    "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start. TZ=Asia/Tokyo is required (runbook sections 1.0 and 4; the image also sets it and -Duser.timezone): without it the JVM runs in UTC, a 30-minute account lock lasts about 9.5 hours and timestamps shift by 9 hours. If you override JAVA_TOOL_OPTIONS, keep -Duser.timezone=Asia/Tokyo. RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false until the Privacy owner and document owner sign the V197 copy-disposal policy (runbook section 4.3); switch it to true after the signature.",
     "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",

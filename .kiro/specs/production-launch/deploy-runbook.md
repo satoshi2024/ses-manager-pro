@@ -87,7 +87,7 @@
 | 19 | `CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION`（`certification.number-crypto.current-key-version`） | 資格番号の暗号鍵の現行version。NF03の子スイッチがOFFでも必要（`feature-switches.md` 4.1） | 上記のversion | × | ymlに定義なし。`CertificationNumberKeyProviderImpl.java:26,45,54-58` |
 | 20 | `CERTIFICATION_NUMBER_CRYPTO_KEYS_<VERSION>`（`certification.number-crypto.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | `CertificationNumberKeyProviderImpl.java:89,111-126` |
 | 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:529`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
-| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。`application.yml:532` の `COMPLIANCE_CREDENTIAL_KEY_V1` はcommentで**配線されていない**ため、この名前で渡す | 〇 | `application.yml:530-532`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
+| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。この名前で渡す（以前 `application.yml` のcommentにあった `COMPLIANCE_CREDENTIAL_KEY_V1` は配線されておらず、読まれなかった。FINAL-FIX でcommentを直した） | 〇 | `application.yml:530-532`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
 | 23 | `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS`（`compliance.gate.fingerprint-key-tenants`） | reviewer fingerprintの鍵を持つtenantの一覧 | `default`（カンマ区切り） | × | `application.yml:542`、`ComplianceReviewerFingerprintKeyProviderImpl.java:167-199` |
 | 24 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION`（`compliance.gate.fingerprint-keys.default.current-key-version`） | reviewer fingerprintのHMAC鍵の現行version（tenant `default`） | 上記のversion | × | `ComplianceReviewerFingerprintKeyProviderImpl.java:65-75,141-160` |
 | 25 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>`（`compliance.gate.fingerprint-keys.default.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | 同上 |
@@ -104,7 +104,10 @@
 
 - `FREEE_ENABLED`（`freee.enabled`）が `false` の間（prodの既定）:
   - 下の4項目が無くても起動する。給与・会計の freee 接続は認可の開始と code 交換を行わず、状態は MISCONFIGURED になる。
-  - 接続が作られないため、会計送信・入金明細・勤怠連携は接続が無いものとして扱われ、freee を呼ばない。既存の接続が残っていても、token の更新で空の client 設定を freee へ送らない（元の401として扱う）。
+  - 接続が作られないため、会計送信・入金明細・勤怠連携は接続が無いものとして扱われ、freee を呼ばない。
+  - 既存の接続行が残っていても、空の client 設定を freee へ送らない（FINAL-FIX P3-1）。
+    - 給与側: token endpoint（code 交換・更新・失効）を `error.payroll.configIncomplete` で拒否する。接続行と状態は変えないため、解除（失効）も freee を有効にするまでできない。
+    - 会計側: token の更新を行わず、元の401として扱う。
   - `ACCOUNTING_TENANT_IDS`（26）は freee の有無に関係なく要る。
 - 公式host・HTTPS の検査は、ON・OFF のどちらでも行う（`freee.*-base-url` を上書きした場合だけ止まる）。
 - `true` にすると、次の4項目のどれかが欠けたとき起動しない。
@@ -140,6 +143,11 @@
 - NF05: `INTEGRATION_HUB_PUBLIC_ID_KEY`、`INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION` と鍵、truststore 等（DG-05）。
 
 **起動は止めないが運用で設定するもの**:
+- **`TZ=Asia/Tokyo`（必須。§4）**: JVM のタイムゾーンを固定する。
+  - 未設定だと JVM は UTC で動く。30分の account lock が約9時間30分続き、監査等の日時も9時間ずれる。
+  - image（`Dockerfile`）も `TZ` と `JAVA_TOOL_OPTIONS` の `-Duser.timezone=Asia/Tokyo` を持つ。task definition でも `TZ` を設定する。
+  - `validate-task-definition.ps1` は、`TZ` が無い場合と、`JAVA_TOOL_OPTIONS` を上書きして `-Duser.timezone` を落とした場合に Fail する。
+- **`RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false`（初回配備の雛形の値）**: V197 の署名まで、副本の保存期限を縮めず、廃棄候補を毎日作り直さない。署名後に `true` にする（§4.3）。
 - `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。
 - `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。
 - `SMTP_HOST` 等: 通知メール。
@@ -273,7 +281,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | 対象 | 要るもの | 正本 |
 |---|---|---|
 | NF04 のうちスイッチOFFでも止まらない部分（pwa-queueの保存経路、lock中の下書きの復元（local password sessionだけ）、台帳の清掃、restore-sessionのlistener）。スイッチはService Workerとmanifestだけを止める | 次のうちこの部分にかかる署名と真機受入が初回配備の前提になる（全行が未署名）。<br>(1) Privacy: 端末内30日保存（P3-13 を含む）。<br>(2) SRE/Ops: 単一instance・sticky session（SRE-5）。<br>(3) Owner/Security: B-NF04-4（失効の制限。決定待ち）。<br>(4) 業務の受入担当: 真機受入 S-01〜S-15 | `feature-switches.md` 4.4「次はOFFでも止めない」、`mobile-pwa-self-service/first-release-user-and-operations-notes.md` §4、`mobile-pwa-self-service/real-device-browser-acceptance-template.md` |
-| 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197） | 保存年数（3年・TRANSACTION_DATE）は暫定値で、文書ownerの確認待ち。<br>副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（確認SQLは §4.3）。<br>副本の調整がするのは廃棄候補（PENDING）を作ることだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`）を止めなくてよい。この scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用で、止めると通常運用が再開できない。<br>`IMPORT` の保持期間は、Privacy の書面受理まで開放の条件のまま | 冒頭の V197 の項、§4.3 |
+| 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197） | 保存年数（3年・TRANSACTION_DATE）は暫定値で、文書ownerの確認待ち。<br>副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（確認SQLは §4.3）。<br>副本の調整がするのは廃棄候補（PENDING）を作ることだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`）を止めなくてよい。この scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用で、止めると通常運用が再開できない。<br>初回配備は `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false`（雛形の値）で副本の調整だけを止め、署名後に `true` にする（§4.3）。<br>`IMPORT` の保持期間は、Privacy の書面受理まで開放の条件のまま | 冒頭の V197 の項、§4.3 |
 
 **機能スイッチをONにする前に要る署名・受理**（揃うまでOFFのまま。ONの手順は各正本）
 
@@ -511,7 +519,10 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
 
 - 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodの必須設定（一覧は §1.0。常に必須の26項目と、freeeを使う場合の4項目。security設定の注意は §4.1）。
 - **`SPRING_FLYWAY_ENABLED` は設定しない**。`true` にしても `ProductionSchemaGuardConfiguration` がSpring BootのFlyway初期化でmigrateを拒否し、1件も適用せずに起動を止める。
-- **JVMのタイムゾーンを `Asia/Tokyo` に固定する（必須）**。`JAVA_TOOL_OPTIONS` に `-Duser.timezone=Asia/Tokyo` を加える（imageの既定 `-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0` を消さないよう、両方を書く）か、container環境変数 `TZ=Asia/Tokyo` を設定する。起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
+- **JVMのタイムゾーンを `Asia/Tokyo` に固定する（必須）**。
+  - FINAL-FIX から image（`Dockerfile`）は `TZ=Asia/Tokyo` と `JAVA_TOOL_OPTIONS` の `-Duser.timezone=Asia/Tokyo` を持ち、task definition の雛形も `TZ=Asia/Tokyo` を設定する（§1.0）。
+  - `JAVA_TOOL_OPTIONS` を task definition で上書きする場合は、image の既定（`-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Duser.timezone=Asia/Tokyo`）を全て書く。
+  - 起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
@@ -573,7 +584,11 @@ V197 の署名事項（Privacy owner・文書 owner の書面署名）を得る�
 
 **副本の調整だけを止める停止口**（`RESUME_LEDGER_COPY_ALIGNMENT_ENABLED`、property `app.resume.ledger-copy-alignment.enabled`、既定 `true`）
 - `false` にすると、日次清理（02:00）のうち副本の保存期限を合わせる処理だけを止める。原本・抽出本文の purge と BP 取込の清理は続く。scheduler 全体（`APP_SCHEDULING_ENABLED`）を止めずに済む。
-- 使う場面: 署名が長く得られない場合や、廃棄候補が作られること自体を避けたいと判断した場合。
+- **初回配備は `false` で始め、Privacy owner と文書 owner の署名を得てから `true` にする**（`infra/ecs/task-definition.prod.json` の雛形は `false`。FINAL-FIX P3-3）。
+  - 理由: `true` のままだと、署名の前に副本の `retention_until` が当日まで縮む。`false` に戻しても縮んだ値は戻らない。
+  - さらに、却下した申請が翌日また廃棄候補になり、毎日の作業になる。
+  - 署名前に「承認しない」運用（上の (0)）は、この停止口の後ろの二重の防御とする。
+- コードの既定は `true` で、dev/test の挙動は変わらない。prod では雛形の値で止める。
 - 既に保存期限を合わせた副本と、既にある廃棄申請は戻らない。(0) の確認は止めた後も続ける。
 - 停止中は、上の定期確認の (2) が0行にならない。これは正常である。再開（`true`）すると、次の実行で拾い直す。
 - 切替は再起動で反映する。停止中は tenant ごとに日次で INFO log `文書台帳の副本の保存期限の調整は停止中です` が出る。真偽値として解釈できない値（例 `ture`）では起動しない。
