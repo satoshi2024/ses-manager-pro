@@ -41,9 +41,11 @@ class HoldReleaseProofVerifierTest {
     private static final String COMMAND = "hr-" + "b".repeat(32);
     private static final String START_HASH = "c".repeat(64);
     private static final String REQUESTER = "sys_user:1";
+    private static final String STARTER = "sys_user:2";
     private static final String ISSUER = "issuer-a";
     private static final String APPROVER = "approver-b";
 
+    private HoldReleaseRules rules = HoldReleaseRules.strict();
     private HoldReleaseTestAuthorities authorities;
     private volatile RevocationStatusProvider revocations;
     private HoldReleaseVerifier verifier;
@@ -58,7 +60,7 @@ class HoldReleaseProofVerifierTest {
         verifier = ProductionPrivacyComponents.holdReleaseVerifier(prod(), authorities.registry(),
                 ref -> revocations.statusOf(ref), Clock.fixed(NOW, ZoneOffset.UTC));
         binding = new HoldReleaseBinding(TENANT, SUBJECT, HOLD, 1, sha256("訴訟終了のため解除する"), COMMAND, 1,
-                START_HASH, REQUESTER);
+                START_HASH, REQUESTER, STARTER);
     }
 
     // --- 発行と束縛 ---
@@ -105,7 +107,9 @@ class HoldReleaseProofVerifierTest {
                 Arguments.of("reasonHash", (UnaryOperator<HoldReleaseBinding>) b -> copy(b, null, null, null, -1,
                         sha256("別の理由"), null, -1, null, null), HoldReleaseRejection.REASON_HASH_MISMATCH),
                 Arguments.of("requester", (UnaryOperator<HoldReleaseBinding>) b -> copy(b, null, null, null, -1, null,
-                        null, -1, null, "sys_user:2"), HoldReleaseRejection.REQUESTER_MISMATCH));
+                        null, -1, null, "sys_user:2"), HoldReleaseRejection.REQUESTER_MISMATCH),
+                Arguments.of("holdStarter", (UnaryOperator<HoldReleaseBinding>) b -> copy(b, null, null, null, -1, null,
+                        null, -1, null, null, "sys_user:3"), HoldReleaseRejection.HOLD_STARTER_MISMATCH));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -115,7 +119,7 @@ class HoldReleaseProofVerifierTest {
                                                 HoldReleaseRejection expected) {
         HoldReleaseBinding presented = change.apply(binding);
         // 提示された束縛に正しく署名していても、現在値（expected）と違えば拒否する
-        assertRejected(() -> verifier.verify(presented, binding, "SUBJECT", issuer(presented), approver(presented)),
+        assertRejected(() -> verifier.verify(presented, binding, "SUBJECT", rules,issuer(presented), approver(presented)),
                 expected);
     }
 
@@ -125,7 +129,7 @@ class HoldReleaseProofVerifierTest {
     void trust_anchorが未登録なら拒否する() {
         HoldReleaseVerifier empty = ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> java.util.Map.of(),
                 ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC));
-        assertRejected(() -> empty.verify(binding, binding, "SUBJECT", issuer(binding), approver(binding)),
+        assertRejected(() -> empty.verify(binding, binding, "SUBJECT", rules,issuer(binding), approver(binding)),
                 HoldReleaseRejection.TRUST_ANCHOR_UNKNOWN);
 
         HoldReleaseAuthorityClaim unknown = HoldReleaseTestAuthorities.signWithForeignKey("someone-else", Role.ISSUER,
@@ -135,7 +139,7 @@ class HoldReleaseProofVerifierTest {
         HoldReleaseVerifier failing = ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> {
             throw new IllegalStateException("registry down");
         }, ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC));
-        assertRejected(() -> failing.verify(binding, binding, "SUBJECT", issuer(binding), approver(binding)),
+        assertRejected(() -> failing.verify(binding, binding, "SUBJECT", rules,issuer(binding), approver(binding)),
                 HoldReleaseRejection.TRUST_ANCHOR_UNKNOWN);
     }
 
@@ -185,7 +189,7 @@ class HoldReleaseProofVerifierTest {
 
         HoldReleaseVerifier noProvider = ProductionPrivacyComponents.holdReleaseVerifier(prod(), authorities.registry(),
                 null, Clock.fixed(NOW, ZoneOffset.UTC));
-        assertRejected(() -> noProvider.verify(binding, binding, "SUBJECT", issuer(binding), approver(binding)),
+        assertRejected(() -> noProvider.verify(binding, binding, "SUBJECT", rules,issuer(binding), approver(binding)),
                 HoldReleaseRejection.REVOCATION_UNKNOWN);
     }
 
@@ -259,6 +263,130 @@ class HoldReleaseProofVerifierTest {
         HoldReleaseAuthorityClaim selfApproval = authorities.sign(ISSUER, Role.APPROVER, binding, NOW.minusSeconds(60),
                 NOW.plusSeconds(3600));
         assertRejected(() -> verify(binding, issuer(binding), selfApproval), HoldReleaseRejection.SEPARATION_OF_DUTIES);
+    }
+
+    // --- hold の開始者（D-05 の解除の承認者規則） ---
+
+    @Test
+    void 発行者か承認者がholdの開始者と同じ主体なら既定で拒否しD05が分離を求めなければ通す() {
+        authorities.rebindPrincipal(ISSUER, STARTER);
+        assertRejected(() -> verify(binding, issuer(binding), approver(binding)),
+                HoldReleaseRejection.SEPARATION_OF_DUTIES);
+        authorities.rebindPrincipal(ISSUER, "sys_user:20");
+        authorities.rebindPrincipal(APPROVER, STARTER);
+        assertRejected(() -> verify(binding, issuer(binding), approver(binding)),
+                HoldReleaseRejection.SEPARATION_OF_DUTIES);
+
+        rules = new HoldReleaseRules(false, true, Duration.ZERO);
+        assertThat(verify(binding, issuer(binding), approver(binding)).binding().holdStarterRef()).isEqualTo(STARTER);
+    }
+
+    @Test
+    void 要求者はholdの開始者と同じでもよい() {
+        HoldReleaseBinding byStarter = copy(binding, null, null, null, -1, null, null, -1, null, STARTER);
+
+        assertThat(verify(byStarter, issuer(byStarter), approver(byStarter)).binding().requesterRef()).isEqualTo(STARTER);
+    }
+
+    @Test
+    void 開始者が不明のholdは既定で拒否しD05が認めれば開始者との分離を判定せず通す() {
+        HoldReleaseBinding unknown = copy(binding, null, null, null, -1, null, null, -1, null, null,
+                HoldReleaseBinding.UNKNOWN_STARTER);
+        assertRejected(() -> verify(unknown, issuer(unknown), approver(unknown)), HoldReleaseRejection.HOLD_STARTER_UNKNOWN);
+
+        rules = new HoldReleaseRules(true, false, Duration.ZERO);
+        assertThat(verify(unknown, issuer(unknown), approver(unknown)).binding().starterKnown()).isFalse();
+    }
+
+    @Test
+    void 署名を確かめる前には主体の判定を返さない() {
+        authorities.rebindPrincipal(ISSUER, REQUESTER);
+        HoldReleaseAuthorityClaim forged = HoldReleaseTestAuthorities.signWithForeignKey(ISSUER, Role.ISSUER, binding,
+                NOW.minusSeconds(60), NOW.plusSeconds(3600));
+
+        assertRejected(() -> verify(binding, forged, approver(binding)), HoldReleaseRejection.SIGNATURE_INVALID);
+    }
+
+    // --- 主体の正規形・理由の hash・署名の正規形 ---
+
+    @Test
+    void trust_anchorの主体は正規形のsys_user_idだけを登録できる() {
+        java.security.PublicKey key = HoldReleaseTestAuthorities.generate().getPublic();
+        for (String bad : List.of("SYS_USER:20", "sys_user:020", "kms:alice", "sys_user:0", "sys_user:", " sys_user:20",
+                "sys_user:20 ", "sys_user:-1", "sys_user:２０")) {
+            assertThatThrownBy(() -> new HoldReleaseTrustAnchor("issuer-x", "k1", key, bad, Set.of(TENANT),
+                    Set.of(Role.ISSUER), Set.of("SUBJECT"), HoldReleaseTestAuthorities.VALID_FROM,
+                    HoldReleaseTestAuthorities.VALID_UNTIL)).as(bad).isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(new HoldReleaseTrustAnchor("issuer-x", "k1", key, "sys_user:20", Set.of(TENANT), Set.of(Role.ISSUER),
+                Set.of("SUBJECT"), HoldReleaseTestAuthorities.VALID_FROM, HoldReleaseTestAuthorities.VALID_UNTIL)
+                .principalRef()).isEqualTo("sys_user:20");
+    }
+
+    @Test
+    void 束縛の要求者と開始者は正規形だけを受け付ける() {
+        for (String bad : List.of("SYS_USER:1", "sys_user:01", "sys_user:0", "kms:alice")) {
+            assertThatThrownBy(() -> copy(binding, null, null, null, -1, null, null, -1, null, bad))
+                    .as(bad).isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String bad : List.of("SYS_USER:2", "sys_user:02", "kms:alice", "sys_user:")) {
+            assertThatThrownBy(() -> copy(binding, null, null, null, -1, null, null, -1, null, null, bad))
+                    .as(bad).isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(copy(binding, null, null, null, -1, null, null, -1, null, null, HoldReleaseBinding.UNKNOWN_STARTER)
+                .starterKnown()).isFalse();
+    }
+
+    @Test
+    void 理由のhashは理由コードとticketと理由本文の全てを束縛する() {
+        String base = HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001", "理由");
+
+        assertThat(HoldReleaseBinding.reasonHash("LITIGATION_ENDED", "TICKET-2001", "理由")).isNotEqualTo(base);
+        assertThat(HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2002", "理由")).isNotEqualTo(base);
+        assertThat(HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001", "理由。")).isNotEqualTo(base);
+        // field の境界をずらしても同じ hash にならない（長さ付き field）
+        assertThat(HoldReleaseBinding.reasonHash("AB", "C", "x")).isNotEqualTo(HoldReleaseBinding.reasonHash("A", "BC", "x"));
+        assertThatThrownBy(() -> HoldReleaseBinding.reasonHash(null, "TICKET-2001", "理由"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** deploy-runbook §4.5 の test vector（Java とは独立に Node.js で計算した値）。 */
+    @Test
+    void 署名の正規形はrunbookのtest_vectorと一致する() {
+        String reasonHash = HoldReleaseBinding.reasonHash("LITIGATION_CLOSED", "TICKET-2001",
+                "訴訟が終結したため保全を解除する");
+        assertThat(reasonHash).isEqualTo("8e3ccdd899ebae58d63b1319e0820aea0d7ff751194d7d57bee7d8873f5dacd5");
+
+        HoldReleaseBinding vector = new HoldReleaseBinding("default", "ENGINEER:7", "ph-" + "a".repeat(32), 1,
+                reasonHash, "hr-" + "b".repeat(32), 1, "c".repeat(64), "sys_user:1", "sys_user:2");
+        assertThat(new String(vector.canonicalBytes(), StandardCharsets.UTF_8)).isEqualTo("28:NF07-HOLD-RELEASE-BINDING-V1"
+                + "7:default10:ENGINEER:735:ph-" + "a".repeat(32) + "1:112:HOLD_RELEASE64:" + reasonHash
+                + "35:hr-" + "b".repeat(32) + "1:164:" + "c".repeat(64) + "10:sys_user:110:sys_user:2");
+        assertThat(vector.digest()).isEqualTo("cc4d333d9dd9ab7078a337c9464ae944da3204234bad2ac993e0b71109e1fb9a");
+
+        String signed = new String(HoldReleaseAuthorityClaim.signedBytes(vector, Role.ISSUER, "issuer-a", "k1",
+                Instant.parse("2026-11-16T02:00:00Z"), Instant.parse("2026-11-16T04:00:00Z")), StandardCharsets.UTF_8);
+        assertThat(signed).isEqualTo("30:NF07-HOLD-RELEASE-AUTHORITY-V110:PRODUCTION12:HOLD_RELEASE6:ISSUER"
+                + "8:issuer-a2:k120:2026-11-16T02:00:00Z20:2026-11-16T04:00:00Z64:" + vector.digest());
+        assertThat(sha256(signed)).isEqualTo("549567a997a2a84a5ecc5bca965d7bb8f3b403b96c57444fedc935a6833daa18");
+        // 時刻は Instant.toString() の正規形（小数秒が 0 なら付けない）。".000Z" で書いた値も同じ正規形になる
+        assertThat(Instant.parse("2026-11-16T02:00:00.000Z").toString()).isEqualTo("2026-11-16T02:00:00Z");
+    }
+
+    @Test
+    void 発行日時の未来は時計の許容ずれまで受け付け期限の側は広げない() {
+        rules = new HoldReleaseRules(true, true, Duration.ofSeconds(60));
+        HoldReleaseAuthorityClaim slightlyAhead = authorities.sign(ISSUER, Role.ISSUER, binding, NOW.plusSeconds(30),
+                NOW.plusSeconds(3600));
+        assertThat(verify(binding, slightlyAhead, approver(binding))).isNotNull();
+
+        HoldReleaseAuthorityClaim tooFar = authorities.sign(ISSUER, Role.ISSUER, binding, NOW.plusSeconds(61),
+                NOW.plusSeconds(3600));
+        assertRejected(() -> verify(binding, tooFar, approver(binding)), HoldReleaseRejection.NOT_YET_VALID);
+
+        HoldReleaseAuthorityClaim expired = authorities.sign(ISSUER, Role.ISSUER, binding, NOW.minusSeconds(120),
+                NOW.minusSeconds(1));
+        assertRejected(() -> verify(binding, expired, approver(binding)), HoldReleaseRejection.EXPIRED);
     }
 
     // --- 範囲・役割 ---
@@ -335,7 +463,7 @@ class HoldReleaseProofVerifierTest {
         List<JournalEvent> released = chain(start(1, HOLD, ZERO));
         released.add(release(2, HOLD, released.get(0).eventHash()));
         HoldReleaseBinding atReleased = new HoldReleaseBinding(TENANT, SUBJECT, HOLD, 1, binding.reasonHash(), COMMAND, 2,
-                released.get(1).eventHash(), REQUESTER);
+                released.get(1).eventHash(), REQUESTER, STARTER);
         VerifiedHoldRelease againProof = verify(atReleased, issuer(atReleased), approver(atReleased));
         assertThatThrownBy(() -> againProof.requireAppendable(head(released, false), released, NOW))
                 .isInstanceOf(JournalConflictException.class).hasMessageContaining("有効ではありません");
@@ -344,7 +472,7 @@ class HoldReleaseProofVerifierTest {
         String otherHold = "ph-" + "9".repeat(32);
         List<JournalEvent> other = chain(start(1, otherHold, ZERO));
         HoldReleaseBinding forOther = new HoldReleaseBinding(TENANT, SUBJECT, HOLD, 1, binding.reasonHash(), COMMAND, 1,
-                other.get(0).eventHash(), REQUESTER);
+                other.get(0).eventHash(), REQUESTER, STARTER);
         VerifiedHoldRelease wrongHold = verify(forOther, issuer(forOther), approver(forOther));
         assertThatThrownBy(() -> wrongHold.requireAppendable(head(other, true), other, NOW))
                 .isInstanceOf(JournalConflictException.class).hasMessageContaining("ID");
@@ -354,7 +482,7 @@ class HoldReleaseProofVerifierTest {
         restarted.add(release(2, HOLD, restarted.get(0).eventHash()));
         restarted.add(start(3, HOLD, restarted.get(1).eventHash()));
         HoldReleaseBinding staleRevision = new HoldReleaseBinding(TENANT, SUBJECT, HOLD, 1, binding.reasonHash(), COMMAND,
-                3, restarted.get(2).eventHash(), REQUESTER);
+                3, restarted.get(2).eventHash(), REQUESTER, STARTER);
         VerifiedHoldRelease stale = verify(staleRevision, issuer(staleRevision), approver(staleRevision));
         assertThatThrownBy(() -> stale.requireAppendable(head(restarted, true), restarted, NOW))
                 .isInstanceOf(JournalConflictException.class).hasMessageContaining("revision");
@@ -425,7 +553,7 @@ class HoldReleaseProofVerifierTest {
 
     private VerifiedHoldRelease verify(HoldReleaseBinding presented, HoldReleaseAuthorityClaim issuer,
                                        HoldReleaseAuthorityClaim approver) {
-        return verifier.verify(presented, presented, "SUBJECT", issuer, approver);
+        return verifier.verify(presented, presented, "SUBJECT", rules,issuer, approver);
     }
 
     private HoldReleaseAuthorityClaim issuer(HoldReleaseBinding target) {
@@ -440,7 +568,7 @@ class HoldReleaseProofVerifierTest {
         JournalEvent last = events.get(events.size() - 1);
         JournalEvent active = VerifiedHoldRelease.activeHoldStart(events);
         return new HoldReleaseBinding(TENANT, SUBJECT, active.caseId(), active.revision(), binding.reasonHash(), COMMAND,
-                last.revision(), last.eventHash(), REQUESTER);
+                last.revision(), last.eventHash(), REQUESTER, STARTER);
     }
 
     private static void assertRejected(Runnable call, HoldReleaseRejection reason) {
@@ -451,11 +579,19 @@ class HoldReleaseProofVerifierTest {
     private static HoldReleaseBinding copy(HoldReleaseBinding b, String tenant, String subject, String hold,
                                            long holdRevision, String reasonHash, String command, long journalRevision,
                                            String journalHash, String requester) {
+        return copy(b, tenant, subject, hold, holdRevision, reasonHash, command, journalRevision, journalHash, requester,
+                null);
+    }
+
+    private static HoldReleaseBinding copy(HoldReleaseBinding b, String tenant, String subject, String hold,
+                                           long holdRevision, String reasonHash, String command, long journalRevision,
+                                           String journalHash, String requester, String starter) {
         return new HoldReleaseBinding(tenant == null ? b.tenantId() : tenant, subject == null ? b.subjectRef() : subject,
                 hold == null ? b.holdId() : hold, holdRevision < 0 ? b.expectedHoldRevision() : holdRevision,
                 reasonHash == null ? b.reasonHash() : reasonHash, command == null ? b.commandId() : command,
                 journalRevision < 0 ? b.expectedJournalRevision() : journalRevision,
-                journalHash == null ? b.expectedJournalHash() : journalHash, requester == null ? b.requesterRef() : requester);
+                journalHash == null ? b.expectedJournalHash() : journalHash, requester == null ? b.requesterRef() : requester,
+                starter == null ? b.holdStarterRef() : starter);
     }
 
     private static JournalPartition partition() {

@@ -139,7 +139,8 @@ public class PrivacyHoldService {
     /** hold の一覧と開始の前提。 */
     public PrivacyHoldOverview overview() {
         accessGuard.requireAllowed(PrivacyAccessGuard.Capability.RETENTION, VIEW_ACTION);
-        String tenantId = requireCallerTenant(actorSource.get());
+        Actor viewer = actorSource.get();
+        String tenantId = requireCallerTenant(viewer);
         PrivacyHoldDecisions.Readiness readiness = decisions.evaluate();
         PrivacyHoldJournal.Availability availability = journal.availability();
         // 画面の表示は破壊的経路の skip ではないため、gate の UNAVAILABLE の metric・WARN に数えない（Review P3-4）
@@ -167,7 +168,8 @@ public class PrivacyHoldService {
                             hold.dataElementId(), hold.status(), hold.reasonCode(), hold.ticketRef(),
                             hold.requestedAt() == null ? null : DISPLAY_TIME.format(hold.requestedAt()), hold.journalRevision(),
                             RECONCILED.equals(hold.reasonCode()), hold.journalEventHash(),
-                            hold.releasedAt() == null ? null : DISPLAY_TIME.format(hold.releasedAt())));
+                            hold.releasedAt() == null ? null : DISPLAY_TIME.format(hold.releasedAt()),
+                            hold.partitionRef(), PrivacyHoldReleaseService.starterRef(hold)));
                 });
         List<PrivacyHoldOverview.ElementEntry> unattributable = new ArrayList<>();
         for (String elementId : HoldSubjectResolver.unattributableElementIds(catalog)) {
@@ -193,7 +195,9 @@ public class PrivacyHoldService {
                 missing.isEmpty(), List.copyOf(missing),
                 readiness.allowedTargetTypes().stream().map(Enum::name).sorted().toList(),
                 List.copyOf(entries), List.copyOf(unattributable), HoldSubjectResolver.unclassifiedElementIds(catalog),
-                related, holdable, releaseOpenQuietly());
+                related, holdable, releaseOpenQuietly(), tenantId,
+                viewer.userId() == null || viewer.userId() <= 0 ? null
+                        : PrivacyHoldReleaseService.REQUESTER_PREFIX + viewer.userId());
     }
 
     private boolean releaseOpenQuietly() {

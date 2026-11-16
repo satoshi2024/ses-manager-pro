@@ -5,7 +5,7 @@ package com.ses.privacy.production.retention.hold;
  *
  * <p>{@code binding} は発行者・承認者が署名した束縛（sf-w2-protocol.md §11.1）をそのまま提示したもの、{@code issuer}・
  * {@code approver} は署名付き authority claim。署名は system の外（D-03 で決める方式）で行い、ここには署名済みの値だけを
- * 渡す。理由本文は保存せず hash だけを束縛と照合する。subject 参照・partition は要求本文だけで受け取る（URL に入れない）。
+ * 渡す。理由本文は保存せず、理由コード・ticket・理由本文の hash だけを束縛と照合する。subject 参照・partition は要求本文だけで受け取る（URL に入れない）。
  *
  * @param reasonCode 理由コード（英大文字・数字・下線）
  * @param reasonText 理由本文（保存しない。SHA-256 を束縛の {@code reasonHash} と照合する）
@@ -24,11 +24,13 @@ public record PrivacyHoldReleaseRequest(String reasonCode, String reasonText, St
      * @param expectedHoldRevision    解除する hold の開始の revision
      * @param expectedJournalRevision 解除の時点の journal head の revision
      * @param expectedJournalHash     解除の時点の journal head の event hash
+     * @param reasonHash              理由コード・ticket・理由本文の正規形の SHA-256（{@code HoldReleaseBinding.reasonHash}）
      * @param requesterRef            解除の要求者（{@code sys_user:<id>}）
+     * @param holdStarterRef          hold の開始者（{@code sys_user:<id>}。不明なら {@code sys_user:0}）
      */
     public record Binding(String tenantId, String subjectRef, String holdId, Long expectedHoldRevision,
                           String reasonHash, String commandId, Long expectedJournalRevision,
-                          String expectedJournalHash, String requesterRef) {
+                          String expectedJournalHash, String requesterRef, String holdStarterRef) {
     }
 
     /**

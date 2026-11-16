@@ -83,6 +83,17 @@ public class PrivacyHoldDecisions {
     }
 
     /**
+     * 解除 proof の判定規則（D-05「解除の承認者規則」と時計の許容ずれ）。呼出しごとに設定から作る。設定が無い・解釈できない
+     * 場合は最も厳しい側（開始者と分離、開始者が不明なら拒否、許容ずれ 0）。
+     */
+    public com.ses.privacy.foundation.HoldReleaseRules releaseRules() {
+        PrivacyHoldProperties.Release release = holdProperties == null ? null : holdProperties.getRelease();
+        boolean separation = release == null || release.starterSeparationRequired();
+        boolean rejectUnknown = release == null || release.rejectUnknownStarter();
+        return new com.ses.privacy.foundation.HoldReleaseRules(separation, rejectUnknown, maxSkew());
+    }
+
+    /**
      * 解除の開放の前提の評価結果。
      *
      * @param ready         D-03・D-05 がどちらも有効か

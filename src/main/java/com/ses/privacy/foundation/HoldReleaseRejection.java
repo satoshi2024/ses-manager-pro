@@ -22,8 +22,10 @@ public enum HoldReleaseRejection {
     NOT_YET_VALID,
     /** trust anchor の範囲（tenant・役割・対象種別）の外。 */
     SCOPE_MISMATCH,
-    /** 要求者・発行者・承認者が分離されていない。 */
+    /** 要求者・発行者・承認者が分離されていない、または発行者・承認者が hold の開始者と同じ（D-05 の規則で分離を求める場合）。 */
     SEPARATION_OF_DUTIES,
+    /** hold の開始者が不明で、D-05 の規則が不明の開始者の hold の解除を拒否する（開始者の値が戻るまで）。 */
+    HOLD_STARTER_UNKNOWN,
     /** 束縛の tenant が呼出し元の tenant と一致しない。 */
     TENANT_MISMATCH,
     /** 束縛の subject（partition）が hold と一致しない。 */
@@ -36,8 +38,10 @@ public enum HoldReleaseRejection {
     JOURNAL_HEAD_MISMATCH,
     /** 束縛の command ID が要求と一致しない。 */
     COMMAND_MISMATCH,
-    /** 束縛の理由 hash が要求の理由本文の hash と一致しない。 */
+    /** 束縛の理由 hash が要求の理由コード・ticket・理由本文の hash と一致しない。 */
     REASON_HASH_MISMATCH,
     /** 束縛の要求者が呼出し元と一致しない。 */
-    REQUESTER_MISMATCH
+    REQUESTER_MISMATCH,
+    /** 束縛の hold の開始者が projection の開始者と一致しない。 */
+    HOLD_STARTER_MISMATCH
 }

@@ -14,15 +14,21 @@ import java.util.Objects;
  * <p>判定の順序（最初に当たった理由を返す）:
  * <ol>
  *   <li>提示された束縛と、信頼できる現在値から組み立てた束縛の項目ごとの一致（tenant・subject・hold ID・hold revision・
- *       journal head・command ID・理由 hash・要求者）。</li>
+ *       journal head・command ID・理由 hash・要求者・開始者）。</li>
  *   <li>claim の有無と役割（issuer の位置に ISSUER、approver の位置に APPROVER）。</li>
  *   <li>trust anchor の登録（{@code authorityId:keyId}）と識別子の一致。</li>
  *   <li>trust anchor の範囲（tenant・役割・対象種別）。</li>
- *   <li>時刻（claim の発行日時〜期限と trust anchor の有効期間。現在時刻は注入された時計）。</li>
+ *   <li>時刻（claim の発行日時〜期限と trust anchor の有効期間。現在時刻は注入された時計）。発行日時の側だけ
+ *       {@link HoldReleaseRules#notBeforeTolerance()} の未来を許し、期限の側は広げない。</li>
+ *   <li>Ed25519 署名（束縛の digest を含む {@link HoldReleaseAuthorityClaim#signedBytes}）。主体に関わる判定は署名を
+ *       確かめた後に行う（署名の無い要求で「ある authority の主体が自分か」を探れないようにする）。</li>
  *   <li>要求者・発行者・承認者の分離（主体は trust anchor の登録値。authority・鍵の共有も拒否）。</li>
- *   <li>Ed25519 署名（束縛の digest を含む {@link HoldReleaseAuthorityClaim#signedBytes}）。</li>
+ *   <li>hold の開始者（D-05 の規則 {@link HoldReleaseRules}）: 開始者が不明なら既定で {@code HOLD_STARTER_UNKNOWN}。分かって
+ *       いれば既定で発行者・承認者は開始者と別の主体（{@code SEPARATION_OF_DUTIES}）。要求者は開始者と同じでもよい。</li>
  *   <li>失効状態（両 trust anchor が {@code ACTIVE} であること。UNKNOWN・provider 無し・照会不能は拒否）。</li>
  * </ol>
+ * 主体の比較は正規形（{@link HoldReleaseTrustAnchor#PRINCIPAL}）の文字列の完全一致だけで行う（anchor・束縛の constructor が
+ * 正規形以外を受け付けない）。
  */
 final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
 
@@ -41,11 +47,13 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
 
     @Override
     public VerifiedHoldRelease verify(HoldReleaseBinding presented, HoldReleaseBinding expected, String targetType,
-                                      HoldReleaseAuthorityClaim issuer, HoldReleaseAuthorityClaim approver) {
+                                      HoldReleaseRules rules, HoldReleaseAuthorityClaim issuer,
+                                      HoldReleaseAuthorityClaim approver) {
         environmentGuard.requireProductionProfile();
         if (presented == null || expected == null || targetType == null) {
             throw reject(HoldReleaseRejection.CLAIM_MISSING);
         }
+        HoldReleaseRules effective = rules == null ? HoldReleaseRules.strict() : rules;
         compareBindings(presented, expected);
         if (issuer == null || approver == null) {
             throw reject(HoldReleaseRejection.CLAIM_MISSING);
@@ -70,19 +78,30 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
         requireScope(approverAnchor, approver, expected.tenantId(), targetType);
 
         Instant now = clock.instant();
-        requireTimeWindow(issuerAnchor, issuer, now);
-        requireTimeWindow(approverAnchor, approver, now);
+        requireTimeWindow(issuerAnchor, issuer, now, effective.notBeforeTolerance());
+        requireTimeWindow(approverAnchor, approver, now, effective.notBeforeTolerance());
+
+        verifySignature(issuerAnchor, issuer, expected);
+        verifySignature(approverAnchor, approver, expected);
 
         String requester = expected.requesterRef();
-        if (requester.equals(issuerAnchor.principalRef()) || requester.equals(approverAnchor.principalRef())
-                || issuerAnchor.principalRef().equals(approverAnchor.principalRef())
+        String issuerPrincipal = issuerAnchor.principalRef();
+        String approverPrincipal = approverAnchor.principalRef();
+        if (requester.equals(issuerPrincipal) || requester.equals(approverPrincipal)
+                || issuerPrincipal.equals(approverPrincipal)
                 || issuerAnchor.authorityId().equals(approverAnchor.authorityId())
                 || issuerAnchor.publicKey().equals(approverAnchor.publicKey())) {
             throw reject(HoldReleaseRejection.SEPARATION_OF_DUTIES);
         }
-
-        verifySignature(issuerAnchor, issuer, expected);
-        verifySignature(approverAnchor, approver, expected);
+        if (!expected.starterKnown()) {
+            if (effective.rejectUnknownStarter()) {
+                throw reject(HoldReleaseRejection.HOLD_STARTER_UNKNOWN);
+            }
+        } else if (effective.starterSeparationRequired()
+                && (expected.holdStarterRef().equals(issuerPrincipal)
+                || expected.holdStarterRef().equals(approverPrincipal))) {
+            throw reject(HoldReleaseRejection.SEPARATION_OF_DUTIES);
+        }
 
         requireActive(issuerAnchor.anchorId());
         requireActive(approverAnchor.anchorId());
@@ -119,6 +138,9 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
         if (!presented.requesterRef().equals(expected.requesterRef())) {
             throw reject(HoldReleaseRejection.REQUESTER_MISMATCH);
         }
+        if (!presented.holdStarterRef().equals(expected.holdStarterRef())) {
+            throw reject(HoldReleaseRejection.HOLD_STARTER_MISMATCH);
+        }
     }
 
     private static HoldReleaseTrustAnchor anchorOf(Map<String, HoldReleaseTrustAnchor> anchors,
@@ -138,11 +160,16 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
         }
     }
 
-    private static void requireTimeWindow(HoldReleaseTrustAnchor anchor, HoldReleaseAuthorityClaim claim, Instant now) {
+    /**
+     * claim の発行日時〜期限と trust anchor の有効期間。発行日時が検証時刻より未来のものは {@code tolerance} の幅までだけ
+     * 受け付ける（署名者の時計の進み）。期限・anchor の有効期間の終わりは広げない。
+     */
+    private static void requireTimeWindow(HoldReleaseTrustAnchor anchor, HoldReleaseAuthorityClaim claim, Instant now,
+                                          java.time.Duration tolerance) {
         if (!claim.expiresAt().isAfter(claim.issuedAt())) {
             throw reject(HoldReleaseRejection.EXPIRED);
         }
-        if (now.isBefore(claim.issuedAt()) || now.isBefore(anchor.validFrom())
+        if (now.plus(tolerance).isBefore(claim.issuedAt()) || now.isBefore(anchor.validFrom())
                 || claim.issuedAt().isBefore(anchor.validFrom())) {
             throw reject(HoldReleaseRejection.NOT_YET_VALID);
         }

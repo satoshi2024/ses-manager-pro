@@ -439,6 +439,46 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 
 **D-05 owner の受理事項（A1H-2。hold 開始の開放の署名と合わせて受理する）**: (1) 原本と副本の DATA_ELEMENT hold は別 element（上の「DATA_ELEMENT hold の対」）、(2) 外部にある実体は D10 の範囲外（上の「外部にある実体」）、(3) D7・D9 は1つの tenant の停止で全 tenant の kind を止める（過剰停止）、(4) D1 の READ_COMMITTED による最初の hold との順序の窓と、D1・D2 の本人の導出が文書行の lock より前であること（plan §3.4 A1H-2 実装記録の残余）、(5) 帰属できない element の行は SUBJECT hold で守られない（plan §3.4.3 規則6）、(6) D13 の PWA の台帳と freee の従業員対応の物理削除（上の表）、(7) 参照元の行が物理削除された実体は D10 で守れない（D11、plan §9 R-15）。
 
+### 4.5 NF07 保全holdの解除（NF07-REL。開放は D-03・D-05 の署名後）
+
+`POST /api/privacy/holds/{holdId}/release` は、D-03・D-05 の決定ID が有効で、prod の verifier があり、解除 authority の trust anchor が登録されるまで 404 を返す（第1期の registry は空、失効 provider は常に UNKNOWN。実 registry と失効 provider は NF07-TRUST）。開放の後の手順は次のとおり。署名は system の外（D-03 で決める方式）で行い、system は鍵を持たない。
+
+**手順**
+
+1. privacy-admin（要求者）が hold 画面で解除する hold を選び、理由コード・ticket・理由を入力する。画面は束縛の全項目（tenant・partition・hold ID・hold revision・理由の hash・command ID（画面で発行）・解除の時点の journal head の revision と event hash・要求者・開始者）と署名依頼の JSON を表示する。
+2. 署名依頼の JSON を発行者と承認者（要求者とは別の、trust anchor に登録された2名）に渡す。各人は下の正規形に Ed25519 で署名し、JSON の `issuer` / `approver` に `authorityId`・`keyId`・`issuedAt`・`expiresAt`・`signature`（base64）を記入する。
+3. 要求者が署名済みの JSON を画面に貼り付けて送る。理由コード・ticket・理由を変えると理由の hash が変わるため署名し直す。journal head・hold revision・開始者が署名の後に変わった場合は 409 になるので、新しい値で署名し直す。同じ JSON の再送は元の結果を返す（Journal に重ねない）。
+
+**正規形**（全て `<UTF-8 の byte 長>:<値>` の field を区切り無しで連結し、SHA-256 は小文字 hex）
+
+- 理由の hash: `NF07-HOLD-RELEASE-REASON-V1`・理由コード・ticket・理由本文。
+- 束縛の digest: `NF07-HOLD-RELEASE-BINDING-V1`・tenant・subjectRef（partition。DATA_ELEMENT hold は `DATA_ELEMENT#<id>`）・hold ID・hold revision（10進）・`HOLD_RELEASE`・理由の hash・command ID・journal head の revision（10進）・journal head の event hash・要求者・開始者。
+- 署名の対象（Ed25519 にそのまま渡す byte 列。hash を取ってから署名しない）: `NF07-HOLD-RELEASE-AUTHORITY-V1`・`PRODUCTION`・`HOLD_RELEASE`・役割（`ISSUER` / `APPROVER`）・authority ID・key ID・発行日時・期限・束縛の digest。
+- 日時は ISO-8601 の UTC で、Java の `Instant.toString()` と同じ形（例: `2026-11-16T02:00:00Z`。小数秒が 0 なら書かない。`.000Z` で書いた値は system が正規形に直してから検証するため、署名の対象と一致しない）。
+- 主体（要求者・開始者・trust anchor の主体）は `sys_user:<sys_user.id>`（先頭の 0・大文字は不可）。開始者が不明の hold は `sys_user:0`。
+
+**test vector**（`HoldReleaseProofVerifierTest` が Java の実装と照合する。値は Node.js で独立に計算した）
+
+| 項目 | 値 |
+|---|---|
+| 入力 | 理由コード `LITIGATION_CLOSED`、ticket `TICKET-2001`、理由 `訴訟が終結したため保全を解除する`、tenant `default`、subjectRef `ENGINEER:7`、hold ID `ph-` + `a`×32、hold revision `1`、command ID `hr-` + `b`×32、journal head revision `1`、event hash `c`×64、要求者 `sys_user:1`、開始者 `sys_user:2`、役割 `ISSUER`、authority `issuer-a`、key `k1`、発行日時 `2026-11-16T02:00:00Z`、期限 `2026-11-16T04:00:00Z` |
+| 理由の hash | `8e3ccdd899ebae58d63b1319e0820aea0d7ff751194d7d57bee7d8873f5dacd5` |
+| 束縛の digest | `cc4d333d9dd9ab7078a337c9464ae944da3204234bad2ac993e0b71109e1fb9a` |
+| 署名の対象の SHA-256（確認用） | `549567a997a2a84a5ecc5bca965d7bb8f3b403b96c57444fedc935a6833daa18` |
+
+**D-05「解除の承認者規則」の設定と運用**
+
+| 設定 | 値 | 既定 | 意味 |
+|---|---|---|---|
+| `privacy.hold.release.starter-separation` | `REQUIRED` / `NOT_REQUIRED` | `REQUIRED` | 開始者が分かっている hold で、発行者・承認者を開始者と別の主体にする（要求者は開始者と同じでもよい） |
+| `privacy.hold.release.unknown-starter` | `REJECT` / `ACCEPT` | `REJECT` | 開始者が不明の hold の解除。`ACCEPT` なら開始者との分離は判定しない |
+
+- 解釈できない値は既定（厳しい側）として扱う。値を変えるのは D-05 の署名で決めた場合だけ。
+- 開始者が不明の hold（一覧の開始者が `sys_user:0`。reconciler が Journal から復元した行で、開始時の値が projection に戻っていない）は、既定では 409（`error.privacy.holdReleaseStarterUnknown`）になる。運用は次のどちらか。
+  1. 開始者の値を戻す: 開始時の監査（`NF07_HOLD_START_REQUESTED`・`START_REASON`、hold ID で引ける）で開始者を確かめ、開始の service が同じ event を projection し直す経路（`adoptReconciledMetadata`）で値が戻るのを待つ。値が戻った後は、新しい開始者で署名し直す。
+  2. D-05 の規則で `unknown-starter=ACCEPT` にする（開始者との分離を判定しないことを D-05 owner が署名で受理した場合だけ）。
+- 帰属できない element の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除できない（409 `error.privacy.holdReleaseDependency`）。受理するか DDL lane で選択の保存を足すかは plan §11 の未決事項。
+
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 
 §4.1・§4.2の設定で起動した後、次の順に行う。bootstrap中にlocal password loginできるのは初期管理者 `admin` だけで、他のユーザーのlocal loginは拒否される。OIDC loginは通常どおり使える。

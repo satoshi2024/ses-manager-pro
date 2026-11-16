@@ -17,12 +17,15 @@ import java.util.List;
  * @param relatedElements        同じ実体の別 element（片方だけの DATA_ELEMENT hold では他方を守れない組）
  * @param holdableElements       DATA_ELEMENT hold の対象にできる element（catalog の NO_PERSONAL_DATA 以外）
  * @param releaseReady           hold の解除の入口が開いているか（D-03・D-05・trust anchor。NF07-REL）
+ * @param tenantId               解除の束縛の tenant（呼出し元の tenant）
+ * @param requesterRef           解除の束縛の要求者（呼出し元の {@code sys_user:<id>}）
  */
 public record PrivacyHoldOverview(String gateState, String gateReason, String journalAvailability, boolean startReady,
                                   List<String> missingPrerequisites, List<String> allowedTargetTypes,
                                   List<HoldEntry> holds, List<ElementEntry> unattributableElements,
                                   List<String> unclassifiedElements, List<RelatedElements> relatedElements,
-                                  List<String> holdableElements, boolean releaseReady) {
+                                  List<String> holdableElements, boolean releaseReady, String tenantId,
+                                  String requesterRef) {
 
     /**
      * hold の1件。
@@ -31,10 +34,13 @@ public record PrivacyHoldOverview(String gateState, String gateReason, String jo
      * @param reconciled       reconciler が Journal から復元した行（理由・ticket は開始時の監査を参照）
      * @param journalEventHash 開始の event hash（解除 proof の束縛の値。NF07-REL）
      * @param releasedAt       解除日時（解除していなければ null）
+     * @param partitionRef     解除の束縛の subject（Journal の partition。DATA_ELEMENT hold は {@code DATA_ELEMENT#<id>}）
+     * @param holdStarterRef   解除の束縛の開始者（{@code sys_user:<id>}。復元行で不明なら {@code sys_user:0}）
      */
     public record HoldEntry(String holdId, String targetType, String subjectRef, String dataElementId, String status,
                             String reasonCode, String ticketRef, String requestedAt, long journalRevision,
-                            boolean reconciled, String journalEventHash, String releasedAt) {
+                            boolean reconciled, String journalEventHash, String releasedAt, String partitionRef,
+                            String holdStarterRef) {
     }
 
     /**

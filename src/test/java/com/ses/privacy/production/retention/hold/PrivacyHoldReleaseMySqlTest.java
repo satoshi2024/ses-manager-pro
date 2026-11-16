@@ -66,6 +66,13 @@ class PrivacyHoldReleaseMySqlTest {
     private static final String ISSUER = "issuer-a";
     private static final String APPROVER = "approver-b";
     private static final String REASON = "訴訟が終結したため保全を解除する";
+    private static final String REASON_CODE = "LITIGATION_CLOSED";
+    private static final String TICKET = "TICKET-MYSQL-2";
+    /**
+     * 固定の時計（決定ID・trust anchor の有効期間・claim の期限を同じ時刻で判定し、実行日によって結果が変わらないようにする。
+     * 本番 adapter の event 時刻・hold の service・verifier の全てに同じ時計を渡す）。
+     */
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-16T03:00:00Z"), java.time.ZoneOffset.UTC);
 
     @Container
     static final MySQLContainer<?> JOURNAL = new MySQLContainer<>("mysql:8.0")
@@ -108,7 +115,7 @@ class PrivacyHoldReleaseMySqlTest {
         appPool.setMaximumPoolSize(8);
         prod = new MockEnvironment();
         prod.setActiveProfiles("prod");
-        production = ProductionPrivacyComponents.productionPrivacyJournal(prod, appenderPool, Clock.systemUTC());
+        production = ProductionPrivacyComponents.productionPrivacyJournal(prod, appenderPool, CLOCK);
     }
 
     @AfterAll
@@ -125,7 +132,7 @@ class PrivacyHoldReleaseMySqlTest {
     void setUp() {
         String tenant = "nf07-rel-" + UUID.randomUUID().toString().substring(0, 8);
         components = new PrivacyHoldMySqlComponents(tenant, appPool, production, appenderPool, JOURNAL_ID,
-                Duration.ofMinutes(2), Clock.systemUTC());
+                Duration.ofMinutes(2), CLOCK);
         components.seedCatalog();
         components.approval.getD03().setDecisionId("D03-NF07-MYSQL-001");
         components.approval.getD03().setSignedOn("2026-11-01");
@@ -134,7 +141,7 @@ class PrivacyHoldReleaseMySqlTest {
         authorities.register(ISSUER, "sys_user:20", tenant);
         authorities.register(APPROVER, "sys_user:30", tenant);
         verifier = ProductionPrivacyComponents.holdReleaseVerifier(prod, authorities.registry(),
-                ref -> RevocationStatus.ACTIVE, Clock.systemUTC());
+                ref -> RevocationStatus.ACTIVE, CLOCK);
         release = components.releaseService(verifier, authorities.registry(),
                 () -> new PrivacyHoldService.Actor(tenant, 1L, "privacy-admin-mysql"));
     }
@@ -260,12 +267,14 @@ class PrivacyHoldReleaseMySqlTest {
 
         // 現在の head に束縛していても、hold revision が古い（解除前の hold の revision）
         HoldReleaseBinding staleRevision = new HoldReleaseBinding(components.tenantId, "ENGINEER:806", second.holdId(),
-                1, PrivacyHoldService.sha256(REASON), newCommandId(), head.revision(), head.eventHash(), "sys_user:1");
+                1, HoldReleaseBinding.reasonHash(REASON_CODE, TICKET, REASON), newCommandId(), head.revision(),
+                head.eventHash(), "sys_user:1", "sys_user:1");
         assertThatThrownBy(() -> releasePort.appendHoldRelease(mint(staleRevision, "SUBJECT")))
                 .isInstanceOf(JournalConflictException.class);
         // 現在の head に束縛していても、解除済みの別の hold ID
         HoldReleaseBinding otherHold = new HoldReleaseBinding(components.tenantId, "ENGINEER:806", first.holdId(),
-                3, PrivacyHoldService.sha256(REASON), newCommandId(), head.revision(), head.eventHash(), "sys_user:1");
+                3, HoldReleaseBinding.reasonHash(REASON_CODE, TICKET, REASON), newCommandId(), head.revision(),
+                head.eventHash(), "sys_user:1", "sys_user:1");
         assertThatThrownBy(() -> releasePort.appendHoldRelease(mint(otherHold, "SUBJECT")))
                 .isInstanceOf(JournalConflictException.class);
 
@@ -324,17 +333,18 @@ class PrivacyHoldReleaseMySqlTest {
         PrivacyHoldProjectionStore.HoldRow hold = components.store.hold(components.tenantId, holdId).orElseThrow();
         JournalHead head = production.head(new JournalPartition(components.tenantId, hold.partitionRef()));
         HoldReleaseBinding binding = new HoldReleaseBinding(components.tenantId, hold.partitionRef(), holdId,
-                hold.journalRevision(), PrivacyHoldService.sha256(REASON), commandId, head.revision(), head.eventHash(),
-                "sys_user:1");
-        Instant now = Instant.now();
+                hold.journalRevision(), HoldReleaseBinding.reasonHash(REASON_CODE, TICKET, REASON), commandId,
+                head.revision(), head.eventHash(), "sys_user:1", PrivacyHoldReleaseService.starterRef(hold));
+        Instant now = CLOCK.instant();
         HoldReleaseAuthorityClaim issuer = authorities.sign(ISSUER, HoldReleaseAuthorityClaim.Role.ISSUER, binding,
                 now.minusSeconds(60), now.plus(Duration.ofMinutes(30)));
         HoldReleaseAuthorityClaim approver = authorities.sign(APPROVER, HoldReleaseAuthorityClaim.Role.APPROVER, binding,
                 now.minusSeconds(60), now.plus(Duration.ofMinutes(30)));
-        return new PrivacyHoldReleaseRequest("LITIGATION_CLOSED", REASON, "TICKET-MYSQL-2",
+        return new PrivacyHoldReleaseRequest(REASON_CODE, REASON, TICKET,
                 new PrivacyHoldReleaseRequest.Binding(binding.tenantId(), binding.subjectRef(), binding.holdId(),
                         binding.expectedHoldRevision(), binding.reasonHash(), binding.commandId(),
-                        binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef()),
+                        binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef(),
+                        binding.holdStarterRef()),
                 claim(issuer), claim(approver));
     }
 
@@ -342,13 +352,13 @@ class PrivacyHoldReleaseMySqlTest {
         PrivacyHoldReleaseRequest.Binding b = request.binding();
         HoldReleaseBinding binding = new HoldReleaseBinding(b.tenantId(), b.subjectRef(), b.holdId(),
                 b.expectedHoldRevision(), b.reasonHash(), b.commandId(), b.expectedJournalRevision(),
-                b.expectedJournalHash(), b.requesterRef());
+                b.expectedJournalHash(), b.requesterRef(), b.holdStarterRef());
         return mint(binding, "SUBJECT");
     }
 
     private VerifiedHoldRelease mint(HoldReleaseBinding binding, String targetType) {
-        Instant now = Instant.now();
-        return verifier.verify(binding, binding, targetType,
+        Instant now = CLOCK.instant();
+        return verifier.verify(binding, binding, targetType, com.ses.privacy.foundation.HoldReleaseRules.strict(),
                 authorities.sign(ISSUER, HoldReleaseAuthorityClaim.Role.ISSUER, binding, now.minusSeconds(60),
                         now.plus(Duration.ofMinutes(30))),
                 authorities.sign(APPROVER, HoldReleaseAuthorityClaim.Role.APPROVER, binding, now.minusSeconds(60),

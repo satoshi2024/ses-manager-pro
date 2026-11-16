@@ -56,7 +56,8 @@ class PrivacyHoldApiControllerTest {
             + "\"ticketRef\":\"TICKET-2\",\"binding\":{\"tenantId\":\"default\",\"subjectRef\":\"ENGINEER:10\","
             + "\"holdId\":\"" + HOLD_ID + "\",\"expectedHoldRevision\":1,\"reasonHash\":\"" + "a".repeat(64) + "\","
             + "\"commandId\":\"hr-" + "b".repeat(32) + "\",\"expectedJournalRevision\":1,"
-            + "\"expectedJournalHash\":\"" + "c".repeat(64) + "\",\"requesterRef\":\"sys_user:1\"},"
+            + "\"expectedJournalHash\":\"" + "c".repeat(64) + "\",\"requesterRef\":\"sys_user:1\","
+            + "\"holdStarterRef\":\"sys_user:2\"},"
             + "\"issuer\":{\"authorityId\":\"issuer-a\",\"keyId\":\"k1\",\"issuedAt\":\"2026-11-16T02:00:00Z\","
             + "\"expiresAt\":\"2026-11-16T04:00:00Z\",\"signature\":\"AAAA\"},"
             + "\"approver\":{\"authorityId\":\"approver-b\",\"keyId\":\"k1\",\"issuedAt\":\"2026-11-16T02:00:00Z\","
@@ -99,9 +100,10 @@ class PrivacyHoldApiControllerTest {
         PrivacyHoldOverview overview = new PrivacyHoldOverview("VERIFIED", null, "AVAILABLE", false, List.of("d05"),
                 List.of("DATA_ELEMENT", "SUBJECT"),
                 List.of(new PrivacyHoldOverview.HoldEntry("ph-" + "1".repeat(32), "SUBJECT", "ENGINEER:10", null,
-                        "ACTIVE", "LITIGATION", "TICKET-1", "2026-11-16T03:00:00Z", 1, false, "d".repeat(64), null)),
+                        "ACTIVE", "LITIGATION", "TICKET-1", "2026-11-16T03:00:00Z", 1, false, "d".repeat(64), null,
+                        "ENGINEER:10", "sys_user:2")),
                 List.of(new PrivacyHoldOverview.ElementEntry("DOCUMENT:IMPORT", 3L, false)),
-                List.of("AUDIT_LOG"), List.of(), List.of("DOCUMENT:IMPORT"), false);
+                List.of("AUDIT_LOG"), List.of(), List.of("DOCUMENT:IMPORT"), false, "default", "sys_user:1");
         when(holdService.overview()).thenReturn(overview);
 
         mockMvc.perform(get("/api/privacy/holds"))
@@ -113,6 +115,8 @@ class PrivacyHoldApiControllerTest {
                 .andExpect(jsonPath("$.data.holds[0].status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.holds[0].journalEventHash").value("d".repeat(64)))
                 .andExpect(jsonPath("$.data.releaseReady").value(false))
+                .andExpect(jsonPath("$.data.requesterRef").value("sys_user:1"))
+                .andExpect(jsonPath("$.data.holds[0].holdStarterRef").value("sys_user:2"))
                 .andExpect(jsonPath("$.data.unattributableElements[0].dataElementId").value("DOCUMENT:IMPORT"))
                 .andExpect(jsonPath("$.data.unattributableElements[0].tenantRowCount").value(3))
                 .andExpect(jsonPath("$.data.unclassifiedElements[0]").value("AUDIT_LOG"));
@@ -189,6 +193,7 @@ class PrivacyHoldApiControllerTest {
         assertThat(captor.getValue().binding().expectedJournalRevision()).isEqualTo(1L);
         assertThat(captor.getValue().issuer().authorityId()).isEqualTo("issuer-a");
         assertThat(captor.getValue().approver().signature()).isEqualTo("BBBB");
+        assertThat(captor.getValue().binding().holdStarterRef()).isEqualTo("sys_user:2");
     }
 
     @Test

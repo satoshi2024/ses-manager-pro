@@ -55,8 +55,9 @@ import java.util.regex.Pattern;
  *   <li>同じ command ID が既に Journal にあれば、内容（束縛の digest と command の payload hash）が同じときだけ元の ACK を返す
  *       （projection が未反映なら補う）。内容が違えば 409。期限切れの proof の再送でも元の結果を返す（新しい状態変更を
  *       起こさないため）。</li>
- *   <li>信頼できる現在値（呼出し元の tenant・hold の partition・hold の開始の revision・理由本文の hash・現在の journal head・
- *       呼出し元）から束縛を組み立て、verifier に提示された束縛・2つの claim と照合させる（{@link HoldReleaseRejection}）。</li>
+ *   <li>信頼できる現在値（呼出し元の tenant・hold の partition・hold の開始の revision・理由コード・ticket・理由本文の
+ *       hash・現在の journal head・呼出し元・projection の開始者）から束縛を組み立て、verifier に提示された束縛・2つの claim と
+ *       D-05 の解除の承認者規則（{@code PrivacyHoldDecisions.releaseRules}）で照合させる（{@link HoldReleaseRejection}）。</li>
  *   <li>独立 transaction で追随位置の行を lock し、pending の CAS（hold 開始と同じ行。同じ tenant の開始・解除は1件ずつ）、
  *       hold 行の lock と hold revision の確認、DATA_ELEMENT hold の依存の確認、required 監査を書いて commit する。</li>
  *   <li>Journal に HOLD_RELEASED を append する（adapter が head と hold revision を CAS し、期限を確かめる）。ACK 不明なら
@@ -193,14 +194,15 @@ public class PrivacyHoldReleaseService {
         HoldReleaseBinding expected;
         try {
             expected = new HoldReleaseBinding(tenantId, partitionRef, holdId, hold.journalRevision(),
-                    validated.reasonHash(), commandId, head.revision(), head.eventHash(), requesterRef);
+                    validated.reasonHash(), commandId, head.revision(), head.eventHash(), requesterRef,
+                    starterRef(hold));
         } catch (IllegalArgumentException e) {
             throw BusinessException.of(503, "error.privacy.sourceUnavailable");
         }
         VerifiedHoldRelease proof;
         try {
-            proof = verifier.verify(validated.presented(), expected, hold.targetType().name(), validated.issuer(),
-                    validated.approver());
+            proof = verifier.verify(validated.presented(), expected, hold.targetType().name(), decisions.releaseRules(),
+                    validated.issuer(), validated.approver());
         } catch (HoldReleaseRejectedException e) {
             BusinessException mapped = rejection(e.reason());
             rejected(actor, holdId, e.reason().name(), mapped.getCode());
@@ -319,6 +321,10 @@ public class PrivacyHoldReleaseService {
                         || !Objects.equals(locked.journalEventHash(), hold.journalEventHash())) {
                     throw BusinessException.of(409, "error.privacy.holdReleaseStale");
                 }
+                // 署名した開始者のまま（検証の後に reconciler の復元行へ開始者の値が戻った等で変われば署名し直し）
+                if (!starterRef(locked).equals(proof.binding().holdStarterRef())) {
+                    throw BusinessException.of(409, "error.privacy.holdReleaseStale");
+                }
                 if (dependsOnSubjectHolds(locked, catalog) && store.activeSubjectHoldExists(tenantId)) {
                     throw BusinessException.of(409, "error.privacy.holdReleaseDependency");
                 }
@@ -326,7 +332,8 @@ public class PrivacyHoldReleaseService {
                 audit.record(actor.username(), PrivacyHoldAudit.RELEASE_REQUESTED, PrivacyHoldAudit.fields(
                         "hold", locked.holdId(), "target", locked.targetType().name(), "element", element,
                         "request", proof.binding().digest().substring(0, 16),
-                        "issuer", validated.issuer().authorityId(), "approver", validated.approver().authorityId()),
+                        "issuer", validated.issuer().authorityId(), "approver", validated.approver().authorityId(),
+                        "starter", proof.binding().starterKnown() ? "KNOWN" : "UNKNOWN_ACCEPTED"),
                         202, true);
                 audit.record(actor.username(), PrivacyHoldAudit.RELEASE_REASON, PrivacyHoldAudit.fields(
                         "hold", locked.holdId(), "reason", validated.reasonCode(), "ticket", validated.ticketRef()),
@@ -445,8 +452,17 @@ public class PrivacyHoldReleaseService {
         return switch (reason) {
             case HOLD_REVISION_MISMATCH, JOURNAL_HEAD_MISMATCH -> BusinessException.of(409, "error.privacy.holdReleaseStale");
             case SEPARATION_OF_DUTIES -> BusinessException.of(403, "error.privacy.holdReleaseSeparation");
+            case HOLD_STARTER_UNKNOWN -> BusinessException.of(409, "error.privacy.holdReleaseStarterUnknown");
             default -> BusinessException.of(403, "error.privacy.holdReleaseProofRejected");
         };
+    }
+
+    /**
+     * projection の hold の開始者の正規形（{@code sys_user:<requested_by>}）。reconciler が復元し開始者の値が戻っていない行
+     * （{@code requested_by = 0}）と、値として解釈できない行は不明（{@link HoldReleaseBinding#UNKNOWN_STARTER}）。
+     */
+    static String starterRef(PrivacyHoldProjectionStore.HoldRow hold) {
+        return hold.requestedBy() > 0 ? REQUESTER_PREFIX + hold.requestedBy() : HoldReleaseBinding.UNKNOWN_STARTER;
     }
 
     private Validated validate(String holdId, PrivacyHoldReleaseRequest request) {
@@ -477,13 +493,14 @@ public class PrivacyHoldReleaseService {
         try {
             presented = new HoldReleaseBinding(binding.tenantId(), binding.subjectRef(), binding.holdId(),
                     binding.expectedHoldRevision(), binding.reasonHash(), binding.commandId(),
-                    binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef());
+                    binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef(),
+                    binding.holdStarterRef());
         } catch (IllegalArgumentException e) {
             throw invalid();
         }
         return new Validated(presented, claim(request.issuer(), HoldReleaseAuthorityClaim.Role.ISSUER),
                 claim(request.approver(), HoldReleaseAuthorityClaim.Role.APPROVER), reasonCode,
-                PrivacyHoldService.sha256(reasonText), ticketRef);
+                HoldReleaseBinding.reasonHash(reasonCode, ticketRef, reasonText), ticketRef);
     }
 
     private static HoldReleaseAuthorityClaim claim(PrivacyHoldReleaseRequest.Claim claim,

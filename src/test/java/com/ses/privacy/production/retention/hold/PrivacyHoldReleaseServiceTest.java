@@ -43,6 +43,8 @@ class PrivacyHoldReleaseServiceTest {
     private static final String ISSUER = "issuer-a";
     private static final String APPROVER = "approver-b";
     private static final String REASON = "訴訟が終結したため保全を解除する";
+    private static final String REASON_CODE = "LITIGATION_CLOSED";
+    private static final String TICKET = "TICKET-2001";
 
     private PrivacyHoldTestFixture fixture;
     private HoldReleaseTestAuthorities authorities;
@@ -218,7 +220,7 @@ class PrivacyHoldReleaseServiceTest {
         PrivacyHoldReleaseRequest request = request(started.holdId(), newCommandId(), REASON);
         HoldReleaseBinding binding = bindingOf(request);
         // service を通さず Journal にだけ解除を入れる（ACK 後に projection を書けなかった状態）
-        fixture.journal.appendHoldRelease(verifier.verify(binding, binding, "SUBJECT", claimOf(request.issuer(),
+        fixture.journal.appendHoldRelease(verifier.verify(binding, binding, "SUBJECT", fixture.decisions.releaseRules(), claimOf(request.issuer(),
                 HoldReleaseAuthorityClaim.Role.ISSUER), claimOf(request.approver(), HoldReleaseAuthorityClaim.Role.APPROVER)));
 
         PrivacyHoldGate.Decision lagging = fixture.gate.evaluate(TENANT);
@@ -273,12 +275,12 @@ class PrivacyHoldReleaseServiceTest {
 
         HoldReleaseBinding staleHead = new HoldReleaseBinding(signed.tenantId(), signed.subjectRef(), signed.holdId(),
                 signed.expectedHoldRevision(), signed.reasonHash(), signed.commandId(), signed.expectedJournalRevision(),
-                "e".repeat(64), signed.requesterRef());
+                "e".repeat(64), signed.requesterRef(), signed.holdStarterRef());
         assertBusiness(() -> release.release(started.holdId(), signedRequest(staleHead, REASON)), 409,
                 "error.privacy.holdReleaseStale");
 
         HoldReleaseBinding staleHold = new HoldReleaseBinding(signed.tenantId(), signed.subjectRef(), signed.holdId(),
-                2, signed.reasonHash(), signed.commandId(), 2, signed.expectedJournalHash(), signed.requesterRef());
+                2, signed.reasonHash(), signed.commandId(), 2, signed.expectedJournalHash(), signed.requesterRef(), signed.holdStarterRef());
         assertBusiness(() -> release.release(started.holdId(), signedRequest(staleHold, REASON)), 409,
                 "error.privacy.holdReleaseStale");
 
@@ -301,7 +303,7 @@ class PrivacyHoldReleaseServiceTest {
             fixture.journal.beforeAppend = () -> { };
             HoldReleaseBinding binding = bindingOf(first);
             winner.set(new PrivacyHoldReleaseResult(started.holdId(), "RELEASED", fixture.journal.appendHoldRelease(
-                    verifier.verify(binding, binding, "SUBJECT", claimOf(first.issuer(),
+                    verifier.verify(binding, binding, "SUBJECT", fixture.decisions.releaseRules(), claimOf(first.issuer(),
                             HoldReleaseAuthorityClaim.Role.ISSUER), claimOf(first.approver(),
                             HoldReleaseAuthorityClaim.Role.APPROVER))).revision(), false));
         };
@@ -342,6 +344,88 @@ class PrivacyHoldReleaseServiceTest {
     }
 
     @Test
+    void 理由コードやticketを署名の後に変えれば拒否する() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7072");
+        PrivacyHoldReleaseRequest signed = request(started.holdId(), newCommandId(), REASON);
+
+        assertBusiness(() -> release.release(started.holdId(), new PrivacyHoldReleaseRequest(signed.reasonCode(),
+                signed.reasonText(), "TICKET-9999", signed.binding(), signed.issuer(), signed.approver())), 403,
+                "error.privacy.holdReleaseProofRejected");
+        assertBusiness(() -> release.release(started.holdId(), new PrivacyHoldReleaseRequest("OTHER_REASON",
+                signed.reasonText(), signed.ticketRef(), signed.binding(), signed.issuer(), signed.approver())), 403,
+                "error.privacy.holdReleaseProofRejected");
+        assertThat(fixture.auditUris.stream().filter(uri -> uri.contains("reason=REASON_HASH_MISMATCH")).count())
+                .isEqualTo(2);
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7072")).isEqualTo(1);
+    }
+
+    @Test
+    void 開始者が不明の復元行は既定で解除を拒否し開始者の値が戻れば解除できる() {
+        String holdId = reconciledHold("ENGINEER:7073");
+        assertThat(PrivacyHoldReleaseService.starterRef(fixture.store.hold(TENANT, holdId).orElseThrow()))
+                .isEqualTo(HoldReleaseBinding.UNKNOWN_STARTER);
+
+        assertBusiness(() -> release.release(holdId, request(holdId, newCommandId(), REASON)), 409,
+                "error.privacy.holdReleaseStarterUnknown");
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("reason=HOLD_STARTER_UNKNOWN"));
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7073")).isEqualTo(1);
+
+        // 開始の service が同じ event を projection しに来て開始者の値を戻す（adoptReconciledMetadata）
+        PrivacyHoldProjectionStore.HoldRow row = fixture.store.hold(TENANT, holdId).orElseThrow();
+        assertThat(fixture.store.adoptReconciledMetadata(TENANT, new PrivacyHoldProjectionStore.NewHold(holdId,
+                PrivacyHoldTargetType.SUBJECT, "ENGINEER:7073", "LITIGATION", "1".repeat(64), "TICKET-1001", 1L,
+                PrivacyHoldTestFixture.T0, row.journalRevision(), row.journalEventHash()))).isEqualTo(1);
+
+        PrivacyHoldReleaseResult released = release.release(holdId, request(holdId, newCommandId(), REASON));
+        assertThat(released.status()).isEqualTo("RELEASED");
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_REQUESTED") && uri.contains("starter=KNOWN"));
+    }
+
+    @Test
+    void D05が不明の開始者を認めれば開始者との分離を判定せず解除できる() {
+        String holdId = reconciledHold("ENGINEER:7074");
+        fixture.holdProperties.getRelease().setUnknownStarter("ACCEPT");
+
+        assertThat(release.release(holdId, request(holdId, newCommandId(), REASON)).status()).isEqualTo("RELEASED");
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_REQUESTED")
+                && uri.contains("starter=UNKNOWN_ACCEPTED"));
+    }
+
+    @Test
+    void 発行者がholdの開始者なら既定で拒否しD05が分離を求めなければ解除できる() {
+        fixture.actor = new PrivacyHoldService.Actor(TENANT, 20L, "privacy-admin-issuer");
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7075");
+        fixture.actor = new PrivacyHoldService.Actor(TENANT, 1L, "privacy-admin-a");
+
+        assertBusiness(() -> release.release(started.holdId(), request(started.holdId(), newCommandId(), REASON)), 403,
+                "error.privacy.holdReleaseSeparation");
+
+        fixture.holdProperties.getRelease().setStarterSeparation("NOT_REQUIRED");
+        assertThat(release.release(started.holdId(), request(started.holdId(), newCommandId(), REASON)).status())
+                .isEqualTo("RELEASED");
+    }
+
+    @Test
+    void 画面の一覧は束縛の全項目を組み立てられる値を返す() {
+        PrivacyHoldStartResult subject = startSubject("ENGINEER:7076");
+        PrivacyHoldStartResult element = fixture.service.start(fixture.elementRequest("INTEGRATION_HUB_AUDIT"));
+
+        PrivacyHoldOverview overview = fixture.service.overview();
+
+        assertThat(overview.tenantId()).isEqualTo(TENANT);
+        assertThat(overview.requesterRef()).isEqualTo("sys_user:1");
+        assertThat(overview.holds()).filteredOn(entry -> entry.holdId().equals(subject.holdId())).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.partitionRef()).isEqualTo("ENGINEER:7076");
+                    assertThat(entry.holdStarterRef()).isEqualTo("sys_user:1");
+                    assertThat(entry.journalEventHash()).isEqualTo(
+                            fixture.journal.head(new JournalPartition(TENANT, "ENGINEER:7076")).eventHash());
+                });
+        assertThat(overview.holds()).filteredOn(entry -> entry.holdId().equals(element.holdId())).singleElement()
+                .satisfies(entry -> assertThat(entry.partitionRef()).isEqualTo("DATA_ELEMENT#INTEGRATION_HUB_AUDIT"));
+    }
+
+    @Test
     void 要求者が発行者と同じ主体なら三方の分離に反し403() {
         PrivacyHoldStartResult started = startSubject("ENGINEER:7055");
         fixture.actor = new PrivacyHoldService.Actor(TENANT, 20L, "issuer-as-requester");
@@ -368,7 +452,7 @@ class PrivacyHoldReleaseServiceTest {
         HoldReleaseBinding signed = bindingOf(request(started.holdId(), newCommandId(), REASON));
         HoldReleaseBinding otherTenant = new HoldReleaseBinding("tenant-b", signed.subjectRef(), signed.holdId(),
                 signed.expectedHoldRevision(), signed.reasonHash(), signed.commandId(), signed.expectedJournalRevision(),
-                signed.expectedJournalHash(), signed.requesterRef());
+                signed.expectedJournalHash(), signed.requesterRef(), signed.holdStarterRef());
         assertBusiness(() -> release.release(started.holdId(), signedRequest(otherTenant, REASON)), 403,
                 "error.privacy.holdReleaseProofRejected");
         assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("reason=TENANT_MISMATCH"));
@@ -543,11 +627,16 @@ class PrivacyHoldReleaseServiceTest {
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1",
                 new PrivacyHoldReleaseRequest.Binding(b.tenantId(), b.subjectRef(), b.holdId(), b.expectedHoldRevision(),
                         b.reasonHash(), "hs-" + "1".repeat(32), b.expectedJournalRevision(), b.expectedJournalHash(),
-                        b.requesterRef()), good.issuer(), good.approver()));
+                        b.requesterRef(), b.holdStarterRef()), good.issuer(), good.approver()));
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1",
                 new PrivacyHoldReleaseRequest.Binding(b.tenantId(), b.subjectRef(), b.holdId(), null, b.reasonHash(),
-                        b.commandId(), b.expectedJournalRevision(), b.expectedJournalHash(), b.requesterRef()),
-                good.issuer(), good.approver()));
+                        b.commandId(), b.expectedJournalRevision(), b.expectedJournalHash(), b.requesterRef(),
+                        b.holdStarterRef()), good.issuer(), good.approver()));
+        // 主体の正規形でない開始者（大文字・先頭の 0）は束縛として受け付けない
+        assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1",
+                new PrivacyHoldReleaseRequest.Binding(b.tenantId(), b.subjectRef(), b.holdId(), b.expectedHoldRevision(),
+                        b.reasonHash(), b.commandId(), b.expectedJournalRevision(), b.expectedJournalHash(),
+                        b.requesterRef(), "SYS_USER:01"), good.issuer(), good.approver()));
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1", b, null,
                 good.approver()));
         assertInvalid(started.holdId(), new PrivacyHoldReleaseRequest(good.reasonCode(), REASON, "TICKET-1", b,
@@ -612,13 +701,26 @@ class PrivacyHoldReleaseServiceTest {
         return "hr-" + UUID.randomUUID().toString().replace("-", "");
     }
 
+    /** ACK 不明が続いた hold 開始を reconciler が Journal から復元した行（開始者は不明の 0）を作る。 */
+    private String reconciledHold(String subjectRef) {
+        fixture.journal.commitThenFail.set(2);
+        assertThatThrownBy(() -> fixture.service.start(fixture.subjectRequest(subjectRef, "ACCEPT_RISK", "ACCEPT_RISK")))
+                .isInstanceOf(BusinessException.class);
+        fixture.reconciler.reconcileAll();
+        PrivacyHoldProjectionStore.HoldRow row = fixture.store.holds(TENANT, false).stream()
+                .filter(hold -> subjectRef.equals(hold.subjectRef())).findFirst().orElseThrow();
+        assertThat(row.requestedBy()).isZero();
+        assertThat(fixture.state().pendingCommandId()).isNull();
+        return row.holdId();
+    }
+
     /** 現在の projection・Journal から束縛を組み立て、発行者・承認者が署名した要求を作る（署名は test-only 鍵）。 */
     private PrivacyHoldReleaseRequest request(String holdId, String commandId, String reasonText) {
         PrivacyHoldProjectionStore.HoldRow hold = fixture.store.hold(TENANT, holdId).orElseThrow();
         JournalHead head = fixture.journal.head(new JournalPartition(TENANT, hold.partitionRef()));
         HoldReleaseBinding binding = new HoldReleaseBinding(TENANT, hold.partitionRef(), holdId, hold.journalRevision(),
-                PrivacyHoldService.sha256(reasonText), commandId, head.revision(), head.eventHash(),
-                "sys_user:" + fixture.actor.userId());
+                HoldReleaseBinding.reasonHash(REASON_CODE, TICKET, reasonText), commandId, head.revision(),
+                head.eventHash(), "sys_user:" + fixture.actor.userId(), PrivacyHoldReleaseService.starterRef(hold));
         return signedRequest(binding, reasonText);
     }
 
@@ -628,10 +730,11 @@ class PrivacyHoldReleaseServiceTest {
                 now.minusSeconds(60), now.plus(Duration.ofMinutes(30)));
         HoldReleaseAuthorityClaim approver = authorities.sign(APPROVER, HoldReleaseAuthorityClaim.Role.APPROVER, binding,
                 now.minusSeconds(60), now.plus(Duration.ofHours(2)));
-        return new PrivacyHoldReleaseRequest("LITIGATION_CLOSED", reasonText, "TICKET-2001",
+        return new PrivacyHoldReleaseRequest(REASON_CODE, reasonText, TICKET,
                 new PrivacyHoldReleaseRequest.Binding(binding.tenantId(), binding.subjectRef(), binding.holdId(),
                         binding.expectedHoldRevision(), binding.reasonHash(), binding.commandId(),
-                        binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef()),
+                        binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef(),
+                        binding.holdStarterRef()),
                 claim(issuer), claim(approver));
     }
 
@@ -649,7 +752,8 @@ class PrivacyHoldReleaseServiceTest {
     private static HoldReleaseBinding bindingOf(PrivacyHoldReleaseRequest request) {
         PrivacyHoldReleaseRequest.Binding b = request.binding();
         return new HoldReleaseBinding(b.tenantId(), b.subjectRef(), b.holdId(), b.expectedHoldRevision(), b.reasonHash(),
-                b.commandId(), b.expectedJournalRevision(), b.expectedJournalHash(), b.requesterRef());
+                b.commandId(), b.expectedJournalRevision(), b.expectedJournalHash(), b.requesterRef(),
+                b.holdStarterRef());
     }
 
     private void assertNotOpen(PrivacyHoldReleaseService service, String holdId, PrivacyHoldReleaseRequest request) {
