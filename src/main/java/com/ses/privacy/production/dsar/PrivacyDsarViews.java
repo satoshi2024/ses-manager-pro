@@ -105,15 +105,20 @@ public final class PrivacyDsarViews {
      * @param autoReleasedCount     自動で package に入れた項目の数（規則未設定なら0）
      * @param providers             provider ごとの記録の件数
      * @param manualReview          要手動確認の一覧（未登録 provider・規則未設定・第三者混在の項目）
-     * @param delivery              交付の記録（CONFIRMED のときだけ）
-     * @param actions               この区画で行える操作（PREVIEW / APPROVE / DOWNLOAD / RECORD_DELIVERY）
+     * @param delivery              交付の記録（開示請求の CONFIRMED のときだけ）
+     * @param approvedPackageDownloaded 承認した package を専用ダウンロードで取得済みか（取得後は期限切れでも作り直さず、交付を記録する。
+     *                              review P3-4）
+     * @param manualResolution      開示以外の請求の手動対応の完了の記録（review P2-2。無ければ null）
+     * @param actions               この区画で行える操作（PREVIEW / REVIEW_DRAFT / APPROVE / DOWNLOAD / RECORD_DELIVERY /
+     *                              RECORD_MANUAL_RESOLUTION）
      */
     public record DeliverySection(String status, long rowVersion, boolean exportSupported, boolean previewReady,
                                   boolean packageRuleConfigured, boolean decisionChanged, HoldStatus hold,
                                   PackageSummary currentPackage, boolean preparedByMe, boolean approvedByMe,
                                   String approvedAt, String redactionReason, Integer autoReleasedCount,
                                   List<ProviderCount> providers, List<ManualReviewItem> manualReview,
-                                  DeliveryRecord delivery, List<String> actions) {
+                                  DeliveryRecord delivery, boolean approvedPackageDownloaded,
+                                  ManualResolutionRecord manualResolution, List<String> actions) {
         public DeliverySection {
             providers = providers == null ? List.of() : List.copyOf(providers);
             manualReview = manualReview == null ? List.of() : List.copyOf(manualReview);
@@ -132,6 +137,10 @@ public final class PrivacyDsarViews {
 
     /** provider ごとの記録の件数。 */
     public record ProviderCount(String providerId, int recordCount) {
+    }
+
+    /** 開示以外の請求の手動対応の完了の記録（結果のコード・証跡の参照・記録日時）。 */
+    public record ManualResolutionRecord(String resolutionCode, String evidenceRef, String resolvedAt) {
     }
 
     /**

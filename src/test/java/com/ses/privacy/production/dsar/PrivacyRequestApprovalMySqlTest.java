@@ -30,6 +30,7 @@ import com.ses.privacy.production.retention.catalog.SubjectAttribution;
 import com.ses.service.FileStorageService;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlConstraintRejections;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -191,23 +191,27 @@ class PrivacyRequestApprovalMySqlTest {
         PrivacyExportPackage pkg = onlyPackage(id);
         String sha = pkg.getContentSha256();
 
+        // MySQL の CHECK 違反（3819）は SQLState HY000 で UncategorizedSQLException に翻訳されるため、例外の型ではなく
+        // error code と制約名で DB の拒否を判定する（統合候補 174632c8 の Runner で検出）
         jdbc.update("UPDATE t_privacy_request SET prepared_by = NULL WHERE tenant_id = ? AND id = ?", tenant, id);
-        assertThatThrownBy(() -> bindApproval(id, ADMIN_B, pkg.getId(), sha))
-                .as("prepared_by が NULL のままの承認").isInstanceOf(DataIntegrityViolationException.class);
+        MySqlConstraintRejections.assertRejectedBy(() -> bindApproval(id, ADMIN_B, pkg.getId(), sha),
+                MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_sod");
         jdbc.update("UPDATE t_privacy_request SET prepared_by = ? WHERE tenant_id = ? AND id = ?", ADMIN_A, tenant, id);
-        assertThatThrownBy(() -> bindApproval(id, ADMIN_A, pkg.getId(), sha))
-                .as("作成者と同じ承認者").isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE t_privacy_request SET approved_by = ?, approved_at = ? "
-                        + "WHERE tenant_id = ? AND id = ?", ADMIN_B, NOW, tenant, id))
-                .as("承認4項目の一部だけ").isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE t_privacy_export_package SET status = 'APPROVED', approved_by = ?, "
-                        + "approved_at = ? WHERE tenant_id = ? AND id = ?", ADMIN_A, NOW, tenant, pkg.getId()))
-                .as("package の作成者による承認").isInstanceOf(DataIntegrityViolationException.class);
+        MySqlConstraintRejections.assertRejectedBy(() -> bindApproval(id, ADMIN_A, pkg.getId(), sha),
+                MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_sod");
+        MySqlConstraintRejections.assertRejectedBy(() -> jdbc.update("UPDATE t_privacy_request SET approved_by = ?, "
+                        + "approved_at = ? WHERE tenant_id = ? AND id = ?", ADMIN_B, NOW, tenant, id),
+                MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_approval_binding");
+        MySqlConstraintRejections.assertRejectedBy(() -> jdbc.update("UPDATE t_privacy_export_package SET status = "
+                        + "'APPROVED', approved_by = ?, approved_at = ? WHERE tenant_id = ? AND id = ?",
+                        ADMIN_A, NOW, tenant, pkg.getId()),
+                MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_export_package_sod");
 
         long otherRequest = previewed("T-DB-CHECK-OTHER");
         PrivacyExportPackage otherPackage = onlyPackage(otherRequest);
-        assertThatThrownBy(() -> bindApproval(id, ADMIN_B, otherPackage.getId(), otherPackage.getContentSha256()))
-                .as("別の request の package は複合FKが拒否する").isInstanceOf(DataIntegrityViolationException.class);
+        MySqlConstraintRejections.assertRejectedBy(
+                () -> bindApproval(id, ADMIN_B, otherPackage.getId(), otherPackage.getContentSha256()),
+                MySqlConstraintRejections.FOREIGN_KEY_VIOLATION, "fk_privacy_request_approved_package");
 
         PrivacyRequest row = requestMapper.selectById(id);
         assertThat(row.getApprovedBy()).isNull();

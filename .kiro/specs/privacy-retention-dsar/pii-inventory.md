@@ -224,3 +224,5 @@ source scannerが検出したが既存rowで個別policy値を確定できない
 ## 6. scope外・未発見の扱い
 
 このinventoryはschema/entity/provider/config/searchで確認できた静的所在であり、本番DB、object storage、mailbox、backup、replica、外部SaaSの実データを検索していない。未登録のfile/object、migration後の運用artifact、ログ基盤、APM、メール受信箱、ブラウザ/download cache、開発者端末は `UNKNOWN` のまま、providerを呼び出さず、人の範囲承認後に再inventoryする。
+
+**NF07 自身の作業データ（catalog から除外。NF07-A2b）**: DSAR の開示 package（`t_privacy_export_package` と、その実体の `PRIVACY_EXPORT` file）は、F2 provider が読んだ本人の記録の交付用の副本で、catalog（`m_pii_data_element`）の data element にせず、F2 provider の検索・hold の帰属・処分の対象にもしない。保存は D-06 の `privacy.dsar.package-max-age` までで、交付記録・期限超過・case の終了で実体を消す（plan §3.4.1 D14、deploy-runbook §4.4 D14）。実体の metadata（`t_file_security_metadata`）は既存の element `FILE_SECURITY_METADATA` に含まれ、削除で論理削除される（owner は privacy-admin で本人ではない）。package の行には内容 hash・作成者・承認者・日時だけが残り、記録の値は残らない。DSAR の request・subject link・action の各表も NF07 の作業データとして同じく catalog の外に置く。

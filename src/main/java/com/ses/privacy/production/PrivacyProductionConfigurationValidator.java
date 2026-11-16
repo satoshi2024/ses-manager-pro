@@ -157,6 +157,13 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         }
         log.info("[privacy] NF07のflag ONの前提を確認しました: flags={} decisionIds={} privacyAdmins={}",
                 flagNames(enabled), binding.snapshot().decisionIds().values(), administrators);
+        if (enabled.contains(Capability.DSAR)) {
+            // 期限規則と package の最長保存期間は approval digest に入らない（review P3-6）。配備の後に D-06 の決定書の値と
+            // この log の値を人が照合する（feature-switches.md 4.7）。値は法的な期間で秘密値ではない
+            PrivacyFeatureProperties.Dsar dsar = featureProperties.getDsar();
+            log.info("[privacy] DSARの設定値（D-06 の決定書と照合する）: dueDays={} packageMaxAge={}",
+                    dsar.getDueDays(), dsar.getPackageMaxAge());
+        }
     }
 
     /**

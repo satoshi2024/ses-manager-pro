@@ -25,6 +25,14 @@ public interface FileStorageService {
      */
     Resource load(String storedName);
 
+    /**
+     * server が生成した種別（{@link FileKind#isServerGeneratedOnly()}。DSAR の開示 package 等）の file を、その種別の専用経路から
+     * 読む。汎用の {@link #load} はこれらの種別を開かない。既定は {@link #load} と同じ（metadata を持たない実装向け）。
+     */
+    default Resource loadServerGenerated(String storedName, FileKind kind) {
+        return load(storedName);
+    }
+
     /** 保持期限到達等の認可済み処理で、現在tenantの保存実体を消去する。 */
     void delete(String storedName);
 

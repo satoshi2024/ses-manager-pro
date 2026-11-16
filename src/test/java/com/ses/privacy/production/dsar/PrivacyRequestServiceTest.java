@@ -347,6 +347,58 @@ class PrivacyRequestServiceTest {
         assertThat(requestMapper.selectById(id).getDueDate()).isEqualTo(LocalDate.of(2026, 12, 31));
     }
 
+    /** NF07-A2b（review P2-2）: 開示以外の請求は SCOPED から手動対応の完了を記録して CONFIRMED にする（system は処分しない）。 */
+    @Test
+    void 開示以外の請求は手動対応の結果と証跡を記録して完了し開示請求と合わない結果と古い版は拒否する() {
+        long id = scopedRequest("T-MANUAL", "DELETION");
+        long access = scopedRequest("T-MANUAL-ACCESS", "ACCESS");
+
+        assertThatThrownBy(() -> service.recordManualResolution(access,
+                new PrivacyDsarCommands.ManualResolution(4L, "OTHER_RESOLVED", "ANS-1")))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(409);
+                    assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarManualResolutionAccess");
+                });
+        assertInvalid(() -> service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(4L, "CORRECTED", "ANS-1")));
+        assertInvalid(() -> service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "taro@example.invalid")));
+        assertInvalid(() -> service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "SCOPE_SNAPSHOT")));
+        assertConflict(() -> service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(3L, "DELETED", "ANS-1")));
+        approval.getD06().setDecisionId("D06-NF07-2026-0016");
+        assertThatThrownBy(() -> service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "ANS-1")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDecisionChanged"));
+        approval.getD06().setDecisionId(D06_ID);
+        assertThat(requestMapper.selectById(id).getStatus()).isEqualTo("SCOPED");
+
+        PrivacyDsarViews.Transition done = service.recordManualResolution(id,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETION_REFUSED_RETENTION", "ANS-2026-0001"));
+
+        assertThat(done.status()).isEqualTo("CONFIRMED");
+        assertThat(done.rowVersion()).isEqualTo(5L);
+        PrivacyRequest row = requestMapper.selectById(id);
+        assertThat(row.getStatus()).isEqualTo("CONFIRMED");
+        assertThat(row.getDeliveredAt()).as("交付の列は開示請求だけが使う").isNull();
+        assertThat(actions(id)).filteredOn(action -> action.getIdempotencyKey().startsWith("DSAR-MANUAL:"))
+                .singleElement().satisfies(action -> {
+                    assertThat(action.getActionType()).isEqualTo("MANUAL_ACTION");
+                    assertThat(action.getStatus()).isEqualTo("SUCCEEDED");
+                    assertThat(action.getBlockedReason()).isEqualTo("DELETION_REFUSED_RETENTION");
+                    assertThat(action.getEvidenceRef()).isEqualTo("ANS-2026-0001");
+                });
+        assertThat(auditLog.codes).endsWith("NF07_DSAR_MANUAL_RESOLVED");
+        assertThat(auditLog.uris.get(auditLog.uris.size() - 1)).contains("from=SCOPED").contains("to=CONFIRMED")
+                .doesNotContain("ANS-2026-0001", "ENGINEER");
+        PrivacyDsarViews.Detail detail = service.detail(id);
+        assertThat(detail.nextActions()).isEmpty();
+        assertThat(detail.closure()).as("完了は終了の記録として読まない").isNull();
+        assertThat(service.detail(access).nextActions()).contains("PREVIEW").doesNotContain("RECORD_MANUAL_RESOLUTION");
+    }
+
     @Test
     void 別人と判定した候補は詳細の表示で記録を照会しない() {
         long id = verifiedRequest("T-REJECTED-VIEW");
@@ -745,6 +797,17 @@ class PrivacyRequestServiceTest {
     private long verifiedRequest(String ticketRef) {
         long id = service.intake(intake(ticketRef, null)).requestId();
         service.verifyIdentity(id, new PrivacyDsarCommands.IdentityVerification(0L, "EV-" + ticketRef));
+        return id;
+    }
+
+    /** 本人（ENGINEER:101）を選んで SCOPED（版4）まで進めた case。 */
+    private long scopedRequest(String ticketRef, String requestType) {
+        long id = service.intake(new PrivacyDsarCommands.Intake(requestType, "EMAIL", null, ticketRef, null)).requestId();
+        service.verifyIdentity(id, new PrivacyDsarCommands.IdentityVerification(0L, "EV-" + ticketRef));
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        service.resolveCandidate(id, linkId(id, "ENGINEER:101"),
+                new PrivacyDsarCommands.CandidateResolution(2L, "SELECTED", null));
+        service.scope(id, new PrivacyDsarCommands.ScopeConfirmation(3L));
         return id;
     }
 

@@ -111,11 +111,49 @@ public final class PrivacyDsarVocabulary {
     }
 
     /**
-     * 画面に出す次の操作。PREVIEW 以降は NF07-A2b（検索と草案 package、承認、専用ダウンロード、交付の記録）。
+     * 画面に出す次の操作。PREVIEW 以降は NF07-A2b（検索と草案 package、承認者による草案の確認、承認、専用ダウンロード、
+     * 交付の記録、開示以外の請求の手動対応の完了）。
      */
     public enum NextAction {
-        VERIFY_IDENTITY, ADD_CANDIDATE, RESOLVE_CANDIDATE, SCOPE, PREVIEW, APPROVE, DOWNLOAD, RECORD_DELIVERY,
-        BLOCK, CANCEL
+        VERIFY_IDENTITY, ADD_CANDIDATE, RESOLVE_CANDIDATE, SCOPE, PREVIEW, REVIEW_DRAFT, APPROVE, DOWNLOAD,
+        RECORD_DELIVERY, RECORD_MANUAL_RESOLUTION, BLOCK, CANCEL
+    }
+
+    /**
+     * 開示以外の請求（訂正・削除・利用停止・異議）の手動対応の結果（NF07-A2b review P2-2。SCOPED → CONFIRMED の
+     * {@code MANUAL_ACTION} 行の {@code blocked_reason}、VARCHAR(50)）。system は処分・訂正を実行せず、人が system の外または
+     * 業務画面で行った対応の記録だけを残す。
+     */
+    public enum ManualResolution {
+        /** 訂正した。 */
+        CORRECTED(RequestType.CORRECTION),
+        /** 訂正の必要が無かった（記録が正しい）。 */
+        CORRECTION_NOT_NEEDED(RequestType.CORRECTION),
+        /** 削除した。 */
+        DELETED(RequestType.DELETION),
+        /** 法令上の保存義務があるため削除しなかった。 */
+        DELETION_REFUSED_RETENTION(RequestType.DELETION),
+        /** 利用を停止した。 */
+        RESTRICTED(RequestType.RESTRICTION),
+        /** 利用停止に応じなかった（理由は証跡で残す）。 */
+        RESTRICTION_REFUSED(RequestType.RESTRICTION),
+        /** 異議を認めた。 */
+        OBJECTION_UPHELD(RequestType.OBJECTION),
+        /** 異議を認めなかった（理由は証跡で残す）。 */
+        OBJECTION_REJECTED(RequestType.OBJECTION),
+        /** その他の対応（証跡の参照で内容を残す）。 */
+        OTHER_RESOLVED(RequestType.CORRECTION, RequestType.DELETION, RequestType.RESTRICTION, RequestType.OBJECTION);
+
+        private final Set<RequestType> requestTypes;
+
+        ManualResolution(RequestType... requestTypes) {
+            this.requestTypes = Set.of(requestTypes);
+        }
+
+        /** この結果を記録できる請求の種別（開示 ACCESS は含まない）。 */
+        public boolean appliesTo(String requestType) {
+            return parse(RequestType.class, requestType).filter(requestTypes::contains).isPresent();
+        }
     }
 
     /**
@@ -150,9 +188,9 @@ public final class PrivacyDsarVocabulary {
     }
 
     /**
-     * 状態ごとに許す次の操作。草案 package（PREVIEW）は開示請求（ACCESS）だけで作る（§3.5。訂正・削除・利用停止・異議は
-     * 受付・期限管理と終了の記録だけ）。package の有無・作成者・期限による絞込み（承認者は作成者以外、期限切れなら作り直し）は
-     * {@code PrivacyExportPackageService#section} が行う。
+     * 状態ごとに許す次の操作。草案 package（PREVIEW）は開示請求（ACCESS）だけで作る（§3.5）。訂正・削除・利用停止・異議は
+     * SCOPED から手動対応の完了（RECORD_MANUAL_RESOLUTION、SCOPED → CONFIRMED）を記録する（review P2-2）。package の有無・作成者・
+     * 期限による絞込み（承認者は作成者以外、期限切れなら作り直し）は {@code PrivacyExportPackageService#section} が行う。
      */
     static List<NextAction> nextActions(PrivacyCaseState state, String requestType) {
         if (state == null) {
@@ -164,8 +202,9 @@ public final class PrivacyDsarVocabulary {
             case IDENTITY_VERIFIED -> List.of(NextAction.ADD_CANDIDATE, NextAction.RESOLVE_CANDIDATE,
                     NextAction.SCOPE, NextAction.BLOCK, NextAction.CANCEL);
             case SCOPED -> access ? List.of(NextAction.PREVIEW, NextAction.BLOCK, NextAction.CANCEL)
-                    : List.of(NextAction.BLOCK, NextAction.CANCEL);
-            case PREVIEWED, APPROVAL_PENDING -> List.of(NextAction.APPROVE, NextAction.BLOCK, NextAction.CANCEL);
+                    : List.of(NextAction.RECORD_MANUAL_RESOLUTION, NextAction.BLOCK, NextAction.CANCEL);
+            case PREVIEWED, APPROVAL_PENDING -> List.of(NextAction.REVIEW_DRAFT, NextAction.APPROVE, NextAction.BLOCK,
+                    NextAction.CANCEL);
             case APPROVED -> List.of(NextAction.DOWNLOAD, NextAction.RECORD_DELIVERY, NextAction.BLOCK,
                     NextAction.CANCEL);
             default -> List.of();

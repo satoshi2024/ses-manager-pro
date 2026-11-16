@@ -372,6 +372,11 @@ class ActionPermissionMatrixTest {
         assertEquals("privacy.dsar.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/preview"));
         assertEquals("privacy.dsar.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/delivery"));
         assertEquals("privacy.dsar.approve", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/approve"));
+        // review P2-3: 承認者による草案の確認は承認の action（export・file.download ではない）
+        assertEquals("privacy.dsar.approve",
+                ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/12/approve/preview?packageId=7"));
+        // review P2-2: 開示以外の請求の手動対応の完了は manage
+        assertEquals("privacy.dsar.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/12/resolution"));
         assertEquals("privacy.dsar.export",
                 ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/12/package/download?packageId=7"));
         org.junit.jupiter.api.Assertions.assertNotEquals("file.download",

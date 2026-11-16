@@ -120,6 +120,7 @@ Full Feature / Production Gateは `BLOCKED` のままであり、F1-M、実PII�
   - **Objective**: 受付〜交付記録の追跡、read-only 検索、redaction 済み草案、package に束縛した二者承認、専用経路だけの取得。交付は system 外で人が行う。
   - **Implementation / Test / Demo**: plan §3.5（§3.5.1 A2a、§3.5.2 A2b）。
   - **本番開放条件（旧停止条件）**: identity verification、同姓同名のhuman resolution、第三者redaction、deadline/appeal/reopenがPASS（D-06、G-AUD）。
+  - **状況（2026-11-16）**: 実装は A2a（受付〜SCOPED）と A2b（検索・草案・承認者の確認・承認・専用ダウンロード・交付記録・開示以外の手動対応の完了・package の削除）まで flag OFF で完了（plan §3.5.2 の実装記録）。browser の Demo、MySQL の Runner、D-06 の署名（期限規則・package の最長保存期間・redaction 規則）と deploy-runbook §4.4 の受理事項 (8) が済むまで未チェックのまま。
 - [ ] **B1 disposition batch（flag OFF）** — 着手は署名後（Q-1）。approved policyだけを対象に、retry/partial failure/wrong-target cancelを含むitem CASとevidenceがPASSになるまで着手しない。計画は plan §4。
 - [ ] **B2 recovery/evidence** — 着手は署名後（Q-1）。DB+binary同時点backup、restore後hash/scope/hold再検証、監査証跡がPASSになるまで着手しない。計画は plan §4。
 - [ ] **M release** — production flag OFF、approved policy allow-list、外部/社内責任者gate、independent ReviewのPLAN/IMPLEMENTATION PASS、remote Head固定後のみrelease候補とする。

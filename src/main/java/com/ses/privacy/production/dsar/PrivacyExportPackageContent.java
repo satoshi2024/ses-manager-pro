@@ -42,6 +42,8 @@ import java.util.TreeMap;
 final class PrivacyExportPackageContent {
 
     static final String FORMAT_VERSION = "nf07-dsar-export-package-v1";
+    /** allow-list の列を1つも持たない行（記録の存在だけが分かる。人が内容を確かめる。review P3-5）。 */
+    static final String RECORD_NO_FIELDS = "RECORD_NO_FIELDS";
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -75,6 +77,12 @@ final class PrivacyExportPackageContent {
                 // data element に属するなら、その行は全ての data element で第三者混在として扱う（SELF の element 経由で漏らさない）
                 DsarDeliveryClass deliveryClass = recordDeliveryClass(record, registry);
                 for (String elementId : new java.util.TreeSet<>(record.dataElementIds())) {
+                    if (record.fields().isEmpty()) {
+                        // 列を持たない行は redactor に渡しても何も残らないため、要手動確認に数える（一覧から落とさない）
+                        manual.computeIfAbsent(hit.providerId() + "\n" + elementId + "\n" + RECORD_NO_FIELDS,
+                                key -> new ManualKey(hit.providerId(), elementId, RECORD_NO_FIELDS)).records++;
+                        continue;
+                    }
                     ThirdPartyRedactor.Outcome outcome = redactor.redact(deliveryClass, fields(record, deliveryClass));
                     if (!outcome.manualReview().isEmpty()) {
                         manual.computeIfAbsent(hit.providerId() + "\n" + elementId + "\n" + outcome.reason(),
