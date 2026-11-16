@@ -9,6 +9,14 @@ import com.ses.entity.IdentityProvider;
 import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
+import com.ses.privacy.production.provider.PrivacyRecord;
+import com.ses.privacy.production.provider.PrivacySubjectRef;
+import com.ses.privacy.production.provider.PrivacySubjectType;
+import com.ses.privacy.production.provider.ProductionPrivacyProvider;
+import com.ses.privacy.production.provider.ProviderDataElement;
+import com.ses.privacy.production.provider.ProviderTable;
+import com.ses.privacy.production.provider.SubjectLink;
+import com.ses.privacy.production.retention.catalog.SubjectAttribution;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +29,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -441,22 +450,54 @@ class PrivacyProductionConfigurationValidatorTest {
         assertDoesNotThrow(validator(approval())::validate);
     }
 
+    /**
+     * NF07-A2b: dsar の起動時検査は実検査（§5.1）。D-01・D-06・D-09 の束縛、期限規則、package の最長保存期間、F2 provider 1件以上が
+     * 揃えば ON で起動し、どれかが欠ければ固定コードで起動を止める（以前の {@code dsar.prerequisitesNotImplemented} は返さない）。
+     */
     @Test
-    void dsarをONにすると前提が未実装のため束縛が揃っても起動を止める() {
+    void dsarは束縛と期限規則とpackage保存期間とF2_providerが揃えばONで起動する() {
         twoPrivacyAdmins();
-        PrivacyApprovalProperties both = approval();
-        both.setCapabilities(new ArrayList<>(List.of("retention", "dsar")));
-        both.getD06().setDecisionId("D06-NF07-2026-0006");
-        both.getD06().setSignedOn("2026-11-05");
-        both.getD06().setExpiresOn("2027-11-04");
-        both.setApprovalDigest(PrivacyDecisionBinding.computeDigest(both));
+        PrivacyFeatureProperties flags = dsarFlags(30, Duration.ofDays(30));
+
+        assertDoesNotThrow(dsarValidator(flags, dsarApproval(), registryWithProvider())::validate);
+    }
+
+    @Test
+    void dsarは期限規則とpackage保存期間とF2_providerのどれかが欠ければそれぞれの固定コードで起動を止める() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties approval = dsarApproval();
+
+        IllegalStateException missingAll = assertThrows(IllegalStateException.class,
+                dsarValidator(dsarFlags(null, null), approval, new ProductionPrivacyProviderRegistry(List.of()))::validate);
+        assertContainsAll(missingAll, "privacy.dsar.enabled", "dsar.dueDaysUnset", "dsar.packageMaxAgeUnset",
+                "dsar.providersUnregistered");
+        assertFalse(missingAll.getMessage().contains("prerequisitesNotImplemented"));
+        assertFalse(missingAll.getMessage().contains("decisionBinding."), "束縛自体は揃っている");
+
+        IllegalStateException outOfRange = assertThrows(IllegalStateException.class,
+                dsarValidator(dsarFlags(367, Duration.ofMinutes(30)), approval, registryWithProvider())::validate);
+        assertContainsAll(outOfRange, "dsar.dueDaysUnset", "dsar.packageMaxAgeUnset");
+        assertFalse(outOfRange.getMessage().contains("dsar.providersUnregistered"));
+
+        IllegalStateException withoutRegistry = assertThrows(IllegalStateException.class,
+                new PrivacyProductionConfigurationValidator(dsarFlags(30, Duration.ofDays(30)), approval, oidc(Set.of()),
+                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
+        assertContainsAll(withoutRegistry, "dsar.providersUnregistered");
+    }
+
+    @Test
+    void dsarはD06の決定ID束縛が欠ければ他の前提が揃っても起動を止める() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties withoutD06 = dsarApproval();
+        withoutD06.getD06().setDecisionId(" ");
+        withoutD06.setApprovalDigest(PrivacyDecisionBinding.computeDigest(withoutD06));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                new PrivacyProductionConfigurationValidator(flags(true, true), both, oidc(Set.of()),
-                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
+                dsarValidator(dsarFlags(30, Duration.ofDays(30)), withoutD06, registryWithProvider())::validate);
 
-        assertContainsAll(error, "privacy.dsar.enabled", "dsar.prerequisitesNotImplemented");
-        assertFalse(error.getMessage().contains("decisionBinding."), "束縛自体は揃っている");
+        assertContainsAll(error, "privacy.dsar.enabled", "decisionBinding.");
+        assertTrue(PrivacyDecisionBinding.requiredDecisions(PrivacyAccessGuard.Capability.DSAR)
+                .contains(PrivacyDecisionBinding.Decision.D06), "DSAR は D-06 の束縛を要する");
     }
 
     @Test
@@ -543,6 +584,57 @@ class PrivacyProductionConfigurationValidatorTest {
                                                               Set<String> breakGlassUsernames) {
         return new PrivacyProductionConfigurationValidator(flags(true, false), approval, oidc(breakGlassUsernames),
                 permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK);
+    }
+
+    private PrivacyProductionConfigurationValidator dsarValidator(PrivacyFeatureProperties flags,
+                                                                  PrivacyApprovalProperties approval,
+                                                                  ProductionPrivacyProviderRegistry registry) {
+        return new PrivacyProductionConfigurationValidator(flags, approval, oidc(Set.of()), permissionGroupMapper,
+                userPermissionGroupMapper, identityProviderMapper, registry, CLOCK);
+    }
+
+    private static PrivacyFeatureProperties dsarFlags(Integer dueDays, Duration packageMaxAge) {
+        PrivacyFeatureProperties properties = flags(true, true);
+        properties.getDsar().setDueDays(dueDays);
+        properties.getDsar().setPackageMaxAge(packageMaxAge);
+        return properties;
+    }
+
+    /** retention と dsar の束縛（D-01・D-06・D-09）。 */
+    private static PrivacyApprovalProperties dsarApproval() {
+        PrivacyApprovalProperties both = approval();
+        both.setCapabilities(new ArrayList<>(List.of("retention", "dsar")));
+        both.getD06().setDecisionId("D06-NF07-2026-0006");
+        both.getD06().setSignedOn("2026-11-05");
+        both.getD06().setExpiresOn("2027-11-04");
+        both.setApprovalDigest(PrivacyDecisionBinding.computeDigest(both));
+        return both;
+    }
+
+    /** 1件の F2 provider を登録した registry（DB には触れない fixture）。 */
+    private static ProductionPrivacyProviderRegistry registryWithProvider() {
+        return new ProductionPrivacyProviderRegistry(List.of(new ProductionPrivacyProvider() {
+            @Override
+            public String providerId() {
+                return "validator-fixture";
+            }
+
+            @Override
+            public List<ProviderDataElement> dataElements() {
+                return List.of(ProviderDataElement.exact("VALIDATOR_FIXTURE", SubjectAttribution.ATTRIBUTABLE,
+                        List.of(new SubjectLink(PrivacySubjectType.ENGINEER, "t_engineer.id"))));
+            }
+
+            @Override
+            public List<ProviderTable> tables() {
+                return List.of(new ProviderTable("t_engineer", List.of("id"), List.of()));
+            }
+
+            @Override
+            public List<PrivacyRecord> findBySubject(String tenantId, PrivacySubjectRef subject) {
+                return List.of();
+            }
+        }));
     }
 
     private static PrivacyFeatureProperties flags(boolean retention, boolean dsar) {

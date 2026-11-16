@@ -311,6 +311,42 @@ class PrivacyRequestServiceTest {
                 scope.getCreatedAt(), registry.providers()).hash()).isEqualTo(row.getScopeSnapshotHash());
     }
 
+    /** NF07-A2b（delta review D-4）: D-06 が差し替わった後は候補の登録・裁定の時点で止め、範囲確定まで作業を続けさせない。 */
+    @Test
+    void 本人確認の後にD06が差し替わると候補の登録と裁定も409で止め記録を読まない() {
+        long id = verifiedRequest("T-D06-EARLY");
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        provider.calls.clear();
+
+        approval.getD06().setDecisionId("D06-NF07-2026-0016");
+        assertThatThrownBy(() -> service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(2L, "ENGINEER:102")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDecisionChanged"));
+        assertThatThrownBy(() -> service.resolveCandidate(id, linkId(id, "ENGINEER:101"),
+                new PrivacyDsarCommands.CandidateResolution(2L, "SELECTED", null)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDecisionChanged"));
+        assertThat(provider.calls).as("差し替わった後は対象者の記録を読まない").isEmpty();
+        assertThat(linkStates(id)).containsExactly(Map.entry("ENGINEER:101", "CANDIDATE"));
+        assertThat(requestMapper.selectById(id).getRowVersion()).isEqualTo(2L);
+    }
+
+    /** NF07-A2b（delta review D-4）: 本人確認の時点にも期限規則が無かった case は、範囲確定の時点の規則で受付日から期限日を補う。 */
+    @Test
+    void 本人確認の時点にも期限規則が無かったcaseは範囲確定の時点の規則で期限日を補う() {
+        features.getDsar().setDueDays(null);
+        long id = verifiedRequest("T-DUE-AT-SCOPE");
+        service.addCandidate(id, new PrivacyDsarCommands.CandidateAddition(1L, "ENGINEER:101"));
+        service.resolveCandidate(id, linkId(id, "ENGINEER:101"),
+                new PrivacyDsarCommands.CandidateResolution(2L, "SELECTED", null));
+        assertThat(requestMapper.selectById(id).getDueDate()).isNull();
+
+        features.getDsar().setDueDays(45);
+        service.scope(id, new PrivacyDsarCommands.ScopeConfirmation(3L));
+
+        assertThat(requestMapper.selectById(id).getDueDate()).isEqualTo(LocalDate.of(2026, 12, 31));
+    }
+
     @Test
     void 別人と判定した候補は詳細の表示で記録を照会しない() {
         long id = verifiedRequest("T-REJECTED-VIEW");

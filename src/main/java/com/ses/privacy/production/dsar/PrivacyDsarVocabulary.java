@@ -9,7 +9,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * DSAR 受付〜SCOPED（NF07-A2a）の値の語彙。DB の CHECK（V190）と画面の選択肢はこの一覧に従う。
+ * DSAR（受付〜SCOPED は NF07-A2a、検索〜交付記録は NF07-A2b）の値の語彙。DB の CHECK（V190）と画面の選択肢はこの一覧に従う。
  *
  * <p>参照値（ticket・証跡）は英数字と一部の記号だけを受け付け、空白・{@code @} を含む自由文（氏名・連絡先の転記）を拒否する。
  * 参照値は外部の記録を指す ID であり、本文そのものは保存しない。
@@ -31,9 +31,14 @@ public final class PrivacyDsarVocabulary {
             Pattern.compile("0[0-9]{1,4}-[0-9]{1,4}-[0-9]{3,4}"),
             Pattern.compile("[A-Za-z]{2}[0-9]{7}"));
 
-    /** A2a が扱う状態。BLOCKED / CANCELLED は終了状態で、再開は新しい case（{@code reopen_of_request_id}）で行う。 */
+    /**
+     * 終了（BLOCKED / CANCELLED）を記録できる状態。foundation の遷移表（{@code PrivacyCaseStateMachine}）で BLOCKED・CANCELLED へ
+     * 進める状態のうち、DSAR が使う範囲（A2a の受付〜SCOPED と、A2b の草案・承認待ち・承認済み）。BLOCKED / CANCELLED は終了状態で、
+     * 再開は新しい case（{@code reopen_of_request_id}）で行う。終了した case の package は削除の scheduler が PURGED にする。
+     */
     static final Set<PrivacyCaseState> CLOSABLE_STATES = EnumSet.of(PrivacyCaseState.REQUESTED,
-            PrivacyCaseState.IDENTITY_VERIFIED, PrivacyCaseState.SCOPED);
+            PrivacyCaseState.IDENTITY_VERIFIED, PrivacyCaseState.SCOPED, PrivacyCaseState.PREVIEWED,
+            PrivacyCaseState.APPROVAL_PENDING, PrivacyCaseState.APPROVED);
 
     /** 再申立の元にできる終了状態。 */
     static final Set<PrivacyCaseState> TERMINAL_STATES = EnumSet.of(PrivacyCaseState.CONFIRMED,
@@ -83,6 +88,12 @@ public final class PrivacyDsarVocabulary {
         WITHDRAWN(PrivacyCaseState.CANCELLED),
         /** 重複した受付。 */
         DUPLICATE(PrivacyCaseState.CANCELLED),
+        /**
+         * 本人確認の後に D-06 の決定（確認基準）が差し替わり、適用した基準と食い違う（A2a delta review D-4。再申立として受け付け直す）。
+         */
+        DECISION_CHANGED(PrivacyCaseState.BLOCKED),
+        /** 第三者情報を除けないため開示資料を作れない（NF07-A2b）。 */
+        REDACTION_NOT_POSSIBLE(PrivacyCaseState.BLOCKED),
         /** その他（証跡の参照で理由を残す）。 */
         OTHER_BLOCKED(PrivacyCaseState.BLOCKED),
         /** その他の取下げ。 */
@@ -99,9 +110,20 @@ public final class PrivacyDsarVocabulary {
         }
     }
 
-    /** 画面に出す次の操作。 */
+    /**
+     * 画面に出す次の操作。PREVIEW 以降は NF07-A2b（検索と草案 package、承認、専用ダウンロード、交付の記録）。
+     */
     public enum NextAction {
-        VERIFY_IDENTITY, ADD_CANDIDATE, RESOLVE_CANDIDATE, SCOPE, BLOCK, CANCEL
+        VERIFY_IDENTITY, ADD_CANDIDATE, RESOLVE_CANDIDATE, SCOPE, PREVIEW, APPROVE, DOWNLOAD, RECORD_DELIVERY,
+        BLOCK, CANCEL
+    }
+
+    /**
+     * 交付の方法（system の外で交付した方法の記録。{@code t_privacy_request.delivery_method} VARCHAR(20)）。
+     * system から外部へ送信する経路は持たない（I-4）。
+     */
+    public enum DeliveryMethod {
+        EMAIL, POSTAL, IN_PERSON, SECURE_TRANSFER, OTHER
     }
 
     /** 列挙値を大文字小文字を区別して厳密に解釈する（綴り違い・前後空白は空）。 */
@@ -127,16 +149,25 @@ public final class PrivacyDsarVocabulary {
         return parse(PrivacyCaseState.class, stored);
     }
 
-    /** 状態ごとに許す次の操作（A2a の範囲。A2b は SCOPED 以降を足す）。 */
-    static List<NextAction> nextActions(PrivacyCaseState state) {
+    /**
+     * 状態ごとに許す次の操作。草案 package（PREVIEW）は開示請求（ACCESS）だけで作る（§3.5。訂正・削除・利用停止・異議は
+     * 受付・期限管理と終了の記録だけ）。package の有無・作成者・期限による絞込み（承認者は作成者以外、期限切れなら作り直し）は
+     * {@code PrivacyExportPackageService#section} が行う。
+     */
+    static List<NextAction> nextActions(PrivacyCaseState state, String requestType) {
         if (state == null) {
             return List.of();
         }
+        boolean access = RequestType.ACCESS.name().equals(requestType);
         return switch (state) {
             case REQUESTED -> List.of(NextAction.VERIFY_IDENTITY, NextAction.BLOCK, NextAction.CANCEL);
             case IDENTITY_VERIFIED -> List.of(NextAction.ADD_CANDIDATE, NextAction.RESOLVE_CANDIDATE,
                     NextAction.SCOPE, NextAction.BLOCK, NextAction.CANCEL);
-            case SCOPED -> List.of(NextAction.BLOCK, NextAction.CANCEL);
+            case SCOPED -> access ? List.of(NextAction.PREVIEW, NextAction.BLOCK, NextAction.CANCEL)
+                    : List.of(NextAction.BLOCK, NextAction.CANCEL);
+            case PREVIEWED, APPROVAL_PENDING -> List.of(NextAction.APPROVE, NextAction.BLOCK, NextAction.CANCEL);
+            case APPROVED -> List.of(NextAction.DOWNLOAD, NextAction.RECORD_DELIVERY, NextAction.BLOCK,
+                    NextAction.CANCEL);
             default -> List.of();
         };
     }

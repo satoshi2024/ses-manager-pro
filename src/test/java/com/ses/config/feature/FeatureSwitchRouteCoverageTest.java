@@ -132,7 +132,11 @@ class FeatureSwitchRouteCoverageTest {
             Map.entry("com.ses.service.impl.ResumeRetentionCleanupServiceImpl",
                     "取込原本・抽出本文の保持期限の清理は既存の経路で、NF07はhold gateの判定だけに使う（A1H-2 D4・D5）"),
             Map.entry("com.ses.service.integrationhub.IntegrationHubRetentionPurgeScheduler",
-                    "integration hubのrecord・nonceのpurgeはNF-05の経路で、NF07はrecordのkindのhold gateの判定だけに使う（A1H-2 D7・D8）"));
+                    "integration hubのrecord・nonceのpurgeはNF-05の経路で、NF07はrecordのkindのhold gateの判定だけに使う（A1H-2 D7・D8）"),
+            // NF07-A2b: DSAR の開示 package（NF07 自身が作った一時 package）の期限超過・終了 case の削除
+            Map.entry("com.ses.privacy.production.dsar.PrivacyExportPackagePurgeScheduler",
+                    "DSARの開示packageのpurge_after超過・終了したcaseのpackageの削除は公開可否と無関係に続ける"
+                            + "（NF07_DSARをOFFへ戻した後も期限を超えてpackageを残さない。I-9。packageが無ければ照会1回で終わる）"));
 
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {
@@ -233,7 +237,8 @@ class FeatureSwitchRouteCoverageTest {
 
     /**
      * NF07-A2a（C-1）: DSAR の画面・API は保持・保全とは別の最上位機能 {@code NF07_DSAR} に属し、
-     * controller は {@code com.ses.privacy.production.dsar} の型にだけ依存する。A2b の承認・package の入口も同じ prefix の配下にある。
+     * controller は {@code com.ses.privacy.production.dsar} の型にだけ依存する。A2b の承認・package の入口も同じ prefix の配下にあり、
+     * package の入口は専用ダウンロードだけである。
      */
     @Test
     void NF07のDSARの画面とAPIは本人請求の機能に属し保持保全とは分かれる() throws Exception {
@@ -257,9 +262,15 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(Feature.forPath("/privacy/dsar-like")).isEmpty();
         assertThat(Feature.forPath("/api/privacy/dsar-like")).isEmpty();
         assertThat(Feature.forPath("/privacy")).isEmpty();
-        assertThat(dsarRoutes).as("承認・package・交付の入口は A2b で足す")
-                .noneMatch(route -> route.normalized().contains("/approve") || route.normalized().contains("/package")
-                        || route.normalized().contains("/export"));
+        // NF07-A2b: 開示資料の区画・草案・承認・専用ダウンロード・交付記録は同じ prefix の配下にあり、NF07_DSAR だけに属する
+        for (String path : List.of("/api/privacy/dsar/1/delivery", "/api/privacy/dsar/1/preview",
+                "/api/privacy/dsar/1/approve", "/api/privacy/dsar/1/package/download")) {
+            assertThat(dsarRoutes).as(path).anyMatch(route -> route.normalized().equals(path));
+        }
+        assertThat(dsarRoutes).as("package の入口は専用ダウンロードだけで、外部へ送る export の入口は持たない")
+                .filteredOn(route -> route.normalized().contains("/package") || route.normalized().contains("/export"))
+                .extracting(Route::normalized)
+                .containsOnly("/api/privacy/dsar/1/package/download");
     }
 
     private static boolean isDsarRoute(Route route) {

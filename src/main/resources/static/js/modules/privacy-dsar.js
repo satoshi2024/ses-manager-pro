@@ -1,6 +1,8 @@
 /**
- * NF07 DSAR 画面（/privacy/dsar 一覧・受付、/privacy/dsar/{id} 詳細・本人確認・名寄せ・範囲確定・終了）。
- * 表示は GET /api/privacy/dsar(/{id})、状態の変更は POST・PUT /api/privacy/dsar/**。
+ * NF07 DSAR 画面（/privacy/dsar 一覧・受付、/privacy/dsar/{id} 詳細・本人確認・名寄せ・範囲確定・終了、
+ * A2b の検索・草案・承認・専用ダウンロード・交付の記録）。
+ * 表示は GET /api/privacy/dsar(/{id}(/delivery))、状態の変更は POST・PUT /api/privacy/dsar/**。
+ * 開示資料は GET /api/privacy/dsar/{id}/package/download だけから取得する（汎用の /api/files は使わない）。
  *
  * - subject 参照は要求本文だけで送る（URL に入れない）。
  * - 状態を変える要求は表示時の rowVersion を送る（別の操作が先に進めていれば 409 になり、再読み込みを促す）。
@@ -17,6 +19,8 @@
     var POSITIVE_ID = /^[1-9][0-9]{0,17}$/;
     var list = {page: 1, size: 20, total: 0};
     var detail = null;
+    /** 開示資料の区画（GET /api/privacy/dsar/{id}/delivery。記録の値・保存名は含まない）。 */
+    var section = null;
 
     function t(key) {
         return SES.i18n.t.apply(SES.i18n, arguments);
@@ -250,10 +254,137 @@
             .then(function (data) {
                 detail = data;
                 renderDetail();
+                return fetchJson('/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/delivery');
+            })
+            .then(function (data) {
+                section = data;
+                renderDelivery();
             })
             .catch(function (message) {
                 SES.toast.error(message);
             });
+    }
+
+    // ------------------------------------------------------------ 開示資料（NF07-A2b）
+
+    function sectionCan(action) {
+        return section && (section.actions || []).indexOf(action) >= 0;
+    }
+
+    function shortHash(value) {
+        return value ? String(value).substring(0, 12) : '-';
+    }
+
+    function renderDelivery() {
+        if (!section) {
+            return;
+        }
+        $('#dsar-decision-changed').toggleClass('d-none', !section.decisionChanged);
+        $('#dsar-delivery-hold').text(label('privacyDsar.hold.', section.hold ? section.hold.state : null));
+        $('#dsar-delivery-package-rule').text(section.packageRuleConfigured
+            ? t('privacyDsar.readiness.ready') : t('privacyDsar.delivery.packageRuleUnset'));
+        var pkg = section.currentPackage;
+        if (pkg) {
+            var state = label('privacyDsar.packageStatus.', pkg.status);
+            if (pkg.expired) {
+                state += ' (' + t('privacyDsar.delivery.expired') + ')';
+            }
+            $('#dsar-delivery-package').text(t('privacyDsar.delivery.packageSummary', state, pkg.createdAt || '-',
+                pkg.purgeAfter || '-', String(pkg.sizeBytes), shortHash(pkg.contentSha256)));
+        } else {
+            $('#dsar-delivery-package').text(t('privacyDsar.delivery.noPackage'));
+        }
+        $('#dsar-delivery-redaction').text(section.redactionReason
+            ? t('privacyDsar.delivery.redactionSummary', label('privacyDsar.redaction.', section.redactionReason),
+                String(section.autoReleasedCount === null || section.autoReleasedCount === undefined
+                    ? 0 : section.autoReleasedCount))
+            : '-');
+        $('#dsar-delivery-approval').text(section.approvedAt
+            ? t(section.approvedByMe ? 'privacyDsar.delivery.approvedByMe' : 'privacyDsar.delivery.approvedByOther',
+                section.approvedAt)
+            : '-');
+
+        var notReady = sectionCan('PREVIEW') && !section.previewReady;
+        $('#dsar-delivery-not-ready').toggleClass('d-none', !notReady).text(notReady
+            ? t(section.decisionChanged ? 'privacyDsar.delivery.decisionChanged'
+                : (section.packageRuleConfigured ? 'privacyDsar.delivery.decisionsMissing'
+                    : 'privacyDsar.delivery.packageRuleUnset'))
+            : '');
+        $('#dsar-preview-submit').toggleClass('d-none', !sectionCan('PREVIEW')).prop('disabled', !section.previewReady);
+        $('#dsar-approve-submit').toggleClass('d-none', !sectionCan('APPROVE'));
+        $('#dsar-approve-own').toggleClass('d-none', !(section.status === 'PREVIEWED' && pkg && pkg.status === 'DRAFT'
+            && !pkg.expired && (pkg.createdByMe || section.preparedByMe)));
+        $('#dsar-download-submit').toggleClass('d-none', !sectionCan('DOWNLOAD'));
+        $('#dsar-delivery-form').toggleClass('d-none', !sectionCan('RECORD_DELIVERY'));
+
+        var providers = section.providers || [];
+        $('#dsar-delivery-providers').html(providers.length === 0
+            ? '<tr><td colspan="2" class="text-center text-secondary">' + esc(t('privacyDsar.delivery.noSearch')) + '</td></tr>'
+            : providers.map(function (entry) {
+                return '<tr><td class="text-break"><code>' + esc(entry.providerId) + '</code></td><td>'
+                    + esc(t('privacyDsar.candidates.rowCount', String(entry.recordCount))) + '</td></tr>';
+            }).join(''));
+        var manual = section.manualReview || [];
+        $('#dsar-delivery-manual').html(manual.length === 0
+            ? '<tr><td colspan="4" class="text-center text-secondary">' + esc(t('privacyDsar.delivery.noManual')) + '</td></tr>'
+            : manual.map(function (item) {
+                return '<tr><td class="text-break"><code>' + esc(item.providerId || '-') + '</code></td>'
+                    + '<td class="text-break"><code>' + esc(item.dataElementId || '-') + '</code></td>'
+                    + '<td>' + esc(label('privacyDsar.manualReason.', item.reason)) + '</td>'
+                    + '<td>' + esc(item.recordCount === null || item.recordCount === undefined
+                        ? t('privacyDsar.delivery.notCounted') : t('privacyDsar.candidates.rowCount', String(item.recordCount)))
+                    + '</td></tr>';
+            }).join(''));
+
+        if (section.delivery) {
+            $('#dsar-delivery-record').removeClass('d-none').text(t('privacyDsar.delivery.recorded',
+                section.delivery.deliveredAt || '-', label('privacyDsar.deliveryMethod.', section.delivery.deliveryMethod),
+                section.delivery.deliveryEvidenceRef || '-'));
+        } else {
+            $('#dsar-delivery-record').addClass('d-none').text('');
+        }
+    }
+
+    function submitPreview() {
+        mutate('POST', '/preview', {rowVersion: section.rowVersion}, t('privacyDsar.confirm.preview'));
+    }
+
+    function submitApprove() {
+        var pkg = section.currentPackage;
+        if (!pkg) {
+            return;
+        }
+        mutate('POST', '/approve', {rowVersion: section.rowVersion, packageId: pkg.id, contentSha256: pkg.contentSha256},
+            t('privacyDsar.confirm.approve', shortHash(pkg.contentSha256)));
+    }
+
+    function submitDownload() {
+        var pkg = section.currentPackage;
+        if (!pkg) {
+            return;
+        }
+        SES.download('/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/package/download?packageId='
+            + encodeURIComponent(pkg.id), (detail ? detail.requestNo : 'dsar') + '.json');
+    }
+
+    function submitDelivery(event) {
+        event.preventDefault();
+        var pkg = section.currentPackage;
+        var evidence = $.trim($('#dsar-delivery-evidence').val());
+        if (!evidence || referenceError(evidence)) {
+            SES.toast.error(evidence ? referenceError(evidence) : t('privacyDsar.validation.required'));
+            return;
+        }
+        if (!pkg) {
+            return;
+        }
+        mutate('POST', '/delivery', {
+            rowVersion: section.rowVersion,
+            packageId: pkg.id,
+            contentSha256: pkg.contentSha256,
+            deliveryMethod: $('#dsar-delivery-method').val(),
+            deliveryEvidenceRef: evidence
+        }, t('privacyDsar.confirm.delivery'));
     }
 
     function can(action) {
@@ -418,6 +549,10 @@
         $('#dsar-candidate-body').on('click', '.dsar-resolve', resolveCandidate);
         $('#dsar-scope-submit').on('click', submitScope);
         $('#dsar-close-form').on('submit', submitClose);
+        $('#dsar-preview-submit').on('click', submitPreview);
+        $('#dsar-approve-submit').on('click', submitApprove);
+        $('#dsar-download-submit').on('click', submitDownload);
+        $('#dsar-delivery-form').on('submit', submitDelivery);
         loadDetail();
     }
 

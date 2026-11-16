@@ -59,8 +59,12 @@ import java.util.function.Supplier;
  *       privacy-admin が BLOCKED として記録する）。snapshot の D-06 は {@code identity_rule_ref}（本人確認時の決定）で、
  *       現在の D-06 がそれと違えば 409 {@code error.privacy.dsarDecisionChanged} で確定しない（A2b が DB の値だけで
  *       snapshot を再計算できるようにする。review P2-1）。</li>
- *   <li>終了（BLOCKED / CANCELLED）: REQUESTED・IDENTITY_VERIFIED・SCOPED から、理由コード付きで記録する。</li>
+ *   <li>終了（BLOCKED / CANCELLED）: REQUESTED・IDENTITY_VERIFIED・SCOPED と、A2b の PREVIEWED・APPROVAL_PENDING・APPROVED から、
+ *       理由コード付きで記録する（終了した case の package は削除の scheduler が PURGED にする）。</li>
  * </ol>
+ * 検索〜交付記録（SCOPED → PREVIEWED → APPROVED → CONFIRMED）は {@link PrivacyExportPackageService}（NF07-A2b）が受け持つ。
+ * D-06 が本人確認の後に差し替わった case は、候補の登録・裁定の時点から 409 {@code error.privacy.dsarDecisionChanged} で止め
+ * （delta review D-4）、期限日の無い case は範囲確定の時点でも期限規則から期限日を補う。
  * 本人確認以降（本人確認・候補の登録と裁定・範囲確定）は D-01・D-06 が欠ければ 409 {@code error.privacy.dsarDecisionUnknown}
  * （DECISION_UNKNOWN）で進めない。受付と終了は決定を前提にしない（受付日時の記録と取下げを止めない）。
  *
@@ -212,8 +216,8 @@ public class PrivacyRequestService {
             }
         }
         Optional<PrivacyCaseState> state = PrivacyDsarVocabulary.state(request.getStatus());
-        List<String> nextActions = PrivacyDsarVocabulary.nextActions(state.orElse(null)).stream()
-                .map(Enum::name).toList();
+        List<String> nextActions = PrivacyDsarVocabulary.nextActions(state.orElse(null), request.getRequestType())
+                .stream().map(Enum::name).toList();
         LocalDate today = PrivacyDecisionBinding.businessDate(clock);
         boolean overdue = PrivacyDsarVocabulary.DEADLINE_TRACKED_STATES.contains(request.getStatus())
                 && request.getDueDate() != null && request.getDueDate().isBefore(today);
@@ -295,9 +299,7 @@ public class PrivacyRequestService {
             requireState(request, PrivacyCaseState.REQUESTED, version);
             LocalDateTime now = now();
             // 期限規則が無いまま受け付けた case は、この時点で有効な規則で受付日から期限日を補う（review P3-6）
-            LocalDate backfilledDueDate = request.getDueDate() == null && readiness.dueDays() != null
-                    && request.getReceivedAt() != null
-                    ? request.getReceivedAt().toLocalDate().plusDays(readiness.dueDays()) : null;
+            LocalDate backfilledDueDate = backfilledDueDate(request, readiness);
             cas(context.tenantId(), requestId, PrivacyCaseState.REQUESTED, version, now, update -> update
                     .set(backfilledDueDate != null, PrivacyRequest::getDueDate, backfilledDueDate)
                     .set(PrivacyRequest::getStatus, PrivacyCaseState.IDENTITY_VERIFIED.name())
@@ -316,13 +318,15 @@ public class PrivacyRequestService {
     /** 名寄せの候補を登録する（F2 provider に記録がある subject だけ）。 */
     public PrivacyDsarViews.Transition addCandidate(long requestId, PrivacyDsarCommands.CandidateAddition command) {
         Context context = beginManage();
-        requireDecisions();
+        PrivacyDsarDecisions.Readiness readiness = requireDecisions();
         long version = requireVersion(command == null ? null : command.rowVersion());
         PrivacySubjectRef subject = PrivacySubjectRef.parse(command.subjectRef())
                 .orElseThrow(PrivacyRequestService::invalid);
         // 対象者の記録を読む前に、lock を取らない事前確認で状態・版・重複・上限を確かめる（受け付けられない要求で
         // 記録を読まない。review P3-3）。確定は下の transaction の中の CAS が行う。
-        requireState(load(context.tenantId(), requestId), PrivacyCaseState.IDENTITY_VERIFIED, version);
+        PrivacyRequest current = load(context.tenantId(), requestId);
+        requireState(current, PrivacyCaseState.IDENTITY_VERIFIED, version);
+        requireSameIdentityRule(current, readiness);
         requireCandidateAcceptable(links(context.tenantId(), requestId), subject);
         // provider の照会は read-only で、transaction の外で行う（記録が無い subject は候補にしない）
         Footprint footprint = footprint(context.tenantId(), subject);
@@ -332,6 +336,7 @@ public class PrivacyRequestService {
         return execute(() -> {
             PrivacyRequest request = load(context.tenantId(), requestId);
             requireState(request, PrivacyCaseState.IDENTITY_VERIFIED, version);
+            requireSameIdentityRule(request, readiness);
             requireCandidateAcceptable(links(context.tenantId(), requestId), subject);
             cas(context.tenantId(), requestId, PrivacyCaseState.IDENTITY_VERIFIED, version, now(), update -> { });
             PrivacyRequestSubjectLink link = new PrivacyRequestSubjectLink();
@@ -355,7 +360,7 @@ public class PrivacyRequestService {
     public PrivacyDsarViews.Transition resolveCandidate(long requestId, long linkId,
                                                         PrivacyDsarCommands.CandidateResolution command) {
         Context context = beginManage();
-        requireDecisions();
+        PrivacyDsarDecisions.Readiness readiness = requireDecisions();
         long version = requireVersion(command == null ? null : command.rowVersion());
         PrivacyDsarVocabulary.LinkState target = PrivacyDsarVocabulary
                 .parse(PrivacyDsarVocabulary.LinkState.class, command.linkState())
@@ -365,6 +370,7 @@ public class PrivacyRequestService {
         return execute(() -> {
             PrivacyRequest request = load(context.tenantId(), requestId);
             requireState(request, PrivacyCaseState.IDENTITY_VERIFIED, version);
+            requireSameIdentityRule(request, readiness);
             PrivacyRequestSubjectLink link = linkId <= 0 ? null : linkMapper.selectOne(
                     new LambdaQueryWrapper<PrivacyRequestSubjectLink>()
                             .eq(PrivacyRequestSubjectLink::getTenantId, context.tenantId())
@@ -407,10 +413,8 @@ public class PrivacyRequestService {
             requireState(request, PrivacyCaseState.IDENTITY_VERIFIED, version);
             // snapshot には本人確認時に記録した D-06（identity_rule_ref）を入れ、A2b が DB の値だけで再計算できるようにする。
             // 本人確認の後に D-06 が差し替わっていれば、適用した基準が食い違うため確定しない（review P2-1）
+            requireSameIdentityRule(request, readiness);
             String identityRule = request.getIdentityRuleRef();
-            if (identityRule == null || !identityRule.equals(readiness.d06DecisionId())) {
-                throw BusinessException.of(409, ERROR_DECISION_CHANGED);
-            }
             List<PrivacyRequestSubjectLink> selected = selectedLinks(context.tenantId(), requestId);
             if (selected.size() != 1) {
                 throw BusinessException.of(409, ERROR_SUBJECT_NOT_UNIQUE);
@@ -418,7 +422,10 @@ public class PrivacyRequestService {
             LocalDateTime asOf = now().truncatedTo(ChronoUnit.MICROS);
             PrivacyDsarScopeSnapshot.Snapshot snapshot = PrivacyDsarScopeSnapshot.of(context.tenantId(), requestId,
                     selected.get(0).getSubjectRef(), identityRule, asOf, providers);
+            // 本人確認の時点でも期限規則が無かった case は、範囲確定の時点の規則で受付日から期限日を補う（delta review D-4）
+            LocalDate backfilledDueDate = backfilledDueDate(request, readiness);
             cas(context.tenantId(), requestId, PrivacyCaseState.IDENTITY_VERIFIED, version, asOf, update -> update
+                    .set(backfilledDueDate != null, PrivacyRequest::getDueDate, backfilledDueDate)
                     .set(PrivacyRequest::getStatus, PrivacyCaseState.SCOPED.name())
                     .set(PrivacyRequest::getScopeSnapshotHash, snapshot.hash()));
             // 候補の変更は全て同じ行の CAS を通るため件数はここで変わらないが、変わっていれば確定ごと巻き戻す
@@ -522,6 +529,24 @@ public class PrivacyRequestService {
         if (requestMapper.update(null, update) != 1) {
             throw conflict();
         }
+    }
+
+    /**
+     * 本人確認で適用した D-06（{@code identity_rule_ref}）が現在の D-06 と同じか。違えば 409 {@code error.privacy.dsarDecisionChanged}。
+     * 範囲確定だけでなく候補の登録・裁定と A2b の草案・承認でも確かめ、差し替わった後の作業を早く止める（delta review D-4）。
+     */
+    static void requireSameIdentityRule(PrivacyRequest request, PrivacyDsarDecisions.Readiness readiness) {
+        String identityRule = request.getIdentityRuleRef();
+        if (identityRule == null || readiness == null || !identityRule.equals(readiness.d06DecisionId())) {
+            throw BusinessException.of(409, ERROR_DECISION_CHANGED);
+        }
+    }
+
+    /** 期限日が無い case に、現在の期限規則で受付日から期限日を補う値（補えない・既にあるなら null）。 */
+    static LocalDate backfilledDueDate(PrivacyRequest request, PrivacyDsarDecisions.Readiness readiness) {
+        return request.getDueDate() == null && readiness != null && readiness.dueDays() != null
+                && request.getReceivedAt() != null
+                ? request.getReceivedAt().toLocalDate().plusDays(readiness.dueDays()) : null;
     }
 
     private static void requireState(PrivacyRequest request, PrivacyCaseState expected, long version) {

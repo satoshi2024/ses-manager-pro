@@ -4,7 +4,11 @@ import com.ses.common.result.ApiResult;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.dsar.PrivacyDsarCommands;
 import com.ses.privacy.production.dsar.PrivacyDsarViews;
+import com.ses.privacy.production.dsar.PrivacyExportPackageService;
 import com.ses.privacy.production.dsar.PrivacyRequestService;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,23 +20,28 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+
 /**
- * NF07 DSAR 受付〜SCOPED の API（NF07-A2a、機能スイッチ {@code NF07_DSAR}）。
+ * NF07 DSAR の API（受付〜SCOPED は NF07-A2a、検索〜交付記録は NF07-A2b。機能スイッチ {@code NF07_DSAR}）。
  *
- * <p>action は {@code ActionPermissionResolver} が GET を {@code privacy.dsar.view}、POST・PUT を {@code privacy.dsar.manage} へ
- * 解決し、privacy-admin だけが許可される。service 層（{@link PrivacyRequestService}）も flag と action を再判定し、
- * 公開スイッチ OFF は {@code FeatureSwitchFilter} と同じ本文の404を返す。subject 参照は要求本文だけで受け取り、URL には
- * request ID と link ID しか置かない（URL は監査・access log に残るため）。承認・package・交付の入口は A2b で足す
- * （{@code /approve}・{@code /package/**}・{@code /export} は handler が無く、OFF なら404、ON でも privacy-admin 以外は403）。
+ * <p>action は {@code ActionPermissionResolver} が GET を {@code privacy.dsar.view}、POST・PUT を {@code privacy.dsar.manage}、
+ * {@code /{id}/approve} を {@code privacy.dsar.approve}、{@code /{id}/package/**} を {@code privacy.dsar.export} へ解決し、
+ * privacy-admin だけが許可される。service 層（{@link PrivacyRequestService}・{@link PrivacyExportPackageService}）も flag と action を
+ * 再判定し、公開スイッチ OFF は {@code FeatureSwitchFilter} と同じ本文の404を返す。subject 参照は要求本文だけで受け取り、URL には
+ * request ID・link ID・package ID しか置かない（URL は監査・access log に残るため）。開示 package は
+ * {@code GET /{id}/package/download} だけから取得でき（汎用の {@code /api/files/**} は拒否する）、system から外部へ送る入口は持たない。
  */
 @RestController
 @RequestMapping("/api/privacy/dsar")
 public class PrivacyDsarApiController {
 
     private final PrivacyRequestService requestService;
+    private final PrivacyExportPackageService packageService;
 
-    public PrivacyDsarApiController(PrivacyRequestService requestService) {
+    public PrivacyDsarApiController(PrivacyRequestService requestService, PrivacyExportPackageService packageService) {
         this.requestService = requestService;
+        this.packageService = packageService;
     }
 
     @GetMapping
@@ -87,6 +96,48 @@ public class PrivacyDsarApiController {
     public ApiResult<PrivacyDsarViews.Transition> cancel(
             @PathVariable long id, @RequestBody PrivacyDsarCommands.Closure request) {
         return ApiResult.success(requestService.cancel(id, request));
+    }
+
+    // ---------------------------------------------------------------- NF07-A2b
+
+    /** 開示資料の区画（package の要約・要手動確認・hold の状態。記録の値と保存名は返さない）。 */
+    @GetMapping("/{id}/delivery")
+    public ApiResult<PrivacyDsarViews.DeliverySection> deliverySection(@PathVariable long id) {
+        return ApiResult.success(packageService.section(id));
+    }
+
+    /** 検索と草案 package の作成（SCOPED → PREVIEWED）。 */
+    @PostMapping("/{id}/preview")
+    public ApiResult<PrivacyDsarViews.Transition> preview(
+            @PathVariable long id, @RequestBody PrivacyDsarCommands.Preview request) {
+        return ApiResult.success(packageService.preview(id, request));
+    }
+
+    /** 作成者以外の privacy-admin による承認（PREVIEWED → APPROVED）。 */
+    @PostMapping("/{id}/approve")
+    public ApiResult<PrivacyDsarViews.Transition> approve(
+            @PathVariable long id, @RequestBody PrivacyDsarCommands.Approval request) {
+        return ApiResult.success(packageService.approve(id, request));
+    }
+
+    /** 承認した package の専用ダウンロード（添付。保存しない・推測させない header を付ける）。 */
+    @GetMapping("/{id}/package/download")
+    public ResponseEntity<byte[]> download(@PathVariable long id, @RequestParam Long packageId) {
+        PrivacyDsarViews.PackageDownload download = packageService.download(id, packageId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(download.filename(), StandardCharsets.UTF_8).build().toString())
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(download.content());
+    }
+
+    /** system の外での交付の記録（APPROVED → CONFIRMED。package は同時に PURGED）。 */
+    @PostMapping("/{id}/delivery")
+    public ApiResult<PrivacyDsarViews.Transition> recordDelivery(
+            @PathVariable long id, @RequestBody PrivacyDsarCommands.Delivery request) {
+        return ApiResult.success(packageService.recordDelivery(id, request));
     }
 
     /** 公開スイッチ OFF は存在しないURLと同じ404（{@code FeatureSwitchFilter} と同じ本文）。 */
