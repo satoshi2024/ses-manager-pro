@@ -1,8 +1,10 @@
 package com.ses.privacy.production.retention.hold;
 
+import com.ses.privacy.foundation.HoldReleaseJournalPort;
 import com.ses.privacy.foundation.JournalConflictException;
 import com.ses.privacy.foundation.JournalUnavailableException;
 import com.ses.privacy.foundation.PrivacyJournalPort;
+import com.ses.privacy.foundation.VerifiedHoldRelease;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -19,9 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * test 用の Journal（port と索引）。本番 adapter と同じ判定順（command の再送 → revision CAS → held）と、foundation の
  * chain 検証と同じ event hash（{@code SES-SF-W2-EVENT-V1}）を持つ。障害の注入（不達・ACK 不明・競合）と append の
- * 前に走る hook を持つ。
+ * 前に走る hook を持つ。解除（NF07-REL）は本番 adapter と同じく {@link #append} では拒否し、{@link #appendHoldRelease} で
+ * 検証済みの proof だけを受け付け、append の判定は本番 adapter と同じ {@link VerifiedHoldRelease#requireAppendable} を使う。
  */
-final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJournalIndex {
+final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJournalIndex, HoldReleaseJournalPort {
 
     private static final String ZERO = "0".repeat(64);
 
@@ -45,20 +48,32 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
 
     @Override
     public synchronized JournalAck append(JournalCommand command) {
+        if (command.type() == CommandType.HOLD_RELEASED) {
+            throw new SecurityException("test: hold解除は検証済みの解除proofでだけappendします");
+        }
+        return appendDurably(command, null);
+    }
+
+    @Override
+    public synchronized JournalAck appendHoldRelease(VerifiedHoldRelease release) {
+        return appendDurably(release.command(), release);
+    }
+
+    private JournalAck appendDurably(JournalCommand command, VerifiedHoldRelease release) {
         appendCalls.incrementAndGet();
         beforeAppend.run();
         requireAvailable();
         if (failWithoutCommit.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
             throw new JournalUnavailableException("test: append before commit failed", null);
         }
-        JournalAck ack = appendOrReplay(command);
+        JournalAck ack = appendOrReplay(command, release);
         if (commitThenFail.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
             throw new JournalUnavailableException("test: ACK lost after commit", null);
         }
         return ack;
     }
 
-    private JournalAck appendOrReplay(JournalCommand command) {
+    private JournalAck appendOrReplay(JournalCommand command, VerifiedHoldRelease release) {
         String key = key(command.partition());
         List<JournalEvent> events = partitions.computeIfAbsent(key, k -> new ArrayList<>());
         for (JournalEvent event : events) {
@@ -78,6 +93,10 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
         long revision = events.size() + 1L;
         String previous = events.isEmpty() ? ZERO : events.get(events.size() - 1).eventHash();
         Instant createdAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        if (command.type() == CommandType.HOLD_RELEASED) {
+            release.requireAppendable(new JournalHead(command.partition(), events.size(), previous, held(events), 0, null,
+                    null), List.copyOf(events), createdAt);
+        }
         JournalEvent draft = new JournalEvent(revision, command.commandId(), command.payloadHash(), command.type(),
                 command.caseId(), command.actionId(), command.requestHash(), command.workerId(),
                 command.expectedLeaseGeneration(), command.leaseUntil(), previous, null, createdAt);
@@ -127,9 +146,9 @@ final class InMemoryHoldJournal implements PrivacyJournalPort, PrivacyHoldJourna
         partitions.forEach((key, events) -> {
             if (key.startsWith(tenantId + "\u0000") && !events.isEmpty()) {
                 for (JournalEvent event : events) {
-                    if (event.type() == CommandType.HOLD_STARTED) {
+                    if (event.type() == CommandType.HOLD_STARTED || event.type() == CommandType.HOLD_RELEASED) {
                         holds.add(new HoldEvent(subjectOf(key), event.revision(), event.commandId(), event.caseId(),
-                                event.eventHash()));
+                                event.eventHash(), event.type(), event.createdAt()));
                     }
                 }
                 JournalEvent last = events.get(events.size() - 1);

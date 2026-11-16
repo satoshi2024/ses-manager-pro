@@ -758,6 +758,17 @@ A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway j
 | B2（W-11。署名後に着手） | Witness/attestor の本番化、recovery の本番配線、unquarantine 手続、DB+binary 同時点 restore 演習 | `ProductionLatestWitnessAdapter`、attestor（鍵は D-03）、`PrivacyRecoveryService` の本番入口、unquarantine API（D-07 の承認者） | Witness インスタンス側 DDL（別 location） | D-07、G-BKP、G-INC、W-6 の witness インスタンス | slice-d §7.3 の未完境界の全件 | restore 後は quarantine を自動解除しない | XL |
 | M（W-13） | release 判定 | release 固定 SHA での coverage scan（未分類 0・欠落 0 を確認する）、全 gate、Go/No-Go | 無し | 全署名 | CI 全 job、PITR | Go/No-Go 記録 | M |
 
+**NF07-REL 実装記録（2026-11-16。DDL なし。実装のみで開放は D-05・D-03 の署名後）**:
+
+- 開放の gate: `POST /api/privacy/holds/{holdId}/release` は、D-05 と D-03 の決定ID（`privacy.approval.d03.*` を追加。D-05 と同じく capability の承認 digest には含めず `evaluateStandalone` で検査）がともに有効で、verifier がある（`ProductionPrivacyComponents.holdReleaseVerifier` は prod profile でしか生成できない）、解除 authority の trust anchor が1件以上登録されている、の全てを満たすまで、存在しない URL と同じ 404 を返す（要求ごとに評価）。起動を止める案は採らない: 決定には署名日・失効日があり実行中に期間を出入りするため要求ごとの判定が要り、起動の停止は hold 開始・gate・破壊的経路まで止める（I-5）。第1期の registry は空（`ConfiguredHoldReleaseTrustRegistry.empty()`）、失効 provider は常に UNKNOWN で、決定ID だけを設定しても解除は通らない（3重の遮断。実 registry・失効 provider は NF07-TRUST）。
+- proof（sf-w2-protocol.md §11.1）: `VerifiedHoldRelease`（foundation、public constructor なし）は package-private の `HoldReleaseProofVerifier` だけが発行する。束縛（`HoldReleaseBinding`）は §11.1 の項目（expected journal head は revision と event hash）に要求者（`sys_user:<id>`）を加えたもの。発行者・承認者は束縛の digest を含む正規形に Ed25519 で署名し（`HoldReleaseAuthorityClaim`）、主体は trust anchor の登録値だけを使う。拒否は固定 code（`HoldReleaseRejection`）。要求者・発行者・承認者は主体で互いに異なり、発行者と承認者は authority・鍵も共有しない。
+- Journal: 汎用の `append` は HOLD_RELEASED を常に拒否し、本番 adapter の `appendHoldRelease`（`HoldReleaseJournalPort`）だけが append する。同じ transaction の中で head を lock し、command の再送（元の ACK）→ revision CAS → `VerifiedHoldRelease.requireAppendable`（journal head・hold revision・hold ID・期限）の順に確かめる。adapter の chain 検証は解除を「有効な hold に対してだけ、その hold ID で1回」として受け付ける。合成 adapter・`JournalProjectionService` は変更しない（I-6）。projection の前の検証（`ProductionJournalChainVerification`）は、解除を含む chain では最初の解除より前を foundation の検証に通し、全体を同じ正規形で検証する。
+- projection・gate・reconciler: 解除は `t_legal_hold` の `status=RELEASED`・`released_at`（Journal の解除 event の時刻）で表す。追随位置の digest は解除した hold の要素にだけ `RELEASED` と解除日時を足し（ACTIVE だけの tenant の digest は A1H と同じ値）、件数は開始＋解除。gate は ACTIVE な hold を partition ごとに1件まで認め、projection だけが RELEASED・Journal にだけ解除がある場合はどちらも UNAVAILABLE。reconciler は解除の pending（`hr-` の command）と、projection に無い解除の追い付きを扱う。解除した hold は gate の hold 集合に入らないため、D1〜D10 は従来どおり動く。解除の後は同じ対象に新しい hold を開始できる。
+- 直列化: 解除の予約は hold 開始と同じ追随位置の行の pending CAS を使う（A1H-1 review §1.4。開始の予約の後・append の前に DATA_ELEMENT hold が解除されて選択が無効になる窓を閉じる）。同じ command の pending（ACK 不明の後の再送）だけは続行し、`pending_since` を CAS で進める。
+- 再送: 同じ command ID が Journal にあれば、束縛の digest と command の payload hash が一致するときだけ元の ACK を返す（proof の期限の後でも、新しい状態変更を起こさないため）。違えば 409。
+- 依存の扱い（fail-closed、D-05 owner の受理事項）: 帰属できない element（catalog で ATTRIBUTABLE でない）の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除しない（どの SUBJECT hold が `DATA_ELEMENT_HOLD` を選んだかは projection に無く、Journal の request hash と監査にしか無いため）。
+- 根拠の test: fast は `HoldReleaseProofVerifierTest`（§11.1 の拒否条件、append 時の判定、解除を含む chain）、`PrivacyHoldReleaseServiceTest`（解除・再送・CAS・pending・開放の gate・D1〜D10 の再開・reconciler）、`PrivacyHoldApiControllerTest`。MySQL は `PrivacyHoldReleaseMySqlTest`（shard-2。本番 adapter の head・hold revision の CAS、同じ command の元の ACK、ACK 不明の後の再送と reconciler、開始との直列化）。
+
 B1 の DDL 草案（番号なし）:
 
 ```sql

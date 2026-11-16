@@ -75,18 +75,38 @@ final class PrivacyHoldMySqlComponents {
         this.journal = new PrivacyHoldJournal(() -> startupResult, () -> port,
                 new JdbcPrivacyHoldJournalIndex(journalDataSource), journalId, pendingTimeout, Duration.ofSeconds(35),
                 () -> app.queryForObject("SELECT @@server_uuid", String.class), clock);
-        HoldSubjectResolver resolver = new HoldSubjectResolver(app, new ProductionPrivacyProviderRegistry(List.of()));
-        PrivacyHoldDecisions decisions = new PrivacyHoldDecisions(approval, holdProperties, clockProperties, clock);
+        this.resolver = new HoldSubjectResolver(app, new ProductionPrivacyProviderRegistry(List.of()));
+        this.decisions = new PrivacyHoldDecisions(approval, holdProperties, clockProperties, clock);
         ObjectProvider<io.micrometer.core.instrument.MeterRegistry> noMetrics = emptyProvider();
         this.gate = new PrivacyHoldGate(store, journal, resolver, noMetrics);
-        TransactionTemplate independent = PrivacyHoldConfiguration.requiresNew(new DataSourceTransactionManager(appDataSource));
-        PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLog);
+        this.independent = PrivacyHoldConfiguration.requiresNew(new DataSourceTransactionManager(appDataSource));
+        this.audit = new PrivacyHoldAudit(auditLog);
+        this.oidc = oidc;
+        this.clock = clock;
         this.projector = new PrivacyHoldProjector(store, journal, independent, audit, clock);
         this.service = new PrivacyHoldService(mock(PrivacyAccessGuard.class), oidc, decisions, journal, store, resolver,
                 gate, projector, audit, independent, clock,
                 () -> new PrivacyHoldService.Actor(tenantId, 1L, "privacy-admin-mysql"));
         this.reconciler = new PrivacyHoldProjectionReconciler(journal, store, projector, decisions, audit, independent,
                 clock, noMetrics);
+    }
+
+    private final HoldSubjectResolver resolver;
+    private final PrivacyHoldDecisions decisions;
+    private final TransactionTemplate independent;
+    private final PrivacyHoldAudit audit;
+    private final OidcSecurityProperties oidc;
+    private final Clock clock;
+
+    /**
+     * 解除の service（NF07-REL。同じ store・Journal・projector・監査）。verifier は test が prod の {@code MockEnvironment} と
+     * test-only 鍵の registry で生成して渡す。D-03 の試験用決定ID は呼出し側が {@link #approval} に設定する。
+     */
+    PrivacyHoldReleaseService releaseService(com.ses.privacy.foundation.HoldReleaseVerifier verifier,
+                                             com.ses.privacy.foundation.HoldReleaseTrustRegistry registry,
+                                             java.util.function.Supplier<PrivacyHoldService.Actor> actor) {
+        return new PrivacyHoldReleaseService(mock(PrivacyAccessGuard.class), oidc, decisions, journal, store, resolver,
+                projector, audit, independent, clock, actor, verifier, registry);
     }
 
     /** tenant の catalog（帰属できない element 1件）。 */
@@ -112,8 +132,11 @@ final class PrivacyHoldMySqlComponents {
         return mock(ObjectProvider.class);
     }
 
-    /** 本番 adapter を包み、append の後の ACK 喪失と append 前の一時停止を注入する。 */
-    static final class FaultyPort implements PrivacyJournalPort {
+    /**
+     * 本番 adapter を包み、append の後の ACK 喪失と append 前の一時停止を注入する。解除（NF07-REL）の append も同じ注入を
+     * 通して本番 adapter の {@code appendHoldRelease} へ渡す。
+     */
+    static final class FaultyPort implements PrivacyJournalPort, com.ses.privacy.foundation.HoldReleaseJournalPort {
         private final PrivacyJournalPort delegate;
         final AtomicInteger appendCalls = new AtomicInteger();
         final AtomicInteger loseAckAfterCommit = new AtomicInteger();
@@ -129,6 +152,15 @@ final class PrivacyHoldMySqlComponents {
 
         @Override
         public JournalAck append(JournalCommand command) {
+            return inject(() -> delegate.append(command));
+        }
+
+        @Override
+        public JournalAck appendHoldRelease(com.ses.privacy.foundation.VerifiedHoldRelease proof) {
+            return inject(() -> ((com.ses.privacy.foundation.HoldReleaseJournalPort) delegate).appendHoldRelease(proof));
+        }
+
+        private JournalAck inject(java.util.function.Supplier<JournalAck> append) {
             beforeAppend.accept(appendCalls.incrementAndGet());
             CountDownLatch gate = release;
             if (gate != null) {
@@ -145,7 +177,7 @@ final class PrivacyHoldMySqlComponents {
             if (unreachable) {
                 throw new JournalUnavailableException("test: unreachable", null);
             }
-            JournalAck ack = delegate.append(command);
+            JournalAck ack = append.get();
             if (loseAckAfterCommit.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
                 throw new JournalUnavailableException("test: ACK lost after commit", null);
             }

@@ -44,6 +44,9 @@ import java.util.Set;
  *       {@code RECONCILED}、理由 hash は 0×64（値を持たない）、開始者は 0（sentinel）、開始日時は Journal の event 時刻。
  *       開始時の理由コード・ticket・D-05 の決定ID・選択は hold ID で開始要求の監査から引ける（理由 hash は監査にも残さない）。
  *       開始の service が後から同じ event を projection しに来た場合は、開始者自身の値で置き換える（Review P3-2）。</li>
+ *   <li>解除（NF07-REL）: pending が解除の command（{@code hr-}）なら、Journal の HOLD_RELEASED（{@code case_id} が hold ID）から
+ *       projection の解除を書き pending を消す。projection が ACTIVE のまま Journal に解除がある hold も、開始の追い付きの後に
+ *       解除を書く。解除の pending の timeout 後の解消は開始と同じ規則（消す直前の再照会、{@code pending_since} の CAS）。</li>
  * </ol>
  * 監査と監視の規則（Review P3-3）: 状態を変えた判定（projection・pending の解消・追い付き）だけを required 監査に残す。状態を
  * 変えない判定（保留・複数位置・解釈不能・照会不能）は、状態が続く間毎回出るため監査には残さず、固定 code の WARN と、
@@ -167,8 +170,9 @@ public class PrivacyHoldProjectionReconciler {
 
     private Outcome resolvePending(String tenantId, PrivacyHoldProjectionStore.StateRow state) {
         String commandId = state.pendingCommandId();
-        Optional<String> holdId = PrivacyHoldPartitions.holdIdOfCommand(commandId);
-        if (holdId.isEmpty()) {
+        boolean release = PrivacyHoldPartitions.isReleaseCommand(commandId);
+        Optional<String> holdId = release ? Optional.empty() : PrivacyHoldPartitions.holdIdOfCommand(commandId);
+        if (!release && holdId.isEmpty()) {
             return hold(Outcome.PENDING_AMBIGUOUS, "commandIdUnparsable");
         }
         List<PrivacyHoldJournalIndex.CommandLocation> locations = journal.index().findCommand(tenantId, commandId);
@@ -177,6 +181,11 @@ public class PrivacyHoldProjectionReconciler {
         }
         if (locations.size() == 1) {
             String partitionRef = locations.get(0).partitionRef();
+            if (release) {
+                // 解除の command ID から hold ID は導かない（解除 event の case_id を使う。NF07-REL）
+                return projectReleaseFromJournal(tenantId, partitionRef, commandId, commandId,
+                        PrivacyHoldAudit.RECONCILE_RELEASE_PROJECTED, Outcome.PENDING_PROJECTED, "releaseAckFound");
+            }
             return projectFromJournal(tenantId, partitionRef, commandId, holdId.get(), commandId,
                     PrivacyHoldAudit.RECONCILE_PROJECTED, Outcome.PENDING_PROJECTED, "ackFound");
         }
@@ -198,8 +207,10 @@ public class PrivacyHoldProjectionReconciler {
             // pending_since が同時に進められていれば（再送の直前の CAS）消さない
             int updated = store.clearExpiredPending(tenantId, journal.journalId(), commandId, state.pendingSince());
             if (updated == 1) {
-                audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_ABANDONED,
-                        PrivacyHoldAudit.fields("hold", holdId.get()), 200, true);
+                // 解除の pending は hold ID を command から導けないため、種別だけを残す（command ID は監査に出さない）
+                audit.record(SYSTEM_ACTOR, PrivacyHoldAudit.RECONCILE_ABANDONED, release
+                        ? PrivacyHoldAudit.fields("kind", "RELEASE")
+                        : PrivacyHoldAudit.fields("hold", holdId.get()), 200, true);
             }
             return updated;
         });
@@ -207,6 +218,10 @@ public class PrivacyHoldProjectionReconciler {
                 : hold(Outcome.PENDING_KEPT, "pendingChangedBeforeClear");
     }
 
+    /**
+     * Journal にあって projection に無い hold event を追い付かせる。開始（HOLD_STARTED）を先に、解除（HOLD_RELEASED）を後に
+     * 反映する（同じ hold の開始が無ければ解除は書けないため。NF07-REL）。解除は projection が ACTIVE の hold だけが対象。
+     */
     private List<Outcome> catchUp(String tenantId) {
         List<Outcome> outcomes = new ArrayList<>();
         PrivacyHoldJournalIndex.TenantView view = journal.index().tenantView(tenantId);
@@ -214,7 +229,12 @@ public class PrivacyHoldProjectionReconciler {
         for (PrivacyHoldProjectionStore.HoldRow hold : store.holds(tenantId, false)) {
             projected.add(hold.holdId());
         }
+        List<PrivacyHoldJournalIndex.HoldEvent> releases = new ArrayList<>();
         for (PrivacyHoldJournalIndex.HoldEvent event : view.holdEvents()) {
+            if (event.release()) {
+                releases.add(event);
+                continue;
+            }
             if (event.caseId() != null && projected.contains(event.caseId())) {
                 continue;
             }
@@ -225,7 +245,54 @@ public class PrivacyHoldProjectionReconciler {
             outcomes.add(projectFromJournal(tenantId, event.partitionRef(), event.commandId(), event.caseId(), null,
                     PrivacyHoldAudit.RECONCILE_CAUGHT_UP, Outcome.CAUGHT_UP, "projectionMissing"));
         }
+        if (releases.isEmpty()) {
+            return outcomes;
+        }
+        Set<String> active = new HashSet<>();
+        for (PrivacyHoldProjectionStore.HoldRow hold : store.holds(tenantId, false)) {
+            if (hold.active()) {
+                active.add(hold.holdId());
+            }
+        }
+        for (PrivacyHoldJournalIndex.HoldEvent release : releases) {
+            if (release.caseId() == null || !PrivacyHoldPartitions.HOLD_ID.matcher(release.caseId()).matches()) {
+                outcomes.add(hold(Outcome.UNRECOGNIZED, "releaseCaseIdInvalid"));
+                continue;
+            }
+            if (!active.contains(release.caseId())) {
+                // 既に RELEASED（または開始を書けなかった hold。開始の判定が UNRECOGNIZED を返している）
+                continue;
+            }
+            outcomes.add(projectReleaseFromJournal(tenantId, release.partitionRef(), release.commandId(), null,
+                    PrivacyHoldAudit.RECONCILE_RELEASE_CAUGHT_UP, Outcome.CAUGHT_UP, "releaseProjectionMissing"));
+        }
         return outcomes;
+    }
+
+    /**
+     * Journal の HOLD_RELEASED から projection の解除を書く（NF07-REL）。event は chain を検証したものだけを使う。解除する hold の
+     * projection がまだ無ければ（開始の追い付きが同じ回で失敗した等）保留し、次の回に任せる。
+     */
+    private Outcome projectReleaseFromJournal(String tenantId, String partitionRef, String commandId,
+                                              String clearCommandId, String auditEvent, Outcome success, String reason) {
+        Optional<PrivacyHoldPartitions.Target> target = PrivacyHoldPartitions.targetOf(partitionRef);
+        if (target.isEmpty()) {
+            return hold(Outcome.UNRECOGNIZED, "partitionUnparsable");
+        }
+        JournalEvent event = projector.acknowledgedEvent(tenantId, partitionRef, commandId);
+        if (event == null || event.caseId() == null || !PrivacyHoldProjector.isHoldRelease(event, event.caseId())
+                || !PrivacyHoldPartitions.HOLD_ID.matcher(event.caseId()).matches()) {
+            return hold(Outcome.UNRECOGNIZED, "eventNotHoldRelease");
+        }
+        String holdId = event.caseId();
+        if (store.hold(tenantId, holdId).isEmpty()) {
+            return hold(Outcome.PENDING_KEPT, "releaseBeforeStartProjection");
+        }
+        projector.projectRelease(tenantId, holdId, event.createdAt(), clearCommandId, SYSTEM_ACTOR, auditEvent,
+                PrivacyHoldAudit.fields("hold", holdId, "target", target.get().type().name(),
+                        "element", target.get().type() == PrivacyHoldTargetType.DATA_ELEMENT ? target.get().value() : null,
+                        "revision", Long.toString(event.revision())));
+        return mark(success, reason);
     }
 
     /** Journal の event から projection を書く。解釈できなければ UNRECOGNIZED（監査には残さない）。 */

@@ -27,6 +27,11 @@ final class PrivacyHoldPartitions {
     static final int MAX_PARTITION_LENGTH = 128;
     static final Pattern HOLD_ID = Pattern.compile("ph-[0-9a-f]{32}");
     static final Pattern COMMAND_ID = Pattern.compile("hs-[0-9a-f]{32}");
+    /**
+     * 解除の command ID（NF07-REL）。発行者・承認者が署名する束縛に入るため、署名の前に要求者側で決める（{@code hr-} +
+     * 32桁 hex）。hold ID とは別の乱数で、command ID から hold ID は導かない（解除 event の {@code case_id} が hold ID）。
+     */
+    static final Pattern RELEASE_COMMAND_ID = Pattern.compile("hr-[0-9a-f]{32}");
     static final Pattern DATA_ELEMENT_ID = Pattern.compile("[A-Z][A-Z0-9_]*(:[A-Z][A-Z0-9_]*)?");
 
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -48,6 +53,11 @@ final class PrivacyHoldPartitions {
             return Optional.empty();
         }
         return Optional.of("ph-" + commandId.substring(3));
+    }
+
+    /** 解除の command ID か（NF07-REL）。 */
+    static boolean isReleaseCommand(String commandId) {
+        return commandId != null && RELEASE_COMMAND_ID.matcher(commandId).matches();
     }
 
     /** SUBJECT hold の partition（subject 参照が不正なら null）。 */

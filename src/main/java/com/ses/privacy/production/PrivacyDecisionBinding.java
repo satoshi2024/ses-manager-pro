@@ -86,6 +86,11 @@ public final class PrivacyDecisionBinding {
         /** 正式 Privacy Owner。 */
         D01("d01"),
         /**
+         * 署名鍵（Trust Anchor・KMS の方式と鍵）。hold 解除 proof（NF07-REL）の開放の前提で、D-05 と同じく capability の承認には
+         * 含めない（D-09 の束縛内容 digest は変わらない）。解除の入口で {@link #evaluateStandalone} が検査する。
+         */
+        D03("d03"),
+        /**
          * hold の種類と権限者（NF07-A1H の hold 開始の前提）。capability の承認には含めない（{@link #requiredDecisions}
          * に入れない）ため、D-09 の束縛内容 digest は変わらない。hold 開始の入口で {@link #evaluateStandalone} が検査する。
          */

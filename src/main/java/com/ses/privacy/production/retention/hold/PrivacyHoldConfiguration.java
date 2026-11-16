@@ -1,9 +1,13 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.config.OidcSecurityProperties;
+import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
+import com.ses.privacy.foundation.HoldReleaseVerifier;
+import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalProperties;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
+import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
 import com.ses.service.AuditLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
@@ -95,7 +99,8 @@ public class PrivacyHoldConfiguration {
                                                  PrivacyHoldGate privacyHoldGate,
                                                  AuditLogService auditLogService,
                                                  PlatformTransactionManager transactionManager,
-                                                 ObjectProvider<Clock> clock) {
+                                                 ObjectProvider<Clock> clock,
+                                                 ObjectProvider<PrivacyHoldReleaseService> releaseService) {
         PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
@@ -103,7 +108,52 @@ public class PrivacyHoldConfiguration {
         return new PrivacyHoldService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
                 privacyHoldJournal, store, holdSubjectResolver, privacyHoldGate,
                 new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock), audit,
-                requiresNew, resolvedClock, null);
+                requiresNew, resolvedClock, null, () -> {
+                    PrivacyHoldReleaseService service = releaseService.getIfAvailable();
+                    return service != null && service.isOpen();
+                });
+    }
+
+    /**
+     * hold 解除 authority の trust anchor（NF07-REL）。第1期は空（D-03 の署名前は anchor を登録しない）。KMS / HSM・設定からの
+     * 読込は NF07-TRUST で差し替える。
+     */
+    @Bean
+    public HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry() {
+        return ConfiguredHoldReleaseTrustRegistry.empty();
+    }
+
+    /**
+     * hold の解除（NF07-REL）。verifier は prod profile でだけ生成し（{@code ProductionPrivacyComponents.holdReleaseVerifier}）、
+     * 失効状態は第1期は常に UNKNOWN（{@link UnknownRevocationStatusProvider}）。prod 以外・D-03 と D-05 の署名前・trust anchor
+     * 未登録の間は、解除の入口は存在しない URL と同じ404になる（{@link PrivacyHoldReleaseService#isOpen()}）。
+     */
+    @Bean
+    public PrivacyHoldReleaseService privacyHoldReleaseService(PrivacyAccessGuard accessGuard,
+                                                               ObjectProvider<OidcSecurityProperties> oidcProperties,
+                                                               PrivacyHoldDecisions privacyHoldDecisions,
+                                                               PrivacyHoldJournal privacyHoldJournal,
+                                                               JdbcTemplate jdbcTemplate,
+                                                               HoldSubjectResolver holdSubjectResolver,
+                                                               AuditLogService auditLogService,
+                                                               PlatformTransactionManager transactionManager,
+                                                               ObjectProvider<Clock> clock,
+                                                               HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry,
+                                                               Environment environment) {
+        PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
+        TransactionTemplate requiresNew = requiresNew(transactionManager);
+        PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
+        Clock resolvedClock = clockOf(clock);
+        // foundation の guard と同じく active profile だけで判定する（default profile の prod では生成しない）
+        boolean activeProd = java.util.Arrays.asList(environment.getActiveProfiles()).contains("prod");
+        HoldReleaseVerifier verifier = activeProd
+                ? ProductionPrivacyComponents.holdReleaseVerifier(environment, privacyHoldReleaseTrustRegistry,
+                new UnknownRevocationStatusProvider(), resolvedClock)
+                : null;
+        return new PrivacyHoldReleaseService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
+                privacyHoldJournal, store, holdSubjectResolver,
+                new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock), audit,
+                requiresNew, resolvedClock, null, verifier, privacyHoldReleaseTrustRegistry);
     }
 
     @Bean

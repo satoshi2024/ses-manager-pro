@@ -36,7 +36,7 @@ class PrivacyFoundationIsolationTest {
         for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,
                 ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
                 ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class,
-                ProductionPrivacyJournalAdapter.class)) {
+                ProductionPrivacyJournalAdapter.class, HoldReleaseProofVerifier.class)) {
             assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
             for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
                 assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),
@@ -86,6 +86,11 @@ class PrivacyFoundationIsolationTest {
         assertEquals(0, attempts.get(), "生成時とhold解除の拒否ではJournalへ接続しない");
         assertEquals(0, ProductionPrivacyJournalAdapter.class.getConstructors().length,
                 "本番adapterにpublic constructorがない");
+        // NF07-REL: 解除は検証済み proof を受け取る別入口だけ。proof は verifier だけが作り、public constructor を持たない
+        assertTrue(journal instanceof HoldReleaseJournalPort, "本番adapterは解除の入口を持つ");
+        assertEquals(0, VerifiedHoldRelease.class.getConstructors().length, "解除proofにpublic constructorがない");
+        assertFalse(HoldReleaseJournalPort.class.isAssignableFrom(JdbcPrivacyJournalAdapter.class),
+                "合成adapterは解除の入口を持たない（I-6）");
     }
 
     @Test
