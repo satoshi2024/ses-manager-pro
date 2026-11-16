@@ -44,6 +44,8 @@ public class PrivacyDsarDeadlineScheduler {
     static final String STAGE_DUE_SOON = "DUE_SOON";
     static final String STAGE_OVERDUE = "OVERDUE";
     static final String LOG_CODE_NO_RECIPIENT = "NF07_DSAR_DEADLINE_NO_RECIPIENT";
+    /** 頁数の上限で読み切れなかった（上限より後の case はこの回では通知しない）。件数だけを出す（delta review D-2）。 */
+    static final String LOG_CODE_TRUNCATED = "NF07_DSAR_DEADLINE_TRUNCATED";
     /**
      * 1回の実行で読む case の頁の大きさと頁数の上限（期限日の早い順に最大 {@code PAGE_SIZE * MAX_PAGES} 件）。
      * 通知済みの古い超過 case が上限を占めて新しい期限接近の case を落とさないよう、1頁で打ち切らない（review P3-10）。
@@ -114,6 +116,10 @@ public class PrivacyDsarDeadlineScheduler {
             due.addAll(batch);
             if (batch.size() < PAGE_SIZE) {
                 break;
+            }
+            if (page == MAX_PAGES) {
+                log.warn("{}: 期限が近いDSARが上限を超えたため、この回は期限日の早い順に一部だけを通知します: read={} pageSize={} maxPages={}",
+                        LOG_CODE_TRUNCATED, due.size(), PAGE_SIZE, MAX_PAGES);
             }
         }
         if (due.isEmpty()) {

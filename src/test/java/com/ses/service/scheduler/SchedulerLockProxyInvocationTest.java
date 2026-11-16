@@ -13,6 +13,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.transaction.AfterTransaction;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
@@ -73,6 +74,11 @@ class SchedulerLockProxyInvocationTest {
                 .as("proxy 経由で lock %s を取った", lockName).isEqualTo(1);
     }
 
+    /**
+     * 呼出しの前にも lock の行を消し、「lock を取った」の判定が残っていた行で成り立たないようにする（delta review D-3）。
+     * 後でも消し、共有 H2 に行を残さない。
+     */
+    @BeforeTransaction
     @AfterTransaction
     void removeLockRows() {
         jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (?, ?, ?)", (Object[]) LOCK_NAMES);

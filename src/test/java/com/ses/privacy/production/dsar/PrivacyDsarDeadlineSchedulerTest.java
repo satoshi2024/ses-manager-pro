@@ -1,5 +1,10 @@
 package com.ses.privacy.production.dsar;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitchProperties;
@@ -33,6 +38,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -177,6 +183,46 @@ class PrivacyDsarDeadlineSchedulerTest {
         verify(notifications).publishToUser(eqLong(privacyAdmin), anyString(), anyString(),
                 org.mockito.ArgumentMatchers.eq("受付番号 DSAR-20261110-PAGE0002 の期限は 2026-11-18 です。"),
                 org.mockito.ArgumentMatchers.eq("/privacy/dsar/" + soon.getId()), anyString(), anyString());
+    }
+
+    /** delta review D-2: 頁数の上限で読み切れなければ、件数だけの WARN を出して黙って切り捨てない。 */
+    @Test
+    void 頁数の上限で読み切れなければ件数だけのWARNを出す() {
+        PrivacyRequestMapper mapper = mock(PrivacyRequestMapper.class);
+        List<PrivacyRequest> fullPage = new ArrayList<>();
+        for (int i = 0; i < PrivacyDsarDeadlineScheduler.PAGE_SIZE; i++) {
+            PrivacyRequest row = new PrivacyRequest();
+            row.setId(i + 1L);
+            row.setRequestNo("DSAR-20261116-FULL" + i);
+            row.setStatus("REQUESTED");
+            row.setDueDate(TODAY.plusDays(1));
+            fullPage.add(row);
+        }
+        when(mapper.selectPage(org.mockito.ArgumentMatchers.<Page<PrivacyRequest>>any(), any())).thenAnswer(call -> {
+            Page<PrivacyRequest> page = new Page<>();
+            page.setRecords(fullPage);
+            return page;
+        });
+        PrivacyDsarRecipientResolver resolver = mock(PrivacyDsarRecipientResolver.class);
+        when(resolver.resolve(TENANT)).thenReturn(List.of());
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(PrivacyDsarDeadlineScheduler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            new PrivacyDsarDeadlineScheduler(mapper, resolver, notifications, decisions(), oidc(TENANT), CLOCK,
+                    switches(true)).dispatch(TODAY);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        verify(mapper, times(PrivacyDsarDeadlineScheduler.MAX_PAGES)).selectPage(any(), any());
+        assertThat(appender.list).filteredOn(event -> event.getLevel() == Level.WARN)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anyMatch(message -> message.contains(PrivacyDsarDeadlineScheduler.LOG_CODE_TRUNCATED)
+                        && message.contains("read=" + PrivacyDsarDeadlineScheduler.PAGE_SIZE
+                        * PrivacyDsarDeadlineScheduler.MAX_PAGES))
+                .noneMatch(message -> message.contains("DSAR-20261116-FULL"));
     }
 
     private static Long eqLong(long value) {

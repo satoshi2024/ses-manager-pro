@@ -84,6 +84,10 @@ class PrivacyRequestServiceTest {
     private PrivacyActionMapper actionMapper;
     @Autowired
     private PlatformTransactionManager transactionManager;
+    @Autowired
+    private AuditLogService realAuditLogService;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     private PrivacyAccessGuard guard;
     private CapturingAuditLogService auditLog;
@@ -670,15 +674,35 @@ class PrivacyRequestServiceTest {
         assertThat(auditLog.codes).isEmpty();
     }
 
+    /**
+     * 本物の監査 service で {@code t_audit_log} へ書けること（H2 の列も本番と同じ {@code method VARCHAR(10)}）。以前の
+     * {@code PRIVACY_DSAR}（12文字）では列に収まらず、required 監査の失敗で DSAR の全操作が失敗していた。
+     */
+    @Test
+    void 監査は本番と同じ長さのmethod列へ本物の監査serviceで書ける() {
+        PrivacyRequestService withRealAudit = service(TENANT, new PrivacyDsarAudit(realAuditLogService));
+
+        PrivacyDsarViews.Transition result = withRealAudit.intake(intake("T-REAL-AUDIT", null));
+
+        assertThat(jdbcTemplate.queryForList("SELECT method FROM t_audit_log WHERE uri = ?", String.class,
+                "/api/privacy/dsar#INTAKE_RECORDED?requestNo=" + result.requestNo() + "&to=REQUESTED"))
+                .containsExactly("PRIV_DSAR");
+        assertThat(requestMapper.selectById(result.requestId()).getStatus()).isEqualTo("REQUESTED");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private PrivacyRequestService service(String actorTenant) {
+        return service(actorTenant, new PrivacyDsarAudit(auditLog));
+    }
+
+    private PrivacyRequestService service(String actorTenant, PrivacyDsarAudit audit) {
         OidcSecurityProperties oidc = new OidcSecurityProperties();
         oidc.setTenantId(TENANT);
         TransactionTemplate nested = new TransactionTemplate(transactionManager);
         nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         return new PrivacyRequestService(guard, oidc, new PrivacyDsarDecisions(approval, features, CLOCK), requestMapper,
-                linkMapper, actionMapper, registry, new PrivacyDsarAudit(auditLog), nested, CLOCK,
+                linkMapper, actionMapper, registry, audit, nested, CLOCK,
                 () -> new PrivacyRequestService.Actor(actorTenant, ADMIN_ID, "privacy-admin-a"));
     }
 

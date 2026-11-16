@@ -20,7 +20,13 @@ import java.util.Objects;
  */
 final class PrivacyHoldAudit {
 
-    static final String METHOD = "PRIVACY_HOLD";
+    /**
+     * 監査の method 列の値。{@code t_audit_log.method} は {@code VARCHAR(10)}（V11）のため10文字以内にする（以前の
+     * {@code PRIVACY_HOLD} は12文字で、MySQL の strict mode では監査の insert が失敗し、required 監査を書く hold の開始・解除が
+     * 常に失敗していた。fast・MySQL の test は監査を mock にしていたため検出できなかった。NF07-REL 第3 commit で発見）。
+     * 経路の識別は application code（{@code NF07_HOLD_<event>}）で行う。
+     */
+    static final String METHOD = "PRIV_HOLD";
     static final String URI_PREFIX = "/api/privacy/holds#";
     private static final int MAX_URI = 500;
 

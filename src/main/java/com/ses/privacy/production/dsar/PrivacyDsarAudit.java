@@ -18,7 +18,13 @@ import java.util.Objects;
  */
 public class PrivacyDsarAudit {
 
-    static final String METHOD = "PRIVACY_DSAR";
+    /**
+     * 監査の method 列の値。{@code t_audit_log.method} は {@code VARCHAR(10)}（V11）のため10文字以内にする（以前の
+     * {@code PRIVACY_DSAR} は12文字で、MySQL の strict mode では監査の insert が失敗し、required 監査を書く DSAR の全操作が
+     * 失敗していた。test は監査を fake にしていたため検出できなかった）。経路の識別は application code（{@code NF07_DSAR_<event>}）
+     * で行う。列の長さは {@code AuditLogMethodLengthGuardTest} が main 全体で確かめる。
+     */
+    static final String METHOD = "PRIV_DSAR";
     static final String URI_PREFIX = "/api/privacy/dsar#";
     static final String APPLICATION_CODE_PREFIX = "NF07_DSAR_";
     private static final int MAX_URI = 500;
