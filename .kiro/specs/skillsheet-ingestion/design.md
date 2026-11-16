@@ -211,6 +211,14 @@ UNION ALL SELECT 'HR', id FROM m_menu WHERE menu_key = 'resume-ingestion';
 - **degrade**：`ai.enabled=false`/`mock` でも mock 解析器で「要確認」まで到達（機能停止しない）。
 - **PII保持**（A8-05）：確定/却下後の `extracted_text` 保持可否と却下ジョブの自動パージ期間を
   `application.yml`（例 `app.resume.retention-days`）で設定可能にし、清理バッチで実施。
+  - 文書台帳の副本（2026-11-16 依頼者決定。Privacy・文書 owner の書面署名待ち）：upload 時に文書台帳へ登録した副本
+    （`RESUME_INGESTION`。原本とは別の実体 file）も、取込原本の purge に合わせて処分対象にし、両者の保存期限を揃える。
+    清理バッチ（`ResumeRetentionCleanupServiceImpl`、02:00）が原本の purge の後に
+    `ResumeIngestionLedgerRetentionService` を呼び、原本を purge 済みのジョブに link した副本の保存期限を当日にする
+    （DRAFT は確定して保存期限を設定、確定済み等は状態を変えず保存期限だけを早める）。処分そのものは既存の
+    `DocumentRetentionJob`（02:30、廃棄候補）→ 管理者の承認・執行で行い、legal hold・NF07 hold はそこで判定する。
+    legal hold 中の副本は変えず WARN を出し、解除後の実行で拾い直す。副本の処理の失敗は原本の purge を止めない。
+    詳細は `.kiro/specs/privacy-retention-dsar/production-bridge-phased-plan.md` §3.4.1「D4 と文書台帳の副本」。
 - **重複要員**：確定前に同名＋生年月日の既存要員を警告（ブロックしない）。
 
 ## 7. テスト方針

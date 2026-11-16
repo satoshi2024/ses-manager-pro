@@ -137,6 +137,11 @@ P は本機能の依存先であり、第8回監査 A8 の恒久対応を兼ね�
 
 - [ ] M1. F 層ギャップメモの解消（A〜D で記録した共有ファイル不足を一括対応）。
 - [ ] M2. PII保持ポリシー（A8-05）：`app.resume.retention-days` 設定＋却下ジョブ自動パージを清理バッチへ。
+  - 2026-11-16 追記：原本の purge に合わせて文書台帳の副本（`RESUME_INGESTION`）の保存期限を当日にし、既存の
+    処分経路（`DocumentRetentionJob` → 管理者の承認・執行）の対象にする（`ResumeIngestionLedgerRetentionService`、
+    test `ResumeIngestionLedgerRetentionTest`）。開放前に Privacy owner・文書 owner の書面署名が必要（design §6、
+    deploy-runbook の V197 行）。Demo：期限切れの取込ジョブを清理した後、副本が CONFIRMED・保存期限＝当日になり、
+    02:30 の job で廃棄申請（PENDING）が1件だけできること。legal hold 中の副本は変わらないこと。
 - [ ] M3. ファイルダウンロードのアクセス制御（A8-04）：取込原本・スキルシートのスコープ検証、`nosniff`。
 - [ ] M4. ドキュメント追随：CLAUDE.md の「主要モジュール一覧」に本機能とAI基盤の実状を追記
     （A8-02/A8-01 の変更を反映。CLAUDE.md 追随を完了条件に含める）。

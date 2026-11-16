@@ -496,7 +496,7 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 | D1 | `DocumentServiceImpl.executeDisposal`（`POST /api/documents/disposal/{requestId}/execute`） | 管理者の手動（承認済み申請） | 文書を DISPOSED にし、全 version の実体を物理削除 | F2 の `DocumentFileProvider` と同じ規則（和集合。下の「D1〜D3 の本人導出」）。人を指す link（直接・間接）と 1on1 相談メモの逆参照から導出し、どれにも当たらない文書は帰属不能 | `DOCUMENT:<document_type>` | 同一 tx 内、更新の直前に照会する。SUBJECT または DATA_ELEMENT の hold に当たれば 409（`error.privacy.holdActive`）。gate が `UNAVAILABLE` でも 409 |
 | D2 | `DocumentServiceImpl.requestDisposal` | 管理者の手動 | PENDING 申請の作成（非破壊） | D1 と同じ | D1 と同じ | hold に当たれば 409（申請を作らない） |
 | D3 | `DocumentRetentionJob` | 自動（日次） | 期限到来文書の PENDING 申請作成（非破壊） | D1 と同じ | D1 と同じ | 当たる文書は申請を作らず skip し、件数を警告する |
-| D4 | `ResumeRetentionCleanupServiceImpl`（履歴取込） | 自動（日次） | 原本の実体削除と `extracted_text` 消去 | `converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合（両方ある行はどちらの hold でも止まる。優先順位にすると候補者だけの hold で変換済みの行を消してしまう）。どちらも無ければ帰属不能 | `RESUME_INGESTION_ORIGINAL`、`RESUME_INGESTION_TEXT` | 帰属できる行は SUBJECT hold に当たる行だけ skip。帰属不能な行は DATA_ELEMENT hold があるときだけ止まる |
+| D4 | `ResumeRetentionCleanupServiceImpl`（履歴取込） | 自動（日次） | 原本の実体削除と `extracted_text` 消去。続けて、原本を purge 済みのジョブに link した文書台帳の副本（`RESUME_INGESTION`）の保存期限を当日に合わせる（副本は消さない。下の「D4 と文書台帳の副本」） | `converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合（両方ある行はどちらの hold でも止まる。優先順位にすると候補者だけの hold で変換済みの行を消してしまう）。どちらも無ければ帰属不能 | `RESUME_INGESTION_ORIGINAL`、`RESUME_INGESTION_TEXT` | 帰属できる行は SUBJECT hold に当たる行だけ skip。帰属不能な行は DATA_ELEMENT hold があるときだけ止まる |
 | D5 | 同（BP 空き取込） | 自動（日次） | `extracted_text` 消去 | `converted_availability_id` → BP_AVAILABILITY、無ければ帰属不能 | `BP_AVAILABILITY_INGESTION_TEXT` | D4 と同じ |
 | D6 | `AiRecommendationRetentionScheduler`（`ai.retention.scheduler-enabled=true` のときだけ Bean がある） | 自動 | redacted summary の purge | F2 の `AiLogProvider` と同じ規則（summary の本人＝source 要員、無ければ推薦結果の1件目の要員）。案件→要員の run は `rank_no=1` の ENGINEER、要員→案件の run は `use_case=MATCHING` の `parameter_hash` を記録時の規則で再計算して source 要員を照合する。2件目以降の要員は第三者で本人にしない。導出できなければ帰属不能（下の「D6 の残余」） | `AI_REDACTED_SUMMARY` | D4 と同じ。接続は Bean の有無に依存しない service 側（`AiRecommendationRetentionService`）に入れ、Bean が無い構成でも test が成立するようにする |
 | D7 | `IntegrationHubRetentionPurgeScheduler` の record purge（IDEMPOTENCY / DELIVERY / INBOUND / INBOUND_REPLAY / AUDIT / EXTERNAL_AUDIT。EXTERNAL_AUDIT は V192 で追加） | 自動（60秒） | 保持期限切れ record の削除 | 帰属不能（record kind × retention class 単位） | `INTEGRATION_HUB_<KIND>` | DATA_ELEMENT hold があるときだけ、その kind を止める。SUBJECT hold では止めない |
@@ -506,6 +506,16 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 | D11 | 業務 record の削除で file 参照が外れる経路 | 手動 | 参照が外れた実体は D10 で消える | 各 `FileReferenceProvider` | — | `FileReferenceProvider` ごとに、論理削除行を参照に数えるかを A1H で一覧化する。held subject の実体は D10 の provider で守る。参照元の行が物理削除された実体は帰属できず守れない（残余、§9 R-15） |
 | D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
 | D13 | 他 NF の破壊的経路 | — | — | — | — | A1H 着手時に本表へ追記して同じ規則で分類する。対象外とするものは理由を書いて D-05 owner の受理を得る |
+
+**D4 と文書台帳の副本（2026-11-16 依頼者決定、NF07-F2 delta review P2-C。Privacy・文書 owner の署名待ち）**
+
+履歴取込の upload は原本と別に文書台帳へ副本（`RESUME_INGESTION`、V197。別の実体 file）を登録する。副本は取引日を持たず保存期限が NULL のままで、D3 の候補にならず無期限に残っていた。依頼者は「取込原本を `app.resume.retention-days` で purge するとき、副本も処分対象にして両者の保存期限を揃える」と決めた。実装は次のとおり（方式 (a)：保存期限を合わせて既存の処分経路に渡す。新しい削除点は作らない）。
+
+- D4 の原本 purge の後に `ResumeIngestionLedgerRetentionService.alignPurgedCopies` を呼ぶ。対象は、原本を purge 済み（`stored_file_name IS NULL`、確定済・却下）のジョブに同じ tenant の link を持つ副本で、DRAFT は `DocumentEligibilityService.confirm` で CONFIRMED・保存期限＝当日にし、CONFIRMED・AMENDED・CANCELLED は状態を変えず保存期限を当日に早める（`DocumentEligibilityService.alignRetention`。保存期限が既に当日以前なら変えない）。
+- 処分は既存の D3（02:30、`registerRetentionDisposalCandidate`。CONFIRMED のみ）→ 管理者の承認 → D1（`executeDisposal`）で行う。AMENDED・CANCELLED は D2（手動の申請）の対象になる。D1〜D3 は lock 後に legal hold を再確認し、NF07 hold の gate（A1H）も D1〜D3 に入るため、本経路は hold を迂回しない。
+- legal hold 中の副本は保存期限も変えず WARN を出す。毎回の実行で未処理の副本を照会し直すので、hold の解除後・一時的な失敗の後の実行で拾い直し、処理済みの副本は照会に出ない（再実行で重ねて変えず、D3 の申請も重複しない）。副本ごとに短い transaction で処理し、失敗しても原本の purge を戻さない。
+- NF07 の SUBJECT hold は、副本にも原本と同じ本人導出（D4 と同じ和集合。下の表の `RESUME_INGESTION`）で効く。DATA_ELEMENT hold は element が別（原本は `RESUME_INGESTION_ORIGINAL`、副本は `DOCUMENT:RESUME_INGESTION`）のため、原本の element だけを hold しても副本は D1〜D3 で止まらない。A1H で hold の対象を選ぶ所と runbook に両方を並べ、この扱いを D-05 owner が受理する。
+- 開放前に Privacy owner と文書 owner の書面署名を得る（deploy-runbook の V197 行・署名事項）。署名が得られない場合は `ResumeRetentionCleanupServiceImpl` の副本処理を外す変更を出す。
 
 **D1〜D3 の本人導出（F2 `DocumentFileProvider`、NF07-F2 review P2-4・delta review P2-A で確定）**
 

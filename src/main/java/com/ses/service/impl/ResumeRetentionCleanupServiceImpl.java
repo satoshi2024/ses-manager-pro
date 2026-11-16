@@ -1,24 +1,33 @@
 package com.ses.service.impl;
 
+import com.ses.common.util.LogRedaction;
 import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.ResumeIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.FileStorageService;
+import com.ses.service.document.ResumeIngestionLedgerRetentionService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
 /**
  * PII（個人情報）の保持期限管理サービス。
  * tenant inventoryごとに実行し、履歴取込ジョブの監査行を残したまま原本と解析結果を消去する。
+ *
+ * <p>原本の purge の後、文書台帳の副本（{@code RESUME_INGESTION}）の保存期限も当日に合わせ、既存の処分経路
+ * （{@code DocumentRetentionJob} の廃棄候補 → 管理者の承認・執行）の対象にする（2026-11-16 依頼者決定。Privacy・文書 owner の
+ * 署名待ち）。副本の処理は原本の purge とは別の短い transaction で行い、失敗しても purge を止めない。
+ * 本 class は transaction を持たない（副本ごとの transaction を呼出し側の transaction に参加させないため）。
  */
 @Slf4j
 @Service
@@ -29,6 +38,7 @@ public class ResumeRetentionCleanupServiceImpl {
     private final BpAvailabilityIngestionMapper bpAvailabilityIngestionMapper;
     private final FileStorageService fileStorageService;
     private final TenantAwareBatchRunner tenantAwareBatchRunner;
+    private final ObjectProvider<ResumeIngestionLedgerRetentionService> ledgerRetentionProvider;
 
     /** 最小保持日数。 */
     @Value("${app.resume.retention-days:30}")
@@ -44,7 +54,8 @@ public class ResumeRetentionCleanupServiceImpl {
         tenantAwareBatchRunner.run(tenantId -> cleanupTenant(tenantId, threshold));
     }
 
-    private void cleanupTenant(String tenantId, LocalDateTime threshold) {
+    /** 1 tenant 分の清理（test から tenant を限定して呼べるよう package-private）。 */
+    void cleanupTenant(String tenantId, LocalDateTime threshold) {
         List<ResumeIngestion> resumeTargets = resumeIngestionMapper
                 .selectExpiredOriginalsForTenant(tenantId, threshold);
         int purged = 0;
@@ -68,6 +79,7 @@ public class ResumeRetentionCleanupServiceImpl {
                 }
             }
         }
+        alignLedgerCopies(tenantId);
 
         // BP取込側も同じinventory境界でPIIを清理する。既存の監査行は論理削除しない。
         List<BpAvailabilityIngestion> bpTargets = bpAvailabilityIngestionMapper
@@ -78,6 +90,28 @@ public class ResumeRetentionCleanupServiceImpl {
         if (purged > 0 || !bpTargets.isEmpty()) {
             log.info("保持期限清理を実行しました: tenantId={}, resumeJobs={}, bpJobs={}",
                     tenantId, purged, bpTargets.size());
+        }
+    }
+
+    /**
+     * 原本を purge 済みのジョブに link した文書台帳の副本の保存期限を当日に合わせる。今回 purge したものに限らず、
+     * 前回までに合わせられなかった副本（hold の解除後・一時的な失敗）も毎回拾い直す。失敗しても原本の purge は戻さない。
+     */
+    private void alignLedgerCopies(String tenantId) {
+        ResumeIngestionLedgerRetentionService ledgerRetention = ledgerRetentionProvider.getIfAvailable();
+        if (ledgerRetention == null) {
+            return;
+        }
+        try {
+            ResumeIngestionLedgerRetentionService.Result result =
+                    ledgerRetention.alignPurgedCopies(tenantId, LocalDate.now());
+            if (result.aligned() > 0 || result.held() > 0 || result.failed() > 0) {
+                log.info("履歴取込原本の purge に合わせて文書台帳の副本を処分対象にしました: tenantId={}, aligned={}, "
+                        + "held={}, failed={}", tenantId, result.aligned(), result.held(), result.failed());
+            }
+        } catch (RuntimeException e) {
+            log.warn("文書台帳の副本の保存期限を合わせられませんでした。次の実行で再試行します: tenantId={}, exceptionType={}",
+                    tenantId, LogRedaction.exceptionType(e));
         }
     }
 }
