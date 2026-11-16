@@ -235,7 +235,7 @@ NF01細粒度epoch計画 §3.4「completeCase」・§4.2・§7.5。本節は実�
 
 | # | 内容 | 担当・扱い |
 |---|---|---|
-| R-1 | M6・既存MySQL試験は本バッチでは未実行。待ちの観測と1213/1205が出ないことはRunnerの実測で確定する。 | Runner: shard-3のM6を5回以上、shard-1の `LifecycleLockOrderMySqlTest`・`LifecycleMySqlIntegrationTest`、shard-2の `ResignationRevocationOutboxMySqlTest`・`EngineerScopeFenceMySqlTest` を3回以上、skip 0 |
+| R-1 | 実測済み（W3-16b 統合後の 57ca6c3f の Runner）: M6・`LifecycleLockOrderMySqlTest`・`ResignationRevocationOutboxMySqlTest`・`EngineerScopeFenceMySqlTest` を合計5回、他の mysql 16類を1回実行し、skip 0 で PASS した。以後の PR #121 の CI（16c6130e まで）の mysql shard でも PASS している。`LifecycleMySqlIntegrationTest` を3回以上というRunnerの指定は、57ca6c3f の1回と CI の各回の合計で満たす。FINAL-FIX で M6 にポータル紐付け登録のcaseを加えたため、そのcaseを最終SHAで再び実測する。 | Runner: 最終SHAで shard-3 のM6を5回以上、skip 0（他は CI の mysql shard） |
 | R-2 | 上長が互いの所属行の上長になっている2人について、利用者の無効化・削除（所属の一括終了と上長解除）と退社完了、または無効化・削除どうしを同時に実行すると、上長解除（clearManager）が相手の所属行を待ち合い1213になり得る（既存。W3-16a後半 review P3-2）。2人の退社完了どうしは、上長解除の対象行も rank 8 で同じ順にlockするため直列化される。今回からAPIは409で返す。 | 運用: 互いを上長にする所属を作らない。発生時は片方ずつ再実行する |
 | R-3 | 外部キー検査の共有lock: 要員の所属組織を書く更新と休暇申請は参照先の組織行（6 S）を、休暇申請は申請者本人の利用者行（3 S）も、要員行より先に取るようになった。利用者行への外部キー（`created_by`・`applicant_id` 等）も rank 3 の暗黙のS lockである。本人自助のwriterで要員行（7 X）を取ってから本人の利用者行を参照する行をinsertするものは、休暇申請のほかに見つからなかった（PWAの変更申請は要員行の後に利用者行を参照しない）。HR・管理者の操作（スキルの置換等）が自分に連携された要員に対して同じ形になる場合と、組織を参照する行をinsertする他の業務writerは未対応。 | 計画 §9 RR-15。1213は409で返る |
 | R-4 | 退社完了はlock前とlock後の2回、退社ゲートを判定する（読取の増加）。完了は管理操作で頻度が低いため許容する。 | 性能gateで確認 |

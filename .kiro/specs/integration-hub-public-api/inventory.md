@@ -97,7 +97,7 @@ fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）
 
 | 境界 | 現行実装 | 行/契約 | NF-05への含意 |
 |---|---|---|---|
-| 内部管理chain | SecurityConfig.securityFilterChain | SecurityConfig.java:117 | form login、HTTP Basic、OIDC、内部role、CSRFを持つ |
+| 内部管理chain | SecurityConfig.securityFilterChain | SecurityConfig.java:117 | form login、OIDC、内部role、CSRFを持つ。HTTP Basicは業務chainに無く、`GET /actuator/prometheus` 専用のchain（`@Order(2)`、STATELESS）だけが持つ（FINAL review §6.4 で訂正） |
 | 内部filter順 | MenuPermissionFilter → ApiAuditFilter → MfaEnforcementFilter → PersistentSessionFilter | SecurityConfig.java:120-126 | 新公開clientを内部Authenticationへ変換しない |
 | 内部認可 | ActionPermissionResolver + AuthorizationService + MenuPermissionFilter | MenuPermissionFilter.java:66-117 | menu/API actionの正本は内部向け。公開client scopeとは別モデルにする |
 | 内部audit | ApiAuditFilter | ApiAuditFilter.java:103-117 | /api/のPOST/PUT/DELETEとdownload中心。/external-api/は未カバー |

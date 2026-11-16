@@ -30,7 +30,18 @@
         { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
         { "name": "DB_POOL_SIZE", "value": "10" },
         { "name": "SHUTDOWN_TIMEOUT", "value": "30s" },
-        { "name": "TRUSTED_PROXIES", "value": "ALB_SUBNET_CIDRS_PLACEHOLDER" }
+        { "name": "TRUSTED_PROXIES", "value": "ALB_SUBNET_CIDRS_PLACEHOLDER" },
+        { "name": "OIDC_TENANT_ID", "value": "default" },
+        { "name": "OIDC_ISSUER_URI", "value": "OIDC_ISSUER_URI_PLACEHOLDER" },
+        { "name": "OIDC_AUTHORIZATION_URI", "value": "OIDC_AUTHORIZATION_URI_PLACEHOLDER" },
+        { "name": "OIDC_TOKEN_URI", "value": "OIDC_TOKEN_URI_PLACEHOLDER" },
+        { "name": "OIDC_JWK_SET_URI", "value": "OIDC_JWK_SET_URI_PLACEHOLDER" },
+        { "name": "OIDC_USER_INFO_URI", "value": "OIDC_USER_INFO_URI_PLACEHOLDER" },
+        { "name": "BREAK_GLASS_USERNAMES", "value": "" },
+        { "name": "ACCOUNTING_TENANT_IDS", "value": "default" },
+        { "name": "FREEE_REDIRECT_URI", "value": "FREEE_REDIRECT_URI_PLACEHOLDER" },
+        { "name": "CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION", "value": "v1" }
       ],
       "secrets": [
         {
@@ -56,6 +67,46 @@
         {
           "name": "MFA_ENCRYPTION_KEY",
           "valueFrom": "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/ses/prod/MFA_ENCRYPTION_KEY"
+        },
+        {
+          "name": "OIDC_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/oidc:client_id::"
+        },
+        {
+          "name": "OIDC_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/oidc:client_secret::"
+        },
+        {
+          "name": "PWA_CONTEXT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app:PWA_CONTEXT_SECRET::"
+        },
+        {
+          "name": "BP_BANK_ACCOUNT_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app:BP_BANK_ACCOUNT_ENCRYPTION_KEY::"
+        },
+        {
+          "name": "CERTIFICATION_NUMBER_CRYPTO_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:CERTIFICATION_NUMBER_CRYPTO_KEYS_V1::"
+        },
+        {
+          "name": "COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1::"
+        },
+        {
+          "name": "SPRING_APPLICATION_JSON",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app-json"
+        },
+        {
+          "name": "FREEE_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:client_id::"
+        },
+        {
+          "name": "FREEE_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:client_secret::"
+        },
+        {
+          "name": "FREEE_TOKEN_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/freee:token_encryption_key::"
         }
       ],
       "mountPoints": [
@@ -114,6 +165,7 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "requiredSettings": "The canonical list of the 29 settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0; this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. SPRING_APPLICATION_JSON carries compliance.gate.fingerprint-keys.default.current-key-version and .keys.<version> (OS environment variable names are not enumerated for that tenant map; runbook section 1.0 rows 23-24). BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_CLIENT_ID/SECRET, FREEE_REDIRECT_URI and FREEE_TOKEN_ENCRYPTION_KEY are required even when freee is not used.",
     "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",

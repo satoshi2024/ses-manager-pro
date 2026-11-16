@@ -55,6 +55,8 @@ If you already have a database that was set up by manually running the old `sql/
 
 `prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/R__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
 
+**The settings prod refuses to start without are listed in one place: `.kiro/specs/production-launch/deploy-runbook.md` §1.0** (secrets, OIDC metadata, key versions and keys, the freee client, and the other required settings). `infra/ecs/task-definition.prod.json` is only a placeholder template. When you add a prod fail-fast check (a validator, or a `@Value` whose empty or development default prod rejects), add its row to §1.0 and its name to the template in the same change. Otherwise the first deployment fails at startup, because nothing else lists the setting. Some of these checks don't run in tests: `FreeeAccountingProvider`, `FreeeIntegrationServiceImpl` and `BpCompanyServiceImpl` decide "prod" from the `spring.profiles.active` property, and `@ActiveProfiles("prod")` tests don't set that plain property, so CI never exercises them.
+
 ### Tests and the DB
 
 Tests do **not** need MySQL — Spring Boot tests pick up `src/test/resources/application-test.yml`, which uses an H2 in-memory DB in MySQL compatibility mode and disables Flyway (`spring.flyway.enabled: false`). The H2 schema for tests comes from **two** mechanisms, so keep both in sync when you change the schema:
