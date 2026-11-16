@@ -150,6 +150,8 @@
             </div>
             <p class="text-secondary mb-2 d-none" id="dsar-approve-own" th:text="#{privacyDsar.delivery.ownDraft}">自分が作成した草案は承認できません</p>
             <p class="text-warning mb-2 d-none" id="dsar-downloaded-expired" th:text="#{privacyDsar.delivery.downloadedExpired}">取得済みの承認資料は期限切れです</p>
+            <!-- 交付の記録は承認した資料の取得の後だけ（HYG-FINAL P3-B） -->
+            <p class="text-secondary mb-2 d-none" id="dsar-download-first" th:text="#{privacyDsar.delivery.downloadFirst}">交付を記録する前に資料をダウンロードしてください</p>
             <div class="d-none mb-2" id="dsar-review-panel">
                 <h3 class="h6 text-light mt-2" th:text="#{privacyDsar.delivery.reviewHeading}">草案の内容（承認前の確認）</h3>
                 <p class="text-secondary mb-1" th:text="#{privacyDsar.delivery.reviewHint}">説明</p>
@@ -218,6 +220,8 @@
                 <dt class="col-12 col-sm-4" th:text="#{privacyDsar.delivery.hold}">保全 hold</dt>
                 <dd class="col-12 col-sm-8 mb-0" id="dsar-resolution-hold">…</dd>
             </dl>
+            <!-- 本人が HELD で結果が削除・利用停止のときの警告（記録は止めない。HYG-FINAL P3-F） -->
+            <p class="text-warning mb-2 d-none" id="dsar-resolution-hold-warning" th:text="#{privacyDsar.resolution.holdWarning}">本人は保全 hold の対象です</p>
             <form id="dsar-resolution-form" class="row g-2 align-items-end d-none" novalidate>
                 <div class="col-12 col-md-5">
                     <label class="form-label" for="dsar-resolution-code" th:text="#{privacyDsar.resolution.code}">対応の結果</label>

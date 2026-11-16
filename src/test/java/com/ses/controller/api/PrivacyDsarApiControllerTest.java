@@ -258,7 +258,7 @@ class PrivacyDsarApiControllerTest {
                 false, false, null, "REDACTION_RULES_UNSET", 0,
                 List.of(new PrivacyDsarViews.ProviderCount("engineer-profile", 2)),
                 List.of(new PrivacyDsarViews.ManualReviewItem(null, "MAILBOX", "PROVIDER_UNREGISTERED", null)),
-                null, false, null, List.of("APPROVE"));
+                null, false, null, List.of("APPROVE"), null);
         when(packageService.section(12L)).thenReturn(section);
 
         mockMvc.perform(get("/api/privacy/dsar/12/delivery"))
@@ -267,7 +267,26 @@ class PrivacyDsarApiControllerTest {
                 .andExpect(jsonPath("$.data.currentPackage.storedName").doesNotExist())
                 .andExpect(jsonPath("$.data.manualReview[0].reason").value("PROVIDER_UNREGISTERED"))
                 .andExpect(jsonPath("$.data.hold.state").value("NONE"))
-                .andExpect(jsonPath("$.data.actions[0]").value("APPROVE"));
+                .andExpect(jsonPath("$.data.actions[0]").value("APPROVE"))
+                .andExpect(jsonPath("$.data.holdConflictResolutions").isEmpty());
+    }
+
+    /** HYG-FINAL P3-F: 本人が HELD のときの手動対応の警告（記録前の結果コード・記録後の印）を API で返す。 */
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 本人がHELDのとき手動対応の区画は警告になる結果コードと記録した結果の印を返す() throws Exception {
+        PrivacyDsarViews.DeliverySection section = new PrivacyDsarViews.DeliverySection("CONFIRMED", 5L, false, false,
+                true, false, new PrivacyDsarViews.HoldStatus("HELD"), null, false, false, null, null, null,
+                List.of(), List.of(), null, false,
+                new PrivacyDsarViews.ManualResolutionRecord("DELETED", "DEL-1", "2026-11-16 10:00", true),
+                List.of(), List.of("DELETED"));
+        when(packageService.section(13L)).thenReturn(section);
+
+        mockMvc.perform(get("/api/privacy/dsar/13/delivery"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.hold.state").value("HELD"))
+                .andExpect(jsonPath("$.data.holdConflictResolutions[0]").value("DELETED"))
+                .andExpect(jsonPath("$.data.manualResolution.holdConflict").value(true));
     }
 
     @Test
@@ -306,7 +325,10 @@ class PrivacyDsarApiControllerTest {
         verify(packageService).recordDelivery(eq(12L), any());
     }
 
-    /** review P2-3: 承認者の草案の確認は inline の JSON で返し、保存させない。拒否は ApiResult の JSON。 */
+    /**
+     * review P2-3: 承認者の草案の確認は inline の JSON で返し、保存させない。拒否は ApiResult の JSON。
+     * HYG-FINAL P3-C: 内容 hash は {@code X-Content-Sha256} header で受け取り、URL の query の hash は読まない（access log に残さない）。
+     */
     @Test
     @WithMockUser(roles = "管理者")
     void 承認者の草案の確認はinlineで保存させず拒否はApiResultで返す() throws Exception {
@@ -316,8 +338,11 @@ class PrivacyDsarApiControllerTest {
                 .thenReturn(new PrivacyDsarViews.PackageDownload("DSAR-20261116-ABCDEFGH-draft.json", content));
         when(packageService.reviewDraft(12L, 8L, sha))
                 .thenThrow(BusinessException.of(403, "error.privacy.dsarDraftReviewByPreparer"));
+        when(packageService.reviewDraft(12L, 7L, null))
+                .thenThrow(BusinessException.of(400, "error.privacy.dsarInvalidRequest"));
 
-        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7").param("contentSha256", sha))
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7")
+                        .header(PrivacyDsarApiController.CONTENT_SHA256_HEADER, sha))
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(content))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
@@ -326,11 +351,17 @@ class PrivacyDsarApiControllerTest {
                         .string("Cache-Control", "no-store"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
                         .string("X-Content-Type-Options", "nosniff"));
-        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "8").param("contentSha256", sha))
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "8")
+                        .header(PrivacyDsarApiController.CONTENT_SHA256_HEADER, sha))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
         mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7"))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        // 旧形式（query の hash）は読まず、header が無いものとして service が 400 にする
+        mockMvc.perform(get("/api/privacy/dsar/12/approve/preview").param("packageId", "7").param("contentSha256", sha))
+                .andExpect(status().isBadRequest());
+        verify(packageService, org.mockito.Mockito.times(2)).reviewDraft(12L, 7L, null);
     }
 
     /** review P2-2: 手動対応の完了は本文をそのまま渡し、CSRF token が無ければ拒否する。 */

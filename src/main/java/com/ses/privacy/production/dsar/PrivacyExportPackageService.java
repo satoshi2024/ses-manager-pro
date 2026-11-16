@@ -122,6 +122,7 @@ public class PrivacyExportPackageService {
     static final String ERROR_PACKAGE_FILE_UNAVAILABLE = "error.privacy.dsarPackageFileUnavailable";
     static final String ERROR_PREVIEW_BY_PREPARER = "error.privacy.dsarDraftReviewByPreparer";
     static final String ERROR_REDRAFT_AFTER_DOWNLOAD = "error.privacy.dsarRedraftAfterDownload";
+    static final String ERROR_DELIVERY_NOT_DOWNLOADED = "error.privacy.dsarDeliveryNotDownloaded";
 
     static final String HOLD_NONE = "NONE";
     static final String HOLD_HELD = "HELD";
@@ -223,15 +224,29 @@ public class PrivacyExportPackageService {
         boolean preparedByMe = me != null && me.equals(request.getPreparedBy());
         boolean downloaded = request.getApprovedPackageId() != null
                 && downloaded(context.tenantId(), requestId, request.getApprovedPackageId());
+        PrivacyDsarViews.HoldStatus hold = holdStatus(context.tenantId(), requestId);
+        boolean held = HOLD_HELD.equals(hold.state());
         PrivacyDsarViews.ManualResolutionRecord resolution = access ? null
-                : manualResolution(context.tenantId(), requestId);
+                : manualResolution(context.tenantId(), requestId, held);
         return new PrivacyDsarViews.DeliverySection(request.getStatus(), version(request), access,
                 readiness.ready() && packageRule && !decisionChanged, packageRule, decisionChanged,
-                holdStatus(context.tenantId(), requestId), summary, preparedByMe,
+                hold, summary, preparedByMe,
                 me != null && me.equals(request.getApprovedBy()), display(request.getApprovedAt()),
                 export == null ? null : export.getEvidenceRef(), export == null ? null : export.getResultCount(),
                 providers, manual, access ? delivery : null, downloaded, resolution,
-                actions(state, access, request, current, summary, me, downloaded));
+                actions(state, access, request, current, summary, me, downloaded),
+                access || !held ? List.of() : holdConflictResolutions(request.getRequestType()));
+    }
+
+    /** 本人が HELD のとき、この請求の種別で記録すると警告になる手動対応の結果コード（HYG-FINAL P3-F）。 */
+    private static List<String> holdConflictResolutions(String requestType) {
+        List<String> codes = new ArrayList<>();
+        for (PrivacyDsarVocabulary.ManualResolution candidate : PrivacyDsarVocabulary.ManualResolution.values()) {
+            if (candidate.conflictsWithHold() && candidate.appliesTo(requestType)) {
+                codes.add(candidate.name());
+            }
+        }
+        return codes;
     }
 
     // ---------------------------------------------------------------- 承認者による草案の確認
@@ -499,7 +514,7 @@ public class PrivacyExportPackageService {
     private int purgeOrphanFiles() {
         List<com.ses.entity.FileSecurityMetadata> orphans;
         try {
-            orphans = packageMapper.selectOrphanFiles(-ORPHAN_GRACE_HOURS, PURGE_BATCH);
+            orphans = packageMapper.selectOrphanFiles(orphanCreatedBefore(), PURGE_BATCH);
         } catch (RuntimeException e) {
             log.warn("{}: 行を持たない開示packageの実体を照会できません: exceptionClass={}", LOG_CODE_PURGE_FAILED,
                     e.getClass().getSimpleName());
@@ -521,6 +536,16 @@ public class PrivacyExportPackageService {
             }
         }
         return removed;
+    }
+
+    /**
+     * 孤児とみなす metadata の作成日時の上限。{@code created_at} を書く {@code AutoFillMetaObjectHandler} と同じ時計
+     * （この service の {@code Clock} の瞬間を JVM の既定時刻帯で表したもの）から猶予を引く。業務時刻帯（{@link #now()}、Asia/Tokyo）
+     * や DB の時計では比べない（JVM が UTC なら猶予が負になり、保存直後の草案の実体を消すため。HYG-FINAL P3-A）。
+     */
+    LocalDateTime orphanCreatedBefore() {
+        return com.ses.config.MyBatisPlusConfig.AutoFillMetaObjectHandler.rowTimestamp(clock)
+                .minusHours(ORPHAN_GRACE_HOURS);
     }
 
     private Boolean purgeOne(PrivacyExportPackage target, LocalDateTime now) {
@@ -614,6 +639,11 @@ public class PrivacyExportPackageService {
         return approved;
     }
 
+    /**
+     * 交付を記録できる承認 package。承認した package と内容 hash に加え、その package を専用ダウンロードで取得した印
+     * （{@value #DOWNLOAD_KEY_PREFIX}）を要する。取得していない package の交付を記録すると、交付記録の hash が system から
+     * 実際に取り出した内容と結び付かない（live でも PURGED でも同じ。HYG-FINAL P3-B）。印が無ければ 409。
+     */
     private PrivacyExportPackage requireDeliverable(String tenantId, PrivacyRequest request, long version,
                                                     long packageId, String sha) {
         if (!PrivacyCaseState.APPROVED.name().equals(request.getStatus())) {
@@ -623,6 +653,9 @@ public class PrivacyExportPackageService {
         PrivacyExportPackage approved = requireApprovedPackage(tenantId, request, packageId, true);
         if (!sha.equals(request.getApprovedContentSha256())) {
             throw BusinessException.of(409, ERROR_PACKAGE_NOT_APPROVED);
+        }
+        if (!downloaded(tenantId, request.getId(), approved.getId())) {
+            throw BusinessException.of(409, ERROR_DELIVERY_NOT_DOWNLOADED);
         }
         return approved;
     }
@@ -769,8 +802,11 @@ public class PrivacyExportPackageService {
         return count != null && count > 0;
     }
 
-    /** 開示以外の請求の手動対応の完了の記録（{@code DSAR-MANUAL:} の MANUAL_ACTION 行。無ければ null）。 */
-    private PrivacyDsarViews.ManualResolutionRecord manualResolution(String tenantId, long requestId) {
+    /**
+     * 開示以外の請求の手動対応の完了の記録（{@code DSAR-MANUAL:} の MANUAL_ACTION 行。無ければ null）。{@code held} は本人が現在
+     * HELD か（記録した結果が削除・利用停止なら警告の印を付ける。HYG-FINAL P3-F）。
+     */
+    private PrivacyDsarViews.ManualResolutionRecord manualResolution(String tenantId, long requestId, boolean held) {
         List<PrivacyAction> rows = actionMapper.selectList(new LambdaQueryWrapper<PrivacyAction>()
                 .eq(PrivacyAction::getTenantId, tenantId)
                 .eq(PrivacyAction::getRequestId, requestId)
@@ -781,8 +817,10 @@ public class PrivacyExportPackageService {
             return null;
         }
         PrivacyAction row = rows.get(0);
+        boolean conflict = held && PrivacyDsarVocabulary.parse(PrivacyDsarVocabulary.ManualResolution.class,
+                row.getBlockedReason()).filter(PrivacyDsarVocabulary.ManualResolution::conflictsWithHold).isPresent();
         return new PrivacyDsarViews.ManualResolutionRecord(row.getBlockedReason(), row.getEvidenceRef(),
-                display(row.getCreatedAt()));
+                display(row.getCreatedAt()), conflict);
     }
 
     private int markPurged(String tenantId, PrivacyExportPackage target, String fromStatus, LocalDateTime purgedAt) {
@@ -887,7 +925,10 @@ public class PrivacyExportPackageService {
                 if (live && PACKAGE_APPROVED.equals(current.getStatus())
                         && current.getId().equals(request.getApprovedPackageId())) {
                     actions.add(PrivacyDsarVocabulary.NextAction.DOWNLOAD.name());
-                    actions.add(PrivacyDsarVocabulary.NextAction.RECORD_DELIVERY.name());
+                    if (downloaded) {
+                        // 交付の記録は取得の後だけ（取得していない package の交付は記録させない。HYG-FINAL P3-B）
+                        actions.add(PrivacyDsarVocabulary.NextAction.RECORD_DELIVERY.name());
+                    }
                 } else if (!live && downloaded) {
                     // 取得済みなら作り直さず、承認した package の hash の照合で交付を記録する（review P3-4）
                     actions.add(PrivacyDsarVocabulary.NextAction.RECORD_DELIVERY.name());

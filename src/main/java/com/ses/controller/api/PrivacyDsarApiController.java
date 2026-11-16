@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,6 +36,9 @@ import java.nio.charset.StandardCharsets;
 @RestController
 @RequestMapping("/api/privacy/dsar")
 public class PrivacyDsarApiController {
+
+    /** 承認者による草案の確認で、確認する草案の内容 hash を渡す request header（URL に置かない）。 */
+    public static final String CONTENT_SHA256_HEADER = "X-Content-Sha256";
 
     private final PrivacyRequestService requestService;
     private final PrivacyExportPackageService packageService;
@@ -142,11 +146,14 @@ public class PrivacyDsarApiController {
 
     /**
      * 承認者による承認前の草案の確認（{@code privacy.dsar.approve}。review P2-3）。保存させない inline の JSON で返し、
-     * 作成者・承認待ち以外・hash の不一致は service が拒否する。
+     * 作成者・承認待ち以外・hash の不一致は service が拒否する。内容 hash は URL に置かず {@value #CONTENT_SHA256_HEADER}
+     * header で受け取る（URL の query は ALB・proxy の access log に残るため。A2a の「hash と subject を URL に置かない」に揃える。
+     * HYG-FINAL P3-C）。header が無ければ service が 400 にする（query の {@code contentSha256} は読まない）。
      */
     @GetMapping("/{id}/approve/preview")
     public ResponseEntity<byte[]> reviewDraft(@PathVariable long id, @RequestParam Long packageId,
-                                              @RequestParam String contentSha256) {
+                                              @RequestHeader(name = CONTENT_SHA256_HEADER, required = false)
+                                              String contentSha256) {
         PrivacyDsarViews.PackageDownload draft = packageService.reviewDraft(id, packageId, contentSha256);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_JSON)

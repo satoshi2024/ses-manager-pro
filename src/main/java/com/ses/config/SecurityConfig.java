@@ -452,8 +452,9 @@ public class SecurityConfig {
      * session失効・MFA未完了・break-glass scope等の自前filterによる検証を受ける。</p>
      * <ul>
      *   <li>sessionを読まず発行もしない。毎要求でBasic資格情報そのものを検証する。</li>
-     *   <li>break-glass利用者はBasicで認証させない。incident束縛・MFA・scope検証はform login sessionでしか
-     *       行えないため、パスワード照合より前に拒否し、lockoutを伴わない推測の口も作らない。</li>
+     *   <li>break-glass利用者と本番初回bootstrapの初期管理者はBasicで認証させない。incident束縛・MFA・scope検証・
+     *       bootstrapの失敗の記録はform login sessionでしか行えないため、パスワード照合より前に拒否し、lockoutを伴わない
+     *       推測の口も作らない（DOC-FINAL review N-2）。</li>
      *   <li>GETだけを許可し、それ以外はdenyAll。cookie/sessionによる認証を受け付けず、
      *       状態を変える操作も持たないためCSRF tokenは扱わない。</li>
      * </ul>
@@ -549,10 +550,17 @@ public class SecurityConfig {
     }
 
     /**
-     * metrics chainでbreak-glass利用者のBasic認証をパスワード照合前に拒否するprovider。
+     * metrics chainでbreak-glass利用者と本番初回bootstrapの初期管理者（{@value ProductionBootstrapMode#BOOTSTRAP_USERNAME}）の
+     * Basic認証をパスワード照合前に拒否するprovider。
      * {@link DisabledException} は AccountStatusException のため、ProviderManagerは後続providerや
      * 親AuthenticationManagerへ委譲せずにその場で認証失敗（401）とする。
-     * break-glass名以外は {@code null} を返し、scraper/DB利用者の通常の認証へ委ねる。
+     * どちらでもない名前は {@code null} を返し、scraper/DB利用者の通常の認証へ委ねる。
+     *
+     * <p>bootstrap名を拒否する理由（DOC-FINAL review N-2）: bootstrap期間はbreak-glass名が空で、初期管理者のlocal loginが
+     * 許されるため、Basicのままだと親AuthenticationManagerが初期管理者のパスワードを照合する。Basicの失敗は
+     * {@code LoginFailureHandler} を通らず失敗回数にも {@code BOOTSTRAP_LOGIN_FAILURE} の監査にも残らないので、lockを伴わない
+     * パスワードの推測口になる。初期管理者は人の操作のための口でscrapeには使わないため、bootstrapの状態に依らず常に拒否する
+     * （照合の前に拒否するので、正しいパスワードでも誤ったパスワードでも同じ401になる）。</p>
      */
     static final class BreakGlassBasicRejectingProvider implements AuthenticationProvider {
 
@@ -565,12 +573,18 @@ public class SecurityConfig {
         @Override
         public Authentication authenticate(Authentication authentication) {
             String username = authentication.getName();
-            Set<String> breakGlassUsernames = oidcSecurityProperties.getBreakGlassUsernames();
-            if (username == null || breakGlassUsernames == null) {
+            if (username == null) {
                 return null;
             }
-            // DBの照合順序（大小文字・末尾空白を区別しない）でbreak-glass行へ解決される表記揺れも止める
+            // DBの照合順序（大小文字・末尾空白を区別しない）で対象の行へ解決される表記揺れも止める
             String candidate = username.trim();
+            if (ProductionBootstrapMode.BOOTSTRAP_USERNAME.equalsIgnoreCase(candidate)) {
+                throw new DisabledException("bootstrap account cannot use HTTP Basic");
+            }
+            Set<String> breakGlassUsernames = oidcSecurityProperties.getBreakGlassUsernames();
+            if (breakGlassUsernames == null) {
+                return null;
+            }
             boolean breakGlass = breakGlassUsernames.stream()
                     .anyMatch(name -> name != null && name.trim().equalsIgnoreCase(candidate));
             if (breakGlass) {

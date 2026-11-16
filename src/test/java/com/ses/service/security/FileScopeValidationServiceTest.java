@@ -104,7 +104,7 @@ class FileScopeValidationServiceTest {
                 engineerCertificationMapperProvider,
                 clock);
         // NF07-A2b: DSAR の開示 package の照合（無ければ全て拒否する fail-closed のため、package でない名前を返す mock を与える）
-        lenient().when(privacyExportPackageMapper.countByStoredNames(any(), any())).thenReturn(0L);
+        lenient().when(privacyExportPackageMapper.countByStoredNames(any(), any(), any())).thenReturn(0L);
         org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper",
                 privacyExportPackageMapper);
     }
@@ -113,7 +113,7 @@ class FileScopeValidationServiceTest {
 
     @Test
     void DSARの開示packageは営業_要員_HR_管理者_privacy_adminの誰が汎用経路で求めても拒否し業務表を見ない() {
-        when(privacyExportPackageMapper.countByStoredNames("dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        when(privacyExportPackageMapper.countByStoredNames("default", "dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
         // privacy-admin は管理者 role の group 所属で、role の上では管理者と区別されない（管理者の通過分岐より前で拒否する）
         for (String role : List.of("営業", "要員", "HR", "マネージャー", "管理者")) {
             loginAs(role);
@@ -132,7 +132,7 @@ class FileScopeValidationServiceTest {
 
     @Test
     void DSARの開示packageは汎用の再scanも拒否する() {
-        when(privacyExportPackageMapper.countByStoredNames("dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        when(privacyExportPackageMapper.countByStoredNames("default", "dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.assertRescanAllowed("dsarpkg.json"));
@@ -142,19 +142,44 @@ class FileScopeValidationServiceTest {
 
     @Test
     void 大文字と末尾の点や空白で表記を変えた保存名も正規化した名前で照合して拒否する() {
-        when(privacyExportPackageMapper.countByStoredNames("DSARPKG.JSON. ", "dsarpkg.json")).thenReturn(1L);
+        when(privacyExportPackageMapper.countByStoredNames("default", "DSARPKG.JSON. ", "dsarpkg.json")).thenReturn(1L);
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.assertDownloadAllowed("DSARPKG.JSON. "));
         assertEquals(403, ex.getCode());
-        verify(privacyExportPackageMapper).countByStoredNames("DSARPKG.JSON. ", "dsarpkg.json");
+        verify(privacyExportPackageMapper).countByStoredNames("default", "DSARPKG.JSON. ", "dsarpkg.json");
+    }
+
+    /**
+     * HYG-FINAL P3-D: PRIVACY_EXPORT の metadata は照会者の tenant だけで照合する（索引 {@code (tenant_id, stored_name)} を使う）。
+     * tenant が決まらなければ照会せずに拒否する（fail-closed）。他 tenant の metadata だけを持つ名前を開けないことは
+     * {@code FileStorageServiceImplTest} の保存層の照合が確かめる。
+     */
+    @Test
+    void DSARの開示packageの照合には照会者のtenantを渡しtenantが無ければ照会せずに拒否する() {
+        loginAs("管理者");
+        service.assertRescanAllowed("tenant-a.json");
+        verify(privacyExportPackageMapper).countByStoredNames("default", "tenant-a.json", "tenant-a.json");
+
+        AccountingTenantContextHolder.setTenantId("tenant-b");
+        service.assertRescanAllowed("tenant-b.json");
+        verify(privacyExportPackageMapper).countByStoredNames("tenant-b", "tenant-b.json", "tenant-b.json");
+
+        AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
+        BusinessException noTenant = assertThrows(BusinessException.class,
+                () -> service.assertRescanAllowed("no-tenant.json"));
+        assertEquals(403, noTenant.getCode());
+        assertEquals("error.forbidden", noTenant.getMessageKey());
+        verify(privacyExportPackageMapper, never()).countByStoredNames(any(), org.mockito.ArgumentMatchers.eq("no-tenant.json"),
+                any());
     }
 
     @Test
     void package表を照合できなければ汎用経路の取得を全て拒否する() {
         loginAs("管理者");
-        when(privacyExportPackageMapper.countByStoredNames(any(), any())).thenThrow(new IllegalStateException("db"));
+        when(privacyExportPackageMapper.countByStoredNames(any(), any(), any())).thenThrow(new IllegalStateException("db"));
         assertEquals(403, assertThrows(BusinessException.class,
                 () -> service.assertDownloadAllowed("anything.pdf")).getCode());
 

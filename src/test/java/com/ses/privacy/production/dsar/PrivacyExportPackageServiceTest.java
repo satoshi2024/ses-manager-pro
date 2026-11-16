@@ -426,6 +426,39 @@ class PrivacyExportPackageServiceTest {
         assertThat(section.actions()).isEmpty();
     }
 
+    /**
+     * HYG-FINAL P3-B: 交付の記録は、承認した package を専用ダウンロードで取得した印（{@code DSAR-DOWNLOAD:}）を要する。取得の前は
+     * 区画に交付の記録を出さず、API は 409 で拒否する。取得しないまま期限で PURGED になった package も、hash が合っていても拒否する
+     * （交付記録の hash を、system から実際に取り出した内容に結び付けるため）。
+     */
+    @Test
+    void 交付の記録は承認したpackageの取得の後だけで取得の前と取得せずPURGEDになった後は409にする() {
+        long id = approvedRequest("T-DELIVER-BEFORE-DOWNLOAD");
+        PrivacyExportPackage pkg = onlyPackage(id);
+        actor.set(adminA());
+
+        assertThat(service.section(id).actions()).as("取得の前は交付を記録させない").containsExactly("DOWNLOAD");
+        assertNotDownloaded(() -> service.recordDelivery(id, delivery(6L, pkg)));
+        assertThat(requestMapper.selectById(id).getStatus()).isEqualTo("APPROVED");
+        assertThat(packageMapper.selectById(pkg.getId()).getStatus()).isEqualTo("APPROVED");
+        assertThat(Files.exists(published(pkg.getStoredName()))).isTrue();
+
+        service.download(id, pkg.getId());
+        assertThat(service.section(id).actions()).containsExactly("DOWNLOAD", "RECORD_DELIVERY");
+        assertThat(service.recordDelivery(id, delivery(6L, pkg)).status()).isEqualTo("CONFIRMED");
+
+        long untouchedId = approvedRequest("T-DELIVER-PURGED-UNTOUCHED");
+        PrivacyExportPackage untouched = onlyPackage(untouchedId);
+        PrivacyExportPackageService afterExpiry = service(Clock.fixed(Instant.parse("2026-12-17T01:00:00Z"),
+                ZoneId.of("Asia/Tokyo")));
+        afterExpiry.purgeDue(null);
+        assertThat(packageMapper.selectById(untouched.getId()).getStatus()).isEqualTo("PURGED");
+        actor.set(adminA());
+        assertNotDownloaded(() -> afterExpiry.recordDelivery(untouchedId, delivery(6L, untouched)));
+        assertThat(requestMapper.selectById(untouchedId).getStatus()).isEqualTo("APPROVED");
+        assertThat(afterExpiry.section(untouchedId).actions()).as("取得していなければ作り直す").containsExactly("PREVIEW");
+    }
+
     @Test
     void 保存実体が承認時の内容と違えばダウンロードを拒否する() throws IOException {
         long id = approvedRequest("T-TAMPER");
@@ -488,8 +521,9 @@ class PrivacyExportPackageServiceTest {
         long delivering = approvedRequest("T-HELD-DELIVER");
         PrivacyExportPackage deliveringPackage = onlyPackage(delivering);
 
-        // 交付記録の削除（期限内の承認済み package の実体を同じ tx で消す）
+        // 交付記録の削除（期限内の承認済み package の実体を同じ tx で消す。交付の記録は取得の印を要する。HYG-FINAL P3-B）
         actor.set(adminA());
+        service.download(delivering, deliveringPackage.getId());
         service.recordDelivery(delivering, delivery(6L, deliveringPackage));
         assertThat(packageMapper.selectById(deliveringPackage.getId()).getStatus()).isEqualTo("PURGED");
         assertThat(Files.exists(published(deliveringPackage.getStoredName()))).isFalse();
@@ -562,14 +596,56 @@ class PrivacyExportPackageServiceTest {
                 + "AND stored_name = ?", Integer.class, TENANT, orphan)).isEqualTo(1);
         assertThat(Files.exists(published(live.getStoredName()))).isTrue();
         assertThat(packageMapper.selectById(live.getId()).getStatus()).isEqualTo("DRAFT");
-        // 猶予（1時間）より新しい metadata は消さない
+        // 猶予（1時間）より新しい metadata は消さない（作成日時は created_at を書く時計で、service の時計の10分前。HYG-FINAL P3-A）
         String fresh = "a2borphan000000000000000000000002.json";
         Files.writeString(published(fresh), "{\"orphan\":true}");
+        LocalDateTime written = com.ses.config.MyBatisPlusConfig.AutoFillMetaObjectHandler.rowTimestamp(CLOCK);
         jdbcTemplate.update("INSERT INTO t_file_security_metadata (tenant_id, stored_name, file_kind, storage_state, "
-                + "scan_status, deleted_flag) VALUES (?, ?, 'PRIVACY_EXPORT', 'PUBLISHED', 'CLEAN', 0)", TENANT, fresh);
+                + "scan_status, created_at, deleted_flag) VALUES (?, ?, 'PRIVACY_EXPORT', 'PUBLISHED', 'CLEAN', ?, 0)",
+                TENANT, fresh, written.minusMinutes(10));
+        assertThat(service.orphanCreatedBefore()).isEqualTo(written.minusHours(1));
         service.purgeDue(NOW);
         assertThat(Files.exists(published(fresh))).isTrue();
         Files.deleteIfExists(published(fresh));
+    }
+
+    /**
+     * HYG-FINAL P3-A: 孤児の猶予は created_at を書いた時計（{@code AutoFillMetaObjectHandler}、JVM の既定時刻帯）で数え、DB の時計や
+     * service の Clock の時刻帯（Asia/Tokyo）では数えない。JVM の時刻帯が UTC でも東京でも、保存した直後の回は消さず、猶予を過ぎた回に
+     * 消す。修正前（DB の {@code LOCALTIMESTAMP} との比較）は JVM が UTC のとき猶予が負になり、保存した直後の回で消していた。
+     */
+    @Test
+    void 孤児の猶予はcreated_atを書いた時計で数えJVMの時刻帯がUTCでも東京でも保存直後の実体を消さない() throws IOException {
+        Files.createDirectories(base().resolve("published"));
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            int sequence = 0;
+            for (String zone : List.of("UTC", "Asia/Tokyo")) {
+                java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
+                String name = "a2bjvmzone00000000000000000000" + (++sequence) + "0.json";
+                Files.writeString(published(name), "{\"orphan\":true}");
+                // created_at は MyBatis-Plus の MetaObjectHandler が書く（SQL の既定値にも業務時刻帯の Clock にも頼らない）
+                FileSecurityMetadata row = new FileSecurityMetadata();
+                row.setTenantId(TENANT);
+                row.setStoredName(name);
+                row.setFileKind("PRIVACY_EXPORT");
+                row.setStorageState("PUBLISHED");
+                row.setScanStatus("CLEAN");
+                metadataMapper.insert(row);
+                Instant afterWrite = Instant.now();
+                ZoneId businessZone = ZoneId.of("Asia/Tokyo");
+
+                service(Clock.fixed(afterWrite, businessZone)).purgeDue(NOW);
+                assertThat(Files.exists(published(name))).as("JVM=%s: 猶予の内は消さない", zone).isTrue();
+                assertThat(metadataMapper.selectByStoredName(TENANT, name)).as("JVM=%s", zone).isNotNull();
+
+                service(Clock.fixed(afterWrite.plus(Duration.ofMinutes(61)), businessZone)).purgeDue(NOW);
+                assertThat(Files.exists(published(name))).as("JVM=%s: 猶予を過ぎたら消す", zone).isFalse();
+                assertThat(metadataMapper.selectByStoredName(TENANT, name)).as("JVM=%s", zone).isNull();
+            }
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
     }
 
     @Test
@@ -620,6 +696,7 @@ class PrivacyExportPackageServiceTest {
         long id = approvedRequest("T-DELETE-FAIL");
         PrivacyExportPackage pkg = onlyPackage(id);
         actor.set(adminA());
+        service.download(id, pkg.getId());
         PrivacyExportPackageService failing = service(CLOCK, new FailingDeleteStorage(fileStorageService));
 
         assertThatThrownBy(() -> failing.recordDelivery(id, delivery(6L, pkg)))
@@ -729,6 +806,40 @@ class PrivacyExportPackageServiceTest {
         long unscoped = requestService.intake(new PrivacyDsarCommands.Intake("ACCESS", "EMAIL", null, "T-HOLD-2", null))
                 .requestId();
         assertThat(service.section(unscoped).hold().state()).isEqualTo("NOT_SCOPED");
+    }
+
+    /**
+     * HYG-FINAL P3-F: 開示以外の請求で本人が HELD のとき、削除・利用停止の結果は記録を止めずに区画（API）で警告する。記録の前は
+     * 警告になる結果コードを返し、記録の後は記録した結果に印を付ける。HELD でなければ警告しない。
+     */
+    @Test
+    void 本人がHELDのとき削除と利用停止の手動対応の結果は記録を止めずに警告を返す() {
+        PrivacyHoldGate gate = mock(PrivacyHoldGate.class);
+        holdGate.set(gate);
+        when(gate.inspect(TENANT)).thenReturn(new PrivacyHoldGate.Decision(PrivacyHoldGate.State.VERIFIED, null,
+                Set.of("ENGINEER:101"), Set.of(), Map.of()));
+        long deletion = scopedRequest("T-HOLD-DELETION", "DELETION");
+        long restriction = scopedRequest("T-HOLD-RESTRICTION", "RESTRICTION");
+        long correction = scopedRequest("T-HOLD-CORRECTION", "CORRECTION");
+
+        assertThat(service.section(deletion).holdConflictResolutions()).containsExactly("DELETED");
+        assertThat(service.section(restriction).holdConflictResolutions()).containsExactly("RESTRICTED");
+        assertThat(service.section(correction).holdConflictResolutions()).isEmpty();
+
+        requestService.recordManualResolution(deletion,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "DEL-2026-0001"));
+        requestService.recordManualResolution(correction,
+                new PrivacyDsarCommands.ManualResolution(4L, "CORRECTED", "COR-2026-0001"));
+        PrivacyDsarViews.DeliverySection recorded = service.section(deletion);
+        assertThat(recorded.status()).as("警告は記録を止めない").isEqualTo("CONFIRMED");
+        assertThat(recorded.manualResolution().resolutionCode()).isEqualTo("DELETED");
+        assertThat(recorded.manualResolution().holdConflict()).isTrue();
+        assertThat(service.section(correction).manualResolution().holdConflict()).isFalse();
+
+        when(gate.inspect(TENANT)).thenReturn(new PrivacyHoldGate.Decision(PrivacyHoldGate.State.VERIFIED, null,
+                Set.of("ENGINEER:102"), Set.of(), Map.of()));
+        assertThat(service.section(deletion).manualResolution().holdConflict()).as("HELD でなければ警告しない").isFalse();
+        assertThat(service.section(restriction).holdConflictResolutions()).isEmpty();
     }
 
     // ---------------------------------------------------------------- helpers
@@ -919,6 +1030,13 @@ class PrivacyExportPackageServiceTest {
         assertThatThrownBy(call).isInstanceOfSatisfying(BusinessException.class, e -> {
             assertThat(e.getCode()).isEqualTo(409);
             assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarPackageNotApproved");
+        });
+    }
+
+    private static void assertNotDownloaded(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
+        assertThatThrownBy(call).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getCode()).isEqualTo(409);
+            assertThat(e.getMessageKey()).isEqualTo("error.privacy.dsarDeliveryNotDownloaded");
         });
     }
 

@@ -13,7 +13,9 @@ import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 /**
  * MyBatis-Plus 設定クラス
@@ -71,6 +73,19 @@ public class MyBatisPlusConfig {
     public static class AutoFillMetaObjectHandler implements MetaObjectHandler {
 
         /**
+         * {@code created_at}・{@code updated_at} に書く時刻（JVM の既定時刻帯の現地時刻。{@link LocalDateTime#now()} と同じ値）。
+         * これらの列と比べる境界（DSAR の孤児清掃の猶予等）は、DB の時計（{@code LOCALTIMESTAMP}）や Asia/Tokyo 固定の
+         * {@code Clock} bean の現地時刻ではなく、この値から計算して SQL へ渡す。書いた時計と比べる時計を同じにし、JVM・DB・業務の
+         * 時刻帯が違っても猶予が縮まない・負にならないようにするため（NF07-A2b review P3-A）。
+         *
+         * @param clock 現在の瞬間の源（本番は system の時計。test は固定値に差し替える。時刻帯は使わない）
+         * @return {@code clock} の瞬間を JVM の既定時刻帯で表した現地時刻
+         */
+        public static LocalDateTime rowTimestamp(Clock clock) {
+            return LocalDateTime.ofInstant(clock.instant(), ZoneId.systemDefault());
+        }
+
+        /**
          * INSERT時の自動フィールド入力処理
          * 作成日時・更新日時に現在日時を設定し、登録者IDにログイン中ユーザーを設定する。
          * strictInsertFillは対象フィールド（@TableField(fill=INSERT)）が未設定(null)の場合のみ
@@ -81,7 +96,7 @@ public class MyBatisPlusConfig {
          */
         @Override
         public void insertFill(MetaObject metaObject) {
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = rowTimestamp(Clock.systemUTC());
             this.strictInsertFill(metaObject, "createdAt", LocalDateTime.class, now);
             this.strictInsertFill(metaObject, "updatedAt", LocalDateTime.class, now);
             // background workerはSecurityContextに残った人間ユーザーを監査主体へ流用しない。
@@ -104,7 +119,7 @@ public class MyBatisPlusConfig {
          */
         @Override
         public void updateFill(MetaObject metaObject) {
-            this.strictUpdateFill(metaObject, "updatedAt", LocalDateTime.class, LocalDateTime.now());
+            this.strictUpdateFill(metaObject, "updatedAt", LocalDateTime.class, rowTimestamp(Clock.systemUTC()));
         }
     }
 }
