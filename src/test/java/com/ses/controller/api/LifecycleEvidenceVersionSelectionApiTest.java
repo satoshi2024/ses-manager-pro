@@ -55,7 +55,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * NF01 N1-3 / Q-9: 証跡は画面で選んだCLEAN版を固定し、版を指定しない（versionless）証跡は400で拒否する。
  * 版一覧APIは完了操作と同じtenant・権限・本人scopeで判定し、元ファイル名等を返さない。
- * あわせてN1-2のテンプレートAPIによるDUAL_CONFIRMATION拒否をHTTP経路で確認する。
+ * あわせてN1-2のテンプレートAPIによるDUAL_CONFIRMATION拒否（W3-21b以降は二者確認の子スイッチOFFのとき）をHTTP経路で確認する。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -77,6 +77,7 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private LifecycleEvidenceLinkMapper evidenceLinkMapper;
     @Autowired private LifecycleTemplateMapper templateMapper;
+    @Autowired private com.ses.config.feature.FeatureSwitchProperties featureSwitchProperties;
 
     private SysUser adminUser;
     private SysUser engineerUser1;
@@ -285,8 +286,19 @@ class LifecycleEvidenceVersionSelectionApiTest {
     }
 
     @Test
-    @DisplayName("テンプレートAPIはCONFIRM公開前のDUAL_CONFIRMATIONを含む作成を400で拒否しテンプレートを残さない")
+    @DisplayName("テンプレートAPIは二者確認の子スイッチOFFでDUAL_CONFIRMATIONを含む作成を400で拒否しテンプレートを残さない")
     void テンプレートAPIはDUAL_CONFIRMATIONを含む作成を400で拒否する() throws Exception {
+        // test profileは子スイッチON（W3-21bでスイッチ連動に変更）。OFFの拒否をHTTP経路で確かめるため試験の間だけOFFにする
+        boolean dualBefore = featureSwitchProperties.getNf01DualConfirmation().isEnabled();
+        featureSwitchProperties.getNf01DualConfirmation().setEnabled(false);
+        try {
+            postDualTemplateAndExpectRejected();
+        } finally {
+            featureSwitchProperties.getNf01DualConfirmation().setEnabled(dualBefore);
+        }
+    }
+
+    private void postDualTemplateAndExpectRejected() throws Exception {
         String name = "二者確認拒否API-" + System.nanoTime();
         LifecycleTemplateDto dual = LifecycleTemplateDto.builder()
                 .templateType("JOIN")
