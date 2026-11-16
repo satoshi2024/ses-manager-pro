@@ -258,6 +258,31 @@ public class DocumentEligibilityService {
     }
 
     /**
+     * 確定済み・版追加済み・取消済みの文書の保存期限を {@code retentionUntil} に早める（状態は変えない）。証跡利用可否は
+     * 保存期限に依存しないため増分しないが、文書行のX lockで証跡readerと直列化する。履歴取込原本の purge に合わせて文書台帳の
+     * 副本の保存期限を揃える {@code ResumeIngestionLedgerRetentionService} が使う（2026-11-16 依頼者決定）。
+     *
+     * @return 保存期限を変えた場合 true。legal hold 中・保存期限が既に同日以前・対象外の状態・snapshot の後に更新された場合は
+     *         何もせず false
+     */
+    @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
+    public boolean alignRetention(Document snapshot, LocalDate retentionUntil) {
+        Objects.requireNonNull(retentionUntil, "retentionUntil");
+        AuthorizationEpochAnchor.Document anchor = anchorOf(snapshot);
+        fence.lockForUpdate(anchor);
+        long version = requireVersion(snapshot);
+        return documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                .eq(Document::getId, anchor.documentId())
+                .eq(Document::getTenantId, anchor.tenantId())
+                .eq(Document::getVersion, version)
+                .eq(Document::getLegalHoldFlag, 0)
+                .in(Document::getStatus, STATUS_CONFIRMED, STATUS_AMENDED, "CANCELLED")
+                .and(w -> w.isNull(Document::getRetentionUntil).or().gt(Document::getRetentionUntil, retentionUntil))
+                .set(Document::getRetentionUntil, retentionUntil)
+                .set(Document::getVersion, version + 1)) == 1;
+    }
+
+    /**
      * 版追加に伴い確定済み文書をAMENDEDにする（増分しない）。Spring経路の版追加は
      * {@code DocumentMetadataCommitService.commitVersion} が同じ規則で行い、本メソッドは直接生成された旧test adapter
      * （{@code DocumentServiceImpl} の metadata commit service 未注入時）だけが使う。

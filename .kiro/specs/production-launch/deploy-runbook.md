@@ -23,6 +23,8 @@
   - NF-06 取込センター画面（W3-12）: `V193__nf06_import_center_menu_and_permission_seed.sql`（menu `import-center` を管理者だけへ付与、`import.metadata.manage` を管理者専用group（`role-admin`・`privacy-admin`）へ明示許可し、他の全groupで拒否する。利用者の割当は変えない）。機能スイッチNF06は既定OFFで、初回リリースはOFFのまま配備する。ONにした起動では admission 承認設定（`ImportAdmissionStartupValidator`）と行参照のHMAC鍵 `IMPORT_ROW_REFERENCE_HMAC_KEY`（`ImportRowReferenceKeyStartupValidator`）が揃わなければ起動しない。前提は単一法人（`m_organization_unit` の論理削除されていない組織の法人IDがちょうど1種類。status・有効期間は見ない。新規導入は0件のため、ONの前に法人を持つ組織を登録する）。ONの手順: `feature-switches.md` 4.8。
   - NF08 B2c-1（W3-13）: `V194__nf08_copilot_dispatch_claim_and_cost_ledger.sql`（summary dispatchのclaim列、費用ledgerの `t_ai_external_send_cost_bucket` / `t_ai_external_send_cost_entry`、`t_audit_log.idx_audit_dispatch_key`。行は作らない）。外部送信は未開放のままで、prodは `AI_EXTERNAL_SEND_ENABLED=true` を `dispatch.permitOnlyNotWired` で起動拒否する（B2c-2の完了と独立Reviewまで。設定では解除できない）。`AI_EXTERNAL_SEND_COST_LEDGER`（`ai.external-send-cost-ledger`）は既定の `persistent` のまま設定しない（`persistent` 以外は解除後も起動拒否）。
   - NF01 B0（W3-18）: `V195__nf01_dual_confirmation_coordinator.sql`（二者確認coordinatorの7表 `t_lifecycle_dual_submission` / `_submission_document` / `_submission_org_fence` / `_confirmation` / `_projection` / `_idempotency` / `_event`。行は作らない。projection以外の不変6表へUPDATE・DELETEを拒否するtrigger 12件を追加する。冪等性keyは `ascii_bin` で、CHECK `ck_dual_idem_key` が空文字と `[A-Za-z0-9._~-]` 以外の文字を拒否する）。アプリ側は `AppendOnlyMapper`・`AppendOnlySqlInjector` で同じ6表の更新・削除を拒否する。二者確認の画面・APIはまだ無く（W3-21a/b）、表は空のまま配備する。trigger件数は §1.2・§3.4 の 67件に含まれる（`DeployRunbookMigrationCountTest` がmigrationのCREATE/DROP TRIGGERから数えて照合する）。自由記述列の保存期間はPrivacyの署名事項（NF01計画 §10・§12 O-8）。
+  - NF07 F2（read-only provider）: `V196__nf07_privacy_data_element_catalog_seed.sql`（`m_pii_data_element` に、`sys_user` に存在する tenant ごとの data element の構造行と `subject_attribution` だけを入れる。owner・データ分類・inventory 状態は UNKNOWN のまま、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` に文書以外の固定27件＋文書種別ごとの `DOCUMENT:<code>`（`m_document_type` の全種別。V197 の2種別を含む）。catalog API `GET /api/privacy/catalog` は `privacy.retention.enabled` がOFFの間404で、初回リリースはOFFのまま配備する。外部 provider（Gemini・CloudSign・freee・mailbox・backup）は登録しない。
+  - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT`（NOT_ATTRIBUTABLE。取込CSVは本人を導出できない）を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。取込センターCSV（IMPORT）は取引日を設定しないため保存期限は NULL のままで、処分候補にはならない（保持期間は開放前に Privacy が書面で受理する条件のまま）。履歴取込の副本（RESUME_INGESTION）は、取込原本を `app.resume.retention-days` で purge する日次清理（02:00）が保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が廃棄候補（PENDING）にし、管理者の承認・執行で処分する（2026-11-16 依頼者決定。legal hold 中の副本は変えない。plan §3.4.1「D4 と文書台帳の副本」）。**署名事項**：この副本の処分方針について Privacy owner と文書 owner の書面署名を、scheduler の有効化（`APP_SCHEDULING_ENABLED=true`）の前に得る。署名が得られない場合は副本処理を外す変更を出してから有効化する。有効化後の監視（失敗の metric・ERROR log）と定期確認の SQL は §4.3。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -163,7 +165,7 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V195（versioned 195件。SQL 194件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- 実行順: V1〜V197（versioned 197件。SQL 196件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
 - callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
 
 ### 3.4 適用結果の確認（DBA立会い）
@@ -180,9 +182,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '195'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '197'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 195
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 197
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -224,12 +226,30 @@ SELECT g.group_key FROM t_permission_group_action a JOIN m_permission_group g ON
 SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g ON g.id = a.group_id
  WHERE a.action_key = 'import.metadata.manage' AND a.deny_flag = 1
    AND g.group_key NOT IN ('role-admin', 'privacy-admin');                                   -- 4
--- NF07 F1（V190）: 表は8件作られ、行は1件も無い（法的な値はseedしない）
+-- NF07 F1（V190）: 表は8件作られ、catalog（m_pii_data_element、V196 の seed）以外に行は1件も無い（法的な値はseedしない）
 SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
  ('m_pii_data_element', 'm_retention_policy', 't_legal_hold', 't_privacy_projection_state', 't_privacy_request',
   't_privacy_request_subject_link', 't_privacy_action', 't_privacy_export_package');      -- 8
-SELECT (SELECT COUNT(*) FROM m_pii_data_element) + (SELECT COUNT(*) FROM m_retention_policy)
-     + (SELECT COUNT(*) FROM t_legal_hold) + (SELECT COUNT(*) FROM t_privacy_request);       -- 0
+SELECT (SELECT COUNT(*) FROM m_retention_policy) + (SELECT COUNT(*) FROM t_legal_hold)
+     + (SELECT COUNT(*) FROM t_privacy_request);                                             -- 0
+-- NF07 F2（V196・V197）: catalog は構造行だけ。tenant default に文書以外の固定27件と、文書種別ごとに1件
+-- （文書種別の数に依存しない数え方にする）。owner・分類・inventory は全て UNKNOWN
+SELECT COUNT(*) FROM m_pii_data_element
+ WHERE tenant_id = 'default' AND data_element_id NOT LIKE 'DOCUMENT:%';                    -- 27
+SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e
+ WHERE e.tenant_id = 'default' AND e.data_element_id = CONCAT('DOCUMENT:', dt.code));      -- 0（全文書種別に catalog 行がある）
+-- 文書種別（V197）: 履歴・スキルシート取込と取込センターCSVは受領（INCOMING）として登録できる
+SELECT code, direction FROM m_document_type WHERE code IN ('IMPORT', 'RESUME_INGESTION')
+   AND deleted_flag = 0 ORDER BY code;
+-- IMPORT INCOMING / RESUME_INGESTION INCOMING の2行
+SELECT data_element_id FROM m_pii_data_element WHERE tenant_id = 'default' AND data_element_id LIKE 'DOCUMENT:%'
+   AND subject_attribution = 'NOT_ATTRIBUTABLE' ORDER BY data_element_id;
+-- DOCUMENT:IMPORT / DOCUMENT:MANAGEMENT_REPORT / DOCUMENT:SERVICE_REQUEST_ATTACHMENT の3行（本人を導出できない文書種別）
+SELECT COUNT(*) FROM m_pii_data_element WHERE owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN'
+    OR inventory_status <> 'UNKNOWN' OR owner_ref IS NOT NULL;                                -- 0
+SELECT COUNT(*) FROM m_pii_data_element WHERE subject_attribution = 'UNKNOWN'
+   AND (provider_id IS NOT NULL OR data_element_id LIKE 'DOCUMENT:%' OR data_element_id LIKE 'INTEGRATION_HUB_%'
+        OR data_element_id = 'EXTERNAL_API_READ_SNAPSHOT');                                  -- 0（gateに接続する要素は分類済み）
 -- NF08 B2c-1（V194）: 費用ledgerの2表があり行は無い。外部送信は未開放のため、claim済み・READYのattemptも無い
 SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
  ('t_ai_external_send_cost_bucket', 't_ai_external_send_cost_entry');                         -- 2
@@ -302,11 +322,11 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定時区の `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定時区で日時を作る箇所は他にもある。testは `argLine` で時区を固定しているが、本番は配備側で固定しない限り固定されない。DB側の時区（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V195 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V197 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。
-- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。機能スイッチは `feature-switches.md` に従い1機能ずつONにする。
+- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。履歴取込の清理（02:00）は文書台帳の副本を処分対象にするため、Privacy owner・文書 owner の書面署名（V197 の行の署名事項）もこの前提に含める。機能スイッチは `feature-switches.md` に従い1機能ずつONにする。
 
 ### 4.1 常に必要なsecurity設定（初回・以後とも。外さない）
 
@@ -336,6 +356,33 @@ OIDCの固定metadata・client credential、MFA鍵、session hash key等のprod�
 - 起動時のWARN log: `[bootstrap] 期限付きbootstrap modeが有効です（期限: ...）` と `[bootstrap] 期限付きbootstrap mode中のため、break-glass管理者の登録検査とOIDC管理者の人数検査を省略します（期限: ...、再開ticket: なし（初回））`。この2行が出ていることを確認する。
 - 期限を過ぎると、**再起動しなくても** `admin` のlocal loginは拒否され、既存のbootstrap sessionも次の要求で失効する（API 401 / 画面はlogin画面へ）。作業が終わらなかった場合は、新しい期限（24時間以内）を設定して再起動する（完了markerが書かれる前なので承認ticketは不要）。
 - prod以外のprofileではbootstrap modeの設定は無視される（dev/testの挙動は変わらない）。
+
+### 4.3 履歴取込の副本の処分（scheduler 有効化後の監視・定期確認）
+
+前提: V197 の行の署名事項（Privacy owner・文書 owner の書面署名）を scheduler の有効化の前に得ていること。日次清理（02:00）が原本を purge した取込ジョブの副本（`RESUME_INGESTION`）の保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が CONFIRMED の副本を廃棄候補（PENDING、`requested_by = -1`）にする。処分は管理者の承認・執行で行う（plan §3.4.1「D4 と文書台帳の副本」）。
+
+- **アラート**: metric `ses.resume.ledger.retention.failures`（tag `stage`: `document`＝副本ごとの失敗、`batch`＝照会自体の失敗）が1件でも増えたら調べる。同時に app log の ERROR `履歴取込原本の purge に合わせた文書台帳の副本の処理に失敗した副本があります`（件数）または `文書台帳の副本の保存期限を合わせられませんでした`（照会の失敗）が出る。失敗した副本は翌日の実行で再試行されるため、2日続けて増える場合は DB の lock 待ち・障害を疑う。legal hold 中の副本は失敗に数えず、副本ごとの WARN だけを出す。
+- **定期確認（週次）**: 次の SQL を実行する。
+
+```sql
+-- (1) 保存期限を過ぎたが D3 が拾わない副本（AMENDED・CANCELLED）。0行でなければ管理者が手動の廃棄申請（D2）を行う
+SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
+ WHERE d.document_type = 'RESUME_INGESTION' AND d.deleted_flag = 0 AND d.status IN ('AMENDED', 'CANCELLED')
+   AND d.retention_until <= CURRENT_DATE AND d.legal_hold_flag = 0
+   AND NOT EXISTS (SELECT 1 FROM t_document_disposal_request r WHERE r.document_id = d.id
+                    AND r.status IN ('PENDING', 'APPROVED'))
+ ORDER BY d.tenant_id, d.id;
+-- (2) 原本を purge 済みなのに保存期限を合わせられていない副本（legal hold 中を除く）。0行でなければ上のアラートと合わせて調べる
+SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
+ WHERE d.document_type = 'RESUME_INGESTION' AND d.deleted_flag = 0 AND d.legal_hold_flag = 0
+   AND d.status IN ('DRAFT', 'CONFIRMED', 'AMENDED', 'CANCELLED')
+   AND (d.status = 'DRAFT' OR d.retention_until IS NULL OR d.retention_until > CURRENT_DATE)
+   AND EXISTS (SELECT 1 FROM t_document_link l JOIN t_resume_ingestion r
+                 ON r.id = l.target_id AND r.tenant_id = l.tenant_id
+               WHERE l.document_id = d.id AND l.tenant_id = d.tenant_id AND l.target_type = 'RESUME_INGESTION'
+                 AND r.stored_file_name IS NULL AND r.status IN ('確定済', '却下'))
+ ORDER BY d.tenant_id, d.id;
+```
 
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 

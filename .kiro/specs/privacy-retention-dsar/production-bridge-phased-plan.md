@@ -493,19 +493,79 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 
 | # | 経路 | 起動 | 処理 | subject の導出 | data element | NF07 hold の扱い |
 |---|---|---|---|---|---|---|
-| D1 | `DocumentServiceImpl.executeDisposal`（`POST /api/documents/disposal/{requestId}/execute`） | 管理者の手動（承認済み申請） | 文書を DISPOSED にし、全 version の実体を物理削除 | `t_document_link` の target のうち人を指すもの（ENGINEER / CANDIDATE / SYS_USER 等） | `DOCUMENT:<document_type>` | 同一 tx 内、更新の直前に照会する。SUBJECT または DATA_ELEMENT の hold に当たれば 409（`error.privacy.holdActive`）。gate が `UNAVAILABLE` でも 409 |
+| D1 | `DocumentServiceImpl.executeDisposal`（`POST /api/documents/disposal/{requestId}/execute`） | 管理者の手動（承認済み申請） | 文書を DISPOSED にし、全 version の実体を物理削除 | F2 の `DocumentFileProvider` と同じ規則（和集合。下の「D1〜D3 の本人導出」）。人を指す link（直接・間接）と 1on1 相談メモの逆参照から導出し、どれにも当たらない文書は帰属不能 | `DOCUMENT:<document_type>` | 同一 tx 内、更新の直前に照会する。SUBJECT または DATA_ELEMENT の hold に当たれば 409（`error.privacy.holdActive`）。gate が `UNAVAILABLE` でも 409 |
 | D2 | `DocumentServiceImpl.requestDisposal` | 管理者の手動 | PENDING 申請の作成（非破壊） | D1 と同じ | D1 と同じ | hold に当たれば 409（申請を作らない） |
 | D3 | `DocumentRetentionJob` | 自動（日次） | 期限到来文書の PENDING 申請作成（非破壊） | D1 と同じ | D1 と同じ | 当たる文書は申請を作らず skip し、件数を警告する |
-| D4 | `ResumeRetentionCleanupServiceImpl`（履歴取込） | 自動（日次） | 原本の実体削除と `extracted_text` 消去 | `converted_engineer_id` → ENGINEER、無ければ `candidate_id` → CANDIDATE、どちらも無ければ帰属不能 | `RESUME_INGESTION_ORIGINAL`、`RESUME_INGESTION_TEXT` | 帰属できる行は SUBJECT hold に当たる行だけ skip。帰属不能な行は DATA_ELEMENT hold があるときだけ止まる |
+| D4 | `ResumeRetentionCleanupServiceImpl`（履歴取込） | 自動（日次） | 原本の実体削除と `extracted_text` 消去。続けて、原本を purge 済みのジョブに link した文書台帳の副本（`RESUME_INGESTION`）の保存期限を当日に合わせる（副本は消さない。下の「D4 と文書台帳の副本」） | `converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合（両方ある行はどちらの hold でも止まる。優先順位にすると候補者だけの hold で変換済みの行を消してしまう）。どちらも無ければ帰属不能 | `RESUME_INGESTION_ORIGINAL`、`RESUME_INGESTION_TEXT` | 帰属できる行は SUBJECT hold に当たる行だけ skip。帰属不能な行は DATA_ELEMENT hold があるときだけ止まる |
 | D5 | 同（BP 空き取込） | 自動（日次） | `extracted_text` 消去 | `converted_availability_id` → BP_AVAILABILITY、無ければ帰属不能 | `BP_AVAILABILITY_INGESTION_TEXT` | D4 と同じ |
-| D6 | `AiRecommendationRetentionScheduler`（`ai.retention.scheduler-enabled=true` のときだけ Bean がある） | 自動 | redacted summary の purge | F2 の `AiLogProvider` と同じ規則。導出できなければ帰属不能 | `AI_REDACTED_SUMMARY` | D4 と同じ。接続は Bean の有無に依存しない service 側（`AiRecommendationRetentionService`）に入れ、Bean が無い構成でも test が成立するようにする |
-| D7 | `IntegrationHubRetentionPurgeScheduler` の record purge（IDEMPOTENCY / DELIVERY / INBOUND / INBOUND_REPLAY / AUDIT） | 自動（60秒） | 保持期限切れ record の削除 | 帰属不能（record kind × retention class 単位） | `INTEGRATION_HUB_<KIND>` | DATA_ELEMENT hold があるときだけ、その kind を止める。SUBJECT hold では止めない |
+| D6 | `AiRecommendationRetentionScheduler`（`ai.retention.scheduler-enabled=true` のときだけ Bean がある） | 自動 | redacted summary の purge | F2 の `AiLogProvider` と同じ規則（summary の本人＝source 要員、無ければ推薦結果の1件目の要員）。案件→要員の run は `rank_no=1` の ENGINEER、要員→案件の run は `use_case=MATCHING` の `parameter_hash` を記録時の規則で再計算して source 要員を照合する。2件目以降の要員は第三者で本人にしない。導出できなければ帰属不能（下の「D6 の残余」） | `AI_REDACTED_SUMMARY` | D4 と同じ。接続は Bean の有無に依存しない service 側（`AiRecommendationRetentionService`）に入れ、Bean が無い構成でも test が成立するようにする |
+| D7 | `IntegrationHubRetentionPurgeScheduler` の record purge（IDEMPOTENCY / DELIVERY / INBOUND / INBOUND_REPLAY / AUDIT / EXTERNAL_AUDIT。EXTERNAL_AUDIT は V192 で追加） | 自動（60秒） | 保持期限切れ record の削除 | 帰属不能（record kind × retention class 単位） | `INTEGRATION_HUB_<KIND>` | DATA_ELEMENT hold があるときだけ、その kind を止める。SUBJECT hold では止めない |
 | D8 | 同 nonce purge（`ApiNonceReplayService.purgeExpired`） | 自動（60秒） | replay 防止用 nonce の削除 | 個人情報を含まない | — | gate に接続しない |
 | D9 | `ExternalApiReadSnapshotPurgeScheduler` | 自動（60秒） | read snapshot の削除 | 帰属不能 | `EXTERNAL_API_READ_SNAPSHOT` | D7 と同じ。F2 の inventory で個人情報を含まないと確認できれば D8 と同じく接続しない |
 | D10 | `FileCleanupService.cleanupOrphanFiles()`（`FileCleanupScheduler` と `DocumentArchiveFileCleanupScheduler` の両方が呼ぶ） | 自動 | どの `FileReferenceProvider` も参照しない実体の削除 | 参照元の行が無いので、この経路自体では導出できない | — | 両 scheduler を同じ扱いにするため、scheduler ではなく `FileReferenceProvider` の側で守る。新規 `PrivacyHoldFileReferenceProvider` が、有効な hold の subject / data element に帰属する stored name（F2 provider が論理削除済みの行も含めて解決）を「参照あり」として返す。gate が `UNAVAILABLE` のときは provider が例外を返し、cleanup をその回は中止させる（既存の cleanup が provider 例外で中止することを A1H で確認し、しない場合は合わせて直す） |
 | D11 | 業務 record の削除で file 参照が外れる経路 | 手動 | 参照が外れた実体は D10 で消える | 各 `FileReferenceProvider` | — | `FileReferenceProvider` ごとに、論理削除行を参照に数えるかを A1H で一覧化する。held subject の実体は D10 の provider で守る。参照元の行が物理削除された実体は帰属できず守れない（残余、§9 R-15） |
 | D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
 | D13 | 他 NF の破壊的経路 | — | — | — | — | A1H 着手時に本表へ追記して同じ規則で分類する。対象外とするものは理由を書いて D-05 owner の受理を得る |
+
+**D4 と文書台帳の副本（2026-11-16 依頼者決定、NF07-F2 delta review P2-C。Privacy・文書 owner の署名待ち）**
+
+履歴取込の upload は原本と別に文書台帳へ副本（`RESUME_INGESTION`、V197。別の実体 file）を登録する。副本は取引日を持たず保存期限が NULL のままで、D3 の候補にならず無期限に残っていた。依頼者は「取込原本を `app.resume.retention-days` で purge するとき、副本も処分対象にして両者の保存期限を揃える」と決めた。実装は次のとおり（方式 (a)：保存期限を合わせて既存の処分経路に渡す。新しい削除点は作らない）。
+
+- D4 の原本 purge の後に `ResumeIngestionLedgerRetentionService.alignPurgedCopies` を呼ぶ。対象は、原本を purge 済み（`stored_file_name IS NULL`、確定済・却下）のジョブに同じ tenant の link を持つ副本で、DRAFT は `DocumentEligibilityService.confirm` で CONFIRMED・保存期限＝当日にし、CONFIRMED・AMENDED・CANCELLED は状態を変えず保存期限を当日に早める（`DocumentEligibilityService.alignRetention`。保存期限が既に当日以前なら変えない）。
+- 処分は既存の D3（02:30、`registerRetentionDisposalCandidate`。CONFIRMED のみ）→ 管理者の承認 → D1（`executeDisposal`）で行う。AMENDED・CANCELLED は D2（手動の申請）の対象になる。D1〜D3 は lock 後に legal hold を再確認し、NF07 hold の gate（A1H）も D1〜D3 に入るため、本経路は hold を迂回しない。
+- legal hold 中の副本は保存期限も変えず WARN を出す。毎回の実行で未処理の副本を照会し直すので、hold の解除後・一時的な失敗の後の実行で拾い直し、処理済みの副本は照会に出ない（再実行で重ねて変えず、D3 の申請も重複しない）。副本ごとに短い transaction で処理し、失敗しても原本の purge を戻さない。照会は ID の keyset（`d.id > 直前の最後の ID`、500件ずつ）で全件を進めるため、hold 中・失敗し続ける副本が先頭に溜まっても後ろの副本は処理される。
+- 失敗は `DocumentRetentionJob` と同じく件数を ERROR で1件残し、metric `ses.resume.ledger.retention.failures`（tag `stage`=`document`/`batch`）に数える。AMENDED・CANCELLED の期限到来と、合わせられずに残った副本は deploy-runbook §4.3 の定期確認 SQL で拾う。
+- 実 MySQL の根拠は `ResumeIngestionLedgerRetentionMySqlTest`（shard-2）：外側 transaction の無い日次清理での副本ごとの失敗の隔離（lock 待ちの timeout）、`changeLegalHold` との両順序の直列化、link・ジョブの tenant 境界、清理 → D3 → 承認 → 執行の端から端まで（保存期限は延ばさない、AMENDED は状態を変えない、epoch は進まない）。
+- NF07 の SUBJECT hold は、副本にも原本と同じ本人導出（D4 と同じ和集合。下の表の `RESUME_INGESTION`）で効く。DATA_ELEMENT hold は element が別（原本は `RESUME_INGESTION_ORIGINAL`、副本は `DOCUMENT:RESUME_INGESTION`）のため、原本の element だけを hold しても副本は D1〜D3 で止まらない。A1H で hold の対象を選ぶ所と runbook に両方を並べ、この扱いを D-05 owner が受理する。
+- 開放前に Privacy owner と文書 owner の書面署名を得る（deploy-runbook の V197 行・署名事項）。署名が得られない場合は `ResumeRetentionCleanupServiceImpl` の副本処理を外す変更を出す。
+
+**D1〜D3 の本人導出（F2 `DocumentFileProvider`、NF07-F2 review P2-4・delta review P2-A で確定）**
+
+文書の link（`t_document_link`、論理削除済みを含む）の target から次の経路で導出し、どれか1つでも当たれば本人の文書とする（和集合。複数の要員を含む請求・注文は含まれる全員の文書になる）。中間の表は tenant で絞らない（文書と link を tenant で絞り、各表の ID は tenant をまたいで一意。tenant 未解決の契約も hold の範囲に入る）。
+
+| link の target | 導出 |
+|---|---|
+| `ENGINEER` | target の要員 |
+| `RESUME_INGESTION` | D4 と同じ（`converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合） |
+| `CERTIFICATION_RECORD` | `t_engineer_certification.engineer_id` |
+| `CONTRACT` | `t_contract.engineer_id` |
+| `WORK_RECORD` | `t_work_record.contract_id` → `t_contract.engineer_id` |
+| `BP_PAYMENT` | `t_bp_payment.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id` |
+| `QUOTATION` | `t_quotation.engineer_id`（NULL の見積は帰属不能） |
+| `INVOICE` | `t_invoice_item.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id`（請求の明細の全要員） |
+| `SALES_ORDER` | `t_sales_order_line.engineer_id`（注文の明細の全要員） |
+| （link なし）`PRIVATE_NOTE` | `t_one_on_one_request.private_note_ref`（文書ID）→ `engineer_id` |
+| （link なし）電子請求書 XML（`INVOICE_OUT`） | `t_digital_invoice.xml_document_id`（文書ID）→ `invoice_id` → `INVOICE` と同じ |
+
+文書種別ごとの宣言の正本は `DocumentFileProvider.DOCUMENT_TYPE_RULES` で、全種別を個別の宣言（導出できる種別は ATTRIBUTABLE、残余は NOT_ATTRIBUTABLE）にし、宣言に無い未知の種別だけを除外付きの接頭辞 `DOCUMENT:` で受ける。catalog（V196・V197）の種別ごとの `subject_attribution` はこの宣言と一致させ（一致しない行は coverage report が `ATTRIBUTION_MISMATCH` で登録済みにしない）、migration が `m_document_type` に入れる全種別と宣言が過不足なく一致することを `DocumentFileProviderTest` が classpath の migration を解析して固定する（種別を足す batch は宣言も足す）。このため規則5の「帰属できない data element」は catalog の `subject_attribution` だけを入力にできる。導出できる種別でも、導出に必要な link・列が無い行（要員の無い見積、契約・注文・要員以外へ link した受領請求等）は §3.4.3 規則4の帰属不能行になる。
+
+導出できない文書種別（残余。catalog・provider とも NOT_ATTRIBUTABLE。§3.4.3 規則5の対象）:
+
+| 文書種別 | link | 理由 | A1H の扱い |
+|---|---|---|---|
+| `SERVICE_REQUEST_ATTACHMENT` | SERVICE_REQUEST | 顧客 portal の依頼で、本人種別（要員・候補者・アカウント・BP）に当たらない | SUBJECT hold 開始画面で tenant 内件数を示し、privacy-admin が DATA_ELEMENT hold を追加するか残余として受理するかを選ぶ（既定なし。C-2-4） |
+| `IMPORT` | IMPORT_JOB | 取込CSVは複数人の行を含み、行と本人を対応付けられない | 同上 |
+| `MANAGEMENT_REPORT` | なし | 経営レポートは集計で個人を対象としない | 同上 |
+
+**DSAR の交付区分（hold の帰属とは別の宣言。delta review 第4項）**: 帰属は保全の側に広く取るが、交付は第三者情報を出さない側に倒す。`DocumentFileProvider.DOCUMENT_TYPE_RULES` が種別ごとに `DsarDeliveryClass` を宣言し、`ThirdPartyRedactor` は `MIXED_THIRD_PARTY`（と宣言の無い data element）を D-06 の規則が設定された後も自動 package に入れない（PDF 等の file は項目単位で redact できない。`ThirdPartyRedactorTest` が固定）。
+
+| 区分 | 文書種別 |
+|---|---|
+| `SELF` | WORK_REPORT、RECEIPT、SKILL_SHEET、CHANGE_REQUEST_ATTACHMENT、CERTIFICATION_EVIDENCE、RESUME_INGESTION |
+| `MIXED_THIRD_PARTY` | 契約類8種（CONTRACT、SIGNED_PDF、ESIGN_CERT、ACCEPTANCE、DISPATCH_LEDGER、EMPLOYMENT_CONDITIONS_STATEMENT、DISPATCH_NOTICE、INDIVIDUAL_CONTRACT）、INVOICE_OUT、INVOICE_IN、ORDER_RECEIVED、ORDER_ACKNOWLEDGEMENT、QUOTATION、BP_SUBMISSION、PRIVATE_NOTE、残余3種 |
+
+文書以外の provider の data element は既定で `MIXED_THIRD_PARTY`（本人の項目だけを自動交付する判断は D-06 の決定後に宣言を変える）。catalog の `third_party_flag` は全行既定の 1（含む扱い）のままで、交付区分の正本は provider の宣言とする（catalog への反映は D-06 と合わせて DDL lane で行う）。第1期の DSAR は開示だけで消去請求を持たない。消去を扱う batch では「帰属できる」と「消去してよい」を別に判定し、法定保存のある種別は消去しない。
+
+catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMENT:UNRESOLVED`）と、seed 後に作られた tenant（catalog 行が無い。coverage report の `CATALOG_MISSING`）は、UNKNOWN と同じく fail-closed とする（hold 機構を使った tenant では処分を止めて警告する。NF07-F2 review P3-6）。
+
+**D6 の残余**: 次の run は summary の本人を導出できず帰属不能行になる。DSAR（A2b）では tenant 内の件数を示して要手動確認に回し、D6 の purge は §3.4.3 規則4（DATA_ELEMENT hold があるときだけ止める）に従う。現行の記録経路（`AiApiController` の `MATCHING`）はどれにも当たらない。
+
+- `use_case` が `MATCHING` 以外で source 要員を持つ run（source 要員を照合する正規形の use_case を限定しているため）
+- source 要員と source 案件を両方持つ run（要員→案件の照合は source 案件を NULL として再計算する）
+- 記録の規則が変わった後の run。`AiLogProviderTest` は (a) 記録側の `canonicalParameters`・`sha256` との一致と、(b) 実際の `recordMatch`（`AiApiController` と同じ引数）で記録した run の帰属を固定する。検出できるのは test が通る経路の変化だけで、matching 実装が返す DTO の中身（案件の結果に要員・BP の ID も入れる等）や新しい呼出し元の引数が変わった場合は、test に現れないまま不一致になり得る（その run は帰属不能行として残る）
+- 根本の解消は、記録時に summary の本人を列として残すこと（DDL lane。番号は総括が割り当てる。F2 では DDL を足さない）
+
+**AI 推薦の候補（`t_ai_recommendation_item` の score・explanation）**: 2件目以降を含む各候補要員の個人データだが、D6 は summary だけを消し item に触れないため破壊的経路ではない。catalog には `AI_RECOMMENDATION_ITEM`（未登録・UNKNOWN）として載せ、DSAR（A2b）の検索範囲に入れるかは A2b で決める（delta review P3-5）。
 
 #### 3.4.2 NF07 hold と `legal_hold_flag` の関係（P1-1）
 

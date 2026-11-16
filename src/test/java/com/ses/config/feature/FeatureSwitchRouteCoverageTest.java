@@ -173,7 +173,10 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(Feature.forPath("/import-center-like")).isEmpty();
     }
 
-    /** C-1: privacy の入口は保持・保全の機能に属し、{@code /privacy}・{@code /api/privacy} 自体は遮断表に登録しない。 */
+    /**
+     * C-1: privacy の入口（W3-14 の policy説明API、F2 の catalog API）は保持・保全の機能に属し、
+     * {@code /privacy}・{@code /api/privacy} 自体は遮断表に登録しない。
+     */
     @Test
     void NF07のpolicy説明APIは保持保全の機能に属しprivacyの根は遮断表へ登録しない() throws Exception {
         List<Route> privacyRoutes = controllerRoutes().stream()
@@ -189,7 +192,10 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(Feature.forPath("/privacy")).isEmpty();
         assertThat(Feature.forPath("/api/privacy")).isEmpty();
         assertThat(Feature.forPath("/api/privacy/unknown-sub")).isEmpty();
-        assertThat(Feature.NF07_RETENTION.apiPrefixes()).containsExactly("/api/privacy/policies");
+        assertThat(privacyRoutes).as("F2 の catalog API").anyMatch(route -> route.normalized().equals("/api/privacy/catalog"));
+        assertThat(Feature.forPath("/api/privacy/catalog")).contains(Feature.NF07_RETENTION);
+        assertThat(Feature.forPath("/api/privacy/catalog-like")).isEmpty();
+        assertThat(Feature.NF07_RETENTION.apiPrefixes()).containsExactly("/api/privacy/policies", "/api/privacy/catalog");
         assertThat(Feature.NF07_RETENTION.pagePrefixes()).isEmpty();
         assertThat(Feature.NF07_RETENTION.menuKeys()).containsExactly("privacy-retention");
         assertThat(NF_ACTION_RESOURCES).doesNotContainKey("privacy");

@@ -62,6 +62,8 @@ class DocumentEligibilityWriterFenceTest {
     private static final String EPOCH_MAPPER = "com/ses/mapper/AuthorizationEpochMapper.java";
     private static final String CHANGE_REQUEST = "com/ses/service/changerequest/impl/EngineerChangeRequestServiceImpl.java";
     private static final String EVIDENCE_READER = "com/ses/service/document/DocumentEvidenceEligibility.java";
+    /** NF07 F2 の read-only provider（文書種別ごとの本人導出の宣言。書込みは ProductionPrivacyProviderReadOnlyStructureTest が禁止）。 */
+    private static final String PRIVACY_DOCUMENT_PROVIDER = "com/ses/privacy/production/provider/DocumentFileProvider.java";
 
     /** 守る書込み（mapper型、書込みとみなすメソッド名）。 */
     enum Guarded {
@@ -88,7 +90,8 @@ class DocumentEligibilityWriterFenceTest {
             ELIGIBILITY, Map.of(
                     Guarded.DISPOSAL, Set.of("requestDisposal", "approveDisposal", "rejectDisposal", "executeDisposal",
                             "markDisposalStorageFailed", "registerRetentionDisposalCandidate"),
-                    Guarded.DOCUMENT_STATE, Set.of("changeLegalHold", "executeDisposal", "confirm", "markAmended")));
+                    Guarded.DOCUMENT_STATE, Set.of("changeLegalHold", "executeDisposal", "confirm", "markAmended",
+                            "alignRetention")));
 
     /**
      * 未接続のwriter（source + 種別 → 呼出し件数）。W3-17で資産貸与・返却・紛失のlinkを接続し空になった。
@@ -171,7 +174,8 @@ class DocumentEligibilityWriterFenceTest {
                 ELIGIBILITY + "|DISPOSAL#markDisposalStorageFailed",
                 ELIGIBILITY + "|DISPOSAL#registerRetentionDisposalCandidate",
                 ELIGIBILITY + "|DOCUMENT_STATE#changeLegalHold", ELIGIBILITY + "|DOCUMENT_STATE#executeDisposal",
-                ELIGIBILITY + "|DOCUMENT_STATE#confirm", ELIGIBILITY + "|DOCUMENT_STATE#markAmended")) {
+                ELIGIBILITY + "|DOCUMENT_STATE#confirm", ELIGIBILITY + "|DOCUMENT_STATE#markAmended",
+                ELIGIBILITY + "|DOCUMENT_STATE#alignRetention")) {
             assertTrue(allowedCounts.getOrDefault(expected, 0) >= 1, expected + " を数えられていること: " + allowedCounts);
         }
     }
@@ -270,7 +274,8 @@ class DocumentEligibilityWriterFenceTest {
             }
         }
         // 登録はconfirmSkillSheetの1箇所。判定reader（DocumentEvidenceEligibility）は許可種別の定数として1箇所だけ持つ。
-        assertEquals(Map.of(CHANGE_REQUEST, 1, EVIDENCE_READER, 1), occurrences,
+        // NF07 F2 の DocumentFileProvider は種別ごとの導出規則の key として1箇所持つ（読取りだけで文書を登録しない）。
+        assertEquals(Map.of(CHANGE_REQUEST, 1, EVIDENCE_READER, 1, PRIVACY_DOCUMENT_PROVIDER, 1), occurrences,
                 "文書種別SKILL_SHEETの生成者を増やす場合は、証跡適格性（計画 §5.1）の前提を見直すこと");
         assertEquals(Map.of(), constantReferences, "許可種別の定数を登録経路で使い回してSKILL_SHEETを生成しない");
         assertEquals(new TreeMap<>(DYNAMIC_DOCUMENT_TYPE_REGISTRATIONS), dynamicRegistrations,
@@ -298,6 +303,8 @@ class DocumentEligibilityWriterFenceTest {
         expected.put("DocumentEligibilityService#executeDisposal", Propagation.MANDATORY);
         expected.put("DocumentEligibilityService#confirm", Propagation.MANDATORY);
         expected.put("DocumentEligibilityService#markAmended", Propagation.MANDATORY);
+        // 履歴取込原本の purge に合わせた副本の保存期限（ResumeIngestionLedgerRetentionService の副本ごとの短tx に参加する）
+        expected.put("DocumentEligibilityService#alignRetention", Propagation.MANDATORY);
         // 保存期限jobはtransactionを持たず文書ごとに呼ぶ（文書ごとの短tx）。
         expected.put("DocumentEligibilityService#registerRetentionDisposalCandidate", Propagation.REQUIRED);
         // afterCommitから呼ぶため、元のtransactionに参加しない。

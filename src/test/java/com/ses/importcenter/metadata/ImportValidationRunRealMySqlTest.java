@@ -156,11 +156,9 @@ class ImportValidationRunRealMySqlTest {
                 INSERT INTO t_permission_group_action(tenant_id, group_id, action_key, deny_flag, deleted_flag)
                 VALUES(?, ?, ?, 0, 0)
                 """, TENANT, groupId, ImportMetadataAuthorizationService.ACTION);
-        jdbc.update("""
-                INSERT IGNORE INTO m_document_type
-                  (code, name, direction, retention_years, retention_start_rule, legal_hold_supported, deleted_flag)
-                VALUES ('IMPORT', '合成取込CSV', 'INCOMING', 7, 'CREATED_AT', 1, 0)
-                """);
+        // 文書種別 IMPORT は V197 の seed に依存する（test で投入しない。投入すると seed の欠落を隠す）
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM m_document_type WHERE code='IMPORT' "
+                + "AND direction='INCOMING' AND deleted_flag=0", Integer.class), "V197 の文書種別 IMPORT");
         authenticate();
         sourceId = catalog.createSource(new ImportSourceRequest(SOURCE_CODE, "合成検証source")).id();
     }
@@ -186,8 +184,7 @@ class ImportValidationRunRealMySqlTest {
                 + "(SELECT id FROM t_document WHERE tenant_id=? AND document_type='IMPORT')", TENANT, TENANT);
         jdbc.update("DELETE FROM t_document WHERE tenant_id=? AND document_type='IMPORT'", TENANT);
         if (sourceId > 0) jdbc.update("DELETE FROM t_import_source_system WHERE tenant_id=? AND id=?", TENANT, sourceId);
-        jdbc.update("DELETE FROM m_document_type WHERE code='IMPORT' AND NOT EXISTS "
-                + "(SELECT 1 FROM t_document WHERE document_type='IMPORT')");
+        // 文書種別 IMPORT は V197 の seed なので消さない
         if (actorUser != null) {
             jdbc.update("DELETE FROM t_audit_log WHERE username=?", actorUser.getUsername());
         }

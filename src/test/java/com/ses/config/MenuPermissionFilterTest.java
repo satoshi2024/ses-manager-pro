@@ -330,6 +330,7 @@ class MenuPermissionFilterTest {
     @ParameterizedTest
     @CsvSource({
             "GET,/api/privacy/policies,privacy.policy.view",
+            "GET,/api/privacy/catalog,privacy.catalog.view",
             "GET,/api/privacy/unknown-sub,privacy.view",
             "GET,/api/privacy/dsar/1/package/download,privacy.dsar.export"
     })

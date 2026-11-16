@@ -33,3 +33,4 @@ ResignationRevocationOutboxMySqlTest
 EngineerScopeFenceMySqlTest
 ProductionPrivacyJournalAdapterMySqlTest
 PrivacyJournalStartupVerifierMySqlTest
+ResumeIngestionLedgerRetentionMySqlTest

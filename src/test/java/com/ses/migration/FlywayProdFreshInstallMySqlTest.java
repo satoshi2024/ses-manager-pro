@@ -513,17 +513,32 @@ class FlywayProdFreshInstallMySqlTest {
     }
 
     /**
-     * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）の新規導入直後の件数。
-     * F1表は行を持たず、privacy-admin は1件・未割当、privacy.* の deny は既定5 groupに1件ずつ、menu は2件。
-     * prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の不変条件に違反する group も0件であること。
+     * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）と F2 catalog seed（V196・V197）の新規導入直後の件数。
+     * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定27件と、文書種別ごとに1件。
+     * 件数は文書種別の数に依存させない。owner・分類・inventory は UNKNOWN）。privacy-admin は1件・未割当、privacy.* の
+     * deny は既定5 groupに1件ずつ、menu は2件。prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の
+     * 不変条件に違反する group も0件であること。V197 の2種別は受領（INCOMING）として登録できること。
      */
     private void assertNf07PrivacyFreshInstall(Statement st) throws Exception {
-        for (String table : List.of("m_pii_data_element", "m_retention_policy", "t_legal_hold",
+        for (String table : List.of("m_retention_policy", "t_legal_hold",
                 "t_privacy_projection_state", "t_privacy_request", "t_privacy_request_subject_link",
                 "t_privacy_action", "t_privacy_export_package")) {
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table),
                     "NF07 F1表はfresh installで0件であること（法的な値をseedしない）: " + table);
         }
+        assertEquals(27L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "V196 の catalog は文書以外が固定27件");
+        assertEquals(scalar(st, "SELECT COUNT(*) FROM m_document_type"), scalar(st, "SELECT COUNT(*) FROM "
+                + "m_pii_data_element WHERE tenant_id = 'default' AND data_element_id LIKE 'DOCUMENT:%'"),
+                "文書種別ごとに catalog 行が1件");
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_document_type dt WHERE NOT EXISTS (SELECT 1 FROM "
+                + "m_pii_data_element e WHERE e.tenant_id = 'default' AND e.data_element_id = CONCAT('DOCUMENT:', dt.code))"),
+                "全文書種別に catalog 行がある");
+        assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT') "
+                + "AND direction = 'INCOMING' AND deleted_flag = 0"), "V197 の文書種別");
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id <> 'default' "
+                + "OR owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
+                + "OR owner_ref IS NOT NULL"), "catalog は構造行だけ（法的な値をseedしない）");
         assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM m_permission_group WHERE group_key = 'privacy-admin'"));
         assertEquals(5L, scalar(st, "SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g "
                 + "ON g.id = a.group_id WHERE a.action_key = 'privacy.*' AND a.deny_flag = 1 "

@@ -93,6 +93,12 @@ spring:
         - classpath:sql/schema-nf08-dispatch-claim-h2.sql
         # V195: NF01 B0 二者確認coordinatorの7表（triggerは置かず、不変6表の更新・削除はmapperで拒否する。V189相当の一意keyより後）
         - classpath:sql/schema-nf01-dual-confirmation-h2.sql
+        # V196: NF07 F2 data element catalog seed（構造行と subject_attribution だけ。H2 でもそのまま実行できる。
+        #       sys_user の tenant と全 m_document_type の作成・seed より後）
+        - classpath:db/migration/V196__nf07_privacy_data_element_catalog_seed.sql
+        # V197: 履歴・スキルシート取込と取込センターCSVの文書種別と catalog 行（H2 でもそのまま実行できる。
+        #       schema-document-archive-h2.sql も同じ2行を持つため NOT EXISTS で重複しない。V196 より後）
+        - classpath:db/migration/V197__resume_ingestion_and_import_document_types.sql
       data-locations:
         - classpath:sql/dummy.sql
 
