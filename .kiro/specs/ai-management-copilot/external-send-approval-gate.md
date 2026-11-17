@@ -16,6 +16,8 @@
 
 **NF07への依存（有効化の必要条件）**: NF08外部送信 ← NF07のREG + TRUST + LINKの統合完了 + `privacy.retention.enabled=true` + 対象policyが `APPROVED_ACTIVE` + NF08の署名・承認設定完備。設定のチェック印だけでは統合・policy状態の証拠にならない。開放前に統合担当とPrivacy Ownerが統合SHA・policy状態・retention設定を記録する。いずれかが未完なら外部送信を開放しない。
 
+**NF07-NF08-LINK（RB-NF08-LINK、実装済み）**: 承認済み外部送信は送信ごとに、承認設定の `nf07-policy-id` が指すNF07 policyが現行で `APPROVED_ACTIVE` かをNF07の内部判定port（`PolicyEnforcementPort`）で確かめ、NF07のflag OFF・UNKNOWN・REVOKED・EXPIRED・DRIFT・policy IDの不一致は全て送信前に拒否する（503 `AI_EXTERNAL_SEND_PRIVACY_POLICY_NOT_ACTIVE`）。判定の詳細は計画（`privacy-retention-dsar/production-bridge-phased-plan.md` §8 の実装記録）。LINKは開放の必要条件の1つであり、**開放には引き続き §8 の S-1〜S-8 と B2c-2 の完了・独立Review（S-10）、その後の S-9 が要る**（いずれも未取得）。第1期はNF07のtrust registryが空・失効providerが常にUNKNOWNのため、LINKは常に拒否する。
+
 ## 1. ゲート設計
 
 ### 1.1 判定式
@@ -31,6 +33,7 @@ external-send-enabled
  ∧ 承認の有効期間内（JST業務日で 署名日 ≦ 当日 ＜ 失効日）
  ∧ 用途が承認用途に含まれる（現時点で受理するのは MANAGEMENT_COPILOT のみ）
  ∧ 宛先host・model・provider が承認値と一致
+ ∧ 承認設定の nf07-policy-id が指す NF07 policy が現行で APPROVED_ACTIVE（送信ごと。NF07-NF08-LINK）
  ∧ 呼出側のdatabase transactionが無い
  ∧ untrustedSourceTextがnull（空文字・伏せ字も不可）
  ∧ 登録済みtemplate定数とfield値の値形式の許可条件に一致
@@ -49,6 +52,7 @@ external-send-enabled
 | チェックリスト10項目と承認設定の両立 | prod 起動時に fail-fast | 補助項目だけ true／承認設定だけ有り、の片側成立を起動時に止める |
 | **失効日の経過・署名日前**（時間の経過だけで生じる不足） | **起動は継続し、外部送信だけ停止**（WARN log・監視metric） | 承認の失効で、AIと無関係な機能まで再起動のたびに使えなくなる事態を避ける（P2-3）。外部送信はgatewayが起動時に承認を固定しないため固定 deny-all になる |
 | 失効日・費用累計・承認digest・request ごとの用途/宛先/model/byte数/field/PII | **呼出し時に拒否**（gateway・adapter） | 起動後に時間経過・利用量・設定差替えで変化するため |
+| NF07 policy の状態（flag・UNKNOWN・失効・期限・改竄・policy ID の一致。NF07-NF08-LINK） | **呼出し時に拒否**（gateway の承認束縛の直後と、adapter の送信直前の再確認。起動時の判定には含めない） | policy の状態は実行中に変わり、失効・期限切れで送信を止めても起動は止めないため（設定の変更なしに次の送信から止まる） |
 | 起動後の設定差替え（決定ID・承認内容の変更） | 呼出し時に拒否（digestが決定書と不一致なら `AI_EXTERNAL_SEND_APPROVAL_DIGEST_MISMATCH`、再署名済みの別承認なら `AI_EXTERNAL_SEND_DECISION_CHANGED`） | 承認は起動時に固定し、実行中の差替えを新しい承認として扱わない（再起動が必要） |
 
 失効・署名日前と構造的な不足が同時にある場合は、構造的な不足を優先して起動失敗とする（失効日を書き換えた設定はdigest不一致になるため、時間要因だけとはみなされない）。prod 以外のprofileでは起動時検査は動かないが、gateway が呼出しごとに同じ評価を再実行するため、承認設定がなければ送信されない。
@@ -60,6 +64,7 @@ external-send-enabled
 | 純粋評価 | `service/ai/AiExternalSendApproval` | 承認設定を固定コードで評価し、承認内容digestを再計算して決定書の値と照合し、承認済みsnapshot（digest込み）を返す（I/Oなし、値をメッセージへ出さない） |
 | 総合判定 | `service/ai/AiProductionApprovalGate#externalSendStatus` / `#assertProviderAllowed(provider, purpose)` | flag・provider・チェックリスト・承認設定・用途のAND。不足のうち時間要因だけを `onlyTemporalViolations()`、起動を止める不足を `startupBlockingGates()` で区別する |
 | 起動時 | `config/AiProductionSafetyValidator` | prod で external-send=true の場合、構造的な不足があれば起動失敗、時間要因だけなら起動継続＋WARN。**B2c-1〜B2c-2の間（計画 C-2 / R-5）は、承認設定が完全でも external-send=true 自体を起動拒否する**（`dispatch.permitOnlyNotWired`。設定では解除できず、B2c-2の完了と独立Reviewの後にコード定数で解除する）。解除後も `ai.external-send-cost-ledger` が `persistent` と完全一致しなければ起動拒否する（`costLedger.notPersistent`） |
+| NF07 policy（LINK） | `service/ai/AiExternalSendPrivacyPolicyCheck`（`AiProductionApprovalGate#assertExternalSendPrivacyPolicy` から呼ぶ）＋ NF07 の `privacy/foundation/PolicyEnforcementPort` | key（`NF08_AI_SUMMARY`・`AI_PROMPT_LOG`・`EXTERNAL_DISPATCH`・`gemini-adapter`）と `nf07-policy-id`・実行tenantで送信ごとに判定し、許可以外は送信しない。手動構築のgate・prod以外のprofileは常に拒否。拒否はWARN `AI_EXTERNAL_SEND_PRIVACY_POLICY_DENIED` と metric `ses_ai_external_send_privacy_policy_denied_total{stage,reason}`（固定コードだけ） |
 | 有効期間監視 | `service/ai/AiExternalSendApprovalMonitor` | 失効前警告・失効・署名日前・不完全を WARN log と Prometheus metric で知らせる（§7.3） |
 | 最終gate | `service/ai/impl/AiExecutionGatewayImpl#assertExternalSendPayload` + `service/ai/AiPiiMasker` | 送信fieldを承認data categoryに限定し、実prompt全体の未mask PII・自由文・未登録template・不正なfield値形式を拒否する（§4） |
 | 費用 | `service/ai/copilot/summary/ApprovedExternalSendCostPolicy` | prompt byte数から上限見積りを出し、prompt上限・1回上限・request予算を検査。proof identityは決定IDと承認digestに束縛 |
@@ -286,6 +291,8 @@ S-9のstaging観測はB2c-2実装・persistent接続完了後、本番開放前�
 
 署名が揃うまで、本番の `ai.external-send-enabled` は false のままとする。
 
+NF07-NF08-LINK は実装済み（RB-NF08-LINK。§0）だが、上の S-1〜S-10 の代わりにはならない。LINK が許可するのは S-3 の NF07 policy が登録・有効化されて `APPROVED_ACTIVE` になった後だけで、その前提（NF07 の D-02・D-03・D-08 の署名、NF07-TRUST の D-03 方式の adapter、`privacy.retention.enabled=true`）も未取得である。LINK の key の data element の本番値（`AI_PROMPT_LOG` を catalog に足すか、`AI_EXTERNAL_PROVIDER_COPY` にするか）も未確定で、確定までは LINK が拒否し続ける（計画 §8 の実装記録）。
+
 ## 9. 敵対的テスト（A-NF08-1、mock/fake/loopback のみ）
 
 | class | 観点 |
@@ -302,7 +309,11 @@ S-9のstaging観測はB2c-2実装・persistent接続完了後、本番開放前�
 | `CopilotExternalSendGateAdversarialTest` | prompt injection、最小field、`bp.bpCompany` 等のdata category外、untrusted text の連絡先・敬称付き人名・法人格付き会社名・送信契約外field値の再出現、送信field値のPII、自由文の全面拒否、登録templateと値形式、transaction内拒否、prompt上限優先、PII canary、承認なし/チェックリスト欠落/flag OFF/digest不一致の固定 deny-all、実行中のdigest不一致・再署名・失効、費用上限、送信前監査失敗、送信後失敗の費用維持、未送信失敗の予約取消、legacy/取込用途の拒否、読取専用 preflight の無副作用、log へ prompt・応答本文を渡さない |
 | `AiConfigurationBindingTest` | 空の警告日数のbindingと30日へのfallback |
 | `AiProviderBeanUniquenessTest` | main sourceのprovider条件付き実装を機械的に列挙し、BP解析を含む全契約を検査する。空白付き値は既存条件と同じlocal fallbackとなり、snapshotはregistryと同じtrim/lowercase。未知・空値はdev/testで互換動作、prodでは起動拒否 |
-| `GeminiCopilotInvocationBoundaryTest` | 本番adapterの決定ID・digest束縛（偽造証拠の拒否）、承認証拠でも test用 loopback transport は公開hostへ送らない、未承認adapterの固定 deny-all と config hash の区別（digestでも区別） |
+| `GeminiCopilotInvocationBoundaryTest` | 本番adapterの決定ID・digest束縛（偽造証拠の拒否）、承認証拠でも test用 loopback transport は公開hostへ送らない、未承認adapterの固定 deny-all と config hash の区別（digestでも区別）、承認証拠でもNF07のpolicyを確認できない（拒否・gateなし・実行tenantなし）なら送信直前に拒否（LINK） |
+| `ProductionPolicyEnforcementServiceTest` | NF07の内部判定port: test-only の鍵で署名した policy で flag OFF・要求不完全・UNKNOWN・REVOKED・EXPIRED・DRIFT・policy ID 不一致を拒否し、全て揃ったときだけ許可（呼出し元の認証を要求しない・cacheしない） |
+| `AiExternalSendPrivacyPolicyCheckTest` | NF08の定数keyと `nf07-policy-id`・実行tenantでの問い合わせ、拒否の固定コードだけのlog・metric、portなし・例外・nullの拒否、手動構築gateの常時拒否、起動時判定に含めないこと |
+| `CopilotExternalSendPrivacyPolicyLinkTest` | 本番の内部判定portと test-only の policy・fake provider で、NF07の各拒否は execute・読取専用 preflight とも送信前に止まり（DENIED監査・metric）、全て揃ったときだけ1回送信する |
+| `PrivacyPolicyEnforcementConfigurationTest` | prod以外は常に拒否するport、prodは本番の判定（flag OFFではDBを読まない） |
 
 DNS/TLS/応答body上限・429/timeout は既存の `CopilotBoundedHttpTransportTest`、`CopilotBoundedHttpTransportTlsTest`、`CopilotBoundedJsonParserTest`、`CopilotGeminiResponseParserTest` が担う。実 provider・実 TLS issuer・実 credential での確認は §8 S-9 の staging 観測で行う。
 
@@ -310,7 +321,7 @@ DNS/TLS/応答body上限・429/timeout は既存の `CopilotBoundedHttpTransport
 
 理由コードは `BusinessException.of(code, key)` のmessage keyとして解決され、4言語（`messages.properties`・`_en`・`_ko`・`_zh_CN`）に訳文がある。訳文は設定値・PIIを含まない。
 
-`AI_EXTERNAL_SEND_APPROVAL_INCOMPLETE`、`AI_EXTERNAL_SEND_PROVIDER_NOT_APPROVED`、`AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED`、`AI_EXTERNAL_SEND_NOT_APPROVED`、`AI_EXTERNAL_SEND_DECISION_CHANGED`、`AI_EXTERNAL_SEND_MODEL_NOT_APPROVED`、`AI_EXTERNAL_SEND_DESTINATION_NOT_APPROVED`、`AI_EXTERNAL_SEND_REQUEST_TOO_LARGE`、`AI_EXTERNAL_SEND_REQUEST_COST_LIMIT`、`AI_EXTERNAL_SEND_REQUEST_SIZE_UNKNOWN`、`AI_EXTERNAL_SEND_OUTPUT_UNBOUNDED`、`AI_EXTERNAL_SEND_COST_OVERFLOW`、`AI_EXTERNAL_SEND_DAILY_COST_LIMIT`、`AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT`、`AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`、`COPILOT_COST_BUDGET_EXCEEDED`（以上W2の16件）、`AI_EXTERNAL_SEND_APPROVAL_DIGEST_MISMATCH`、`AI_EXTERNAL_SEND_FIELD_NOT_APPROVED`、`AI_EXTERNAL_SEND_UNMASKED_PII`（W3-03で追加）、`AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWED`、`AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALID`、`AI_EXTERNAL_SEND_TRANSACTION_ACTIVE`（G1で追加）。
+`AI_EXTERNAL_SEND_APPROVAL_INCOMPLETE`、`AI_EXTERNAL_SEND_PROVIDER_NOT_APPROVED`、`AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED`、`AI_EXTERNAL_SEND_NOT_APPROVED`、`AI_EXTERNAL_SEND_DECISION_CHANGED`、`AI_EXTERNAL_SEND_MODEL_NOT_APPROVED`、`AI_EXTERNAL_SEND_DESTINATION_NOT_APPROVED`、`AI_EXTERNAL_SEND_REQUEST_TOO_LARGE`、`AI_EXTERNAL_SEND_REQUEST_COST_LIMIT`、`AI_EXTERNAL_SEND_REQUEST_SIZE_UNKNOWN`、`AI_EXTERNAL_SEND_OUTPUT_UNBOUNDED`、`AI_EXTERNAL_SEND_COST_OVERFLOW`、`AI_EXTERNAL_SEND_DAILY_COST_LIMIT`、`AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT`、`AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`、`COPILOT_COST_BUDGET_EXCEEDED`（以上W2の16件）、`AI_EXTERNAL_SEND_APPROVAL_DIGEST_MISMATCH`、`AI_EXTERNAL_SEND_FIELD_NOT_APPROVED`、`AI_EXTERNAL_SEND_UNMASKED_PII`（W3-03で追加）、`AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWED`、`AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALID`、`AI_EXTERNAL_SEND_TRANSACTION_ACTIVE`（G1で追加）、`AI_EXTERNAL_SEND_PRIVACY_POLICY_NOT_ACTIVE`（NF07-NF08-LINKで追加。NF07側の細かな理由は利用者へ返さず、WARN logとmetricの固定コードだけに出す）。
 
 ## 11. 未解決事項
 

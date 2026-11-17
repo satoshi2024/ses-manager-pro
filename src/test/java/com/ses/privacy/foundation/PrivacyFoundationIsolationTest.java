@@ -39,6 +39,12 @@ class PrivacyFoundationIsolationTest {
     @Test
     void 解除のproofとJournalの本番部品の呼出し元はSpring登録と解除のserviceに限る() throws Exception {
         java.util.Map<String, java.util.Set<String>> allowed = java.util.Map.of(
+                // NF07-NF08-LINK: 内部判定 port は送信を許可する根拠になるため、Spring 登録（prod の registry・失効 provider）だけに限る
+                "productionPolicyEnforcement(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPrivacyComponents.java",
+                        "com/ses/privacy/production/PrivacyPolicyEnforcementConfiguration.java"),
+                "new ProductionPolicyEnforcementService(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPrivacyComponents.java"),
                 "policyRegistrationVerifier(", java.util.Set.of(
                         "com/ses/privacy/foundation/ProductionPrivacyComponents.java",
                         "com/ses/privacy/production/retention/policy/PrivacyPolicyRegistrationConfiguration.java"),
@@ -58,7 +64,7 @@ class PrivacyFoundationIsolationTest {
                 "new VerifiedHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseProofVerifier.java"));
         // 方法参照（{@code ::appendHoldRelease} 等）は呼出しの "(" を含まないため、どこにも書かせない（delta review P3-6）
         java.util.List<String> forbiddenReferences = java.util.List.of("::holdReleaseVerifier", "::appendHoldRelease",
-                "::productionPrivacyJournal", "::policyRegistrationVerifier");
+                "::productionPrivacyJournal", "::policyRegistrationVerifier", "::productionPolicyEnforcement");
         Path root = Path.of("src/main/java");
         java.util.List<String> violations = new java.util.ArrayList<>();
         java.util.Map<String, java.util.Set<String>> found = new java.util.HashMap<>();
@@ -92,7 +98,8 @@ class PrivacyFoundationIsolationTest {
                 ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
                 ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class,
                 ProductionPrivacyJournalAdapter.class, HoldReleaseProofVerifier.class,
-                ProductionPolicyRegistrationVerifier.class, PrivacyTrustReadiness.class)) {
+                ProductionPolicyRegistrationVerifier.class, PrivacyTrustReadiness.class,
+                ProductionPolicyEnforcementService.class)) {
             assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
             for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
                 assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),

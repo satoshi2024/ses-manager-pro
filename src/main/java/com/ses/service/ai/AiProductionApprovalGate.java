@@ -2,6 +2,9 @@ package com.ses.service.ai;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
+import com.ses.privacy.foundation.PolicyEnforcementPort;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +19,8 @@ import java.util.Locale;
  * productionGatesの10項目は運用者確認チェックリスト（補助項目）に降格し、必要条件ではあるが
  * 十分条件ではない。外部送信は external-send flag ∧ 非local provider ∧ チェックリスト全項目 ∧
  * 承認設定の完全性・一致 ∧ 用途の承認、の全てを満たす場合だけ許可する。</p>
+ * <p>加えて、承認済み外部送信は送信ごとに NF07 の policy（承認設定の {@code nf07-policy-id}）が現行で有効かを
+ * NF07 の内部判定 port で確かめる（NF07-NF08-LINK、{@link #assertExternalSendPrivacyPolicy}）。</p>
  */
 @Component
 public class AiProductionApprovalGate {
@@ -23,19 +28,43 @@ public class AiProductionApprovalGate {
     /** legacy入口（CHAT/MATCHING/PROPOSAL_DRAFT）を表す用途marker。外部送信の承認用途には含められない。 */
     public static final String PURPOSE_LEGACY_ENDPOINT = "LEGACY_ENDPOINT";
 
+    /** NF07 の policy を確認できないため承認済み外部送信を拒否する理由コード（NF07-NF08-LINK）。 */
+    public static final String REASON_PRIVACY_POLICY_NOT_ACTIVE =
+            AiExternalSendPrivacyPolicyCheck.REASON_POLICY_NOT_ACTIVE;
+
     private final AiConfig aiConfig;
     private final Clock clock;
+    /** NF07-NF08-LINK の送信ごとの判定。手動構築では常に拒否（port を持たない）。 */
+    private final AiExternalSendPrivacyPolicyCheck privacyPolicyCheck;
     private AiExternalSendGateStatus startupStatus;
 
-    /** 手動構築テスト用。承認日の判定はJSTのシステム時計で行う。 */
+    /** 手動構築テスト用。承認日の判定はJSTのシステム時計で行う。NF07 policy の判定は常に拒否する。 */
     public AiProductionApprovalGate(AiConfig aiConfig) {
         this(aiConfig, Clock.system(AiExternalSendApproval.BUSINESS_ZONE));
     }
 
-    @Autowired
+    /** 手動構築用。NF07 policy の判定は常に拒否する（承認済み外部送信は送信されない）。 */
     public AiProductionApprovalGate(AiConfig aiConfig, Clock clock) {
+        this(aiConfig, clock, AiExternalSendPrivacyPolicyCheck.unavailable());
+    }
+
+    /** 本番DI。NF07 の内部判定 port は送信のたびに取得し、取得できなければ拒否する。 */
+    @Autowired
+    public AiProductionApprovalGate(AiConfig aiConfig, Clock clock,
+                                    ObjectProvider<PolicyEnforcementPort> policyEnforcementProvider,
+                                    ObjectProvider<MeterRegistry> meterRegistryProvider) {
+        this(aiConfig, clock, new AiExternalSendPrivacyPolicyCheck(
+                policyEnforcementProvider == null ? () -> null : policyEnforcementProvider::getIfAvailable,
+                meterRegistryProvider == null ? () -> null : meterRegistryProvider::getIfAvailable));
+    }
+
+    /** NF07 policy の判定を指定する構築（テストでは test-only の port を渡す）。 */
+    public AiProductionApprovalGate(AiConfig aiConfig, Clock clock,
+                                    AiExternalSendPrivacyPolicyCheck privacyPolicyCheck) {
         this.aiConfig = aiConfig;
         this.clock = clock == null ? Clock.system(AiExternalSendApproval.BUSINESS_ZONE) : clock;
+        this.privacyPolicyCheck = privacyPolicyCheck == null
+                ? AiExternalSendPrivacyPolicyCheck.unavailable() : privacyPolicyCheck;
     }
 
     /** gateway・adapter・monitorが共用する、最初の利用時に固定した起動判定。 */
@@ -121,6 +150,26 @@ public class AiProductionApprovalGate {
         }
         if (!decision.approval().permitsPurpose(purpose)) {
             throw BusinessException.of(503, "AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED");
+        }
+    }
+
+    /**
+     * NF07-NF08-LINK: 承認済み外部送信の送信ごとに、承認設定の {@code nf07-policy-id} が指す NF07 policy が現行で
+     * {@code APPROVED_ACTIVE} かを確かめる。起動時の判定（{@link #startupExternalSendStatus()}）には含めない
+     * （policy の状態は実行中に変わるため、送信のたびに評価する）。
+     *
+     * @return 判定を満たしたか（NF07 の公開スイッチ OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・policy ID の不一致は false）
+     */
+    public boolean externalSendPrivacyPolicyPermits(String tenantId, AiExternalSendApproval.Snapshot approval,
+                                                    AiExternalSendPrivacyPolicyCheck.Stage stage) {
+        return privacyPolicyCheck.permits(tenantId, approval, stage);
+    }
+
+    /** {@link #externalSendPrivacyPolicyPermits} を満たさなければ 503 {@value #REASON_PRIVACY_POLICY_NOT_ACTIVE}。 */
+    public void assertExternalSendPrivacyPolicy(String tenantId, AiExternalSendApproval.Snapshot approval,
+                                                AiExternalSendPrivacyPolicyCheck.Stage stage) {
+        if (!externalSendPrivacyPolicyPermits(tenantId, approval, stage)) {
+            throw BusinessException.of(503, REASON_PRIVACY_POLICY_NOT_ACTIVE);
         }
     }
 

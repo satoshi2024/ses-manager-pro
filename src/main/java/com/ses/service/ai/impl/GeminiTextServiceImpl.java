@@ -75,6 +75,11 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     /** 起動時に完全だった外部送信承認の承認内容digest。approvedDecisionIdと同時にnull/非nullになる。 */
     private final String approvedDigest;
     private final java.time.Clock approvalClock;
+    /**
+     * 送信直前の NF07 policy の再確認（NF07-NF08-LINK）に使う共有gate。手動構築（gateなし）ではnullで、
+     * 承認済みの送信は固定deny-allのまま。
+     */
+    private final com.ses.service.ai.AiProductionApprovalGate approvalGate;
 
     @Autowired
     public GeminiTextServiceImpl(AiConfig aiConfig,
@@ -118,6 +123,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                           com.ses.service.ai.AiProductionApprovalGate approvalGate, java.time.Clock clock) {
         this.aiConfig = aiConfig;
         this.approvalClock = clock;
+        this.approvalGate = approvalGate;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
@@ -142,6 +148,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                           OutboundUrlGuard outboundUrlGuard) {
         this.aiConfig = aiConfig;
         this.approvalClock = java.time.Clock.systemUTC();
+        this.approvalGate = null;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
@@ -275,6 +282,8 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
      * gatewayの承認policyが発行した上限証拠か、送信直前に再確認する（gateway迂回の多層防御）。
      * 現在の承認設定が完全で起動時の決定ID・承認内容digestと一致し、proof identity・config hash・1回上限が整合する
      * 場合だけ許可する。同じ決定IDのまま承認内容（上限・用途・期限等）を差し替えた設定はdigestの不一致で拒否する。
+     * 最後に、承認設定の {@code nf07-policy-id} が指す NF07 policy が現行で有効かを共有gateで再確認する
+     * （NF07-NF08-LINK。gateなし・tenantなし・NF07の拒否は全て送信しない）。
      */
     private boolean allowsApprovedDispatch(com.ses.service.ai.copilot.summary.PreflightCostEvidence evidence) {
         if (approvedDecisionId == null || approvedDigest == null || aiConfig == null
@@ -299,7 +308,23 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                 && evidence.upperBoundYen() != null
                 && evidence.upperBoundYen() <= live.snapshot().costLimit().perRequestYen()
                 && evidence.dispatchOutcome().state()
-                == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
+                == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED
+                && privacyPolicyPermits(live.snapshot());
+    }
+
+    /** NF07-NF08-LINK の送信直前の再確認。gateなし・実行tenantなしは拒否する。 */
+    private boolean privacyPolicyPermits(AiExternalSendApproval.Snapshot approval) {
+        if (approvalGate == null) {
+            return false;
+        }
+        String tenantId;
+        try {
+            tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        } catch (RuntimeException missingTenant) {
+            return false;
+        }
+        return approvalGate.externalSendPrivacyPolicyPermits(tenantId, approval,
+                com.ses.service.ai.AiExternalSendPrivacyPolicyCheck.Stage.ADAPTER);
     }
 
     /** 起動時の承認snapshot。external-send無効・承認不完全（失効・digest不一致を含む）ならnull。 */

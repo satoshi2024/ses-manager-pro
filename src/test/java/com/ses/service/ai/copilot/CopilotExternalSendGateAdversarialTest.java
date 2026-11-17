@@ -887,7 +887,10 @@ class CopilotExternalSendGateAdversarialTest {
     }
 
     private AiExecutionGatewayImpl gateway(AiConfig config, CopilotBoundedAiTextService adapter) {
-        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock);
+        // NF07-NF08-LINK の判定は本 class の対象外のため、fixture の policy だけを許可する test-only の check を使う
+        // （NF07 側の拒否は CopilotExternalSendPrivacyPolicyLinkTest が確かめる）。
+        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock,
+                AiExternalSendApprovalFixtures.permittingPrivacyPolicy());
         return new AiExecutionGatewayImpl(adapter, config, probe, new ObjectMapper(),
                 mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
                 mock(PlatformTransactionManager.class), clock, gate,

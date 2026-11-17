@@ -76,6 +76,27 @@ public final class AiExternalSendApprovalFixtures {
         return config;
     }
 
+    /**
+     * NF07-NF08-LINK の判定を満たす test-only の check。NF07 の内部判定 port の代わりに、NF08 の key（定数）と fixture の
+     * policy ID の組だけを許可し、それ以外は {@code POLICY_ID_MISMATCH} で拒否する（無条件の許可にしない）。
+     * NF07 の検証そのものは {@code ProductionPolicyEnforcementServiceTest}・{@code CopilotExternalSendPrivacyPolicyLinkTest} が
+     * test-only の鍵で署名した policy で確かめる。
+     */
+    public static AiExternalSendPrivacyPolicyCheck permittingPrivacyPolicy() {
+        com.ses.privacy.foundation.PolicyEnforcementPort port = request ->
+                NF07_POLICY_ID.equals(request.expectedPolicyId())
+                        && AiExternalSendPrivacyPolicyCheck.MODULE_CODE.equals(request.moduleCode())
+                        && AiExternalSendPrivacyPolicyCheck.DATA_ELEMENT_ID.equals(request.dataElementId())
+                        && AiExternalSendPrivacyPolicyCheck.ACTION.equals(request.action())
+                        && "gemini-adapter".equals(request.providerId())
+                        && request.tenantId() != null && !request.tenantId().isBlank()
+                        ? com.ses.privacy.foundation.PolicyEnforcementDecision.permit()
+                        : com.ses.privacy.foundation.PolicyEnforcementDecision.deny(
+                                com.ses.privacy.foundation.PolicyEnforcementReason.POLICY_ID_MISMATCH,
+                                com.ses.privacy.foundation.PolicyFailureReason.NONE);
+        return new AiExternalSendPrivacyPolicyCheck(() -> port, () -> null);
+    }
+
     public static void enableChecklist(AiConfig.ProductionGates gates) {
         gates.setOwnerApproved(true);
         gates.setApprovedCatalog(true);

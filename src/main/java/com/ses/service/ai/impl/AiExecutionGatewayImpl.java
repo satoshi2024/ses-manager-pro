@@ -13,6 +13,7 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiExternalSendAuditor;
 import com.ses.service.ai.AiExternalSendBudgetLedger;
+import com.ses.service.ai.AiExternalSendPrivacyPolicyCheck;
 import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
@@ -382,6 +383,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 assertExternalSendTenantBinding(request);
                 assertBoundedIdentity(request, configured);
                 assertApprovedExternalSendBinding(configured);
+                // NF07-NF08-LINK: 承認設定の nf07-policy-id が指す NF07 policy が現行で有効か（送信ごと、cacheしない）。
+                productionApprovalGate.assertExternalSendPrivacyPolicy(request.getExecutionContext().tenantId(),
+                        startupExternalSendApproval, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY);
                 // 空文字を含む自由文はサイズ判定より前に400で拒否する。
                 if (request.getUntrustedSourceText() != null) {
                     throw BusinessException.of(400, REASON_UNTRUSTED);

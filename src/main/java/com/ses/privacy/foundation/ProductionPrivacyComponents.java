@@ -56,6 +56,36 @@ public final class ProductionPrivacyComponents {
     }
 
     /**
+     * NF07 policy の内部判定 port を生成する（NF07-NF08-LINK、production-bridge-phased-plan.md §4 の LINK 行・§8）。
+     *
+     * <p>説明照会と同じ catalog・current source・trust anchor・失効状態を読み、同じ検証を通すが、呼出し元の privacy 権限は
+     * 要求せず判定対象の tenant だけを束縛し、可否と固定の理由コードだけを返す（説明 DTO を返さない）。
+     * prod profile 以外では生成を拒否する。生成時に catalog・source・trust registry へ触れない（判定のたびに読む）。
+     *
+     * @param environment   起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param sourceEnabled 公開スイッチ（{@code privacy.retention.enabled} と決定ID束縛の有効期間）。判定のたびに読む
+     * @param catalog       policy catalog
+     * @param source        current policy source
+     * @param trustRegistry policy envelope の署名 anchor（D-03 の署名前は空）
+     * @param revocations   失効状態（第1期は常に UNKNOWN）
+     * @param clock         検証の時計
+     */
+    public static PolicyEnforcementPort productionPolicyEnforcement(
+            Environment environment,
+            BooleanSupplier sourceEnabled,
+            ProductionPolicyCatalogPort catalog,
+            CurrentPolicySource source,
+            ProductionPolicyTrustRegistry trustRegistry,
+            RevocationStatusProvider revocations,
+            Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        return new ProductionPolicyEnforcementService(sourceEnabled, catalog, source, trustRegistry, revocations,
+                guard, clock);
+    }
+
+    /**
      * 独立 Journal インスタンスへの本番 adapter を生成する（NF07-A1J、production-bridge-phased-plan.md §3.3）。
      *
      * <p>合成 {@code JdbcPrivacyJournalAdapter} とは別 class・別入口で、合成層のコードは使わない（I-6）。

@@ -38,6 +38,38 @@ final class ProductionApprovalEnvelopeVerifier {
                 || caller.tenantId().isBlank() || caller.actorId().isBlank()) {
             throw failure(PolicyFailureReason.UNAUTHORIZED_ACTOR_ROLE, "許可された呼び出し元が必要です");
         }
+        return verifyCurrent(caller.tenantId(), lookup, expectedPolicyId, expectedScope, expectedDataElementId,
+                expectedAction, expectedProvider);
+    }
+
+    /**
+     * 内部判定 port（NF07-NF08-LINK、{@link ProductionPolicyEnforcementService}）の current 候補の検証。説明照会
+     * （{@link #verifyCurrentCandidate}）と同じ検証を、呼出し元の役割ではなく判定対象の tenant だけに束縛して行う
+     * （計画 §8: 一般利用者の送信からも呼ぶため privacy 管理者を要求せず、説明 DTO も返さない）。
+     */
+    VerifiedPolicyMetadata verifyCurrentForEnforcement(String tenantId,
+                                                       PolicyLookupResult lookup,
+                                                       String expectedPolicyId,
+                                                       String expectedScope,
+                                                       String expectedDataElementId,
+                                                       String expectedAction,
+                                                       String expectedProvider) {
+        environmentGuard.requireProductionProfile();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw failure(PolicyFailureReason.TENANT_MISMATCH, "判定対象のtenantが必要です");
+        }
+        return verifyCurrent(tenantId, lookup, expectedPolicyId, expectedScope, expectedDataElementId,
+                expectedAction, expectedProvider);
+    }
+
+    /** current 候補の lookup・tenant・policy ID・revision・digest を確かめ、署名の検証へ進む（照会と内部判定で共通）。 */
+    private VerifiedPolicyMetadata verifyCurrent(String tenantId,
+                                                 PolicyLookupResult lookup,
+                                                 String expectedPolicyId,
+                                                 String expectedScope,
+                                                 String expectedDataElementId,
+                                                 String expectedAction,
+                                                 String expectedProvider) {
         if (lookup == null) {
             throw failure(PolicyFailureReason.POLICY_NOT_FOUND, "現在のpolicy候補がありません");
         }
@@ -59,7 +91,7 @@ final class ProductionApprovalEnvelopeVerifier {
             throw failure(PolicyFailureReason.POLICY_NOT_FOUND, "current policy候補の情報が不足しています");
         }
         environmentGuard.requireProductionAudience(candidate.metadata().audience());
-        if (!caller.tenantId().equals(candidate.metadata().tenantId())) {
+        if (!tenantId.equals(candidate.metadata().tenantId())) {
             throw failure(PolicyFailureReason.TENANT_MISMATCH, "呼び出し元とpolicyのtenantが一致しません");
         }
         if (expectedPolicyId == null || !candidate.policyId().equals(expectedPolicyId)) {
@@ -73,7 +105,7 @@ final class ProductionApprovalEnvelopeVerifier {
         if (!canonicalDigest.equals(lookup.currentDigest())) {
             throw failure(PolicyFailureReason.DIGEST_MISMATCH, "policy digestが一致しません");
         }
-        return verifySigned(candidate, caller.tenantId(), expectedScope, expectedDataElementId, expectedAction,
+        return verifySigned(candidate, tenantId, expectedScope, expectedDataElementId, expectedAction,
                 expectedProvider);
     }
 
