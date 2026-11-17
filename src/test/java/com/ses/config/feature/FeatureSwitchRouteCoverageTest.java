@@ -479,9 +479,10 @@ class FeatureSwitchRouteCoverageTest {
         assertThat(base).contains("name=\"ses-pwa-shell\" content=\"off\"");
         assertThat(base).contains("<a id=\"pwa-restore-link\" href=\"/offline.html\"");
         assertThat(common).contains("shellDisabled: function()", "this.unregisterShell();", "'ses-pwa-shell-'");
-        // NF-02の子（顧客ポータルの問い合わせ）: portalの問い合わせタブ・画面・モーダル2件・script。
+        // NF-02の子（顧客ポータルの問い合わせ）: portalの問い合わせタブ・画面・モーダル3件（起票・詳細と返信・CSAT）・
+        // 文言を渡す inline script・script の7件（RB-I18N で詳細と返信を同じ画面のモーダルにし、文言 map を足した）。
         // 親キー（nf02）だけで判定するとNF-02 ON・子OFFのときに顧客へ問い合わせ導線が出るため、子キーだけで判定する。
-        assertThat(count(portal, "disabledFeatures.contains('nf02-customer-portal')")).isEqualTo(5);
+        assertThat(count(portal, "disabledFeatures.contains('nf02-customer-portal')")).isEqualTo(7);
         assertThat(count(portal, "disabledFeatures.contains('nf02')")).isZero();
         assertThat(portal).contains("if (typeof PortalServiceDesk !== 'undefined') PortalServiceDesk.init();");
         // NF-03の子（資格番号の入力）: 本人画面の資格番号入力欄1件。JSは入力欄の有無で申請・再申請の送信値を切り替える
