@@ -164,6 +164,11 @@ public class IntegrationHubExternalApiProperties {
          * productionのinbound有効時は必須。DBのclient行だけで受信元を広げられないようにする。
          */
         private List<String> allowedClientCidrs = new ArrayList<>();
+        /**
+         * 決定書に記載されたinbound承認内容のSHA-256（小文字hex 64桁）。productionのinbound有効時は必須で、
+         * 現行設定から {@link IntegrationHubApprovalDigest#canonicalInbound} で再計算した値と一致しなければ起動しない。
+         */
+        private String approvalDigest;
     }
 
     @Data
@@ -191,6 +196,12 @@ public class IntegrationHubExternalApiProperties {
          * 送信時のegress照合と登録時検証は実HTTPS transport（W3-06b）で同じ一覧を使う。
          */
         private List<String> allowedDestinations = new ArrayList<>();
+        /**
+         * 決定書に記載されたoutbound承認内容のSHA-256（小文字hex 64桁）。productionのoutbound有効時は必須で、
+         * 現行設定とtruststoreの内容から {@link IntegrationHubApprovalDigest#canonicalOutbound} で再計算した値と
+         * 一致しなければ起動しない。
+         */
+        private String approvalDigest;
     }
 
     @Data

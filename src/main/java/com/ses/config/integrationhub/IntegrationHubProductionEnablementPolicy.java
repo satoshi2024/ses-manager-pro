@@ -17,6 +17,10 @@ import java.util.regex.Pattern;
  *
  * <p>正本の承認項目と決定IDの形式は {@code .kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md}。
  * 既定値（両方向OFF、provider.mode=MOCK）は承認なしで常に通る。
+ *
+ * <p>決定IDは形式だけでなく、決定書に記載された承認内容の digest（{@code approval-digest}）へ束縛する（b-13）。
+ * 正規形は {@link IntegrationHubApprovalDigest}。不一致・未設定・形式不正は開放する方向の違反として起動を止める。
+ * 違反文言は固定で、設定値・再計算したdigestを含めない。
  */
 final class IntegrationHubProductionEnablementPolicy {
     /** DG-05 inbound決定ID。日付は署名日、末尾は同日の連番。 */
@@ -97,6 +101,17 @@ final class IntegrationHubProductionEnablementPolicy {
             // D-1: production入口はLBのみ。trusted proxy未設定では全requestがLB自身のIPと判定される。
             violations.add("inbound開放にはLBのCIDRをsecurity.trusted-proxiesへ設定してください");
         }
+        String configured = IntegrationHubApprovalDigest.normalizeConfiguredDigest(
+                approval == null ? null : approval.getApprovalDigest());
+        String canonical = IntegrationHubApprovalDigest.canonicalInbound(properties);
+        if (configured == null) {
+            violations.add("inbound開放にはpublic-api.approval.approval-digest（決定書の承認内容のSHA-256、小文字hex 64桁）が必要です");
+        } else if (canonical == null) {
+            violations.add("inbound承認digestの算出にはtopology.bound-tenant-idを英数字と._:-の100文字以内にしてください");
+        } else if (!configured.equals(IntegrationHubApprovalDigest.digest(canonical))) {
+            // 決定IDを取り直さずに承認値（CIDR・trusted proxy・provider等）を変えた設定を止める。
+            violations.add("public-api.approval.approval-digestが現行のinbound承認内容と一致しません（決定書と設定を照合してください）");
+        }
         return violations;
     }
 
@@ -117,6 +132,24 @@ final class IntegrationHubProductionEnablementPolicy {
         if (!productionOutboundCapable(properties.getProvider().getMode())) {
             violations.add("outbound開放にはprovider.mode=HTTPSが必要です");
         }
+        String configured = IntegrationHubApprovalDigest.normalizeConfiguredDigest(
+                approval == null ? null : approval.getApprovalDigest());
+        String truststore = IntegrationHubApprovalDigest.truststoreSha256(
+                properties.getExternalTransport().getTruststorePath());
+        if (configured == null) {
+            violations.add("outbound開放にはexternal-transport.approval.approval-digest（決定書の承認内容のSHA-256、小文字hex 64桁）が必要です");
+        } else if (truststore == null) {
+            // truststoreの内容（信頼する発行者）も承認内容に含めるため、読めなければ照合できない。
+            violations.add("outbound承認digestの照合にはexternal-transport.truststore-pathのfileを読める必要があります（1MiB以下）");
+        } else {
+            String canonical = IntegrationHubApprovalDigest.canonicalOutbound(properties, truststore);
+            if (canonical == null) {
+                violations.add("outbound承認digestの算出にはtopology.bound-tenant-idを英数字と._:-の100文字以内にしてください");
+            } else if (!configured.equals(IntegrationHubApprovalDigest.digest(canonical))) {
+                // 送信先・truststore・送信量を決定書と違う値へ変えた設定を止める。
+                violations.add("external-transport.approval.approval-digestが現行のoutbound承認内容と一致しません（決定書と設定を照合してください）");
+            }
+        }
         return violations;
     }
 
@@ -134,16 +167,42 @@ final class IntegrationHubProductionEnablementPolicy {
         };
     }
 
-    /** 両方向に共通するcredential前提。keyringの現行versionと鍵が環境から注入されていること。 */
+    /**
+     * 両方向に共通するcredential前提。keyringの現行versionと鍵、credential hashのpepper（N5-P3-2）が環境から
+     * 注入されていること。pepperは32 byteを{@code =}無しのbase64urlで書き、暗号鍵と同じ値にしない（用途を分ける）。
+     */
     private static List<String> credentialViolations(Environment environment) {
         List<String> violations = new ArrayList<>();
         String version = environment == null ? null
                 : environment.getProperty("integration.hub.crypto.current-key-version");
-        if (!StringUtils.hasText(version)
-                || !StringUtils.hasText(environment.getProperty("integration.hub.crypto.keys." + version))) {
+        String key = StringUtils.hasText(version)
+                ? environment.getProperty("integration.hub.crypto.keys." + version) : null;
+        if (!StringUtils.hasText(key)) {
             violations.add("NF-05開放にはintegration.hub.cryptoの現行key versionと鍵の注入が必要です");
         }
+        String pepper = environment == null ? null
+                : environment.getProperty(CREDENTIAL_HASH_PEPPER_PROPERTY);
+        if (!validPepper(pepper)) {
+            violations.add("NF-05開放にはintegration.hub.crypto.credential-hash-pepper（32 byteのbase64url、=無し）の注入が必要です");
+        } else if (pepper.equals(key)) {
+            violations.add("integration.hub.crypto.credential-hash-pepperには暗号鍵と別の値を設定してください");
+        }
         return violations;
+    }
+
+    /** credential hashのpepperを読むproperty名。keyringと同じ名前を使う。 */
+    static final String CREDENTIAL_HASH_PEPPER_PROPERTY =
+            com.ses.service.integrationhub.crypto.EnvironmentIntegrationHubKeyring.CREDENTIAL_HASH_PEPPER_PROPERTY;
+
+    private static boolean validPepper(String encoded) {
+        if (!StringUtils.hasText(encoded) || encoded.contains("=") || encoded.matches(".*\\s.*")) {
+            return false;
+        }
+        try {
+            return java.util.Base64.getUrlDecoder().decode(encoded).length == 32;
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
     }
 
     private static boolean narrowEnough(String cidr) {

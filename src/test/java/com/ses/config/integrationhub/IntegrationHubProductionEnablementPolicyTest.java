@@ -13,6 +13,8 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.mock.env.MockEnvironment;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,9 @@ class IntegrationHubProductionEnablementPolicyTest {
 
     private static final String INBOUND_DECISION = "DG-05-IN-20261201-01";
     private static final String OUTBOUND_DECISION = "DG-05-OUT-20261201-01";
+
+    @org.junit.jupiter.api.io.TempDir
+    Path directory;
 
     @Test
     void productionDefaultsOffAndMockPassWithoutAnyApproval() {
@@ -191,11 +196,101 @@ class IntegrationHubProductionEnablementPolicyTest {
     @Test
     void HTTPSは署名済みoutbound承認でinboundを要求せず有効化できる() {
         var properties = base(false, true);
-        approveOutbound(properties);
         properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
-        properties.getExternalTransport().setTruststorePath("fixture.p12");
+        approveOutbound(properties);
         assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
         assertDoesNotThrow(properties::validateBoundaries);
+    }
+
+    /** b-13: 決定IDは承認内容のdigestへ束縛され、決定書と違う承認値・未転記・形式不正では開かない。 */
+    @Test
+    void inboundは承認digestの未設定と形式不正と承認値の変更を拒否する() {
+        var properties = base(true, false);
+        approveInbound(properties);
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
+
+        properties.getPublicApi().getApproval().setApprovalDigest(null);
+        assertMessage("public-api.approval.approval-digest", properties);
+        properties.getPublicApi().getApproval().setApprovalDigest("TBD");
+        assertMessage("public-api.approval.approval-digest", properties);
+
+        // 決定IDを取り直さずに送信元CIDRを足す・trusted proxyやproviderを変える設定は、digestの不一致で止まる。
+        for (java.util.function.Consumer<IntegrationHubExternalApiProperties> change : List.<java.util.function.Consumer<IntegrationHubExternalApiProperties>>of(
+                p -> p.getPublicApi().getApproval().getAllowedClientCidrs().add("198.51.100.0/24"),
+                p -> p.getSecurity().getTrustedProxies().set(0, "10.0.1.0/24"),
+                p -> p.getProvider().getApprovedInboundProviders().add("provider-z"),
+                p -> p.getTopology().setBoundTenantId("tenant-b"))) {
+            approveInbound(properties);
+            change.accept(properties);
+            List<String> violations = IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true));
+            assertEquals(1, violations.size(), violations.toString());
+            assertTrue(violations.get(0).contains("一致しません"), violations.toString());
+            assertFalse(violations.get(0).contains(properties.getPublicApi().getApproval().getApprovalDigest()),
+                    "違反文言へdigestを出さない");
+        }
+
+        approveInbound(properties);
+        String digest = properties.getPublicApi().getApproval().getApprovalDigest();
+        properties.getPublicApi().getApproval().setApprovalDigest(" " + digest.toUpperCase(java.util.Locale.ROOT) + " ");
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)),
+                "決定書の大文字・前後空白の転記は小文字化して照合する");
+        properties.getTopology().setBoundTenantId("tenant a");
+        assertTrue(IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)).stream()
+                .anyMatch(violation -> violation.contains("bound-tenant-id")));
+    }
+
+    @Test
+    void outboundは承認digestとtruststoreの内容を照合し読めないtruststoreを拒否する() throws IOException {
+        var properties = base(false, true);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        approveOutbound(properties);
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
+
+        // pathを変えずにtruststoreの中身（信頼する発行者）を差し替えると、承認内容が変わったものとして止まる。
+        Files.write(Path.of(properties.getExternalTransport().getTruststorePath()),
+                "nf05-replaced-truststore".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        assertTrue(IntegrationHubProductionEnablementPolicy.outboundViolations(properties).stream()
+                .anyMatch(violation -> violation.contains("external-transport.approval.approval-digest")
+                        && violation.contains("一致しません")));
+        Files.delete(Path.of(properties.getExternalTransport().getTruststorePath()));
+
+        approveOutbound(properties);
+        properties.getExternalTransport().getApproval().getAllowedDestinations().add("api.partner-b.example:443");
+        assertMessage("一致しません", properties);
+
+        approveOutbound(properties);
+        properties.getExternalTransport().setBatchSize(16);
+        assertMessage("一致しません", properties);
+
+        approveOutbound(properties);
+        properties.getExternalTransport().setTruststorePath(directory.resolve("missing.p12").toString());
+        assertTrue(IntegrationHubProductionEnablementPolicy.outboundViolations(properties).stream()
+                .anyMatch(violation -> violation.contains("truststore-path")));
+
+        approveOutbound(properties);
+        properties.getExternalTransport().getApproval().setApprovalDigest(null);
+        assertTrue(IntegrationHubProductionEnablementPolicy.outboundViolations(properties).stream()
+                .anyMatch(violation -> violation.contains("external-transport.approval.approval-digest")));
+    }
+
+    /** N5-P3-2: credential hashのpepperは開放時に必須で、暗号鍵と同じ値・形式外を拒否する。 */
+    @Test
+    void credentialHashのpepperが無いか暗号鍵と同じなら開放しない() {
+        var properties = base(true, false);
+        approveInbound(properties);
+        MockEnvironment withoutPepper = new MockEnvironment();
+        withoutPepper.setActiveProfiles("prod");
+        withoutPepper.setProperty("integration.hub.crypto.current-key-version", "test-key-v1");
+        withoutPepper.setProperty("integration.hub.crypto.keys.test-key-v1", SYNTHETIC_PEPPER);
+        properties.setEnvironment(withoutPepper);
+        assertMessage("credential-hash-pepper", properties);
+
+        for (String invalid : List.of("short", SYNTHETIC_PEPPER + "=", SYNTHETIC_PEPPER + "AAAA", "c3ludGhl dGlj")) {
+            withoutPepper.setProperty("integration.hub.crypto.credential-hash-pepper", invalid);
+            assertMessage("credential-hash-pepper", properties);
+        }
+        withoutPepper.setProperty("integration.hub.crypto.credential-hash-pepper", SYNTHETIC_PEPPER);
+        assertMessage("暗号鍵と別の値", properties);
     }
 
     @Test
@@ -265,6 +360,7 @@ class IntegrationHubProductionEnablementPolicyTest {
         return properties;
     }
 
+    /** 署名済みinbound承認の転記。決定書のdigestは、全ての承認値を設定した後の正規形から作る（決定書に記載された値）。 */
     private static void approveInbound(IntegrationHubExternalApiProperties properties) {
         properties.getPublicApi().getApproval().setDecisionId(INBOUND_DECISION);
         properties.getPublicApi().getApproval().getAllowedClientCidrs().clear();
@@ -272,21 +368,45 @@ class IntegrationHubProductionEnablementPolicyTest {
         properties.getSecurity().getTrustedProxies().clear();
         properties.getSecurity().getTrustedProxies().add("10.0.0.0/24");
         properties.setEnvironment(prodEnvironment(true));
+        properties.getPublicApi().getApproval().setApprovalDigest(
+                IntegrationHubApprovalDigest.digest(IntegrationHubApprovalDigest.canonicalInbound(properties)));
     }
 
-    private static void approveOutbound(IntegrationHubExternalApiProperties properties) {
+    /** 署名済みoutbound承認の転記。truststoreは合成file（内容だけをdigestへ含める）。digestは最後に作る。 */
+    private void approveOutbound(IntegrationHubExternalApiProperties properties) {
         properties.getExternalTransport().getApproval().setDecisionId(OUTBOUND_DECISION);
         properties.getExternalTransport().getApproval().getAllowedDestinations().clear();
         properties.getExternalTransport().getApproval().getAllowedDestinations().add("hooks.partner-a.example:443");
+        properties.getExternalTransport().setTruststorePath(syntheticTruststore().toString());
+        properties.getExternalTransport().getApproval().setApprovalDigest(
+                IntegrationHubApprovalDigest.digest(IntegrationHubApprovalDigest.canonicalOutbound(properties,
+                        IntegrationHubApprovalDigest.truststoreSha256(
+                                properties.getExternalTransport().getTruststorePath()))));
     }
 
-    /** prod profileのMockEnvironment。credentialありはkeyringのversionと鍵（合成値）を持つ。 */
+    private Path syntheticTruststore() {
+        try {
+            Path file = directory.resolve("synthetic-truststore.p12");
+            if (!Files.exists(file)) {
+                Files.write(file, "nf05-synthetic-truststore".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            }
+            return file;
+        } catch (IOException failure) {
+            throw new java.io.UncheckedIOException(failure);
+        }
+    }
+
+    /** credential hashのpepper（32 byte「synthetic-nf05-test-only-pepper!」のbase64url）。 */
+    private static final String SYNTHETIC_PEPPER = "c3ludGhldGljLW5mMDUtdGVzdC1vbmx5LXBlcHBlciE";
+
+    /** prod profileのMockEnvironment。credentialありはkeyringのversionと鍵とpepper（合成値）を持つ。 */
     private static MockEnvironment prodEnvironment(boolean withCredential) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("prod");
         if (withCredential) {
             environment.setProperty("integration.hub.crypto.current-key-version", "test-key-v1");
             environment.setProperty("integration.hub.crypto.keys.test-key-v1", "synthetic-test-only-key-material");
+            environment.setProperty("integration.hub.crypto.credential-hash-pepper", SYNTHETIC_PEPPER);
         }
         return environment;
     }

@@ -38,7 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.provider.mode=MOCK",
                 "integration.hub.topology.bound-tenant-id=tenant-a1-e2e",
                 "integration.hub.crypto.current-key-version=test-key-v1",
-                "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "integration.hub.crypto.credential-hash-pepper=c3ludGhldGljLW5mMDUtdGVzdC1vbmx5LXBlcHBlciE"
         })
 @ActiveProfiles("test")
 @Tag("browser")
@@ -93,7 +94,7 @@ class ExternalApiEnabledConnectorE2ETest {
                                                   cipher_format, status, issued_at, expires_at, version)
                 VALUES (?, ?, 1, ?, ?, ?, 'test-key-v1', 'IHG1', 'ACTIVE', ?, ?, 0)
                 """, CREDENTIAL_DB_ID, CLIENT_DB_ID, KEY_ID, encryptedSecret,
-                cryptoService.sha256Hex(CLIENT_SECRET),
+                cryptoService.credentialHash(CLIENT_ID, 1, CLIENT_SECRET),
                 LocalDateTime.ofInstant(now.minusSeconds(60), ZoneOffset.UTC),
                 LocalDateTime.ofInstant(now.plusSeconds(86400), ZoneOffset.UTC));
     }

@@ -570,6 +570,8 @@ integration:
       approval:
         decision-id: ${INTEGRATION_HUB_INBOUND_DECISION_ID:}
         allowed-client-cidrs: []
+        # 決定書に記載されたinbound承認内容のSHA-256（正規形はDG-05草案 §1.1）。prodのinbound有効時は必須（b-13）。
+        approval-digest: ${INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST:}
     external-transport:
       enabled: false
       batch-size: 32
@@ -584,6 +586,8 @@ integration:
       approval:
         decision-id: ${INTEGRATION_HUB_OUTBOUND_DECISION_ID:}
         allowed-destinations: []
+        # 決定書に記載されたoutbound承認内容（truststoreの内容を含む）のSHA-256。prodのoutbound有効時は必須（b-13）。
+        approval-digest: ${INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST:}
     provider:
       mode: MOCK
     security:
@@ -597,6 +601,9 @@ integration:
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}
+      # credential secretの保存用HMACのpepper（32 byte、=無しのbase64url。暗号鍵と別の値）。N5-P3-2。
+      # 未設定ではcredentialを発行できない（fail closed）。prodのNF05有効時は起動時にも検査する。
+      credential-hash-pepper: ${INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER:}
 
 # ===== NF07 プライバシー（保持・DSAR）。production-bridge-phased-plan.md §5.1 =====
 # 既定OFF。真偽値として解釈できない値（例: ture）は起動失敗になる（app.features.* と同じ扱い）。
