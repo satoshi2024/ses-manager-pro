@@ -487,7 +487,10 @@ class ImportCsvIngestionRealMySqlTest {
             statement.execute("CREATE USER IF NOT EXISTS '" + user + "'@'%' IDENTIFIED BY '" + password + "'");
             statement.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON `" + DATABASE + "`.* TO '" + user + "'@'%'");
         }
-        String url = "jdbc:mysql://" + MYSQL.getHost() + ":" + MYSQL.getMappedPort(3306) + "/" + DATABASE;
+        // delta review N-P3-2: Testcontainers の URL（接続 parameter を含む）をそのまま使い、user と password だけを替える。
+        // 自前で組んだ URL は TLS の PREFERRED と自動生成の証明書に頼って caching_sha2_password の認証を通していた。
+        String url = MYSQL.getJdbcUrl();
+        assertFalse(url.contains("user=") || url.contains("password="), "user・password は URL ではなく引数で替える");
         org.springframework.jdbc.datasource.DriverManagerDataSource limitedSource =
                 new org.springframework.jdbc.datasource.DriverManagerDataSource(url, user, password);
         JdbcTemplate limitedJdbc = new JdbcTemplate(limitedSource);

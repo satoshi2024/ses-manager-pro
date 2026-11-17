@@ -29,7 +29,9 @@ import java.util.regex.Pattern;
  *       {@code failover}・{@code sequential}・{@code loadbalance}・{@code replication}・{@code aurora}、および host 部に
  *       複数の host を書いた URL（{@code h1,h2}・{@code [h1,h2]}・{@code address=(...)} / {@code (host=...)} の形）。
  *       Connector/J の failover・load-balance proxy は通信異常時に別の接続へ切り替える（{@code pickNewConnection}）ため、
- *       透過再接続と同じく結果不明のCOMMITの分類を崩す。host部の key-value 形は1 hostでも拒否する（host:port 形へ書き直す）。</li>
+ *       透過再接続と同じく結果不明のCOMMITの分類を崩す。host部の key-value 形は1 hostでも拒否する（host:port 形へ書き直す）。
+ *       最終判定は Connector/J 自身の解析結果で、単一接続（{@code SINGLE_CONNECTION}）かつ host 1件のものだけを通し、
+ *       Connector/J が受け付けるのに解析できない URL も拒否する（RB-NF05 delta review N-P3-1。{@link #connectionTargetViolation}）。</li>
  * </ul>
  * ProxySQL・MySQL Router等の透過再接続proxyと、Hikari以外のconnection pool（{@code spring.datasource.type}）も同じ理由で
  * 禁止だが、前者はアプリから検出できず、後者は本検査の対象外のため、配備文書
@@ -65,20 +67,25 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         List<String> violations = violations(environment);
         if (!violations.isEmpty()) {
             throw new IllegalStateException("JDBC接続設定で透過再接続（autoReconnect）または複数hostへの切替え"
-                    + "（failover・loadbalance・replication・multi-host・SRV）が有効なため起動を中止します。"
+                    + "（failover・loadbalance・replication・multi-host・SRV）が有効、またはJDBC driverが解析できないURLのため"
+                    + "起動を中止します。"
                     + "取込commitの結果分類が成立しなくなるため、単一hostの jdbc:mysql://host:port/db に直してください: "
                     + violations);
         }
     }
 
-    /** 違反した property 名（複数 host の違反は {@code 名前(multiHost)}）。値は返さない。 */
+    /**
+     * 違反した property 名（複数 host の違反は {@code 名前(multiHost)}、Connector/J が解析できない URL は
+     * {@code 名前(unparsable)}）。値は返さない。
+     */
     static List<String> violations(Environment environment) {
         List<String> violations = new ArrayList<>();
         for (String key : URL_PROPERTIES) {
             String url = environment.getProperty(key);
             if (url == null) continue;
             if (autoReconnect(url)) violations.add(key);
-            if (multiHost(url)) violations.add(key + "(" + MULTI_HOST + ")");
+            String target = connectionTargetViolation(url);
+            if (target != null) violations.add(key + "(" + target + ")");
         }
         Map<String, String> dataSourceProperties = Binder.get(environment)
                 .bind(DATA_SOURCE_PROPERTIES, Bindable.mapOf(String.class, String.class))
@@ -95,8 +102,9 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                 if (autoReconnect(property.getValue())) {
                     violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
                 }
-                if (multiHost(property.getValue())) {
-                    violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + MULTI_HOST + ")");
+                String target = connectionTargetViolation(property.getValue());
+                if (target != null) {
+                    violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + target + ")");
                 }
             }
         }
@@ -111,10 +119,33 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
     }
 
     /**
-     * MySQL・MariaDB の URL が単一 host 以外へ接続し得るか。他の DB（H2 等）の URL は対象外で false。
+     * URL の接続先の違反。違反が無ければ null、複数 host へ切り替え得るなら {@link #MULTI_HOST}、Connector/J が受け付ける
+     * URL を Connector/J 自身が解析できない・確かめられないなら {@link #UNPARSABLE}。
+     *
+     * <p>最終判定は Connector/J の解析結果である（RB-NF05 delta review N-P3-1）。Connector/J が受け付ける URL
+     * （{@code ConnectionUrl.acceptsUrl}）は {@code ConnectionUrl.getConnectionUrlInstance} で解析し、型が
+     * {@code SINGLE_CONNECTION} で host がちょうど1件の場合だけ通す。自前の文字列判定（{@link #multiHost}）は前段の速い拒否で、
+     * Connector/J が扱わない MariaDB の URL もここで拒否する。両方を通ったものだけを通す（どちらかが拒否すれば拒否）。
+     * 文字列判定だけでは、scheme と {@code //} の間の空白（{@code jdbc:mysql: //h1,h2/db}）、百分率符号化した scheme
+     * （{@code jdbc:%6Dysql:loadbalance://}）、user 情報の {@code ,}（Connector/J は {@code ,} で先に分けてから user 情報を取る）を
+     * Connector/J と同じに解釈できなかった。
+     */
+    static String connectionTargetViolation(String url) {
+        if (url == null) return null;
+        if (multiHost(url)) return MULTI_HOST;
+        return switch (ConnectorJUrl.inspect(url)) {
+            case NOT_CONNECTOR_J, SINGLE_HOST -> null;
+            case MULTIPLE_HOSTS -> MULTI_HOST;
+            case PARSE_FAILED -> UNPARSABLE;
+        };
+    }
+
+    /**
+     * 自前の前段判定: MySQL・MariaDB の URL が単一 host 以外へ接続し得るか。他の DB（H2 等）の URL は対象外で false。
      * scheme が単一 host のもの以外、または host 部を複数 host とみなす。host 部は Connector/J の authority と同じく
-     * {@code ://} の後から最初の {@code /}・{@code ?}・{@code #} の手前まで（{@code ;} では終わらない。RB-NF05 review P3-1）で、
-     * user 情報 {@code user:pass@} を除いた残りに {@code ,}・{@code (}・{@code =}・{@code ;} のどれかを含めば複数 host とする
+     * {@code ://} の後から最初の {@code /}・{@code ?}・{@code #} の手前まで（{@code ;} では終わらない。RB-NF05 review P3-1）。
+     * authority に {@code ,} があれば、user 情報の中でも複数 host とする（Connector/J は {@code ,} で分けてから user 情報を取る）。
+     * user 情報 {@code user:pass@} を除いた host 部に {@code (}・{@code =}・{@code ;} を含めば複数 host とする
      * （{@code ;} は host 名に現れないため、含む host 部は解釈の違いで failover へ化け得るものとして拒否する）。
      */
     static boolean multiHost(String url) {
@@ -133,11 +164,58 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
             int index = rest.indexOf(terminator);
             if (index >= 0 && index < end) end = index;
         }
-        String hosts = rest.substring(0, end);
-        int userInfo = hosts.lastIndexOf('@');
-        if (userInfo >= 0) hosts = hosts.substring(userInfo + 1);
-        return hosts.isEmpty() || hosts.indexOf(',') >= 0 || hosts.indexOf('(') >= 0 || hosts.indexOf('=') >= 0
-                || hosts.indexOf(';') >= 0;
+        String authority = rest.substring(0, end);
+        if (authority.indexOf(',') >= 0) return true;
+        int userInfo = authority.lastIndexOf('@');
+        String hosts = userInfo >= 0 ? authority.substring(userInfo + 1) : authority;
+        return hosts.isEmpty() || hosts.indexOf('(') >= 0 || hosts.indexOf('=') >= 0 || hosts.indexOf(';') >= 0;
+    }
+
+    /** 解析できない・確かめられない URL の違反の印。 */
+    static final String UNPARSABLE = "unparsable";
+
+    /**
+     * Connector/J（{@code com.mysql.cj.conf.ConnectionUrl}）による URL の解析。driver は runtime scope の依存のため
+     * reflection で呼ぶ（compile classpath に置かない）。解析で DNS などの外部照会をしないよう、型を先に確かめ、
+     * {@code SINGLE_CONNECTION} の場合だけ host の一覧を取る（DNS SRV 型の host 一覧は照会を伴う）。
+     */
+    enum ConnectorJUrl {
+        /** Connector/J が受け付けない URL（H2・MariaDB driver 用など）。前段の文字列判定だけで判断する。 */
+        NOT_CONNECTOR_J,
+        /** {@code SINGLE_CONNECTION} で host が1件。 */
+        SINGLE_HOST,
+        /** failover・load-balance・replication・X DevAPI・DNS SRV、または host が1件でない。 */
+        MULTIPLE_HOSTS,
+        /** Connector/J が受け付けるのに解析に失敗した、または driver を呼べない（MySQL の URL に見える場合）。 */
+        PARSE_FAILED;
+
+        private static final String CONNECTION_URL_CLASS = "com.mysql.cj.conf.ConnectionUrl";
+        /** driver を呼べないときに MySQL の URL とみなす形（scheme の符号化・空白を含めて大まかに見る）。 */
+        private static final Pattern MYSQL_LIKE = Pattern.compile("(?is)\\s*jdbc:(?:mysql|%6d).*");
+
+        static ConnectorJUrl inspect(String url) {
+            Class<?> connectionUrl;
+            try {
+                connectionUrl = Class.forName(CONNECTION_URL_CLASS, false, ImportJdbcReconnectGuard.class.getClassLoader());
+            } catch (ClassNotFoundException | LinkageError unavailable) {
+                return MYSQL_LIKE.matcher(url).matches() ? PARSE_FAILED : NOT_CONNECTOR_J;
+            }
+            try {
+                Object accepted = connectionUrl.getMethod("acceptsUrl", String.class).invoke(null, url);
+                if (!Boolean.TRUE.equals(accepted)) return NOT_CONNECTOR_J;
+                Object parsed = connectionUrl.getMethod("getConnectionUrlInstance", String.class,
+                        java.util.Properties.class).invoke(null, url, new java.util.Properties());
+                Object type = connectionUrl.getMethod("getType").invoke(parsed);
+                if (!(type instanceof Enum<?> kind) || !"SINGLE_CONNECTION".equals(kind.name())) return MULTIPLE_HOSTS;
+                Object hosts = connectionUrl.getMethod("getHostsList").invoke(parsed);
+                return hosts instanceof List<?> list && list.size() == 1 ? SINGLE_HOST : MULTIPLE_HOSTS;
+            } catch (java.lang.reflect.InvocationTargetException parseFailure) {
+                // 例外の message は URL（認証情報を含み得る）を含むため使わない。
+                return PARSE_FAILED;
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError unverifiable) {
+                return PARSE_FAILED;
+            }
+        }
     }
 
     private static String percentDecoded(String url) {

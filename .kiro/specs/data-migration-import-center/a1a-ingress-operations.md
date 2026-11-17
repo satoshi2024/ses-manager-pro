@@ -101,6 +101,7 @@
   - `spring.datasource.hikari.data-source-properties.*`（`url` は JDBC URL と同じ規則で、autoReconnect と複数 host の両方を見る）
 - `autoReconnect` / `autoReconnectForPools` が `true` / `yes` なら起動を中止する。URL の値は百分率符号化を戻してからも判定する（`%74rue` 等。Connector/J は戻した値を読む）。
 - MySQL・MariaDB の URL が上の複数 host の形なら起動を中止する（違反は `spring.datasource.url(multiHost)` のように property 名と印だけで示す）。MySQL・MariaDB 以外の URL（H2 等）は対象外。
+- **最終判定は Connector/J 自身の解析結果**（RB-NF05 delta review N-P3-1）: Connector/J が受け付ける URL は `ConnectionUrl.getConnectionUrlInstance` で解析し、単一接続（`SINGLE_CONNECTION`）かつ host 1件のときだけ通す。解析に失敗する URL は `(unparsable)` で拒否する（driver が解析できない URL は接続もできない）。自前の文字列判定は前段の速い拒否で、どちらかが拒否すれば拒否する。scheme と `//` の間の空白（`jdbc:mysql: //h1,h2/db`）、百分率符号化した scheme（`jdbc:%6Dysql:loadbalance://`）、user 情報の `,`（Connector/J は `,` で分けてから user 情報を取るため、`app:3306,x@db-a` は2つの host になる）も、Connector/J の解析どおりに拒否する。
 - 例外文言には property 名だけを出し、URL・host 名・認証情報は出さない。
 - 透過再接続 proxy と Hikari 以外の pool はアプリから検出できない（または検査の対象外）ため、配備 checklist で DBA / SRE が確認する（`feature-switches.md` 4.8.2 #7）。
 
@@ -128,7 +129,7 @@
   - 参照が無く `commitConnectionId` が無い（MySQL 以外の DB、ID の取得失敗、`DISCARD_FAILED`）→ 従来どおり、記録から1時間を過ぎていれば未 commit と確定して回収する。`DISCARD_FAILED` は未 commit が確定しているため接続を確かめる必要が無い。
   - DB 照会・削除の失敗 → 台帳を残して次回再試行する。
   - storage key が既定形式（32桁hex/UUID）でない台帳は自動削除せず、手作業の照合へ回す。
-- 残る前提: 記録の5分以内に server が再起動し、再起動後の別の接続が同じ ID で長い文を実行している場合だけ、その文が終わるまで回収が遅れる（消し過ぎにはならない）。再起動・failover が記録の5分より後なら、ID を使わずに判定する。
+- 残る前提: 記録の5分以内に server が再起動し、再起動後の別の接続が同じ ID で長い文を実行している場合だけ、その文が終わるまで回収が遅れる（消し過ぎにはならない）。**再起動が記録より前に起きた場合**（接続 ID を控えた後・台帳へ記録する前の再起動。COMMIT の失敗そのものが再起動による場合）も、起動時刻が記録時刻より前になるため ID を使う。この場合も結果は回収が遅れるだけである（PROCESS 権限が無いため同じ ID に見えるのはアプリ自身の接続だけで、遅れはアプリの最も長い文を超えない。RB-NF05 delta review N-P3-3）。再起動・failover が記録の5分より後なら、ID を使わずに判定する。
 - `app.scheduling.enabled=false` の環境では動かない。多 instance で upload root が instance ごとの local directory の場合、lock を取らなかった instance の台帳は次に lock を取るまで残る（初回本番は単一 instance または sticky session が前提）。
 
 **監視 metric**（いずれも tag は固定値だけで PII なし）

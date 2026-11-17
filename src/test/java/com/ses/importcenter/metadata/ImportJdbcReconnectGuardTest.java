@@ -101,18 +101,124 @@ class ImportJdbcReconnectGuardTest {
                         "jdbc:mysql:replication://db-a,db-b/ses_manager_db")));
     }
 
+    /**
+     * 通す URL は、Connector/J 自身が単一接続・host 1件と解析するもの（またはConnector/Jが扱わない他DBのURL）だけ。
+     *
+     * <p>RB-NF05 delta review N-P3-1 による期待値の訂正: 以前ここで「通す」としていた
+     * {@code jdbc:mysql://app:p%40ss,word@db-a:3306/...} は、Connector/J が authority を {@code ,} で先に分けてから user 情報を
+     * 取るため、{@code app:p%40ss} と {@code word@db-a:3306} の2つの host になる（8.3.0 では解析に失敗する）。単一 host という
+     * 期待値そのものが誤りだったため、拒否の側（下の試験）へ移した。
+     * 断言を緩めたのではない。
+     */
     @Test
     void 単一hostのURLはuser情報とIPv6とqueryがあっても通しMySQL以外のURLは対象にしない() {
         for (String url : List.of(DEFAULT_URL,
-                "jdbc:mysql://app:p%40ss,word@db-a:3306/ses_manager_db?sessionVariables=a=1,b=2",
+                "jdbc:mysql://app:pw@db-a:3306/ses_manager_db?sessionVariables=a=1,b=2",
                 "jdbc:mysql://[2001:db8::10]:3306/ses_manager_db",
                 "jdbc:mysql://db-a/ses_manager_db",
-                "jdbc:mysql://db-a",
-                "jdbc:mariadb://db-a:3306/ses_manager_db",
-                "jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1",
-                "jdbc:postgresql://db-a,db-b/other")) {
+                "jdbc:mysql://db-a")) {
+            assertEquals("SINGLE", driver(url), "前提: Connector/J は単一接続・host 1件と解析する: " + url);
             assertEquals(List.of(), ImportJdbcReconnectGuard.violations(
                     new MockEnvironment().withProperty("spring.datasource.url", url)), url);
+        }
+        for (String url : List.of("jdbc:mariadb://db-a:3306/ses_manager_db",
+                "jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1",
+                "jdbc:postgresql://db-a,db-b/other")) {
+            assertEquals("NOT_ACCEPTED", driver(url), "前提: Connector/J が扱わない URL: " + url);
+            assertEquals(List.of(), ImportJdbcReconnectGuard.violations(
+                    new MockEnvironment().withProperty("spring.datasource.url", url)), url);
+        }
+    }
+
+    /**
+     * RB-NF05 delta review N-P3-1: 自前の文字列判定だけでは通っていたが、Connector/J 8.3.0 が複数 host・load-balance として
+     * 解析する（または解析できない）URL。判定の正本は Connector/J の解析結果であり、各 URL の前提として Connector/J 自身の
+     * 解析結果も断言する（Connector/J を上げて解析が変われば、この試験が気付く）。
+     */
+    @Test
+    void user情報のカンマとschemeの空白と百分率符号化もdriverの解析に合わせて拒否する() {
+        java.util.Map<String, String> driverVerdicts = new java.util.LinkedHashMap<>();
+        // (a) scheme と // の間の空白（Connector/J の正規表現は \s* を許す）
+        driverVerdicts.put("jdbc:mysql: //db-a,db-b/ses_manager_db", "FAILOVER_CONNECTION");
+        driverVerdicts.put("jdbc:mysql:\t//db-a,db-b/ses_manager_db", "FAILOVER_CONNECTION");
+        // (b) 百分率符号化した scheme（Connector/J は scheme を戻してから型を決める）
+        driverVerdicts.put("jdbc:%6Dysql://db-a,db-b/ses_manager_db", "FAILOVER_CONNECTION");
+        driverVerdicts.put("jdbc:%6Dysql:loadbalance://db-a:3306/ses_manager_db", "LOADBALANCE_CONNECTION");
+        driverVerdicts.put("jdbc:mysql%3Aloadbalance://db-a/ses_manager_db", "LOADBALANCE_CONNECTION");
+        driverVerdicts.put("jdbc:%6Dysql+srv://_mysql._tcp.db.example/ses_manager_db", "FAILOVER_DNS_SRV_CONNECTION");
+        // (c) user 情報の ,（Connector/J は , で分けてから user 情報を取る）。password が数字なら本当の failover になる。
+        //     旧試験の「通す」は誤りだった（上の試験の注釈）。
+        driverVerdicts.put("jdbc:mysql://app:3306,x@db-a/ses_manager_db", "FAILOVER_CONNECTION");
+        driverVerdicts.put("jdbc:mysql://app:p%40ss,word@db-a:3306/ses_manager_db?sessionVariables=a=1,b=2", "ERROR");
+        driverVerdicts.put("jdbc:mysql://app:p;w,x@db-a:3306/ses_manager_db", "ERROR");
+        driverVerdicts.forEach((url, verdict) -> {
+            assertEquals(verdict, driver(url), "前提: Connector/J 8.3.0 の解析結果: " + url);
+            List<String> violations = ImportJdbcReconnectGuard.violations(
+                    new MockEnvironment().withProperty("spring.datasource.url", url));
+            assertEquals(1, violations.size(), url + " " + violations);
+            assertTrue(violations.get(0).equals("spring.datasource.url(multiHost)")
+                    || violations.get(0).equals("spring.datasource.url(unparsable)"), url + " " + violations);
+            assertEquals(violations, ImportJdbcReconnectGuard.violations(new MockEnvironment().withProperty(
+                    "spring.datasource.hikari.data-source-properties.url", url)).stream()
+                    .map(violation -> violation.replace("spring.datasource.hikari.data-source-properties.url",
+                            "spring.datasource.url")).toList(), "data source の url も同じ判定: " + url);
+        });
+        // 同じ写法でも単一 host なら、Connector/J の解析どおり通す（判定の正本は Connector/J）。
+        for (String url : List.of("jdbc:mysql: //db-a/ses_manager_db", "jdbc:%6dysql://db-a/ses_manager_db",
+                "jdbc:mysql://app:p;w@db-a/ses_manager_db")) {
+            assertEquals("SINGLE", driver(url), url);
+            assertEquals(List.of(), ImportJdbcReconnectGuard.violations(
+                    new MockEnvironment().withProperty("spring.datasource.url", url)), url);
+        }
+    }
+
+    /**
+     * 判定の不変条件（oracle）: Connector/J が単一接続・host 1件と解析しない URL は、必ず拒否する。逆に、自前の前段判定は
+     * Connector/J より厳しくてよい（{@code ;}・{@code (}・{@code =} を含む host 部、空の host 部は Connector/J が1 host と
+     * 解析しても拒否する）。ここに並べた全ての URL で、通した URL が Connector/J の単一接続であることを断言する。
+     */
+    @Test
+    void 通すURLは全てConnectorJの単一接続で前段判定はそれより厳しい() {
+        List<String> urls = List.of(DEFAULT_URL, DEFAULT_URL + "&autoReconnect=%74rue",
+                "jdbc:mysql://db-a:3306,db-b:3306/ses_manager_db", "jdbc:mysql://[db-a:3306,db-b:3306]/ses_manager_db",
+                "jdbc:mysql://address=(host=db-a)(port=3306)/ses_manager_db", "jdbc:mysql://(host=db-a,port=3306)/ses_manager_db",
+                "jdbc:mysql:loadbalance://db-a:3306/ses_manager_db", "jdbc:mysql:replication://db-a,db-b/ses_manager_db",
+                "jdbc:mysql+srv://_mysql._tcp.db.example/ses_manager_db", "jdbc:mysql://db-a;x,db-b:3306/ses_manager_db",
+                "jdbc:mysql://db-a;db-b/ses_manager_db", "jdbc:mysql://db-a;x", "jdbc:mysql://db-a:3306;failover=true/ses_manager_db",
+                "jdbc:mysql://app:p;w@db-a;x,db-b/ses_manager_db", "jdbc:mysql://db-a,db-b#fragment", "jdbc:mysql://",
+                "jdbc:mysql://db-a:3306/ses_manager_db;x,y", "jdbc:mysql://db-a:3306?sessionVariables=a=1;b=2",
+                "jdbc:mysql://db-a:3306#a,b;c", "jdbc:mysql: //db-a,db-b/ses_manager_db",
+                "jdbc:%6Dysql:loadbalance://db-a:3306/ses_manager_db", "jdbc:mysql://app:3306,x@db-a/ses_manager_db",
+                "jdbc:mysql://app:p;w,x@db-a:3306/ses_manager_db", "jdbc:mysql://app:p;w@db-a/ses_manager_db",
+                "jdbc:mysql://[2001:db8::10]:3306/ses_manager_db");
+        for (String url : urls) {
+            boolean allowed = ImportJdbcReconnectGuard.connectionTargetViolation(url) == null;
+            if (allowed) {
+                assertEquals("SINGLE", driver(url), "通した URL は Connector/J の単一接続でなければならない: " + url);
+            }
+            if (!"SINGLE".equals(driver(url))) {
+                assertFalse(allowed, "Connector/J が単一接続と解析しない URL は拒否する: " + url);
+            }
+        }
+        // 前段判定が Connector/J より厳しい例（Connector/J は1 host と解析するが拒否する）。
+        for (String stricter : List.of("jdbc:mysql://db-a;db-b/ses_manager_db", "jdbc:mysql://db-a;x",
+                "jdbc:mysql://address=(host=db-a)(port=3306)/ses_manager_db", "jdbc:mysql://")) {
+            assertEquals("SINGLE", driver(stricter), stricter);
+            assertEquals(ImportJdbcReconnectGuard.MULTI_HOST, ImportJdbcReconnectGuard.connectionTargetViolation(stricter),
+                    stricter);
+        }
+    }
+
+    /** Connector/J 8.3.0 自身の解析結果（判定の正本）。{@code SINGLE} は単一接続かつ host 1件。DNS の照会はしない。 */
+    private static String driver(String url) {
+        if (!com.mysql.cj.conf.ConnectionUrl.acceptsUrl(url)) return "NOT_ACCEPTED";
+        try {
+            com.mysql.cj.conf.ConnectionUrl parsed = com.mysql.cj.conf.ConnectionUrl.getConnectionUrlInstance(url,
+                    new java.util.Properties());
+            if (parsed.getType() != com.mysql.cj.conf.ConnectionUrl.Type.SINGLE_CONNECTION) return parsed.getType().name();
+            return parsed.getHostsList().size() == 1 ? "SINGLE" : "SINGLE_CONNECTION_WITH_" + parsed.getHostsList().size();
+        } catch (RuntimeException unparsable) {
+            return "ERROR";
         }
     }
 
@@ -135,7 +241,9 @@ class ImportJdbcReconnectGuardTest {
                     new MockEnvironment().withProperty("spring.datasource.url", url)), url);
         }
         // user 情報（@ より前）の ; と、path・query・fragment の後ろの ; や , は host 部ではない。
-        for (String url : List.of("jdbc:mysql://app:p;w,x@db-a:3306/ses_manager_db",
+        // 期待値の訂正（delta review N-P3-1）: 以前ここで通していた jdbc:mysql://app:p;w,x@db-a:3306/... は、Connector/J が
+        // authority を , で先に分けるため2つの host になる（8.3.0 では解析に失敗する）。誤った期待値だったため拒否の試験へ移した。
+        for (String url : List.of("jdbc:mysql://app:p;w@db-a:3306/ses_manager_db",
                 "jdbc:mysql://db-a:3306/ses_manager_db;x,y",
                 "jdbc:mysql://db-a:3306?sessionVariables=a=1;b=2",
                 "jdbc:mysql://db-a:3306#a,b;c")) {
@@ -159,8 +267,11 @@ class ImportJdbcReconnectGuardTest {
         }
         assertEquals(List.of(), ImportJdbcReconnectGuard.violations(new MockEnvironment()
                 .withProperty("spring.datasource.url", DEFAULT_URL + "&autoReconnect=%66alse")));
-        assertEquals(List.of(), ImportJdbcReconnectGuard.violations(new MockEnvironment()
-                .withProperty("spring.datasource.url", DEFAULT_URL + "&note=%ZZ")), "不正な符号化は元の文字列だけで判定する");
+        // 期待値の訂正（delta review N-P3-1）: 不正な百分率符号化は Connector/J 8.3.0 自身が解析できない
+        // （IllegalArgumentException）。driver が解析できない URL は接続もできないため、判定の正本に合わせて拒否する。
+        assertEquals("ERROR", driver(DEFAULT_URL + "&note=%ZZ"));
+        assertEquals(List.of("spring.datasource.url(unparsable)"), ImportJdbcReconnectGuard.violations(new MockEnvironment()
+                .withProperty("spring.datasource.url", DEFAULT_URL + "&note=%ZZ")), "driver が解析できない URL は拒否する");
     }
 
     private static ImportJdbcReconnectGuard guard(MockEnvironment environment) {
