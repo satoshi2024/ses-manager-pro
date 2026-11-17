@@ -263,7 +263,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 | # | 前提 | 理由 | 正本 |
 |---|---|---|---|
-| SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
+| SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする。NF02のSLA営業日カレンダー（`m_work_calendar`）もtenant列を持たず、`ServiceSlaCalculator.findCalendarForScope` の4段目（全社共通）のカレンダーは全tenantで共用される（W3 review P3-N2-4。tenant列の追加はDDLが要るため未対応。多tenant化の前に対応する） | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
 | SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
 | SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
