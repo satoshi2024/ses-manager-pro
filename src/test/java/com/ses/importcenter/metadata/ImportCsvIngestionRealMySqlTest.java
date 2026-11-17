@@ -487,9 +487,17 @@ class ImportCsvIngestionRealMySqlTest {
             statement.execute("CREATE USER IF NOT EXISTS '" + user + "'@'%' IDENTIFIED BY '" + password + "'");
             statement.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON `" + DATABASE + "`.* TO '" + user + "'@'%'");
         }
-        // delta review N-P3-2: Testcontainers の URL（接続 parameter を含む）をそのまま使い、user と password だけを替える。
-        // 自前で組んだ URL は TLS の PREFERRED と自動生成の証明書に頼って caching_sha2_password の認証を通していた。
-        String url = MYSQL.getJdbcUrl();
+        // delta review N-P3-2 / D-P3-2: Testcontainers の URL を元にし、user と password は引数で替える。
+        // 訂正: Testcontainers 1.20.6 の getJdbcUrl() は useSSL・allowPublicKeyRetrieval を含まない（Testcontainers 自身の
+        // 接続だけが MySQLContainer#constructUrlForConnection で useSSL=false と allowPublicKeyRetrieval=true を足す）。
+        // getJdbcUrl() のままでは、TLS の PREFERRED と自動生成の証明書に頼って caching_sha2_password の認証を通すことになる。
+        // Testcontainers 自身の接続と同じ規則（無い時だけ足す）で2つを明示して足す。
+        String jdbcUrl = MYSQL.getJdbcUrl();
+        String withSsl = jdbcUrl.contains("useSSL=") ? jdbcUrl
+                : jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "useSSL=false";
+        String url = withSsl.contains("allowPublicKeyRetrieval=") ? withSsl : withSsl + "&allowPublicKeyRetrieval=true";
+        assertTrue(url.contains("useSSL=false") && url.contains("allowPublicKeyRetrieval=true"),
+                "Testcontainers 自身の接続と同じ parameter で接続する");
         assertFalse(url.contains("user=") || url.contains("password="), "user・password は URL ではなく引数で替える");
         org.springframework.jdbc.datasource.DriverManagerDataSource limitedSource =
                 new org.springframework.jdbc.datasource.DriverManagerDataSource(url, user, password);

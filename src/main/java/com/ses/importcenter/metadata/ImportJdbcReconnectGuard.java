@@ -31,7 +31,11 @@ import java.util.regex.Pattern;
  *       Connector/J の failover・load-balance proxy は通信異常時に別の接続へ切り替える（{@code pickNewConnection}）ため、
  *       透過再接続と同じく結果不明のCOMMITの分類を崩す。host部の key-value 形は1 hostでも拒否する（host:port 形へ書き直す）。
  *       最終判定は Connector/J 自身の解析結果で、単一接続（{@code SINGLE_CONNECTION}）かつ host 1件のものだけを通し、
- *       Connector/J が受け付けるのに解析できない URL も拒否する（RB-NF05 delta review N-P3-1。{@link #connectionTargetViolation}）。</li>
+ *       Connector/J が受け付けるのに解析できない URL も拒否する（RB-NF05 delta review N-P3-1。{@link #connectionTargetViolation}）。
+ *       解析には Hikari が driver へ渡す data-source-properties も渡す（{@code dnsSrv=true} は単一 host の URL でも
+ *       DNS SRV の failover にする。D-P3-1）。</li>
+ *   <li>data-source-properties に置いた、接続の型・接続先・failover／load-balance／replication の動作を変える key
+ *       （{@link #CONNECTION_TOPOLOGY_KEYS}。値に関係なく、大文字小文字を問わない）。</li>
  * </ul>
  * ProxySQL・MySQL Router等の透過再接続proxyと、Hikari以外のconnection pool（{@code spring.datasource.type}）も同じ理由で
  * 禁止だが、前者はアプリから検出できず、後者は本検査の対象外のため、配備文書
@@ -67,8 +71,8 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         List<String> violations = violations(environment);
         if (!violations.isEmpty()) {
             throw new IllegalStateException("JDBC接続設定で透過再接続（autoReconnect）または複数hostへの切替え"
-                    + "（failover・loadbalance・replication・multi-host・SRV）が有効、またはJDBC driverが解析できないURLのため"
-                    + "起動を中止します。"
+                    + "（failover・loadbalance・replication・multi-host・SRV）が有効、JDBC driverが解析できないURL、"
+                    + "またはdata-source-propertiesで接続の型・接続先・切替えを変えているため起動を中止します。"
                     + "取込commitの結果分類が成立しなくなるため、単一hostの jdbc:mysql://host:port/db に直してください: "
                     + violations);
         }
@@ -76,20 +80,34 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
 
     /**
      * 違反した property 名（複数 host の違反は {@code 名前(multiHost)}、Connector/J が解析できない URL は
-     * {@code 名前(unparsable)}）。値は返さない。
+     * {@code 名前(unparsable)}、data-source-properties の接続の型・接続先を変える key は {@code 名前(connectionTopology)}）。
+     * 値は返さない。
      */
     static List<String> violations(Environment environment) {
         List<String> violations = new ArrayList<>();
+        Map<String, String> dataSourceProperties = Binder.get(environment)
+                .bind(DATA_SOURCE_PROPERTIES, Bindable.mapOf(String.class, String.class))
+                .orElse(Map.of());
+        // Hikari は jdbcUrl での接続時に data-source-properties をそのまま driver の Properties（info）として渡す。
+        // Connector/J は接続の型を info の値（dnsSrv 等）でも決めるため、URL の解析にも同じ Properties を渡す
+        // （RB-NF05 delta review D-P3-1）。url 自身は info から除く（JDBC URL 側の判定で見る）。
+        java.util.Properties driverInfo = new java.util.Properties();
+        dataSourceProperties.forEach((name, value) -> {
+            if (name != null && value != null && !"url".equalsIgnoreCase(name)) driverInfo.setProperty(name, value);
+        });
+        // Spring 側で driver の Properties に入る他の入力元は username・password だけ（Hikari の DriverDataSource が
+        // data-source-properties に無い時だけ user・password として足す）。接続の型・host は変えないが、driver と同じ入力にする。
+        addIfAbsent(driverInfo, "user", firstNonNull(environment.getProperty("spring.datasource.hikari.username"),
+                environment.getProperty("spring.datasource.username")));
+        addIfAbsent(driverInfo, "password", firstNonNull(environment.getProperty("spring.datasource.hikari.password"),
+                environment.getProperty("spring.datasource.password")));
         for (String key : URL_PROPERTIES) {
             String url = environment.getProperty(key);
             if (url == null) continue;
             if (autoReconnect(url)) violations.add(key);
-            String target = connectionTargetViolation(url);
+            String target = connectionTargetViolation(url, driverInfo);
             if (target != null) violations.add(key + "(" + target + ")");
         }
-        Map<String, String> dataSourceProperties = Binder.get(environment)
-                .bind(DATA_SOURCE_PROPERTIES, Bindable.mapOf(String.class, String.class))
-                .orElse(Map.of());
         for (Map.Entry<String, String> property : dataSourceProperties.entrySet()) {
             String name = property.getKey() == null ? "" : property.getKey().toLowerCase(Locale.ROOT);
             String value = property.getValue() == null ? "" : property.getValue().trim().toLowerCase(Locale.ROOT);
@@ -97,12 +115,16 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                     && ("true".equals(value) || "yes".equals(value))) {
                 violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
             }
+            // 接続の型・接続先・切替えを変える key は、値に関係なく拒否する（大文字小文字を問わない。D-P3-1）。
+            if (CONNECTION_TOPOLOGY_KEYS.contains(name)) {
+                violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + CONNECTION_TOPOLOGY + ")");
+            }
             // data source の url property（MysqlDataSource#setUrl）も JDBC URL と同じ規則で検査する（review P3-1）。
             if ("url".equals(name) && property.getValue() != null) {
                 if (autoReconnect(property.getValue())) {
                     violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
                 }
-                String target = connectionTargetViolation(property.getValue());
+                String target = connectionTargetViolation(property.getValue(), driverInfo);
                 if (target != null) {
                     violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + target + ")");
                 }
@@ -110,6 +132,55 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         }
         return List.copyOf(violations);
     }
+
+    private static void addIfAbsent(java.util.Properties info, String name, String value) {
+        if (value != null && info.getProperty(name) == null) info.setProperty(name, value);
+    }
+
+    private static String firstNonNull(String first, String second) {
+        return first != null ? first : second;
+    }
+
+    /** data-source-properties の接続の型・接続先・切替えを変える key の違反の印。 */
+    static final String CONNECTION_TOPOLOGY = "connectionTopology";
+
+    /**
+     * data-source-properties に置くと、接続の型・接続先・切替えの動作を変える Connector/J 8.3.0 の key（小文字。{@code PropertyKey}
+     * の key 名を照合して選んだ。RB-NF05 delta review D-P3-1）。値に関係なく拒否する。
+     * <ul>
+     *   <li>型を変える: {@code dnsSrv}（info で true なら DNS SRV の failover になる）、{@code xdevapi.dns-srv}。</li>
+     *   <li>接続先を変える: {@code host}・{@code port}・{@code protocol}・{@code path}・{@code address}・{@code priority}・
+     *       {@code type}（host の属性。URL の host が空なら info の host を使う）、{@code socketFactory}（接続の作り方を差し替える）。</li>
+     *   <li>failover・load-balance・replication の動作: {@code failOverReadOnly}・{@code retriesAllDown}・
+     *       {@code secondsBeforeRetrySource}・{@code queriesBeforeRetrySource}・{@code allowSourceDownConnections}・
+     *       {@code allowReplicaDownConnections}・{@code readFromSourceWhenNoReplicas}・{@code ha.loadBalanceStrategy}・
+     *       {@code ha.enableJMX}・{@code loadBalance*} の10件・{@code replicationConnectionGroup}・{@code serverAffinityOrder}、
+     *       再接続の {@code maxReconnects}・{@code reconnectAtTxEnd}。旧名（{@code secondsBeforeRetryMaster} 等）も含める。</li>
+     *   <li>{@code PropertyKey} ではないが接続先を決める {@code MysqlDataSource} の bean property: {@code serverName}・
+     *       {@code portNumber}（{@code data-source-class-name} で MysqlDataSource を使うと setter で設定され、JDBC URL の代わりに
+     *       接続先になる）。</li>
+     * </ul>
+     * 接続先は検査した JDBC URL の host:port だけで決め、Properties で上書きさせない（8.3.0 では {@code host}・{@code port} は
+     * URL の host 部が空の時に使われる）。照合して拒否の対象から外した key: {@code localSocketAddress}（ローカル側の bind address）、
+     * {@code socksProxyHost}・{@code socksProxyPort}・{@code socksProxyRemoteDns}（TCP の中継で、切断は driver へそのまま
+     * 失敗として届き、別の接続へ切り替えない）、{@code resourceId}（XA の識別）。
+     * {@code autoReconnect}・{@code autoReconnectForPools} は従来どおり値（true/yes）で判定する（false の明示は通す）。
+     */
+    static final java.util.Set<String> CONNECTION_TOPOLOGY_KEYS = java.util.Set.of(
+            "dnssrv", "xdevapi.dns-srv",
+            "host", "port", "protocol", "path", "address", "priority", "type", "socketfactory",
+            "failoverreadonly", "retriesalldown", "secondsbeforeretrysource", "queriesbeforeretrysource",
+            "allowsourcedownconnections", "allowreplicadownconnections", "readfromsourcewhennoreplicas",
+            "secondsbeforeretrymaster", "queriesbeforeretrymaster", "allowmasterdownconnections",
+            "allowslavedownconnections", "readfrommasterwhennoslaves",
+            "ha.loadbalancestrategy", "ha.enablejmx",
+            "loadbalanceautocommitstatementregex", "loadbalanceautocommitstatementthreshold",
+            "loadbalanceblocklisttimeout", "loadbalanceblacklisttimeout", "loadbalanceconnectiongroup",
+            "loadbalanceexceptionchecker", "loadbalancehostremovalgraceperiod", "loadbalancepingtimeout",
+            "loadbalancesqlexceptionsubclassfailover", "loadbalancesqlstatefailover",
+            "loadbalancevalidateconnectiononswapserver",
+            "replicationconnectiongroup", "serveraffinityorder", "maxreconnects", "reconnectattxend",
+            "servername", "portnumber");
 
     /** URL の query に autoReconnect が有効な指定があるか。Connector/J は値を百分率符号化から戻して読むため、戻した形でも見る。 */
     static boolean autoReconnect(String url) {
@@ -131,9 +202,17 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
      * Connector/J と同じに解釈できなかった。
      */
     static String connectionTargetViolation(String url) {
+        return connectionTargetViolation(url, new java.util.Properties());
+    }
+
+    /**
+     * {@link #connectionTargetViolation(String)} を、driver へ渡る Properties（Hikari の data-source-properties）付きで判定する。
+     * Connector/J は接続の型を URL と info の両方から決めるため（{@code dnsSrv} 等）、解析にも同じ info を渡す（D-P3-1）。
+     */
+    static String connectionTargetViolation(String url, java.util.Properties driverInfo) {
         if (url == null) return null;
         if (multiHost(url)) return MULTI_HOST;
-        return switch (ConnectorJUrl.inspect(url)) {
+        return switch (ConnectorJUrl.inspect(url, driverInfo)) {
             case NOT_CONNECTOR_J, SINGLE_HOST -> null;
             case MULTIPLE_HOSTS -> MULTI_HOST;
             case PARSE_FAILED -> UNPARSABLE;
@@ -193,7 +272,7 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         /** driver を呼べないときに MySQL の URL とみなす形（scheme の符号化・空白を含めて大まかに見る）。 */
         private static final Pattern MYSQL_LIKE = Pattern.compile("(?is)\\s*jdbc:(?:mysql|%6d).*");
 
-        static ConnectorJUrl inspect(String url) {
+        static ConnectorJUrl inspect(String url, java.util.Properties driverInfo) {
             Class<?> connectionUrl;
             try {
                 connectionUrl = Class.forName(CONNECTION_URL_CLASS, false, ImportJdbcReconnectGuard.class.getClassLoader());
@@ -204,7 +283,7 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                 Object accepted = connectionUrl.getMethod("acceptsUrl", String.class).invoke(null, url);
                 if (!Boolean.TRUE.equals(accepted)) return NOT_CONNECTOR_J;
                 Object parsed = connectionUrl.getMethod("getConnectionUrlInstance", String.class,
-                        java.util.Properties.class).invoke(null, url, new java.util.Properties());
+                        java.util.Properties.class).invoke(null, url, copyOf(driverInfo));
                 Object type = connectionUrl.getMethod("getType").invoke(parsed);
                 if (!(type instanceof Enum<?> kind) || !"SINGLE_CONNECTION".equals(kind.name())) return MULTIPLE_HOSTS;
                 Object hosts = connectionUrl.getMethod("getHostsList").invoke(parsed);
@@ -215,6 +294,15 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
             } catch (ReflectiveOperationException | RuntimeException | LinkageError unverifiable) {
                 return PARSE_FAILED;
             }
+        }
+
+        /** driver に渡す Properties の複製（driver 側の変更を呼出元へ返さない）。 */
+        private static java.util.Properties copyOf(java.util.Properties driverInfo) {
+            java.util.Properties copy = new java.util.Properties();
+            if (driverInfo != null) {
+                driverInfo.stringPropertyNames().forEach(name -> copy.setProperty(name, driverInfo.getProperty(name)));
+            }
+            return copy;
         }
     }
 

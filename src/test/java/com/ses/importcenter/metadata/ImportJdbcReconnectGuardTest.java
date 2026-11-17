@@ -3,11 +3,19 @@ package com.ses.importcenter.metadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -163,7 +171,7 @@ class ImportJdbcReconnectGuardTest {
                     .map(violation -> violation.replace("spring.datasource.hikari.data-source-properties.url",
                             "spring.datasource.url")).toList(), "data source の url も同じ判定: " + url);
         });
-        // 同じ写法でも単一 host なら、Connector/J の解析どおり通す（判定の正本は Connector/J）。
+        // 同じ表記でも単一 host なら、Connector/J の解析どおり通す（判定の正本は Connector/J）。
         for (String url : List.of("jdbc:mysql: //db-a/ses_manager_db", "jdbc:%6dysql://db-a/ses_manager_db",
                 "jdbc:mysql://app:p;w@db-a/ses_manager_db")) {
             assertEquals("SINGLE", driver(url), url);
@@ -211,10 +219,14 @@ class ImportJdbcReconnectGuardTest {
 
     /** Connector/J 8.3.0 自身の解析結果（判定の正本）。{@code SINGLE} は単一接続かつ host 1件。DNS の照会はしない。 */
     private static String driver(String url) {
+        return driver(url, new Properties());
+    }
+
+    /** {@link #driver(String)} を、Hikari が driver へ渡すのと同じ Properties（info）付きで解析する（D-P3-1）。 */
+    private static String driver(String url, Properties info) {
         if (!com.mysql.cj.conf.ConnectionUrl.acceptsUrl(url)) return "NOT_ACCEPTED";
         try {
-            com.mysql.cj.conf.ConnectionUrl parsed = com.mysql.cj.conf.ConnectionUrl.getConnectionUrlInstance(url,
-                    new java.util.Properties());
+            com.mysql.cj.conf.ConnectionUrl parsed = com.mysql.cj.conf.ConnectionUrl.getConnectionUrlInstance(url, info);
             if (parsed.getType() != com.mysql.cj.conf.ConnectionUrl.Type.SINGLE_CONNECTION) return parsed.getType().name();
             return parsed.getHostsList().size() == 1 ? "SINGLE" : "SINGLE_CONNECTION_WITH_" + parsed.getHostsList().size();
         } catch (RuntimeException unparsable) {
@@ -272,6 +284,176 @@ class ImportJdbcReconnectGuardTest {
         assertEquals("ERROR", driver(DEFAULT_URL + "&note=%ZZ"));
         assertEquals(List.of("spring.datasource.url(unparsable)"), ImportJdbcReconnectGuard.violations(new MockEnvironment()
                 .withProperty("spring.datasource.url", DEFAULT_URL + "&note=%ZZ")), "driver が解析できない URL は拒否する");
+    }
+
+    private static final String DSP = "spring.datasource.hikari.data-source-properties";
+    private static final String SRV_URL = "jdbc:mysql://_mysql._tcp.db.example/ses_manager_db";
+
+    /**
+     * RB-NF05 delta review D-P3-1: Hikari は data-source-properties を driver の Properties（info）として渡し、Connector/J は
+     * info の {@code dnsSrv} を URL より先に見て接続の型を決める。以前は解析に空の Properties を渡していたため、
+     * 単一 host の URL に {@code dnsSrv=true} を足すだけで DNS SRV の failover が検査を通った。
+     * 解析に同じ Properties を渡す（a）ことと、key そのものを拒否する（b）ことを、それぞれ独立に確かめる。
+     */
+    @Test
+    void dnsSrvをdata_source_propertiesに置くと単一hostのURLでもSRVのfailoverになるため解析に渡して拒否する() {
+        Properties dnsSrv = info("dnsSrv", "true");
+        String hostWithPort = "jdbc:mysql://db-a:3306/ses_manager_db";
+        assertEquals("SINGLE", driver(SRV_URL), "前提: URL だけなら Connector/J は単一接続と解析する");
+        assertEquals("FAILOVER_DNS_SRV_CONNECTION", driver(SRV_URL, dnsSrv), "前提: info の dnsSrv=true で DNS SRV の failover になる");
+        assertEquals("LOADBALANCE_DNS_SRV_CONNECTION",
+                driver("jdbc:mysql:loadbalance://_mysql._tcp.db.example/ses_manager_db", dnsSrv), "前提: loadbalance も SRV 型になる");
+        assertEquals("ERROR", driver(hostWithPort, dnsSrv), "前提: port 付きの host に dnsSrv=true を足すと driver は解析に失敗する");
+
+        // (a) 解析に info を渡す。key の拒否とは独立に効く。
+        assertNull(ImportJdbcReconnectGuard.connectionTargetViolation(SRV_URL));
+        assertEquals(ImportJdbcReconnectGuard.MULTI_HOST, ImportJdbcReconnectGuard.connectionTargetViolation(SRV_URL, dnsSrv));
+        assertEquals(ImportJdbcReconnectGuard.UNPARSABLE,
+                ImportJdbcReconnectGuard.connectionTargetViolation(hostWithPort, dnsSrv));
+        assertNull(ImportJdbcReconnectGuard.connectionTargetViolation(SRV_URL, new Properties()));
+
+        // (a)+(b) 設定から: URL の違反と key の違反の両方を出す。
+        String keyViolation = DSP + ".dnsSrv(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")";
+        for (String urlProperty : List.of("spring.datasource.url", "spring.datasource.hikari.jdbc-url")) {
+            assertEquals(List.of(urlProperty + "(multiHost)", keyViolation), ImportJdbcReconnectGuard.violations(
+                    environment(urlProperty, SRV_URL, DSP + ".dnsSrv", "true")), urlProperty);
+            assertEquals(List.of(urlProperty + "(unparsable)", keyViolation), ImportJdbcReconnectGuard.violations(
+                    environment(urlProperty, hostWithPort, DSP + ".dnsSrv", "true")), urlProperty);
+        }
+        assertEquals(Set.of(DSP + ".url(multiHost)", keyViolation), Set.copyOf(ImportJdbcReconnectGuard.violations(
+                environment(DSP + ".url", SRV_URL, DSP + ".dnsSrv", "true"))), "data source の url も同じ info で解析する");
+
+        // (b) 大文字小文字の違う key と false の値は driver が型を変えないが、値と大文字小文字に関係なく拒否する。
+        for (String[] entry : List.of(new String[]{"dnsSrv", "false"}, new String[]{"DNSSRV", "TRUE"},
+                new String[]{"dnssrv", "true"}, new String[]{"DnsSrv", "yes"})) {
+            assertEquals("SINGLE", driver(SRV_URL, info(entry[0], entry[1])), "前提: driver は型を変えない: " + entry[0]);
+            assertEquals(List.of(DSP + "." + entry[0] + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                    ImportJdbcReconnectGuard.violations(environment("spring.datasource.url", SRV_URL,
+                            DSP + "." + entry[0], entry[1])), entry[0] + "=" + entry[1]);
+        }
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> guard(environment(
+                "spring.datasource.url", SRV_URL, DSP + ".dnsSrv", "true")).afterPropertiesSet());
+        assertTrue(failure.getMessage().contains(keyViolation), failure.getMessage());
+        assertFalse(failure.getMessage().contains("db.example"), "host 名を例外文言へ出さない");
+
+        // Spring の username・password は Hikari が driver の user・password として足すが、接続の型・host を変えない。
+        assertEquals("SINGLE", driver(DEFAULT_URL, info("user", "app", "password", "pw")));
+        assertEquals(List.of(), ImportJdbcReconnectGuard.violations(environment("spring.datasource.url", DEFAULT_URL,
+                "spring.datasource.username", "app", "spring.datasource.password", "pw")));
+    }
+
+    /**
+     * RB-NF05 delta review D-P3-1 (b): data-source-properties に置くと接続の型・接続先・failover／load-balance／replication の
+     * 動作を変える key を、値と大文字小文字に関係なく拒否する。全ての key について、前提として Connector/J 8.3.0 の key
+     * （{@code PropertyKey} の key 名か旧名、または {@code MysqlDataSource} の setter）であることと、その Properties での
+     * driver 自身の解析結果を断言してから拒否を断言する。{@code dnsSrv} 以外は driver の解析では単一接続のままで、
+     * 型の判定だけでは見えないため key で拒否する。
+     */
+    @Test
+    void data_source_propertiesの接続の型と接続先と切替えを変えるkeyは値と大文字小文字に関係なく拒否する() {
+        Map<String, String> keys = new LinkedHashMap<>();
+        keys.put("dnsSrv", "true");
+        keys.put("xdevapi.dns-srv", "true");
+        keys.put("host", "db-b");
+        keys.put("port", "3307");
+        keys.put("protocol", "tcp");
+        keys.put("path", "x");
+        keys.put("address", "(host=db-b)");
+        keys.put("priority", "1");
+        keys.put("type", "x");
+        keys.put("socketFactory", "com.mysql.cj.protocol.StandardSocketFactory");
+        keys.put("failOverReadOnly", "false");
+        keys.put("retriesAllDown", "1");
+        keys.put("secondsBeforeRetrySource", "1");
+        keys.put("queriesBeforeRetrySource", "1");
+        keys.put("allowSourceDownConnections", "true");
+        keys.put("allowReplicaDownConnections", "true");
+        keys.put("readFromSourceWhenNoReplicas", "true");
+        keys.put("secondsBeforeRetryMaster", "1");
+        keys.put("queriesBeforeRetryMaster", "1");
+        keys.put("allowMasterDownConnections", "true");
+        keys.put("allowSlaveDownConnections", "true");
+        keys.put("readFromMasterWhenNoSlaves", "true");
+        keys.put("ha.loadBalanceStrategy", "random");
+        keys.put("ha.enableJMX", "true");
+        keys.put("loadBalanceAutoCommitStatementRegex", "x");
+        keys.put("loadBalanceAutoCommitStatementThreshold", "1");
+        keys.put("loadBalanceBlocklistTimeout", "1");
+        keys.put("loadBalanceBlacklistTimeout", "1");
+        keys.put("loadBalanceConnectionGroup", "g");
+        keys.put("loadBalanceExceptionChecker", "x");
+        keys.put("loadBalanceHostRemovalGracePeriod", "1");
+        keys.put("loadBalancePingTimeout", "1");
+        keys.put("loadBalanceSQLExceptionSubclassFailover", "x");
+        keys.put("loadBalanceSQLStateFailover", "x");
+        keys.put("loadBalanceValidateConnectionOnSwapServer", "true");
+        keys.put("replicationConnectionGroup", "g");
+        keys.put("serverAffinityOrder", "db-a");
+        keys.put("maxReconnects", "1");
+        keys.put("reconnectAtTxEnd", "true");
+        keys.put("serverName", "db-b");
+        keys.put("portNumber", "3307");
+        assertEquals(ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY_KEYS, keys.keySet().stream()
+                .map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet()), "拒否する key の全てを試す");
+        Set<String> dataSourceSetters = java.util.Arrays.stream(com.mysql.cj.jdbc.MysqlDataSource.class.getMethods())
+                .map(java.lang.reflect.Method::getName).collect(Collectors.toSet());
+
+        keys.forEach((name, value) -> {
+            if (Set.of("serverName", "portNumber").contains(name)) {
+                assertNull(com.mysql.cj.conf.PropertyKey.fromValue(name), name);
+                assertTrue(dataSourceSetters.contains("set" + Character.toUpperCase(name.charAt(0)) + name.substring(1)),
+                        "前提: MysqlDataSource の bean property: " + name);
+            } else {
+                assertNotNull(com.mysql.cj.conf.PropertyKey.fromValue(name), "前提: Connector/J 8.3.0 の key（旧名を含む）: " + name);
+            }
+            boolean typeChanging = "dnsSrv".equals(name);
+            assertEquals(typeChanging ? "ERROR" : "SINGLE", driver(DEFAULT_URL, info(name, value)),
+                    "前提: この Properties での Connector/J 自身の解析結果: " + name);
+            List<String> expected = new java.util.ArrayList<>();
+            if (typeChanging) expected.add("spring.datasource.url(unparsable)");
+            expected.add(DSP + "." + name + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")");
+            assertEquals(expected, ImportJdbcReconnectGuard.violations(
+                    environment("spring.datasource.url", DEFAULT_URL, DSP + "." + name, value)), name);
+            for (String variant : List.of(name.toUpperCase(Locale.ROOT), name.toLowerCase(Locale.ROOT))) {
+                if (variant.equals(name)) continue;
+                assertEquals("SINGLE", driver(DEFAULT_URL, info(variant, value)), "前提: driver は別の大文字小文字を読まない: " + variant);
+                assertEquals(List.of(DSP + "." + variant + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                        ImportJdbcReconnectGuard.violations(environment("spring.datasource.url", DEFAULT_URL,
+                                DSP + "." + variant, value)), variant);
+            }
+        });
+    }
+
+    /**
+     * D-P3-1: autoReconnect 系の key は data-source-properties に置いても拒否する（URL の query だけでなく）。driver の解析では
+     * 単一接続のままのため、値（true/yes）で判定する。key の大文字小文字と値の前後の空白は問わず、false・no は通す。
+     */
+    @Test
+    void data_source_propertiesのautoReconnectは大文字小文字と空白に関係なく拒否しfalseは通す() {
+        assertEquals("SINGLE", driver(DEFAULT_URL, info("autoReconnect", "true")), "前提: 型の判定では見えない");
+        assertEquals("SINGLE", driver(DEFAULT_URL, info("autoReconnectForPools", "true")), "前提: 型の判定では見えない");
+        for (String[] entry : List.of(new String[]{"autoReconnect", "true"}, new String[]{"AUTORECONNECT", "Yes"},
+                new String[]{"autoreconnectforpools", " TRUE "}, new String[]{"AutoReconnectForPools", "yes"})) {
+            assertEquals(List.of(DSP + "." + entry[0]), ImportJdbcReconnectGuard.violations(environment(
+                    "spring.datasource.url", DEFAULT_URL, DSP + "." + entry[0], entry[1])), entry[0] + "=" + entry[1]);
+        }
+        for (String[] entry : List.of(new String[]{"autoReconnect", "false"}, new String[]{"autoReconnectForPools", "no"})) {
+            assertEquals(List.of(), ImportJdbcReconnectGuard.violations(environment(
+                    "spring.datasource.url", DEFAULT_URL, DSP + "." + entry[0], entry[1])), entry[0] + "=" + entry[1]);
+        }
+    }
+
+    private static Properties info(String... nameValues) {
+        Properties info = new Properties();
+        for (int i = 0; i < nameValues.length; i += 2) info.setProperty(nameValues[i], nameValues[i + 1]);
+        return info;
+    }
+
+    private static MockEnvironment environment(String... nameValues) {
+        MockEnvironment environment = new MockEnvironment();
+        for (int i = 0; i < nameValues.length; i += 2) environment.setProperty(nameValues[i], nameValues[i + 1]);
+        return environment;
     }
 
     private static ImportJdbcReconnectGuard guard(MockEnvironment environment) {

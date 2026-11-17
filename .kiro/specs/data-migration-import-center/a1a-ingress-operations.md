@@ -98,10 +98,17 @@
 - `ImportJdbcReconnectGuard` が次の property を検査する（機能スイッチと関係なく常に動く）。
   - `spring.datasource.url`（`DB_URL` を含む）
   - `spring.datasource.hikari.jdbc-url`
-  - `spring.datasource.hikari.data-source-properties.*`（`url` は JDBC URL と同じ規則で、autoReconnect と複数 host の両方を見る）
+  - `spring.datasource.hikari.data-source-properties.*`（`url` は JDBC URL と同じ規則で、autoReconnect と複数 host の両方を見る。他の key は autoReconnect 系と、下の接続の型・接続先・切替えを変える key を見る）
 - `autoReconnect` / `autoReconnectForPools` が `true` / `yes` なら起動を中止する。URL の値は百分率符号化を戻してからも判定する（`%74rue` 等。Connector/J は戻した値を読む）。
 - MySQL・MariaDB の URL が上の複数 host の形なら起動を中止する（違反は `spring.datasource.url(multiHost)` のように property 名と印だけで示す）。MySQL・MariaDB 以外の URL（H2 等）は対象外。
 - **最終判定は Connector/J 自身の解析結果**（RB-NF05 delta review N-P3-1）: Connector/J が受け付ける URL は `ConnectionUrl.getConnectionUrlInstance` で解析し、単一接続（`SINGLE_CONNECTION`）かつ host 1件のときだけ通す。解析に失敗する URL は `(unparsable)` で拒否する（driver が解析できない URL は接続もできない）。自前の文字列判定は前段の速い拒否で、どちらかが拒否すれば拒否する。scheme と `//` の間の空白（`jdbc:mysql: //h1,h2/db`）、百分率符号化した scheme（`jdbc:%6Dysql:loadbalance://`）、user 情報の `,`（Connector/J は `,` で分けてから user 情報を取るため、`app:3306,x@db-a` は2つの host になる）も、Connector/J の解析どおりに拒否する。
+- **解析には driver へ渡る Properties も渡す**（RB-NF05 delta review D-P3-1）: Hikari は data-source-properties をそのまま driver の Properties（info）として渡し（`spring.datasource.username`・`password` は info に無い時だけ `user`・`password` として足す）、Connector/J は info の値でも接続の型を決める。例えば data-source-properties に `dnsSrv=true` を置くと、単一 host の `jdbc:mysql://_mysql._tcp.db.example/db` が DNS SRV の failover になる（port 付きの host なら解析に失敗する）。解析には同じ info を渡し、その結果で判定する。
+- **接続の型・接続先・切替えを変える key は data-source-properties に置けない**（D-P3-1）: 値と大文字小文字に関係なく `名前(connectionTopology)` で拒否する。Connector/J 8.3.0 の `PropertyKey` を照合して選んだ key は次のとおり。
+  - 型: `dnsSrv`・`xdevapi.dns-srv`
+  - 接続先: `host`・`port`・`protocol`・`path`・`address`・`priority`・`type`・`socketFactory`（8.3.0 では `host`・`port` は URL の host 部が空の時に使われる）。`PropertyKey` ではないが `MysqlDataSource` の接続先になる `serverName`・`portNumber` も拒否する。接続先は検査した JDBC URL の host:port だけで決める。
+  - failover・load-balance・replication の動作: `failOverReadOnly`・`retriesAllDown`・`secondsBeforeRetrySource`・`queriesBeforeRetrySource`・`allowSourceDownConnections`・`allowReplicaDownConnections`・`readFromSourceWhenNoReplicas`（旧名の `secondsBeforeRetryMaster`・`queriesBeforeRetryMaster`・`allowMasterDownConnections`・`allowSlaveDownConnections`・`readFromMasterWhenNoSlaves` も）、`ha.loadBalanceStrategy`・`ha.enableJMX`・`loadBalance*` の10件（旧名 `loadBalanceBlacklistTimeout` も）・`replicationConnectionGroup`・`serverAffinityOrder`、再接続の `maxReconnects`・`reconnectAtTxEnd`。
+  - 照合して対象から外した key: `localSocketAddress`（ローカル側の bind address）、`socksProxyHost`・`socksProxyPort`・`socksProxyRemoteDns`（TCP の中継で、切断は driver へ失敗として届き、別の接続へ切り替えない）、`resourceId`（XA の識別）。
+  - `autoReconnect`・`autoReconnectForPools` は従来どおり値（`true`/`yes`）で判定し、key の大文字小文字と値の前後の空白は問わない（`false`・`no` は通す）。
 - 例外文言には property 名だけを出し、URL・host 名・認証情報は出さない。
 - 透過再接続 proxy と Hikari 以外の pool はアプリから検出できない（または検査の対象外）ため、配備 checklist で DBA / SRE が確認する（`feature-switches.md` 4.8.2 #7）。
 
@@ -164,7 +171,7 @@
 | 413・汎用403・照合台帳・winner アラート | `ImportCsvIngestionServiceTest`、`GlobalExceptionHandlerTest`、`ImportCenterApiSecurityTest` |
 | 照合台帳と判定規則 | `ImportStageReconciliationLedgerTest`、`ImportStageReconcilerTest`（専用 H2。COMMIT 接続が実行中の間は見送り、確認中の commit を数え直しで拾い、確認できなければ残す）、`ImportCsvIngestionRealMySqlTest`（実 MySQL・KILL 注入からの回収と commit 済み保持、COMMIT 接続 ID の記録、`DO SLEEP` 中の接続を実行中と判定する process 一覧の照会） |
 | storage key の索引（V200） | `ImportStageStorageKeyIndexContractTest`（V200 と H2 schema の索引の一致、Docker 不要）、`FlywayMigrationSmokeTest`（実 MySQL の索引） |
-| 透過再接続・複数 host の fail-fast | `ImportJdbcReconnectGuardTest`（autoReconnect・百分率符号化・multi-host・loadbalance・replication・SRV・mysqlx・MariaDB の failover 等） |
+| 透過再接続・複数 host の fail-fast | `ImportJdbcReconnectGuardTest`（autoReconnect・百分率符号化・multi-host・loadbalance・replication・SRV・mysqlx・MariaDB の failover 等。data-source-properties の `dnsSrv` を driver の解析へ渡すことと、接続の型・接続先・切替えを変える key の拒否） |
 | apply 入口の閉鎖 | `ImportCenterApplyEntryClosedTest` |
 | 実 Tomcat エンドツーエンド | `ImportRawUploadServletContainerE2ETest`：素の `text/csv`（UTF8・SHIFT_JIS）、parameter 付き 415、chunked + service 413。RANDOM_PORT のため TestIsolationAuditTest の allowlist に登録 |
 | 本番 admission（Q-5） | `ImportAdmissionPortTest`（既定 deny・承認時の許可と必須監査・部分設定/改ざん/placeholder/失効/未承認 source）、`ImportAdmissionStartupValidatorTest`（NF06 OFF は起動継続、ON は構造的不備で起動失敗） |
