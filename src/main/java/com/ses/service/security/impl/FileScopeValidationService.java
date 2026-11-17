@@ -74,6 +74,13 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.ServiceAttachmentLinkMapper serviceAttachmentLinkMapper;
 
+    /**
+     * portal添付downloadで扱ってよい問い合わせの範囲（uploadと同じpolicy。W2 r2 P3-1 の多重防御）。
+     * 未注入ならportal起票のみ（fail-closed。{@code ServiceRequestAttachmentService} と同じ既定）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalServiceRequestVisibilityPolicy;
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.jdbc.core.JdbcTemplate importMetadataJdbc;
 
@@ -146,8 +153,21 @@ public class FileScopeValidationService {
                 || !"PORTAL_VISIBLE".equals(attachmentLink.getVisibility())) {
             throw BusinessException.of(404, "error.notFound");
         }
-        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
         String tenantId = currentTenant();
+        // 問い合わせの顧客とportalの公開範囲を、文書版を引く前に確かめる（W2 r2 P3-1 の多重防御）。
+        // controllerの getPortalDetail を経ない呼出しでも、uploadと同じpolicyで範囲外を他社と同じ404にする。
+        // 版の状態（scan中の403等）より先に判定し、範囲外の問い合わせについて添付の有無・状態を示さない。
+        if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
+                .eq("tenant_id", tenantId).eq("id", serviceRequestId));
+        if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)
+                || !portalServiceRequestVisibility().isVisible(request,
+                com.ses.service.accounting.AccountingTenantContextHolder.getZoneId())) {
+            throw BusinessException.of(404, "error.notFound");
+        }
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
         DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
                 new QueryWrapper<DocumentVersion>().eq("tenant_id", tenantId)
                         .eq("storage_key", storedName)
@@ -157,14 +177,6 @@ public class FileScopeValidationService {
         }
         if (!"CLEAN".equals(version.getScanStatus())) {
             throw BusinessException.of(403, "error.file.scanNotReady");
-        }
-        if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
-            throw BusinessException.of(403, "error.forbidden");
-        }
-        ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
-                .eq("tenant_id", tenantId).eq("id", serviceRequestId));
-        if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)) {
-            throw BusinessException.of(404, "error.notFound");
         }
 
         com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
@@ -196,6 +208,11 @@ public class FileScopeValidationService {
                 || !serviceRequestFileReferenceProvider.referencedFileNames().contains(storedName)) {
             throw BusinessException.of(403, "error.forbidden");
         }
+    }
+
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalServiceRequestVisibility() {
+        return portalServiceRequestVisibilityPolicy != null ? portalServiceRequestVisibilityPolicy
+                : com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY;
     }
 
     /** 資格証憑の専用認可境界。汎用文書リンク規則へフォールバックしない。 */

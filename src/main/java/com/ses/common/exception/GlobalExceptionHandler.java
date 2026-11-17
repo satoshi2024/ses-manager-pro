@@ -139,6 +139,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500, SafeErrorPolicy.DEFAULT_SYSTEM_MESSAGE));
     }
 
+    /**
+     * api controller の {@code @RequestBody} 等が受け付けない Content-Type。クライアント側の誤りなので
+     * 汎用 Exception ハンドラ（500・SYSTEM）へ落とさず415で返す（RB-NF02 review P3-2）。文言は業務例外の415
+     * （P3-N2-1）と同じ固定文言にし、受け付ける形式は Accept header で示す。
+     */
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResult<Void>> handleUnsupportedMediaType(
+            org.springframework.web.HttpMediaTypeNotSupportedException e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "UNSUPPORTED_MEDIA_TYPE");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("受け付けないContent-Type: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        if (e.getSupportedMediaTypes() != null && !e.getSupportedMediaTypes().isEmpty()) {
+            response.header(org.springframework.http.HttpHeaders.ACCEPT,
+                    org.springframework.http.MediaType.toString(e.getSupportedMediaTypes()));
+        }
+        return response.body(ApiResult.<Void>error(415, SafeErrorPolicy.statusMessage(415)));
+    }
+
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class, java.time.format.DateTimeParseException.class})
     public ResponseEntity<ApiResult<Void>> handleRequestParameterException(Exception e) {
         CorrelationContext.put(CorrelationContext.ERROR_CODE, "INVALID_REQUEST_PARAMETER");
@@ -190,6 +210,8 @@ public class GlobalExceptionHandler {
             case 409 -> HttpStatus.CONFLICT;
             // SafeErrorPolicy.safeHttpCodeが許可する413（上限超過）をstatus行でも413として返す。
             case 413 -> HttpStatus.PAYLOAD_TOO_LARGE;
+            // 同じく許可済みの415（添付できないファイル形式。NF-02 P3-N2-1）。
+            case 415 -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
             case 502 -> HttpStatus.BAD_GATEWAY;
             case 503 -> HttpStatus.SERVICE_UNAVAILABLE;

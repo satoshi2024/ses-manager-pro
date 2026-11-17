@@ -17,6 +17,14 @@ import com.ses.entity.ServiceRequest;
 public interface ServiceRequestService {
 
     /**
+     * 一覧API（内部・ポータル）の1ページの上限件数（NF-02 P3-N2-3）。
+     * 一覧は1行ごとにSLA clock・顧客・担当者等を個別に引くため、全体上限（{@code PageUtils.MAX_PAGE_SIZE}=1000）
+     * のままでは1要求がDB接続を長く占有する。画面の指定（内部10件・ポータル50件）より十分大きい値にする。
+     * CSV出力はこの上限を使わない（{@code ServiceRequestExportServiceImpl}）。
+     */
+    int LIST_MAX_PAGE_SIZE = 100;
+
+    /**
      * 新規サービスリクエスト起票（内部・ポータル共通）
      */
     ServiceRequest createRequest(ServiceRequestCreateRequest req, Long actorUserId, boolean isPortal, Long portalUserId);
@@ -35,12 +43,13 @@ public interface ServiceRequestService {
     PortalServiceRequestDto getPortalDetail(Long id, Long customerId);
 
     /**
-     * 内部向け一覧検索（ページネーション・DataScope適用）
+     * 内部向け一覧検索（ページネーション・DataScope適用）。page・sizeは {@code PageUtils.safePage} で正規化する
+     * （0以下は既定値、上限は {@code PageUtils.MAX_PAGE_SIZE}）。一覧APIは呼出し前に {@link #LIST_MAX_PAGE_SIZE} へ丸める。
      */
     Page<ServiceRequestDto> searchInternalRequests(int page, int size, String keyword, String status, String priority, String category, Long customerId);
 
     /**
-     * ポータル向け一覧検索（自社スコープ限定）
+     * ポータル向け一覧検索（自社スコープ限定）。page・sizeの正規化は {@link #searchInternalRequests} と同じ。
      */
     Page<PortalServiceRequestDto> searchPortalRequests(int page, int size, String keyword, String status, Long customerId);
 

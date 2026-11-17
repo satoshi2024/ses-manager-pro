@@ -134,6 +134,20 @@ class PortalServiceRequestVisibilityIntegrationTest {
                 customer.getId(), 200L));
     }
 
+    /** W2 r2 P3-5: 公開開始時刻が未設定なら、内部画面は社内登録を「社内限定」、portal起票を「顧客公開対象」と示す。 */
+    @Test
+    void 内部の一覧と詳細は公開開始時刻が未設定なら社内登録を社内限定と示す() {
+        Page<ServiceRequestDto> internalList = serviceRequestService.searchInternalRequests(1, 50, null, null, null,
+                null, customer.getId());
+        assertThat(internalList.getRecords())
+                .extracting(ServiceRequestDto::getId, ServiceRequestDto::getPortalVisible)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.api.Assertions.tuple(internalRequest.getId(), false),
+                        org.assertj.core.api.Assertions.tuple(portalRequest.getId(), true));
+        assertThat(serviceRequestService.getInternalDetail(internalRequest.getId()).getPortalVisible()).isFalse();
+        assertThat(serviceRequestService.getInternalDetail(portalRequest.getId()).getPortalVisible()).isTrue();
+    }
+
     @Test
     void 内部サービスデスクは社内登録とportal起票の両方を従来どおり扱える() {
         Page<ServiceRequestDto> internalList = serviceRequestService.searchInternalRequests(1, 50, null, null, null,

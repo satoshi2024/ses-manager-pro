@@ -114,7 +114,11 @@ public class PortalCustomerServiceDeskApiController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status) {
         authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.view");
-        Page<PortalServiceRequestDto> result = serviceRequestService.searchPortalRequests(current, size, keyword, status, customerId());
+        // 内部一覧と同じ一覧専用の上限へ丸める（P3-N2-3。portal画面の指定は50件）。
+        Page<PortalServiceRequestDto> paging = com.ses.common.util.PageUtils.safePage(current, size,
+                com.ses.common.util.PageUtils.DEFAULT_PAGE_SIZE, ServiceRequestService.LIST_MAX_PAGE_SIZE);
+        Page<PortalServiceRequestDto> result = serviceRequestService.searchPortalRequests((int) paging.getCurrent(),
+                (int) paging.getSize(), keyword, status, customerId());
         return ApiResult.success(result);
     }
 

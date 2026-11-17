@@ -97,7 +97,10 @@ function initListPage() {
 
             const row = `
                 <tr>
-                    <td><a href="/service-desk/requests/${r.id}" class="text-accent-blue fw-bold text-decoration-none">${escapeHtml(r.requestNo)}</a></td>
+                    <td>
+                        <a href="/service-desk/requests/${r.id}" class="text-accent-blue fw-bold text-decoration-none">${escapeHtml(r.requestNo)}</a>
+                        <div class="mt-1">${getPortalVisibilityBadge(r.portalVisible)}</div>
+                    </td>
                     <td>${escapeHtml(r.customerName || '-')}</td>
                     <td><span class="badge bg-dark">${escapeHtml(r.category || '-')}</span></td>
                     <td>${priorityBadge}</td>
@@ -258,6 +261,7 @@ function initDetailPage(requestId) {
         $('#requestNoBadge').text(data.requestNo);
         $('#statusBadge').replaceWith(getStatusBadge(data.status));
         $('#priorityBadge').replaceWith(getPriorityBadge(data.priority));
+        $('#portalVisibilityBadge').html(getPortalVisibilityBadge(data.portalVisible));
         $('#categoryBadge').text(data.category);
         $('#subjectHeader').text(data.subject);
         $('#customerName').text(data.customerName || '-');
@@ -505,6 +509,22 @@ function getPriorityBadge(priority) {
         default:
             return `<span class="badge bg-dark">${escapeHtml(priority || '-')}</span>`;
     }
+}
+
+/**
+ * 顧客ポータルへ出す範囲の問い合わせかを示すバッジ（W2 r2 P3-5）。portalVisible はサーバー側の公開範囲policyの判定
+ * （portal起票、または公開開始時刻以降の作成）。顧客ポータルの子スイッチがOFFの間は「顧客公開対象」でも顧客には
+ * 表示されないため、title の補足文で示す。値が無い場合は社内限定として扱う（公開側へ倒さない）。
+ */
+function getPortalVisibilityBadge(portalVisible) {
+    const visible = portalVisible === true;
+    const label = SES.i18n.t(visible ? 'servicedesk.portalVisibility.visible' : 'servicedesk.portalVisibility.internal');
+    const hint = SES.i18n.t(visible ? 'servicedesk.portalVisibility.visibleHint'
+        : 'servicedesk.portalVisibility.internalHint');
+    const cls = visible ? 'bg-warning text-dark' : 'bg-secondary';
+    const icon = visible ? 'bi-eye' : 'bi-eye-slash';
+    return `<span class="badge ${cls}" data-portal-visible="${visible}" title="${escapeHtml(hint)}">`
+        + `<i class="bi ${icon} me-1" aria-hidden="true"></i>${escapeHtml(label)}</span>`;
 }
 
 function formatDateTime(dtStr) {

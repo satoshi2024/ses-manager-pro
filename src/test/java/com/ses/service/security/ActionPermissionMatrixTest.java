@@ -520,6 +520,43 @@ class ActionPermissionMatrixTest {
         }
     }
 
+    // ---------------------------------------------------------------- NF-03 資格番号（FINAL P3-4-1・V121・V126）
+
+    /**
+     * 資格番号の復号（{@code certification.pii.view}）は本人と HR・管理者だけ（approval-decision:45）。
+     * マネージャーは V126 で {@code certification-learning-gap.*} を持つが別resourceであり、
+     * {@code certification.pii.view} の候補（action本体・{@code certification.*}・{@code '*'}）には当たらない。
+     * 将来のseedが営業・マネージャーへ {@code certification.*} や全体baselineを与えた場合はここで落ちる。
+     */
+    @Test
+    void 資格番号の復号actionはマネージャーと営業を拒否しHRと管理者だけに許可する() {
+        String pii = "certification.pii.view";
+        assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), pii), "マネージャーに許可された");
+        assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"), pii), "営業に許可された");
+        assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), pii), "要員に許可された");
+        // group未割当のlegacy fallbackでも開かない（certification は既知resourceではなく未知actionとして拒否）
+        assertFalse(authorizationService.isAllowed(authenticate(9996L, "マネージャー"), pii), "legacyのマネージャーに許可された");
+        assertFalse(authorizationService.isAllowed(authenticate(9999L, "営業"), pii), "legacyの営業に許可された");
+        // 対照: V121 の明示許可を持つHRと、管理者には許可される（上の拒否がfixtureの欠落によるものでないこと）
+        assertTrue(authorizationService.isAllowed(authenticate(9002L, "HR"), pii), "HRが拒否された");
+        assertTrue(authorizationService.isAllowed(authenticate(9007L, "管理者"), pii), "管理者が拒否された");
+        // マネージャーは同じ画面の別resource（V126）を使える。拒否がresourceの境界によるものであることの確認
+        assertTrue(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), "certification-learning-gap.view"));
+    }
+
+    @Test
+    void 資格番号の復号actionの許可根拠は管理者とHRのgroupだけが持つ() {
+        // AuthorizationServiceImpl の候補キー（action本体・resource wildcard・'*'）を許可で持つ非管理者・非HRのgroupは無い
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                + "WHERE group_id IN (2, 4, 5) AND deny_flag = 0 AND deleted_flag = 0 "
+                + "AND action_key IN ('certification.pii.view', 'certification.*', '*')", Integer.class));
+        for (int groupId : new int[]{1, 3}) {
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                    + "WHERE group_id = ? AND action_key = 'certification.pii.view' AND deny_flag = 0 "
+                    + "AND deleted_flag = 0", Integer.class, groupId), "group " + groupId + " の明示許可（V121）");
+        }
+    }
+
     private Authentication authenticate(Long id, String role) {
         SysUser user = new SysUser();
         user.setId(id);

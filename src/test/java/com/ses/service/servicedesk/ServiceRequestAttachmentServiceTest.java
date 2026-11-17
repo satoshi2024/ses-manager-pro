@@ -177,9 +177,56 @@ class ServiceRequestAttachmentServiceTest {
 
     @Test
     void 非許可MIMEはDocumentServiceに到達しない() {
-        assertThrows(BusinessException.class, () -> service.uploadInternal(10L, null,
+        BusinessException rejected = assertThrows(BusinessException.class, () -> service.uploadInternal(10L, null,
                 new MockMultipartFile("file", "payload.exe", "application/octet-stream", "MZ".getBytes()),
                 "INTERNAL", 100L));
+        // P3-N2-1: 415はSafeErrorPolicyで500へ丸めずに返す（GlobalExceptionHandlerTestで確認）
+        assertEquals(415, rejected.getCode());
+        assertEquals("error.file.typeNotAllowed", rejected.getMessageKey());
         verify(documentService, never()).registerReceived(any(), any());
+    }
+
+    /** W2 NF06 hardening P3-4: 空ファイルは「上限超過」の413ではなく入力誤りの400で、空であることを示す文言にする。 */
+    @Test
+    void 空ファイルは400のerror_file_emptyで文書登録前に拒否する() {
+        for (String endpoint : java.util.List.of("internal", "portal")) {
+            MockMultipartFile empty = new MockMultipartFile("file", "empty.pdf", "application/pdf", new byte[0]);
+            BusinessException rejected = assertThrows(BusinessException.class, () -> {
+                if ("internal".equals(endpoint)) {
+                    service.uploadInternal(10L, null, empty, "INTERNAL", 100L);
+                } else {
+                    request.setChannel("PORTAL");
+                    request.setPortalUserId(200L);
+                    service.uploadPortal(10L, null, empty, 20L, 200L);
+                }
+            }, endpoint);
+            assertEquals(400, rejected.getCode(), endpoint);
+            assertEquals("error.file.empty", rejected.getMessageKey(), endpoint);
+        }
+        BusinessException missing = assertThrows(BusinessException.class,
+                () -> service.uploadInternal(10L, null, null, "INTERNAL", 100L));
+        assertEquals(400, missing.getCode());
+        assertEquals("error.file.empty", missing.getMessageKey());
+        verify(documentService, never()).registerReceived(any(), any());
+    }
+
+    @Test
+    void 上限を超えるファイルは413のerror_file_sizeExceededで文書登録前に拒否する() {
+        UploadProperties properties = new UploadProperties();
+        properties.setServiceRequestMaxFileSizeBytes(4L);
+        ServiceRequestAttachmentService limited = new ServiceRequestAttachmentService(requestMapper, commentMapper,
+                attachmentLinkMapper, documentVersionMapper, documentService, dataScopeService, properties,
+                Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> limited.uploadInternal(10L, null,
+                new MockMultipartFile("file", "large.pdf", "application/pdf", "12345".getBytes()), "INTERNAL", 100L));
+        assertEquals(413, rejected.getCode());
+        assertEquals("error.file.sizeExceeded", rejected.getMessageKey());
+        verify(documentService, never()).registerReceived(any(), any());
+
+        // 上限ちょうどは受け付ける（境界の取り違えが無いこと）
+        limited.uploadInternal(10L, null,
+                new MockMultipartFile("file", "exact.pdf", "application/pdf", "1234".getBytes()), "INTERNAL", 100L);
+        verify(documentService).registerReceived(any(), any());
     }
 }
