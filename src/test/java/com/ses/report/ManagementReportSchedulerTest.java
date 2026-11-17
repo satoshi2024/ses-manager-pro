@@ -802,9 +802,13 @@ class ManagementReportSchedulerTest {
                 detachSchedulerLog(logs);
             }
             ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
-            // 停止判定はmarkFailureの同一UPDATEがDB値で行う。schedulerは通常の失敗分類を渡すだけ。
+            // 停止判定はmarkFailureの同一UPDATEがDB値で行う。schedulerは通常の失敗分類を渡し、messageは加算後の回数で
+            // 「再試行で続ける」と「停止した」を書き分ける（claimのCASで加算後の回数はDB値と一致する。RB-HYG review P3-4）。
+            String expectedMessage = failuresBefore + 1 >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES
+                    ? ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY
+                    : ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY;
             verify(mapper).markFailure(eq("default"), eq(5L), token.capture(), any(), any(), eq(SEPT),
-                    eq("SCHEDULE_GENERATION_FAILED"), anyString());
+                    eq("SCHEDULE_GENERATION_FAILED"), eq(expectedMessage));
             tokens.add(token.getValue());
             errors.addAll(messages(logs, Level.ERROR));
             if (failuresBefore == 10) {
@@ -815,6 +819,10 @@ class ManagementReportSchedulerTest {
         }
 
         assertThat(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES).isEqualTo(12);
+        assertThat(com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED",
+                ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY))
+                .as("停止の key も同梱bundleにあり allowlist を通る")
+                .isEqualTo(ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY);
         assertThat(events(registry, ReportScheduleMetrics.Event.RUN_FAILED)).isEqualTo(2.0);
         assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).isEqualTo(1.0);
         assertThat(errors).anyMatch(message -> message.contains("連続失敗が上限（12回）")
