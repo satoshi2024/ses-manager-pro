@@ -93,7 +93,7 @@ public class AllocationPlan extends BaseEntity {
 
     /**
      * JSON に出現した ALWAYS フィールド名（CON-01）。
-     * setter 経由でキー出現を記録し、未出現はサービス側で既存値へ回填する。
+     * setter 経由でキー出現を記録し、未出現はサービス側で既存値で補完する。
      */
     @JsonIgnore
     @TableField(exist = false)

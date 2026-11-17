@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T076 F2: 契約→actual allocation同期の定向test（L2〜L3）。
+ * T076 F2: 契約→actual allocation同期の対象限定test（L2〜L3）。
  * 契約成立でactual行が作成/更新され、終了/解約/削除で破棄される。
  * 同一engineer+positionの確定planはactual成立でsupersedeされ、plan/actualの二重計上が起きない。
  */

@@ -24,7 +24,7 @@ final class PurePolicyVerificationKernel {
         }
     }
 
-    // --- 第 2 段階: Anchor ID 比対 ---
+    // --- 第 2 段階: Anchor ID 照合 ---
     static void verifyAnchorIdentity(ApprovalEnvelopeMetadata metadata, TrustedAuthority anchor) throws PolicySecurityException {
         if (!anchor.authorityId().equals(metadata.authorityId()) || !anchor.keyId().equals(metadata.keyId())) {
             throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "authorityまたはkeyが一致しません");
@@ -43,7 +43,7 @@ final class PurePolicyVerificationKernel {
         }
     }
 
-    // --- 第 4 段階: 時間窓検査（半開区間） ---
+    // --- 第 4 段階: 有効期間の検査（半開区間） ---
     static void verifyTimeWindow(Instant now, TrustedAuthority anchor, ApprovalEnvelopeMetadata metadata) throws PolicySecurityException {
         if (now.isBefore(anchor.validFrom()) || !now.isBefore(anchor.validUntil())) {
             throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_VALIDITY_EXPIRED, "authorityが現在有効ではありません");

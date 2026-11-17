@@ -116,7 +116,7 @@ class ImportJdbcReconnectGuardTest {
      * {@code jdbc:mysql://app:p%40ss,word@db-a:3306/...} は、Connector/J が authority を {@code ,} で先に分けてから user 情報を
      * 取るため、{@code app:p%40ss} と {@code word@db-a:3306} の2つの host になる（8.3.0 では解析に失敗する）。単一 host という
      * 期待値そのものが誤りだったため、拒否の側（下の試験）へ移した。
-     * 断言を緩めたのではない。
+     * assertを緩めたのではない。
      */
     @Test
     void 単一hostのURLはuser情報とIPv6とqueryがあっても通しMySQL以外のURLは対象にしない() {
@@ -141,7 +141,7 @@ class ImportJdbcReconnectGuardTest {
     /**
      * RB-NF05 delta review N-P3-1: 自前の文字列判定だけでは通っていたが、Connector/J 8.3.0 が複数 host・load-balance として
      * 解析する（または解析できない）URL。判定の正本は Connector/J の解析結果であり、各 URL の前提として Connector/J 自身の
-     * 解析結果も断言する（Connector/J を上げて解析が変われば、この試験が気付く）。
+     * 解析結果も検証する（Connector/J を上げて解析が変われば、この試験が気付く）。
      */
     @Test
     void user情報のカンマとschemeの空白と百分率符号化もdriverの解析に合わせて拒否する() {
@@ -183,7 +183,7 @@ class ImportJdbcReconnectGuardTest {
     /**
      * 判定の不変条件（oracle）: Connector/J が単一接続・host 1件と解析しない URL は、必ず拒否する。逆に、自前の前段判定は
      * Connector/J より厳しくてよい（{@code ;}・{@code (}・{@code =} を含む host 部、空の host 部は Connector/J が1 host と
-     * 解析しても拒否する）。ここに並べた全ての URL で、通した URL が Connector/J の単一接続であることを断言する。
+     * 解析しても拒否する）。ここに並べた全ての URL で、通した URL が Connector/J の単一接続であることを検証する。
      */
     @Test
     void 通すURLは全てConnectorJの単一接続で前段判定はそれより厳しい() {
@@ -347,7 +347,7 @@ class ImportJdbcReconnectGuardTest {
      * RB-NF05 delta review D-P3-1 (b): data-source-properties に置くと接続の型・接続先・failover／load-balance／replication の
      * 動作を変える key を、値と大文字小文字に関係なく拒否する。全ての key について、前提として Connector/J 8.3.0 の key
      * （{@code PropertyKey} の key 名か旧名、または {@code MysqlDataSource} の setter）であることと、その Properties での
-     * driver 自身の解析結果を断言してから拒否を断言する。{@code dnsSrv} 以外は driver の解析では単一接続のままで、
+     * driver 自身の解析結果を検証してから拒否を検証する。{@code dnsSrv} 以外は driver の解析では単一接続のままで、
      * 型の判定だけでは見えないため key で拒否する。
      */
     @Test
@@ -394,6 +394,8 @@ class ImportJdbcReconnectGuardTest {
         keys.put("reconnectAtTxEnd", "true");
         keys.put("serverName", "db-b");
         keys.put("portNumber", "3307");
+        // E-P3-1: 何も変えない変換 class を指定しても key で拒否する（変換 class は任意の属性を書き換えられる）。
+        keys.put("propertiesTransform", NoOpTransform.class.getName());
         assertEquals(ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY_KEYS, keys.keySet().stream()
                 .map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet()), "拒否する key の全てを試す");
         Set<String> dataSourceSetters = java.util.Arrays.stream(com.mysql.cj.jdbc.MysqlDataSource.class.getMethods())
@@ -441,6 +443,102 @@ class ImportJdbcReconnectGuardTest {
         for (String[] entry : List.of(new String[]{"autoReconnect", "false"}, new String[]{"autoReconnectForPools", "no"})) {
             assertEquals(List.of(), ImportJdbcReconnectGuard.violations(environment(
                     "spring.datasource.url", DEFAULT_URL, DSP + "." + entry[0], entry[1])), entry[0] + "=" + entry[1]);
+        }
+    }
+
+    /**
+     * RB-NF05 delta review E-P3-1: Connector/J は解析の中で {@code useConfigs}（同梱の設定 file）と {@code propertiesTransform}
+     * （classpath の変換 class）を展開する。展開前の URL の文字列と data-source-properties の key 名だけを見る検査は、
+     * {@code ?useConfigs=clusterBase} で {@code autoReconnect=true} が有効になる接続を通していた。各 case で先に driver 自身の
+     * 展開結果（main host の有効な属性）を検証し、そのうえで検査が展開後の属性で拒否することを検証する。
+     */
+    @Test
+    void useConfigsとpropertiesTransformで展開された有効な属性のautoReconnectと切替えのkeyも拒否する() {
+        String url = "spring.datasource.url";
+        String clusterBase = DEFAULT_URL + "&useConfigs=clusterBase";
+        assertEquals("SINGLE", driver(clusterBase), "前提: 接続の型の判定では見えない");
+        assertEquals("true", effective(clusterBase, new Properties()).get("autoReconnect"), "前提: clusterBase は autoReconnect を足す");
+        assertEquals("false", effective(clusterBase, new Properties()).get("failOverReadOnly"), "前提: failOverReadOnly も足す");
+        assertFalse(ImportJdbcReconnectGuard.autoReconnect(clusterBase), "前提: URL の文字列には autoReconnect が無い");
+        List<String> expandedBoth = List.of(url + "(" + ImportJdbcReconnectGuard.EFFECTIVE_AUTO_RECONNECT + ")",
+                url + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")");
+        assertEquals(expandedBoth, ImportJdbcReconnectGuard.violations(environment(url, clusterBase)));
+        for (String urlProperty : List.of("spring.datasource.hikari.jdbc-url", DSP + ".url")) {
+            assertEquals(List.of(urlProperty + "(" + ImportJdbcReconnectGuard.EFFECTIVE_AUTO_RECONNECT + ")",
+                    urlProperty + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                    ImportJdbcReconnectGuard.violations(environment(urlProperty, clusterBase)), urlProperty);
+        }
+
+        String coldFusion = DEFAULT_URL + "&useConfigs=coldFusion";
+        assertEquals("true", effective(coldFusion, new Properties()).get("autoReconnect"), "前提: coldFusion も autoReconnect を足す");
+        assertEquals(List.of(url + "(" + ImportJdbcReconnectGuard.EFFECTIVE_AUTO_RECONNECT + ")"),
+                ImportJdbcReconnectGuard.violations(environment(url, coldFusion)));
+
+        // data-source-properties の useConfigs も driver へ info として渡り、同じく展開される。
+        assertEquals("true", effective(DEFAULT_URL, info("useConfigs", "clusterBase")).get("autoReconnect"));
+        assertEquals(expandedBoth, ImportJdbcReconnectGuard.violations(
+                environment(url, DEFAULT_URL, DSP + ".useConfigs", "clusterBase")));
+
+        // 明示の false は展開より優先される（driver の結果どおり）。展開で足された切替えの key は残るため拒否する。
+        String explicitFalse = DEFAULT_URL + "&autoReconnect=false&useConfigs=clusterBase";
+        assertEquals("false", effective(explicitFalse, new Properties()).get("autoReconnect"), "前提: 明示の値が優先");
+        assertEquals(List.of(url + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                ImportJdbcReconnectGuard.violations(environment(url, explicitFalse)));
+
+        // 接続の型・再接続を変えない同梱設定は通す。
+        String maxPerformance = DEFAULT_URL + "&useConfigs=maxPerformance";
+        assertNull(effective(maxPerformance, new Properties()).get("autoReconnect"), "前提: maxPerformance は再接続を変えない");
+        assertEquals(List.of(), ImportJdbcReconnectGuard.violations(environment(url, maxPerformance)));
+
+        // propertiesTransform: classpath の変換 class は解析の中で autoReconnect を書き足せる。
+        String transform = DEFAULT_URL + "&propertiesTransform=" + AddAutoReconnectTransform.class.getName();
+        assertEquals("SINGLE", driver(transform), "前提: 接続の型の判定では見えない");
+        assertEquals("true", effective(transform, new Properties()).get("autoReconnect"), "前提: 変換で autoReconnect が有効になる");
+        assertEquals(expandedBoth, ImportJdbcReconnectGuard.violations(environment(url, transform)));
+        assertEquals(List.of(url + "(" + ImportJdbcReconnectGuard.EFFECTIVE_AUTO_RECONNECT + ")",
+                DSP + ".propertiesTransform(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                ImportJdbcReconnectGuard.violations(environment(url, DEFAULT_URL,
+                        DSP + ".propertiesTransform", AddAutoReconnectTransform.class.getName())));
+        // 存在しない変換 class は driver 自身が解析できない（接続もできない）ため、判定の正本に合わせて拒否する。
+        String missingTransform = DEFAULT_URL + "&propertiesTransform=com.example.NoSuchTransform";
+        assertEquals("ERROR", driver(missingTransform));
+        assertEquals(List.of(url + "(unparsable)"), ImportJdbcReconnectGuard.violations(environment(url, missingTransform)));
+
+        // URL の query に直接書いた切替えの key も、展開後の属性として拒否する（単一 host では効かないが値を問わない）。
+        for (String parameter : List.of("failOverReadOnly=false", "maxReconnects=3", "FAILOVERREADONLY=true")) {
+            String withTopology = DEFAULT_URL + "&" + parameter;
+            assertEquals("SINGLE", driver(withTopology), parameter);
+            assertEquals(List.of(url + "(" + ImportJdbcReconnectGuard.CONNECTION_TOPOLOGY + ")"),
+                    ImportJdbcReconnectGuard.violations(environment(url, withTopology)), parameter);
+        }
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> guard(environment(url, clusterBase + "&password=secret-in-url")).afterPropertiesSet());
+        assertTrue(failure.getMessage().contains(url + "(" + ImportJdbcReconnectGuard.EFFECTIVE_AUTO_RECONNECT + ")"),
+                failure.getMessage());
+        assertFalse(failure.getMessage().contains("secret-in-url"), "URL・認証情報を例外文言へ出さない");
+        assertFalse(failure.getMessage().contains("localhost"));
+    }
+
+    /** Connector/J 8.3.0 が解析時に展開した後の main host の有効な属性（接続はこの属性で初期化される）。 */
+    private static Map<String, String> effective(String url, Properties info) {
+        return com.mysql.cj.conf.ConnectionUrl.getConnectionUrlInstance(url, info).getMainHost().getHostProperties();
+    }
+
+    /** 試験用の変換 class: 解析の中で autoReconnect を有効にする（driver が classpath から読み込む）。 */
+    public static final class AddAutoReconnectTransform implements com.mysql.cj.conf.ConnectionPropertiesTransform {
+        @Override
+        public Properties transformProperties(Properties properties) {
+            properties.setProperty("autoReconnect", "true");
+            return properties;
+        }
+    }
+
+    /** 試験用の変換 class: 何も変えない。 */
+    public static final class NoOpTransform implements com.mysql.cj.conf.ConnectionPropertiesTransform {
+        @Override
+        public Properties transformProperties(Properties properties) {
+            return properties;
         }
     }
 

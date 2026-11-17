@@ -10,7 +10,7 @@
 
 | 用途 | ファイル |
 |---|---|
-| 開工（S0 / F1〜M） | [start-conversations.md](start-conversations.md) |
+| 着手（S0 / F1〜M） | [start-conversations.md](start-conversations.md) |
 | Review（Plan / Task / R-NF08 / SNF横断） | [review-conversations.md](review-conversations.md) |
 | 入口・横断Review時の読み方 | [README.md](README.md) |
 
@@ -42,7 +42,7 @@
 
 - [x] **Objective**: provisional catalogを固定し、catalog外実行を型とruntimeで拒否し、management answer run/feedbackを既存AI ledgerへ安全に記録する。
 - **Blocked until**: Plan Review CONDITIONAL PASS（済）。`<APPROVED_SCOPE>`正式値は未決のため catalog は **provisional / 既定disabled** とする。本番外部送信・flag ONは不可。
-- **開工対話**: [start-conversations.md §F1](start-conversations.md)
+- **着手対話**: [start-conversations.md §F1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-F1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R1、R3、R7、R8、R9
 - **Implementation guidance**:
@@ -62,13 +62,13 @@
 
 - [x] **Objective**: 質問をtyped parameterへ変換し、DataScope/role/menu認可後にcanonical serviceだけを実行してtyped resultを返す。
 - **Blocked until**: F1 PASS、Scope A/Bの受入fixture、canonical service adapter契約（provisional catalogで可）。
-- **開工対話**: [start-conversations.md §F2](start-conversations.md)
+- **着手対話**: [start-conversations.md §F2](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-F2](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R2、R4、R5、R6、R10
 - **Implementation guidance**:
   - parserはcandidate queryと不足parameterだけを返し、SQL、repository、table、column、raw filterを型へ入れない。
   - `YearMonth`、期間、月数、asOf、timezone、0/NULL/forecastを明示する。
-  - `DashboardService`、`UtilizationForecastService`、`ManagementAccountingService`、`CashFlowForecastService`の既存口径をadapterで再利用する。
+  - `DashboardService`、`UtilizationForecastService`、`ManagementAccountingService`、`CashFlowForecastService`の既存の集計基準をadapterで再利用する。
   - `SalesPerformanceService`はDataScopeを統合したscoped adapter/overloadができるまでcatalog disabledとする。
   - result envelopeにvalue/unit/period/timezone/freshness/state/basis/scope/source/data versionを付与する。
 - **Test requirements**:
@@ -76,13 +76,13 @@
   - 営業DataScope、empty scope、detail/citation再認可、期間境界、timezone、0/NULL/forecastを検証。
   - 画面・export・AIの同一指標contract testを追加。
 - **Demo**: 管理者・マネージャー・営業のtest userで同じ質問を実行し、typed resultと正本API/exportの値・単位・期間が一致することを確認する。
-- **Rollback**: query単位のenabledをOFFにしてgatewayから除外。正本serviceの既存画面/exportの口径を変更しない。
+- **Rollback**: query単位のenabledをOFFにしてgatewayから除外。正本serviceの既存画面/exportの集計基準を変更しない。
 
 ### A1: Chat / answer / citation UI
 
 - [x] **Objective**: typed resultを正本として表示するchat画面を追加し、summaryとcitationを安全に表示する。
 - **Blocked until**: F2 PASS、citation route/menu/scope再認可契約（provisionalで可。human escalationはDG-08まで文言のみ）。
-- **開工対話**: [start-conversations.md §A1](start-conversations.md)
+- **着手対話**: [start-conversations.md §A1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-A1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R2、R6、R7、R10
 - **Implementation guidance**:
@@ -98,7 +98,7 @@
 
 - [x] **Objective**: mock/rule providerで評価可能なsummary gatewayと、PII redaction・canary・timeout・429・invalid JSON・cost上限を固定する。**具体モデル未決定でも`AiTextService`差し替え点を実装する。**
 - **Blocked until**: A1またはAPI contractがPASS。外部provider有効化は別承認（本taskでは不可）。
-- **開工対話**: [start-conversations.md §B1](start-conversations.md)
+- **着手対話**: [start-conversations.md §B1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-B1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R1、R7、R8、R9
 - **Implementation guidance**:
@@ -114,7 +114,7 @@
 
 - [x] **Objective**: 固定匿名datasetとadversarial suiteでmetric、PII、scope、citation、provider failureを評価する。
 - **Blocked until**: B1 PASS、評価dataset/version/segment policy（provisional fixture可）。
-- **開工対話**: [start-conversations.md §B2](start-conversations.md)
+- **着手対話**: [start-conversations.md §B2](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-B2](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R8、R9、R10
 - **Implementation guidance**:
@@ -130,7 +130,7 @@
 
 - [x] **Objective**: 画面/API/export/AIの同一指標とscopeを統合検証し、Reviewへremote Head、plan/spec/tasks、completion matrixを渡す。
 - **Blocked until**: F1、F2、A1、B1、B2の全PASS。NF-07、DG-08、`GATE-S17-G10-PROD`、approved owner/catalogは本番有効化gate（M完了でも未完ならCONDITIONAL PASS）。
-- **開工対話**: [start-conversations.md §M](start-conversations.md)
+- **着手対話**: [start-conversations.md §M](start-conversations.md)
 - **最終Review対話**: [review-conversations.md §R-NF08](review-conversations.md)（必須。PR gate）
 - **対象要件**: AI-MC-R1〜R10
 - **Implementation guidance**:

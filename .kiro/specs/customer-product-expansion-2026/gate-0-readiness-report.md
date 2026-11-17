@@ -252,7 +252,7 @@ MyBatis-Plus wrapperによる主なカスタム query の入口は、`CustomerAp
 
 ### 3.4 Scheduler、Async、Cache
 
-- Schedulerは `SesManagerApplication.java:14-16` で有効化されている。契約単価同期 `ContractPriceSyncService.java:32-34`、レジュメPII清理 `ResumeRetentionCleanupServiceImpl.java:37-39`、更新エスカレーション `RenewalEscalationScheduler.java:20-22`、通知生成 `NotificationScheduler.java:14-17`、ファイル清理 `FileCleanupScheduler.java:20-23`、契約更新ドラフト `ContractRenewalScheduler.java:19-22` がある。
+- Schedulerは `SesManagerApplication.java:14-16` で有効化されている。契約単価同期 `ContractPriceSyncService.java:32-34`、レジュメPIIの消去 `ResumeRetentionCleanupServiceImpl.java:37-39`、更新エスカレーション `RenewalEscalationScheduler.java:20-22`、通知生成 `NotificationScheduler.java:14-17`、ファイル清掃 `FileCleanupScheduler.java:20-23`、契約更新ドラフト `ContractRenewalScheduler.java:19-22` がある。
 - ShedLockは `SchedulerLockConfig.java:24-35` と `V58__shedlock.sql:8-13` でDB全体に一つの名前を持つ。名前は `contractPriceSyncDaily` 等でtenantを含まないため、共有DBでは「1ジョブが全tenantをloop」するか、tenant suffix方式を決定する必要がある。
 - Asyncは `AsyncConfig.java:20-37` の共通poolを使う。取込解析は `ResumeIngestionServiceImpl.java:94-95`、`ProjectIngestionServiceImpl.java:92-93`、`BpAvailabilityIngestionServiceImpl.java:83-84`、メールは `MailServiceImpl.java:102-104`、Webhookは `WebhookNotifier.java:44-45`。TaskDecoratorによるtenant/user/locale伝播はなく、context未解決時fail-closedもない。
 - Cacheは `CacheConfig.java:31-75` のCaffeineで、DashboardとUtilizationForecastをキャッシュする。`DashboardServiceImpl.java:63-65`、`UtilizationForecastServiceImpl.java:59-63` が利用し、キーはdata scopeとuser IDを含むがtenant IDを含まない。共有DB採用時はtenantを必ずキーへ追加し、tenant切替・停止時のinvalidateを設計する。
@@ -295,7 +295,7 @@ MyBatis-Plus wrapperによる主なカスタム query の入口は、`CustomerAp
 - G1に依存するOIDC/MFA、G2に依存する法定帳票・保存期間、G3に依存する外部portal、G4/G5に依存する外部会計・JP PINT、G6に依存する雇用勤怠。
 - Wave 0のorganization、identity、archive、productivity。`parallel-execution-plan.md:53-64,71-77` の依存順を満たすまで並行実装しない。
 
-## 7. 推奨する次の開工指示
+## 7. 推奨する次の着手指示
 
 次の指示を推奨する。
 

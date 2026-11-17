@@ -3796,7 +3796,7 @@ class ImportMetadataRealMySqlTest {
                     if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
                 }
             }
-            reportCleanupFailures("candidate registry撤権競合fixture",
+            reportCleanupFailures("candidate registry権限取消し競合fixture",
                     awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture), pool, expectedDenialObserved),
                     primaryFailure);
         }
@@ -3849,7 +3849,7 @@ class ImportMetadataRealMySqlTest {
                     if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
                 }
             }
-            reportCleanupFailures("lease job撤権競合fixture",
+            reportCleanupFailures("lease job権限取消し競合fixture",
                     awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture), pool, expectedDenialObserved),
                     primaryFailure);
         }

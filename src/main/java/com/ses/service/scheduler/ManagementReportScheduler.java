@@ -95,6 +95,17 @@ public class ManagementReportScheduler {
     private static final long DB_SECOND_TRUNCATION_MILLIS = 500L;
     /** 引き継ぎを数えた上限到達で停止した行の {@code last_error_message}（同梱bundleのkey。4言語）。 */
     public static final String TAKEOVER_EXHAUSTED_MESSAGE_KEY = "error.managementReport.scheduleStoppedByLeaseExpiry";
+    /**
+     * 生成失敗の completion で、まだ上限に達していない（再試行で続ける）ときの {@code last_error_message}（同梱bundleのkey。4言語）。
+     * 以前は {@code safeJobMessage} の既定分岐の日本語固定文言（連携処理の結果の記録）が入り、引き継ぎ停止の key と形式が
+     * そろわず意味も違っていた（review RB-NF10 P3-D2）。どちらも key を保存し、画面では {@code SES.i18n.t} で訳す。
+     */
+    public static final String GENERATION_FAILED_MESSAGE_KEY = "error.managementReport.scheduleGenerationFailed";
+    /**
+     * 生成失敗の completion で連続失敗が上限に達し、同じ UPDATE で停止した行の {@code last_error_message}（同梱bundleのkey。4言語）。
+     * 停止したことを文言で明示する（RB-HYG review P3-4。1つの key では、停止前の失敗と停止とを同じ文言で書いていた）。
+     */
+    public static final String GENERATION_STOPPED_MESSAGE_KEY = "error.managementReport.scheduleStoppedByGenerationFailure";
 
     private final ReportScheduleMapper scheduleMapper;
     private final ReportScheduleClaimService claimService;
@@ -480,7 +491,10 @@ public class ManagementReportScheduler {
             if (!isDeterministicClaimFailure(stopFailure)
                     && stoppedByThisAttempt(tenantId, schedule, failuresAfter, logicalRunAt, retryAt)) {
                 // 停止SQLはcommit済みだった（review RB-NF10 P3-1）。行は無効のため、ここで通知しないと誰も通知しない。
-                // 停止SQLを含むpollはShedLockで直列のため、同じretry時刻の停止を他nodeが作ることはない。
+                // pollはShedLockの lockAtMostFor（10分）以内なら node 間で直列で、同じretry時刻の停止を他nodeが作ることはない。
+                // pollが10分を超えると他nodeのpollと重なり得る。その場合、同じ秒に同じsnapshotで同じ行を扱い、自分の停止SQLは
+                // commitされずに例外となり他nodeがcommitしたときだけ、読み直しの結果が一致してここでも通知する（通知とmetricが
+                // 重複するだけで、停止状態は正しい。review RB-NF10 P3-D1）。
                 notifyTakeoverExhausted(schedule, failuresAfter, logicalRunAt, retryAt);
             }
             return;
@@ -542,7 +556,7 @@ public class ManagementReportScheduler {
         try {
             int changed = scheduleMapper.markFailure(tenantId, schedule.getId(), claim.token(),
                     claim.claimedAt(), retryAt, logicalRunAt,
-                    "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
+                    "SCHEDULE_GENERATION_FAILED", safeMessage(failuresAfter));
             if (changed == 0) {
                 log.warn("[定期管理レポート] failure completionでclaim所有権を失いました: scheduleId={}",
                         schedule.getId());
@@ -826,7 +840,14 @@ public class ManagementReportScheduler {
         return schedule.getFailureCount() == null ? 0 : schedule.getFailureCount();
     }
 
-    private String safeMessage(Exception ex) {
-        return SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED", null);
+    /**
+     * 生成失敗の {@code last_error_message}。例外の message・SQL は保存しない。加算後の回数が上限以上なら、markFailure の同じ
+     * UPDATE が DB 値で停止する（claim の CAS で {@code failuresAfter} は DB の加算後の値と一致する）ため停止の key、未満なら
+     * 再試行の key を書く。同梱bundleにあるkeyだけを許すため、万一keyが無ければ従来の安全な既定messageになる。
+     */
+    private static String safeMessage(int failuresAfter) {
+        String key = failuresAfter >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES
+                ? GENERATION_STOPPED_MESSAGE_KEY : GENERATION_FAILED_MESSAGE_KEY;
+        return SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED", key);
     }
 }

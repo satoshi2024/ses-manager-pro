@@ -669,7 +669,7 @@ class AuthorizationEpochSchemaMySqlTest {
         Fixture f = fixture();
         Fixture other = fixture();
         rollbackOnly(() -> {
-            // 各用例はFKを1つだけ破り、他のFKは満たす（error 1452 とmessage中の制約名で、破った制約を特定する）
+            // 各ケースはFKを1つだけ破り、他のFKは満たす（error 1452 とmessage中の制約名で、破った制約を特定する）
             assertForeignKeyRejected("他tenantの案件を指す提出", "fk_dual_submission_case",
                     () -> insertSubmission(f.tenant(), other.caseId(), other.taskA(), f.engineerId(), f.userId(), 1));
             assertForeignKeyRejected("別案件のtaskを指す提出", "fk_dual_submission_task",

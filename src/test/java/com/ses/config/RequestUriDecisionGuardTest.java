@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code /%61pi/...} や prefix付きの要求がcontrollerへ届くのに判定だけ外れる（本batch以前は転送ヘッダー無しの
  * {@code /%61pi/...} だけで営業がm_menu・action denyを迂回し、更新系の監査も残らなかった）。
  * {@code getServletPath()} はservlet mapping次第で空になり、{@code getRequestURL()} はhost・schemeを含むため、
- * どちらも判定の口径にしない。判定には {@code com.ses.common.util.RequestPaths} を使うこと。
+ * どちらも判定基準にしない。判定には {@code com.ses.common.util.RequestPaths} を使うこと。
  *
  * <p>走査範囲は {@code src/main/java} 全体（共通util・controller・privacy等を含む）。メソッド呼出し
  * （{@code .getRequestURI(}）とメソッド参照（{@code ::getRequestURI}）の両方を数える。

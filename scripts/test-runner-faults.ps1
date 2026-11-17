@@ -7,7 +7,7 @@
   独立テンポラリ fixture リポジトリ内で runner (verify-like-ci.ps1) を実際に呼び出し、.
   全異常系および正常系シナリオを高速・決定論的に検証する.
   実作業ツリー (ses-snf-final-consolidation-gate) の src/target/証跡への書き込み・削除は一切行わない.
-  断言内容: 終了コード、JSON状態、証跡保全、後続 clean 呼び出し抑止、実作業ツリー不変.
+  検証内容: 終了コード、JSON状態、証跡保全、後続 clean 呼び出し抑止、実作業ツリー不変.
   検証結果は可読なサマリーおよび証跡ディレクトリとして永続化・保持される.
 #>
 
@@ -43,7 +43,7 @@ function Invoke-FixtureGit {
     }
 }
 
-# 実作業ツリーの初期状態を記録 (テスト終了時に不変であることを断言).
+# 実作業ツリーの初期状態を記録 (テスト終了時に不変であることを検証).
 $realStartHeadOutput = Invoke-FixtureGit -GitArgs @('-C', $realRepoRoot, 'rev-parse', 'HEAD')
 $realStartHead = $realStartHeadOutput -join "`n"
 $realStartStatus = @(Invoke-FixtureGit -GitArgs @('-C', $realRepoRoot, 'status', '--porcelain'))
@@ -434,9 +434,9 @@ $bashBatContent = "@echo off`r`n`"$currentPsExe`" -ExecutionPolicy Bypass -File 
 
 try {
     # --------------------------------------------------------------------------
-    # 1. 門禁縮減パラメータの厳格白名単拒絶 (Group 1)
+    # 1. ゲート縮小パラメータの厳格許可リストによる拒絶 (Group 1)
     # --------------------------------------------------------------------------
-    Write-Host "Test 01: Maven引数の厳格白名単および不正引数拒絶検証..."
+    Write-Host "Test 01: Maven引数の厳格許可リストおよび不正引数拒絶検証..."
     $forbiddenTests = @(
         '-Dtest=SampleTest',
         '-DskipTests',
@@ -456,8 +456,8 @@ try {
             -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev01`"", "-MavenArgs", $fArg) `
             -NoNewWindow -Wait -PassThru
 
-        Assert-Test ($proc01.ExitCode -eq 1) "01.白名単拒絶 ($fArg) - 終了コード." "未許可パラメータが ExitCode 1 で拒絶されること."
-        Assert-Test (-not (Test-Path -LiteralPath $ev01)) "01.白名単拒絶 - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
+        Assert-Test ($proc01.ExitCode -eq 1) "01.許可リストによる拒絶 ($fArg) - 終了コード." "未許可パラメータが ExitCode 1 で拒絶されること."
+        Assert-Test (-not (Test-Path -LiteralPath $ev01)) "01.許可リストによる拒絶 - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
     }
 
     # 許可された安全引数の通過確認.
@@ -475,19 +475,19 @@ try {
     # --------------------------------------------------------------------------
     Write-Host "Test 01B: MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証..."
 
-    # Test-IsWhitelistedJvmOption の個別単体断言 (通配禁止・個別承認済み具体的オプションのみ許可).
-    Assert-Test (Test-IsWhitelistedJvmOption '-Dfile.encoding=UTF-8') "01B.単体白名単 - UTF-8許可." "file.encoding=UTF-8 が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Duser.timezone=Asia/Tokyo') "01B.単体白名単 - タイムゾーン許可." "user.timezone=Asia/Tokyo が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.awt.headless=true') "01B.単体白名単 - ヘッドレス許可." "headless=true が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.net.preferIPv4Stack=true') "01B.単体白名単 - IPv4優先許可." "preferIPv4Stack=true が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Xmx2048m') "01B.単体白名単 - Xmxメモリ許可." "Xmx2048m が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Xms512m') "01B.単体白名単 - Xmsメモリ許可." "Xms512m が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-Xss1m') "01B.単体白名単 - Xssスタック許可." "Xss1m が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseContainerSupport') "01B.単体白名単 - UseContainerSupport許可." "-XX:+UseContainerSupport が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxRAMPercentage=75.0') "01B.単体白名単 - MaxRAMPercentage許可." "-XX:MaxRAMPercentage=75.0 が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseG1GC') "01B.単体白名単 - UseG1GC許可." "-XX:+UseG1GC が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+EnableDynamicAgentLoading') "01B.単体白名単 - EnableDynamicAgentLoading許可." "-XX:+EnableDynamicAgentLoading が許可されること."
-    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxMetaspaceSize=512m') "01B.単体白名単 - MaxMetaspaceSize許可." "-XX:MaxMetaspaceSize=512m が許可されること."
+    # Test-IsWhitelistedJvmOption の個別の単体検証 (通配禁止・個別承認済み具体的オプションのみ許可).
+    Assert-Test (Test-IsWhitelistedJvmOption '-Dfile.encoding=UTF-8') "01B.単体許可リスト - UTF-8許可." "file.encoding=UTF-8 が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Duser.timezone=Asia/Tokyo') "01B.単体許可リスト - タイムゾーン許可." "user.timezone=Asia/Tokyo が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.awt.headless=true') "01B.単体許可リスト - ヘッドレス許可." "headless=true が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.net.preferIPv4Stack=true') "01B.単体許可リスト - IPv4優先許可." "preferIPv4Stack=true が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xmx2048m') "01B.単体許可リスト - Xmxメモリ許可." "Xmx2048m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xms512m') "01B.単体許可リスト - Xmsメモリ許可." "Xms512m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xss1m') "01B.単体許可リスト - Xssスタック許可." "Xss1m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseContainerSupport') "01B.単体許可リスト - UseContainerSupport許可." "-XX:+UseContainerSupport が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxRAMPercentage=75.0') "01B.単体許可リスト - MaxRAMPercentage許可." "-XX:MaxRAMPercentage=75.0 が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseG1GC') "01B.単体許可リスト - UseG1GC許可." "-XX:+UseG1GC が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+EnableDynamicAgentLoading') "01B.単体許可リスト - EnableDynamicAgentLoading許可." "-XX:+EnableDynamicAgentLoading が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxMetaspaceSize=512m') "01B.単体許可リスト - MaxMetaspaceSize許可." "-XX:MaxMetaspaceSize=512m が許可されること."
 
     # 拒絶対象反例 (未知 -XX, VMOptionsFile, Flags, 診断フラグ・任意コマンド).
     Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:VMOptionsFile=options.txt')) "01B.単体拒絶 - VMOptionsFile拒絶 (options.txt)." "-XX:VMOptionsFile=options.txt が拒絶されること."
@@ -558,7 +558,7 @@ try {
         [System.Environment]::SetEnvironmentVariable('JDK_JAVA_OPTIONS', $null)
     }
 
-    # 白名単準拠の安全な環境変数設定時の通過検証 (メモリ、エンコーディング、タイムゾーン、個別承認済み -XX).
+    # 許可リスト準拠の安全な環境変数設定時の通過検証 (メモリ、エンコーディング、タイムゾーン、個別承認済み -XX).
     [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Tokyo -Djava.awt.headless=true -Xmx1024m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+EnableDynamicAgentLoading')
     try {
         $evSafeEnv = Join-Path $testBaseDir 'ev-env-safe'
@@ -567,9 +567,9 @@ try {
         $procSafeEnv = Start-Process -FilePath $currentPsExe `
             -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evSafeEnv`"") `
             -NoNewWindow -Wait -PassThru
-        Assert-Test ($procSafeEnv.ExitCode -eq 0) "01B.安全白名単環境変数 - 終了コード." "白名単内の安全なJVMオプションが許可されること."
+        Assert-Test ($procSafeEnv.ExitCode -eq 0) "01B.安全許可リスト環境変数 - 終了コード." "許可リスト内の安全なJVMオプションが許可されること."
         $sessSafeEnv = [System.IO.File]::ReadAllText((Join-Path $evSafeEnv 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-        Assert-Test ($sessSafeEnv.state -eq 'PASS') "01B.安全白名単環境変数 - セッションPASS." "セッション状態が PASS であること."
+        Assert-Test ($sessSafeEnv.state -eq 'PASS') "01B.安全許可リスト環境変数 - セッションPASS." "セッション状態が PASS であること."
     } finally {
         [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', $null)
     }
@@ -1222,7 +1222,7 @@ try {
     Assert-Test $noSecrets "21.全通過 - 交付ツリー無秘密." "最終交付ツリーに秘密情報が存在しないこと."
 
     # --------------------------------------------------------------------------
-    # 22. 実作業ツリー不変性の厳格断言 (Group 5)
+    # 22. 実作業ツリー不変性の厳密な検証 (Group 5)
     # --------------------------------------------------------------------------
     Write-Host "Test 22: 実作業ツリー不変性の検証..."
     $realEndHeadOutput = Invoke-FixtureGit -GitArgs @('-C', $realRepoRoot, 'rev-parse', 'HEAD')

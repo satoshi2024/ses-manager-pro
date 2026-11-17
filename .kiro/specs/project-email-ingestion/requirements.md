@@ -24,7 +24,7 @@ SESの営業はパートナーのメーリングリストから日々大量の�
 1. THE システム SHALL 営業/マネージャー/管理者が「メール本文の貼り付け」または「.emlファイルのアップロード」で案件を投入できる画面/APIを提供する。
 2. WHEN 投入された場合、THE システム SHALL `t_project_ingestion` にジョブを作成し初期状態「取込待ち」で記録し、非同期で抽出→AI解析を開始する（即応答）。
 3. THE .emlアップロード SHALL 既存 `FileKind` に準じたサイズ・形式検証を通す（新種別 `PROJECT_EMAIL` を追加、eml/txt想定）。
-4. THE 原本（貼付テキスト/emlファイル） SHALL 孤児清理の対象外になる（`FileReferenceProvider` を追加）。
+4. THE 原本（貼付テキスト/emlファイル） SHALL 孤児清掃の対象外になる（`FileReferenceProvider` を追加）。
 
 ### Requirement 2: 内容の自動抽出（AI構造化）
 1. THE システム SHALL 案件メールから厳格JSONで案件項目を抽出する: 案件名・必要スキル（配列）・単価下限/上限（円）・勤務地・リモート可否・開始日/終了日・商流（元請/一次/二次…）・募集人数・エンド顧客名・備考。不明は null、値を捏造しない。

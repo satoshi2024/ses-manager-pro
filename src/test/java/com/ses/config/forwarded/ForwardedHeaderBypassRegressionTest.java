@@ -47,7 +47,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * FWD-SANITIZE PRE-P1-1 / PRE-P2-1 の再現テストを、修正後の拒否・記録の断言へ置き換えたもの。
+ * FWD-SANITIZE PRE-P1-1 / PRE-P2-1 の再現テストを、修正後の拒否・記録のassertへ置き換えたもの。
  *
  * <p>修正前（Boot標準の {@link ForwardedHeaderFilter} ＋ {@code getRequestURI()} 判定）は、clientが
  * {@code X-Forwarded-Prefix: /x} を送るだけで次が成立していた（scratchpadのharnessで確認済み）。

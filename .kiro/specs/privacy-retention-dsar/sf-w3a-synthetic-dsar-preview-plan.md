@@ -117,7 +117,7 @@ rootがMySQLを直列実行する。すべてのcaseはharness所有の一時MyS
 
 | Case | 実fixture / 競合 | 受入条件 |
 |---|---|---|
-| identity proof | valid ephemeral signatureとtenant/requester/subject/revisionを1字段ずつ差し替え、期限/audience/key/signatureも変更 | 完全bindingのvalid proofだけ`IDENTITY_VERIFIED`へ進む。bool/name-only、曖昧identityはreject、provider query=0 |
+| identity proof | valid ephemeral signatureとtenant/requester/subject/revisionを1項目ずつ差し替え、期限/audience/key/signatureも変更 | 完全bindingのvalid proofだけ`IDENTITY_VERIFIED`へ進む。bool/name-only、曖昧identityはreject、provider query=0 |
 | scope and provider | allowlisted synthetic targetに対するread-only provider。別tenant/subject/provider/targetを用意 | service経由のreadは同一scopeのみ。cross-scope access=0、未登録provider call=0 |
 | preview output | candidate、active hold、unknown policy/audit/provider/journal fixture | closed result schema、raw data/artifactなし、`PREVIEW_ONLY`常在。holdはBLOCKED、unknownはUNKNOWN、policy fixtureなしにcandidateなし |
 | CAS/idempotency | exact replay、same key/different payload、同revision競合2 worker | exact retryはimmutable snapshotを再検証してからview化。異payload conflict、CAS成功は一つ、case/revision/history atomic |

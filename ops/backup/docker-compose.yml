@@ -10,7 +10,7 @@
 #     image/tool-image.sh build-record → save し、各ホストでは tool-image.sh load（tar の SHA-256 と
 #     content ID を照合）で読み込む。この compose は build しない（build: を書かない）。
 #   - 下記 x-ses-backup-tool-content-id に、記録した content ID（sha256:<16 進 64 桁>。image store に
-#     依存しない識別子。image ID は store により変わるため使わない）を設定する。占位値（UNPINNED）のまま、
+#     依存しない識別子。image ID は store により変わるため使わない）を設定する。仮置きの値（UNPINNED）のまま、
 #     またはローカルの ses-backup-tool:8.0.46 の content ID と一致しない場合、image/tool-image.sh check /
 #     compose が拒否する。job は必ず
 #       ops/backup/image/tool-image.sh compose run --rm <service>

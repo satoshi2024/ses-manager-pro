@@ -454,7 +454,7 @@
   - `AssetBoundaryAndLifecycleIntegrationTest.testProviderRecoveryAndIdempotency`: timeout/失敗時の `PENDING_CONFIRMATION` 永続化、分類不能応答時の `UNKNOWN` blocker、ポーリングジョブによる復旧後確認完了、二重確認時の冪等性アサート
 - **手動 Demo と証跡**: `AssetBoundaryAndLifecycleIntegrationTest` 実行ログ
 - **Rollback**: アダプタークラスの revert
-- **未検証事項**: 実SaaSとのOAuth通信（NF-05開工時に委譲）
+- **未検証事項**: 実SaaSとのOAuth通信（NF-05着手時に委譲）
 
 ### Task B2.3: MySQL 8 実コンテナ統合テスト & Shard Inventory 登録 (CR-06)
 - **Status**: [x] COMPLETED

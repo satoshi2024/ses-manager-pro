@@ -65,7 +65,7 @@ Sandbox証跡はsynthetic ID、日時、provider/API version、credential versio
 
 **合成fixtureで可能:** signer/parser/schema/property fail-closed、timeout/429/bad response、retry/DLQ/idempotency/CAS、wrong identity/scope、rotation state machine、revocation denial、budget boundary、audit redaction、flag/emergency-stop制御のpure/unit/mock/loopback検証。loopbackはliteral loopbackのみで、成功を実provider受入へ換算しない。
 
-**人工の環境/権限/実行が必要:** provider/製品/API version決定、sandboxアカウント/契約/egress許可、provider credentials発行・注入・rotate・revoke、実TLS/署名互換、実429/quota/billing、data region/retention/training/subprocessor/DPA評価、Security/Privacy/Legal/Production Owner承認、代表的本番topologyでのcanary。本番は別途明示承認されるまで禁止。人手担当者は操作前に実行scope・時間窓・synthetic-only data・費用上限を記録する。
+**人工の環境/権限/実行が必要:** provider/製品/API version決定、sandboxアカウント/契約/egress許可、provider credentials発行・注入・rotate・revoke、実TLS/署名互換、実429/quota/billing、data region/retention/training/subprocessor/DPA評価、Security/Privacy/Legal/Production Owner承認、代表的本番topologyでのcanary。本番は別途明示承認されるまで禁止。人手担当者は操作前に実行scope・実行時間枠・synthetic-only data・費用上限を記録する。
 
 ## 8. 未解決の人手決定
 

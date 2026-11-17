@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 文書台帳版の storage key を孤児清理から保護するプロバイダー（P2-03）。
+ * 文書台帳版の storage key を孤児清掃から保護するプロバイダー（P2-03）。
  */
 @Service
 @RequiredArgsConstructor

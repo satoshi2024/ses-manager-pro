@@ -223,7 +223,7 @@ class ImportCsvIngestionServiceTest {
         assertNoRawTempFiles();
     }
 
-    // ---------------------------------------------------------------- 正向
+    // ---------------------------------------------------------------- 正常系
 
     @Test
     void approvedSyntheticCustomerUploadStagesExactBytesAndReturnsRedactedUploadedDetail() throws Exception {

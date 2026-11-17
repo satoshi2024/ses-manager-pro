@@ -593,7 +593,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         };
     }
 
-    /** Dashboard KPIと同一のUtilizationCalcService口径で実績稼働/Benchを取得する。 */
+    /** Dashboard KPIと同一のUtilizationCalcService集計基準で実績稼働/Benchを取得する。 */
     private UtilizationCalcService.UtilizationSnapshot loadUtilizationActual(YearMonth target) {
         String tenantId = currentTenant();
         List<Engineer> engineers;

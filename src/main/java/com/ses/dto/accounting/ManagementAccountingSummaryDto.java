@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** 管理会計の予実サマリー。金額はMonthlyRevenueCalcServiceの共通口径で算出する。 */
+/** 管理会計の予実サマリー。金額はMonthlyRevenueCalcServiceの共通の集計基準で算出する。 */
 @Data
 @Builder
 @NoArgsConstructor

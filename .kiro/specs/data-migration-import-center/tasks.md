@@ -92,7 +92,7 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
 
 - sample sourceからcanonical row、candidate、error code、source row hashだけを表示し、DB差分が0であることを示す。
 
-### 実装候補の定向検証（Review待ち）
+### 実装候補の対象限定の検証（Review待ち）
 
 - 2026-10-01、`JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を設定して以下を実行した。main/test全source compile後、指定2クラスのみ実行。
   - `..\apache-maven-3.9.6\bin\mvn.cmd test -Dtest=SesCsvParserTest,ImportValidationServiceTest`
@@ -101,14 +101,14 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
   - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `2FC959CF7E94B2EBFA5726E824546CBFB0FDE79908C1B3933FC1FAFF266CA82D`
 - 検証対象は合成CSVのみ。parser/DTO/validator単体試験であり、DB差分、domain apply、HTTP/UI、実source適合、業務Demoは未検証である。F2のDemo完了やNF-06全体完了を意味しない。
 - 空行/全空多列行は`empty_skipped`へ計上し、header列数不一致扱いしない。quoted newlineは1 source recordとして保持し、末尾改行だけで空recordを生成しない。
-- Astra F2 CODE FAIL指摘の修正定向検証（2026-10-02）：JPY parserはASCII十進形式・最大64文字・整数有効18桁をBigDecimal化前に検証し、指数表記/巨大指数を拒否。Contract `startDate`の空/空白/`\N`を必須違反とし、ISO日付を許可。Proposalはpositionの`projectExternalKey`と解決済project identityを比較し、関係欠損/lookup不能はfail-closed。
-  - 同じ定向コマンド、`BUILD SUCCESS`、17 tests / 0 failures / 0 errors / 0 skipped。
+- Astra F2 CODE FAIL指摘の修正対象限定の検証（2026-10-02）：JPY parserはASCII十進形式・最大64文字・整数有効18桁をBigDecimal化前に検証し、指数表記/巨大指数を拒否。Contract `startDate`の空/空白/`\N`を必須違反とし、ISO日付を許可。Proposalはpositionの`projectExternalKey`と解決済project identityを比較し、関係欠損/lookup不能はfail-closed。
+  - 同じ対象限定のコマンド、`BUILD SUCCESS`、17 tests / 0 failures / 0 errors / 0 skipped。
   - `TEST-com.ses.importcenter.foundation.SesCsvParserTest.xml` SHA-256: `4A5BB47A2269350C6786D5BB5B573A6860054D085C831883CD90436E75F8715C`
   - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `EA4A06949B53B21F8A420D9A73CEB488D9FAAD5C43508A52C7232AF981689B6E`
 
 ### Astra foundation review
 
-- Astra はcommit `1e8aa651e6ec4901e1e498aca1a484a7b88fe4c8` のF2 foundation限定CODE PASSを2026-10-02に判定し、3件のfindingを閉じた。PASS対象は純parser/canonical/read-only validation foundationとその定向testである。
+- Astra はcommit `1e8aa651e6ec4901e1e498aca1a484a7b88fe4c8` のF2 foundation限定CODE PASSを2026-10-02に判定し、3件のfindingを閉じた。PASS対象は純parser/canonical/read-only validation foundationとその対象限定testである。
 - これはF2 Demo、DB resolver実装、write-mock/DB無変更の統合証跡、実source適合、A1以降、NF-06全体完了の承認ではない。
 - 追加回帰境界：JPY整数有効18/19桁、入力長64/65文字、`-0`/`-0.0`をsynthetic unit caseへ追加する。F1 registry実装前にsource-system immutable namespaceとparent target identity/version bindingをPlan/unique設計へ反映する。
 

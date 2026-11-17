@@ -51,7 +51,7 @@ public class I18nLocaleSwitchTest extends BaseIntegrationTest {
     void cookieZhCN_rendersChinese() throws Exception {
         mockMvc.perform(get("/login").cookie(new Cookie("SES_LOCALE", "zh-CN")))
                 .andExpect(status().isOk())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("登录")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\u767b\u5f55")));
     }
 
     @Test

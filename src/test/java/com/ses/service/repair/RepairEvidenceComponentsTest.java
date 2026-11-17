@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 境界A 修復証跡コンポーネント（コーデック・初回選定・重試発見・不変条件検証）の独立単体テスト。
+ * 境界A 修復証跡コンポーネント（コーデック・初回選定・再試行時の発見・不変条件検証）の独立単体テスト。
  * <p>
  * DB 接続を一切行わず、純粋メモリ内不変スナップショットを用いて全境界・エッジケースを実証する。
  * </p>
@@ -32,7 +32,7 @@ class RepairEvidenceComponentsTest {
     // =========================================================================
 
     @Test
-    @DisplayName("正常系: 代表載体証跡 (SES_NF09_COMPL) のエンコードおよび完全一致パース")
+    @DisplayName("正常系: 代表行の証跡 (SES_NF09_COMPL) のエンコードおよび完全一致パース")
     void testEncodeAndParseCarrier_valid() {
         String digest = codec.calculateQueueDigest(List.of(100L, 101L, 102L));
         CarrierEvidence original = new CarrierEvidence(
@@ -111,7 +111,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("容量境界: 500バイト超過時は截断せず直ちに IllegalStateException を送出すること")
+    @DisplayName("容量境界: 500バイト超過時は切り詰めず直ちに IllegalStateException を送出すること")
     void testCapacityBoundary_over500BytesThrows() {
         String digest = codec.calculateQueueDigest(List.of(100L));
         String hugeTenant = "t".repeat(350);
@@ -147,7 +147,7 @@ class RepairEvidenceComponentsTest {
     // =========================================================================
 
     @Test
-    @DisplayName("厳格構文: プロトコル標識行がJSON不正の場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("厳格構文: プロトコル識別行がJSON不正の場合は CorruptedEvidenceException を送出すること")
     void testParse_corruptedProtocolRecords_syntaxErrorThrows() {
         assertThatThrownBy(() -> codec.parseCarrier("SES_NF09_COMPL:{malformed_json}"))
             .isInstanceOf(CorruptedEvidenceException.class);
@@ -251,7 +251,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("厳格構文: 結案日時のUTC形式 (Z末尾) が不正な場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("厳格構文: 完了日時のUTC形式 (Z末尾) が不正な場合は CorruptedEvidenceException を送出すること")
     void testParse_invalidUtcTimestampThrows() {
         String digest = codec.calculateQueueDigest(List.of(100L));
         // Z なしローカル日時
@@ -270,11 +270,11 @@ class RepairEvidenceComponentsTest {
     }
 
     // =========================================================================
-    // 5. 初回実行時 確定載体選定 (Initial Carrier Selection)
+    // 5. 初回実行時 確定代表行の選定 (Initial Carrier Selection)
     // =========================================================================
 
     @Test
-    @DisplayName("初回選定: 親キューが PENDING の場合は親キューが最優先で載体に選定されること")
+    @DisplayName("初回選定: 親キューが PENDING の場合は親キューが最優先で代表行に選定されること")
     void testInitialCarrierSelection_parentPendingPriority() {
         ScopeRepairQueueSnapshot parent = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", 10089L, "PENDING", null, 0L);
         ScopeRepairQueueSnapshot child1 = new ScopeRepairQueueSnapshot(10L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
@@ -285,7 +285,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("初回選定: 親キューが不在 (NO_QUEUE) または既結案の場合は参加子キュー最小IDが選定されること")
+    @DisplayName("初回選定: 親キューが不在 (NO_QUEUE) または完了済みの場合は参加子キュー最小IDが選定されること")
     void testInitialCarrierSelection_parentNotPendingOrNoQueue_selectsMinParticipatingChild() {
         ScopeRepairQueueSnapshot child1 = new ScopeRepairQueueSnapshot(20L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
         ScopeRepairQueueSnapshot child2 = new ScopeRepairQueueSnapshot(10L, "DIGITAL_INVOICE_EVENT", 2002L, "PENDING", null, 0L);
@@ -301,7 +301,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("初回選定: 集約内に旧チケットのより小さいIDの既結案キューが存在しても参加PENDING群の最小が選ばれること")
+    @DisplayName("初回選定: 集約内に旧チケットのより小さいIDの完了済みキューが存在しても参加PENDING群の最小が選ばれること")
     void testInitialCarrierSelection_ignoresOldResolvedQueueWithSmallerId() {
         ScopeRepairQueueSnapshot child20 = new ScopeRepairQueueSnapshot(20L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
         ScopeRepairQueueSnapshot child30 = new ScopeRepairQueueSnapshot(30L, "DIGITAL_INVOICE_EVENT", 2002L, "PENDING", null, 0L);
@@ -493,14 +493,14 @@ class RepairEvidenceComponentsTest {
     // =========================================================================
 
     @Test
-    @DisplayName("走査順序: 載体不在時であっても孤立した破損部材レコードが存在すれば事前に CorruptedEvidenceException で拒絶されること")
+    @DisplayName("走査順序: 代表行が無いときであっても孤立した破損部材レコードが存在すれば事前に CorruptedEvidenceException で拒絶されること")
     void testPreScan_isolatedCorruptedMemberThrows() {
         ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
         ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
         RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
 
-        // 載体は存在しないが、部材キューに破損JSON（SES_NF09_MEMBER:{broken）が存在
+        // 代表行は存在しないが、部材キューに破損JSON（SES_NF09_MEMBER:{broken）が存在
         ScopeRepairQueueSnapshot corruptedMemberQueue = new ScopeRepairQueueSnapshot(
             101L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", "SES_NF09_MEMBER:{broken_json}", 1L
         );
@@ -517,7 +517,7 @@ class RepairEvidenceComponentsTest {
         RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
 
-        // PENDING なのに破損プロトコル標識行を保持
+        // PENDING なのに破損プロトコル識別行を保持
         ScopeRepairQueueSnapshot pendingCorrupted = new ScopeRepairQueueSnapshot(
             100L, "DIGITAL_INVOICE", 10089L, "PENDING", "SES_NF09_COMPL:{broken_json}", 0L
         );
@@ -545,11 +545,11 @@ class RepairEvidenceComponentsTest {
     }
 
     // =========================================================================
-    // 8. 重試発見・再構成・全不変条件検証 (Retry Invariants & Reconstitution)
+    // 8. 再試行時の発見・再構成・全不変条件検証 (Retry Invariants & Reconstitution)
     // =========================================================================
 
     @Test
-    @DisplayName("重試正常系: P-1 (更新なし +0) の重試発見・集合再構成・全不変条件合致で成功判定")
+    @DisplayName("再試行の正常系: P-1 (更新なし +0) の再試行時の発見・集合再構成・全不変条件合致で成功判定")
     void testRetryDiscovery_p1Success() {
         long invId = 10089L;
         String ticket = "APPR-20261026-INV-0089";
@@ -583,7 +583,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試正常系: P-2 (親CAS更新 +1) の重試発見・集合再構成・全不変条件合致で成功判定")
+    @DisplayName("再試行の正常系: P-2 (親CAS更新 +1) の再試行時の発見・集合再構成・全不変条件合致で成功判定")
     void testRetryDiscovery_p2Success() {
         long invId = 10089L;
         String ticket = "APPR-20261026-INV-0089";
@@ -620,7 +620,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試正常系: 本チケットの載体不在時は alreadyResolved=false を返却して通常実行経路へ進むこと")
+    @DisplayName("再試行の正常系: 本チケットの代表行が無いときは alreadyResolved=false を返却して通常実行経路へ進むこと")
     void testRetryDiscovery_carrierNotFound() {
         ScopeRepairQueueSnapshot q1 = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", 10089L, "PENDING", null, 0L);
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
@@ -635,7 +635,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: 同一集約内に同一チケットの載体が複数存在する場合は IllegalStateException を送出すること")
+    @DisplayName("再試行の異常系: 同一集約内に同一チケットの代表行が複数存在する場合は IllegalStateException を送出すること")
     void testRetryDiscovery_duplicateCarriersRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -654,11 +654,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier1, qCarrier2), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(IllegalStateException.class)
-          .hasMessageContaining("同一決裁チケットの完了証跡載体が複数検知されました");
+          .hasMessageContaining("同一決裁チケットの完了証跡の代表行が複数検知されました");
     }
 
     @Test
-    @DisplayName("重試異常系: 部材キューが異なる載体IDを指定している場合は LinkageConflictException を送出すること")
+    @DisplayName("再試行の異常系: 部材キューが異なる代表行IDを指定している場合は LinkageConflictException を送出すること")
     void testRetryDiscovery_memberLinkageConflictRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -678,11 +678,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier, qMember), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(LinkageConflictException.class)
-          .hasMessageContaining("異なる載体IDを指定しています");
+          .hasMessageContaining("異なる代表行IDを指定しています");
     }
 
     @Test
-    @DisplayName("重試異常系: 部材欠落 (qc 不一致) の場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("再試行の異常系: 部材欠落 (qc 不一致) の場合は CorruptedEvidenceException を送出すること")
     void testRetryDiscovery_memberCountMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -702,11 +702,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier, qMember), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(CorruptedEvidenceException.class)
-          .hasMessageContaining("件数が載体の記録と不一致");
+          .hasMessageContaining("件数が代表行の記録と不一致");
     }
 
     @Test
-    @DisplayName("重試異常系: 暗号学的ハッシュ不一致 (qh 不一致) の場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("再試行の異常系: 暗号学的ハッシュ不一致 (qh 不一致) の場合は CorruptedEvidenceException を送出すること")
     void testRetryDiscovery_hashMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -722,11 +722,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier), parentInvoice, List.of(), targetScope, approvalEvidence
         )).isInstanceOf(CorruptedEvidenceException.class)
-          .hasMessageContaining("ハッシュ値が載体の記録と不一致");
+          .hasMessageContaining("ハッシュ値が代表行の記録と不一致");
     }
 
     @Test
-    @DisplayName("重試異常系: 載体テナント不一致の場合は SecurityException を送出すること")
+    @DisplayName("再試行の異常系: 代表行のテナント不一致の場合は SecurityException を送出すること")
     void testRetryDiscovery_tenantMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -746,7 +746,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: 載体法人不一致の場合は SecurityException を送出すること")
+    @DisplayName("再試行の異常系: 代表行の法人不一致の場合は SecurityException を送出すること")
     void testRetryDiscovery_legalEntityMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -766,7 +766,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: 載体修復前版 (vBf) 承認版不一致の場合は OptimisticLockingFailureException を送出すること")
+    @DisplayName("再試行の異常系: 代表行の修復前版 (vBf) 承認版不一致の場合は OptimisticLockingFailureException を送出すること")
     void testRetryDiscovery_vBfMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -786,7 +786,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: P1 で vAf != vBf の場合は IllegalStateException を送出すること")
+    @DisplayName("再試行の異常系: P1 で vAf != vBf の場合は IllegalStateException を送出すること")
     void testRetryDiscovery_p1VersionInconsistencyRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -802,11 +802,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier), parentInvoice, List.of(), targetScope, approvalEvidence
         )).isInstanceOf(IllegalStateException.class)
-          .hasMessageContaining("P1 載体の修復後バージョンが修復前バージョンと一致しません");
+          .hasMessageContaining("P1 代表行の修復後バージョンが修復前バージョンと一致しません");
     }
 
     @Test
-    @DisplayName("重試異常系: P2 で vAf != vBf + 1 の場合は IllegalStateException を送出すること")
+    @DisplayName("再試行の異常系: P2 で vAf != vBf + 1 の場合は IllegalStateException を送出すること")
     void testRetryDiscovery_p2VersionInconsistencyRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -822,11 +822,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier), parentInvoice, List.of(), targetScope, approvalEvidence
         )).isInstanceOf(IllegalStateException.class)
-          .hasMessageContaining("P2 載体の修復後バージョンが修復前バージョン+1と一致しません");
+          .hasMessageContaining("P2 代表行の修復後バージョンが修復前バージョン+1と一致しません");
     }
 
     @Test
-    @DisplayName("重試異常系: 未知修復分類 pCls は CorruptedEvidenceException を送出すること")
+    @DisplayName("再試行の異常系: 未知修復分類 pCls は CorruptedEvidenceException を送出すること")
     void testRetryDiscovery_unknownPClsRejection() {
         String digest = codec.calculateQueueDigest(List.of(100L));
         String unknownPClsJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P9\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
@@ -838,7 +838,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: 親インボイスDB実バージョン不一致 (vAf 不一致) は OptimisticLockingFailureException を送出すること")
+    @DisplayName("再試行の異常系: 親インボイスDB実バージョン不一致 (vAf 不一致) は OptimisticLockingFailureException を送出すること")
     void testRetryDiscovery_parentDbVersionMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -854,11 +854,11 @@ class RepairEvidenceComponentsTest {
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
             List.of(qCarrier), parentInvoice, List.of(), targetScope, approvalEvidence
         )).isInstanceOf(OptimisticLockingFailureException.class)
-          .hasMessageContaining("親インボイスの現在バージョンが載体修復後バージョンと一致しません");
+          .hasMessageContaining("親インボイスの現在バージョンが代表行の修復後バージョンと一致しません");
     }
 
     @Test
-    @DisplayName("重試異常系: 親インボイスDB現在スコープ不一致は SecurityException を送出すること")
+    @DisplayName("再試行の異常系: 親インボイスDB現在スコープ不一致は SecurityException を送出すること")
     void testRetryDiscovery_parentDbScopeMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -878,7 +878,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("重試異常系: 子イベントDB現在スコープ不一致は SecurityException を送出すること")
+    @DisplayName("再試行の異常系: 子イベントDB現在スコープ不一致は SecurityException を送出すること")
     void testRetryDiscovery_childDbScopeMismatchRejection() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -899,7 +899,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("旧自由文混存: 旧キューに [IDEMPOTENT_CLOSE] 等が存在しても新プロトコル標識のみで正しく再構成成功すること")
+    @DisplayName("旧自由文混存: 旧キューに [IDEMPOTENT_CLOSE] 等が存在しても新プロトコル識別子のみで正しく再構成成功すること")
     void testRetryDiscovery_coexistenceWithHistoricalOrdinaryNotes() {
         long invId = 10089L;
         String ticket = "APPR-001";
@@ -935,7 +935,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("旧小ID共存: 過去チケットの旧載体 (小ID) が共存していても新チケットの載体を精確一致で特定できること")
+    @DisplayName("旧小ID共存: 過去チケットの旧代表行 (小ID) が共存していても新チケットの代表行を厳密一致で特定できること")
     void testRetryDiscovery_coexistenceWithOldSmallerIdQueue() {
         long invId = 10089L;
         String ticketOld = "APPR-OLD-001";
@@ -945,12 +945,12 @@ class RepairEvidenceComponentsTest {
         ChildInvoiceEventSnapshot child2000 = new ChildInvoiceEventSnapshot(2000L, invId, "tenant-1", 100L);
         ChildInvoiceEventSnapshot child2001 = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
 
-        // 旧チケットの載体 id=5
+        // 旧チケットの代表行 id=5
         String digestOld = codec.calculateQueueDigest(List.of(5L));
         CarrierEvidence carrierOld = new CarrierEvidence(1, ticketOld, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, digestOld, 1L, "2026-10-01T10:00:00Z");
         ScopeRepairQueueSnapshot qOldCarrier = new ScopeRepairQueueSnapshot(5L, "DIGITAL_INVOICE_EVENT", 2000L, "RESOLVED", codec.encodeCarrier(carrierOld), 1L);
 
-        // 新チケットの載体 id=20、部材 id=30
+        // 新チケットの代表行 id=20、部材 id=30
         String digestNew = codec.calculateQueueDigest(List.of(20L, 30L));
         CarrierEvidence carrierNew = new CarrierEvidence(1, ticketNew, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 2, digestNew, 1L, "2026-10-28T16:30:00Z");
         MemberEvidence memberNew = new MemberEvidence(1, 20L, ticketNew, round);

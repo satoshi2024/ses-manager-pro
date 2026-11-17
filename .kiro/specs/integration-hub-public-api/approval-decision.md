@@ -25,7 +25,7 @@
 この承認で直ちに実装できるのは、Task 0/0R/0R-Dの正本化とTask F1のclient、credential、scope、
 idempotency、usage bucket、webhook-inbound-outbound persistence contractのDDL、entity、mapper、
 service基盤、H2/MySQL migration、test、purge、rollback証跡、およびF1に必要な最小config/crypto abstraction
-である。ただし同じ開工対話で独立Plan ReviewのPLAN PASSを先に受領する。
+である。ただし同じ着手対話で独立Plan ReviewのPLAN PASSを先に受領する。
 
 F1 Decision時点ではpublic endpointの公開、外部送信、A1、A2、B1、B2、production enablementを開始しない。
 後続のscope expansion DecisionでF2/A1/B1/B2/Mの開発だけを追加承認したが、production enablement、

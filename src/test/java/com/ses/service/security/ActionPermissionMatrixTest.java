@@ -266,7 +266,7 @@ class ActionPermissionMatrixTest {
         Integer nonAdminWildcardCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id IN (2, 3, 4, 5) AND action_key = '*' AND deny_flag = 0",
                 Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(0, nonAdminWildcardCount, "非管理者groupに全局*許可が存在する");
+        org.junit.jupiter.api.Assertions.assertEquals(0, nonAdminWildcardCount, "非管理者groupにグローバルな*許可が存在する");
 
         // role-admin (group 1) に baseline ('*') が1件存在すること
         Integer adminBaselineCount = jdbcTemplate.queryForObject(

@@ -27,7 +27,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T050定向テスト: 期間/CAS、退職者除外、活動関連付け、宛先母集団を確認する。 */
+/** T050対象限定テスト: 期間/CAS、退職者除外、活動関連付け、宛先母集団を確認する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

@@ -6,7 +6,7 @@
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`<br>
 本フェーズ基準（Base）: `93b40985e45e29c1531cec93ea41648cb7c8ad38`<br>
 直前基準（Previous Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`<br>
-固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`（42件定向 / 4,292件 Fast 合格の歴史的証拠）<br>
+固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`（対象限定42件 / 4,292件 Fast 合格の歴史的証拠）<br>
 担当: AI-5（接線・意思決定契約および純粋カーネル抽出設計担当）
 
 ---
@@ -14,7 +14,7 @@
 ## 1. 目的と抽出範囲・責務境界（Extraction Scope & Responsibility Boundary）
 
 ### 1.1 目的
-既存の `ApprovalEnvelopeVerifier`（`com.ses.privacy.foundation`）は、暗号学的なエンベロープ署名検証・属性照合・職務分離（SoD）・時間窓検査などの「純粋計算ロジック」と、`SyntheticEnvironmentGuard` による本番プロファイル（`prod`）の遮断、システム時計（`Clock`）、Trust Anchor マッピング、失効プロバイダー呼び出しなどの「環境・インフラ依存」が単一クラス内に結合している。
+既存の `ApprovalEnvelopeVerifier`（`com.ses.privacy.foundation`）は、暗号学的なエンベロープ署名検証・属性照合・職務分離（SoD）・有効期間の検査などの「純粋計算ロジック」と、`SyntheticEnvironmentGuard` による本番プロファイル（`prod`）の遮断、システム時計（`Clock`）、Trust Anchor マッピング、失効プロバイダー呼び出しなどの「環境・インフラ依存」が単一クラス内に結合している。
 
 本設計は、本番環境への安全な段階的移行（NF07 接線）を見据え、既存の合成環境隔離ガードを一切弱化させることなく、副作用および環境依存を完全に排除した決定論的な純粋検証ロジックを分段階ヘルパー群（Staged Helpers）として **`PurePolicyVerificationKernel`** へ抽出し、既存の `ApprovalEnvelopeVerifier` を委任・オーケストレーション構造へ安全にリファクタリングするための最小・具体的な実施計画を定める。
 
@@ -33,7 +33,7 @@ flowchart TD
         subgraph PolicyStage["Step 1: Policy エンベロープの全段検証（Policy 先行完備）"]
             P1["1.1 スキーマ検証 (Kernel)"] --> P2["1.2 Anchor 検索・ID一致 (Wrapper)"]
             P2 --> P3["1.3 Scope 照合 (Kernel)"]
-            P3 --> P4["1.4 時間窓検査 (Kernel)"]
+            P3 --> P4["1.4 有効期間の検査 (Kernel)"]
             P4 --> P5["1.5 失効照合: 鍵→Envelope順 (Wrapper)"]
             P5 --> P6["1.6 失効判定: ACTIVE白リスト (Kernel)"]
             P6 --> P7["1.7 Ed25519 数学署名検証 (Kernel)"]
@@ -44,7 +44,7 @@ flowchart TD
         subgraph CaseStage["Step 2: Case エンベロープの全段検証（Policy 成功後のみ開始）"]
             C1["2.1 スキーマ検証 (Kernel)"] --> C2["2.2 Anchor 検索・ID一致 (Wrapper)"]
             C2 --> C3["2.3 Scope 照合 (Kernel)"]
-            C3 --> C4["2.4 時間窓検査 (Kernel)"]
+            C3 --> C4["2.4 有効期間の検査 (Kernel)"]
             C4 --> C5["2.5 失効照合: 鍵→Envelope順 (Wrapper)"]
             C5 --> C6["2.6 失効判定: ACTIVE白リスト (Kernel)"]
             C6 --> C7["2.7 Ed25519 数学署名検証 (Kernel)"]
@@ -73,7 +73,7 @@ flowchart TD
 #### ① 分段階の実行順序と先行バッチ照会の禁止
 1. **厳格な評価順序の維持**:
    各エンベロープの検証は、必ず以下の順序で実行され、先行ステップが失敗した場合は後続ステップを実行せず直ちに中断（Fail-Fast）する：
-   `スキーマ検証` → `Anchor 検索および ID 一致検査` → `Scope 照合` → `時間窓検査` → `失効照合および判定` → `Ed25519 署名検証`。
+   `スキーマ検証` → `Anchor 検索および ID 一致検査` → `Scope 照合` → `有効期間の検査` → `失効照合および判定` → `Ed25519 署名検証`。
 2. **Policy 先行完備と Case 失効照会の遅延**:
    `verify(...)` において、**Policy エンベロープの全段検証が完全に合格した後にのみ、Case エンベロープの検証を開始する**。
    Policy と Case の失効状態を事前に一括取得（バッチ取得）することは厳格に禁止する。Policy がスキーマ、スコープ、時間、署名等で失敗した場合、Case の失効プロバイダー（`revocations.statusOf`）は **1 度も呼び出されてはならない（呼び出し回数 0 回）**。
@@ -88,18 +88,18 @@ flowchart TD
 | 入口メソッド | 時刻決定メカニズム | SoD 違反時の例外契約 | 属性ドリフト時の例外契約 | 戻り値の責務 |
 |---|---|---|---|---|
 | **`verify(...)`**<br>（公開 API、状態機械向け） | ラッパー内部で `clock.instant()` を呼び出して `now` を確定 | Policy または Case のいずれかで `requesterId.equals(approverId)` の場合、既存の普通 **`SecurityException`**（文言: `"職務分離条件に違反しています"`）を送出 | 既存の普通 **`SecurityException`**（文言: `"tenantが一致しません"`、`"actionが一致しません"` 等）を送出 | **`VerifiedApproval`**（ラッパー末端で生成。状態機械遷移の入力証明） |
-| **`verifyPolicyOnly(...)`**<br>（パッケージ private、只読照会向け） | 引数として渡された **`Instant now` をそのまま使用**（ラッパーの `clock` は呼び出さない） | Policy の `requesterId.equals(approverId)` の場合、型付けされた **`PolicySecurityException`**（理由: `SOD_VIOLATION`、文言: `"職務分離違反: 申請者と承認者は異なる必要があります"`）を送出 | 型付けされた **`PolicySecurityException`**（理由: `TENANT_MISMATCH`, `SCOPE_MISMATCH`, `ACTION_MISMATCH` 等）を送出 | **`VerifiedPolicyMetadata`**（説明専用 DTO。実行認可能力ゼロ） |
+| **`verifyPolicyOnly(...)`**<br>（パッケージ private、読取り専用照会向け） | 引数として渡された **`Instant now` をそのまま使用**（ラッパーの `clock` は呼び出さない） | Policy の `requesterId.equals(approverId)` の場合、型付けされた **`PolicySecurityException`**（理由: `SOD_VIOLATION`、文言: `"職務分離違反: 申請者と承認者は異なる必要があります"`）を送出 | 型付けされた **`PolicySecurityException`**（理由: `TENANT_MISMATCH`, `SCOPE_MISMATCH`, `ACTION_MISMATCH` 等）を送出 | **`VerifiedPolicyMetadata`**（説明専用 DTO。実行認可能力ゼロ） |
 
 ### 1.4 承認証明（`VerifiedApproval`）の生成境界と権限モデルの明確化
 
 1. **`VerifiedApproval` は純粋カーネルから返却・構築しない**:
    - `PurePolicyVerificationKernel` は、暗号数学・属性一致・不変条件を計算する純粋関数群であり、状態機械が消費する `VerifiedApproval` を返却または構築してはならない。
-   - 純粋カーネルのヘルパーメソッドは `void`（不合格時は例外送出）または状態機械に直接消費されない純計算結果（`Instant effectiveExpiry`、あるいは只読説明用 DTO `VerifiedPolicyMetadata`）のみを返却する。
+   - 純粋カーネルのヘルパーメソッドは `void`（不合格時は例外送出）または状態機械に直接消費されない純計算結果（`Instant effectiveExpiry`、あるいは読取り専用説明用 DTO `VerifiedPolicyMetadata`）のみを返却する。
 2. **`VerifiedApproval` はラッパーの末端でのみ構築する**:
    - `VerifiedApproval` は、環境防護（`SyntheticEnvironmentGuard`）、Trust Anchor 解決、失効プロバイダー連携、およびすべての純粋検証（Policy、Case、バインディング、SoD）がすべて合格したことを保証できる合成ラッパー（`ApprovalEnvelopeVerifier`）の末端においてのみ構築される。
 3. **承認証明の権限モデルの定義**:
    - `VerifiedApproval` は、ケース状態機械（`PrivacyCaseStateMachine.transition(...)`）が `APPROVAL_PENDING` から `APPROVED` への内部状態遷移を検証するために使用する「承認証明（Approval Proof）」である。
-   - これは、システム外部へのディスパッチや物理的データ削除を無条件に許可する「完全な外発認可（Dispatch Authorization）」ではなく、また単なる只読メタデータを表す「説明専用 DTO」でもない。
+   - これは、システム外部へのディスパッチや物理的データ削除を無条件に許可する「完全な外発認可（Dispatch Authorization）」ではなく、また単なる読取り専用メタデータを表す「説明専用 DTO」でもない。
 4. **可視性（`package-private`）の限界と真の境界防護**:
    - `PurePolicyVerificationKernel` の可視性を `package-private`（デフォルト）とすることは、`com.ses.privacy.foundation` パッケージ外部からの直接利用や依存の混入を防ぐための境界設定である。
    - `package-private` は同パッケージ内の他クラスからの直接呼び出しをコンパイラレベルで遮断するものではない。同パッケージ内におけるバイパス防止は、アーキテクチャ規約、コードレビュー、およびオーケストレーション契約によって厳格に統制する。
@@ -141,7 +141,7 @@ final class PurePolicyVerificationKernel {
         }
     }
 
-    // --- 第 2 段階: Anchor ID 比対 ---
+    // --- 第 2 段階: Anchor ID 照合 ---
     static void verifyAnchorIdentity(ApprovalEnvelopeMetadata metadata, TrustedAuthority anchor) throws PolicySecurityException {
         if (!anchor.authorityId().equals(metadata.authorityId()) || !anchor.keyId().equals(metadata.keyId())) {
             throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "authorityまたはkeyが一致しません");
@@ -160,7 +160,7 @@ final class PurePolicyVerificationKernel {
         }
     }
 
-    // --- 第 4 段階: 時間窓検査（半開区間） ---
+    // --- 第 4 段階: 有効期間の検査（半開区間） ---
     static void verifyTimeWindow(Instant now, TrustedAuthority anchor, ApprovalEnvelopeMetadata metadata) throws PolicySecurityException {
         if (now.isBefore(anchor.validFrom()) || !now.isBefore(anchor.validUntil())) {
             throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_VALIDITY_EXPIRED, "authorityが現在有効ではありません");
@@ -311,7 +311,7 @@ final class PurePolicyVerificationKernel {
         // Step 3: Scope 照合 (Kernel)
         PurePolicyVerificationKernel.verifyAuthorityScope(envelopeKind, dataElementId, metadata, action, provider, anchor);
 
-        // Step 4: 時間窓検査 (Kernel)
+        // Step 4: 有効期間の検査 (Kernel)
         PurePolicyVerificationKernel.verifyTimeWindow(now, anchor, metadata);
 
         // Step 5: 失効プロバイダー照会 (Wrapper: 鍵→Envelope順、例外ハンドリング)
@@ -416,7 +416,7 @@ Policy-only 経路および Policy+Case 経路の双方について、現行実�
 
 ---
 
-## 4. 等価性・負向テストマトリクス（Equivalence & Negative Test Matrix）
+## 4. 等価性・異常系テストマトリクス（Equivalence & Negative Test Matrix）
 
 ### 4.1 既存実在テストクラスとの対応
 本カーネル抽出後も、既存のテストクラスが 1 行のテストコード変更もなく完全合格（100% 回帰パス）することを検証条件とする。
@@ -424,29 +424,29 @@ Policy-only 経路および Policy+Case 経路の双方について、現行実�
 | 既存実在テストクラス | 既存テストメソッド | 検証する等価性・防護要件 | 実行環境・分類 |
 |---|---|---|---|
 | `ApprovalEnvelopeVerifierTest` | `acceptsSeparatelySignedSyntheticPolicyAndCase` | 正常系: 分離署名された Policy/Case の正常承認証明生成 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `rejectsUnknownSchemaVersionEvenWhenCorrectlySigned` | 負向系: 未知スキーマバージョン（"99"）の即時拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `rejectsUnknownSchemaVersionEvenWhenCorrectlySigned` | 異常系: 未知スキーマバージョン（"99"）の即時拒絶 | Fast (H2/Unit) |
 | `ApprovalEnvelopeVerifierTest` | `verifiedProofExpiresAtTrustedAuthorityExpiryEvenWhenEnvelopesRemainValid` | 境界系: 最短有効期限（Authority 有効期限）の反映 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `signatureCoversPolicyAndCaseClaimsAndCanonicalEncodingIsLengthDelimited` | 負向系: 改竄ペイロード・別アクション/プロバイダーの署名拒絶 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `rejectsUnknownOrOutOfScopeTrustAnchorsAndRevocationUnknown` | 負向系: 未知アンカー、スコープ外アンカー、失効状態 UNKNOWN/REVOKED の拒絶 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `rejectsTenantActionProviderTargetAndPolicyBindingDrift` | 負向系: テナント・アクション・プロバイダー・ターゲットのドリフト拒絶 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `rejectsExpiredFutureEffectiveFutureIdentityAndSeparationOfDutiesViolations` | 負向系: 期限切れ・未来発効・未来本人確認・職務分離（SoD）違反の拒絶 | Fast (H2/Unit) |
-| `ApprovalEnvelopeVerifierTest` | `runtimeProfilesAndAudienceAreTakenFromTrustedEnvironment` | **最重要環境負向系**: active/default `prod` プロファイル時の即時拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `signatureCoversPolicyAndCaseClaimsAndCanonicalEncodingIsLengthDelimited` | 異常系: 改竄ペイロード・別アクション/プロバイダーの署名拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `rejectsUnknownOrOutOfScopeTrustAnchorsAndRevocationUnknown` | 異常系: 未知アンカー、スコープ外アンカー、失効状態 UNKNOWN/REVOKED の拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `rejectsTenantActionProviderTargetAndPolicyBindingDrift` | 異常系: テナント・アクション・プロバイダー・ターゲットのドリフト拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `rejectsExpiredFutureEffectiveFutureIdentityAndSeparationOfDutiesViolations` | 異常系: 期限切れ・未来発効・未来本人確認・職務分離（SoD）違反の拒絶 | Fast (H2/Unit) |
+| `ApprovalEnvelopeVerifierTest` | `runtimeProfilesAndAudienceAreTakenFromTrustedEnvironment` | **最重要の環境異常系**: active/default `prod` プロファイル時の即時拒絶 | Fast (H2/Unit) |
 | `ApprovalEnvelopeVerifierTest` | `signatureAndEnvelopeBytesAreDefensiveCopies` | 防御的コピー: 署名配列改変に対する不変性検証 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testEnvironment_ProdProfile_ThrowsSecurityException` | **最重要環境負向系**: `prod` プロファイル混入時の即時 fail-closed 中断 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_NotYetIssued_ReturnsPolicyExpired` | 時間窓負向系: 発行日時が未来のエンベロープ拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_NotYetEffective_ReturnsPolicyExpired` | 時間窓負向系: 発効前エンベロープ拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_ExpiredAtDeadline_ReturnsPolicyExpired` | 時間窓負向系: 期限切れエンベロープ拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_AuthorityExpired_ReturnsPolicyExpired` | 時間窓負向系: Authority 期限切れ拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_AuthorityScopeMismatch_ReturnsPolicyDrift` | スコープ負向系: Authority スコープ不一致拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_KeyRevoked_ReturnsPolicyRevoked` | 失効負向系: 鍵失効時の即時拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_EnvelopeRevoked_ReturnsPolicyRevoked` | 失効負向系: エンベロープ失効時の即時拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationStatusUnknown_ReturnsPolicyUnknown` | 失効負向系: 失効状態 UNKNOWN の拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationKeyNull_ReturnsPolicyUnknown` | 失効負向系: 鍵失効状態 null の拒絶（既存 UNKNOWN ルール） | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationEnvelopeNull_ReturnsPolicyUnknown` | 失効負向系: エンベロープ失効状態 null の拒絶（既存 UNKNOWN ルール） | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationProviderError_ReturnsPolicyUnknown` | 外部障害負向系: 失効プロバイダー例外時の安全拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_TamperedSignature_ReturnsPolicyDrift` | 暗号負向系: 改竄署名の拒絶 | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_SodViolation_ReturnsPolicyDrift` | SoD 負向系: 申請者=承認者違反の拒絶（PolicySecurityException） | Fast (H2/Unit) |
-| `PolicyReadonlyQueryServiceTest` | `testPolicy_MismatchedBinding_ReturnsPolicyDrift` | バインディング負向系: パラメータ不一致拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testEnvironment_ProdProfile_ThrowsSecurityException` | **最重要の環境異常系**: `prod` プロファイル混入時の即時 fail-closed 中断 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_NotYetIssued_ReturnsPolicyExpired` | 有効期間の異常系: 発行日時が未来のエンベロープ拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_NotYetEffective_ReturnsPolicyExpired` | 有効期間の異常系: 発効前エンベロープ拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_ExpiredAtDeadline_ReturnsPolicyExpired` | 有効期間の異常系: 期限切れエンベロープ拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_AuthorityExpired_ReturnsPolicyExpired` | 有効期間の異常系: Authority 期限切れ拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_AuthorityScopeMismatch_ReturnsPolicyDrift` | スコープ異常系: Authority スコープ不一致拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_KeyRevoked_ReturnsPolicyRevoked` | 失効異常系: 鍵失効時の即時拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_EnvelopeRevoked_ReturnsPolicyRevoked` | 失効異常系: エンベロープ失効時の即時拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationStatusUnknown_ReturnsPolicyUnknown` | 失効異常系: 失効状態 UNKNOWN の拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationKeyNull_ReturnsPolicyUnknown` | 失効異常系: 鍵失効状態 null の拒絶（既存 UNKNOWN ルール） | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationEnvelopeNull_ReturnsPolicyUnknown` | 失効異常系: エンベロープ失効状態 null の拒絶（既存 UNKNOWN ルール） | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_RevocationProviderError_ReturnsPolicyUnknown` | 外部障害異常系: 失効プロバイダー例外時の安全拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_TamperedSignature_ReturnsPolicyDrift` | 暗号異常系: 改竄署名の拒絶 | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_SodViolation_ReturnsPolicyDrift` | SoD 異常系: 申請者=承認者違反の拒絶（PolicySecurityException） | Fast (H2/Unit) |
+| `PolicyReadonlyQueryServiceTest` | `testPolicy_MismatchedBinding_ReturnsPolicyDrift` | バインディング異常系: パラメータ不一致拒絶 | Fast (H2/Unit) |
 | `PolicyReadonlyQueryServiceTest` | `testValidSyntheticPolicy_ReturnsApprovedActiveWithoutExecutionCapability` | 正常系・安全検証: 照会成功かつ実行認可なしの確認 | Fast (H2/Unit) |
 
 ### 4.2 擬似新規受け入れテスト計画（Planned New Acceptance Tests）
@@ -456,7 +456,7 @@ Policy-only 経路および Policy+Case 経路の双方について、現行実�
 | 検査シナリオ | 期待される動作・短絡評価契約 | 検証対象クラス |
 |---|---|---|
 | **未知スキーマかつ未知アンカー** | スキーマ検査が第1段階で実行されるため、アンカー解決を行わずに `UNSUPPORTED_SCHEMA_VERSION` で即時拒絶（`UNKNOWN_TRUST_ANCHOR` は送出されない） | `ApprovalEnvelopeVerifierTest`<br>`PurePolicyVerificationKernelTest` |
-| **期限切れかつ失効プロバイダー例外** | 時間窓検査（第4段階）が失効プロバイダー呼び出し（第5段階）より先に行われるため、`EXPIRED_AT_OR_AFTER_DEADLINE` で拒絶され、失効プロバイダーの呼び出し回数は **厳格に 0 回** | `ApprovalEnvelopeVerifierTest` |
+| **期限切れかつ失効プロバイダー例外** | 有効期間の検査（第4段階）が失効プロバイダー呼び出し（第5段階）より先に行われるため、`EXPIRED_AT_OR_AFTER_DEADLINE` で拒絶され、失効プロバイダーの呼び出し回数は **厳格に 0 回** | `ApprovalEnvelopeVerifierTest` |
 | **Policy 失敗時における Case 失効照会の不実行** | Policy が改竄・期限切れ等で失敗した場合、Case エンベロープの検証には到達せず、Case の失効プロバイダー呼び出し回数は **厳格に 0 回** | `ApprovalEnvelopeVerifierTest` |
 | **失効プロバイダー呼び出し順序・回数と短絡** | 1. 署名鍵（`authorityId:keyId`）照会が先、エンベロープ（`revocationReference`）照会が後。<br>2. 鍵照会で例外発生時は即座に `REVOCATION_PROVIDER_ERROR` で短絡し、エンベロープ照会は行われない（呼び出し回数 1 回）。<br>3. 双方正常時は呼び出し回数 2 回。 | `ApprovalEnvelopeVerifierTest` |
 | **引数 now と wrapper clock の乖離** | `verifyPolicyOnly` において引数 `now` が `clock.instant()` と異なる場合、引数 `now` のみが時間評価に採用され、`clock.instant()` は一切呼び出されない | `ApprovalEnvelopeVerifierTest` |
@@ -464,7 +464,7 @@ Policy-only 経路および Policy+Case 経路の双方について、現行実�
 | **null 失効ステータスの挙動** | 鍵またはエンベロープの失効ステータスが `null` の場合、既存ルール通り `REVOCATION_STATUS_UNKNOWN`（文言: `"keyまたはenvelopeの失効状態がACTIVEではありません"`）が送出される（NPE 発生や新規セマンティクス導入のないことを確認） | `ApprovalEnvelopeVerifierTest`<br>`PurePolicyVerificationKernelTest` |
 
 ### 4.3 テスト実行実績に関する注記（TEST NOT RUN）
-* 直前固定コミット `c8b78dc3` において記録された「42件定向テスト合格」「4,292件 Fast 回帰テスト合格」は、当時のスキャン実績であり歴史的証拠である。
+* 直前固定コミット `c8b78dc3` において記録された「42件対象限定テスト合格」「4,292件 Fast 回帰テスト合格」は、当時のスキャン実績であり歴史的証拠である。
 * **本フェーズ基準（`197386f866c834c7232590ec2f16fd13b8ac17d6`）においては、設計文書の策定のみを行っており、新規のテスト実行（Maven、Docker、MySQL等）は一切行っていない（TEST NOT RUN）。**
 
 ---
@@ -496,7 +496,7 @@ flowchart TD
    - 内容: `PurePolicyVerificationKernel.java` 実装、`ApprovalEnvelopeVerifier.java` の委任化、`PurePolicyVerificationKernelTest.java` 追加、および新規受け入れテストの追加。
    - 制約: Fast 単体テストのみ実行。`SyntheticEnvironmentGuard` は 100% 維持。
 3. **Batch 3: SF-RO-QUERY 独立 CODE Review の完了**
-   - 内容: `PolicyReadonlyQueryService` および只読スライスに対する Astra / 総括の独立コードレビュー完了。
+   - 内容: `PolicyReadonlyQueryService` および読取り専用スライスに対する Astra / 総括の独立コードレビュー完了。
    - 状態: 現在の **REVIEW PENDING** 状態を正式にクローズ。
 4. **Batch 4: 本番用ラッパーおよび認証コンテキスト接線の実装**
    - 内容: `ProdPolicyVerificationWrapper` の独立新設、`OidcLoginUser` の内部バインディング優先テナント解決、`ExternalApiPrincipal` マッピング。

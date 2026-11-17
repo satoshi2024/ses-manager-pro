@@ -49,7 +49,7 @@ public class PrivacyJournalProperties {
     @Setter
     public static class Datasource {
 
-        /** {@code jdbc:mysql://} だけ。{@code sslMode=VERIFY_IDENTITY} 必須、透過再接続と時区の上書きは不可。 */
+        /** {@code jdbc:mysql://} だけ。{@code sslMode=VERIFY_IDENTITY} 必須、透過再接続とタイムゾーンの上書きは不可。 */
         private String url;
 
         private String username;

@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 /**
- * T058定向テスト: 月次締めchecklistの未検収件数（R4.2）と通知（R4.1）。
+ * T058対象限定テスト: 月次締めchecklistの未検収件数（R4.2）と通知（R4.1）。
  * 未検収件数は閲覧者のscopeで数える（design §5.2）。
  */
 @SpringBootTest

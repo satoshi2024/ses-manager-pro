@@ -201,7 +201,7 @@ public class SecurityConfig {
             .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
             // 初回ログイン時のパスワード変更が済むまで、変更画面・変更API以外を遮断（MFAの後に判定する）
             .addFilterAfter(passwordChangeEnforcementFilter, MfaEnforcementFilter.class)
-            // 本番初回bootstrap sessionだけを、改密 → MFA登録の順とbootstrap用の入口へ限定する（他のsessionは素通り）
+            // 本番初回bootstrap sessionだけを、パスワード変更 → MFA登録の順とbootstrap用の入口へ限定する（他のsessionは素通り）
             .addFilterAfter(bootstrapSessionFilter, PasswordChangeEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth

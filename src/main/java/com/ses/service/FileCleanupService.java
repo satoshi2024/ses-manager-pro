@@ -1,7 +1,7 @@
 package com.ses.service;
 
 /**
- * アップロード済みファイルの孤児（DBから参照されなくなったファイル）清理サービス。
+ * アップロード済みファイルの孤児（DBから参照されなくなったファイル）清掃サービス。
  */
 public interface FileCleanupService {
 

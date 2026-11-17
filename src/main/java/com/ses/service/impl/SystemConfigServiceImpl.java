@@ -105,7 +105,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("default_settlement_min", ConfigSchema.integer(0, null));
         SCHEMAS.put("default_settlement_max", ConfigSchema.integer(0, null));
         SCHEMAS.put("ai_enabled", ConfigSchema.bool());
-        // 計算側は小数(0.10=10%)で乗算するため上限は1。commission.rate(百分数0–100)とは別口径。
+        // 計算側は小数(0.10=10%)で乗算するため上限は1。commission.rate(百分数0–100)とは別の基準。
         SCHEMAS.put("billing.tax-rate", ConfigSchema.decimal("0", "1"));
         SCHEMAS.put("billing.payment-due-rule", ConfigSchema.enumOf("next-month-end", "next-next-month-end"));
         SCHEMAS.put("notice.contract-end-days", ConfigSchema.integer(0, null));

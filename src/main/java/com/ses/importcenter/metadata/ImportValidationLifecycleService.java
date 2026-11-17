@@ -476,7 +476,7 @@ public class ImportValidationLifecycleService {
                 Long.class, input.context.tenantId(), job.id, grant.runId);
         if (found == 0 && maxExisting != null && chunk.rows().get(0).sourceRowNumber() <= maxExisting) conflict();
 
-        // row lock待機の後で権限とDB時刻を再確認し、待機中の撤権・期限切れを拒否する。
+        // row lock待機の後で権限とDB時刻を再確認し、待機中の権限取消し・期限切れを拒否する。
         ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(input.context);
         requireSameActor(input.context, gate);
         Timestamp now = dbNow();

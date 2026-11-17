@@ -35,7 +35,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** 本番初回bootstrap loginの成功処理（{@link LoginSuccessHandler}）: sessionの印・改密 → MFAの順・期限・監査。 */
+/** 本番初回bootstrap loginの成功処理（{@link LoginSuccessHandler}）: sessionの印・パスワード変更 → MFAの順・期限・監査。 */
 class LoginSuccessHandlerBootstrapTest {
 
     private static final Instant NOW = Instant.parse("2026-11-13T09:00:00Z");
@@ -50,7 +50,7 @@ class LoginSuccessHandlerBootstrapTest {
     }
 
     @Test
-    void 初回の改密が必要なbootstrap_loginは変更画面へ誘導しMFA_pendingを立てない() throws Exception {
+    void 初回のパスワード変更が必要なbootstrap_loginは変更画面へ誘導しMFA_pendingを立てない() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -69,7 +69,7 @@ class LoginSuccessHandlerBootstrapTest {
     }
 
     @Test
-    void 改密済みのbootstrap_loginはMFAの登録または検証へ誘導する() throws Exception {
+    void パスワード変更済みのbootstrap_loginはMFAの登録または検証へ誘導する() throws Exception {
         when(mfaService.isConfigured(any())).thenReturn(false);
         MockHttpServletRequest setupRequest = new MockHttpServletRequest();
         MockHttpServletResponse setup = new MockHttpServletResponse();
@@ -132,7 +132,7 @@ class LoginSuccessHandlerBootstrapTest {
     }
 
     @Test
-    void 同じsessionで別の主体がloginするとbootstrapの印とMFA検証と改密要求を引き継がない() throws Exception {
+    void 同じsessionで別の主体がloginするとbootstrapの印とMFA検証とパスワード変更要求を引き継がない() throws Exception {
         // review P3-a: session fixation対策はsession IDだけを替えて属性を残すため、login時に安全状態を消す
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpSession session = new MockHttpSession();

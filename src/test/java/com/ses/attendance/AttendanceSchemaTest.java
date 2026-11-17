@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** T068のL1〜L3定向test。H2 replay、entity CRUD、NULL/0、期間/UNIQUEを固定する。 */
+/** T068のL1〜L3対象限定test。H2 replay、entity CRUD、NULL/0、期間/UNIQUEを固定する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

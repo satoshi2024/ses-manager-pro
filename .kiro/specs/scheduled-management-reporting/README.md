@@ -1,6 +1,6 @@
 # scheduled-management-reporting（NF-10）
 
-## 開工判定
+## 着手判定
 
 - 状態: `APPROVED / IMPLEMENTED / INDEPENDENT_REVIEW_PENDING`
 - Approved report/recipient: 管理者（全社）およびマネージャー（許可された組織scope）

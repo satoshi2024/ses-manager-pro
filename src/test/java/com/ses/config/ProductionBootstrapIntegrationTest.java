@@ -136,15 +136,15 @@ class ProductionBootstrapIntegrationTest {
     }
 
     @Test
-    void adminは改密を先に強制されその後MFA登録を強制される() throws Exception {
+    void adminはパスワード変更を先に強制されその後MFA登録を強制される() throws Exception {
         MockHttpSession session = loginAsBootstrapAdmin();
         assertThat(session.getAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
         assertThat(session.getAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE))
-                .as("改密 → MFAの順にするためMFA pendingは立てない").isNull();
+                .as("パスワード変更 → MFAの順にするためMFA pendingは立てない").isNull();
         verify(auditLogService).recordRequired(eq("admin"), eq("AUTH"), eq("/login"), eq(200),
                 eq("BOOTSTRAP_LOGIN_SUCCESS"), eq(true));
 
-        // 1. 改密前: 画面は変更画面へ、MFA登録APIも含めAPIは403
+        // 1. パスワード変更前: 画面は変更画面へ、MFA登録APIも含めAPIは403
         mockMvc.perform(get("/user/list").session(session))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl(PasswordChangeEnforcementFilter.CHANGE_PAGE));
@@ -159,11 +159,11 @@ class ProductionBootstrapIntegrationTest {
                 eq("BOOTSTRAP_WRITE_ATTEMPT"), eq(false));
         verify(auditLogService).record(eq("admin"), eq("PUT"), eq("/api/profile/password"), eq(200),
                 eq("BOOTSTRAP_WRITE"), eq(true));
-        // review P3-e: 改密時に同じユーザーの他sessionを失効させる（このsessionは永続session未追跡のため全件）
+        // review P3-e: パスワード変更時に同じユーザーの他sessionを失効させる（このsessionは永続session未追跡のため全件）
         Long adminId = jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username = 'admin'", Long.class);
         verify(persistentSessionService).revokeAllForUser(adminId, "BOOTSTRAP_PASSWORD_CHANGED");
 
-        // 2. 改密後: MFA完了までMFA登録画面へ誘導し、業務・bootstrap用APIも403
+        // 2. パスワード変更後: MFA完了までMFA登録画面へ誘導し、業務・bootstrap用APIも403
         mockMvc.perform(get("/").session(session))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/mfa/setup"));
@@ -204,7 +204,7 @@ class ProductionBootstrapIntegrationTest {
     }
 
     @Test
-    void bootstrap_sessionの改密は追跡中の現在session以外の同じユーザーのsessionを失効させる() throws Exception {
+    void bootstrap_sessionのパスワード変更は追跡中の現在session以外の同じユーザーのsessionを失効させる() throws Exception {
         MockHttpSession session = loginAsBootstrapAdmin();
         session.setAttribute(PersistentSessionService.SESSION_HASH_ATTRIBUTE, "bootstrap-current-session-hash");
 

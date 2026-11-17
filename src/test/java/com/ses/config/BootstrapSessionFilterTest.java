@@ -171,18 +171,18 @@ class BootstrapSessionFilterTest {
     }
 
     @Test
-    void 改密前は変更経路だけをPasswordChangeEnforcementFilterへ任せて通す() throws Exception {
+    void パスワード変更前は変更経路だけをPasswordChangeEnforcementFilterへ任せて通す() throws Exception {
         authenticate();
         MockHttpSession session = bootstrapSession();
         session.setAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
 
         MockFilterChain chain = new MockFilterChain();
         filter.doFilter(request("PUT", "/api/profile/password", session), new MockHttpServletResponse(), chain);
-        assertThat(chain.getRequest()).as("改密前はMFAを待たずに変更APIを通す").isNotNull();
+        assertThat(chain.getRequest()).as("パスワード変更前はMFAを待たずに変更APIを通す").isNotNull();
     }
 
     @Test
-    void 改密後はMFA完了までMFA画面へ誘導しAPIを403にする() throws Exception {
+    void パスワード変更後はMFA完了までMFA画面へ誘導しAPIを403にする() throws Exception {
         authenticate();
         MockHttpSession session = bootstrapSession();
         when(mfaService.isConfigured(1L)).thenReturn(false);

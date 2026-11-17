@@ -78,7 +78,7 @@
 ## 限定再検証（全体PASSとは別）
 
 - NF01 fixture修復Head `e3944774e667a226848d3883e7333ddb8b2ef1f6`は対象2 class、
-  **5/0/0/0**。Astraが製品側認可・document/cancel断言を緩和していないことを確認しCODE PASS。
+  **5/0/0/0**。Astraが製品側認可・document/cancelのassertを緩和していないことを確認しCODE PASS。
   controlへ`e90daaf1`として統合した。
 - loopback対象4 classは固定Head `e3ca3ae0eda203e568b463b331cfc2a9fcbae349`で
   `jdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を指定して再実行、**12/0/0/0、exit 0**。
@@ -165,7 +165,7 @@
 - command: `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test -Pmysql-tests`。
 - UTC `2026-10-02T01:29:10.1912076Z`〜`2026-10-02T02:13:19.4022749Z`、exit 1、開始/終了clean、Head一致。
 - **190 tests / 7 failures / 0 errors / 0 skipped、78 class XML**。
-- 5 failureは4 classの最新版断言が182のままで、実際はNF01 V183まで適用済みだった。
+- 5 failureは4 classの最新版のassertが182のままで、実際はNF01 V183まで適用済みだった。
   CustomerSuccess 1、SelfService 2、Asset 1、V110AdminBoundaryUpgrade 1。
 - OperationalBoundaryの2 failureは子JVMの`JAVA_TOOL_OPTIONS`通知がstderrからprotocolへ混入したもの。
   先頭行のlock判定と、protocol以外を含めたpid distinct判定が誤った。業務assertionを削除せず修復する。
@@ -195,7 +195,7 @@
 - 原log、全10 XML/textとhash、metadata、zero-skipped gate判定、実MySQL8.0.46の観測を
   sourceおよびcontrolの`verification-evidence/20261004-q2-q3-mysql-02/`へ保存した。
   log SHA-256: `2E0C70E6CA055D4CFE05440312086540752B4274EBE4397089CF16D9631670EF`。
-- Astraがraw/report hash、原失敗method包含、child実PID/claim/lock断言を確認し、限定CODE PASS。
+- Astraがraw/report hash、原失敗method包含、child実PID/claim/lockのassertを確認し、限定CODE PASS。
   controlへ`47ca275b`、`2d1b60e6`、`b978fbac`として統合した。
 - これは5 classの修復完了であり、全MySQL190件の再合格ではない。第1回全体FAILと20 skipped runを履歴として保持する。
 

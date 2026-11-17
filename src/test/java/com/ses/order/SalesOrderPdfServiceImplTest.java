@@ -29,7 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
- * T056定向テスト: 注文請書PDF生成（L1）。同梱フォント(ipaexg.ttf)で無条件に検証する。
+ * T056対象限定テスト: 注文請書PDF生成（L1）。同梱フォント(ipaexg.ttf)で無条件に検証する。
  */
 class SalesOrderPdfServiceImplTest {
 

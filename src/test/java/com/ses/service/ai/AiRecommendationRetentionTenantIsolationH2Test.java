@@ -56,7 +56,7 @@ class AiRecommendationRetentionTenantIsolationH2Test {
     }
 
     @Test
-    void 双tenant過期データでも現在tenantだけpurgeする() {
+    void 二つのtenantの期限切れデータでも現在tenantだけpurgeする() {
         Long versionId = activeVersionId();
         Long runA = insertExpired("tenant-a", versionId);
         Long runB = insertExpired("tenant-b", versionId);

@@ -1,6 +1,6 @@
 # F1b wave3: EOF seal・recount・publish計画
 
-状態: W3B seal実装およびREQUEST CHANGES対応完了（Astra限定PLAN PASS承認済み）。W3A counter/capabilityコードはd6577342にて73項Fast・100項MySQLの実環境テストを通過し、Astra独立CODE PASSを取得して閉環完了。旧SHA（9ab64f13）での未検証履歴を正本として維持しつつ、W3B seal CASの実装およびAstraレビュー指摘（SealCapability境界復旧・source_row_number意味論修正・夾具および並行検証証拠の補強）を反映完了。本切片はsynthetic validation lifecycleのseal CASを扱い、実source適合、NF-06全体完了、production enablementを意味しない。候補worktreeのruntime検証はPENDING（H2-05はsource tree `1715746d0bdcc54c643b0bada015e40c1545b8f5`で2クラス合計10 testsがPASSした範囲に限り、候補統合commit自体は未実行、MySQL-01はDocker不可で11実ケース未実行）。
+状態: W3B seal実装およびREQUEST CHANGES対応完了（Astra限定PLAN PASS承認済み）。W3A counter/capabilityコードはd6577342にて73項Fast・100項MySQLの実環境テストを通過し、Astra独立CODE PASSを取得して完了。旧SHA（9ab64f13）での未検証履歴を正本として維持しつつ、W3B seal CASの実装およびAstraレビュー指摘（SealCapability境界復旧・source_row_number意味論修正・夾具および並行検証証拠の補強）を反映完了。本切片はsynthetic validation lifecycleのseal CASを扱い、実source適合、NF-06全体完了、production enablementを意味しない。候補worktreeのruntime検証はPENDING（H2-05はsource tree `1715746d0bdcc54c643b0bada015e40c1545b8f5`で2クラス合計10 testsがPASSした範囲に限り、候補統合commit自体は未実行、MySQL-01はDocker不可で11実ケース未実行）。
 
 ## 1. 対象と現状
 
@@ -23,7 +23,7 @@ seal/publishの状態と確定値はV184の既存列に保存できるため、�
 - 既存schemaはvalidation rowのUPDATE/DELETE禁止、SEALED以降の追記禁止、job pointerとrun stateの相互整合を単独では強制しない。wave2と同じservice-only write契約により`appendChunk`をBUILDING専用にし、seal/publish/abortがjob PRIMARY lockを取る。もしDB直接更新に対するimmutable row enforcementまで要件にするなら、trigger等のschema案を独立したschema reviewへ戻し、ここでmigration番号を決めない。
 - EOF capabilityはDocumentServiceが開いた同一DocumentVersionのbyte streamから作る。現在の`DocumentServiceImpl`は登録時に新storage keyを作りhashを保存し、Import Centerはversion ID/no/hashを固定して毎回実streamのsource SHAを確認する。実storage/providerが既存versionの同じkeyを後から上書き可能ならこのimmutability前提は成立しないため、publish gate前にstorageのversion immutabilityを確認し、未保証ならstorage/versioning案を別レビューへ戻す。
 
-## 3. Wave 3A: 現状区分と前置核検証跡
+## 3. Wave 3A: 現状区分と事前確認の証跡
 
 ### 3.1 現存W3A実装内容（SHA 9ab64f13時点）
 
@@ -41,14 +41,14 @@ W3Aのコードは現在worktree上に実装済みである：
    - `ValidationCounterAccumulatorTest.java`（単体試験）。
    - `ImportMetadataRealMySqlTest.java`（W3A結合試験）。
 
-### 3.2 必須前置条件の閉環履歴と証拠
+### 3.2 必須の前提条件の完了履歴と証拠
 
 1. **旧SHA（9ab64f13）における未検証履歴の保持**:
    - 当時の固定SHA `9ab64f133726b62835a4f9023263c2c6772dc62f` においては、ランタイム実行証拠（`run-nf06-counter-fast-01-1024.ps1` / `run-nf06-counter-mysql-01-1024.ps1` の成果物）が未取得であり、Astra CODE PASS 記録も存在しなかった。この未検証状態の歴史的事実は正本として保持され、遡及して過去に通過していたとは改竄しない。
 2. **互換性修正とテスト入力補完の経緯**:
-   - `aee2e6822ac8aa14c6638aaa4733e0c7681cbd4e`: `ValidationCounterAccumulatorTest.java` の Java 21 `List.getFirst()` を Java 17 準拠の `get(0)` へ修正（POM/target非変更、全断言保持）。
-   - `d6577342d77c89752fb0401925b082cad504421f`: 同テストのCSV入力に `ENGINEER` 必須ヘッダー `fullName`（`externalKey,fullName,expectedUnitPrice\nengineer-1,テスト要員,120\n`）を補完し、parser前置条件を満たして目標変換失敗分岐へ進入可能に修正。
-3. **固定基線 d6577342 でのW3A閉環とW3B PLAN PASS取得**:
+   - `aee2e6822ac8aa14c6638aaa4733e0c7681cbd4e`: `ValidationCounterAccumulatorTest.java` の Java 21 `List.getFirst()` を Java 17 準拠の `get(0)` へ修正（POM/target非変更、全assert保持）。
+   - `d6577342d77c89752fb0401925b082cad504421f`: 同テストのCSV入力に `ENGINEER` 必須ヘッダー `fullName`（`externalKey,fullName,expectedUnitPrice\nengineer-1,テスト要員,120\n`）を補完し、parser前提条件を満たして目標変換失敗分岐へ進入可能に修正。
+3. **固定基線 d6577342 でのW3Aの完了とW3B PLAN PASS取得**:
    - 固定基線 `d6577342d77c89752fb0401925b082cad504421f` に対して、AI-1により 73 項の Fast feedback テストおよび 100 項の Real MySQL テストが全件実行され PASS（証拠アーカイブ済み）。
    - Astra による独立 CODE Review を受審し、W3A CODE PASS を取得。
    - 続いて Astra より本計画文書（W3B seal CAS 設計）に対し限定 PLAN PASS が承認され、W3B seal 実装フェーズへの進入条件が正式に満たされた。
@@ -65,7 +65,7 @@ exact sourceのEOF走査とrow appendを完了し発行された`SealCapability`
   - ロック取得後における `BUILDING` と `SEALED` の明確な処理分流。
   - ACLゲート通過後のDB現在時刻（`CURRENT_TIMESTAMP(6)`）によるリース期限厳格判定。
   - 【BUILDING分流】保存済みDB行セットの昇順ストリーミング走査と`row_set_sha256`の再照合、正準`summary_sha256`算出、単一トランザクションCAS、失敗時の零部分書き込み（全原子ロールバック）。
-  - 【SEALED分流】ACK loss再試行における認可ゲート継続（撤権バイパス厳禁）、最新DB時刻による期限切れ判定、同世代renew時のバージョン互換性、永続化証明の完全一致照合、および零重複書き込み（Zero Rewrite）。
+  - 【SEALED分流】ACK loss再試行における認可ゲート継続（権限取消しのバイパス厳禁）、最新DB時刻による期限切れ判定、同世代renew時のバージョン互換性、永続化証明の完全一致照合、および零重複書き込み（Zero Rewrite）。
   - `append`, `renew`, `takeover`, `abort`との競合直列化検証。
 - **明確な除外対象**:
   - recount, publish, apply, UI, 実業務インポート, 本番有効化（production enablement）。
@@ -76,8 +76,8 @@ exact sourceのEOF走査とrow appendを完了し発行された`SealCapability`
 |---|---|---|---|
 | 本番コード | `src/main/java/com/ses/importcenter/metadata/ImportValidationLifecycleService.java` | 変更 | `seal(SealCapability capability)` メソッドおよび `sealInTransaction` の追加。リソースロック・BUILDING/SEALED状態分流・権限再検証・行セット照合・CAS・ACK loss冪等回復を実装。 |
 | 本番コード | `src/main/java/com/ses/importcenter/metadata/ImportValidationAppendService.java` | 軽微変更 | `SealCapability` のpackage-privateアクセサ確認（必要に応じて追加）。SEALED後の追記拒否ガードの再確認。 |
-| テスト（H2） | `src/test/java/com/ses/importcenter/metadata/ImportValidationSealServiceTest.java` | **新規作成** | Fast feedback用単体・状態遷移テスト。CAS条件、row-set不一致、件数不一致、金額制約、サマリーハッシュ算出、ACK loss状態分流・撤権拒否・期限切れ拒否・同世代renew互換・重複無書き込みを網羅。 |
-| テスト（MySQL） | `src/test/java/com/ses/importcenter/metadata/ImportValidationSealRealMySqlTest.java` | **新規作成** | 実MySQL競合・分離性統合テスト（`@Tag("mysql")`）。ロック待機順序、デッドロック回避、renew/takeover/abort/appendとの競合CAS、期限切れ境界、`retention_until IS NULL` 正向用例を検証。 |
+| テスト（H2） | `src/test/java/com/ses/importcenter/metadata/ImportValidationSealServiceTest.java` | **新規作成** | Fast feedback用単体・状態遷移テスト。CAS条件、row-set不一致、件数不一致、金額制約、サマリーハッシュ算出、ACK loss状態分流・権限取消し時の拒否・期限切れ拒否・同世代renew互換・重複無書き込みを網羅。 |
+| テスト（MySQL） | `src/test/java/com/ses/importcenter/metadata/ImportValidationSealRealMySqlTest.java` | **新規作成** | 実MySQL競合・分離性統合テスト（`@Tag("mysql")`）。ロック待機順序、デッドロック回避、renew/takeover/abort/appendとの競合CAS、期限切れ境界、`retention_until IS NULL` 正常系ケースを検証。 |
 
 > [!IMPORTANT]
 > **テストクラス独立方針とShard登録**:
@@ -117,7 +117,7 @@ sealトランザクション（`REQUIRES_NEW / READ_COMMITTED`）内では、以
   5. Job 条件確認: `job.state.equals("VALIDATING")`, `job.activeRunId == run.id`, `job.currentRunId == null`, `job.owner.equals(capability.workerId())`, `job.generation == capability.generation()`, `job.version == capability.jobVersion()`.
   6. 単一トランザクション CAS 更新を実行し、`BUILDING → SEALED` へ原子遷移（4.7節）。
 - **分流 B（`run.state.equals("SEALED")` - ACK Loss 冪等回復パス）**:
-  1. **認可ゲートの継続（撤権バイパス厳禁）**:
+  1. **認可ゲートの継続（権限取消しのバイパス厳禁）**:
      - 冪等回復であっても、必ず `authorization.requireCurrentAuthorizationForWrite(expected.context)` を実行する。
      - コミット後にアクター権限が revoke されていた場合は、`403 Forbidden` を返却する。
   2. **最新DB時刻によるリース期限判定**:
@@ -132,10 +132,10 @@ sealトランザクション（`REQUIRES_NEW / READ_COMMITTED`）内では、以
           - 期限は厳密に一致していなければならない（`job.expiresAt.equals(capability.expiresAt())`）。
        2. **バージョン進行（`job.version > capability.jobVersion()`）**:
           - 期限は capability の期限より前であってはならず（`!job.expiresAt.before(capability.expiresAt())`）、**期限相等（`job.expiresAt.equals(capability.expiresAt())`）も正当な同世代再試行として明示的に許容**する。
-       3. **バージョン逆行または期限回退**:
-          - `job.version < capability.jobVersion()` または `job.expiresAt.before(capability.expiresAt())`（期限回退）の場合は即座に `409 Conflict` で拒否する。
+       3. **バージョン逆行または期限の巻き戻り**:
+          - `job.version < capability.jobVersion()` または `job.expiresAt.before(capability.expiresAt())`（期限の巻き戻り）の場合は即座に `409 Conflict` で拒否する。
      - **両許容条件（条件1および条件2）における共通必須前提**:
-       - 現在の認可が有効（`authorization.requireCurrentAuthorizationForWrite` 通過、撤権バイパス厳禁）。
+       - 現在の認可が有効（`authorization.requireCurrentAuthorizationForWrite` 通過、権限取消しのバイパス厳禁）。
        - 現在のDB時刻において未期限（`job.expiresAt.after(dbNow)`）。
        - owner / generation / run / input スナップショットおよび永続化証明（row_set_sha256, summary_sha256, 各カウンター）が完全一致。
        - 零 UPDATE（`UPDATE` SQLを発行せず、`sealed_at` を再取得せず、`job.version_no` を増やさない）。
@@ -264,7 +264,7 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 | takeover 対 seal | seal が job lock を先取 | takeover が待機 | seal 実行時点で未期限であれば takeover は「未期限worker奪取禁止」により 409 conflict。 |
 | abort 対 seal | abort が job lock を先取 | seal が待機 | abort が run を `ABORTED`、active pointer を解除。seal は `state <> 'BUILDING'` により 409 conflict で拒否される。 |
 | abort 対 seal | seal が job lock を先取 | abort が待機 | seal が run を `SEALED` に進める。現行 `abortInTransaction` は `state IN ('BUILDING', 'SEALED')` を許容しているため、同世代・有効期限内の現workerによる明示的 abort は成功し `ABORTED` へ遷移可能。 |
-| seal 待機中 expiry 跨越 | - | seal が待機 | リソースロックや認可ゲートで待機中にリースの `lease_expires_at <= dbNow` となった場合、認可ゲート直後のDB時刻検査で即座に検知され、CASを実行せず 409 conflict で拒否。 |
+| seal 待機中 expiry をまたぐ | - | seal が待機 | リソースロックや認可ゲートで待機中にリースの `lease_expires_at <= dbNow` となった場合、認可ゲート直後のDB時刻検査で即座に検知され、CASを実行せず 409 conflict で拒否。 |
 
 ### 4.9 状態・トランザクション遷移表
 
@@ -282,17 +282,17 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 | `t_import_validation_run.published_slot` | `NULL` | CAS成功 | `NULL`（維持） | `NULL`（維持） |
 | `t_import_validation_run` サマリー列・ハッシュ群 | `NULL` | 全制約（null/0, カウンター等式, 8192バイト）適合 | 確定値・正準ハッシュが保存 | `NULL`（維持、零部分書き込み） |
 | `t_import_validation_row` | N行 | 変更なし（読取・照合のみ） | N行（不変） | N行（不変） |
-| 【SEALED再試行】`t_import_validation_run.state` | `SEALED` | 権限有効、`dbNow < expiresAt`、同一世代・owner・run、[(v == v0 かつ exp == exp0) または (v > v0 かつ !exp.before(exp0))]、永続証明完全一致 | `SEALED`（不変、零重複書込み、sealed_at不変） | 権限失効時は `403`、期限切れ/回退/ハッシュ差分は `409` |
+| 【SEALED再試行】`t_import_validation_run.state` | `SEALED` | 権限有効、`dbNow < expiresAt`、同一世代・owner・run、[(v == v0 かつ exp == exp0) または (v > v0 かつ !exp.before(exp0))]、永続証明完全一致 | `SEALED`（不変、零重複書込み、sealed_at不変） | 権限失効時は `403`、期限切れ/巻き戻り/ハッシュ差分は `409` |
 
-### 4.10 テストマトリクス（正向・負向）
+### 4.10 テストマトリクス（正常系・異常系）
 
 | テスト分類 | テストケースID | 試験内容と注入障害 | 期待される判定と保護動作 |
 |---|---|---|---|
-| 正向用例 | **POS-SEAL-01** | `retention_until IS NULL`（無期限保持ドキュメント）での正常 seal | 正常成功（`state='SEALED'`、サマリー保存） |
-| 正向用例 | **POS-SEAL-01b** | **先頭空行および中間空行を含む正向用例**: 空行スキップにより `source_row_number` が 2, 4 となり 1 から連続せず跳躍（※ヘッダー後の空行が 1、cust-1 が 2、空行が 3、cust-2 が 4）するが厳格に単調増加するデータでの正常 seal | 正常成功（`state='SEALED'`、サマリー保存、跳躍行番号 2, 4 を保持） |
-| 正向用例 | **POS-SEAL-02** | 同一ワーカー・同一バージョン・同一期限での正常 seal コミット直後の同一トークン再試行（ACK loss 冪等回復: `job.version == capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`） | 正常成功（二重更新なし、零重複書込み、`sealed_at` 不変） |
-| 正向用例 | **POS-SEAL-03** | seal コミット後に同一世代で renew 実行され期限が延長された状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.after(capability.expiresAt())`）での seal 冪等再試行 | 正常成功（同世代バージョン進行受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
-| 正向用例 | **POS-SEAL-04** | **version 増加だが expiry 相等の正向用例**: seal コミット後に同一世代で renew 実行されたが `GREATEST` により期限同値を維持した状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`、かつ `job.expiresAt.after(dbNow)`）での seal 冪等再試行 | 正常成功（同世代・非減少期限受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
+| 正常系ケース | **POS-SEAL-01** | `retention_until IS NULL`（無期限保持ドキュメント）での正常 seal | 正常成功（`state='SEALED'`、サマリー保存） |
+| 正常系ケース | **POS-SEAL-01b** | **先頭空行および中間空行を含む正常系ケース**: 空行スキップにより `source_row_number` が 2, 4 となり 1 から連続せず跳躍（※ヘッダー後の空行が 1、cust-1 が 2、空行が 3、cust-2 が 4）するが厳格に単調増加するデータでの正常 seal | 正常成功（`state='SEALED'`、サマリー保存、跳躍行番号 2, 4 を保持） |
+| 正常系ケース | **POS-SEAL-02** | 同一ワーカー・同一バージョン・同一期限での正常 seal コミット直後の同一トークン再試行（ACK loss 冪等回復: `job.version == capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`） | 正常成功（二重更新なし、零重複書込み、`sealed_at` 不変） |
+| 正常系ケース | **POS-SEAL-03** | seal コミット後に同一世代で renew 実行され期限が延長された状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.after(capability.expiresAt())`）での seal 冪等再試行 | 正常成功（同世代バージョン進行受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
+| 正常系ケース | **POS-SEAL-04** | **version 増加だが expiry 相等の正常系ケース**: seal コミット後に同一世代で renew 実行されたが `GREATEST` により期限同値を維持した状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`、かつ `job.expiresAt.after(dbNow)`）での seal 冪等再試行 | 正常成功（同世代・非減少期限受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
 | 不正トークン | NEG-SEAL-01 | 他テナントの `SealCapability` を提示 | 403 Forbidden（認可・テナント境界拒否） |
 | 不正トークン | NEG-SEAL-02 | 別job / 別run の `SealCapability` を提示 | 409 Conflict（job/run 不一致） |
 | 不正トークン | NEG-SEAL-03 | 旧世代（stale generation）の `SealCapability` を提示 | 409 Conflict（世代不一致） |
@@ -318,10 +318,10 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 | 状態拒絶検証 | NEG-SEAL-23 | source system が DISABLED（V184 CHECK制約準拠）化（状態拒絶検証） | 409 Conflict（source status 不一致） |
 | 状態拒絶検証 | NEG-SEAL-24 | `retention_until < CURRENT_DATE`（保管期限切れドキュメント）（状態拒絶検証） | 409 Conflict（retention 期限切れ拒否） |
 | 状態拒絶検証 | NEG-SEAL-25 | document に legal_hold が設定（状態拒絶検証） | 409 Conflict（document hold 検知） |
-| 冪等・ACK loss | **NEG-SEAL-26** | SEALED 後の再試行時にアクター権限が revoke されている | **403 Forbidden**（認可ゲート厳格維持、撤権バイパス拒否） |
+| 冪等・ACK loss | **NEG-SEAL-26** | SEALED 後の再試行時にアクター権限が revoke されている | **403 Forbidden**（認可ゲート厳格維持、権限取消しのバイパス拒否） |
 | 冪等・ACK loss | **NEG-SEAL-27a** | SEALED 後の再試行時にリース期限が切れている（`expiresAt <= dbNow`） | **409 Conflict**（期限切れ失効、確認不可） |
-| 冪等・ACK loss | **NEG-SEAL-27b** | **expiry 回退の拒否用例**: SEALED 後の再試行時に、`job.expiresAt` が capability の期限より過去に回退している（`job.expiresAt.before(capability.expiresAt())`） | **409 Conflict**（期限回退検知拒否） |
-| 冪等・ACK loss | **NEG-SEAL-27c** | **job.version 逆行の拒否用例**: SEALED 後の再試行時に、`job.version < capability.jobVersion()` となっている | **409 Conflict**（バージョン逆行検知拒否） |
+| 冪等・ACK loss | **NEG-SEAL-27b** | **expiry の巻き戻りの拒否ケース**: SEALED 後の再試行時に、`job.expiresAt` が capability の期限より過去へ巻き戻っている（`job.expiresAt.before(capability.expiresAt())`） | **409 Conflict**（期限の巻き戻りを検知して拒否） |
+| 冪等・ACK loss | **NEG-SEAL-27c** | **job.version 逆行の拒否ケース**: SEALED 後の再試行時に、`job.version < capability.jobVersion()` となっている | **409 Conflict**（バージョン逆行検知拒否） |
 | 冪等・ACK loss | **NEG-SEAL-28** | SEALED 完了済みの run に対し別ハッシュの SealCapability で再試行 | 409 Conflict（ハッシュ差分拒否） |
 | 冪等・ACK loss | **NEG-SEAL-29** | SEALED 完了後に Takeover が発生し新世代となった状態での旧世代再試行 | 409 Conflict（世代不一致拒否） |
 | 原子性検証 | NEG-SEAL-30 | UPDATE 実行後・実際の commit 前の制御された障害ロールバック（setRollbackOnCommitFailure(true)、同一接続で uncommitted SEALED 到達確認、doRollback 実行確認） | 全ロールバック（run は BUILDING のまま、sealed_at・サマリー列空、零部分書き込み実証。CAS 条件不一致による『CAS 更新返回 0』と明確に区分） |
@@ -330,18 +330,18 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 
 1. **`ImportValidationSealServiceTest.java`（Fast Suite / H2 / Mock）**:
    - Spring context または直接モック/H2 datasource を利用し、短時間で実行可能な単体テスト集。
-   - **フィクスチャライフサイクルの厳格化**: 各テスト用例ごとに最終的な CSV、source/document SHA、および正準 mapping（`ImportMetadataService.canonicalMapping` 由来の辞書順 JSON）を事前に確定して DB へ投入した後にのみ `beginStart`/`start`/`append` を実行する。リース取得後の DB 事後書き換え（UPDATE）を完全排除。
-   - POS-SEAL-01b（空行スキップ行番号 2, 4 の跳躍保持）、POS-SEAL-02 〜 POS-SEAL-04, NEG-SEAL-01 〜 NEG-SEAL-15（構築不変条件境界としての IllegalArgumentException 断言）, NEG-SEAL-26 〜 NEG-SEAL-30 を網羅。
+   - **フィクスチャライフサイクルの厳格化**: 各テストケースごとに最終的な CSV、source/document SHA、および正準 mapping（`ImportMetadataService.canonicalMapping` 由来の辞書順 JSON）を事前に確定して DB へ投入した後にのみ `beginStart`/`start`/`append` を実行する。リース取得後の DB 事後書き換え（UPDATE）を完全排除。
+   - POS-SEAL-01b（空行スキップ行番号 2, 4 の跳躍保持）、POS-SEAL-02 〜 POS-SEAL-04, NEG-SEAL-01 〜 NEG-SEAL-15（構築不変条件境界としての IllegalArgumentException の検証）, NEG-SEAL-26 〜 NEG-SEAL-30 を網羅。
    - **NEG-30 の精密実証**: 同一 instanceId を持つ注入版 lifecycle service により start・append・seal を一貫して実行し、`setRollbackOnCommitFailure(true)` 設定下で CAS UPDATE 到達後・コミット直前（`doCommit` 内）にトランザクション内未コミット状態が `SEALED` であることを同一接続で確認した上で障害を注入。`doRollback` 実行およびトランザクションロールバック後に run が `BUILDING` に留まり、サマリー列や `sealed_at` が一切書き込まれない零部分書き込みを検証。結論は「UPDATE 実行後・実際の commit 前の制御された障害ロールバック」に限定。
 2. **`ImportValidationSealRealMySqlTest.java`（Testcontainers MySQL / `@Tag("mysql")`）**:
    - 既存の肥大化した `ImportMetadataRealMySqlTest` には追加せず、完全に独立したテストクラスとして新設。
    - **フィクスチャライフサイクルの厳格化**: 各テストごとに固有の jobId を採番し、正準 mapping および事前確定 SHA で全マスタ・ジョブを投入後に `beginStart`/`start`/`append` を実行。事後 UPDATE による SHA 改変を排除。
-   - POS-SEAL-01, NEG-SEAL-16 〜 NEG-SEAL-25 を中心に、実MySQL上でのInnoDB行ロック順序、デッドロック不在、トランザクション分離（READ COMMITTED）、wait edge、`retention_until IS NULL` 正向用例、および `CURRENT_TIMESTAMP(6)` 境界を実環境で検証。
+   - POS-SEAL-01, NEG-SEAL-16 〜 NEG-SEAL-25 を中心に、実MySQL上でのInnoDB行ロック順序、デッドロック不在、トランザクション分離（READ COMMITTED）、wait edge、`retention_until IS NULL` 正常系ケース、および `CURRENT_TIMESTAMP(6)` 境界を実環境で検証。
    - **厳格な並行待機検証**:
      - seal 実行トランザクションが実際に利用した接続 ID を `TrackingTransactionManager.doBegin` にて直接取得（別接続取得を排除）。
      - `performance_schema.data_lock_waits`（および `sys.innodb_lock_waits`）により、requester と blocker、および対象行の双端待機関係を厳密に照合（単端 requester LOCK WAIT のみの降格クエリは完全排除）。
      - worker の事前終了・待機タイムアウト・接続ID未取得時は `fail()` で明確にテスト失敗とし、`finally` で確実に blocker を解放、有界タイムアウト（5秒）で worker pool を回収。
-     - **NEG-21 の同一期限跨ぎ実証**: DB の `lease_expires_at` と capability の `expiresAt` を同一の短期限（現在時刻 + 2000ms）で整合させ、awaitLockWait 成功直後に独立観測接続から DB 時刻を取得し `observedWaitTime < shortExpiry`（待機突入時に有効）を厳格断言。待機中に 2500ms 経過させて同一期限を実時間で跨ぎ、ブロック解放前の DB 時刻 `>= shortExpiry` を確認した上でブロックを解放し、fresh DB time 検査による 409 拒絶を厳格に実証。
+     - **NEG-21 の同一期限跨ぎ実証**: DB の `lease_expires_at` と capability の `expiresAt` を同一の短期限（現在時刻 + 2000ms）で整合させ、awaitLockWait 成功直後に独立観測接続から DB 時刻を取得し `observedWaitTime < shortExpiry`（待機突入時に有効）を厳密に検証。待機中に 2500ms 経過させて同一期限を実時間で跨ぎ、ブロック解放前の DB 時刻 `>= shortExpiry` を確認した上でブロックを解放し、fresh DB time 検査による 409 拒絶を厳格に実証。
    - `scripts/test-suites/mysql-shard-3.txt` に登録済みであり、`MySqlTestShardInventoryTest` の整合性を維持する。
 
 ## 5. Wave 3C: sealed recountとpublish capability
@@ -389,7 +389,7 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 - renew対seal/publish: renewが先にversion/expiryを変えたら古いexact lease CASは拒否する。current ownerは新しいleaseでcapabilityを再束縛できるのは同一run/input/generationのままの場合だけとし、必要に応じEOF verification/recountを再実行する。expiryを跨いだtokenは使わない。
 - takeover対stale worker: takeoverがgenerationを増やした後は旧generationのappend/seal/publishを拒否する。active unexpired workerはtakeoverできない。新workerはsame BUILDING prefixまたはSEALED runだけを継続し、新runを暗黙作成しない。
 - abort対seal/publish: job row lockを先に得た操作を直列化点とする。abortが先に成功した場合はABORTED/pointers releasedとなりpublishは409。publishが先に成功した場合はCOMPLETEDとなりabortは409。双方の敗者はstate/pointers/lease/versionを二次変更しない。seal成功後のabortは現generation/未期限の明示操作に限る。COMPLETEDはabort不可。
-- commit ACK loss: seal retryは同run・same proof hash・same current generationが既にSEALEDならread-onlyで同じsealed stateを返す。異なるproofは拒否。process restart後はSEALED takeover + recountで新capabilityを作る。publish後のACK lossだけは独立したread-only回復分岐とする。現在のactor/ACLを再確認し、jobが`VALIDATED`、active pointer/leaseがNULL、current pointerが対象run、job versionがcapability version+1、generationとinputが一致し、runが`COMPLETED`/published slot 1で`completed_at IS NOT NULL`、source/row-set/summary hash・全summaryがcapabilityと完全一致する場合だけ保存済み結果を返す。`completed_at`はpublish transactionが保存した値をそのまま返し、capability生成時刻との比較はしない。commit済みACK lossではDB leaseがclearされcapabilityの旧expiryを過ぎていても、この完全一致したread-only分岐だけを許可する。撤権は403。row、counter、timestamp、pointer、versionを再writeしない。未完了状態、同世代renew後のversion差、takeover後のgeneration差、pointer/hash/input不一致はACK loss扱いせず拒否する。通常publish pathはfresh DB時刻でexpiryを判定し、期限切れは409とする。
+- commit ACK loss: seal retryは同run・same proof hash・same current generationが既にSEALEDならread-onlyで同じsealed stateを返す。異なるproofは拒否。process restart後はSEALED takeover + recountで新capabilityを作る。publish後のACK lossだけは独立したread-only回復分岐とする。現在のactor/ACLを再確認し、jobが`VALIDATED`、active pointer/leaseがNULL、current pointerが対象run、job versionがcapability version+1、generationとinputが一致し、runが`COMPLETED`/published slot 1で`completed_at IS NOT NULL`、source/row-set/summary hash・全summaryがcapabilityと完全一致する場合だけ保存済み結果を返す。`completed_at`はpublish transactionが保存した値をそのまま返し、capability生成時刻との比較はしない。commit済みACK lossではDB leaseがclearされcapabilityの旧expiryを過ぎていても、この完全一致したread-only分岐だけを許可する。権限取消しは403。row、counter、timestamp、pointer、versionを再writeしない。未完了状態、同世代renew後のversion差、takeover後のgeneration差、pointer/hash/input不一致はACK loss扱いせず拒否する。通常publish pathはfresh DB時刻でexpiryを判定し、期限切れは409とする。
 - renew/takeover/abort/publishの勝敗をSQL error/timeoutで判定しない。期待するdomain拒否だけを409/403にし、deadlock/lock wait timeout/connection failureはinfra failureとして保持する。
 
 ### Test requirements
@@ -410,10 +410,10 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 
 ## 7. 小分けの実装・review gate
 
-1. **W3A capability + EOF/reconciliation** — `ImportValidationAppendService`のappend completionにprivate-ctor tokenを追加。全parser/source/row proofとcounterを作る。固定基線 `d6577342` にて Astra CODE PASS および 73 Fast / 100 MySQL テスト全件通過の実行証拠を取得し閉環完了。
+1. **W3A capability + EOF/reconciliation** — `ImportValidationAppendService`のappend completionにprivate-ctor tokenを追加。全parser/source/row proofとcounterを作る。固定基線 `d6577342` にて Astra CODE PASS および 73 Fast / 100 MySQL テスト全件通過の実行証拠を取得して完了。
 2. **W3B seal transaction** — Astra 限定 PLAN PASS 承認に基づき実装および REQUEST CHANGES 対応完了。`ImportValidationLifecycleService` へ seal CAS を追加。resource/ACL/time lock order、BUILDING/SEALED状態分流、source_row_number 単調増加と空行スキップ対応、row-set recheck、summary persistence、ACK-loss retry を実装。SealCapability 生成境界を完全維持（テスト用ファクトリ削除、実 append パス検証およびテスト内限定リフレクション）。独立した H2 state tests（`ImportValidationSealServiceTest`）と MySQL lock tests（`ImportValidationSealRealMySqlTest`）において、Snapshot 不変条件境界、真正な行ロック競合待機（LOCK WAIT）、V184 DISABLED 準拠、自然な時間経過による期限切れ、および CAS commit 失敗時の完全ロールバック（零部分書き込み）を網羅。新 MySQL テストは `scripts/test-suites/mysql-shard-3.txt` に登録済み。
 3. **W3C SEALED recount + publish capability** — SEALED source/row proofとsummary再構成を実装。takeover recovery、old generation token、empty/blank/amount/finding testsを行う。
-4. **W3D atomic publish + candidate visibility（PLAN PASS済み、CODE REVIEW待ち）** — `PublishCapability`のみを受け、current input/actor/ACL/FileScope/source/document/mappingとexact leaseを再確認する。既存bounded row-set verifierで実DB rowを同一10秒上限transaction内に再検算し、summaryもcapabilityと照合した後、fresh DB expiry判定とDB側expiry CAS条件を通してrun/jobをatomic publishする。W3D-POS/NEG-01..11とW3D-RACE-12/13を含む実MySQL試験でrow改ざん後のpublish拒否、parallel publish、renew/takeover/abort両順序、expiry、撤権、全rollback、旧expiry経過後のstrict ACK-loss read-only回復、candidate visibilityを確認する。PLAN PASS後のコードレビュー・実行証拠は別gateである。V185/migration、API/UI、domain applyは対象外。
+4. **W3D atomic publish + candidate visibility（PLAN PASS済み、CODE REVIEW待ち）** — `PublishCapability`のみを受け、current input/actor/ACL/FileScope/source/document/mappingとexact leaseを再確認する。既存bounded row-set verifierで実DB rowを同一10秒上限transaction内に再検算し、summaryもcapabilityと照合した後、fresh DB expiry判定とDB側expiry CAS条件を通してrun/jobをatomic publishする。W3D-POS/NEG-01..11とW3D-RACE-12/13を含む実MySQL試験でrow改ざん後のpublish拒否、parallel publish、renew/takeover/abort両順序、expiry、権限取消し、全rollback、旧expiry経過後のstrict ACK-loss read-only回復、candidate visibilityを確認する。PLAN PASS後のコードレビュー・実行証拠は別gateである。V185/migration、API/UI、domain applyは対象外。
 5. **Review freeze** — 各waveの対象SHA、H2/MySQL evidence、zero skip、schema audit、未完了境界をAstra CODE reviewへ渡す。合格はNF-06全体、A1/B1/B2/M、real source、production enablementの完了を意味しない。
 
 ### W3D 実装進捗（2026-11-04）

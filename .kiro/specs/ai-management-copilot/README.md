@@ -17,7 +17,7 @@
 
 | 用途 | 正本ファイル | 中央 roadmap からの参照 |
 |---|---|---|
-| 実装・開工（F1〜M） | [start-conversations.md](start-conversations.md) | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 は本書へ委譲 |
+| 実装・着手（F1〜M） | [start-conversations.md](start-conversations.md) | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 は本書へ委譲 |
 | 独立 Review（Plan / Task / 最終） | [review-conversations.md](review-conversations.md) | `2026-08-27-post-acceptance-review-conversations.md` §R-NF08 は本書へ委譲 |
 
 **SNF01〜10 を一括 Review する場合**: 各 NF の中央 §R-NF0X は入口のみ。NF-08 の詳細観点・task 別 Review・モデル切替契約は **本 spec の `review-conversations.md` を正**とする。横断 Review AI は本 README と `review-ledger.md` の completion matrix を必ず読む。
@@ -30,7 +30,7 @@
 | [design.md](design.md) | 固定 pipeline、catalog、scope、provider 境界 |
 | [tasks.md](tasks.md) | T000 / F1 / F2 / A1 / B1 / B2 / M |
 | [review-ledger.md](review-ledger.md) | gate 表、task 証跡、Review 判定 |
-| [start-conversations.md](start-conversations.md) | 開工対話集（モデル未決定・役割分離を明記） |
+| [start-conversations.md](start-conversations.md) | 着手対話集（モデル未決定・役割分離を明記） |
 | [review-conversations.md](review-conversations.md) | 独立 Review 対話集 |
 | [external-send-approval-gate.md](external-send-approval-gate.md) | 外部送信承認ゲート（承認設定一覧、承認digest、本番リリース前の署名項目、有効化・停止・失効時の運用、最終gate、監査、費用上限） |
 

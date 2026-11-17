@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** T055定向テスト: 注文取消・条件差分の承認adapter（L1〜L2）。 */
+/** T055対象限定テスト: 注文取消・条件差分の承認adapter（L1〜L2）。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class SalesOrderApprovalAdapterTest {

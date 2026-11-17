@@ -161,7 +161,7 @@ class ReportScheduleClaimFenceMySqlTest {
      * <p>{@code performance_schema.data_locks}/{@code data_lock_waits} はInnoDBのlock systemを照会のたびに走査する。
      * {@code information_schema.innodb_trx} はInnoDBの {@code trx_i_s} cacheから返され、cacheは「最後の読取から
      * 0.1秒を超えて経過した」場合にだけ再取得されるため、20ms間隔のpollingでは最初の読取時点のsnapshotが固定され、
-     * その後に発生したLOCK WAITを観測できない。93c11457の定向MySQL実行で本testが失敗した原因であり、使わない。
+     * その後に発生したLOCK WAITを観測できない。93c11457の対象限定のMySQL実行で本testが失敗した原因であり、使わない。
      *
      * <p>{@code LOCK_DATA}はInnoDBが対象pageをlatch待ちなしで参照できた場合だけ鍵値を返し、待機中でもNULLになり得るため
      * （{@link InnoDbRecordLockWaits}）、ここでは結合・絞込みに使わない。対象行の特定は

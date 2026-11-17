@@ -63,11 +63,11 @@ class DashboardServiceImplTest {
     @Mock
     private com.ses.mapper.AcceptanceMapper acceptanceMapper;
 
-    // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
+    // 共通集計基準サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
     @org.mockito.Spy
     private MonthlyRevenueCalcServiceImpl monthlyRevenueCalcService = new MonthlyRevenueCalcServiceImpl();
 
-    // 稼働率の共通口径サービス(将来稼働率予測と同一実装)
+    // 稼働率の共通集計基準サービス(将来稼働率予測と同一実装)
     @org.mockito.Spy
     private UtilizationCalcServiceImpl utilizationCalcService = new UtilizationCalcServiceImpl();
 
@@ -308,7 +308,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_WithActuals() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        // 共通口径は契約単位フォールバック: 実績は該当契約に紐づく必要があるため、稼動契約を用意する
+        // 共通の集計基準は契約単位フォールバック: 実績は該当契約に紐づく必要があるため、稼動契約を用意する
         java.time.YearMonth actualMonth = java.time.YearMonth.now().minusMonths(5);
         Contract c1 = new Contract();
         c1.setId(1L);
@@ -417,7 +417,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_トレンド計算() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        // 当月・前月ともに実績が該当契約に紐づく前提(共通口径は契約単位)
+        // 当月・前月ともに実績が該当契約に紐づく前提(共通の集計基準は契約単位)
         Contract c1 = new Contract();
         c1.setId(1L);
         c1.setStatus("稼動中");

@@ -91,7 +91,7 @@ public interface BpAvailabilityIngestionMapper extends BaseMapper<BpAvailability
                               @Param("message") String message);
 
     /**
-     * 孤児ファイル清理用：却下以外の論理削除されていないジョブの stored_file_name を取得する。
+     * 孤児ファイル清掃用：却下以外の論理削除されていないジョブの stored_file_name を取得する。
      */
     @Select("SELECT stored_file_name FROM t_bp_availability_ingestion " +
             "WHERE deleted_flag = 0 AND status != '\u5374\u4e0b' AND stored_file_name IS NOT NULL")

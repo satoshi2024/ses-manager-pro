@@ -96,7 +96,7 @@ public final class PrivacyDsarViews {
      * @param previewReady          草案を作る前提（D-01・D-06、package の最長保存期間、D-06 の不変）が揃っているか
      * @param packageRuleConfigured D-06 の package 最長保存期間（{@code privacy.dsar.package-max-age}）が設定されているか
      * @param decisionChanged       本人確認で適用した D-06 が現在の D-06 と違うか（delta review D-4）
-     * @param hold                  本人の保全 hold の状態（読取りの表示だけ。主控決定 A2a P3-9）
+     * @param hold                  本人の保全 hold の状態（読取りの表示だけ。統括の決定 A2a P3-9）
      * @param currentPackage        最新の package（無ければ null）
      * @param preparedByMe          草案の作成者が操作者自身か（自分の草案は承認できない）
      * @param approvedByMe          承認者が操作者自身か

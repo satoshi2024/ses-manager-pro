@@ -14,7 +14,7 @@ public record MemberEvidence(
             throw new CorruptedEvidenceException("未対応のプロトコルバージョンです: " + v);
         }
         if (carrierId <= 0) {
-            throw new CorruptedEvidenceException("載体キューIDが正の整数ではありません: " + carrierId);
+            throw new CorruptedEvidenceException("代表行のキューIDが正の整数ではありません: " + carrierId);
         }
         if (ticket == null || ticket.isBlank()) {
             throw new CorruptedEvidenceException("決裁チケット番号が空です");

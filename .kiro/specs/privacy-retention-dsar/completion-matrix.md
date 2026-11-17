@@ -33,7 +33,7 @@
 
 ### 1. 直前固定検証実績（c8b78dc3 の歴史的証拠）
 本ラウンドにおいては新規のテスト実行は行っていない（NO NEW TESTS RUN IN THIS ROUND）。以下の実績は直前固定コミット `c8b78dc3` において完了・記録された歴史的証拠であり、全体の COMPLETE 状態を不当に引き上げるものではない。
-* **只読Policy照会スライス定向テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
+* **読取り専用Policy照会スライスの対象限定テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
   * 実行コマンド: `mvn test -Dtest=PolicyReadonlyQueryServiceTest,ApprovalEnvelopeVerifierTest,PrivacyFoundationIsolationTest`
   * 結果: **3クラス / 42テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
   * 内訳:
@@ -44,7 +44,7 @@
   * 実行コマンド: `mvn test` (Fast H2/Unit)
   * 結果: **697クラス / 4,292テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
 
-### 2. 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
+### 2. 履歴スキャン統計の分離と将来リリースの完了判定ゲート規約
 過去のインベントリスキャン統計は計測時点のコミットSHAが異なっており、直前基準（`9024f7b2` / `b2886c47`）や本フェーズ基準（`aad2afee`）の直接スキャン結果と混同してはならない。
 * **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
   * 116 migration / 180 table / 4,279 CREATE column / 153 ALTER column / 176 entity / 424 provider候補。
@@ -52,9 +52,9 @@
 * **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
   * 183 SQL / 254 table / 244 entity / 708 provider候補。
   * プライバシーカタログ未分類 74、インベントリ欠落 1,082 列、プロバイダー参照欠落 285、エンティティ未マップ 68 で `BLOCKED`。
-* **将来リリースの閉環ゲート規約**:
+* **将来リリースの完了判定ゲート規約**:
   * 上記の統計はいずれも本設計の基準コミットの直接再走査結果ではない。
-  * Phase 4 実装時および将来の本番公開（Production Enablement）時には、リリース対象コミット SHA に対するインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定することを必須ゲートとする。
+  * Phase 4 実装時および将来の本番公開（Production Enablement）時には、リリース対象コミット SHA に対するインベントリ・カバレッジの網羅確認スキャンを再実行し、未分類 0・欠落 0 の証拠を固定することを必須ゲートとする。
 
 ### 3. 既存合成機能の実在状況と歴史的固定検証
 既存の Journal、Hold/Fence、署名検証/SoD、Recovery、Preview は既に合成隔離層として部分実装・検証が存在しており、未実装または白紙として扱ってはならない。
@@ -83,7 +83,7 @@
 ### 6. 純粋Policy検証カーネル実装（Batch 2 実装完了・CODE REVIEW PENDING。2026-11-14 時点の独立CODE verdictは UNKNOWN、C-10）
 詳細設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) を参照。
 * **計画審査状況**: `pure-policy-verification-kernel-plan.md` は Astra より限定 PLAN PASS を受理（コミット `93b40985`）。
-* **抽出実装（PurePolicyVerificationKernel）**: 分段階ヘルパー群（スキーマ検証、Anchor ID比対、Scope照合、時間窓検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）を package-private クラスとして実装。
+* **抽出実装（PurePolicyVerificationKernel）**: 分段階ヘルパー群（スキーマ検証、Anchor ID照合、Scope照合、有効期間の検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）を package-private クラスとして実装。
 * **オーケストレーション維持**: ラッパー（`ApprovalEnvelopeVerifier`）が評価順序（schema → anchor → scope → time → revocation → signature）を厳格にオーケストレーション。Policy 完備検証後に初めて Case を検証し、先行バッチ照会は行わない。
 * **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
 * **単体テスト拡充**: `PurePolicyVerificationKernelTest` を新規追加し純粋ヘルパーの各境界値を単体網羅。`ApprovalEnvelopeVerifierTest` に計画受入テスト 7 項目を追加。

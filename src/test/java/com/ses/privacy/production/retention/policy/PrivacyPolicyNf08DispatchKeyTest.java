@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 /**
- * NF07-NF08-LINK の key（RB-NF08-LINK review P3-2、主控決定）: NF08 の外部送信 policy の data element を本番 catalog（V196）にある
+ * NF07-NF08-LINK の key（RB-NF08-LINK review P3-2、統括の決定）: NF08 の外部送信 policy の data element を本番 catalog（V196）にある
  * {@code AI_EXTERNAL_PROVIDER_COPY} にしたことで、NF07-REG がその key の policy を登録・有効化でき、LINK の送信判定が
  * {@code PERMITTED} になることを H2 上で確かめる（catalog に無い {@code AI_PROMPT_LOG} は REG が登録を拒否する）。
  *

@@ -257,8 +257,8 @@ class ImportValidationResultServiceTest {
     }
 
     /**
-     * b-14（W3-05 review P3-1）: 1page目をflushした後に撤権されると応答は途中で切れる。page境界で切れたCSVは完全に
-     * 見えるため、最終行（#END）を書かないことで欠落を発見できるようにする（以前の試験は1page目の前に撤権していた）。
+     * b-14（W3-05 review P3-1）: 1page目をflushした後に権限が取り消されると応答は途中で切れる。page境界で切れたCSVは完全に
+     * 見えるため、最終行（#END）を書かないことで欠落を発見できるようにする（以前の試験は1page目の前に権限を取り消していた）。
      */
     @Test
     void errorExportCutAfterTheFirstFlushedPageHasNoTrailer() throws Exception {

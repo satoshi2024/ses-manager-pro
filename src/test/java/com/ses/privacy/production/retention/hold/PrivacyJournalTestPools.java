@@ -23,7 +23,7 @@ public final class PrivacyJournalTestPools {
     }
 
     /**
-     * 本番と同じ設定のうち session time zone だけを {@code zone} に変えた pool（時区検査の不適合を明示的に作る。
+     * 本番と同じ設定のうち session time zone だけを {@code zone} に変えた pool（タイムゾーン検査の不適合を明示的に作る。
      * container の既定 time_zone に依存しない。Review P3-6）。
      */
     public static HikariDataSource poolWithSessionTimeZone(String jdbcUrl, String username, String password,

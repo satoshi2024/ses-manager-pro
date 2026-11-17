@@ -1427,6 +1427,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
+        // 種別ごとの規則（ここと呼出し先の private method、FileScopeValidationService）へ SKILL_SHEET を加えるときは、
+        // NF01 二者確認の可視性（DocumentEvidenceEligibility#visibleEvidenceCandidate。ENGINEER link の data scope だけを見る）も
+        // 同じ規則へ合わせ直す。DocumentEvidenceEligibilityTest が source を読んで SKILL_SHEET が無いことを固定している（RB-NF01 D-P3-1）。
         boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();
         if (isHr) {
             if (Set.of("ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE").contains(doc.getDocumentType())) {

@@ -33,7 +33,7 @@ public final class AiExternalSendPrivacyPolicyCheck {
     /**
      * NF07 policy key の data element。本番の data element catalog（V196）にある、Gemini への送信で生じる外部 provider 側の写し
      * （{@code AI_PAYLOAD}・storage {@code gemini-adapter.request}・{@code pii-inventory.md#3}）。外部送信 policy は「送信して
-     * provider に写しを持たせる」ことを管理するため、この element に束縛する（RB-NF08-LINK review P3-2、主控決定。DDL なし）。
+     * provider に写しを持たせる」ことを管理するため、この element に束縛する（RB-NF08-LINK review P3-2、統括の決定。DDL なし）。
      * Privacy Owner がこの束縛を確認する（未取得）。
      */
     public static final String DATA_ELEMENT_ID = "AI_EXTERNAL_PROVIDER_COPY";

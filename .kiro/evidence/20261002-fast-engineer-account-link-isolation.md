@@ -36,4 +36,4 @@ Mavenの実行ログとSurefire XML/TXTは作業tree内のローカル `verifica
 
 ## 残る範囲
 
-full fastを再実行していないため、他のテストクラスが同じ共有H2で工程師/アカウントlinkを作成し、後続contextで同種のID再利用を起こすかは未検証である。今回確認できた直近producerと影響対象は隔離したが、全suiteでのorder-independentなfixture分離は未証明である。
+full fastを再実行していないため、他のテストクラスが同じ共有H2で要員/アカウントlinkを作成し、後続contextで同種のID再利用を起こすかは未検証である。今回確認できた直近producerと影響対象は隔離したが、全suiteでのorder-independentなfixture分離は未証明である。

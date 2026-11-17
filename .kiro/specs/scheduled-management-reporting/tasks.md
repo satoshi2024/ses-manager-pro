@@ -4,7 +4,7 @@
 
 - [x] T0: 専用 worktree、branch、base、status、remote を検証する。
   - Objective: 通常 checkout を変更しない開始証拠を残す。
-  - Evidence: `README.md` の開工判定。通常 checkout は `main`、専用 branch は `codex/scheduled-management-reporting`。
+  - Evidence: `README.md` の着手判定。通常 checkout は `main`、専用 branch は `codex/scheduled-management-reporting`。
   - Demo: `git worktree list`、`git status --short --branch`、`git remote -v`。
 - [x] T1: NF-10/DG-10、platform invariants、既存正本 service/DTO/API/UI/export、DocumentService、outbox、backup/recovery を読了し inventory を作成する。
   - Objective: 集計式を再実装せず、正本と制約を対応付ける。

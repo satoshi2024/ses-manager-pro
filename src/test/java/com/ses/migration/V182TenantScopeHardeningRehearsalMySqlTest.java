@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * V182テナント・法人スコープ固定および修復演練の完全使い捨て実MySQL 8検証テスト。
+ * V182テナント・法人スコープ固定および修復リハーサルの完全使い捨て実MySQL 8検証テスト。
  *
  * <p>契約書: .kiro/specs/asset-account-license-lifecycle/v182-rehearsal-contract.md
  * 規約:
@@ -152,7 +152,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         try (Connection conn = createConnection(dbName); Statement stmt = conn.createStatement()) {
             assertV182HistorySuccess(stmt);
 
-            // 4.1 t_digital_invoice の回填と隔離
+            // 4.1 t_digital_invoice のバックフィルと隔離
             assertDigitalInvoiceScope(stmt, fixture.invSingleOkId, "tenant-c1", 101L);
             assertDigitalInvoiceScope(stmt, fixture.invMultiSameOkId, "tenant-same", 202L);
             assertDigitalInvoiceScope(stmt, fixture.invConflictId, null, null);
@@ -170,7 +170,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertEquals(0L, scalar(stmt, "SELECT COUNT(*) FROM t_nf09_scope_repair_queue "
                     + "WHERE entity_type='DIGITAL_INVOICE_EVENT' AND entity_id=" + fixture.evtParentOkId));
 
-            // 4.3 t_peppol_participant の回填とコールバック隔離
+            // 4.3 t_peppol_participant のバックフィルとコールバック隔離
             assertPeppolScope(stmt, fixture.pepCustomerOkId, "tenant-c1", 101L);
             assertPeppolScope(stmt, fixture.pepOtherUnresolvedId, null, null);
             assertQueueRow(stmt, "PEPPOL_PARTICIPANT", fixture.pepOtherUnresolvedId, "SCOPE_UNRESOLVED");
@@ -192,7 +192,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertNormalizedActorPair(stmt, "t_digital_invoice", fixture.invUnresolvedId);
             assertNormalizedActorPair(stmt, "t_digital_invoice_event", fixture.evtParentUnresolvedId);
 
-            // 生成列callback_active_slotの検証（直接更新せず生成結果をクエリ断言）
+            // 生成列callback_active_slotの検証（直接更新せず生成結果をクエリで検証）
             assertNull(queryCallbackActiveSlot(stmt, fixture.pepConflict1Id),
                     "CONFLICT_REPAIR状態ではcallback_active_slotはNULL");
             assertNull(queryCallbackActiveSlot(stmt, fixture.pepConflict2Id),
@@ -233,7 +233,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='184' AND success=1"));
             assertEquals(0L, scalar(stmt,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='185'"),
-                    "NF10専用のV185は本演練に含まれない");
+                    "NF10専用のV185は本リハーサルに含まれない");
 
             // V182で作成されたキュー表が後続で破損していないことを確認
             assertEquals(1L, scalar(stmt,
@@ -243,7 +243,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     }
 
     // =========================================================================
-    // 第6節: キュー修復演練 (TC-REP-01 〜 TC-REP-06)
+    // 第6節: キュー修復リハーサル (TC-REP-01 〜 TC-REP-06)
     // =========================================================================
 
     @Test
@@ -255,7 +255,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         long humanUserId = 1001L;
 
         try (Connection conn = createConnection(dbName)) {
-            // TC-REP-01: 正常系・孤立インボイスの同一Tx修復とCAS結案
+            // TC-REP-01: 正常系・孤立インボイスの同一Tx修復とCASによる完了
             long invoiceId = insertUnresolvedInvoice(conn, "msg-rep-01");
             long queueId = insertQueueRow(conn, "DIGITAL_INVOICE", invoiceId, "SCOPE_UNRESOLVED");
 
@@ -301,7 +301,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 s.executeUpdate("UPDATE m_customer SET deleted_flag=0 WHERE id=" + custB);
             }
 
-            // 負例4: 残留重複の拒否 (両方をVERIFIEDにしようとする不正操作の拒否、MySQLエラーコード1062を明示核対)
+            // 負例4: 残留重複の拒否 (両方をVERIFIEDにしようとする不正操作の拒否、MySQLエラーコード1062を明示的に照合)
             SQLException dupEx = assertThrows(SQLException.class, () -> attemptIllegalDuplicateActivation(
                     conn, pep1, pep2, "tenant-pep-rep", 601L));
             assertEquals(1062, dupEx.getErrorCode(), "アクティブコールバック重複時は明確にMySQLエラーコード1062であること");
@@ -315,11 +315,11 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertFalse(pepCasFailed, "キュー版数不一致時はCAS失敗");
             assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
 
-            // 正当な修復結案 (正当な所有者・スコープ・版数で実行)
+            // 正当な修復の完了 (正当な所有者・スコープ・版数で実行)
             boolean rep02Ok = repairPeppolConflictInTransaction(
                     conn, pep1, pep2, "tenant-pep-rep", 601L,
                     pepQueue1, 0, pepQueue2, 0, humanUserId, "TC-REP-02 deduplicated");
-            assertTrue(rep02Ok, "TC-REP-02 重複Peppolの解決・結案成功");
+            assertTrue(rep02Ok, "TC-REP-02 重複Peppolの解決・完了の成功");
 
             try (Statement s = conn.createStatement()) {
                 assertEquals(1, queryCallbackActiveSlot(s, pep1),
@@ -327,13 +327,13 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 assertNull(queryCallbackActiveSlot(s, pep2),
                         "無効化行はDUPLICATE_DEPRECATEDのため生成列callback_active_slotはNULL");
 
-                // 2件目を再度VERIFIEDに更新しようとすると一意制約uk_peppol_callback_activeに違反する (1062核対)
+                // 2件目を再度VERIFIEDに更新しようとすると一意制約uk_peppol_callback_activeに違反する (1062を照合)
                 assertMysqlFailure(() -> s.executeUpdate(
                         "UPDATE t_peppol_participant SET status='VERIFIED' WHERE id=" + pep2),
                         1062, "23000", "同一アクティブコールバックの複数VERIFIEDは一意制約違反");
             }
 
-            // TC-REP-03: 負向系・他テナント担当者による越境修復試行の拒否
+            // TC-REP-03: 異常系・他テナント担当者による越境修復試行の拒否
             long invoiceCross = insertUnresolvedInvoice(conn, "msg-rep-03");
             long queueCross = insertQueueRow(conn, "DIGITAL_INVOICE", invoiceCross, "SCOPE_UNRESOLVED");
             assertThrows(SecurityException.class, () -> repairInvoiceInTransaction(
@@ -341,7 +341,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     queueCross, 0, humanUserId, "Cross tenant", "tenant-b_unauthorized"));
             assertEquals("PENDING", queryQueueStatus(conn, queueCross), "拒否されたキュー行はPENDINGを維持");
 
-            // TC-REP-04: 負向系・未解決スコープ(NULL)のまま結案試行を拒否
+            // TC-REP-04: 異常系・未解決スコープ(NULL)のまま完了の試行を拒否
             long invoiceNullScope = insertUnresolvedInvoice(conn, "msg-rep-04");
             long queueNullScope = insertQueueRow(conn, "DIGITAL_INVOICE", invoiceNullScope, "SCOPE_UNRESOLVED");
             assertThrows(IllegalArgumentException.class, () -> repairInvoiceInTransaction(
@@ -349,7 +349,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     queueNullScope, 0, humanUserId, "Null scope", null));
             assertEquals("PENDING", queryQueueStatus(conn, queueNullScope));
 
-            // TC-REP-05: 負向系・キューCAS不一致時の業務テーブル完全ロールバック
+            // TC-REP-05: 異常系・キューCAS不一致時の業務テーブル完全ロールバック
             long invoiceCasFail = insertUnresolvedInvoice(conn, "msg-rep-05");
             long queueCasFail = insertQueueRow(conn, "DIGITAL_INVOICE", invoiceCasFail, "SCOPE_UNRESOLVED");
             // expectedQueueVersionに誤った999を指定
@@ -514,7 +514,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                         + diagnostics);
             }
 
-            // 4. ロック競合の実証を確認した後、第1トランザクションがキューを結案しコミット (ロック解放)
+            // 4. ロック競合の実証を確認した後、第1トランザクションがキューを完了にしコミット (ロック解放)
             int tx1QueueUpdated;
             try (PreparedStatement ps = conn1.prepareStatement(
                     "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
@@ -525,7 +525,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 ps.setLong(3, concurrentQueueId);
                 tx1QueueUpdated = ps.executeUpdate();
             }
-            assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー結案成功");
+            assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー完了の成功");
             conn1.commit();
             tx1Committed = true;
 
@@ -534,7 +534,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertEquals(RepairOutcome.CAS_CONFLICT, result2,
                     "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北(UPDATE 0行)すること");
 
-            // 6. DB内の確定状態を厳格に核対: 勝者の反映、および敗者更新の完全ゼロ残存
+            // 6. DB内の確定状態を厳密に照合: 勝者の反映、および敗者更新の完全ゼロ残存
             try (Connection verifyConn = createConnection(dbName); Statement s = verifyConn.createStatement()) {
                 assertEquals("tenant-winner-tx1", queryInvoiceTenant(verifyConn, concurrentInvoiceId));
                 assertEquals(901L, queryInvoiceLegalEntity(verifyConn, concurrentInvoiceId));
@@ -612,7 +612,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     }
 
     // =========================================================================
-    // 第5節: 失敗時の証拠保全演練 (TC-REP-07)
+    // 第5節: 失敗時の証拠保全リハーサル (TC-REP-07)
     // =========================================================================
 
     @Test
@@ -624,7 +624,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         assertEquals(EXPECTED_V182_SHA256, actualHash,
                 "本番V182スクリプトのSHA-256が固定値と一致し改変されていないこと");
 
-        // 1. 独立した証拠退避ディレクトリを事前作成 (断言失敗時も取得済み現場を実ディスクに保持可能とする)
+        // 1. 独立した証拠退避ディレクトリを事前作成 (検証失敗時も取得済み現場を実ディスクに保持可能とする)
         Path evidenceDir = Path.of("target/v182-rehearsal-evidence/run-"
                 + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8));
         Files.createDirectories(evidenceDir);
@@ -659,17 +659,17 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
         List<ILoggingEvent> capturedLogEvents = new ArrayList<>(logAppender.list);
 
-        // 3. 失敗検知後、まずリアルログ、元例外、取得可能なDB証拠を退避 (断言より先行実行)
+        // 3. 失敗検知後、まずリアルログ、元例外、取得可能なDB証拠を退避 (検証より先に実行)
         List<String> collectionWarnings = new ArrayList<>();
 
-        // (a) 実Flyway実行ログの落盤 (手動メタデータサマリで冒称しない)
+        // (a) 実Flyway実行ログの保存 (手動メタデータサマリで詐称しない)
         try {
             dumpCapturedFlywayLogs(evidenceDir.resolve("flyway_execution.log"), capturedLogEvents);
         } catch (Throwable t) {
             collectionWarnings.add("flyway_execution.log dump failed: " + t.getMessage());
         }
 
-        // (b) 取得可能なDB証拠の落盤 (一部テーブル不存在や早期失敗時も他の証拠収集を継続)
+        // (b) 取得可能なDB証拠の保存 (一部テーブル不存在や早期失敗時も他の証拠収集を継続)
         try (Connection conn = createConnection(dbName)) {
             dumpHistoryToDisk(conn, evidenceDir.resolve("flyway_schema_history.csv"), collectionWarnings);
             dumpDdlToDisk(conn, evidenceDir.resolve("tables_ddl.sql"), collectionWarnings);
@@ -679,7 +679,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             collectionWarnings.add("Database connection failed during evidence collection: " + t.getMessage());
         }
 
-        // (c) 診断情報・例外原因チェーン・AI-1帰属通知・メタデータサマリの落盤
+        // (c) 診断情報・例外原因チェーン・AI-1帰属通知・メタデータサマリの保存
         try {
             dumpDiagnosticsToDisk(evidenceDir.resolve("execution_diagnostics.txt"),
                     caughtMigrationError, collectionWarnings);
@@ -701,7 +701,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         assertTrue(collectionWarnings.isEmpty(),
                 "証拠収集プロセスが例外なく完了していること (収集異常: " + collectionWarnings + ")");
 
-        // 5. 証拠落盤完了後に、マイグレーション失敗の型・エラーコード・制約名・DB状態・実ログ取得を検証
+        // 5. 証拠保存完了後に、マイグレーション失敗の型・エラーコード・制約名・DB状態・実ログ取得を検証
         assertFalse(capturedLogEvents.isEmpty(),
                 "実際のFlywayログイベントが1件以上取得されていること");
 
@@ -730,7 +730,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     "障害注入の前置DDL(ALTER TABLE)がMySQLの暗黙コミットにより永続化されていること");
         }
 
-        // 重要注釈: 本演練はV182完了後の隔離故障注入による証拠保全の事前検証であり、
+        // 重要注釈: 本リハーサルはV182完了後の隔離故障注入による証拠保全の事前検証であり、
         // 本番環境における中途コミット破損状態からの部分マイグレーション回復やforward-fixを検証したと混称しない。
     }
 
@@ -968,7 +968,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 return false;
             }
 
-            // 2. キュー行のCAS結案
+            // 2. キュー行のCASによる完了
             int queueUpdated;
             try (PreparedStatement ps = conn.prepareStatement(
                     "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
@@ -1231,7 +1231,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             long humanUserId, String note) throws SQLException {
 
         if (tenantId == null || tenantId.isBlank() || legalEntityId == null) {
-            throw new IllegalArgumentException("Peppolスコープが未確定(NULL)のまま結案はできません");
+            throw new IllegalArgumentException("Peppolスコープが未確定(NULL)のまま完了にはできません");
         }
 
         // 真正なCustomer Ownership検証 (存在・非削除・スコープ一致)
@@ -1267,7 +1267,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 }
             }
 
-            // 両キュー行のexpected-version CAS結案
+            // 両キュー行のexpected-version CASによる完了
             int wUpdated;
             try (PreparedStatement ps = conn.prepareStatement(
                     "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
@@ -1490,7 +1490,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     }
 
     // =========================================================================
-    // 証拠ディスク落盤および検証ヘルパー (第5節)
+    // 証拠のディスク書き出しおよび検証ヘルパー (第5節)
     // =========================================================================
 
     private void dumpHistoryToDisk(Connection conn, Path targetFile, List<String> collectionWarnings) throws Exception {

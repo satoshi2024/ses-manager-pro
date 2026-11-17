@@ -31,8 +31,8 @@ P は本機能の依存先であり、第8回監査 A8 の恒久対応を兼ね�
   - **テスト要件**: 既存一致・大文字小文字/全半角ゆれ一致・未登録の自動作成。
   - **Demo**: 「react」「AWS」等で既存/新規どちらも `skill_id` が返る。
 
-- [ ] P3. 孤児清理の参照登録（A8-03）
-  - **Objective**: 取込原本が清理バッチで消えないようにする。
+- [ ] P3. 孤児清掃の参照登録（A8-03）
+  - **Objective**: 取込原本が清掃バッチで消えないようにする。
   - **実装ガイダンス**: design 2.3。最小=`FileCleanupServiceImpl.collectReferencedFileNames` に
     `resumeIngestionMapper.selectAllStoredFileNames()` を追加。望ましくは `FileReferenceProvider` 化。
   - **テスト要件**: 取込ジョブの `stored_file_name` が参照集合に含まれ削除対象外になる。
@@ -136,11 +136,11 @@ P は本機能の依存先であり、第8回監査 A8 の恒久対応を兼ね�
 ## M. 統合・仕上げ
 
 - [ ] M1. F 層ギャップメモの解消（A〜D で記録した共有ファイル不足を一括対応）。
-- [ ] M2. PII保持ポリシー（A8-05）：`app.resume.retention-days` 設定＋却下ジョブ自動パージを清理バッチへ。
+- [ ] M2. PII保持ポリシー（A8-05）：`app.resume.retention-days` 設定＋却下ジョブ自動パージを清掃バッチへ。
   - 2026-11-16 追記：原本の purge に合わせて文書台帳の副本（`RESUME_INGESTION`）の保存期限を当日にし、既存の
     処分経路（`DocumentRetentionJob` → 管理者の承認・執行）の対象にする（`ResumeIngestionLedgerRetentionService`、
     test `ResumeIngestionLedgerRetentionTest`）。開放前に Privacy owner・文書 owner の書面署名が必要（design §6、
-    deploy-runbook の V197 行）。Demo：期限切れの取込ジョブを清理した後、副本が CONFIRMED・保存期限＝当日になり、
+    deploy-runbook の V197 行）。Demo：期限切れの取込ジョブを消去した後、副本が CONFIRMED・保存期限＝当日になり、
     02:30 の job で廃棄申請（PENDING）が1件だけできること。legal hold 中の副本は変わらないこと。
 - [ ] M3. ファイルダウンロードのアクセス制御（A8-04）：取込原本・スキルシートのスコープ検証、`nosniff`。
 - [ ] M4. ドキュメント追随：CLAUDE.md の「主要モジュール一覧」に本機能とAI基盤の実状を追記
@@ -159,5 +159,5 @@ P は本機能の依存先であり、第8回監査 A8 の恒久対応を兼ね�
 - **品質**: 転記ミス減、スキルが `m_skill_tag` に正規化されて登録され、集計/マッチングの精度が上がる。
 - **一気通貫**: （D 実施時）候補者→要員化までスキルシート起点で完結。
 - **基盤の副次改善**: AI連携が設定駆動・サーバー側キー・タイムアウト付きになり（A8-01）、
-  偽AI機能の除去（A8-02）、ファイル清理の構造化（A8-03）、PIIアクセス制御（A8-04/05）が同時に片付く。
+  偽AI機能の除去（A8-02）、ファイル清掃の構造化（A8-03）、PIIアクセス制御（A8-04/05）が同時に片付く。
 </content>

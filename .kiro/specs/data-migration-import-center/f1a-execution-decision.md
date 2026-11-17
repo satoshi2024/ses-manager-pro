@@ -85,7 +85,7 @@ source/jobの各write transactionでもactor/source状態とversionを再確認�
 
 候補表: `t_import_source_system`, `t_import_mapping`, `t_import_job`, `t_import_validation_run`,
 `t_import_validation_row`, `t_import_identity_registry`。tenant複合FKまたは同等以上のDB制約を付け、
-source→job/mapping、job→run、run→rowの跨tenant参照をDBでも拒否する。詳細column/null/check/index表を
+source→job/mapping、job→run、run→rowのtenant横断参照をDBでも拒否する。詳細column/null/check/index表を
 実装担当が最初のDDL draftとして提出し、Astra確認前にschemaを完成扱いしない。
 
 許可範囲は`com.ses.importcenter/**`、対応test、専用schema fixture、追加migration、feature spec、

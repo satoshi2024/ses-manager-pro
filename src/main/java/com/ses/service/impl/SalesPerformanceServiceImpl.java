@@ -141,7 +141,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
                 activeContractCountMap.put(uid, activeContractCountMap.getOrDefault(uid, 0) + 1);
 
-                // 1契約分の金額決定は共通口径サービスへ委譲(確定実績優先、なければ契約単価)。
+                // 1契約分の金額決定は共通集計基準サービスへ委譲(確定実績優先、なければ契約単価)。
                 MonthlyRevenueCalcService.ContractAmount amount =
                         amountBatchMap.get(c.getId());
                 BigDecimal sales = amount.getSales();

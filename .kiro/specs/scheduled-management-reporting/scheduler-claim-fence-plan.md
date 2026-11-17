@@ -8,7 +8,7 @@
 - テストは統括（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの対象限定fast（9 class）は288/0/0/0、対象限定MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は統括のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 - 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。
 - 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。統括Runnerの対象限定実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は統括のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。2026-11-14追記: 統合候補に対するCIは、第1・2波の全batchを取り込んだ `8000d94e` で7 job（fast・MySQL shard 1〜3・backup integration・browser・performance）すべて通過した（run 43387006667、統括の記録）。手元での `verify-like-ci` 全体実行は本書の記録対象外。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
-- 2026-11-17追記: ON前のP2/P3（引き継ぎを含むretry上限、entityの書き戻し、tenant単位の隔離、metricの結果区分、時計の差の観測、alert rule草案）をRB-NF10で扱った（§15、§10.6）。MySQL testは主控Runnerの実行待ちである。
+- 2026-11-17追記: ON前のP2/P3（引き継ぎを含むretry上限、entityの書き戻し、tenant単位の隔離、metricの結果区分、時計の差の観測、alert rule草案）をRB-NF10で扱った（§15、§10.6）。MySQL testは統括のRunnerの実行待ちである。
 
 ## 1. 確認した欠陥と影響
 
@@ -375,16 +375,16 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
   - **2026-11-17改訂（RB-NF10、§15）**: 引き継ぎも連続失敗1回として数える。DDLは不要で、既存の `failure_count` を使う。
     - 期限切れleaseの引き継ぎclaimは、completionに至らなかった前の実行を失敗1回として、claimと同じUPDATEで `failure_count` を加算する（`ReportScheduleMapper.claimDue`。占有中の行だけに一致する条件で加算し、SET句の評価順に依存しない）。引き継いだ実行が成功すれば0へ戻り、失敗すればさらに1回加算される。
     - 引き継げば上限（12回）に達するleaseは引き継がず、同じsnapshot CASで停止する（`markTakeoverExhausted`）。停止の状態はfailure completionの上限到達と同じで（`enabled = 0`、`SCHEDULE_RETRY_EXHAUSTED`、retry予定は5分×12＝60分後、論理runを保持、lease/tokenをclear）、通知もERROR（`cause=STALE_LEASE`）＋ `RETRY_EXHAUSTED_DISABLED`。管理者の有効化で同一論理runから再開する。tokenをclearするため、期限後も動いていた旧workerのcompletionは0件になる。
-    - **停止の原因の見分け方**（RB-NF10 review P3-5）: 停止理由code `SCHEDULE_RETRY_EXHAUSTED` は管理者の再開条件（`updateEnabled` の0戻し）のため両方の停止で共通にし、引き継ぎによる停止だけ `last_error_message` を `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語のbundleに登録したkey）にする。生成失敗による停止は従来どおり失敗completionの安全な既定message。schedule一覧APIの `lastErrorMessage` とERRORログの `cause=STALE_LEASE` で区別できる。DDLは要らない。
+    - **停止の原因の見分け方**（RB-NF10 review P3-5）: 停止理由code `SCHEDULE_RETRY_EXHAUSTED` は管理者の再開条件（`updateEnabled` の0戻し）のため両方の停止で共通にし、`last_error_message` で区別する。引き継ぎによる停止は `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語のbundleに登録したkey）にする。生成失敗の completion は、加算後の回数が上限未満（再試行で続ける）なら `error.managementReport.scheduleGenerationFailed`、上限に達して同じ UPDATE で停止したなら `error.managementReport.scheduleStoppedByGenerationFailure`にする（2026-11-17、RB-HYG。停止したことを文言で明示するため2つに分けた（RB-HYG review P3-4。claim の CAS で加算後の回数は DB 値と一致する）。review RB-NF10 P3-D2 の前は `safeJobMessage` の既定分岐の日本語固定文言で、引き継ぎ停止の key と形式がそろわず意味も違っていた）。いずれも key を保存し、画面を作るときは `SES.i18n.t` で訳す。schedule一覧APIの `lastErrorMessage` とERRORログの `cause=STALE_LEASE` で区別できる。DDLは要らない。
       - 引き継ぎで回数だけが1増えた行（停止前）は、`last_error_code`・`last_error_message` が前回の値のまま残る（引き継ぎのclaimは回数以外の失敗の列を書かない）。一覧では「失敗回数は増えたが理由は前回のまま」に見える。引き継ぎの事実はWARN「期限切れprocessing leaseを引き継ぎました…連続失敗1回として数えました」と `STALE_LEASE_TAKEOVER` で確認する。
-    - 結果不明の停止は、行を読み直して**この試行が作った停止状態**を確かめた時だけ通知する。判定は、無効・停止理由code・lease無し・同じ論理run・この試行のretry時刻（秒精度）・この試行の加算後の回数の全一致で、retry時刻は試行ごとの現在時刻から決まるため他workerの停止と区別できる。読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN`／`CLAIM_UNCERTAIN` の監視（§10.6 A4）と§10.3 Q4に委ねる。
+    - 結果不明の停止は、行を読み直して**この試行が作った停止状態**を確かめた時だけ通知する。判定は、無効・停止理由code・lease無し・同じ論理run・この試行のretry時刻（秒精度）・この試行の加算後の回数の全一致で、retry時刻は試行ごとの現在時刻から決まるため、pollがShedLockの `lockAtMostFor`（10分）以内でnode間に直列の間は他workerの停止と区別できる。pollが10分を超えて他nodeのpollと重なると、同じ秒に同じsnapshotで同じ行を扱い、自分の停止SQLがcommitされずに例外となり他nodeがcommitした場合だけ一致し、重複して通知する（停止状態は正しく、重複するのはERRORとmetricの1回。review RB-NF10 P3-D1）。読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN`／`CLAIM_UNCERTAIN` の監視（§10.6 A4）と§10.3 Q4に委ねる。
       - `markFailure` が上限で結果不明: commitされていなければleaseが残り、期限後の引き継ぎが同じ失敗を数えて停止・通知する。lease期限は**読み直す直前の現在時刻**で判定し（RB-NF10 review P3-2。markFailureは接続・lock待ちの後で例外になり得るため、失敗検知時刻では期限切れ後の他workerの停止を見落とす）、期限を過ぎていれば判定しない。
       - 引き継ぎ停止（`markTakeoverExhausted`）が結果不明（RB-NF10 review P3-1）: 確定的なSQL失敗（commitされない）は読み直さない。それ以外は読み直し、commit済みなら通知する（行は無効になっているため、ここで通知しないと誰も通知しない）。commitされていなければ期限切れleaseのまま残り、次のpollの引き継ぎ停止が通知する。
   - **数え方の範囲**（RB-NF10 review P3-4）:
     - 回数は**同一論理runの中でだけ**累積する。success completionが `next_run_at` を進めて0へ戻し、失敗も引き継ぎも同じ論理runを続けるため、周期（月）を跨いで「遅い実行」が累積することはない。停止に至るのは、同じ論理runで成功できない試行が12回続いた場合だけである。
     - 単一instanceでは、実行中の処理を同じnodeが引き継ぐことはない（`@Scheduled` の同じtaskは重ならず、次のpollは今回の終了後になる）。引き継ぎが起きるのは、process停止・再起動の後と、多instanceで他nodeのpollがShedLockの `lockAtMostFor`（10分）後にstaleのleaseを見た場合である。
     - 変更前は、同じ状況（毎回completionに至らない試行）が無限の引き継ぎと重複実行になっていた。変更後は約6時間（lease 30分 × 残り回数）で停止し、`RETRY_EXHAUSTED_DISABLED` で通知される。
-    - 典型の長い実行（A が30分を超え、B が引き継いで1回数える）は、B が A の作った成功runを再利用してすぐ成功するため（§14.4）、回数は0へ戻る。
+    - 典型の長い実行（A が30分を超え、B が引き継いで1回数える）は、B が A の作った成功runを再利用してすぐ成功するため（§14.4）、回数は0へ戻る。これは B の開始時に A が生成を終えている場合で、A の生成途中に B が始まると B は重複 insert で失敗して回数が2になり、retry の成功で0へ戻る（review RB-NF10 c837e5d0 §2.4）。
   - 残る限界:
     - poison pillで止まるまでの時間は約 lease 30分 × 残り回数（初回からなら約6時間）である。
     - 同じ論理runで成功できない試行のたびに30分を超える場合（再利用できない長い実行が続く場合）は、正常な実行でも12回で停止する。事前には `LEASE_OVERRUN` で見える。
@@ -392,7 +392,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
     - 時刻・timezoneとの関係: tenant timezoneを先へ進める変更（例: UTC→Asia/Tokyo）をすると、実行中のleaseは直ちにstaleと判定されて引き継がれ、失敗1回として数えられる（§11 P2-3）。node間の時刻差sがあると、他nodeはs分だけ早くstaleと判定する（§11 P2-2）。
   - **Report Ownerの確認（未取得）**:
     - 「12回」の数え方が「同一論理runの中の、初回を含む連続失敗（completionに至らずlease期限を超えた試行を含む）12回」になった。P3-5の数え方の確認と合わせて確認する。
-    - **正常な実行が30分を超え得るなら、数え方の定義ではなくB-NF10-2（lease延長はしない）を見直す**（lease更新〔heartbeat〕またはより長いlease）。主控の判断（2026-11-17）で数え方の定義は現状のまま（「同一runが引き継がれた時だけ数える」等には変えない）とした。生成・配布の所要時間の見込みはReport Ownerが示す（未取得）。
+    - **正常な実行が30分を超え得るなら、数え方の定義ではなくB-NF10-2（lease延長はしない）を見直す**（lease更新〔heartbeat〕またはより長いlease）。統括の判断（2026-11-17）で数え方の定義は現状のまま（「同一runが引き継がれた時だけ数える」等には変えない）とした。生成・配布の所要時間の見込みはReport Ownerが示す（未取得）。
 
 ### 14.3 確定的claim SQL失敗（P3-3 / review P3-8）
 
@@ -464,7 +464,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 15. ON前のP2/P3（2026-11-17、RB-NF10）
 
-状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。messagesは第2回（下記）で1 key（4言語）を追加した。
+状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（統括のRunnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。messagesは第2回（下記）で1 key（4言語）を追加した。
 
 依拠: FINAL複審 §7 (b) b-19・§6.3 L-2、review `nf10-v185` P2-2・P2-3・P2-8、`w2-nf10-policy-30e058ce` P3-6・P3-9・P3-12。
 
@@ -478,13 +478,13 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | P2-3 timezone変更の方針 | 挙動不変・文書のみ | §11追記（Report Ownerが決める、未決） |
 | Report Owner署名・確定版の配布方針 | 人が行う（未取得） | `deploy-runbook.md` §1.7 のNF10の行と `feature-switches.md` 4.5 に列挙した |
 
-- 対象限定のtest（主控Runnerへ渡す一覧）:
+- 対象限定のtest（統括のRunnerへ渡す一覧）:
   - fast: `ManagementReportSchedulerTest`、`ReportScheduleMapperH2SqlTest`、`ReportScheduleApiBoundaryTest`、`ReportScheduleServiceImplTest`、`FeatureSwitchSchedulerGateTest`（NF10 OFFでmapperに触れないこと）、global guard `ScheduledMethodsHaveSchedulerLockTest`・`TestIsolationAuditTest`
   - MySQL: `ReportScheduleClaimFenceMySqlTest`（`scripts/test-suites/mysql-shard-1.txt`、既存classへのcase追加と期待値更新のためshard登録の変更なし）、`ReportScheduleDispatchPolicyMySqlTest`（`mysql-shard-2.txt`、変更なしだが引き継ぎの数え方の変更の影響を受ける）
 
 ### 15.1 独立レビュー（`4ffcfb72`、PASS 附条件）への対応（第2回、2026-11-17）
 
-主控の判断: 引き継ぎの数え方は現状のまま（「同一runが引き継がれた時だけ数える」には変えない）。clock skewのWARNのコード既定5秒は受け入れる。
+統括の判断: 引き継ぎの数え方は現状のまま（「同一runが引き継がれた時だけ数える」には変えない）。clock skewのWARNのコード既定5秒は受け入れる。
 
 | 指摘 | 処理 | 内容 |
 |---|---|---|

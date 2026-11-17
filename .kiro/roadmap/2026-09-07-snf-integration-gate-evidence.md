@@ -42,7 +42,7 @@ NF02/NF03/NF05/NF08/NF10 の変更 file pairwise intersection は全組合せで
 - `V150__service_request_atomic_sequence.sql` は1件だけ存在し、NF-02専用の `t_service_request_sequence` を作成する。
 - `V151__certification_continuity_group.sql` は1件だけ存在し、NF-03専用の `t_certification_continuity_group` と整合性制約を作成する。
 - V150 と V151 の順序は正しく、V1 は変更していない。既存 migration の書き換えもない。
-- V150/V151 の存在・一意性・内容・順序を `FlywayMigrationVersionResolutionTest` に統合断言し、同テストと `MySqlTestShardInventoryTest` は `2 / 0 / 0 / 0` で PASS。
+- V150/V151 の存在・一意性・内容・順序を `FlywayMigrationVersionResolutionTest` に統合して検証し、同テストと `MySqlTestShardInventoryTest` は `2 / 0 / 0 / 0` で PASS。
 - `schema-service-desk-h2.sql` と V150、`schema-certification-learning-skill-gap-h2.sql` と V151 は、それぞれ新規 table、unique/index、FK/check、default を同期している。
 - `@Tag("mysql")` の実ファイル 58 件と shard inventory 登録 58 件を比較し、missing 0 / duplicate 0 / extra 0。新規 NF02/NF03 smoke・concurrency test の登録漏れはない。
 
@@ -98,7 +98,7 @@ unit test、静的 probe、offline fallback は real Browser evidence の代替�
 |---|---|---|---|---|
 | NF-01 | 既存実装・既存証跡 PASS | 既存独立 Review PASS | 既存 COMPLETE 記録を維持 | COMPLETE（再昇格ではない） |
 | NF-02 | targeted PASS。全体 fast/MySQL は未PASS | PENDING | Owner/DG-02 未確定、未承認 | IMPLEMENTED / INDEPENDENT_REVIEW_PENDING |
-| NF-03 | targeted・V151/H2 断言 PASS | 独立再Review PENDING | NF-07等 release gate 未完 | IMPLEMENTED / INDEPENDENT_REVIEW_PENDING |
+| NF-03 | targeted・V151/H2 の検証 PASS | 独立再Review PENDING | NF-07等 release gate 未完 | IMPLEMENTED / INDEPENDENT_REVIEW_PENDING |
 | NF-04 | automated/static evidence は PASS | PENDING | Browser evidence 未取得 | IMPLEMENTED / BROWSER_BLOCKED / INDEPENDENT_REVIEW_PENDING |
 | NF-05 | targeted PASSだが統合 snapshot 回帰 OPEN（R1 時点） | PENDING | mock/test限定、production enablement不可 | IMPLEMENTATION_BLOCKED / PRODUCTION_BLOCKED |
 | NF-06 | 実装未着手 | N/A | CANDIDATE | DISCOVERY（未完） |

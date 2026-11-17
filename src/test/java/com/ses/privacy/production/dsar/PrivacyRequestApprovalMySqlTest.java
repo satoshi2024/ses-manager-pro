@@ -112,7 +112,7 @@ import static org.mockito.Mockito.mock;
  *       作り直しの CHECK・FK。</li>
  * </ul>
  * 開示 package の実体は既定では in-memory の {@link FileStorageService} に置く（file の quarantine → published は H2 の
- * {@code PrivacyExportPackageServiceTest} が実装で確かめる。孤児の削除と scan の失敗の用例だけ、一時 directory の実
+ * {@code PrivacyExportPackageServiceTest} が実装で確かめる。孤児の削除と scan の失敗のケースだけ、一時 directory の実
  * {@link FileStorageServiceImpl} を使う）。各 test は専用の tenant を使い、commit した行は class 専用の container DB に残る
  * （他の test の行は読まない）。
  */

@@ -43,7 +43,7 @@ Astraは2026-10-02、B0 `1443fb68943849a3260d7ebe005259f3eb609d60`上の凍結WI
 
 - 3 durable経路同時失敗・旧queue残存: 現在tab、他tab、同profile cold startで旧内容を表示/送信しない。通常GETでは解除されず、fresh reauthと明示復元の許可/拒否を別々に確認する。
 - offline DOM表示後の別tab logout、読取promiseをbarrierで止めた状態でlogout、遅延完了で再表示しない。
-- TTL満了後のwall clock回退、lease保持中の回退、疑義状態からrestart。期限切れqueueの送信0をserver時計でも検証する。
+- TTL満了後のwall clockの巻き戻り、lease保持中の巻き戻り、疑義状態からrestart。期限切れqueueの送信0をserver時計でも検証する。
 - v1→v2実IndexedDB upgradeで過大conflictが残らないこと。
 - CDP window.openはprimitiveを返す。queue全件空を仮定せず、対象request ID削除と既存conflict保持を別々に検査する。
 - lease旧ownerの遅延結果はconflict/errorまたは後継record改変を試みさせ、guard拒否の可視差を作る。HTTP barrier timeoutをassertしfinallyで解放する。重要なCDP変更命令は結果を確認し、evaluateのnullを成功扱いしない。

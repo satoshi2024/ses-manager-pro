@@ -1477,7 +1477,7 @@ async function runBatch02Suite() {
   });
 
   // MOD06-09
-  await recordCase('MOD06-09', 'N,B,E', 'MOD-06', 'TemplateRenderer 波括弧/未定義key/HTML転義/空宛先逐endpoint断言', async () => {
+  await recordCase('MOD06-09', 'N,B,E', 'MOD-06', 'TemplateRenderer 波括弧/未定義key/HTML転義/空宛先のendpoint別検証', async () => {
     const client = new HttpClient();
     await client.login('s300.sales01', 'Scale300!');
     const ts = Date.now();
@@ -1510,7 +1510,7 @@ async function runBatch02Suite() {
   });
 
   // MOD06-10
-  await recordCase('MOD06-10', 'E,D', 'MOD-06', 'SMTP/mock外部失敗注入、mail status/error落庫、孤児file 0', async () => {
+  await recordCase('MOD06-10', 'E,D', 'MOD-06', 'SMTP/mock外部失敗注入、mail status/errorのDB保存、孤児file 0', async () => {
     const deliveries = execSql(`SELECT id, recipient, status, error_message, created_at FROM t_mail_delivery ORDER BY id DESC LIMIT 3;`);
 
     return {

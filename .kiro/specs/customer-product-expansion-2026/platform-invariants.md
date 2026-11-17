@@ -304,7 +304,7 @@ S04〜S17の`design.md`は次の3節を持つ。既定解どおりなら「本�
 
 ### 表3: 状態機械 と 競合
 
-| 状態 | 許可遷移 | 遷移の防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 遷移の重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 
 ---

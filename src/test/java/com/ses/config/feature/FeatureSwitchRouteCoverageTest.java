@@ -130,7 +130,7 @@ class FeatureSwitchRouteCoverageTest {
             Map.entry("com.ses.service.job.DocumentRetentionJob",
                     "保存期限文書の廃棄候補の抽出は既存の経路で、NF07はhold gateの判定だけに使う（flagで止めると期限超過の保持になる。A1H-2 D3）"),
             Map.entry("com.ses.service.impl.ResumeRetentionCleanupServiceImpl",
-                    "取込原本・抽出本文の保持期限の清理は既存の経路で、NF07はhold gateの判定だけに使う（A1H-2 D4・D5）"),
+                    "取込原本・抽出本文の保持期限の清掃は既存の経路で、NF07はhold gateの判定だけに使う（A1H-2 D4・D5）"),
             Map.entry("com.ses.service.integrationhub.IntegrationHubRetentionPurgeScheduler",
                     "integration hubのrecord・nonceのpurgeはNF-05の経路で、NF07はrecordのkindのhold gateの判定だけに使う（A1H-2 D7・D8）"),
             // NF07-A2b: DSAR の開示 package（NF07 自身が作った一時 package）の期限超過・終了 case の削除

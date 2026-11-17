@@ -45,7 +45,7 @@ public class WorkRecordApiController {
     /**
      * 承認滞留の可視化（読み取り専用・トラックA3）。対象月の提出済（未承認）件数と滞留日数を返す。
      * 状態遷移は一切行わない。組織scopeは {@link WorkRecordService#pendingApprovalSummary} 内で
-     * 月次グリッドと同口径の SQL 条件により絞り込む（全件 monthlyGrid → filter → subList は使わない）。
+     * 月次グリッドと同じ集計基準の SQL 条件により絞り込む（全件 monthlyGrid → filter → subList は使わない）。
      * 滞留日数は t_work_record.updated_at（提出済へ遷移した際にDBのON UPDATE CURRENT_TIMESTAMPで
      * 自動更新される）を基準にする。提出済のレコードは編集不可のため、承認・差戻しされるまで
      * updated_at は提出時刻のまま変わらない。

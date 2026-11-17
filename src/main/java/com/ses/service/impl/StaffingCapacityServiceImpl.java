@@ -328,7 +328,7 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
     public UtilizationCalcService.UtilizationSnapshot utilization(YearMonth month, List<Engineer> engineers,
                                                                   Map<Long, List<Contract>> contractsByEngineer,
                                                                   boolean assumeRenew) {
-        // design §5.1: 稼働率の口径はUtilizationCalcServiceを唯一の正とする（dashboard KPIと同一値）
+        // design §5.1: 稼働率の集計基準はUtilizationCalcServiceを唯一の正とする（dashboard KPIと同一値）
         return utilizationCalcService.calc(month, engineers, contractsByEngineer, assumeRenew);
     }
 

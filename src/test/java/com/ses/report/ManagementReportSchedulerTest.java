@@ -267,8 +267,13 @@ class ManagementReportSchedulerTest {
 
         scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
+        // last_error_message は例外の message（"source unavailable"）ではなく、引き継ぎ停止と同じ形式の同梱bundleのkey
+        // （review RB-NF10 P3-D2。以前は既定分岐の日本語固定文言だった）。
         verify(mapper).markFailure(eq("default"), eq(5L), anyString(), any(), any(), eq(scheduledAt),
-                eq("SCHEDULE_GENERATION_FAILED"), anyString());
+                eq("SCHEDULE_GENERATION_FAILED"), eq(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY));
+        org.junit.jupiter.api.Assertions.assertEquals(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY,
+                com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED",
+                        ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY), "同梱bundleにあるkeyだけが通る");
         verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
         verifyNoInteractions(deliveryService);
     }
@@ -797,9 +802,13 @@ class ManagementReportSchedulerTest {
                 detachSchedulerLog(logs);
             }
             ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
-            // 停止判定はmarkFailureの同一UPDATEがDB値で行う。schedulerは通常の失敗分類を渡すだけ。
+            // 停止判定はmarkFailureの同一UPDATEがDB値で行う。schedulerは通常の失敗分類を渡し、messageは加算後の回数で
+            // 「再試行で続ける」と「停止した」を書き分ける（claimのCASで加算後の回数はDB値と一致する。RB-HYG review P3-4）。
+            String expectedMessage = failuresBefore + 1 >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES
+                    ? ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY
+                    : ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY;
             verify(mapper).markFailure(eq("default"), eq(5L), token.capture(), any(), any(), eq(SEPT),
-                    eq("SCHEDULE_GENERATION_FAILED"), anyString());
+                    eq("SCHEDULE_GENERATION_FAILED"), eq(expectedMessage));
             tokens.add(token.getValue());
             errors.addAll(messages(logs, Level.ERROR));
             if (failuresBefore == 10) {
@@ -810,6 +819,10 @@ class ManagementReportSchedulerTest {
         }
 
         assertThat(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES).isEqualTo(12);
+        assertThat(com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED",
+                ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY))
+                .as("停止の key も同梱bundleにあり allowlist を通る")
+                .isEqualTo(ManagementReportScheduler.GENERATION_STOPPED_MESSAGE_KEY);
         assertThat(events(registry, ReportScheduleMetrics.Event.RUN_FAILED)).isEqualTo(2.0);
         assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).isEqualTo(1.0);
         assertThat(errors).anyMatch(message -> message.contains("連続失敗が上限（12回）")
@@ -1010,8 +1023,9 @@ class ManagementReportSchedulerTest {
         verify(mapper).markTakeoverExhausted(eq("default"), eq(5L), eq(SEPT), isNull(), eq(STALE_CLAIMED_AT),
                 eq(SEPT), eq(STALE_TOKEN), eq(SEPT), eq(11), eq(SEPT), eq(FIXED_NOW.plusMinutes(60)),
                 eq(FIXED_NOW.minusMinutes(30)), eq(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY));
+        // 生成失敗の message も key になった（P3-D2）。両者は別の key で区別する。
         assertThat(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY)
-                .isNotEqualTo(com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED", null));
+                .isNotEqualTo(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY);
         verify(mapper, never()).selectForTenant(any(), any());
         verify(mapper, never()).claimDue(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
                 anyInt(), any(), anyString(), any(), any());

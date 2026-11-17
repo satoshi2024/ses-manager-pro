@@ -73,7 +73,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * A-NF08-1: 外部送信gateの敵対的テスト（mock/fake adapterのみ。ネットワークI/O・実provider・実secretなし）。
- * prompt injection、最小field、PII mask（最終gate）、外部送信拒否、承認digest、費用上限、監査の非PII性、log脱敏を確認する。
+ * prompt injection、最小field、PII mask（最終gate）、外部送信拒否、承認digest、費用上限、監査の非PII性、logの秘匿化を確認する。
  * 時計は固定（2026-11-13 10:00 JST）にし、JST日付の境界で結果が変わらないようにする。
  */
 class CopilotExternalSendGateAdversarialTest {

@@ -1,7 +1,7 @@
 # Source Matrix と法人別36協定 棚卸し（トラックB1 / T067）
 
 - 出所: `attendance-leave-overtime-compliance` task 0（T067）
-- 実行基線: `.kiro/audits/2026-08-01-attendance-parallel-track-plan.md` §4 トラックB1、§5 開始条件、§8.4 開工対話（同監査計画は現行ではsupersededの履歴資料）
+- 実行基線: `.kiro/audits/2026-08-01-attendance-parallel-track-plan.md` §4 トラックB1、§5 開始条件、§8.4 着手対話（同監査計画は現行ではsupersededの履歴資料）
 - 本書はproduction codeを1行も変更しない。成果物は本文書のみ。
 - 参照した確定文書: `requirements.md`、`design.md`、`overtime-rules.md`（いずれも実行基線 `5e29f39`）
 - **時間外の計算ルール自体（値・境界・優先順位）は `overtime-rules.md` で確定済みであり、本書では決め直さない。**

@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T076 F2: 需給集計（capacity aggregation）の定向test（L2〜L3）。
+ * T076 F2: 需給集計（capacity aggregation）の対象限定test（L2〜L3）。
  * plan/actual二重計上0・更新済契約の反映・退職の反映・休暇が稼働可能日数を減らすが契約FTEを変えない・
  * 稼働率がdashboard KPI（UtilizationCalcService）と一致することを検証する。
  */
@@ -121,7 +121,7 @@ class StaffingCapacityServiceTest {
     @Test
     void 更新済契約は終了日以降もactualとして供給される() {
         // renewalDecision は DTO に無い ALWAYS 列のため、無引数 updateWithBusinessRules では
-        // old から回填され上書きできない。単列更新 API を使う。
+        // old から補完され上書きできない。単列更新 API を使う。
         Contract contract = createContract(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 1, null);
         contractService.updateRenewalDecision(contract.getId(), "CONTINUE");
 
@@ -185,7 +185,7 @@ class StaffingCapacityServiceTest {
     }
 
     @Test
-    void 稼働率はdashboardKPIと同一口径になる() {
+    void 稼働率はdashboardKPIと同一の集計基準になる() {
         createContract(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 1, null);
         Engineer bench = new Engineer();
         bench.setId(engineerId + 1000000L);

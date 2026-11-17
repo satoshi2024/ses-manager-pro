@@ -4,7 +4,7 @@
 
 ## 判定の前提
 
-直近 Review（独立 Plan Review、Head `4e171f19`）: 総合 **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED**。F1 許可（開工対話）。
+直近 Review（独立 Plan Review、Head `4e171f19`）: 総合 **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED**。F1 許可（着手対話）。
 
 ## R1 Review（Task 0R）指摘との対応
 
@@ -71,7 +71,7 @@
 
 **Reviewed Head:** `4e171f196e861a3fd849db3aa9f98c1981a6d747`（remote と一致）
 
-**Verdict:** 総合 Review **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED** / F1 **許可**（開工対話で。本 Review 対話では実装しない）
+**Verdict:** 総合 Review **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED** / F1 **許可**（着手対話で。本 Review 対話では実装しない）
 
 **検証:** merge parents `2abd4efc` + `76e45340`、merge-base `76e45340`、`git diff --check origin/main...HEAD` = 0、`gh pr list` 空。
 
@@ -95,7 +95,7 @@
 
 ### Next wave
 
-- **F1 開始: YES**（開工対話）
+- **F1 開始: YES**（着手対話）
 - **PR: NOT CREATED**（M + Implementation Review PASS まで）
 
 ## 再Reviewの開始条件（Implementation）

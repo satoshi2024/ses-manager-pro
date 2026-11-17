@@ -21,7 +21,7 @@ SPEC DRAFT → NOT READY → READY → IN PROGRESS → REVIEWABLE → REVIEW
 - `CONDITIONAL PASS` は P0/P1=0 で、残件が外部環境だけに限定され、owner、期限、再実行手順、合格条件、本番 block が明記された場合だけ使う。
 - 最終 `PASS` は merge 済み head に対する独立 Review だけが付与できる。
 
-## 3. 開工前 Readiness
+## 3. 着手前 Readiness
 
 各 spec の最初の production 変更前に、実装 AI は次を埋める。
 

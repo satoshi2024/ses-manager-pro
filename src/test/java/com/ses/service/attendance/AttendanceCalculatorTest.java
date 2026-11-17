@@ -63,7 +63,7 @@ class AttendanceCalculatorTest {
     }
 
     @Test
-    void 跨夜と休憩を深夜から差し引く() {
+    void 日跨ぎと休憩を深夜から差し引く() {
         day("通常", 480);
 
         AttendanceCalculation result = calculator.calculate(LocalDate.of(2026, 8, 3), 20L,
@@ -203,7 +203,7 @@ class AttendanceCalculatorTest {
     }
 
     @Test
-    void 跨夜休憩は勤務開始基準のoffsetで一意に表す() {
+    void 日跨ぎの休憩は勤務開始基準のoffsetで一意に表す() {
         day("通常", 480);
 
         AttendanceCalculation result = calculator.calculate(LocalDate.of(2026, 8, 3), 20L,

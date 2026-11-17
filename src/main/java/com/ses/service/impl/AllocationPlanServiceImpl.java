@@ -73,7 +73,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
             if (existing.getSourceContractId() != null) {
                 throw BusinessException.of(400, "error.staffing.actualManagedByContract");
             }
-            // CON-01: 未出現 ALWAYS を回填してから過配賦判定する（ドラッグ POST で exceptionReason 欠落しても保持）。
+            // CON-01: 未出現 ALWAYS を補完してから過配賦判定する（ドラッグ POST で exceptionReason 欠落しても保持）。
             restoreAbsentAlwaysFields(allocation, existing);
             allocation.setEngineerId(existing.getEngineerId());
             allocation.setStatus(STATUS_DRAFT);
@@ -112,7 +112,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     }
 
     /**
-     * payload に未出現の ALWAYS フィールドを既存行から回填する（CON-01）。
+     * payload に未出現の ALWAYS フィールドを既存行から補完する（CON-01）。
      * {@code sourceContractId}/{@code approvalRequestId} は saveDraft 側の draft 規則で別途強制する。
      */
     private void restoreAbsentAlwaysFields(AllocationPlan incoming, AllocationPlan existing) {

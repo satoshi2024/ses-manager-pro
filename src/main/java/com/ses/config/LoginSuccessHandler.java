@@ -90,8 +90,8 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             rejectBreakGlass(request, "break-glass incidentをsessionへ固定できません");
         }
         if (bootstrap) {
-            // BootstrapSessionFilterが改密 → MFA → bootstrap入口だけの順に制限する。MFA pendingは立てない
-            // （立てるとPasswordChangeEnforcementFilterがMFAを先に待つため、改密 → MFAの順にならない）。
+            // BootstrapSessionFilterがパスワード変更 → MFA → bootstrap入口だけの順に制限する。MFA pendingは立てない
+            // （立てるとPasswordChangeEnforcementFilterがMFAを先に待つため、パスワード変更 → MFAの順にならない）。
             // 印はbootstrap loginの本人（sys_user.id）へ結び付け、別の主体のsessionでは効かせない（review P3-a）。
             jakarta.servlet.http.HttpSession session = request.getSession(true);
             session.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
@@ -118,7 +118,7 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
                     ? "/mfa/challenge" : "/mfa/setup";
         } else if (bootstrap && !passwordChangeRequired) {
-            // bootstrapは改密 → MFAの順。改密済みならMFAの登録または検証へ進める。
+            // bootstrapはパスワード変更 → MFAの順。パスワード変更済みならMFAの登録または検証へ進める。
             targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
                     ? "/mfa/challenge" : "/mfa/setup";
         }

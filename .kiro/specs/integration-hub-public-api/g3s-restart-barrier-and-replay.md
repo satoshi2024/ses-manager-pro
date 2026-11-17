@@ -65,6 +65,6 @@ WARNは最大1分間隔、有限reason counterとメモリgaugeで示す。Prome
 - 実SpringBoot起動：状態DB障害時も起動し、未準備のworkerが送らずloginが200で応答する。
 - 実producer/MVC：既存原子commit/rollback、小数秒保存、MANDATORY実proxy、system-config隠蔽/拒否/通常保存、bulkのCSRF/role/条件/件数上限/三回の連続進展/各監査、実replay-window JOIN。
 - unit：bulk partial/audit失敗/予算、worker新generation起点と開始予算、tenant mismatch skip。既存ローカルTLSは先頭IP失敗後のfallbackを加えて再実行する。
-- 既存shard-3 IntegrationHubV192AuditRetentionMySqlTestへ状態/新SELECTの用例を追加する。実SQL/mapper/TMとAuditLogServiceImplを使うが手動構成であり、実Spring proxyの証拠はH2側と分ける。本作業ではMySQL未実行。
+- 既存shard-3 IntegrationHubV192AuditRetentionMySqlTestへ状態/新SELECTのケースを追加する。実SQL/mapper/TMとAuditLogServiceImplを使うが手動構成であり、実Spring proxyの証拠はH2側と分ける。本作業ではMySQL未実行。
 - 正式Runnerは最終SHAのfast/全体guard、mysql shard-3、実Tomcat/connectorでphase・proxy・queueを確認する。
   旧G3-P3-9の3図MySQL、expired/TLS1.1実wire、外部ネットワークpeerの正式証拠とG3-P3-13の承認digest/CI gateは引き続き別批次で必要。禁止実行と未記述の試験コードを混同しない。

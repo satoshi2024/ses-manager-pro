@@ -49,7 +49,7 @@ S01/S02の完了履歴と過去証拠は変更しない。
 対象限定テストがgreenになった後に1回実行する。
 
 - `pom.xml`、Spring context構成、profile、dependency/BOM変更。
-- `SecurityConfig`、全局filter/advice、認証principal、CSRF、session。
+- `SecurityConfig`、グローバルfilter/advice、認証principal、CSRF、session。
 - `DataScopeService`、`OrganizationScopeService`、tenant/file scope等の共通認可母集団。
 - 共通cache key、transaction callback、scheduler/async context。
 - V1、増分Flyway、共通H2 schema、entityの横断変更。

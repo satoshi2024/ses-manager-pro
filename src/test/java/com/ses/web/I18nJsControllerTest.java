@@ -58,12 +58,12 @@ public class I18nJsControllerTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("★回帰: lang=zh-CN で中国語辞書が文字化けせず載る(menu.engineer=人员管理)")
+    @DisplayName("★回帰: lang=zh-CN で中国語辞書が文字化けせず載る(menu.engineer=\u4eba\u5458\u7ba1\u7406)")
     void chineseDictionaryByLangParam() throws Exception {
         String body = mockMvc.perform(get("/js/i18n.js").param("lang", "zh-CN"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        assertThat(body).contains("人员管理");
+        assertThat(body).contains("\u4eba\u5458\u7ba1\u7406");
         assertThat(body).contains("window.SES_LANG = 'zh-CN'");
     }
 

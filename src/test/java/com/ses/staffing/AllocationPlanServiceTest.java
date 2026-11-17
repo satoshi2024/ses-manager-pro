@@ -47,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * T075 F1: 過配賦判定（日単位）・例外承認・状態機械・scenario外の区間代数の定向test（L2〜L3）。
+ * T075 F1: 過配賦判定（日単位）・例外承認・状態機械・scenario外の区間代数の対象限定test（L2〜L3）。
  * 受入条件R5: 50+50許可 / 60+50拒否 / 重複なし許可 / 1日重複拒否 / 隣接OK・同日NG / 例外承認で許可。
  *
  * <p>reviseのrollback（変更前の区間へ戻る）はREQUIRES_NEWなtransactionで実行し、

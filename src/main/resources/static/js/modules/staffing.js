@@ -368,7 +368,7 @@ window.SES_staffing = (function () {
                 allocationPercent: Number($card.attr('data-percent') || 100),
                 version: Number($card.attr('data-version') || 0)
             };
-            // 空の exceptionReason はキーごと省略し、サーバ側 CON-01 回填に委ねる
+            // 空の exceptionReason はキーごと省略し、サーバ側 CON-01 補完に委ねる
             const exceptionReason = $card.attr('data-exception-reason');
             if (exceptionReason) {
                 dragPayload.exceptionReason = exceptionReason;

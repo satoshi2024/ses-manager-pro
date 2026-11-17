@@ -92,7 +92,7 @@ spring:
 
 ### 決定4: フロントJS i18n = 辞書エンドポイント + `SES.i18n`
 
-- 新規 `controller/page/I18nJsController.java`: `GET /js/i18n.js?lang=xx&v=版本` が
+- 新規 `controller/page/I18nJsController.java`: `GET /js/i18n.js?lang=xx&v=<版>` が
   `window.SES_LANG / SES_MESSAGES / SES_ENUMS` を `application/javascript` で配信。
   permitAll 済みの `/js/**` 配下なので SecurityConfig 修正ゼロ、未ログインでも取得可。Cache-Control 24h(lang/v パラメータで言語別・リリース別キャッシュ)
 - 新規 `common/i18n/I18nMessagesLoader.java`: `PropertiesLoaderUtils` でデフォルト包→ロケール包の順にマージ、locale別に `ConcurrentHashMap` キャッシュ、Jackson で JSON 化
@@ -147,10 +147,10 @@ spring:
 ## テスト設計
 
 1. `MessageBundleConsistencyTest`(純JUnit): 4ファイルのキー集合完全一致 / 同一キーの `{n}` プレースホルダ集合一致 / 空値なし / `EnumMappings.GROUPS` の全 group×code に `enum.*` キーが存在
-2. `EnumMappingsCoverageTest`: `V1__create_tables.sql` から正規表現で全 `ENUM(...)` 値域を抽出し、EnumMappings が網羅していることを断言
+2. `EnumMappingsCoverageTest`: `V1__create_tables.sql` から正規表現で全 `ENUM(...)` 値域を抽出し、EnumMappings が網羅していることを検証
 3. `I18nLocaleSwitchTest`(MockMvc/H2): `?lang=en` で Set-Cookie + 英語描画 / `SES_LOCALE=zh-CN` Cookie で中国語 / Cookieなしで日本語(fallback-to-system-locale=false の検証)
 4. `I18nJsControllerTest`: 未認証で200 / `SES_MESSAGES`・`SES_ENUMS` 含有 / Cache-Control / 不正 lang で500にならない
-5. 既存テスト適応: 日本語メッセージを断言するテストはデフォルト ja のため基本無傷。壊れる場合は MessageSource 経由で期待値取得に変更
+5. 既存テスト適応: 日本語メッセージを検証するテストはデフォルト ja のため基本無傷。壊れる場合は MessageSource 経由で期待値取得に変更
 
 ## リスクと遺留事項
 

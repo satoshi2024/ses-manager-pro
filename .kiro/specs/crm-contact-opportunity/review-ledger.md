@@ -71,7 +71,7 @@ api_prefix から再解決して null なら deny() し、この deny は**管�
 | # | 修正 | 無いとどうなるか |
 |---|---|---|
 | 1 | `ActionPermissionResolver.RESOURCE_NAMES` へ `Map.entry("crm", "crm")` を追加 | `resolve()` が null を返し、**管理者を含む全roleが403** |
-| 2 | **V74** で `crm.*` を `t_permission_group_action` へseed（role-sales / role-manager） | V66_1が非管理者groupから全局 `*` を削除し「既知resource wildcardの列挙」へ置換したため、**group割当済みの営業/マネージャーが403** |
+| 2 | **V74** で `crm.*` を `t_permission_group_action` へseed（role-sales / role-manager） | V66_1が非管理者groupからグローバルな `*` を削除し「既知resource wildcardの列挙」へ置換したため、**group割当済みの営業/マネージャーが403** |
 
 Reviewの最小修正は1だけだったが、2が無いと営業/マネージャーは依然403のままで、
 「正しい期待値を書いたtest」を追加できない（実態に合わせた誤ったtestを書くのは Round 1 で

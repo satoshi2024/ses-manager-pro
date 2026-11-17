@@ -1,12 +1,12 @@
-# NF01 ↔ NF09 退社ライフサイクル・外部アカウント撤権連携設計書 (Lifecycle Revocation Bridge Plan)
+# NF01 ↔ NF09 退社ライフサイクル・外部アカウント権限取消し連携設計書 (Lifecycle Revocation Bridge Plan)
 
 ## 1. 目的と背景
 
-本設計書は、NF01（Engineer Lifecycle Workflow / 退社オフボーディング）と NF09（Enterprise Identity & External Account Reference / 外部アカウント管理）の間における、安全かつ厳格な撤権連携インターフェース仕様を定義する。
+本設計書は、NF01（Engineer Lifecycle Workflow / 退社オフボーディング）と NF09（Enterprise Identity & External Account Reference / 外部アカウント管理）の間における、安全かつ厳格な権限取消し連携インターフェース仕様を定義する。
 
 現行の `ExternalAccountRevokeConfirmationService.confirm(referenceId, attribution)` は、単に対象レコードの現行 `version` を読み取って楽観排他（CAS）更新を行っている。しかし、非同期リクエストや再試行が発生する外部 IdP（Keycloak 等）連携においては、以下の深刻な整合性課題が存在する：
-- 旧世代の要求（generation / claim）に基づく遅延応答や古いコールバックが、後から起票された新しい撤権試行の CAS を通過し、古い結果で新しい状態を誤認確定してしまう問題（ABA 問題・遅延確定競合）。
-- 外部 Provider からの「HTTP 204 ACK」「ユーザー無効化（enabled=false）」「アクティブセッション数 0」という個別観測結果を、全スコープ（オフラインセッション、既発行 JWT、下流 SaaS 等）の完全撤権（`REVOKED`）と短絡し、退社ブロッカーを不当に解除してしまう問題。
+- 旧世代の要求（generation / claim）に基づく遅延応答や古いコールバックが、後から起票された新しい権限取消し試行の CAS を通過し、古い結果で新しい状態を誤認確定してしまう問題（ABA 問題・遅延確定競合）。
+- 外部 Provider からの「HTTP 204 ACK」「ユーザー無効化（enabled=false）」「アクティブセッション数 0」という個別観測結果を、全スコープ（オフラインセッション、既発行 JWT、下流 SaaS 等）の完全な権限取消し（`REVOKED`）と短絡し、退社ブロッカーを不当に解除してしまう問題。
 - 技術的未解決（`UNKNOWN` / `FAILED`）と、業務上のリスク受容・例外承認（`Waiver`）が混同され、技術状態が虚偽に `REVOKED` へ改ざんされるリスク。
 - 退社プロセス進行中や退社完了後に、並行して外部アカウントが新規割り当てされ、退社ブロッカーから逃逸する問題。
 
@@ -46,7 +46,7 @@
 ## 3. 不変識別子と要求範囲の固定 (Immutable Target & Revocation Scope)
 
 ### 3.1 外部アカウントの不変バインディング
-撤権対象は、可変なユーザー名（username）やメールアドレスではなく、作成時に固定された以下の不変属性と厳密に結合する：
+権限取消し対象は、可変なユーザー名（username）やメールアドレスではなく、作成時に固定された以下の不変属性と厳密に結合する：
 - `system_identifier`: 外部 IdP 種別（例: `KEYCLOAK_SYSTEM_INTERNAL`）
 - `realm`: 対象レルム名（RFC 3986 準拠の厳格セグメント）
 - `external_subject_id`: 外部 IdP における不変内部主キー（Keycloak におけるユーザー UUID）
@@ -54,12 +54,12 @@
 - `legal_entity_id` / `tenant_id`: 帰属組織
 
 ### 3.2 凍結された必須スコープ (Required Scope) と完了条件
-撤権操作が「技術的に完全撤権された（`REVOKED`）」と判定されるためには、契約で凍結された以下の必須スコープ（`RequiredScope`）のすべてに対して確証証跡が存在しなければならない。
+権限取消し操作が「技術的に完全に権限が取り消された（`REVOKED`）」と判定されるためには、契約で凍結された以下の必須スコープ（`RequiredScope`）のすべてに対して確証証跡が存在しなければならない。
 
 | スコープ識別子 | 必須検証証跡 (Verification Evidence) | 未充足・未カバー時の扱い |
 |---|---|---|
-| `USER_DISABLE` | `PUT /users/{id}` (204 ACK) かつその後の `GET /users/{id}` で `enabled == false` を確認 | 未確認時は `UNKNOWN`、撤権未完了 |
-| `ACTIVE_SESSIONS` | `POST /users/{id}/logout` (204 ACK) かつその後の `GET /users/{id}/sessions` でアクティブセッション数が 0 であることを確認 | 未確認時は `UNKNOWN`、撤権未完了 |
+| `USER_DISABLE` | `PUT /users/{id}` (204 ACK) かつその後の `GET /users/{id}` で `enabled == false` を確認 | 未確認時は `UNKNOWN`、権限取消し未完了 |
+| `ACTIVE_SESSIONS` | `POST /users/{id}/logout` (204 ACK) かつその後の `GET /users/{id}/sessions` でアクティブセッション数が 0 であることを確認 | 未確認時は `UNKNOWN`、権限取消し未完了 |
 | `OFFLINE_SESSIONS` | 全クライアントのオフラインセッション無効化の個別確認（またはシステム方針でオフライン無効が証明されていること） | **Keycloak標準APIでは全クライアント網羅が困難であり、未カバー（UNCOVERED）となる** |
 | `DOWNSTREAM_TOKENS` | 既発行ステートレス JWT の失効（Token Revocation / Introspection エンドポイントでの無効化確認） | **IdP 外部の SaaS セッションは証明不能（UNCOVERED）** |
 
@@ -195,7 +195,7 @@ sequenceDiagram
     Repo->>Repo: 13. SELECT ... FROM t_external_account_reference WHERE id=:id FOR UPDATE
     Repo->>Repo: 14. 世代 (Gen=2)・要求ハッシュ (H2)・証跡の整合性再検証
 
-    alt 全必須スコープが affirmative に検証された場合 (Path A: 技術撤権)
+    alt 全必須スコープが affirmative に検証された場合 (Path A: 技術的な権限取消し)
         Repo->>Repo: 15. confirmRevocationWithClaimCas (Gen=2, Hash=H2, status='REVOKED')
         Repo->>Task: 16. ClearanceToken (CLEARED_TECHNICAL, Status=COMPLETED)
         Task->>Task: 17. completeLifecycleTask (Status -> COMPLETED)
@@ -245,7 +245,7 @@ public record ClearanceToken(
 
 #### 7.2.1 `LifecycleExceptionApprovalAdapter` の将来拡張とフィールド規約
 現行の `LifecycleExceptionApprovalAdapter` は、タスク免除申請の作成時（`snapshot()`）および申請前検証時（`validateBeforeRequest()`）において、`taskId`, `reason`, `riskOwner`, `remedyDeadline` のみを扱っている。
-外部アカウント撤権の例外免除に対応するため、今後の改修において `payload_json` に以下の 3 つの必須フィールドを正式に追加・拡張する：
+外部アカウント権限取消しの例外免除に対応するため、今後の改修において `payload_json` に以下の 3 つの必須フィールドを正式に追加・拡張する：
 1. `accountReferenceId`: 免除対象の外部アカウント参照 ID (`t_external_account_reference.id`)
 2. `targetScope`: 例外免除を認める未カバー失効スコープ識別子（カンマ区切りまたはリスト）
 3. `validUntil`: 例外認可の厳格な有効期限（ISO-8601 UTC 日時）
@@ -259,7 +259,7 @@ public record ClearanceToken(
 #### 7.2.3 短トランザクション 2（Tx 2）におけるロック保持中の検査（Holding Lock Verification）
 Tx 2 のロック下において、以下の 6 つの条件をすべて検証する：
 1. **承認状態確認**: 当該 Case / Task に紐づく `t_approval_request` が存在し、`request_type = 'LIFECYCLE_EXCEPTION'` かつ `status = 'approved'` であること。
-2. **アカウント一致確認**: `payload_json` の `accountReferenceId` が、撤権対象の `t_external_account_reference.id` と完全に一致すること。
+2. **アカウント一致確認**: `payload_json` の `accountReferenceId` が、権限取消し対象の `t_external_account_reference.id` と完全に一致すること。
 3. **スコープ網羅確認**: Provider 側で技術的確証が得られなかった Required Scope の全項目が、`payload_json` の `targetScope` に漏れなく含まれていること。未解決のスコープが残存する場合は **`BLOCKED (SCOPE_UNCOVERED)`**。
 4. **有効期限確認**: `payload_json` の承認有効期限 `validUntil` が現在時刻（`Instant.now()`）以降であること。期限切れの場合は **`BLOCKED (WAIVER_EXPIRED)`**。
 5. **Token 有効期限の厳格制約**:
@@ -298,9 +298,9 @@ Tx 2 のロック下において、以下の 6 つの条件をすべて検証す
 
 ## 8. 検証・検収テストケースマトリクス
 
-本設計の全不変条件について、正常系・異常系・並行系の検収用例を定義する。
+本設計の全不変条件について、正常系・異常系・並行系の検収テストケースを定義する。
 
-| 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
+| ケース ID | カテゴリ | テスト条件 | 期待される動作・結果 |
 |---|---|---|---|
 | `TC-BR-01` | 正常系 | 全必須スコープ（Disable, Logout, Readback 0）が完全充足 | `confirmRevocationWithClaimCas` 成功、アカウント `status='REVOKED'`、ClearanceToken `CLEARED_TECHNICAL`、タスク `COMPLETED`。 |
 | `TC-BR-02` | 正常系 | Provider 未カバー領域あり、有効期限内の承認済み Waiver 結合 | アカウント `status` は UNKNOWN のまま維持（REVOKED 偽装なし）、ClearanceToken `CLEARED_BY_WAIVER`、タスク `WAIVED`。 |
@@ -316,9 +316,9 @@ Tx 2 のロック下において、以下の 6 つの条件をすべて検証す
 | `TC-BR-12` | 並行系 | `assignAccount` と `activateCase (DRAFT -> ACTIVE)` の並行競合 | `t_engineer` ロックにより直列化。ACTIVE 化後は `409 CONFLICT (OFFBOARDING_IN_PROGRESS)` で割り当て拒否。 |
 | `TC-BR-13` | 並行系 | 退職案件が `ON_HOLD` 中の要員に対する `assignAccount` 試行 | `t_engineer` ロック下で保留状態を検知し `409 CONFLICT (OFFBOARDING_ON_HOLD)` で厳格拒否。逃逸 0 件。 |
 | `TC-BR-14` | 並行系 | `assignAccount` と `completeLifecycleTask` の並行競合 | `t_engineer` ロックにより直列化。退職完了後は退職完了ステータスにより拒否。ブロッカーすり抜け 0 件。 |
-| `TC-BR-15` | 並行系 | 2 スレッドが同一アカウントに対して同時に撤権 Claim を起票 | 先行が `current_generation = G1` で成功、後続は楽観ロック競合または `G2` へ直列化され、互いの証跡が混同されない。 |
+| `TC-BR-15` | 並行系 | 2 スレッドが同一アカウントに対して同時に権限取消しの Claim を起票 | 先行が `current_generation = G1` で成功、後続は楽観ロック競合または `G2` へ直列化され、互いの証跡が混同されない。 |
 | `TC-BR-16` | 異常系 | 旧承認申請で `payload_json` に `accountReferenceId`, `targetScope`, `validUntil` が欠落 | ロック保持中の検査で検知され `BLOCKED (APPROVAL_PAYLOAD_INCOMPLETE)`。救済なしで拒否。 |
-| `TC-BR-17` | 異常系 | 退社タスク・案件完了確定時、未撤権・未免除の外部アカウントが残存 | 完了前全アカウント照合により検知され `409 CONFLICT (UNREVOKED_ACCOUNTS_REMAIN)`。完了を完全にブロック。 |
+| `TC-BR-17` | 異常系 | 退社タスク・案件完了確定時、権限未取消し・未免除の外部アカウントが残存 | 完了前全アカウント照合により検知され `409 CONFLICT (UNREVOKED_ACCOUNTS_REMAIN)`。完了を完全にブロック。 |
 
 ---
 

@@ -137,6 +137,34 @@ class PrivacyHoldServiceMySqlTest {
                 .doesNotContainPattern("(^|[^0-9A-Za-z])501([^0-9A-Za-z]|$)"));
     }
 
+    /**
+     * RB-NF07-HOLD delta review D-P3-3: app 側の {@code @@server_uuid} 照会（{@link ApplicationServerUuidQuery}）は借りた接続の
+     * network timeout を一時的に 15 秒へ上げて finally で戻す。戻した値と、Hikari が返却時に行う復元（pool の既定 0）が実際の
+     * Connector/J・Hikari の接続で効き、主 pool へ変更済みの接続が残らないことを、pool の全接続（上限 8）を借りて確かめる。
+     */
+    @Test
+    void app側のserver_uuid照会の後に主poolの全接続を借りてもnetwork_timeoutは既定の0に戻っている() throws Exception {
+        assertThat(components.journal.availability()).as("前提: 可用性の判定で app 側の照会を通る")
+                .isEqualTo(PrivacyHoldJournal.Availability.AVAILABLE);
+        ApplicationServerUuidQuery query = new ApplicationServerUuidQuery(new JdbcTemplate(appPool));
+        for (int i = 0; i < 16; i++) {
+            assertThat(query.get()).as("前提: 照会が実際に値を返す").isNotBlank();
+        }
+        assertThat(appPool.getMaximumPoolSize()).isEqualTo(8);
+        List<java.sql.Connection> borrowed = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < appPool.getMaximumPoolSize(); i++) {
+                java.sql.Connection connection = appPool.getConnection();
+                borrowed.add(connection);
+                assertThat(connection.getNetworkTimeout()).as("借りた接続 %d の network timeout", i).isZero();
+            }
+        } finally {
+            for (java.sql.Connection connection : borrowed) {
+                connection.close();
+            }
+        }
+    }
+
     @Test
     void ACK不明の後の再送は元のACKを返し二重にholdを作らない() {
         components.port.loseAckAfterCommit.set(1);

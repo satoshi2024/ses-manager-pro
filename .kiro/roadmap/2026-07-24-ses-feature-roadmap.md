@@ -42,7 +42,7 @@ FR-01・FR-08・既存 `skillsheet-ingestion` は**同一パターン**（受信
   - 入力経路は2段構え。(a) MVP: メール本文の**貼り付け／.emlアップロード**、(b) 拡張: IMAP/メール受信の定期取込（別ジョブ）。
   - 「取込基盤」を再利用。新パーサ `ProjectParseService`（`AiTextService` で案件JSON抽出：案件名・必要スキル・単価幅・勤務地・リモート可否・開始/終了・商流・募集人数・元請/エンド）＋ mock パーサ（正規表現）。
   - 取込ジョブ `t_project_ingestion`（`skillsheet-ingestion` の `t_resume_ingestion` と同型：status・parsed_json・converted_project_id）。レビュー画面で確認・修正 → 確定で `Project` 生成。確定時に既存 `AiMatchingService`（FR-02後は実AI）で**Bench要員へのマッチ候補**を即提示。
-  - 抽出テキストは既存 `ResumeTextExtractor` を一般化して流用。孤児清理は `FileReferenceProvider` を1つ追加。
+  - 抽出テキストは既存 `ResumeTextExtractor` を一般化して流用。孤児清掃は `FileReferenceProvider` を1つ追加。
 - 期待効果: 案件登録の工数を「1件数分の手入力」→「レビュー数十秒」に。案件母集団が増え、マッチング機会が構造的に増える。
 - 再利用: `skillsheet-ingestion` 一式、`AiTextService`、`Project` 既存CRUD。
 - 規模/優先度: 中／★★★（Phase 1・基盤再利用で低コスト）。

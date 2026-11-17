@@ -111,7 +111,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
         boolean passwordChangeRequired = PasswordChangeEnforcementFilter.isChangeRequired(session);
         boolean mfaVerified = MfaEnforcementFilter.isVerifiedFor(session, SecurityUtils.currentUserId());
 
-        // 改密 → MFAの順。改密前は PasswordChangeEnforcementFilter が既に変更経路以外を止めている。
+        // パスワード変更 → MFAの順。パスワード変更前は PasswordChangeEnforcementFilter が既に変更経路以外を止めている。
         if (!passwordChangeRequired && !mfaVerified && !isMfaFlow(method, uri)) {
             requireMfa(request, response);
             return;

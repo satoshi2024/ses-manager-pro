@@ -256,7 +256,7 @@ BPコンプライアンス、顧客/BPポータル、勤怠、会計連携、AI�
 | 用途 | パス |
 |---|---|
 | spec package | `.kiro/specs/ai-management-copilot/` |
-| 開工対話（F1〜M） | `.kiro/specs/ai-management-copilot/start-conversations.md` |
+| 着手対話（F1〜M） | `.kiro/specs/ai-management-copilot/start-conversations.md` |
 | 独立Review対話 | `.kiro/specs/ai-management-copilot/review-conversations.md` |
 | 中央要約（実装） | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 |
 | 中央要約（Review） | `2026-08-27-post-acceptance-review-conversations.md` §R-NF08 |
@@ -371,9 +371,9 @@ NF-08はNF-07のPII inventory/retention、既存AI本番gate、semantic query ca
 13. **監査**: actor、scope、target、before/afterまたはsnapshot hash、correlation ID、結果を記録する。
 14. **Demo**: 権限成功だけでなく、403、競合、再送、外部失敗、0件、mobile、復旧を含める。
 
-## 7. 「開工対話」と「Review対話」を混ぜない
+## 7. 「着手対話」と「Review対話」を混ぜない
 
-### 開工対話の責務
+### 着手対話の責務
 
 - 通常checkoutから分離した専用Codex worktreeと`codex/<feature-name>` branchで作業する。
 - 通常checkout、他feature worktree、他branchの未commit変更を触らない。
@@ -386,13 +386,13 @@ NF-08はNF-07のPII inventory/retention、既存AI本番gate、semantic query ca
 
 ### Review対話の責務
 
-- 開工対話と別の新規対話、通常checkout/実装worktreeとも別の専用Review worktreeで、原則read-onlyで実施する。
+- 着手対話と別の新規対話、通常checkout/実装worktreeとも別の専用Review worktreeで、原則read-onlyで実施する。
 - push済みremote feature branchの固定HeadだけをReviewし、Review途中にHeadが変わった場合は対象を再確定する。
 - 最初にapproved scope、Decision Gate、requirements、design、tasks、ledgerのPlan Reviewを行い、計画の未完・矛盾・
   scope creepがないことを`PLAN PASS`として確定する。
 - 実装者の説明やcheckboxを証拠として信用せず、requirements、diff、test assertion、Demo証拠を読む。
 - 指摘はP0/P1/P2、`file:line`、再現条件、影響、最小修正範囲で返す。
-- Review中に修正しない。修正は開工対話へ返し、同じReview対話でdeltaを再Reviewする。
+- Review中に修正しない。修正は着手対話へ返し、同じReview対話でdeltaを再Reviewする。
 - `PLAN PASS`後にImplementation Reviewを行い、双方PASS後だけ`gh`でfeature branchからbase branchへのPRを
   自動作成または更新し、次Waveを解放する。
 - PRのmerge、auto-merge、remote branch削除は別の明示依頼がない限り行わない。

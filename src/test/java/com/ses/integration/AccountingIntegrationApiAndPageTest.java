@@ -454,7 +454,7 @@ class AccountingIntegrationApiAndPageTest {
     void i18n_fourLanguages_stableReasonCodes() throws Exception {
         String[] languages = {"ja", "en", "zh-CN", "ko"};
         String[] expectedLabels = {"マッピング設定", "Mapping Settings", "映射配置", "매핑 설정"};
-        String[] expectedCustomerCodeAttrs = {"顧客コード", "Customer Code", "客户代码", "고객 코드"};
+        String[] expectedCustomerCodeAttrs = {"顧客コード", "Customer Code", "\u5ba2\u6237\u4ee3\u7801", "고객 코드"};
 
         for (int i = 0; i < languages.length; i++) {
             // CookieLocaleResolver 経由で locale を切り替え、サーバー解決済みの可視文言がローカライズされること (R1-P1-11)

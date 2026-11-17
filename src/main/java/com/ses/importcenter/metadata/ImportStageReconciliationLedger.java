@@ -41,8 +41,8 @@ import java.util.regex.Pattern;
  * <p>DDLを追加しないため、upload root直下の専用directory {@value #DIRECTORY} へstage一件につき小さなproperties
  * fileを一つ置く。内容はtenant ID・storage key・operation ID・理由・記録時刻と、結果不明のCOMMITを送った接続の
  * server側ID（取得できた場合だけ）で、CSV本文・file名・利用者情報は
- * 含めない。{@code FileCleanupServiceImpl}の孤児清理はupload root・quarantine・publishedの直下だけを非再帰で走査し
- * directoryを対象にしないため、台帳fileは清理されない。台帳fileはdownload APIから参照されない（参照名を持たない）ため、
+ * 含めない。{@code FileCleanupServiceImpl}の孤児清掃はupload root・quarantine・publishedの直下だけを非再帰で走査し
+ * directoryを対象にしないため、台帳fileは清掃されない。台帳fileはdownload APIから参照されない（参照名を持たない）ため、
  * FileReferenceProvider／FileScopeValidationServiceへの登録対象でもない。
  *
  * <p>記録は応答や元の失敗を上書きしないよう例外を投げない。書込みに失敗した場合も日本語ログと
@@ -214,7 +214,7 @@ public class ImportStageReconciliationLedger {
                 try {
                     Files.deleteIfExists(temp);
                 } catch (IOException ignored) {
-                    // 一時fileは*.tmpのため照合対象にならない。次回以降の手作業清理に委ねる。
+                    // 一時fileは*.tmpのため照合対象にならない。次回以降の手作業での清掃に委ねる。
                 }
             }
         }

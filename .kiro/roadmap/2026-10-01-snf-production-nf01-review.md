@@ -24,7 +24,7 @@
   退社完了の阻害check後へ呼出を追加せず、失効要求と確認待ちを独立段階として設計・検証する。
 - DOCUMENT_LINKは存在性確認と任意documentVersionId受理に留まる（TaskServiceImpl:129-136）。
   歴史ledgerの未閉鎖ACL項目として残す。本Reviewは文書読み出しchain未検証のため新規漏洩findingとはしていない。
-- 実provider、実撤権、production演習は未完了。
+- 実provider、実際の権限取消し、production演習は未完了。
 
 ## 実行分割
 

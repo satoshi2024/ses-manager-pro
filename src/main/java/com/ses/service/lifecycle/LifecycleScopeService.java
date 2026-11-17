@@ -192,7 +192,7 @@ public class LifecycleScopeService {
     /**
      * タスクの閲覧可否判定（本人非公開タスクのフィルタリング含む）
      * <p>
-     * 表2（design.md §6）の可見母集団ルール:
+     * 表2（design.md §6）の閲覧可能な母集団ルール:
      * <ul>
      *   <li>管理者/HR: 全タスク可視</li>
      *   <li>マネージャー: 内部タスク含む全タスク可視</li>

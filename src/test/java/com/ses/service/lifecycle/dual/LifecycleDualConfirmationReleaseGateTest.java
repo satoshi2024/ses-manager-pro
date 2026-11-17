@@ -13,7 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 二者確認の子スイッチを本番でONにする前の署名gate（計画 §7.8 開始条件・§10 Privacy・§12 O-8、主控の判断）。
+ * 二者確認の子スイッチを本番でONにする前の署名gate（計画 §7.8 開始条件・§10 Privacy・§12 O-8、統括の判断）。
  * prod profileでだけ動き、子スイッチの実効値がONなのにPrivacy署名の参照が無い・不正・placeholderなら起動を止める。
  */
 class LifecycleDualConfirmationReleaseGateTest {

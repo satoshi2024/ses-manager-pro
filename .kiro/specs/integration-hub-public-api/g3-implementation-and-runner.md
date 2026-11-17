@@ -48,7 +48,7 @@ audienceは登録した完全HTTPS URLのURI.toASCIIString()であり、明示po
   metadata/private/特殊用途宛てのネットワーク拒否を用意する。実ネットワーク・ALB/WAFの証跡はローカルfakeの代替にならない。
 - service外の直接mapper更新、bulk/import、削除と未登録イベントはproducer対象外。
   changedFieldNamesは通知する公開snapshotのfield集合であり、値の差分検出は未実装。Ownerが通知契約と対象範囲を判断する。
-- 上記実装の独立Review、主控Runner、DG-05全署名、安全なsecret配布、DPA・顧客/provider書面許可・予算が完了するまでNO-GO。
+- 上記実装の独立Review、統括のRunner、DG-05全署名、安全なsecret配布、DPA・顧客/provider書面許可・予算が完了するまでNO-GO。
 
 ## Runnerへ渡す検証
 

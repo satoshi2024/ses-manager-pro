@@ -30,8 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T078 B1: 需給heatmapの定向test（L2〜L3）。
- * 全社合計=内訳合計・FTE口径・24か月上限・HRのbench cost mask・応答サイズの上限を検証する。
+ * T078 B1: 需給heatmapの対象限定test（L2〜L3）。
+ * 全社合計=内訳合計・FTEの算定基準・24か月上限・HRのbench cost mask・応答サイズの上限を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")

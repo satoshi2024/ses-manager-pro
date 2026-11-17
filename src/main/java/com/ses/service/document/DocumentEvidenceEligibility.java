@@ -200,14 +200,16 @@ public class DocumentEvidenceEligibility {
      * 返さずに存在しない文書と同じ応答にする。
      * <ol>
      *   <li>文書が指定tenantに存在する（論理削除済みも読む。削除状態は可視の文書についてだけ {@link #evaluate} が判定する）。</li>
-     *   <li>文書種別が {@link #ACCEPTED_DOCUMENT_TYPE}（{@code SKILL_SHEET}）。削除状態より先に判定し、種別ごとに文書下載の
+     *   <li>文書種別が {@link #ACCEPTED_DOCUMENT_TYPE}（{@code SKILL_SHEET}）。削除状態より先に判定し、種別ごとに文書ダウンロードの
      *       ACLが厳しい種別（{@code RECEIPT}・{@code CHANGE_REQUEST_ATTACHMENT}・{@code PRIVATE_NOTE}・電子インボイスの
      *       {@code INVOICE_IN}/{@code INVOICE_OUT} 等）は、要員の data scope を持つ提出者にも「無い」と同じに見せる。</li>
      *   <li>有効なlinkのうち同じtenantで案件の要員（{@code ENGINEER}）を指すものが1件以上ある。</li>
      * </ol>
-     * actorの文書ACL（条件11）は含まない。{@code SKILL_SHEET} は文書下載
+     * actorの文書ACL（条件11）は含まない。{@code SKILL_SHEET} は文書ダウンロード
      * （{@code DocumentServiceImpl#assertDocumentAccessAllowed}）の専用ACL種別にも電子インボイスにも当たらないため、
-     * 下載と同じ判定は {@code ENGINEER} link の要員 data scope（管理者は無条件）になり、呼出側はそれを本判定より先に行う。
+     * 呼出側の ACL はダウンロードの {@code ENGINEER} link 分岐と同じ判定（要員 data scope。管理者は無条件）になり、本判定より先に行う。
+     * ダウンロードは link のどれか1件（{@code CUSTOMER} link 等）が通れば足りるため、二者確認の可視はダウンロードの部分集合で、
+     * ダウンロードより広くならない（RB-NF01 delta review D-P3-2）。
      * 要員を指すlinkに加えて別のlinkがある等のlink形の不適合は {@link #evaluate} の条件8が判定する（可視の文書だけ）。
      */
     public boolean visibleEvidenceCandidate(String tenantId, long documentId, long engineerId) {

@@ -60,7 +60,7 @@ Reviewer `astra_review_baseline`（gpt-6-astra）が固定Headとraw証拠をrea
   並行証拠P2と後続補正を閉鎖。control統合は`8f19cf43`〜`626aa967`の5commit。
 
 これらは全NF01/NF03の受入・production承認ではない。NF01のDUAL二者確認、document ACL/version、
-durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統合後full suiteは未実行。
+durable権限取消しtrigger、NF03 retention/Privacy gateと全体受入は未完。統合後full suiteは未実行。
 
 ## NF07 SF-W1 限定再審査
 
@@ -78,7 +78,7 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
 ## NF01 既存fixture追従
 
 `e3944774e667a226848d3883e7333ddb8b2ef1f6`は明示tenant/active DB actorを既存2 classへ設定した。
-対象5/0/0/0、Astra CODE PASS。製品側境界とdocument/cancel断言を維持し、control `e90daaf1`へ統合した。
+対象5/0/0/0、Astra CODE PASS。製品側境界とdocument/cancelのassertを維持し、control `e90daaf1`へ統合した。
 全fastの再実行は別gateとして残る。
 
 ## NF10 session-bound再認証
@@ -118,7 +118,7 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
   Contract startDate必須値と、同tenant/legalEntityのposition→project親key照合を追加した。
 - raw XML **11+6=17/0/0/0**と2 hashを照合。control `a79e2171`、`5b2e5db3`へ統合した。
 - 現ValidationContext/resolverは単一synthetic namespaceに限定する。実registry接続前には
-  immutable sourceSystemか出自を持つ親target IDをbindingし、裸externalKeyの跨source比較を禁止する。
+  immutable sourceSystemか出自を持つ親target IDをbindingし、裸externalKeyのsource横断の比較を禁止する。
 - 18/19桁、64/65文字、負零の境界は静的照合のみ。次波で回帰へ追加する。
   完全なF2 Demo、実resolver/apply、NF06全機能・production受入は未完了。
 

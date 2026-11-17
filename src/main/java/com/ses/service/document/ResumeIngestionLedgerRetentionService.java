@@ -32,7 +32,7 @@ import java.util.Set;
  *   <li>文書の legal hold 中の副本は何も変えず WARN を出す（解除後の実行で拾い直す）</li>
  * </ul>
  * 判定は文書行を lock して読み直した値で行う（lock 前に読んだ hold・状態を使わない）。
- * 処分候補の作成は {@code DocumentRetentionJob}（02:30。履歴の清理 02:00 の後）の
+ * 処分候補の作成は {@code DocumentRetentionJob}（02:30。履歴の清掃 02:00 の後）の
  * {@link DocumentEligibilityService#registerRetentionDisposalCandidate}、物理削除は管理者の承認と
  * {@code DocumentServiceImpl.executeDisposal} で行う。どちらも lock 後に legal hold を再確認し、NF07 hold の gate（A1H）も
  * 同じ D3・D1 に入るため、本 service は hold の判定を迂回しない。副本ごとに短い transaction で処理し、1件の失敗で

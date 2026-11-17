@@ -69,13 +69,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 確かめる（NF07-F2 delta review 第3回 P2-D、M-1〜M-4）。
  *
  * <ul>
- *   <li>M-1: 外側 transaction を持たない日次清理（{@code cleanupExpiredExtractedText} → {@code TenantAwareBatchRunner}）で、
+ *   <li>M-1: 外側 transaction を持たない日次清掃（{@code cleanupExpiredExtractedText} → {@code TenantAwareBatchRunner}）で、
  *       副本1件の文書行を別接続が lock したまま lock 待ちが timeout しても、その1件だけが失敗（metric +1）になり、
- *       他の副本・原本の purge・BP 取込の清理は commit される。次の実行でその副本を拾い直す。</li>
+ *       他の副本・原本の purge・BP 取込の清掃は commit される。次の実行でその副本を拾い直す。</li>
  *   <li>M-2: legal hold の変更（{@code changeLegalHold}）と両順序で直列化する。hold 先行なら副本の処理は待ち、commit 後の
  *       hold を見て何も変えない。副本の処理が先行なら hold の変更は待ち、その後の D3 は廃棄候補を作らない。</li>
  *   <li>M-3: link・ジョブが別 tenant の副本は変えず、別 tenant の実行は副本に触れない。</li>
- *   <li>M-4: 清理 → D3（{@code DocumentRetentionJob}）の PENDING（requested_by=-1）→ 管理者の承認 → 執行で副本が DISPOSED
+ *   <li>M-4: 清掃 → D3（{@code DocumentRetentionJob}）の PENDING（requested_by=-1）→ 管理者の承認 → 執行で副本が DISPOSED
  *       になり実体 file が消える。再実行で申請は重複しない。保存期限は早めるだけで延ばさず、AMENDED は状態を変えず、
  *       {@code evidence_eligibility_epoch} は進まない。</li>
  * </ul>
@@ -86,7 +86,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 副本の処理を lock 保持のまま止める箇所が無いため、試験の外側 transaction の中で {@code alignPurgedCopies} を呼ぶ
  * （副本ごとの transaction はそれに参加する。外側 transaction を持たない場合の性質は M-1・M-4 が確かめる）。
  * 日次 job は ShedLock（{@code lockAtLeastFor=PT1M}）を通るため、呼ぶ前に lock を期限切れにする（行は消さない）。
- * 各 case は清理が実際に動いたこと（原本の purge・副本の変化）を確かめ、ShedLock の skip を成功と取り違えない。
+ * 各 case は清掃が実際に動いたこと（原本の purge・副本の変化）を確かめ、ShedLock の skip を成功と取り違えない。
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -177,7 +177,7 @@ class ResumeIngestionLedgerRetentionMySqlTest {
     // ===== M-1 副本ごとの transaction と失敗の隔離 =====
 
     @Test
-    void M1_副本1件のlock待ちがtimeoutしても他の副本と原本のpurgeとBPの清理はcommitされ次の実行で拾い直す() throws Exception {
+    void M1_副本1件のlock待ちがtimeoutしても他の副本と原本のpurgeとBPの清掃はcommitされ次の実行で拾い直す() throws Exception {
         long a = copyOfExpiredJob(TENANT_A, "DRAFT", null);
         long b = copyOfExpiredJob(TENANT_A, "DRAFT", null);
         long c = copyOfExpiredJob(TENANT_A, "DRAFT", null);
@@ -209,10 +209,10 @@ class ResumeIngestionLedgerRetentionMySqlTest {
                     InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
                     TimeUnit.SECONDS.toMillis(WAIT_SECONDS), () -> {
                         if (run.isDone()) {
-                            throw new AssertionError("M-1: 副本Bのlock待ちを観測する前に清理が終わった: " + outcome(run));
+                            throw new AssertionError("M-1: 副本Bのlock待ちを観測する前に清掃が終わった: " + outcome(run));
                         }
                     }, "M-1");
-            // 副本Bの lock 待ちは timeout し、清理は例外を外へ出さずに終わる
+            // 副本Bの lock 待ちは timeout し、清掃は例外を外へ出さずに終わる
             run.get(WAIT_SECONDS, TimeUnit.SECONDS);
             releaseBlocker.countDown();
             blocker.get(WAIT_SECONDS, TimeUnit.SECONDS);
@@ -233,7 +233,7 @@ class ResumeIngestionLedgerRetentionMySqlTest {
         assertEquals(0L, count("SELECT COUNT(*) FROM t_resume_ingestion WHERE tenant_id = ? AND stored_file_name IS NOT NULL",
                 TENANT_A), "M-1: 原本の purge は3件ともcommitされる");
         assertNull(jdbc.queryForObject("SELECT extracted_text FROM t_bp_availability_ingestion WHERE id = ?", String.class, bp),
-                "M-1: 副本の失敗の後も同じtenantのBP取込の清理まで進む");
+                "M-1: 副本の失敗の後も同じtenantのBP取込の清掃まで進む");
         assertEquals(failuresBefore + 1, failures(ResumeIngestionLedgerRetentionService.STAGE_DOCUMENT), 0.0001,
                 "M-1: 失敗はmetricに1件数える");
 
@@ -286,7 +286,7 @@ class ResumeIngestionLedgerRetentionMySqlTest {
         assertNull(retentionUntil(d));
         assertEquals(1L, count("SELECT legal_hold_flag FROM t_document WHERE id = ?", d));
         assertEquals(0L, count("SELECT COUNT(*) FROM t_resume_ingestion WHERE tenant_id = ? AND stored_file_name IS NOT NULL",
-                TENANT_A), "M-2: 清理は実際に動き原本をpurgeしている");
+                TENANT_A), "M-2: 清掃は実際に動き原本をpurgeしている");
         long control = copy(TENANT_A, "CONFIRMED", false, LocalDate.now().minusDays(1));
         clearSchedulerLocks();
         documentRetentionJob.processExpiredDocuments();
@@ -381,7 +381,7 @@ class ResumeIngestionLedgerRetentionMySqlTest {
     // ===== M-4 端から端まで =====
 
     @Test
-    void M4_清理からD3と承認と執行まで通り再実行で申請は重複せず保存期限は延ばさない() throws Exception {
+    void M4_清掃からD3と承認と執行まで通り再実行で申請は重複せず保存期限は延ばさない() throws Exception {
         LocalDate start = LocalDate.now();
         long draft = copyOfExpiredJob(TENANT_A, "DRAFT", null);
         String storageKey = storeVersion(draft);

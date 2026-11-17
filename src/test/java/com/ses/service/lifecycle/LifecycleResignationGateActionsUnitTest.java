@@ -260,7 +260,7 @@ class LifecycleResignationGateActionsUnitTest {
     }
 
     @Test
-    void 停止CASが0件ならそれ以降の撤権処理へ進まず409で中断する() {
+    void 停止CASが0件ならそれ以降の権限取消し処理へ進まず409で中断する() {
         linkedUser(activeUser(null));
         when(sysUserMapper.update(isNull(), any())).thenReturn(0);
 

@@ -85,7 +85,7 @@ public class LegacyUploadMigrationService {
             for (Path file : files.filter(Files::isRegularFile).toList()) {
                 String storedName = file.getFileName().toString();
                 if (!referenced.contains(storedName)) {
-                    // どのproviderも参照していない実体は孤児清理の担当。ここでは公開しない。
+                    // どのproviderも参照していない実体は孤児清掃の担当。ここでは公開しない。
                     continue;
                 }
                 if (metadataMapper.selectByStoredName(TENANT_ID, storedName) != null) {

@@ -27,8 +27,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T048定向テスト: CRM DDLのH2 replay検証・entity CRUD・主担当一意・期間重複・移行DML。
- * L1〜L3の定向test。
+ * T048対象限定テスト: CRM DDLのH2 replay検証・entity CRUD・主担当一意・期間重複・移行DML。
+ * L1〜L3の対象限定test。
  *
  * <p>親テーブル({@code m_customer})の行は各testが自分で作る。V73は実MySQLで
  * {@code fk_customer_contact_customer} を張るため、存在しない顧客IDを使うtestは

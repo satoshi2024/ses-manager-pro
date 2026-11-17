@@ -281,12 +281,12 @@ function Assert-ControlledMavenJvmEnvironment {
                 Assert-ValidMavenArgs -ArgsList $parsedArgs
             } catch {
                 $redacted = Get-RedactedText -Text $rawMavenArgs
-                throw "FATAL: MAVEN_ARGS に未許可または門禁を迂回する引数が検出されました: '$redacted'."
+                throw "FATAL: MAVEN_ARGS に未許可またはゲートを迂回する引数が検出されました: '$redacted'."
             }
         }
     }
 
-    # 2. JVMオプション環境変数の厳格白名単検証 (MAVEN_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, MAVEN_CONFIG).
+    # 2. JVMオプション環境変数の厳格許可リスト検証 (MAVEN_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, MAVEN_CONFIG).
     $jvmVars = @('MAVEN_OPTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'MAVEN_CONFIG')
     foreach ($varName in $jvmVars) {
         if (Test-Path "env:$varName") {
@@ -300,7 +300,7 @@ function Assert-ControlledMavenJvmEnvironment {
                 foreach ($tok in $tokens) {
                     if (-not (Test-IsWhitelistedJvmOption -Option $tok)) {
                         $redactedTok = Get-RedactedText -Text $tok
-                        throw "FATAL: $varName に未許可または未知のJVMパラメータが検出されました（白名単外拒絶）: '$redactedTok'."
+                        throw "FATAL: $varName に未許可または未知のJVMパラメータが検出されました（許可リスト外の拒否）: '$redactedTok'."
                     }
                 }
             }

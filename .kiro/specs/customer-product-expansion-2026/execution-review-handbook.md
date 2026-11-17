@@ -14,7 +14,7 @@
 3. specの `design.md`（技術契約）
 4. specの `tasks.md`（実行順・完了条件）
 5. 本書、`shared-standards.md`、dependency/parallel plan
-6. 開工・Review対話の定型文
+6. 着手・Review対話の定型文
 
 下位文書だけで上位要件を狭めてはならない。矛盾は表にして停止し、推測で選択しない。
 
@@ -53,7 +53,7 @@ NOT READY → READY → IN PROGRESS → REVIEW ─┬→ PASS
 CONDITIONAL PASSはP0=0/P1=0で、残件が環境・契約・実機だけに限定され、各残件にowner、期限、手順、
 合格条件、rollback、次spec/block本番の区分がある場合だけ使用する。必須実MySQLやbrowser Demoを静的testで代替しない。
 
-## 4. 開工前Readiness Gate
+## 4. 着手前Readiness Gate
 
 production fileを変える前に次を出力する。
 
