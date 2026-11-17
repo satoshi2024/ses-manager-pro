@@ -257,11 +257,13 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
   - `outbound承認digestの照合にはexternal-transport.truststore-pathのfileを読める必要があります`: truststore を読めない・空・1 MiB 超。
   - `…bound-tenant-idを英数字と._:-の100文字以内に…`: tenant の形式。
 - truststore を入れ替えたら（同じ証明書でも file の byte が変われば）outbound digest が変わり、起動しない。証明書の入替えは OUT-4 の変更として新しい決定を取る。
-- 調整値（timeout・lease・purge 間隔、`inbound-lease-seconds` 等）は digest に含めない。`batch-size`・`fixed-delay-ms`（OUT-7）と `unauthenticated-audit-max-per-minute`（IN-7）は含めるため、変えるには新しい決定が要る。
+- 調整値（timeout・lease・purge 間隔、`inbound-lease-seconds` 等）は digest に含めない。`batch-size`・`fixed-delay-ms`（OUT-7）と `unauthenticated-audit-max-per-minute`（IN-7）は含めるため、変えるには新しい決定が要る（この運用負担は Owner/SRE の受理事項。未取得）。
+- **旧決定の再投入は検出できない**（RB-NF05 review P3-4）: digest には鍵も有効期間も無いため、撤回・置換された旧決定ID・旧 digest・旧い承認値の組を設定し直しても起動する。配備のたびに、設定する決定IDが現に有効な決定であることを配備記録と変更管理で確かめる。署名日・失効日を正規形へ入れるか（v2）は Security/Owner の判断（未取得。DG-05 草案 §1.1）。
+- truststore は起動時の照合で1回だけ読み、digest を計算した byte 列を transport が読み込む。照合の後に file を差し替えても反映されない（RB-NF05 review P3-6）。替えるときは新しい決定の後に全停止で再起動する。
 
 ### 14.2 credential hash の pepper（N5-P3-2）
 
-- `INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER`（`integration.hub.crypto.credential-hash-pepper`）: 32 byte を `=` 無しの base64url で書く。暗号鍵（`integration.hub.crypto.keys.*`）と同じ値は拒否する。secret store から全 instance に同じ値で注入する。
+- `INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER`（`integration.hub.crypto.credential-hash-pepper`）: 32 byte を `=` 無しの base64url で書く。暗号鍵（`integration.hub.crypto.keys.*` の**全 version**）と復号後の byte 列が同じ値は拒否する（base64url の末尾の表記を変えた同じ鍵も拒否する。RB-NF05 review P3-5）。secret store から全 instance に同じ値で注入する。
 - credential の保存用 hash（`t_credential_version.secret_hash`）は、この pepper を鍵にした HMAC-SHA256（client ID・credential version・secret を長さ前置で連結）。認証は envelope（IHG1）の復号で行い、hash は照合に使わない。pepper を替えても既存 credential の認証は変わらない（以後の発行行だけが新しい pepper の hash になる）。
 - pepper が無い環境では credential を発行できない（fail closed）。prod で NF05 を開けると起動時にも検査する。
 - 発行できる secret は 43 文字以上の base64url だけ（管理 API は 32 byte 乱数から作る）。

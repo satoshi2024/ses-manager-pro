@@ -19,9 +19,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -245,6 +247,9 @@ class IntegrationHubProductionEnablementPolicyTest {
         properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
         approveOutbound(properties);
         assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
+        // review P3-6: 照合でdigestを計算したbyte列を記録し、transportはそれを読む（fileを読み直さない）。
+        Path approvedFile = Path.of(properties.getExternalTransport().getTruststorePath());
+        assertArrayEquals(Files.readAllBytes(approvedFile), properties.getExternalTransport().approvedTruststoreContent());
 
         // pathを変えずにtruststoreの中身（信頼する発行者）を差し替えると、承認内容が変わったものとして止まる。
         Files.write(Path.of(properties.getExternalTransport().getTruststorePath()),
@@ -263,9 +268,13 @@ class IntegrationHubProductionEnablementPolicyTest {
         assertMessage("一致しません", properties);
 
         approveOutbound(properties);
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.outboundViolations(properties));
         properties.getExternalTransport().setTruststorePath(directory.resolve("missing.p12").toString());
+        assertNull(properties.getExternalTransport().approvedTruststoreContent(),
+                "照合後にpathが変われば記録したbyte列を使わない");
         assertTrue(IntegrationHubProductionEnablementPolicy.outboundViolations(properties).stream()
                 .anyMatch(violation -> violation.contains("truststore-path")));
+        assertNull(properties.getExternalTransport().approvedTruststoreContent(), "読めないtruststoreは記録しない");
 
         approveOutbound(properties);
         properties.getExternalTransport().getApproval().setApprovalDigest(null);
@@ -290,7 +299,35 @@ class IntegrationHubProductionEnablementPolicyTest {
             assertMessage("credential-hash-pepper", properties);
         }
         withoutPepper.setProperty("integration.hub.crypto.credential-hash-pepper", SYNTHETIC_PEPPER);
-        assertMessage("暗号鍵と別の値", properties);
+        assertMessage("暗号鍵（全version）と別の値", properties);
+    }
+
+    /**
+     * RB-NF05 review P3-5: pepperと暗号鍵の比較は復号後のbyte列で行い、現行以外のversionの鍵とも比べる。32 byteの
+     * base64urlは末尾の文字の下位2 bitを使わないため、同じbyte列を「…E」「…F」「…G」「…H」と書ける。
+     */
+    @Test
+    void pepperは表記を変えた同じ鍵と旧versionの鍵も拒否し別の鍵なら通す() {
+        var properties = base(true, false);
+        approveInbound(properties);
+        String stem = SYNTHETIC_PEPPER.substring(0, SYNTHETIC_PEPPER.length() - 1);
+        for (String sameBytes : List.of(stem + "F", stem + "G", stem + "H", SYNTHETIC_PEPPER + "=")) {
+            MockEnvironment environment = prodEnvironment(true);
+            environment.setProperty("integration.hub.crypto.keys.test-key-v1", sameBytes);
+            properties.setEnvironment(environment);
+            assertMessage("暗号鍵（全version）と別の値", properties);
+        }
+
+        MockEnvironment rotated = prodEnvironment(true);
+        rotated.setProperty("integration.hub.crypto.current-key-version", "test-key-v2");
+        rotated.setProperty("integration.hub.crypto.keys.test-key-v2", "synthetic-current-key-material");
+        rotated.setProperty("integration.hub.crypto.keys.test-key-v1", SYNTHETIC_PEPPER);
+        properties.setEnvironment(rotated);
+        assertMessage("暗号鍵（全version）と別の値", properties);
+
+        rotated.setProperty("integration.hub.crypto.keys.test-key-v1", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, rotated),
+                "全versionの鍵とbyte列が違えば通す");
     }
 
     @Test

@@ -116,6 +116,40 @@ class ImportJdbcReconnectGuardTest {
         }
     }
 
+    /**
+     * RB-NF05 review P3-1: Connector/J の authority は {@code [^/?#]*} で {@code ;} を含む。{@code ;} を host 部の終わりと
+     * みなすと {@code jdbc:mysql://h1;x,h2/db} が通り、実際は failover になる。host 部の {@code ;} は全て拒否する。
+     */
+    @Test
+    void host部のセミコロンは区切りとみなさず拒否しdata_sourceのurlも同じ規則で検査する() {
+        for (String url : List.of(
+                "jdbc:mysql://db-a;x,db-b:3306/ses_manager_db",
+                "jdbc:mysql://db-a;db-b/ses_manager_db",
+                "jdbc:mysql://db-a:3306;failover=true/ses_manager_db",
+                "jdbc:mysql://app:p;w@db-a;x,db-b/ses_manager_db",
+                "jdbc:mysql://db-a;x",
+                "jdbc:mysql://db-a,db-b#fragment",
+                "jdbc:mysql://db-a,db-b",
+                "jdbc:mariadb://db-a;db-b/ses_manager_db")) {
+            assertEquals(List.of("spring.datasource.url(multiHost)"), ImportJdbcReconnectGuard.violations(
+                    new MockEnvironment().withProperty("spring.datasource.url", url)), url);
+        }
+        // user 情報（@ より前）の ; と、path・query・fragment の後ろの ; や , は host 部ではない。
+        for (String url : List.of("jdbc:mysql://app:p;w,x@db-a:3306/ses_manager_db",
+                "jdbc:mysql://db-a:3306/ses_manager_db;x,y",
+                "jdbc:mysql://db-a:3306?sessionVariables=a=1;b=2",
+                "jdbc:mysql://db-a:3306#a,b;c")) {
+            assertEquals(List.of(), ImportJdbcReconnectGuard.violations(
+                    new MockEnvironment().withProperty("spring.datasource.url", url)), url);
+        }
+        assertEquals(List.of("spring.datasource.hikari.data-source-properties.url(multiHost)"),
+                ImportJdbcReconnectGuard.violations(new MockEnvironment().withProperty(
+                        "spring.datasource.hikari.data-source-properties.url", "jdbc:mysql://db-a;x,db-b/ses_manager_db")));
+        assertEquals(List.of("spring.datasource.hikari.data-source-properties.url"),
+                ImportJdbcReconnectGuard.violations(new MockEnvironment().withProperty(
+                        "spring.datasource.hikari.data-source-properties.url", DEFAULT_URL + "&autoReconnect=true")));
+    }
+
     /** Connector/J は URL の値を百分率符号化から戻して読むため、符号化した autoReconnect も拒否する（同 P3-2 の3）。 */
     @Test
     void 百分率符号化したautoReconnectも拒否する() {

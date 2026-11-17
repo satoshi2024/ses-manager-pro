@@ -13,6 +13,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -214,8 +215,79 @@ class ImportStageReconcilerTest {
         return new ImportStageReconciler(ledger, jdbc, documents, meters, Clock.fixed(now, ZoneOffset.UTC));
     }
 
-    private ImportStageReconciler reconcilerAt(Instant now, ImportStageReconciler.CommitConnectionProbe probe) {
-        return new ImportStageReconciler(ledger, jdbc, documents, meters, Clock.fixed(now, ZoneOffset.UTC), probe);
+    /**
+     * RB-NF05 review P3-3: 接続IDはserverの再起動・failoverの後に別の接続へ振り直される。記録後にserverが再起動した
+     * （起動時刻が記録時刻＋許容より後）・別serverになった（server_uuidが違う）なら、IDが実行中に見えても使わず回収する。
+     */
+    @Test
+    void 記録後にDB_serverが再起動または切り替わった台帳は接続IDを使わず時間で判定する() {
+        String restartedKey = key();
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(restartedKey,
+                UUID.randomUUID().toString()), 21L, SERVER_UUID);
+        List<Long> probed = new java.util.ArrayList<>();
+        Instant now = RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW);
+
+        ImportStageReconciler.Result restarted = reconcilerAt(now, id -> { probed.add(id); return true; },
+                new ImportStageReconciler.ServerIdentity(SERVER_UUID,
+                        RECORDED.plus(ImportStageReconciler.SERVER_RESTART_MARGIN).plusSeconds(1))).reconcileDue();
+
+        assertEquals(1, restarted.reclaimed(), "再起動したserverでは同じIDが別の接続のものになり得る");
+        assertEquals(List.of(), probed);
+
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(key(),
+                UUID.randomUUID().toString()), 22L, SERVER_UUID);
+        ImportStageReconciler.Result failedOver = reconcilerAt(now, id -> { probed.add(id); return true; },
+                new ImportStageReconciler.ServerIdentity("aaaaaaaa-71ca-11e1-9e33-c80aa9429562",
+                        RECORDED.minus(Duration.ofDays(30)))).reconcileDue();
+
+        assertEquals(1, failedOver.reclaimed(), "server_uuidが違えば別server（failover）");
+        assertEquals(List.of(), probed);
+        verify(documents, org.mockito.Mockito.times(2)).discardImportStage(any());
+    }
+
+    @Test
+    void 時計の誤差の範囲の起動時刻と同じserverでは接続IDを使いserverを取れなければ台帳を残す() {
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(key(),
+                UUID.randomUUID().toString()), 31L, SERVER_UUID.toUpperCase(java.util.Locale.ROOT));
+        List<Long> probed = new java.util.ArrayList<>();
+        Instant now = RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW);
+
+        ImportStageReconciler.Result withinMargin = reconcilerAt(now, id -> { probed.add(id); return true; },
+                new ImportStageReconciler.ServerIdentity(SERVER_UUID,
+                        RECORDED.plus(ImportStageReconciler.SERVER_RESTART_MARGIN))).reconcileDue();
+
+        assertEquals(1, withinMargin.pending(), "許容内の起動時刻は再起動とみなさず、実行中の接続を待つ");
+        assertEquals(List.of(31L), probed);
+
+        ImportStageReconciler.Result unknownServer = new ImportStageReconciler(ledger, jdbc, documents, meters,
+                Clock.fixed(now, ZoneOffset.UTC), new ImportStageReconciler.CommitConnectionProbe() {
+                    @Override public boolean isExecuting(long connectionId) { return false; }
+                    @Override public ImportStageReconciler.ServerIdentity currentServer() {
+                        throw new IllegalStateException("synthetic status outage");
+                    }
+                }).reconcileDue();
+
+        assertEquals(1, unknownServer.failed());
+        assertEquals(1, ledger.entries().size(), "serverを確かめられなければ消さない");
+        verify(documents, never()).discardImportStage(any());
+    }
+
+    /** 試験の既定: 記録より前から動いている同じserver。 */
+    private static final String SERVER_UUID = "3e11fa47-71ca-11e1-9e33-c80aa9429562";
+    private static final ImportStageReconciler.ServerIdentity SAME_SERVER =
+            new ImportStageReconciler.ServerIdentity(SERVER_UUID, RECORDED.minus(Duration.ofDays(1)));
+
+    private ImportStageReconciler reconcilerAt(Instant now, java.util.function.LongPredicate executing) {
+        return reconcilerAt(now, executing, SAME_SERVER);
+    }
+
+    private ImportStageReconciler reconcilerAt(Instant now, java.util.function.LongPredicate executing,
+                                               ImportStageReconciler.ServerIdentity server) {
+        return new ImportStageReconciler(ledger, jdbc, documents, meters, Clock.fixed(now, ZoneOffset.UTC),
+                new ImportStageReconciler.CommitConnectionProbe() {
+                    @Override public boolean isExecuting(long connectionId) { return executing.test(connectionId); }
+                    @Override public ImportStageReconciler.ServerIdentity currentServer() { return server; }
+                });
     }
 
     private static String key() {

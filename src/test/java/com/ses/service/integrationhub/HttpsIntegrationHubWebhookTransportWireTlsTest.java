@@ -66,6 +66,10 @@ class HttpsIntegrationHubWebhookTransportWireTlsTest {
     @TempDir
     static Path fixtureRoot;
 
+    /** 試験ごとの一時 directory（共有の truststore を書き換えない）。 */
+    @TempDir
+    Path caseDirectory;
+
     private static SSLContext validLeaf;
     private static SSLContext expiredLeaf;
     private static Path trustedCaStore;
@@ -191,14 +195,47 @@ class HttpsIntegrationHubWebhookTransportWireTlsTest {
         return fixture;
     }
 
+    /**
+     * RB-NF05 review P3-6: 承認照合が digest を計算した truststore の byte 列を transport が読み込み、照合の後に同じ path の
+     * file を別の CA へ差し替えても照合した内容だけを信頼する。対照として、照合の記録が無ければ差し替え後の file を読む。
+     */
+    @Test
+    void 承認照合で読んだtruststoreのbyte列を使い照合後のfileの差替えを読まない() throws Exception {
+        TlsFixture valid = start(validLeaf);
+        Path swapped = caseDirectory.resolve("swapped-truststore.p12");
+        Files.copy(trustedCaStore, swapped);
+        IntegrationHubExternalApiProperties approved = transportProperties(swapped);
+        approved.getExternalTransport().recordApprovedTruststore(swapped.toString(), Files.readAllBytes(swapped));
+        Files.copy(otherCaStore, swapped, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+        IntegrationHubWebhookTransportResult result = transport(approved).send(request("127.0.0.1", valid.port()));
+
+        assertThat(result.success()).as("照合した truststore（信頼 CA）で接続する").isTrue();
+        IntegrationHubWebhookTransportResult unrecorded = transport(transportProperties(swapped))
+                .send(request("127.0.0.1", valid.port()));
+        assertThat(unrecorded.errorCode()).as("照合の記録が無ければ file（差し替え後の別 CA）を読む")
+                .isEqualTo("TLS_CERTIFICATE_UNTRUSTED");
+        approved.getExternalTransport().setTruststorePath(otherCaStore.toString());
+        assertThat(approved.getExternalTransport().approvedTruststoreContent()).as("path が変われば記録を使わない").isNull();
+        assertThat(valid.requests()).hasValue(1);
+    }
+
     /** production と同じ構成の transport。宛先 guard だけを mock にし、host を 127.0.0.1 へ固定する。 */
     private HttpsIntegrationHubWebhookTransport transport(Path truststore, int... ports) throws Exception {
+        return transport(transportProperties(truststore));
+    }
+
+    private static IntegrationHubExternalApiProperties transportProperties(Path truststore) {
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getExternalTransport().setTruststorePath(truststore.toString());
         properties.getExternalTransport().setTruststorePassword(new String(PASSWORD));
         properties.getExternalTransport().setTruststoreType("PKCS12");
         properties.getExternalTransport().setConnectTimeoutMs(3000);
         properties.getExternalTransport().setReadTimeoutMs(3000);
+        return properties;
+    }
+
+    private HttpsIntegrationHubWebhookTransport transport(IntegrationHubExternalApiProperties properties) throws Exception {
         IntegrationHubHttpsEndpointGuard guard = mock(IntegrationHubHttpsEndpointGuard.class);
         when(guard.validate(any())).thenAnswer(call -> {
             URI uri = call.getArgument(0);

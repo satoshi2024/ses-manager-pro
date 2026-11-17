@@ -165,10 +165,17 @@ public final class HttpsIntegrationHubWebhookTransport
             "x-integration-hub-timestamp", "x-integration-hub-key-id", "x-integration-hub-credential-version",
             "x-integration-hub-signature", "idempotency-key", "x-correlation-id");
 
+    /**
+     * truststoreを読み込む。production起動時の承認照合がdigestを計算したbyte列があればそれを使い、fileを読み直さない
+     * （RB-NF05 review P3-6。照合後にfileを差し替えても、信頼するのは決定書のdigestと一致した内容だけ）。照合していない
+     * 環境（dev/test）ではfileを読む。
+     */
     static SSLContext loadTruststore(IntegrationHubExternalApiProperties properties) {
         var tls = properties.getExternalTransport();
         char[] password = tls.getTruststorePassword() == null ? new char[0] : tls.getTruststorePassword().toCharArray();
-        try (var input = java.nio.file.Files.newInputStream(java.nio.file.Path.of(tls.getTruststorePath()))) {
+        byte[] approved = tls.approvedTruststoreContent();
+        try (var input = approved != null ? new java.io.ByteArrayInputStream(approved)
+                : java.nio.file.Files.newInputStream(java.nio.file.Path.of(tls.getTruststorePath()))) {
             java.security.KeyStore store = java.security.KeyStore.getInstance(tls.getTruststoreType());
             store.load(input, password);
             if (store.size() == 0) throw new IllegalArgumentException("truststoreが空です");

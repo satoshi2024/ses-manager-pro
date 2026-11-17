@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -39,7 +40,9 @@ import java.util.regex.Pattern;
  * L4 LBに切られた）に備え、台帳にCOMMIT接続のserver側ID（MySQLの{@code CONNECTION_ID()}）がある結果不明の台帳は、
  * 参照が無くても、そのserver threadが文を実行している間は判定しない（pendingに数えて次回に回す）。接続が文を実行して
  * いないと確かめた後に参照件数を数え直してから回収する。接続IDの無い台帳（MySQL以外・ID取得の失敗・補償削除の失敗）は
- * 従来どおり時間だけで判定する。
+ * 従来どおり時間だけで判定する。接続IDはserverの再起動・failoverの後に別の接続へ振り直されるため、記録後にserverが
+ * 再起動した（起動時刻が記録より後）・別serverになった（{@code @@server_uuid}が違う）場合はIDを使わない
+ * （RB-NF05 review P3-3。元の接続は既に無く、COMMITの結果は確定している）。
  */
 @Component
 public class ImportStageReconciler {
@@ -97,6 +100,8 @@ public class ImportStageReconciler {
         int pending = 0;
         int failed = 0;
         int manual = 0;
+        // 現在のDB serverの識別と起動時刻は1回の照合で1度だけ取る（取れなければ台帳ごとに取り直す）。
+        ServerIdentity server = null;
         for (ImportStageReconciliationLedger.Entry entry : ledger.entries()) {
             if (entry.recordedAt().isAfter(cutoff)) {
                 pending++;
@@ -111,8 +116,14 @@ public class ImportStageReconciler {
             try {
                 int references = references(entry);
                 if (references == 0 && entry.commitConnectionId() != null) {
-                    // COMMITを送った接続のserver threadが文を実行中なら、COMMITはまだ確定していない（b-14）。
-                    if (commitConnections.isExecuting(entry.commitConnectionId())) {
+                    if (server == null) server = commitConnections.currentServer();
+                    if (!sameServerSinceRecord(entry, server)) {
+                        // 記録後にserverが再起動した・別serverへ切り替わった。元の接続は既に無く、同じIDは別の接続に
+                        // 振り直され得るため使わない（RB-NF05 review P3-3）。COMMITの結果は確定しているので時間だけで判定する。
+                        log.info("[取込] COMMIT接続のserverが台帳の記録後に再起動・切替えされたため、接続IDを使わずに判定します: "
+                                + "operationId={} commitConnectionId={}", entry.operationId(), entry.commitConnectionId());
+                    } else if (commitConnections.isExecuting(entry.commitConnectionId())) {
+                        // COMMITを送った接続のserver threadが文を実行中なら、COMMITはまだ確定していない（b-14）。
                         pending++;
                         log.info("[取込] 照合対象stageのCOMMIT接続がまだ実行中のため判定を見送ります: operationId={} "
                                 + "commitConnectionId={}", entry.operationId(), entry.commitConnectionId());
@@ -153,25 +164,68 @@ public class ImportStageReconciler {
         return references;
     }
 
+    /**
+     * serverの起動時刻の誤差の許容。DB serverとアプリの時計のずれ・{@code Uptime}の秒単位の丸めで、再起動していない
+     * serverを「記録後に再起動した」と誤って判定しない（誤れば接続IDを使わず時間だけの判定へ戻るため、安全側に取る）。
+     */
+    static final Duration SERVER_RESTART_MARGIN = Duration.ofMinutes(5);
+
+    /**
+     * 台帳を記録した時のserverが、記録後に再起動・切替えされずに動いているか。台帳のserver識別（無ければ比べない）と
+     * 現在のserverの{@code @@server_uuid}が違えば別server（failover）、現在のserverの起動時刻が記録時刻＋許容より後なら
+     * 再起動である。どちらの場合も元の接続は既に無く、COMMITの結果は確定している。
+     */
+    static boolean sameServerSinceRecord(ImportStageReconciliationLedger.Entry entry, ServerIdentity server) {
+        if (server == null) return true;
+        if (entry.commitServerUuid() != null && server.serverUuid() != null
+                && !entry.commitServerUuid().equalsIgnoreCase(server.serverUuid())) {
+            return false;
+        }
+        return server.startedAt() == null
+                || !server.startedAt().isAfter(entry.recordedAt().plus(SERVER_RESTART_MARGIN));
+    }
+
+    /** 現在のDB serverの識別（{@code @@server_uuid}。取れなければnull）と起動時刻（取れなければnull）。 */
+    record ServerIdentity(String serverUuid, Instant startedAt) { }
+
     /** 結果不明のCOMMITを送った接続のserver threadが、まだ文を実行しているか。 */
-    @FunctionalInterface
     interface CommitConnectionProbe {
         /** 判定できなければ例外を投げる（照合は失敗として台帳を残す）。 */
         boolean isExecuting(long connectionId);
+
+        /** 現在のDB server。判定できなければ例外を投げる（照合は失敗として台帳を残す）。 */
+        ServerIdentity currentServer();
     }
 
     /**
      * MySQLの{@code information_schema.PROCESSLIST}で判定する。同じDB accountのthreadはPROCESS権限なしで見える
-     * （アプリは全instanceで同じaccountを使う）。{@code COMMAND='Sleep'}は文を実行していない（COMMITは完了したか、
-     * clientが送る前に切れて以後も送られない）ため実行中に数えない。{@code Killed}は後始末中なので実行中に数える。
-     * MySQL以外（照会できないDB）は例外になり、その台帳は失敗として残る。
+     * （アプリは全instanceで同じaccountを使い、account を交互に切り替える rotation をしない。feature-switches.md 4.8.2 #10）。
+     * {@code COMMAND='Sleep'}は文を実行していない（COMMITは完了したか、clientが送る前に切れて以後も送られない）ため
+     * 実行中に数えない。{@code Killed}は後始末中なので実行中に数える。serverの起動時刻は{@code UNIX_TIMESTAMP()}から
+     * {@code SHOW GLOBAL STATUS LIKE 'Uptime'}（権限不要）を引いて求める。MySQL以外（照会できないDB）は例外になり、
+     * その台帳は失敗として残る。
      */
     static CommitConnectionProbe processList(JdbcTemplate jdbc) {
-        return connectionId -> {
-            Integer executing = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.PROCESSLIST "
-                    + "WHERE ID = ? AND COMMAND <> 'Sleep'", Integer.class, connectionId);
-            if (executing == null) throw new IllegalStateException("COMMIT接続の状態を取得できません");
-            return executing > 0;
+        return new CommitConnectionProbe() {
+            @Override
+            public boolean isExecuting(long connectionId) {
+                Integer executing = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.PROCESSLIST "
+                        + "WHERE ID = ? AND COMMAND <> 'Sleep'", Integer.class, connectionId);
+                if (executing == null) throw new IllegalStateException("COMMIT接続の状態を取得できません");
+                return executing > 0;
+            }
+
+            @Override
+            public ServerIdentity currentServer() {
+                String serverUuid = jdbc.queryForObject("SELECT @@server_uuid", String.class);
+                Long now = jdbc.queryForObject("SELECT UNIX_TIMESTAMP()", Long.class);
+                List<Long> uptime = jdbc.query("SHOW GLOBAL STATUS LIKE 'Uptime'", (rs, n) -> rs.getLong(2));
+                if (now == null || uptime.size() != 1 || uptime.get(0) == null || uptime.get(0) < 0) {
+                    throw new IllegalStateException("DB serverの起動時刻を取得できません");
+                }
+                return new ServerIdentity(serverUuid == null ? null : serverUuid.toLowerCase(java.util.Locale.ROOT),
+                        Instant.ofEpochSecond(now - uptime.get(0)));
+            }
         };
     }
 

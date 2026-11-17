@@ -203,8 +203,9 @@ public class ImportCsvIngestionService {
                             LogRedaction.exceptionType(readbackFailure));
                 }
                 // 保全したstageは照合台帳へ記録し、ImportStageReconcilerが後から行方を確定・回収する（A-NF06-2）。
-                // COMMIT接続のIDも残し、そのserver threadが文を実行している間は照合が判定しないようにする（b-14）。
-                stageLedger.recordRetained(before.tenantId(), staged, unknown.commitConnectionId());
+                // COMMIT接続のIDとserverの識別も残し、そのserver threadが文を実行している間は照合が判定しないようにする（b-14）。
+                stageLedger.recordRetained(before.tenantId(), staged, unknown.commitConnectionId(),
+                        unknown.commitServerUuid());
                 if (deadline.expired() || ImportIngressDeadline.isTimeoutFailure(unknown)) {
                     BusinessException exceeded = deadline.exceeded("commit");
                     exceeded.addSuppressed(unknown);

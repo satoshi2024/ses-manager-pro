@@ -134,8 +134,11 @@ final class IntegrationHubProductionEnablementPolicy {
         }
         String configured = IntegrationHubApprovalDigest.normalizeConfiguredDigest(
                 approval == null ? null : approval.getApprovalDigest());
-        String truststore = IntegrationHubApprovalDigest.truststoreSha256(
-                properties.getExternalTransport().getTruststorePath());
+        // truststoreは1回だけ読み、同じbyte列をHTTPS transportへ渡す（照合後のfileの差替えを読まない。review P3-6）。
+        String truststorePath = properties.getExternalTransport().getTruststorePath();
+        byte[] truststoreContent = IntegrationHubApprovalDigest.readTruststore(truststorePath);
+        properties.getExternalTransport().recordApprovedTruststore(truststorePath, truststoreContent);
+        String truststore = IntegrationHubApprovalDigest.sha256Hex(truststoreContent);
         if (configured == null) {
             violations.add("outbound開放にはexternal-transport.approval.approval-digest（決定書の承認内容のSHA-256、小文字hex 64桁）が必要です");
         } else if (truststore == null) {
@@ -170,6 +173,10 @@ final class IntegrationHubProductionEnablementPolicy {
     /**
      * 両方向に共通するcredential前提。keyringの現行versionと鍵、credential hashのpepper（N5-P3-2）が環境から
      * 注入されていること。pepperは32 byteを{@code =}無しのbase64urlで書き、暗号鍵と同じ値にしない（用途を分ける）。
+     *
+     * <p>同じ値かどうかは復号後のbyte列で比べ、現行versionだけでなく{@code integration.hub.crypto.keys.*}の全versionの
+     * 鍵と比べる（RB-NF05 review P3-5）。32 byteのbase64urlは末尾の文字に使われない2 bitがあり、同じbyte列に4通りの
+     * 表記があるため、文字列の比較では表記を変えた同じ鍵を見逃す。
      */
     private static List<String> credentialViolations(Environment environment) {
         List<String> violations = new ArrayList<>();
@@ -182,10 +189,19 @@ final class IntegrationHubProductionEnablementPolicy {
         }
         String pepper = environment == null ? null
                 : environment.getProperty(CREDENTIAL_HASH_PEPPER_PROPERTY);
-        if (!validPepper(pepper)) {
+        byte[] pepperBytes = decodePepper(pepper);
+        if (pepperBytes == null) {
             violations.add("NF-05開放にはintegration.hub.crypto.credential-hash-pepper（32 byteのbase64url、=無し）の注入が必要です");
-        } else if (pepper.equals(key)) {
-            violations.add("integration.hub.crypto.credential-hash-pepperには暗号鍵と別の値を設定してください");
+        } else {
+            try {
+                List<String> keys = new ArrayList<>(cryptoKeys(environment));
+                if (StringUtils.hasText(key)) keys.add(key);
+                if (keys.stream().anyMatch(candidate -> sameBytes(pepperBytes, candidate))) {
+                    violations.add("integration.hub.crypto.credential-hash-pepperには暗号鍵（全version）と別の値を設定してください");
+                }
+            } finally {
+                java.util.Arrays.fill(pepperBytes, (byte) 0);
+            }
         }
         return violations;
     }
@@ -194,14 +210,47 @@ final class IntegrationHubProductionEnablementPolicy {
     static final String CREDENTIAL_HASH_PEPPER_PROPERTY =
             com.ses.service.integrationhub.crypto.EnvironmentIntegrationHubKeyring.CREDENTIAL_HASH_PEPPER_PROPERTY;
 
-    private static boolean validPepper(String encoded) {
+    /** pepperを復号する。32 byteの{@code =}無しbase64urlでなければnull。 */
+    private static byte[] decodePepper(String encoded) {
         if (!StringUtils.hasText(encoded) || encoded.contains("=") || encoded.matches(".*\\s.*")) {
+            return null;
+        }
+        try {
+            byte[] decoded = java.util.Base64.getUrlDecoder().decode(encoded);
+            if (decoded.length == 32) return decoded;
+            java.util.Arrays.fill(decoded, (byte) 0);
+            return null;
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
+    /** {@code integration.hub.crypto.keys.*}の全versionの鍵（環境変数の{@code INTEGRATION_HUB_CRYPTO_KEYS_<VERSION>}を含む）。 */
+    private static List<String> cryptoKeys(Environment environment) {
+        if (environment == null) return List.of();
+        try {
+            return List.copyOf(org.springframework.boot.context.properties.bind.Binder.get(environment)
+                    .bind("integration.hub.crypto.keys",
+                            org.springframework.boot.context.properties.bind.Bindable.mapOf(String.class, String.class))
+                    .orElse(java.util.Map.of()).values().stream().filter(StringUtils::hasText).toList());
+        } catch (RuntimeException unbindable) {
+            // 鍵の一覧を作れなくても、現行versionの鍵とは呼出元が比べる。
+            return List.of();
+        }
+    }
+
+    /** 鍵を復号した byte 列がpepperと一致するか（定数時間比較。復号できない鍵は一致しない）。 */
+    private static boolean sameBytes(byte[] pepper, String encodedKey) {
+        byte[] key;
+        try {
+            key = java.util.Base64.getUrlDecoder().decode(encodedKey.trim());
+        } catch (IllegalArgumentException invalid) {
             return false;
         }
         try {
-            return java.util.Base64.getUrlDecoder().decode(encoded).length == 32;
-        } catch (IllegalArgumentException invalid) {
-            return false;
+            return java.security.MessageDigest.isEqual(pepper, key);
+        } finally {
+            java.util.Arrays.fill(key, (byte) 0);
         }
     }
 

@@ -185,6 +185,34 @@ public class IntegrationHubExternalApiProperties {
         private String truststoreType = "PKCS12";
         /** outbound方向のproduction承認（DG-05）。dev/testでは任意。 */
         private OutboundApproval approval = new OutboundApproval();
+        /**
+         * production起動時の承認照合（{@link IntegrationHubProductionEnablementPolicy}）がdigestを計算したtruststoreの
+         * pathとbyte列。HTTPS transportはfileを読み直さずこのbyte列を読み込み、照合後にfileが差し替えられても照合した内容
+         * だけを信頼する（RB-NF05 review P3-6。TOCTOUを無くす）。設定からは束縛しない。
+         */
+        @lombok.Getter(lombok.AccessLevel.NONE)
+        @lombok.Setter(lombok.AccessLevel.NONE)
+        @lombok.EqualsAndHashCode.Exclude
+        @lombok.ToString.Exclude
+        private volatile ApprovedTruststore approvedTruststore;
+
+        /** 承認照合でdigestを計算したtruststoreのbyte列を記録する（照合だけが呼ぶ。byte列は複製して持つ）。 */
+        public void recordApprovedTruststore(String path, byte[] content) {
+            this.approvedTruststore = path == null || content == null ? null
+                    : new ApprovedTruststore(path, content.clone());
+        }
+
+        /**
+         * 承認照合でdigestを計算したtruststoreのbyte列の複製。照合していない（dev/test・OFF）か、その後に
+         * {@code truststore-path} が変わっていればnullを返し、呼出元はfileを読む。
+         */
+        public byte[] approvedTruststoreContent() {
+            ApprovedTruststore current = approvedTruststore;
+            if (current == null || !current.path().equals(truststorePath)) return null;
+            return current.content().clone();
+        }
+
+        private record ApprovedTruststore(String path, byte[] content) { }
     }
 
     @Data

@@ -71,17 +71,20 @@ public class ImportStageReconciliationLedger {
 
     /**
      * 台帳の一件。{@code file}は削除用で、内容は他の項目に限る。{@code commitConnectionId}は結果不明のCOMMITを送った接続の
-     * server側ID（取得できた場合だけ。b-14）で、照合はそのserver threadが文を実行している間は判定しない。
+     * server側ID、{@code commitServerUuid}はそのserverの{@code @@server_uuid}（どちらも取得できた場合だけ。b-14）で、
+     * 照合は同じserverが記録後に再起動していなければ、そのserver threadが文を実行している間は判定しない。
      */
     record Entry(Path file, String tenantId, String storageKey, String operationId, Reason reason,
-                 Instant recordedAt, Long commitConnectionId) {
+                 Instant recordedAt, Long commitConnectionId, String commitServerUuid) {
         Entry(Path file, String tenantId, String storageKey, String operationId, Reason reason, Instant recordedAt) {
-            this(file, tenantId, storageKey, operationId, reason, recordedAt, null);
+            this(file, tenantId, storageKey, operationId, reason, recordedAt, null, null);
         }
     }
 
     /** 台帳fileのCOMMIT接続IDの項目名。 */
     static final String COMMIT_CONNECTION_ID = "commitConnectionId";
+    /** 台帳fileのCOMMIT接続のserver識別（{@code @@server_uuid}）の項目名。 */
+    static final String COMMIT_SERVER_UUID = "commitServerUuid";
 
     private final Path directory;
     private final MeterRegistry meterRegistry;
@@ -103,15 +106,21 @@ public class ImportStageReconciliationLedger {
 
     /** COMMIT結果不明で保全したstageを記録する。例外は投げない。 */
     boolean recordRetained(String tenantId, StagedImportDocument staged) {
-        return recordRetained(tenantId, staged, null);
+        return recordRetained(tenantId, staged, null, null);
+    }
+
+    /** COMMIT結果不明で保全したstageを、COMMIT接続のserver側ID（無ければnull）と一緒に記録する。例外は投げない。 */
+    boolean recordRetained(String tenantId, StagedImportDocument staged, Long commitConnectionId) {
+        return recordRetained(tenantId, staged, commitConnectionId, null);
     }
 
     /**
-     * COMMIT結果不明で保全したstageを、COMMITを送った接続のserver側ID（無ければnull）と一緒に記録する。例外は投げない。
+     * COMMIT結果不明で保全したstageを、COMMITを送った接続のserver側IDとそのserverの{@code @@server_uuid}
+     * （どちらも無ければnull）と一緒に記録する。例外は投げない。
      */
-    boolean recordRetained(String tenantId, StagedImportDocument staged, Long commitConnectionId) {
+    boolean recordRetained(String tenantId, StagedImportDocument staged, Long commitConnectionId, String commitServerUuid) {
         increment(RETAINED_METRIC, null);
-        return write(tenantId, staged, Reason.OUTCOME_UNKNOWN, commitConnectionId);
+        return write(tenantId, staged, Reason.OUTCOME_UNKNOWN, commitConnectionId, commitServerUuid);
     }
 
     /**
@@ -123,7 +132,7 @@ public class ImportStageReconciliationLedger {
     boolean recordDiscardFailure(String tenantId, StagedImportDocument staged, String path) {
         increment(DISCARD_FAILURE_METRIC, path);
         // 未commitが確定しているため、COMMIT接続の終了を待つ必要は無い（接続IDを持たない）。
-        return write(tenantId, staged, Reason.DISCARD_FAILED, null);
+        return write(tenantId, staged, Reason.DISCARD_FAILED, null, null);
     }
 
     /** 台帳の全件を記録時刻順に返す。読めないfileはログに残して飛ばす（削除しない）。 */
@@ -158,7 +167,8 @@ public class ImportStageReconciliationLedger {
         return directory;
     }
 
-    private boolean write(String tenantId, StagedImportDocument staged, Reason reason, Long commitConnectionId) {
+    private boolean write(String tenantId, StagedImportDocument staged, Reason reason, Long commitConnectionId,
+                          String commitServerUuid) {
         if (staged == null || staged.storageKey() == null || staged.storageKey().isBlank()) {
             log.error("[取込] storage keyの無いstageは照合台帳へ記録できません: reason={}", reason);
             increment(LEDGER_FAILURE_METRIC, null);
@@ -175,6 +185,9 @@ public class ImportStageReconciliationLedger {
         properties.setProperty("recordedAtEpochMillis", Long.toString(clock.millis()));
         if (commitConnectionId != null && commitConnectionId > 0) {
             properties.setProperty(COMMIT_CONNECTION_ID, Long.toString(commitConnectionId));
+            if (commitServerUuid != null && ImportCommitConnectionIdentity.SERVER_UUID.matcher(commitServerUuid).matches()) {
+                properties.setProperty(COMMIT_SERVER_UUID, commitServerUuid.toLowerCase(java.util.Locale.ROOT));
+            }
         }
         Path temp = null;
         try {
@@ -221,9 +234,16 @@ public class ImportStageReconciliationLedger {
             if (commitConnectionId != null && commitConnectionId < 1) {
                 throw new IllegalArgumentException(COMMIT_CONNECTION_ID);
             }
+            // server識別が壊れていても同じ扱い（別serverと誤って判定し、時間だけで消さない）。
+            String serverUuid = properties.getProperty(COMMIT_SERVER_UUID);
+            if (serverUuid != null && (commitConnectionId == null
+                    || !ImportCommitConnectionIdentity.SERVER_UUID.matcher(serverUuid.trim()).matches())) {
+                throw new IllegalArgumentException(COMMIT_SERVER_UUID);
+            }
             return new Entry(file, properties.getProperty("tenantId", ""), storageKey,
                     properties.getProperty("operationId", ""), reason,
-                    Instant.ofEpochMilli(Long.parseLong(recordedAt)), commitConnectionId);
+                    Instant.ofEpochMilli(Long.parseLong(recordedAt)), commitConnectionId,
+                    serverUuid == null ? null : serverUuid.trim().toLowerCase(java.util.Locale.ROOT));
         } catch (IOException | RuntimeException failure) {
             log.error("[取込] stage照合台帳のfileを読めないため飛ばします（削除しません）: file={} exceptionType={}",
                     file.getFileName(), LogRedaction.exceptionType(failure));

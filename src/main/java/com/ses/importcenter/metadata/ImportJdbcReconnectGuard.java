@@ -36,7 +36,8 @@ import java.util.regex.Pattern;
  * （{@code .kiro/specs/data-migration-import-center/a1a-ingress-operations.md} §5、{@code feature-switches.md} 4.8.2 #7）で禁止する。
  *
  * <p>検査対象は{@code spring.datasource.url}、{@code spring.datasource.hikari.jdbc-url}、
- * {@code spring.datasource.hikari.data-source-properties.*}。違反時の例外文言にはproperty名と違反の種類だけを出し、
+ * {@code spring.datasource.hikari.data-source-properties.*}（{@code url} は JDBC URL と同じ規則で見る）。違反時の例外文言には
+ * property名と違反の種類だけを出し、
  * URL（認証情報を含み得る）は出さない。
  */
 @Component
@@ -89,6 +90,15 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                     && ("true".equals(value) || "yes".equals(value))) {
                 violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
             }
+            // data source の url property（MysqlDataSource#setUrl）も JDBC URL と同じ規則で検査する（review P3-1）。
+            if ("url".equals(name) && property.getValue() != null) {
+                if (autoReconnect(property.getValue())) {
+                    violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
+                }
+                if (multiHost(property.getValue())) {
+                    violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + MULTI_HOST + ")");
+                }
+            }
         }
         return List.copyOf(violations);
     }
@@ -102,8 +112,10 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
 
     /**
      * MySQL・MariaDB の URL が単一 host 以外へ接続し得るか。他の DB（H2 等）の URL は対象外で false。
-     * scheme が単一 host のもの以外、または host 部（{@code ://} の後から最初の {@code /}・{@code ?}・{@code ;} まで。
-     * user 情報 {@code user:pass@} は除く）に {@code ,}・{@code (}・{@code =} を含むものを複数 host とみなす。
+     * scheme が単一 host のもの以外、または host 部を複数 host とみなす。host 部は Connector/J の authority と同じく
+     * {@code ://} の後から最初の {@code /}・{@code ?}・{@code #} の手前まで（{@code ;} では終わらない。RB-NF05 review P3-1）で、
+     * user 情報 {@code user:pass@} を除いた残りに {@code ,}・{@code (}・{@code =}・{@code ;} のどれかを含めば複数 host とする
+     * （{@code ;} は host 名に現れないため、含む host 部は解釈の違いで failover へ化け得るものとして拒否する）。
      */
     static boolean multiHost(String url) {
         String trimmed = url.trim();
@@ -117,14 +129,15 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         }
         String rest = trimmed.substring(separator + 3);
         int end = rest.length();
-        for (char terminator : new char[]{'/', '?', ';'}) {
+        for (char terminator : new char[]{'/', '?', '#'}) {
             int index = rest.indexOf(terminator);
             if (index >= 0 && index < end) end = index;
         }
         String hosts = rest.substring(0, end);
         int userInfo = hosts.lastIndexOf('@');
         if (userInfo >= 0) hosts = hosts.substring(userInfo + 1);
-        return hosts.isEmpty() || hosts.indexOf(',') >= 0 || hosts.indexOf('(') >= 0 || hosts.indexOf('=') >= 0;
+        return hosts.isEmpty() || hosts.indexOf(',') >= 0 || hosts.indexOf('(') >= 0 || hosts.indexOf('=') >= 0
+                || hosts.indexOf(';') >= 0;
     }
 
     private static String percentDecoded(String url) {

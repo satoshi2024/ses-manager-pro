@@ -87,6 +87,7 @@
   - JDBC URL や data source property の `autoReconnect=true` / `autoReconnectForPools=true`。
   - **複数 host へ切り替える JDBC URL**（RB-NF05、W2-NF06 review P3-2）。Connector/J の failover・load-balance proxy は通信異常時に別の接続へ切り替えるため、透過再接続と同じく結果不明の COMMIT の分類を崩す。
     - host 部に複数の host を書いた URL: `jdbc:mysql://h1:3306,h2:3306/db`、`jdbc:mysql://[h1,h2]/db`、`jdbc:mysql://address=(host=h1)...,address=(host=h2).../db`。host 部の key-value 形（`(host=h1,port=3306)`・`address=(...)`）は1 host でも拒否する（`host:port` 形に書き直す）。
+    - host 部は Connector/J の authority と同じく `://` の後から最初の `/`・`?`・`#` の手前まで（`;` では終わらない）。host 部に `;` を含む URL（`jdbc:mysql://h1;x,h2/db` 等）も拒否する（RB-NF05 review P3-1。`;` を区切りとみなすと `h1` の1 host に見え、実際は failover になる）。
     - `jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`（DNS SRV で複数 host に展開する）・`jdbc:mysqlx://`。
     - MariaDB driver の `failover`・`sequential`・`loadbalance`・`replication`・`aurora`。
   - ProxySQL・MySQL Router 等、client に見えない形で接続を張り替える透過再接続 proxy。
@@ -97,7 +98,7 @@
 - `ImportJdbcReconnectGuard` が次の property を検査する（機能スイッチと関係なく常に動く）。
   - `spring.datasource.url`（`DB_URL` を含む）
   - `spring.datasource.hikari.jdbc-url`
-  - `spring.datasource.hikari.data-source-properties.*`
+  - `spring.datasource.hikari.data-source-properties.*`（`url` は JDBC URL と同じ規則で、autoReconnect と複数 host の両方を見る）
 - `autoReconnect` / `autoReconnectForPools` が `true` / `yes` なら起動を中止する。URL の値は百分率符号化を戻してからも判定する（`%74rue` 等。Connector/J は戻した値を読む）。
 - MySQL・MariaDB の URL が上の複数 host の形なら起動を中止する（違反は `spring.datasource.url(multiHost)` のように property 名と印だけで示す）。MySQL・MariaDB 以外の URL（H2 等）は対象外。
 - 例外文言には property 名だけを出し、URL・host 名・認証情報は出さない。
@@ -109,21 +110,25 @@
 - 照合台帳 `ImportStageReconciliationLedger` に記録する対象は次の2つ。
   - COMMIT 結果が確定せず、readback でも本 stage の行が見えないため保全した stage（`OUTCOME_UNKNOWN`）。
   - 未 commit 確定なのに補償削除に失敗した stage（`DISCARD_FAILED`）。
-- 台帳は upload root 直下の `import-stage-ledger/` に置く。stage 1件につき properties file を1つ作り、内容は tenant ID・storage key・operation ID・理由・記録時刻と、`OUTCOME_UNKNOWN` では COMMIT を送った接続の server 側 ID（`commitConnectionId`。MySQL の `CONNECTION_ID()` を COMMIT 前に控えたもの。取得できた場合だけ）とする（CSV 本文・利用者情報は含めない）。`commitConnectionId` が数値でない・1未満の台帳は読めない file として飛ばし、時間だけで消さない。
+- 台帳は upload root 直下の `import-stage-ledger/` に置く。stage 1件につき properties file を1つ作り、内容は tenant ID・storage key・operation ID・理由・記録時刻と、`OUTCOME_UNKNOWN` では COMMIT を送った接続の server 側 ID（`commitConnectionId`。MySQL の `CONNECTION_ID()` を COMMIT 前に控えたもの。取得できた場合だけ）とその server の識別（`commitServerUuid`。`@@server_uuid` を小文字で）とする（CSV 本文・利用者情報は含めない）。`commitConnectionId` が数値でない・1未満、`commitServerUuid` が UUID の形式でない台帳は読めない file として飛ばし、時間だけで消さない。
 - 孤児清理（`FileCleanupServiceImpl`）は upload root・quarantine・published の直下だけを非再帰で走査し directory を対象にしないため、台帳 file は消されない。download API からも参照されない。
 
 **回収**
 - `ImportStageReconcileScheduler`（毎時17分、ShedLock `importStageReconcileHourly`）が `ImportStageReconciler` を呼ぶ。記録から1時間（`SAFETY_WINDOW`）を過ぎた台帳だけを判定する。
 - 判定規則:
   - `t_document_version.storage_key` が同じ storage key を参照する版が1件でもある（tenant・論理削除を問わない）→ commit 済みと確定し、台帳だけを外す（object は文書台帳の管理下に残る）。照会は V200 の索引 `idx_dv_storage_key` を使う。
-  - 参照が無く、台帳に `commitConnectionId` がある → その接続の server thread が文を実行中か（`information_schema.PROCESSLIST` の `ID` が一致し `COMMAND <> 'Sleep'`）を確かめる（RB-NF05、W2-NF06 review P3-1）。
+  - 参照が無く、台帳に `commitConnectionId` がある → まず、記録した時の server が今も再起動せずに動いているかを確かめる（RB-NF05 review P3-3）。接続 ID は server の再起動・failover の後に別の接続へ振り直されるため、次のどちらかなら ID を使わず、下の「`commitConnectionId` が無い」場合と同じく時間だけで判定する（元の接続は既に無く、COMMIT の結果は確定している）。
+    - 現在の `@@server_uuid` が台帳の `commitServerUuid` と違う（別 server。failover）。
+    - 現在の server の起動時刻（`UNIX_TIMESTAMP()` − `SHOW GLOBAL STATUS LIKE 'Uptime'`）が、台帳の記録時刻＋5分より後（記録後に再起動した）。5分は DB とアプリの時計のずれと `Uptime` の秒の丸めの許容で、再起動していない server を再起動と誤らない側に取る（記録の5分以内に再起動した場合は ID を使う。回収が遅れるだけで消し過ぎはしない）。
+    - server を確かめられない（照会の失敗）台帳は失敗として残す。
+  - 同じ server のままなら、その接続の server thread が文を実行中か（`information_schema.PROCESSLIST` の `ID` が一致し `COMMAND <> 'Sleep'`）を確かめる（RB-NF05、W2-NF06 review P3-1）。
     - 実行中 → COMMIT はまだ確定していない。判定を見送り（pending に数え）、台帳を残す。COMMIT が server 側で1時間を超えて止まり（disk full・FTWRL 待ち等）、その間に client 側の接続だけが L4 LB に切られた場合でも、時間だけで原本を消さない。
     - 実行していない（`Sleep`、または一覧に無い）→ 参照件数を数え直す。確かめる間に COMMIT が確定した場合は commit 済み、0件なら未 commit と確定して回収する。`Sleep` の thread は COMMIT を実行しておらず、client が既に切れているため以後も COMMIT は送られない。`Killed` は後始末中のため実行中に数える。
-    - 同じ DB account の thread は PROCESS 権限なしで見えるため、アプリの account に権限を足す必要は無い（全 instance が同じ account を使う前提）。照会に失敗した台帳は失敗として残す。
+    - 同じ DB account（同じ user 名）の thread は PROCESS 権限なしで見えるため、アプリの account に権限を足す必要は無い（業務権限だけの専用 user で `ImportCsvIngestionRealMySqlTest` が確かめる）。**全 instance が同じ user 名を使い、alternating-users 方式の rotation をしないことが前提**（`feature-switches.md` 4.8.2 #10、`deploy-runbook.md` §1.2）。別の user の接続は見えず「実行していない」と判定され、時間だけの判定へ戻る。照会に失敗した台帳は失敗として残す。
   - 参照が無く `commitConnectionId` が無い（MySQL 以外の DB、ID の取得失敗、`DISCARD_FAILED`）→ 従来どおり、記録から1時間を過ぎていれば未 commit と確定して回収する。`DISCARD_FAILED` は未 commit が確定しているため接続を確かめる必要が無い。
   - DB 照会・削除の失敗 → 台帳を残して次回再試行する。
   - storage key が既定形式（32桁hex/UUID）でない台帳は自動削除せず、手作業の照合へ回す。
-- 残る前提: server の再起動で接続 ID は1から振り直されるため、再起動後に別の接続が同じ ID を持つと、その接続が文を実行している間だけ回収が遅れる（安全側。Hikari の接続は最長 `max-lifetime` で入れ替わる）。
+- 残る前提: 記録の5分以内に server が再起動し、再起動後の別の接続が同じ ID で長い文を実行している場合だけ、その文が終わるまで回収が遅れる（消し過ぎにはならない）。再起動・failover が記録の5分より後なら、ID を使わずに判定する。
 - `app.scheduling.enabled=false` の環境では動かない。多 instance で upload root が instance ごとの local directory の場合、lock を取らなかった instance の台帳は次に lock を取るまで残る（初回本番は単一 instance または sticky session が前提）。
 
 **監視 metric**（いずれも tag は固定値だけで PII なし）
@@ -245,6 +250,7 @@ printf 'crm\ncrm-2\ncrm2\ncrm_2\n' | LC_ALL=C sort
 - REJECTED 行の finding code を、source 行番号・行参照と合わせて UTF-8（BOM 付き）CSV で返す。列は `sourceRowNumber,sourceRowHash,code`（`sourceRowHash` 列の値は preview と同じ鍵付き HMAC の行参照。§14.1）。原文・値は出さない。
 - DB から keyset（行番号順、500 行ずつ）で読み、page ごとに flush する（全件を memory へ載せない）。page 読取の前ごとに認可を再確認し、撤権・法人変更があれば以後を出力しない。
 - **最終行**（RB-NF05、W3-05 review P3-1）: 全 page を書き終えた場合だけ、最後に `#END,<code 行の件数>,<REJECTED 行の件数>` の1行を書く（列数は header と同じ3列）。flush 済みの応答は途中の失敗（撤権・DB 障害・行の不一致 409）でも 200 のまま切れ、page 境界で切れると完全な CSV に見えるため、**この行が無い CSV は途中で切れている**。利用者・運用者は最終行の有無と、code 行の件数が実際の行数と一致することを確かめる（画面の「エラーCSV」も同じ file）。
+  - **最終行はデータ行ではない**（RB-NF05 review P3-7）。件数の2つが `sourceRowHash` 列と `code` 列の位置に入るため、そのまま Excel の filter・pivot や script の集計にかけると、code が数字の行として数えられる。集計・filter の前に、先頭の cell が `#END` の行を除く。script は「最終行が `#END` で始まる」「件数が本文と一致する」を確かめてからその行を除いて処理し、どちらかを満たさない CSV は使わずに出力し直す。`sourceRowNumber` 列は数字だけなので、`#` で始まる先頭 cell で見分けられる。
 - 各 cell は `ImportErrorCsvWriter#sanitize` で CSV injection を無害化する（先頭文字が TAB・CR、または前置空白の後の先頭が `=`・`+`・`-`・`@` なら `'` を前置。値全体が十進数の負数はそのまま）。
 - 一時 file を作らないため、`FileReferenceProvider`・`FileScopeValidationService` への追加登録は不要。出力前に必須監査（`IMPORT_ERROR_EXPORT`）。
 

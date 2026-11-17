@@ -119,6 +119,14 @@ final class IntegrationHubApprovalDigest {
      * 例外の message には path を含めない（呼出元へは null だけを返す）。
      */
     static String truststoreSha256(String truststorePath) {
+        return sha256Hex(readTruststore(truststorePath));
+    }
+
+    /**
+     * truststore file の内容を1回だけ読む（RB-NF05 review P3-6）。照合はこの byte 列から digest を計算し、同じ byte 列を
+     * HTTPS transport へ渡す（file を読み直さない）。読めない・空・上限超過なら null。
+     */
+    static byte[] readTruststore(String truststorePath) {
         if (truststorePath == null || truststorePath.isBlank()) {
             return null;
         }
@@ -128,23 +136,18 @@ final class IntegrationHubApprovalDigest {
             if (size < 1 || size > MAX_TRUSTSTORE_BYTES) {
                 return null;
             }
-            MessageDigest digest = sha256();
             try (InputStream input = Files.newInputStream(path)) {
-                byte[] buffer = new byte[8192];
-                long total = 0;
-                int read;
-                while ((read = input.read(buffer)) > 0) {
-                    total += read;
-                    if (total > MAX_TRUSTSTORE_BYTES) {
-                        return null;
-                    }
-                    digest.update(buffer, 0, read);
-                }
+                byte[] content = input.readNBytes((int) MAX_TRUSTSTORE_BYTES + 1);
+                return content.length < 1 || content.length > MAX_TRUSTSTORE_BYTES ? null : content;
             }
-            return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | RuntimeException unreadable) {
             return null;
         }
+    }
+
+    /** byte 列の SHA-256（小文字 hex）。null なら null。 */
+    static String sha256Hex(byte[] content) {
+        return content == null ? null : HexFormat.of().formatHex(sha256().digest(content));
     }
 
     /** 正規形の SHA-256（小文字 hex）。正規形が null なら null。 */

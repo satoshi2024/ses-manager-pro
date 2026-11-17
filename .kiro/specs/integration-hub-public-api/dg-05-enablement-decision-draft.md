@@ -42,6 +42,12 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 
 - prod で開ける方向の digest が、未設定・形式外（小文字 hex 64 桁。大文字・前後の空白は直して照合する）・現行設定から再計算した値と不一致のいずれかなら、起動しない（`IntegrationHubProductionEnablementPolicy`）。違反の文言に設定値・digest は出さない。開けない方向の digest は見ない。
 - digest は鍵を持たない完全性の束縛で、署名ではない。設定を変えられる者は正規形から値を作り直せる。そのため、変更の承認は「決定書への記載」と「二人による再計算」（下記）が担う。
+- **コードで検出できないこと（RB-NF05 review P3-4）**: digest には鍵も有効期間（署名日・失効日）も無い。そのため、**撤回・置換された旧決定（旧決定ID＋旧 digest）と、それに合わせた旧い承認値をもう一度設定しても、起動検査は通る**。§1 の「旧IDの決定書へ失効日を記録する」は紙の上の記録で、コードは失効を知らない。防ぐのは配備記録（決定IDと digest の対応）と変更管理（承認された変更だけを配備する）である。
+  - NF06 の admission 承認・NF07 の決定ID束縛のように、署名日・失効日を正規形へ入れて起動検査で失効を拒否する（正規形 v2。決定書と試験の golden vector を取り直す）かは、**Security/Owner の判断（未取得）**とする。
+- **運用負担として受理が要ること（Owner/SRE、未取得）**: 次はどれも承認内容の変更になり、新しい DG-05 決定（新しい決定ID・digest・署名）が無いと起動しない。
+  - truststore file の byte が変わること（証明書の追加・削除・入替えだけでなく、同じ証明書で作り直した場合も）。
+  - `external-transport.batch-size`・`fixed-delay-ms`（OUT-7）、`public-api.unauthenticated-audit-max-per-minute`（IN-7）の変更。
+- truststore は起動時の照合で1回だけ読み、digest を計算した byte 列そのものを HTTPS transport が読み込む（照合の後に file を差し替えても、信頼するのは決定書の digest と一致した内容だけ。RB-NF05 review P3-6）。truststore を替えるときは、新しい決定の後に全停止で再起動する。
 
 **正規形**（UTF-8、各行を LF で終える。最終行も LF。1行目は方向ごとの版で、以降は次の順の `key=value`）
 
