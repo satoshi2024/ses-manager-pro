@@ -134,8 +134,88 @@ class ImportStageReconcilerTest {
         assertEquals(1, ledger.entries().size());
     }
 
+    /**
+     * b-14（W2-NF06 review P3-1）: 1時間を過ぎても、COMMITを送った接続のserver threadが文を実行中なら判定せず残す。
+     * 実行していないと確かめた後に回収する。参照があればthreadを確かめずにcommit済みとする。
+     */
+    @Test
+    void COMMIT接続が実行中の間は参照が無くても回収せず終了後に回収する() {
+        String storageKey = key();
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(storageKey,
+                UUID.randomUUID().toString()), 4242L);
+        java.util.concurrent.atomic.AtomicBoolean executing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        List<Long> probed = new java.util.ArrayList<>();
+        ImportStageReconciler reconciler = reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW).plusSeconds(3600),
+                id -> { probed.add(id); return executing.get(); });
+
+        ImportStageReconciler.Result waiting = reconciler.reconcileDue();
+
+        assertEquals(1, waiting.pending());
+        assertEquals(0, waiting.reclaimed());
+        verify(documents, never()).discardImportStage(any());
+        assertEquals(1, ledger.entries().size(), "COMMIT接続が実行中の台帳は残す");
+        assertEquals(List.of(4242L), probed);
+
+        executing.set(false);
+        ImportStageReconciler.Result done = reconciler.reconcileDue();
+
+        assertEquals(1, done.reclaimed());
+        verify(documents).discardImportStage(any());
+        assertEquals(List.of(), ledger.entries());
+    }
+
+    @Test
+    void COMMIT接続の確認中に確定したcommitは数え直しでcommit済みとし確認できなければ台帳を残す() {
+        String committedKey = key();
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(committedKey,
+                UUID.randomUUID().toString()), 7L);
+        // 最初の参照件数の後、接続の確認の間にCOMMITが確定して版が見えるようになった状態を再現する。
+        ImportStageReconciler.Result raced = reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW), id -> {
+            jdbc.update("INSERT INTO t_document_version (id, tenant_id, storage_key, deleted_flag) VALUES (9, ?, ?, 0)",
+                    "tenant-a", committedKey);
+            return false;
+        }).reconcileDue();
+
+        assertEquals(1, raced.committed());
+        verify(documents, never()).discardImportStage(any());
+        assertEquals(List.of(), ledger.entries());
+
+        String unknownKey = key();
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(unknownKey,
+                UUID.randomUUID().toString()), 8L);
+        ImportStageReconciler.Result unavailable = reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW), id -> {
+            throw new IllegalStateException("synthetic processlist outage");
+        }).reconcileDue();
+
+        assertEquals(1, unavailable.failed());
+        verify(documents, never()).discardImportStage(any());
+        assertEquals(1, ledger.entries().size(), "接続の状態を確かめられなければ消さない");
+    }
+
+    @Test
+    void 参照がある台帳と接続IDの無い台帳はCOMMIT接続を確かめない() {
+        String storageKey = key();
+        jdbc.update("INSERT INTO t_document_version (id, tenant_id, storage_key, deleted_flag) VALUES (3, ?, ?, 0)",
+                "tenant-a", storageKey);
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(storageKey,
+                UUID.randomUUID().toString()), 11L);
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(key(), UUID.randomUUID().toString()));
+        List<Long> probed = new java.util.ArrayList<>();
+
+        ImportStageReconciler.Result result = reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW),
+                id -> { probed.add(id); return true; }).reconcileDue();
+
+        assertEquals(1, result.committed());
+        assertEquals(1, result.reclaimed(), "接続IDの無い台帳は従来どおり時間だけで判定する");
+        assertEquals(List.of(), probed);
+    }
+
     private ImportStageReconciler reconcilerAt(Instant now) {
         return new ImportStageReconciler(ledger, jdbc, documents, meters, Clock.fixed(now, ZoneOffset.UTC));
+    }
+
+    private ImportStageReconciler reconcilerAt(Instant now, ImportStageReconciler.CommitConnectionProbe probe) {
+        return new ImportStageReconciler(ledger, jdbc, documents, meters, Clock.fixed(now, ZoneOffset.UTC), probe);
     }
 
     private static String key() {

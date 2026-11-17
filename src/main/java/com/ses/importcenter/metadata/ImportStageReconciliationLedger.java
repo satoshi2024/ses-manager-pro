@@ -39,7 +39,8 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>DDLを追加しないため、upload root直下の専用directory {@value #DIRECTORY} へstage一件につき小さなproperties
- * fileを一つ置く。内容はtenant ID・storage key・operation ID・理由・記録時刻だけで、CSV本文・file名・利用者情報は
+ * fileを一つ置く。内容はtenant ID・storage key・operation ID・理由・記録時刻と、結果不明のCOMMITを送った接続の
+ * server側ID（取得できた場合だけ）で、CSV本文・file名・利用者情報は
  * 含めない。{@code FileCleanupServiceImpl}の孤児清理はupload root・quarantine・publishedの直下だけを非再帰で走査し
  * directoryを対象にしないため、台帳fileは清理されない。台帳fileはdownload APIから参照されない（参照名を持たない）ため、
  * FileReferenceProvider／FileScopeValidationServiceへの登録対象でもない。
@@ -68,9 +69,19 @@ public class ImportStageReconciliationLedger {
     /** 台帳へ記録する理由。値はfileへそのまま書くため変更しない。 */
     enum Reason { OUTCOME_UNKNOWN, DISCARD_FAILED }
 
-    /** 台帳の一件。{@code file}は削除用で、内容は他の項目に限る。 */
+    /**
+     * 台帳の一件。{@code file}は削除用で、内容は他の項目に限る。{@code commitConnectionId}は結果不明のCOMMITを送った接続の
+     * server側ID（取得できた場合だけ。b-14）で、照合はそのserver threadが文を実行している間は判定しない。
+     */
     record Entry(Path file, String tenantId, String storageKey, String operationId, Reason reason,
-                 Instant recordedAt) { }
+                 Instant recordedAt, Long commitConnectionId) {
+        Entry(Path file, String tenantId, String storageKey, String operationId, Reason reason, Instant recordedAt) {
+            this(file, tenantId, storageKey, operationId, reason, recordedAt, null);
+        }
+    }
+
+    /** 台帳fileのCOMMIT接続IDの項目名。 */
+    static final String COMMIT_CONNECTION_ID = "commitConnectionId";
 
     private final Path directory;
     private final MeterRegistry meterRegistry;
@@ -92,8 +103,15 @@ public class ImportStageReconciliationLedger {
 
     /** COMMIT結果不明で保全したstageを記録する。例外は投げない。 */
     boolean recordRetained(String tenantId, StagedImportDocument staged) {
+        return recordRetained(tenantId, staged, null);
+    }
+
+    /**
+     * COMMIT結果不明で保全したstageを、COMMITを送った接続のserver側ID（無ければnull）と一緒に記録する。例外は投げない。
+     */
+    boolean recordRetained(String tenantId, StagedImportDocument staged, Long commitConnectionId) {
         increment(RETAINED_METRIC, null);
-        return write(tenantId, staged, Reason.OUTCOME_UNKNOWN);
+        return write(tenantId, staged, Reason.OUTCOME_UNKNOWN, commitConnectionId);
     }
 
     /**
@@ -104,7 +122,8 @@ public class ImportStageReconciliationLedger {
      */
     boolean recordDiscardFailure(String tenantId, StagedImportDocument staged, String path) {
         increment(DISCARD_FAILURE_METRIC, path);
-        return write(tenantId, staged, Reason.DISCARD_FAILED);
+        // 未commitが確定しているため、COMMIT接続の終了を待つ必要は無い（接続IDを持たない）。
+        return write(tenantId, staged, Reason.DISCARD_FAILED, null);
     }
 
     /** 台帳の全件を記録時刻順に返す。読めないfileはログに残して飛ばす（削除しない）。 */
@@ -139,7 +158,7 @@ public class ImportStageReconciliationLedger {
         return directory;
     }
 
-    private boolean write(String tenantId, StagedImportDocument staged, Reason reason) {
+    private boolean write(String tenantId, StagedImportDocument staged, Reason reason, Long commitConnectionId) {
         if (staged == null || staged.storageKey() == null || staged.storageKey().isBlank()) {
             log.error("[取込] storage keyの無いstageは照合台帳へ記録できません: reason={}", reason);
             increment(LEDGER_FAILURE_METRIC, null);
@@ -154,6 +173,9 @@ public class ImportStageReconciliationLedger {
         properties.setProperty("operationId", operationId == null ? "" : operationId);
         properties.setProperty("reason", reason.name());
         properties.setProperty("recordedAtEpochMillis", Long.toString(clock.millis()));
+        if (commitConnectionId != null && commitConnectionId > 0) {
+            properties.setProperty(COMMIT_CONNECTION_ID, Long.toString(commitConnectionId));
+        }
         Path temp = null;
         try {
             Files.createDirectories(directory);
@@ -193,9 +215,15 @@ public class ImportStageReconciliationLedger {
             String recordedAt = properties.getProperty("recordedAtEpochMillis", "");
             Reason reason = Reason.valueOf(properties.getProperty("reason", ""));
             if (storageKey.isBlank()) throw new IllegalArgumentException("storageKey");
+            // 接続IDの項目が壊れていれば読めないfileとして扱い、自動回収の対象にしない（時間だけで消さない）。
+            String connection = properties.getProperty(COMMIT_CONNECTION_ID);
+            Long commitConnectionId = connection == null ? null : Long.valueOf(Long.parseLong(connection.trim()));
+            if (commitConnectionId != null && commitConnectionId < 1) {
+                throw new IllegalArgumentException(COMMIT_CONNECTION_ID);
+            }
             return new Entry(file, properties.getProperty("tenantId", ""), storageKey,
                     properties.getProperty("operationId", ""), reason,
-                    Instant.ofEpochMilli(Long.parseLong(recordedAt)));
+                    Instant.ofEpochMilli(Long.parseLong(recordedAt)), commitConnectionId);
         } catch (IOException | RuntimeException failure) {
             log.error("[取込] stage照合台帳のfileを読めないため飛ばします（削除しません）: file={} exceptionType={}",
                     file.getFileName(), LogRedaction.exceptionType(failure));

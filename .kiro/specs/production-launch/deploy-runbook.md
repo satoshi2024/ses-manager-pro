@@ -25,6 +25,7 @@
   - NF01 B0（W3-18）: `V195__nf01_dual_confirmation_coordinator.sql`（二者確認coordinatorの7表 `t_lifecycle_dual_submission` / `_submission_document` / `_submission_org_fence` / `_confirmation` / `_projection` / `_idempotency` / `_event`。行は作らない。projection以外の不変6表へUPDATE・DELETEを拒否するtrigger 12件を追加する。冪等性keyは `ascii_bin` で、CHECK `ck_dual_idem_key` が空文字と `[A-Za-z0-9._~-]` 以外の文字を拒否する）。アプリ側は `AppendOnlyMapper`・`AppendOnlySqlInjector` で同じ6表の更新・削除を拒否する。二者確認の画面・APIはまだ無く（W3-21a/b）、表は空のまま配備する。trigger件数は §1.2・§3.4 の 67件に含まれる（`DeployRunbookMigrationCountTest` がmigrationのCREATE/DROP TRIGGERから数えて照合する）。自由記述列の保存期間はPrivacyの署名事項（NF01計画 §10・§12 O-8）。
   - NF07 F2（read-only provider）: `V196__nf07_privacy_data_element_catalog_seed.sql`（`m_pii_data_element` に、`sys_user` に存在する tenant ごとの data element の構造行と `subject_attribution` だけを入れる。owner・データ分類・inventory 状態は UNKNOWN のまま、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` に文書以外の固定27件＋文書種別ごとの `DOCUMENT:<code>`（`m_document_type` の全種別。V197 の2種別を含む）。catalog API `GET /api/privacy/catalog` は `privacy.retention.enabled` がOFFの間404で、初回リリースはOFFのまま配備する。外部 provider（Gemini・CloudSign・freee・mailbox・backup）は登録しない。
   - 文書種別の追加（既存不具合の修正）: `V197__resume_ingestion_and_import_document_types.sql`（`m_document_type` に `RESUME_INGESTION`（履歴・スキルシート取込）と `IMPORT`（取込センターCSV）を INCOMING で入れ、catalog に `DOCUMENT:IMPORT`（NOT_ATTRIBUTABLE。取込CSVは本人を導出できない）を足す。既にある行は入れない）。これまではどの migration も2種別を作っておらず、スキルシート取込の upload は `error.document.invalidType`（400）で毎回失敗していた。保存年数（3年・TRANSACTION_DATE）は spec に根拠が無い暫定値で文書 owner の確認待ち。取込センターCSV（IMPORT）は取引日を設定しないため保存期限は NULL のままで、処分候補にはならない（保持期間は開放前に Privacy が書面で受理する条件のまま）。履歴取込の副本（RESUME_INGESTION）は、取込原本を `app.resume.retention-days` で purge する日次清理（02:00）が保存期限を当日に合わせ、02:30 の `DocumentRetentionJob` が廃棄候補（PENDING）にし、管理者の承認・執行で処分する（2026-11-16 依頼者決定。legal hold 中の副本は変えない。plan §3.4.1「D4 と文書台帳の副本」）。**署名事項**：この副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（FINAL-FIX (a)-3）。副本の調整は廃棄候補（PENDING）を作るだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`。中核jobと共用）を止めなくてよい。副本の調整だけを止める停止口 `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED`（既定 `true`）もある。確認の SQL、停止口、有効化後の監視（失敗の metric・ERROR log）と定期確認は §4.3。
+  - NF-06 取込 stage 照合の索引（RB-NF05、FINAL review b-14）: `V200__nf06_document_version_storage_key_index.sql`（`t_document_version.storage_key` に非一意の索引 `idx_dv_storage_key` を足す。V1・V67 は変えない。行は変えない）。照合 batch（`ImportStageReconcileScheduler`、NF06 の OFF でも動く）は台帳1件ごとに同じ storage key の版を数えるため、従来は全件走査だった。V198・V199 は本 branch に無い（別 batch の予約番号）。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -366,7 +367,7 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V197（versioned 197件。SQL 196件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- 実行順: V1〜V200（versioned 198件。SQL 197件＋Java migration `V74_3` 1件。V198・V199 は本 branch に無い）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
 - callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
 
 ### 3.4 適用結果の確認（DBA立会い）
@@ -383,9 +384,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '197'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '200'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 197
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 198
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -475,6 +476,10 @@ SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE
    AND event_object_table = 't_lifecycle_dual_projection';                                     -- 0
 SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schema = DATABASE()
    AND constraint_name = 'ck_dual_idem_key';                                                   -- 1
+-- NF-06 照合の索引（V200）: storage_key の1列・非一意の索引
+SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
+   AND table_name = 't_document_version' AND index_name = 'idx_dv_storage_key'
+   AND column_name = 'storage_key' AND non_unique = 1;                                         -- 1
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
@@ -526,7 +531,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V197 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V200 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。

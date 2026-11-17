@@ -99,6 +99,9 @@ spring:
         # V197: 履歴・スキルシート取込と取込センターCSVの文書種別と catalog 行（H2 でもそのまま実行できる。
         #       schema-document-archive-h2.sql も同じ2行を持つため NOT EXISTS で重複しない。V196 より後）
         - classpath:db/migration/V197__resume_ingestion_and_import_document_types.sql
+        # V200: t_document_version.storage_key の索引 idx_dv_storage_key は、上の schema-document-archive-h2.sql が
+        #       作る（@Sql で同表を作り直す試験でも索引を保つため）。V200 の file を重ねて流すと索引名が重複して失敗するため
+        #       ここには置かない。V200 と H2 schema の索引の一致は ImportStageStorageKeyIndexContractTest が固定する。
       data-locations:
         - classpath:sql/dummy.sql
 

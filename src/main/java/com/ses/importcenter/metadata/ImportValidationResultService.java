@@ -62,6 +62,8 @@ import java.util.function.LongSupplier;
  * 原文・値は出さないため一時fileを作らず、{@code FileReferenceProvider}・{@code FileScopeValidationService}への
  * 追加登録は不要である。各cellは{@link ImportErrorCsvWriter#sanitize}でCSV injectionを無害化する。
  * page読取の前ごとに認可を再確認し、撤権・法人変更があれば以後を出力しない（応答は途中で切れる）。
+ * 全pageを書き終えた場合だけ最終行 {@code #END,<code行の件数>,<REJECTED行の件数>} を書く（b-14。W3-05 review P3-1）。
+ * flush済みの応答は途中の失敗でも200のまま切れ、page境界で切れると完全なCSVに見えるため、この行の有無と件数で欠落を発見する。
  */
 @Service
 public class ImportValidationResultService {
@@ -175,6 +177,8 @@ public class ImportValidationResultService {
         writer.write('﻿');
         ImportErrorCsvWriter.writeRowCodeHeader(writer);
         long after = 0;
+        long codeLines = 0;
+        long rejectedRows = 0;
         while (true) {
             requireSameContext(export.context());
             List<StoredRow> page = jdbc.query("""
@@ -190,14 +194,18 @@ public class ImportValidationResultService {
             for (StoredRow row : page) {
                 if (row.number() <= after) throw BusinessException.of(409, "error.import.validationRowMismatch");
                 after = row.number();
+                rejectedRows++;
                 String reference = export.references().reference(row.hashHex());
                 for (String code : row.codes()) {
                     ImportErrorCsvWriter.writeRowCode(writer, row.number(), reference, code);
+                    codeLines++;
                 }
             }
             writer.flush();
             if (page.size() < EXPORT_PAGE_ROWS) break;
         }
+        // 全pageを書き終えた場合だけ最終行を書く。途中で例外になった応答にはこの行が無い（切断の検出用）。
+        ImportErrorCsvWriter.writeRowCodeTrailer(writer, codeLines, rejectedRows);
         writer.flush();
     }
 

@@ -93,6 +93,32 @@ class ImportStageReconciliationLedgerTest {
         assertTrue(Files.exists(broken), "読めない台帳は手作業照合のため残す");
     }
 
+    /** b-14: 結果不明のCOMMITを送った接続のserver側IDを残し、補償削除の失敗の台帳には持たせない。壊れたIDは読まない。 */
+    @Test
+    void commitConnectionIdIsRecordedOnlyForOutcomeUnknownAndACorruptedIdIsNotTrusted() throws Exception {
+        ImportStageReconciliationLedger ledger = ledger(null, Clock.fixed(NOW, ZoneOffset.UTC));
+        String retained = UUID.randomUUID().toString();
+
+        assertTrue(ledger.recordRetained("tenant-a", staged(STORAGE_KEY, retained), 98765L));
+        assertTrue(ledger.recordDiscardFailure("tenant-a", staged(STORAGE_KEY, UUID.randomUUID().toString()), "failure"));
+        assertTrue(ledger.recordRetained("tenant-a", staged(STORAGE_KEY, UUID.randomUUID().toString()), null));
+
+        List<ImportStageReconciliationLedger.Entry> entries = ledger.entries();
+        assertEquals(3, entries.size());
+        assertEquals(1, entries.stream().filter(entry -> Long.valueOf(98765L).equals(entry.commitConnectionId())
+                && retained.equals(entry.operationId())).count());
+        assertEquals(2, entries.stream().filter(entry -> entry.commitConnectionId() == null).count());
+
+        for (String corrupted : List.of("not-a-number", "0", "-5")) {
+            Path file = ledger.directory().resolve(retained + ImportStageReconciliationLedger.SUFFIX);
+            String content = Files.readString(file, StandardCharsets.ISO_8859_1)
+                    .replaceAll("commitConnectionId=[^\\r\\n]*", "commitConnectionId=" + corrupted);
+            Files.writeString(file, content, StandardCharsets.ISO_8859_1);
+            assertEquals(2, ledger.entries().size(), "接続IDが壊れた台帳は時間だけで消さないよう読まない: " + corrupted);
+            assertTrue(Files.exists(file));
+        }
+    }
+
     @Test
     void writeFailureIsReportedWithoutThrowing() throws Exception {
         SimpleMeterRegistry meters = new SimpleMeterRegistry();

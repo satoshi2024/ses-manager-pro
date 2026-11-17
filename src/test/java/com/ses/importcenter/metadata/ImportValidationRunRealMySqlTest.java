@@ -227,7 +227,8 @@ class ImportValidationRunRealMySqlTest {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         results.writeErrorExport(export, bytes);
         String csv = bytes.toString(StandardCharsets.UTF_8);
-        assertEquals(1 + 1 + 2, csv.substring(1).split("\r\n").length);
+        assertEquals(1 + 1 + 2 + 1, csv.substring(1).split("\r\n").length, "header + code行3件 + 最終行");
+        assertTrue(csv.endsWith("#END,3,2\r\n"), "全pageを書き終えたCSVだけが最終行（code行3件・REJECTED行2件）を持つ");
         assertTrue(csv.contains(",DUPLICATE_SOURCE_KEY\r\n") && csv.contains(",EMAIL_INVALID\r\n")
                 && csv.contains(",FIELD_REQUIRED\r\n"));
         assertFalse(csv.contains("合成会社") || csv.contains("example.co.jp"));

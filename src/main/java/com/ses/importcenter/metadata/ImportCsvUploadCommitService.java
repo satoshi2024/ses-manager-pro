@@ -67,10 +67,13 @@ public class ImportCsvUploadCommitService {
         TransactionStatus status = transactionManager.getTransaction(definition);
         CompletionProbe completion = new CompletionProbe();
         ImportUploadJobDetail result;
+        Long commitConnectionId;
         try {
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(completion);
             }
+            // COMMITが結果不明になった場合に、照合がそのserver threadの終了を待てるよう接続IDを控える（b-14）。
+            commitConnectionId = ImportCommitConnectionIdentity.currentTransactionConnectionId();
             result = commitInTransaction(token, contentManifest, staged);
         } catch (RuntimeException | Error callbackFailure) {
             // 書込gateのtimeout・lock待ちtimeout・insert前後の例外はCOMMIT未発行。rollback後に元の例外を投げる。
@@ -85,9 +88,9 @@ public class ImportCsvUploadCommitService {
                 throw commitFailure;
             }
             log.error("[取込] metadataのCOMMIT結果を確定できません。stage自身の行をreadbackして判定します: "
-                    + "completionStatus={} failureClass={}", completion.describe(),
-                    LogRedaction.exceptionType(commitFailure));
-            throw new ImportCommitOutcomeUnknownException(commitFailure);
+                    + "completionStatus={} failureClass={} commitConnectionId={}", completion.describe(),
+                    LogRedaction.exceptionType(commitFailure), commitConnectionId);
+            throw new ImportCommitOutcomeUnknownException(commitFailure, commitConnectionId);
         }
         return result;
     }

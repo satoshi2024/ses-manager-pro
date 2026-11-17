@@ -78,6 +78,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -396,7 +397,7 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Test
-    void commitAckUncertainWithoutVisibleRowRetainsStageForReconciliation() {
+    void commitAckUncertainWithoutVisibleRowRetainsStageForReconciliation() throws Exception {
         // COMMIT送信前にserver側で接続を切断し、client側ではCOMMIT結果が判定不能（afterCompletion=UNKNOWN）な状態を作る。
         // serverは切断でtransactionをrollbackするため行は見えず、storage補償もROLLED_BACKではないので走らない。
         FaultInjectingTransactionManager severed = new FaultInjectingTransactionManager(transactionManager,
@@ -418,11 +419,16 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(1, retained.size());
         assertEquals(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN, retained.get(0).reason());
         assertEquals(TENANT, retained.get(0).tenantId());
+        // b-14：実MySQLではCOMMITを送った接続のserver側IDを台帳へ残す（KILLした接続と同じID）。
+        Long commitConnection = retained.get(0).commitConnectionId();
+        assertNotNull(commitConnection, "実MySQLのCOMMIT接続IDを台帳へ残す");
 
         ImportStageReconciler.Result early = reconcilerAt(java.time.Clock.systemUTC()).reconcileDue();
         assertEquals(1, early.pending(), "safety window内は判定せず残す");
         assertEquals(1, storage.objectCount());
 
+        // KILLしたthreadが後始末（Killed）を終えてprocess一覧から外れるまで待つ（実行中の間は照合が判定しない）。
+        awaitConnectionNotExecuting(commitConnection);
         ImportStageReconciler.Result due = reconcilerAt(java.time.Clock.offset(java.time.Clock.systemUTC(),
                 ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1))).reconcileDue();
         assertEquals(1, due.reclaimed());
@@ -459,6 +465,63 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(List.of(), stageLedger.entries());
         verify(documentService, never()).discardImportStage(any());
         assertEquals(committed, metadata.getUploadedJobDetail(committed.jobId()));
+    }
+
+    /**
+     * b-14（W2-NF06 review P3-1）: 照合のCOMMIT接続判定（information_schema.PROCESSLIST）を実MySQLで通す。文を実行中の
+     * 接続は実行中、待機（Sleep）中の接続と存在しない接続は実行中でないと判定し、実行中の間は参照の無い台帳も回収しない。
+     */
+    @Test
+    void reconcilerWaitsWhileTheCommitConnectionIsStillExecutingOnTheServer() throws Exception {
+        ImportStageReconciler.CommitConnectionProbe probe = ImportStageReconciler.processList(jdbc);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try (Connection busy = dataSource.getConnection()) {
+            long busyId;
+            try (Statement statement = busy.createStatement();
+                 ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(result.next());
+                busyId = result.getLong(1);
+            }
+            assertFalse(probe.isExecuting(busyId), "待機（Sleep）中の接続は文を実行していない");
+            String unreferencedKey = UUID.randomUUID().toString().replace("-", "") + "/" + UUID.randomUUID();
+            com.ses.entity.Document document = new com.ses.entity.Document();
+            document.setDocumentType("IMPORT");
+            DocumentVersion version = new DocumentVersion();
+            version.setStorageKey(unreferencedKey);
+            assertTrue(stageLedger.recordRetained(TENANT,
+                    new StagedImportDocument(document, version, unreferencedKey, UUID.randomUUID().toString()), busyId));
+
+            java.util.concurrent.Future<?> sleeping = executor.submit(() -> {
+                try (Statement statement = busy.createStatement()) {
+                    statement.execute("DO SLEEP(5)");
+                }
+                return null;
+            });
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
+            while (!probe.isExecuting(busyId) && System.nanoTime() < deadline) Thread.sleep(50);
+            assertTrue(probe.isExecuting(busyId), "SLEEP実行中の接続は実行中");
+
+            ImportStageReconciler.Result waiting = reconcilerAt(java.time.Clock.offset(java.time.Clock.systemUTC(),
+                    ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1))).reconcileDue();
+            assertEquals(1, waiting.pending(), "COMMIT接続が実行中の間は判定しない");
+            assertEquals(0, waiting.reclaimed());
+            assertEquals(1, stageLedger.entries().size());
+            verify(documentService, never()).discardImportStage(any());
+
+            sleeping.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            awaitConnectionNotExecuting(busyId);
+            assertFalse(probe.isExecuting(Long.MAX_VALUE), "存在しない接続は実行中でない");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** 接続のserver threadが文を実行しなくなる（Sleepになるか一覧から外れる）まで、最大10秒待つ。 */
+    private void awaitConnectionNotExecuting(long connectionId) throws InterruptedException {
+        ImportStageReconciler.CommitConnectionProbe probe = ImportStageReconciler.processList(jdbc);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (probe.isExecuting(connectionId) && System.nanoTime() < deadline) Thread.sleep(50);
+        assertFalse(probe.isExecuting(connectionId), "接続 " + connectionId + " が10秒以内に実行を終えること");
     }
 
     @Test
