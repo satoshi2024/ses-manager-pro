@@ -171,6 +171,20 @@ class ReportScheduleApiBoundaryTest {
         assertThat(tableField("processingClaimToken").value()).isEqualTo("processing_claim_token");
     }
 
+    @Test
+    void 自動停止で書く有効フラグと停止理由はentity由来のUPDATEから除外される() throws Exception {
+        // review P3-9: 読取後にretry上限で自動停止した行をentityで書き戻すと、停止を古い値で取り消してしまう。
+        // enabledは作成時に無効（0）を保存するためINSERTは許可する。
+        TableField enabled = tableField("enabled");
+        assertThat(enabled.insertStrategy()).as("enabled insertStrategy").isEqualTo(FieldStrategy.DEFAULT);
+        assertThat(enabled.updateStrategy()).as("enabled updateStrategy").isEqualTo(FieldStrategy.NEVER);
+        for (String field : List.of("lastErrorCode", "lastErrorMessage")) {
+            TableField annotation = tableField(field);
+            assertThat(annotation.insertStrategy()).as(field + " insertStrategy").isEqualTo(FieldStrategy.NEVER);
+            assertThat(annotation.updateStrategy()).as(field + " updateStrategy").isEqualTo(FieldStrategy.NEVER);
+        }
+    }
+
     private TableField tableField(String name) throws NoSuchFieldException {
         Field field = ReportSchedule.class.getDeclaredField(name);
         TableField annotation = field.getAnnotation(TableField.class);

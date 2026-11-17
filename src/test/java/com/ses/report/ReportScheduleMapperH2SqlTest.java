@@ -191,6 +191,112 @@ class ReportScheduleMapperH2SqlTest {
         assertThat(scheduleMapper.countLegacyLeases(TENANT + "-other", null)).as("他tenantの行は数えない").isZero();
     }
 
+    private List<ReportSchedule> selectDue(LocalDateTime now) {
+        return scheduleMapper.selectDue(TENANT, now, now.minusMinutes(30), 50);
+    }
+
+    private int stopAtLimit(ReportSchedule snapshot, LocalDateTime now, LocalDateTime retryAt) {
+        return scheduleMapper.markTakeoverExhausted(snapshot.getTenantId(), snapshot.getId(), snapshot.getNextRunAt(),
+                snapshot.getRetryScheduledAt(), snapshot.getProcessingClaimedAt(), snapshot.getProcessingLogicalRunAt(),
+                snapshot.getProcessingClaimToken(), snapshot.getLastRunAt(), snapshot.getFailureCount(), SEPT,
+                retryAt, now.minusMinutes(30), "error.system.unexpected");
+    }
+
+    @Test
+    void 期限切れleaseの引き継ぎclaimは連続失敗回数を加算し上限に達する引き継ぎは停止SQLだけが一致する() {
+        long id = insertDue(SEPT);
+        // 10回失敗済みの行の実行がcompletion前に止まり、lease期限を過ぎた（poison pill）。
+        String deadOwner = "00000000-0000-4000-8000-0000000000e1";
+        jdbcTemplate.update("UPDATE m_report_schedule SET processing_logical_run_at = ?, last_run_at = ?, "
+                + "processing_claimed_at = ?, processing_claim_token = ?, failure_count = 10 WHERE id = ?",
+                SEPT, SEPT, SEPT.plusMinutes(1), deadOwner, id);
+        LocalDateTime firstTakeoverAt = SEPT.plusMinutes(40);
+        ReportSchedule firstStale = only(selectDue(firstTakeoverAt), id);
+        assertThat(stopAtLimit(firstStale, firstTakeoverAt, firstTakeoverAt.plusMinutes(60)))
+                .as("上限前の引き継ぎは停止SQLに一致しない").isZero();
+        String takeoverToken = UUID.randomUUID().toString();
+        assertThat(claim(firstStale, takeoverToken, firstTakeoverAt)).isEqualTo(1);
+        ReportSchedule takenOver = scheduleMapper.selectById(id);
+        assertThat(takenOver.getFailureCount()).as("引き継ぎは前の実行を1回として数える").isEqualTo(11);
+        assertThat(takenOver.getProcessingClaimToken()).isEqualTo(takeoverToken);
+        assertThat(takenOver.getEnabled()).isEqualTo(1);
+
+        // 引き継いだ実行もcompletion前に止まり、再び期限を過ぎた。引き継げば12回目になる。
+        assertThat(stopAtLimit(takenOver, firstTakeoverAt.plusMinutes(10), firstTakeoverAt.plusMinutes(70)))
+                .as("期限前のleaseは停止しない").isZero();
+        LocalDateTime secondAt = firstTakeoverAt.plusMinutes(31);
+        ReportSchedule secondStale = only(selectDue(secondAt), id);
+        assertThat(secondStale.getFailureCount()).isEqualTo(11);
+        assertThat(claim(secondStale, UUID.randomUUID().toString(), secondAt))
+                .as("上限に達する引き継ぎはclaimに一致しない").isZero();
+        assertThat(scheduleMapper.selectById(id).getProcessingClaimToken()).isEqualTo(takeoverToken);
+        LocalDateTime retryAt = secondAt.plusMinutes(60);
+        assertThat(stopAtLimit(secondStale, secondAt, retryAt)).isEqualTo(1);
+        assertThat(stopAtLimit(secondStale, secondAt, retryAt)).as("同じsnapshotの再停止").isZero();
+
+        ReportSchedule stopped = scheduleMapper.selectById(id);
+        assertThat(stopped.getEnabled()).isZero();
+        assertThat(stopped.getFailureCount()).isEqualTo(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
+        assertThat(stopped.getLastErrorCode()).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(stopped.getLastErrorMessage()).isEqualTo("error.system.unexpected");
+        assertThat(stopped.getRetryScheduledAt()).as("再開用にretry予定を保存").isEqualTo(retryAt);
+        assertThat(stopped.getProcessingLogicalRunAt()).isEqualTo(SEPT);
+        assertThat(stopped.getLastRunAt()).isEqualTo(SEPT);
+        assertThat(stopped.getNextRunAt()).isEqualTo(SEPT);
+        assertThat(stopped.getProcessingClaimedAt()).isNull();
+        assertThat(stopped.getProcessingClaimToken()).isNull();
+        // 期限後も動いていた旧ownerのcompletionは、tokenが消えたため0件になる。
+        assertThat(scheduleMapper.markSuccess(TENANT, id, takeoverToken, firstTakeoverAt, OCT, SEPT)).isZero();
+        assertThat(selectDue(retryAt.plusMinutes(1))).extracting(ReportSchedule::getId)
+                .as("停止中は引き継ぎ候補にもdue候補にもならない").doesNotContain(id);
+
+        // 管理者の有効化で回数だけ0へ戻り、retry時刻に同一論理runが通常のclaimで選ばれる（回数は加算しない）。
+        assertThat(scheduleMapper.updateEnabled(TENANT, id, 1, 1L)).isEqualTo(1);
+        ReportSchedule resumed = only(selectDue(retryAt.plusMinutes(1)), id);
+        assertThat(resumed.getFailureCount()).isZero();
+        assertThat(resumed.getProcessingClaimedAt()).isNull();
+        assertThat(claim(resumed, UUID.randomUUID().toString(), retryAt.plusMinutes(1))).isEqualTo(1);
+        assertThat(scheduleMapper.selectById(id).getFailureCount()).as("通常のclaimは回数を変えない").isZero();
+    }
+
+    @Test
+    void 読取後に自動停止した行をentity経由で更新しても有効フラグと停止理由を書き戻さない() {
+        long id = insertDue(SEPT);
+        jdbcTemplate.update("UPDATE m_report_schedule SET failure_count = 11 WHERE id = ?", id);
+        ReportSchedule staleRead = scheduleMapper.selectById(id);
+        assertThat(staleRead.getEnabled()).isEqualTo(1);
+
+        // 読取後にschedulerが12回目の失敗で自動停止する。
+        LocalDateTime claimedAt = SEPT.plusMinutes(1);
+        String token = UUID.randomUUID().toString();
+        assertThat(claim(only(selectDue(claimedAt), id), token, claimedAt)).isEqualTo(1);
+        assertThat(scheduleMapper.markFailure(TENANT, id, token, claimedAt, claimedAt.plusMinutes(60), SEPT,
+                "SCHEDULE_GENERATION_FAILED", "error.system.unexpected")).isEqualTo(1);
+        assertThat(scheduleMapper.selectById(id).getEnabled()).isZero();
+
+        // 停止前に読んだentity（enabled=1・停止理由なし）を書き戻しても、停止は取り消されない（review P3-9）。
+        staleRead.setCronExpression("0 0 1 1 * *");
+        staleRead.setEnabled(1);
+        staleRead.setLastErrorCode("SCHEDULE_GENERATION_FAILED");
+        staleRead.setLastErrorMessage("forged");
+        assertThat(scheduleMapper.updateById(staleRead)).isEqualTo(1);
+
+        ReportSchedule after = scheduleMapper.selectById(id);
+        assertThat(after.getCronExpression()).as("entity由来の更新自体は行われる").isEqualTo("0 0 1 1 * *");
+        assertThat(after.getEnabled()).isZero();
+        assertThat(after.getLastErrorCode()).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(after.getLastErrorMessage()).isEqualTo("error.system.unexpected");
+        assertThat(after.getFailureCount()).isEqualTo(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
+    }
+
+    @Test
+    void DB時刻はsession_time_zoneに依存しないepoch秒で取得できる() {
+        Long dbEpochSecond = scheduleMapper.selectDbEpochSecond();
+
+        assertThat(dbEpochSecond).isNotNull();
+        assertThat(Math.abs(dbEpochSecond - java.time.Instant.now().getEpochSecond())).isLessThanOrEqualTo(60L);
+    }
+
     @Test
     void 孤児tokenは未占有として選ばれ実行中retry_leaseはLIMIT枠を占有しない() {
         long orphanId = insertDue(SEPT);

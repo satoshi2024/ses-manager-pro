@@ -20,6 +20,12 @@ import java.time.LocalDateTime;
  * {@code update(entity, wrapper)} が読取時点の古い値でleaseを書き戻さないよう、これらの列は
  * {@link FieldStrategy#NEVER} でentity由来のUPDATEから除外する。lease/retry/token/失敗回数はINSERTからも除外し、
  * DB既定値（NULL/0）で作成する。{@code nextRunAt} だけは作成時にentityから設定する。
+ *
+ * <p>{@code enabled}・{@code lastErrorCode}・{@code lastErrorMessage} も、retry上限の自動停止でschedulerが書く状態である
+ * （停止は {@code enabled = 0} と停止理由codeの組）。読取後にschedulerが自動停止した行をentity経由で書き戻すと、
+ * 停止を古い値で取り消してしまうため、同じくentity由来のUPDATEから除外する（review P3-9）。管理者のenable/disableは
+ * {@code ReportScheduleMapper.updateEnabled} の指名列UPDATEだけで行う。{@code enabled} は作成時に無効（0）を
+ * 保存するためINSERTは許可し、error列はINSERTからも除外する（作成時はNULL）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -30,6 +36,8 @@ public class ReportSchedule extends BaseEntity {
     private Long templateVersionId;
     private String cronExpression;
     private String timezoneId;
+    /** 有効フラグ。作成時のみentityから設定し、以後は {@code updateEnabled} と自動停止のSQLだけが更新する。 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private Integer enabled;
     private String lockKey;
     /** 次回実行予定。作成時のみentityから設定し、以後はsuccess completionだけが進める。 */
@@ -61,7 +69,11 @@ public class ReportSchedule extends BaseEntity {
     /** 連続失敗回数。failure completionがowner条件下のDB式で加算する。 */
     @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     private Integer failureCount;
+    /** 直近の失敗理由code（自動停止の理由を含む）。completion・自動停止のSQLだけが更新する。 */
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     private String lastErrorCode;
+    /** 直近の失敗理由の安全なmessage。completion・自動停止のSQLだけが更新する。 */
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     private String lastErrorMessage;
     private Long createdBy;
     private Long updatedBy;

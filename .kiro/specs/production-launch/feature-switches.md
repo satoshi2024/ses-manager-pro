@@ -175,6 +175,22 @@
 - OFFにする時点で既に通知outboxへ投入済みの配信通知は、汎用の通知outbox送信（`NotificationOutboxScheduler`）により送信され、配信状態も同期され得る（リンク先はOFF中404）。配信の即時停止が必要な場合は、OFF前に該当の配信を取消すこと。配信専用スイッチの分離は後続作業（A-NF10-6）で検討する。
 - ON復帰後、OFF中に期限を迎えたscheduleは保留中の次回実行時刻（`next_run_at`）から既存のschedule計算に従って処理される。複数回分の実行が溜まった場合の扱いは既存ロジックに従い、本スイッチでは補完を保証しない。
 
+#### 4.5.1 ONにする前の署名・受理（2026-11-17、RB-NF10。全て未取得）
+
+`deploy-runbook.md` §1.7 のNF10の行の詳細である。揃うまで `FEATURE_NF10_ENABLED` はOFFのまま。
+
+| # | 要るもの | 決める人・署名者 | 状態 | 正本 |
+|---|---|---|---|---|
+| 1 | Report Owner の署名（NF10をONにすること） | Report Owner | 未取得 | `scheduled-management-reporting/scheduler-claim-fence-plan.md` §14 |
+| 2 | 確定版の配布方針（月次cronは通常は締め前に動くため定期配布はほぼ速報になる。確定版を定期運用に含めるか、手動生成・手動配布で扱うか） | Report Owner | 未決 | 同 §14.4 |
+| 3 | 「12回」の数え方の確認: 同一論理runの中の、初回を含む連続失敗で、completionに至らずlease期限を超えた試行（引き継ぎ）も1回と数える（RB-NF10、review P3-6）。成功で0へ戻り、月を跨いで累積しない。単一instanceでは実行中の処理は引き継がれない。P3-5の数え方（再試行12回か失敗12回か）と合わせる | Report Owner | 未取得 | 同 §14.2・§15 |
+| 3a | 生成・配布の所要時間の見込み。正常な実行が30分（lease）を超え得るなら、数え方の定義ではなく B-NF10-2（lease延長はしない）を見直す（lease更新またはより長いlease） | Report Owner（見直す場合の設計は技術責任者） | 未取得 | 同 §14.2 |
+| 4 | alert rule の閾値・評価窓・重要度・通知経路の設定。`RETRY_EXHAUSTED_DISABLED` の業務側の宛先と受けた後の対応手順 | SRE（設定）、Report Owner（業務側の宛先と対応） | 未決（§10.6はプレースホルダの草案だけ） | 同 §10.6 |
+| 5 | NTP同期の前提と、許容する本node・DBの時刻差（gauge `ses_report_schedule_clock_skew_seconds` の閾値。WARNのコード既定5秒は決定ではない） | SRE | 未決 | 同 §11（P2-2） |
+| 6 | tenant timezone を変えるときの方針（再計算・移行手順を用意するか、変更を止めるか。決まるまでの暫定の扱いを含む） | Report Owner（運用手順はSREと合意） | 未決 | 同 §11（P2-3） |
+| 7 | 排水・検出SQL・復旧の手順草案の承認 | SRE／DBA | 未取得 | 同 §10.1〜§10.4 |
+| 8 | 新旧versionを同時に動かさない（rolling禁止） | SRE | 配備の前提（`deploy-runbook.md` SRE-5） | 同 §10.1 |
+
 ### 4.6 NF-03
 
 - 資格期限通知は実行日を基準に閾値を判定するため、OFF期間中に到来した閾値の通知はON後に送られない場合がある。

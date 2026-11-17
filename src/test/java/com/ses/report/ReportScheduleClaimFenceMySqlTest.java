@@ -372,7 +372,8 @@ class ReportScheduleClaimFenceMySqlTest {
         assertThat(dateTime(id, "next_run_at")).isEqualTo(SEPT);
         assertThat(dateTime(id, "processing_claimed_at")).isNull();
         assertThat(token(id)).isNull();
-        assertThat(intColumn(id, "failure_count")).isEqualTo(1);
+        // Bの引き継ぎがcompletionに至らなかったAの実行を1回数え（RB-NF10、review P3-6）、Bの失敗で2回になる。
+        assertThat(intColumn(id, "failure_count")).isEqualTo(2);
         assertThat(stringColumn(id, "last_error_code")).isEqualTo(ERROR_CODE);
         Map<String, Object> failed = row(id);
 
@@ -923,6 +924,8 @@ class ReportScheduleClaimFenceMySqlTest {
         forged.setProcessingClaimedAt(SEPT.plusMinutes(1));
         forged.setProcessingClaimToken(UUID.randomUUID().toString());
         forged.setFailureCount(9);
+        forged.setLastErrorCode(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        forged.setLastErrorMessage("forged");
         assertThat(scheduleMapper.insert(forged)).isEqualTo(1);
         long id = forged.getId();
         Map<String, Object> inserted = leaseColumns(id);
@@ -931,6 +934,8 @@ class ReportScheduleClaimFenceMySqlTest {
         assertThat(inserted.get("processing_claimed_at")).isNull();
         assertThat(inserted.get("processing_claim_token")).isNull();
         assertThat(intColumn(id, "failure_count")).isZero();
+        assertThat(stringColumn(id, "last_error_code")).as("停止理由はINSERTから設定できない").isNull();
+        assertThat(stringColumn(id, "last_error_message")).isNull();
         assertThat(dateTime(id, "next_run_at")).as("作成時のnext_run_atは保存する").isEqualTo(SEPT);
 
         ReportSchedule staleRead = scheduleMapper.selectById(id);
@@ -938,14 +943,105 @@ class ReportScheduleClaimFenceMySqlTest {
         ReportScheduleClaimService.Claim owner = claim(dueSnapshot(TENANT, id, claimedAt), SEPT, claimedAt);
         assertThat(owner).isNotNull();
         Map<String, Object> claimed = leaseColumns(id);
+        // 読取後にschedulerが自動停止した状態（review P3-9。markFailureの上限到達と同じ列の組）。
+        jdbcTemplate.update("UPDATE m_report_schedule SET enabled = 0, last_error_code = ?, "
+                + "last_error_message = ? WHERE id = ?", ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE, ERROR_MESSAGE, id);
 
-        // claim前に読んだentityを書き戻しても、lease/next/last/retry/failure列は古い値へ戻らない。
+        // claim前に読んだentityを書き戻しても、lease/next/last/retry/failure列と、自動停止の有効フラグ・停止理由は
+        // 古い値へ戻らない。
         staleRead.setCronExpression("0 0 1 1 * *");
         staleRead.setNextRunAt(OCT);
+        staleRead.setEnabled(1);
+        staleRead.setLastErrorCode(ERROR_CODE);
+        staleRead.setLastErrorMessage("forged");
         assertThat(scheduleMapper.updateById(staleRead)).isEqualTo(1);
         assertThat(leaseColumns(id)).isEqualTo(claimed);
         assertThat(stringColumn(id, "cron_expression")).isEqualTo("0 0 1 1 * *");
+        assertThat(intColumn(id, "enabled")).as("自動停止をentityで取り消さない").isZero();
+        assertThat(stringColumn(id, "last_error_code")).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(stringColumn(id, "last_error_message")).isEqualTo(ERROR_MESSAGE);
         assertThat(scheduleMapper.markSuccess(TENANT, id, owner.token(), owner.claimedAt(), OCT, SEPT)).isEqualTo(1);
+    }
+
+    // =========================================================================
+    // RB-NF10 review P3-6 poison pill（completion前に毎回停止する実行）
+    // =========================================================================
+
+    @Test
+    void completion前に毎回停止する実行は引き継ぎごとに連続失敗として数え上限で引き継がずに停止し有効化で再開する() {
+        long id = insertSchedule(TENANT, SEPT);
+        jdbcTemplate.update("UPDATE m_report_schedule SET failure_count = 10 WHERE id = ?", id);
+        Harness harness = new Harness(SEPT.plusSeconds(30));
+        AtomicInteger attempts = new AtomicInteger();
+        when(harness.snapshotService.generate(any())).thenAnswer(invocation -> {
+            attempts.incrementAndGet();
+            // OOM等でprocessが止まる状況。Errorはschedulerのfailure completionを経由せずに抜ける。
+            throw new SimulatedProcessStop();
+        });
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        LocalDateTime stopAt = SEPT.plusMinutes(62);
+        try {
+            // 1回目: 通常のclaim（回数は10のまま）の後、completion前に止まる。
+            assertThatThrownBy(harness.scheduler::dispatchDue).isInstanceOf(SimulatedProcessStop.class);
+            assertThat(intColumn(id, "failure_count")).isEqualTo(10);
+            assertThat(dateTime(id, "processing_claimed_at")).isEqualTo(SEPT.plusSeconds(30));
+
+            // 2回目: lease期限後の引き継ぎが前の実行を1回数えて11にし、また止まる。
+            harness.clock.set(SEPT.plusMinutes(31));
+            assertThatThrownBy(harness.scheduler::dispatchDue).isInstanceOf(SimulatedProcessStop.class);
+            assertThat(intColumn(id, "failure_count")).isEqualTo(11);
+            assertThat(dateTime(id, "processing_claimed_at")).isEqualTo(SEPT.plusMinutes(31));
+
+            // 3回目: 引き継げば12回目になるため、生成せずに同じsnapshot CASで停止する。
+            harness.clock.set(stopAt);
+            harness.scheduler.dispatchDue();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        assertThat(attempts.get()).as("上限で止めた後は生成を再開しない").isEqualTo(2);
+        LocalDateTime retryAt = stopAt.plusMinutes(60);
+        assertThat(intColumn(id, "enabled")).isZero();
+        assertThat(stringColumn(id, "last_error_code")).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(stringColumn(id, "last_error_message")).as("引き継ぎによる停止はmessageで区別できる")
+                .isEqualTo(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY);
+        assertThat(intColumn(id, "failure_count")).isEqualTo(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
+        assertThat(dateTime(id, "retry_scheduled_at")).isEqualTo(retryAt);
+        assertThat(dateTime(id, "processing_logical_run_at")).isEqualTo(SEPT);
+        assertThat(dateTime(id, "last_run_at")).isEqualTo(SEPT);
+        assertThat(dateTime(id, "next_run_at")).isEqualTo(SEPT);
+        assertThat(dateTime(id, "processing_claimed_at")).isNull();
+        assertThat(token(id)).isNull();
+        List<String> messages = messages(logs);
+        assertThat(messages).anyMatch(message -> message.contains("連続失敗1回として数えました")
+                && message.contains("failureCount=11"));
+        assertThat(messages).anyMatch(message -> message.contains("cause=STALE_LEASE")
+                && message.contains("failureCount=12"));
+
+        // 停止中は時間が経っても引き継がない。
+        harness.clock.set(retryAt.plusHours(3));
+        harness.scheduler.dispatchDue();
+        assertThat(attempts.get()).isEqualTo(2);
+
+        // 管理者の有効化で回数を0に戻し、保持したretryから同一論理runを再開する。
+        authenticateAdmin();
+        assertThat(scheduleService.setEnabled(id, true).getFailureCount()).isZero();
+        org.mockito.Mockito.doReturn(succeeded(606L)).when(harness.snapshotService).generate(any());
+        harness.clock.set(retryAt.plusHours(3).plusMinutes(1));
+        harness.scheduler.dispatchDue();
+        assertCompletedSuccessfully(id, OCT, SEPT);
+        ArgumentCaptor<ReportGenerationCommand> commands = ArgumentCaptor.forClass(ReportGenerationCommand.class);
+        verify(harness.snapshotService, times(3)).generate(commands.capture());
+        assertThat(commands.getAllValues()).extracting(ReportGenerationCommand::period)
+                .containsOnly(YearMonth.of(2026, 8));
+        verify(harness.deliveryService, times(1)).deliverScheduled(eq(606L), any());
+    }
+
+    /** completion前のprocess停止（OOM等）を模す。schedulerは {@code Exception} だけを失敗として記録する。 */
+    private static final class SimulatedProcessStop extends Error {
+        SimulatedProcessStop() {
+            super("simulated process stop before completion", null, false, false);
+        }
     }
 
     @Test
@@ -997,6 +1093,8 @@ class ReportScheduleClaimFenceMySqlTest {
         assertThat(ownerB.token()).isNotEqualTo(ownerA.token());
         assertThat(token(id)).isEqualTo(ownerB.token());
         assertThat(dateTime(id, "processing_logical_run_at")).isEqualTo(SEPT);
+        assertThat(intColumn(id, "failure_count")).as("引き継ぎはAの実行を連続失敗1回として数える").isEqualTo(1);
+        assertThat(ownerB.failureCount()).isEqualTo(1);
         return new Takeover(id, ownerA, ownerB);
     }
 

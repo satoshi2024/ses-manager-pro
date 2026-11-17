@@ -98,11 +98,28 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 |---|---|
 | 基準 | `1836eb73fec57421d2acc9503e3e84fe1f267856`。branch `codex/snf-w2-nf10-scheduler-policy-20261113` |
 | 起動guard（A-NF10-3） | token無しlease（legacy lease）が1件でもあれば全tenantのclaimを止める（fail-closed）。運用者がdrainを確認した時刻 `management-report.legacy-lease-drain-confirmed-before`（既定は空）より前、かつ本instance起動前に取得されたleaseだけを期限後に引き継ぐ。それ以降のleaseと、解釈できない設定値は止める。検出の失敗も停止（plan §14.1） |
-| retry上限（A-NF10-4 / P2-4） | 初回を含む連続12回目の失敗で `enabled = 0`・`last_error_code = SCHEDULE_RETRY_EXHAUSTED` を所有権CASと同じUPDATEで保存。停止理由はschedule一覧APIで確認でき、管理者の有効化で連続失敗回数を0へ戻して同一論理runから再開する。同一論理runで確定的に失敗する原因の復旧手順（新schedule作成等）とpoison pillの限界を記載。DDL不要（plan §14.2） |
+| retry上限（A-NF10-4 / P2-4） | 初回を含む連続12回目の失敗で `enabled = 0`・`last_error_code = SCHEDULE_RETRY_EXHAUSTED` を所有権CASと同じUPDATEで保存。停止理由はschedule一覧APIで確認でき、管理者の有効化で連続失敗回数を0へ戻して同一論理runから再開する。同一論理runで確定的に失敗する原因の復旧手順（新schedule作成等）とpoison pillの限界を記載。DDL不要（plan §14.2）。2026-11-17（RB-NF10）: 引き継ぎも連続失敗1回として数え、上限に達する引き継ぎはせずに停止・通知する（poison pillの限界を解消。DDL不要、下の「RB-NF10」） |
 | 確定的SQL失敗（P3-3） | 当該行だけを見送り、同tenantの残り候補は続行。見送った行は待機（5分×回数、上限60分）の間due一覧から除外し、LIMIT枠を占有させない（plan §14.3） |
 | 重複配布（A-NF10-5 / P2-1） | lease延長はしない。定期runのrun_keyはschedule・template版・対象月・scopeで作りcutoffを含めないため、同一論理runのcutoffは最初のrunに固定される。前提はrecipient previewとtemplate版が同一論理runの間で変わらないこと。重複実行・締めを跨ぐ重複実行・8並行投入で配布が1回に収束することを実MySQLで検証する（plan §14.4） |
-| metric/alert（P2-8） | `ses_report_schedule_events_total{event}`（14種）と `ses_report_schedule_legacy_leases`（gaugeの古い値に注意）。推奨alert ruleは案のみ（plan §14.5） |
+| metric/alert（P2-8） | `ses_report_schedule_events_total{event}`（14種）と `ses_report_schedule_legacy_leases`（gaugeの古い値に注意）。推奨alert ruleは案のみ（plan §14.5）。2026-11-17（RB-NF10）: `outcome` tag（確定的失敗・結果不明等。eventごとに固定）と2 eventを加えて16種、gauge `ses_report_schedule_clock_skew_seconds` を追加。alert ruleの草案はplan §10.6へ移し、閾値・評価窓・重要度・通知先をプレースホルダにした（未決。決める人はSRE／Report Owner） |
 | 機能スイッチ（A-NF10-6） | 既存のNF10スイッチを使い、新しいスイッチは追加しない。OFF前に投入済みの通知outboxは汎用schedulerが送る隙間が残る（plan §14.6） |
 | 追加・更新test（r2は `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過） | `ReportScheduleDispatchPolicyMySqlTest`（新規、`@Tag("mysql")`、`scripts/test-suites/mysql-shard-2.txt`、5件）、`ManagementReportSchedulerTest`（r1で1件置換・5件追加、r2で4件追加）、`ReportSnapshotServiceImplTest`（r2で2件追加）、`ReportScheduleMapperH2SqlTest`（2件追加）、`ReportScheduleApiBoundaryTest`（1件追加） |
 | 変更しないもの | DDL、`messages*.properties`、`application*.yml`、機能スイッチ実装。新設定はコード既定値（空＝未確認）で動き、`application.yml` への明示は提案のみ |
-| 残課題 | schedule一覧画面での停止理由表示（画面自体が未実装）、論理runのskip API（未実装の方針のみ）、引き継ぎ回数の上限（DDLが要るため方針のみ）、alert ruleの設定、並行時の文書artifact重複（UNKNOWN）、P2-3のtimezone変更時の再計算 |
+| 残課題 | schedule一覧画面での停止理由表示（画面自体が未実装）、論理runのskip API（未実装の方針のみ）、~~引き継ぎ回数の上限（DDLが要るため方針のみ）~~（2026-11-17、RB-NF10で既存列により実装）、alert ruleの設定、並行時の文書artifact重複（UNKNOWN）、P2-3のtimezone変更時の再計算 |
+
+## NF10 RB-NF10 ON前のP2/P3（2026-11-17）
+
+状態: **実装済・対象限定fastだけworker環境で通過。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定は未取得のまま。
+
+| 項目 | 内容 |
+|---|---|
+| 基準 | `7bf54101fb5fd56f052093dec77db8dd38b16324`。branch `codex/snf-rb-nf10-20261117` |
+| 引き継ぎを含むretry上限（review P3-6） | 期限切れleaseの引き継ぎclaimが、completionに至らなかった前の実行を失敗1回として同じUPDATEで `failure_count` に加算する。引き継げば上限（12回）に達するleaseは引き継がず、同じsnapshot CASで停止する（failure completionの上限到達と同じ状態・通知）。結果不明のfailure completionは読み直して停止を確かめた時だけ通知する。DDL不要（plan §14.2） |
+| entityの書き戻し（review P3-9） | `enabled`（UPDATEだけ）、`lastErrorCode`・`lastErrorMessage`（INSERT・UPDATE）を `FieldStrategy.NEVER` にした。手動disableで一覧に停止理由が残る点は設計どおりとして変えない（plan §15） |
+| tenant単位の隔離（review P3-12） | NF10の `dispatchDue` だけ、1 tenantの例外をERRORとmetric（`TENANT_DISPATCH_REJECTED`／`TENANT_DISPATCH_FAILED`）に残して残りのtenantを続ける。共有runnerと起動guardのfail-closedは変えない |
+| metric/alert（review P2-8の残り） | `outcome` tag、alert rule草案（plan §10.6、閾値等は未決） |
+| 時計（review P2-2）・timezone変更（P2-3） | 挙動は変えない。P2-2は本nodeとDBの時計の差のgaugeとWARNを追加（許容値はSREが決める、未決）。P2-3はReport Ownerが決める（未決）（plan §11追記） |
+| 追加・更新test | `ManagementReportSchedulerTest`（8件追加、1件のtag断言を `outcome` 追加に合わせて強化）、`ReportScheduleMapperH2SqlTest`（3件追加）、`ReportScheduleApiBoundaryTest`（1件追加）、`ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`mysql-shard-1.txt`。1件追加。stale takeover後のfailure completionの回数の期待値を1から2へ更新（引き継ぎで1回数えるため）、引き継ぎhelperとentity書き戻しのcaseに断言を追加） |
+| 独立レビュー（`4ffcfb72`、PASS附条件）への対応（第2回） | P3-1（引き継ぎ停止のSQLが結果不明なら読み直して通知）、P3-2（読み直しのlease期限判定を読み直す直前の時刻にし、この試行のretry時刻と回数の一致を判定に加えた）、P3-3（tenant隔離のERRORに安全な要約 `detail=`）、P3-5（引き継ぎによる停止の `last_error_message` を別key）を修正。P3-4・P3-6・P3-7は文書（plan §14.2・§11・§15.1）。数え方は主控の判断で現状のまま（plan §15.1） |
+| 変更しないもの | DDL、`application*.yml`、機能スイッチ実装、共有の `TenantAwareBatchRunner`。新設定 `management-report.clock-skew-warn-seconds` はコード既定値（5秒）で動く。`messages*.properties` は第2回で1 key（`error.managementReport.scheduleStoppedByLeaseExpiry`、4言語）を追加 |
+| 人が行うもの（未取得） | Report Owner署名、確定版の配布方針、「12回」の数え方（引き継ぎを含む）の確認、生成・配布の所要時間の見込み（30分を超え得るならB-NF10-2を見直す）、P2-3の方針、alert ruleの閾値と通知先、NTPの前提と許容する時刻差、§10の手順草案のSRE/DBA承認（`deploy-runbook.md` §1.7、`feature-switches.md` 4.5） |
