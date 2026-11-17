@@ -18,10 +18,18 @@ function extractFunction(source, name) {
     throw new Error(`${name} has an unmatched block`);
 }
 
-const csrfFactory = new Function('document', `${extractFunction(queue, 'csrfHeader')}; return csrfHeader;`);
+// csrfHeader は文言を uiError（→ uiText）で解決するため、両方を同じ scope に取り出す。
+// uiText が参照するのは window.SES_MESSAGES と readStoredUiMessages だけなので、最小の代替を渡す。
+const csrfFactory = (doc, win = {}) => new Function('document', 'window', 'readStoredUiMessages',
+    `${extractFunction(queue, 'uiText')}; ${extractFunction(queue, 'uiError')}; `
+    + `${extractFunction(queue, 'csrfHeader')}; return csrfHeader;`)(doc, win, () => null);
 const csrf = csrfFactory({ cookie: 'XSRF-TOKEN=csrf%2Bvalue; Path=/' });
 assert.deepEqual(csrf(), { 'X-XSRF-TOKEN': 'csrf+value' });
 assert.throws(() => csrfFactory({ cookie: '' })(), /CSRF/);
+// 画面の文言（SES_MESSAGES）があれば、例外の文言もその言語になる
+assert.throws(() => csrfFactory({ cookie: '' },
+    { SES_MESSAGES: { 'pwa.error.csrfUnavailable': 'CSRF token unavailable. Reload while online.' } })(),
+    /CSRF token unavailable/);
 
 const state = {
     scope: 'scope-a', revocationEpoch: 'epoch-a', documentGeneration: 4, quarantined: false,
@@ -80,6 +88,10 @@ function element(id) {
 }
 const document = {
     readyState: 'loading',
+    // offline.html は端末に保存した言語で lang・title・[data-pwa-text] の文言を置き換える（RB-I18N）
+    documentElement: { lang: '' },
+    title: '',
+    querySelectorAll: () => [],
     addEventListener(type, handler) { if (type === 'DOMContentLoaded') this.ready = handler; },
     getElementById: element,
     createElement: tag => ({ tag, textContent: '', children: [],
@@ -90,6 +102,8 @@ let prepared = 0;
 let confirmed = 0;
 const windowEvents = {};
 const window = { SES: { pwaQueue: {
+    text(key, fallback) { return fallback; },
+    language() { return 'en'; },
     async checkRestoreAvailability() { return true; },
     async prepareRestore(password) { assert.equal(password, 'secret'); prepared++; },
     async confirmRestore() { confirmed++; },
@@ -97,6 +111,8 @@ const window = { SES: { pwaQueue: {
 } }, addEventListener(type, handler) { windowEvents[type] = handler; } };
 vm.runInNewContext(inline, { document, window, navigator: { onLine: true }, Intl, Number, String, Object });
 document.ready();
+assert.equal(document.documentElement.lang, 'en', '端末に保存した言語を画面の言語にする');
+assert.match(document.title, /SES Manager Pro$/);
 element('offline-restore-password').value = 'secret';
 await element('offline-reauth').handlers.click();
 assert.equal(prepared, 1);
@@ -109,7 +125,7 @@ assert.equal(element('offline-drafts').hidden, false, '明示確認後だけDOM�
 assert.match(element('offline-draft-list').textContent, /2026-10-07/);
 
 const workerEvents = new Map();
-const cacheData = new Map([['ses-pwa-shell-v1', new Map()], ['ses-pwa-shell-v2', new Map()], ['ses-pwa-shell-v3', new Map()], ['other-cache', new Map()]]);
+const cacheData = new Map([['ses-pwa-shell-v1', new Map()], ['ses-pwa-shell-v2', new Map()], ['ses-pwa-shell-v3', new Map()], ['ses-pwa-shell-v4', new Map()], ['other-cache', new Map()]]);
 const caches = {
     async open(name) {
         if (!cacheData.has(name)) cacheData.set(name, new Map());
@@ -139,8 +155,8 @@ await installPromise;
 let activatePromise;
 workerEvents.get('activate')({ waitUntil(promise) { activatePromise = promise; } });
 await activatePromise;
-assert.deepEqual([...cacheData.keys()].sort(), ['other-cache', 'ses-pwa-shell-v4'].sort(),
-    'v4 worker activation purges v1/v2/v3 shell caches and retains unrelated caches');
+assert.deepEqual([...cacheData.keys()].sort(), ['other-cache', 'ses-pwa-shell-v5'].sort(),
+    'v5 worker activation purges v1/v2/v3/v4 shell caches and retains unrelated caches');
 networkAvailable = false;
 let offlineResponse;
 workerEvents.get('fetch')({
