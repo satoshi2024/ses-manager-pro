@@ -10,12 +10,12 @@
 ## 1. 目的・適用範囲・リハーサルヘルパーとの厳格な区分 (Objectives, Scope & Distinction)
 
 ### 1.1 目的
-`V182__nf09_tenant_scope_hardening.sql` の適用直後に生成される `t_nf09_scope_repair_queue` のうち、`entity_type = 'DIGITAL_INVOICE'` および `entity_type = 'DIGITAL_INVOICE_EVENT'` に隔離された未解決レコード群を、データ欠損や外鍵違反を起こさずに安全・不可分に解消するための**本番対応修復エグゼキュータ（Production Repair Executor for Boundary A）**の最小実装設計を確定する。
+`V182__nf09_tenant_scope_hardening.sql` の適用直後に生成される `t_nf09_scope_repair_queue` のうち、`entity_type = 'DIGITAL_INVOICE'` および `entity_type = 'DIGITAL_INVOICE_EVENT'` に隔離された未解決レコード群を、データ欠損や外部キー違反を起こさずに安全・不可分に解消するための**本番対応修復エグゼキュータ（Production Repair Executor for Boundary A）**の最小実装設計を確定する。
 
 ### 1.2 適用範囲（境界 A に厳格限定）
 - **対象エンティティ**:
   1. 親デジタルインボイス: `t_digital_invoice`（BIGINT `version` 列保有）
-  2. 紐づく子イベント: `t_digital_invoice_event`（`version` 列なし、3列複合外鍵 `fk_digital_invoice_event_scope` 拘束）
+  2. 紐づく子イベント: `t_digital_invoice_event`（`version` 列なし、3列複合外部キー `fk_digital_invoice_event_scope` 拘束）
   3. 親インボイス修復キュー: `t_nf09_scope_repair_queue` (`entity_type = 'DIGITAL_INVOICE'`)
   4. 子イベント修復キュー: `t_nf09_scope_repair_queue` (`entity_type = 'DIGITAL_INVOICE_EVENT'`)
 - **本切片の対象外（非スコープ）**:
@@ -28,9 +28,9 @@
 | 比較項目 | リハーサルテストヘルパー (`repairInvoiceInTransaction`) | 本計画で策定する本番修復エグゼキュータ |
 |---|---|---|
 | **実装位置** | `src/test/java/.../V182TenantScopeHardeningRehearsalMySqlTest.java` (private) | `src/main/java/com/ses/service/repair/` (正式プロダクション層) |
-| **子イベント (`t_digital_invoice_event`)** | **未実装（完全無視）**。親行のみ更新し、子イベントの外鍵検査を回避。 | **完全集約実装**。親と全子イベントを同一 Tx 内でアトミックにロック・3分類・更新。 |
+| **子イベント (`t_digital_invoice_event`)** | **未実装（完全無視）**。親行のみ更新し、子イベントの外部キー検査を回避。 | **完全集約実装**。親と全子イベントを同一 Tx 内でアトミックにロック・3分類・更新。 |
 | **親インボイス状態判定** | 単純な NULL 更新のみ。 | 親行ロック直後の無条件バージョン検証、親 3 分類判定、および厳密フィールド一致に基づく已完成冪等再試行の独立判定。 |
-| **外鍵整合性 (`RESTRICT`)** | 子イベントが存在しない合成データでのみ成立。 | MySQL 8 の即時文単位 RESTRICT 検査を充足する精密な原値比較 UPDATE を実装。 |
+| **外部キー整合性 (`RESTRICT`)** | 子イベントが存在しない合成データでのみ成立。 | MySQL 8 の即時文単位 RESTRICT 検査を充足する精密な原値比較 UPDATE を実装。 |
 | **承認検証** | 呼出引数 `callerTenant` の単純な文字列一致のみ。 | `t_approval_request` および `t_approval_action` 正本照合（用途・テナント・現在ラウンド充足・2名承認者・実資格）の実照合。 |
 | **資格照合とフェイルクローズ** | ロール判定なし（無条件通過）。 | `RepairApprovalQualificationService` による厳格照合。未登録・失効・照会失敗は一律 Fail-Closed（管理者の財務自動フォールバック禁止）。 |
 | **完成証跡の格納・再試行発見** | なし（コンソールログのみ）。 | 初回選定（親優先／最小参加子）と再試行発見（厳密フィールド一致）を明確に分離。代表行・参加行構造化 JSON と SHA-256 集合再構成により確実に検証。 |
@@ -47,7 +47,7 @@
 
 ```mermaid
 flowchart TD
-    CLI[DigitalInvoiceScopeRepairCli / Ingress] --> GateCheck{前置安全防護検査<br/>ses.repair.invoice.enabled == true}
+    CLI[DigitalInvoiceScopeRepairCli / Ingress] --> GateCheck{事前の安全防護検査<br/>ses.repair.invoice.enabled == true}
     GateCheck -->|false: 無効| AbortDisabled[終了コード 1 即時中断]
     GateCheck -->|true: 有効| AuthContext[認証コンテキスト検証<br/>SecurityUtils.currentUserId 取得]
 
@@ -79,7 +79,7 @@ flowchart TD
         StateMatrix -->|整合性異常検知| TxRollback
         StateMatrix --> DryRunCheck{dryRun == true ?}
         DryRunCheck -->|true| SetRbOnly[トランザクション内明示的ロールバック<br/>status.setRollbackOnly]
-        DryRunCheck -->|false| DmlExec[9. 親・子・キュー CAS DML 発行 & 逐行影響数検証<br/>初回代表行選定 & 代表行・参加行構造化証跡格納<br/>全レコード長 <= 500 検査 & resolved_by 記録]
+        DryRunCheck -->|false| DmlExec[9. 親・子・キュー CAS DML 発行 & 行ごとの影響件数検証<br/>初回代表行選定 & 代表行・参加行構造化証跡格納<br/>全レコード長 <= 500 検査 & resolved_by 記録]
         DmlExec --> TxCommit[10. トランザクションコミット]
     end
 
@@ -226,7 +226,7 @@ public record ScopeRepairApprovalEvidence(
    - 認証コンテキストが存在しない、または無効な場合は直ちに `AuthenticationCredentialsNotFoundException` で拒絶。
 6. **キュー完了時の `resolved_by` と構造化証跡の記録**:
    - `t_nf09_scope_repair_queue` の更新時、`resolved_by` には**実際にコマンドを実行した操作者（`executorUserId`）**を記録する。
-   - 代表キューの `resolution_note` には後述 4.2 節に規定する固定プロトコル標識付き定長コンパクト構造化完了証跡（`SES_NF09_COMPL:...`）を格納し、その他の参加キューには固定標識構造化参加行参照（`SES_NF09_MEMBER:...`）を格納する。
+   - 代表キューの `resolution_note` には後述 4.2 節に規定する固定のプロトコル識別子付き定長コンパクト構造化完了証跡（`SES_NF09_COMPL:...`）を格納し、その他の参加キューには固定識別子付きの構造化参加行参照（`SES_NF09_MEMBER:...`）を格納する。
 
 ### 3.4 テスト用フィクスチャの本番バックドア化防止
 テスト実行で使用される合成承認フィクスチャ（例: `ticketId = "TEST-MOCK-APPR-001"`）およびモック資格プロバイダは、Spring プロファイルが `@Profile("test")` である環境においてのみ有効なモック検証器として分離する。
@@ -251,7 +251,7 @@ public record ScopeRepairApprovalEvidence(
 
 ### 4.2 完成証跡ストレージ・初回代表行選定・再試行発見および集合再構成アルゴリズム
 
-#### 4.2.1 完成証跡ストレージの課題・容量定義および固定プロトコル標識
+#### 4.2.1 完成証跡ストレージの課題・容量定義および固定のプロトコル識別子
 `t_nf09_scope_repair_queue.resolution_note` は MySQL 8 スキーマ上 `VARCHAR(500) NULL`（`CHARACTER SET utf8mb4`）である。
 無界なキュー ID 配列の平文格納を廃止し、参加キュー件数 `qc` と、ソート済み参加キュー ID 列の SHA-256 ダイジェスト `qh`（厳密に 64 文字の小文字 16 進数）による定長暗号学的要約を採用する。
 
@@ -260,16 +260,16 @@ public record ScopeRepairApprovalEvidence(
   - しかし本プロトコルにおける「500 制限」は、**MySQL の文字数上限定義そのものではなく、マルチバイト文字展開（1 文字最大 4 バイト）に伴う予期せぬ切り捨てリスクや照合順序依存を物理的に排除するためのアプリケーション層の防御的バイト境界（UTF-8 実バイト長 $\le 500$ バイト）**である。
   - `V182` スキーマにおいて `tenant_id` は `VARCHAR(100)`、`t_approval_request.request_no` は最大 50 文字程度を許容する。
   - 「常に 280 文字以内に収まる」といった無検証の固定長保証は行わず、更新発行前に Java 側で `serializedNote.getBytes(StandardCharsets.UTF_8).length <= 500` を絶対のガードとして検証する。
-  - 万一 500 バイトを超過した場合は**決して截断（Truncation）せず、直ちに `IllegalStateException` を送出して全量ロールバック**する。
+  - 万一 500 バイトを超過した場合は**決して切り詰め（Truncation）をせず、直ちに `IllegalStateException` を送出して全量ロールバック**する。
 
-- **固定プロトコル標識による歴史的自由文との分離**:
-  - 新たに書き込まれる完了証跡および参加行参照には、先頭に固定かつ識別可能なプロトコル標識プレフィックスを付与する：
+- **固定のプロトコル識別子による歴史的自由文との分離**:
+  - 新たに書き込まれる完了証跡および参加行参照には、先頭に固定かつ識別可能なプロトコル識別プレフィックスを付与する：
     - 代表証跡: `SES_NF09_COMPL:`
     - 参加参加行参照: `SES_NF09_MEMBER:`
   - エンコーディング、発見スキャン、パース、および実バイト長検査（$\le 500$ バイト）はすべてこの形式に従う。
   - **歴史的普通備考の完全分離**:
-    `resolution_note` が `null` であるか、または上記プロトコル標識で始まらない行（例: 過去のマイグレーションや旧チケットで格納された `[IDEMPOTENT_CLOSE]` や手動メンテナンスのメモ）は**歴史的普通備考として完全無視・現状維持**し、本プロトコルの修復証跡としては一切扱わない。
-  - **プロトコル標識行の厳格性**:
+    `resolution_note` が `null` であるか、または上記プロトコル識別子で始まらない行（例: 過去のマイグレーションや旧チケットで格納された `[IDEMPOTENT_CLOSE]` や手動メンテナンスのメモ）は**歴史的普通備考として完全無視・現状維持**し、本プロトコルの修復証跡としては一切扱わない。
+  - **プロトコル識別行の厳格性**:
     `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる行において、JSON パースエラー、プロトコルバージョン不一致（`v != 1`）、または必須フィールドの欠落を検知した場合は、互換例外を一切設けず直ちに `CorruptedEvidenceException` を送出して全量ロールバックする。
 
 #### 4.2.2 初回実行時における確定代表行選定アルゴリズム (Carrier Selection on Initial Execution)
@@ -286,9 +286,9 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
 > 後述の再試行（Retry）時には全キューが既に `RESOLVED` に遷移しているため、この選定規則を再試行時に再評価してはならない（再評価すると親が RESOLVED であるため親代表行を見失う等の不整合を引き起こす）。
 
 #### 4.2.3 完了記録および参加行構造化参照のシリアライズ仕様
-本トランザクション内で完了される全キュー行に対し、以下の固定プロトコル標識付き厳格構造化 JSON を `resolution_note` に格納する：
+本トランザクション内で完了される全キュー行に対し、以下の固定のプロトコル識別子付き厳格構造化 JSON を `resolution_note` に格納する：
 
-1. **代表レコード (固定標識 `SES_NF09_COMPL:`)**:
+1. **代表レコード (固定識別子 `SES_NF09_COMPL:`)**:
    選定された `carrierQueue` に格納する（プレフィックス `SES_NF09_COMPL:` に続けてコンパクト JSON を連結）：
    ```text
    SES_NF09_COMPL:{"v":1,"ticket":"APPR-20261026-INV-0089","round":1,"invId":10089,"tenant":"tenant-1","legalEntity":100,"pCls":"P2","vBf":0,"vAf":1,"qc":3,"qh":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","by":1,"at":"2026-10-28T16:30:00Z"}
@@ -308,7 +308,7 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
      - `by`: コマンドを実行した認証操作者 ID（`sys_user.id`、正の整数）
      - `at`: 完了確定 ISO 8601 UTC タイムスタンプ（文字列）
 
-2. **非代表行参加参加行レコード (固定標識 `SES_NF09_MEMBER:`)**:
+2. **非代表行参加参加行レコード (固定識別子 `SES_NF09_MEMBER:`)**:
    代表以外の参加キュー全行（$q \in Q_{\text{participating}} \setminus \{\text{carrierQueue}\}$）に格納する（プレフィックス `SES_NF09_MEMBER:` に続けてコンパクト JSON を連結）：
    ```text
    SES_NF09_MEMBER:{"v":1,"carrierId":101,"ticket":"APPR-20261026-INV-0089","round":1}
@@ -318,15 +318,15 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
      - `carrierId`: 本集約の代表キュー主キー（`carrierQueue.id`、正の整数）
      - `ticket`: 決裁チケット番号（文字列）
      - `round`: 決裁有効ラウンド（正の整数）
-   - 単なる `contains(ticket)` のような自由テキストを完全排除し、固定プロトコル標識および `carrierId`、`ticket`、`round` を厳格にバインドした構造化レコードとする。
+   - 単なる `contains(ticket)` のような自由テキストを完全排除し、固定のプロトコル識別子および `carrierId`、`ticket`、`round` を厳格にバインドした構造化レコードとする。
 
 #### 4.2.4 再試行発見アルゴリズム（厳密フィールド一致による唯一代表行特定と歴史的自由文の分離）
 再実行（Retry）時、ロック取得済みの集約内全キュー（親キューが存在すれば親キュー＋全子イベントキュー）の中から、以下の**厳密フィールド一致**により本決裁の完了証跡代表行を探索する：
 
 - **歴史的自由テキスト備考の完全分離・保護**:
-  - キューの `resolution_note` が `null` であるか、または本プロトコルの固定標識（`SES_NF09_COMPL:` または `SES_NF09_MEMBER:`）で始まらない行（例: 過去の移行や旧チケットで書き込まれた `[IDEMPOTENT_CLOSE]` や手動メンテナンスメモ）：
+  - キューの `resolution_note` が `null` であるか、または本プロトコルの固定識別子（`SES_NF09_COMPL:` または `SES_NF09_MEMBER:`）で始まらない行（例: 過去の移行や旧チケットで書き込まれた `[IDEMPOTENT_CLOSE]` や手動メンテナンスメモ）：
     **非プロトコル行として完全無視（Ignored / Untouched）**し、本プロトコルの修復完了証跡としては一切扱わない。旧自由テキストの改変や削除も行わない。
-- **本プロトコル標識行の厳格性（破損・未知バージョン・欠落の即時拒絶）**:
+- **本プロトコル識別行の厳格性（破損・未知バージョン・欠落の即時拒絶）**:
   - `resolution_note` が `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる行において、以下のいずれかが検知された場合：
     1. JSON パースエラー（文法破損）
     2. プロトコルバージョン不一致（`v != 1`）
@@ -341,7 +341,7 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
   - `record.invId == command.invoiceId`
 - **代表行整合性の検証**:
   1. **代表行不在時（合致件数 == 0）**: 本チケット・ラウンドによる完了証跡は存在しない。通常実行経路（初回実行または版不一致判定）へ進む。
-  2. **複数代表行衝突時（合致件数 > 1）**: 同一集約内に同一チケット・ラウンドの完了証跡代表行が複数存在する。直ちに `IllegalStateException("同一決裁チケットの完了証跡載体が複数検知されました")` を送出し、Tx 全量ロールバック。
+  2. **複数代表行衝突時（合致件数 > 1）**: 同一集約内に同一チケット・ラウンドの完了証跡代表行が複数存在する。直ちに `IllegalStateException("同一決裁チケットの完了証跡の代表行が複数検知されました")` を送出し、Tx 全量ロールバック。
   3. **証跡破損時**: 上述のとおり直ちに `CorruptedEvidenceException` で即時拒絶。
 
 > [!NOTE]
@@ -375,18 +375,18 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
    再実行を成功と認定して `SKIPPED_ALREADY_RESOLVED` を返却する前に、以下の不変条件チェックを**例外なく全項目検証**する：
    1. **テナントスコープ一致検証**:
       `carrier.tenant.equals(command.targetTenantId)` であること。
-      不一致時は直ちに `SecurityException("載体に記録されたテナントスコープがコマンド対象と一致しません: expected=" + command.targetTenantId + ", actual=" + carrier.tenant)` を送出して全量ロールバック。
+      不一致時は直ちに `SecurityException("代表行に記録されたテナントスコープがコマンド対象と一致しません: expected=" + command.targetTenantId + ", actual=" + carrier.tenant)` を送出して全量ロールバック。
    2. **法人スコープ一致検証**:
       `carrier.legalEntity.equals(command.targetLegalEntityId)` であること。
-      不一致時は直ちに `SecurityException("載体に記録された法人スコープがコマンド対象と一致しません: expected=" + command.targetLegalEntityId + ", actual=" + carrier.legalEntity)` を送出して全量ロールバック。
+      不一致時は直ちに `SecurityException("代表行に記録された法人スコープがコマンド対象と一致しません: expected=" + command.targetLegalEntityId + ", actual=" + carrier.legalEntity)` を送出して全量ロールバック。
    3. **承認正本バージョン合致検証**:
       `carrier.vBf == approval.targetVersion` であること。
-      代表行に記録された修復前版（vBf）が、正本決裁承認の対象バージョンと一致していることを検証。不一致時は直ちに `OptimisticLockingFailureException("載体の修復前版が決裁承認対象バージョンと一致しません: approval=" + approval.targetVersion + ", carrier=" + carrier.vBf)` を送出して全量ロールバック。
+      代表行に記録された修復前版（vBf）が、正本決裁承認の対象バージョンと一致していることを検証。不一致時は直ちに `OptimisticLockingFailureException("代表行の修復前版が決裁承認対象バージョンと一致しません: approval=" + approval.targetVersion + ", carrier=" + carrier.vBf)` を送出して全量ロールバック。
    4. **分類別バージョン整合性検証 (vAf vs vBf)**:
       - `carrier.pCls.equals("P1")` の場合:
-        親更新なし（+0）であるため、厳格に `carrier.vAf == carrier.vBf` であること。不一致時は直ちに `IllegalStateException("P1 載体の修復後バージョンが修復前バージョンと一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
+        親更新なし（+0）であるため、厳格に `carrier.vAf == carrier.vBf` であること。不一致時は直ちに `IllegalStateException("P1 代表行の修復後バージョンが修復前バージョンと一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
       - `carrier.pCls.equals("P2")` の場合:
-        親 CAS 更新（+1）であるため、厳格に `carrier.vAf == carrier.vBf + 1` であること。不一致時は直ちに `IllegalStateException("P2 載体の修復後バージョンが修復前バージョン+1と一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
+        親 CAS 更新（+1）であるため、厳格に `carrier.vAf == carrier.vBf + 1` であること。不一致時は直ちに `IllegalStateException("P2 代表行の修復後バージョンが修復前バージョン+1と一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
       - **未知分類の即時拒絶**:
         `carrier.pCls` が `"P1"` または `"P2"` 以外の値（例: `"P3"`, `"P9"`, 不正文字列等）である場合、直ちに `IllegalStateException("未知の修復分類です: " + carrier.pCls)` を送出して全量ロールバック。
    5. **親行 DB 現バージョン一致検証**:
@@ -432,7 +432,7 @@ $$\text{lockedParentVersion} == \text{command.expectedInvoiceVersion} == \text{a
 
 ---
 
-### 4.5 実スキーマ準拠の更新 SQL と NULL-Safe 原値比較・逐行影響数検証
+### 4.5 実スキーマ準拠の更新 SQL と NULL-Safe 原値比較・行ごとの影響件数検証
 
 #### (1) 親インボイスの version CAS 更新（分類 P-2 の場合のみ発行）
 ```sql
@@ -459,7 +459,7 @@ UPDATE t_digital_invoice_event
 ```
 - **検証**: 各文の更新行数 == 1。全 $N_2$ 件で計 $N_2$ 行。
 
-#### (3) 代表キューの CAS 完了および固定標識定長完了証跡（SES_NF09_COMPL:）格納
+#### (3) 代表キューの CAS 完了および固定識別子付きの定長完了証跡（SES_NF09_COMPL:）格納
 前述 4.2.2 項で選定された代表キューに対し：
 ```sql
 UPDATE t_nf09_scope_repair_queue
@@ -474,7 +474,7 @@ UPDATE t_nf09_scope_repair_queue
 ```
 - **検証**: 更新行数 == 1。`:carrierProtocolText`（`SES_NF09_COMPL:` + コンパクト JSON）の実バイト長 $\le 500$ バイト（UTF-8）を事前検証。
 
-#### (4) 参加参加キュー全行の CAS 完了および固定標識構造化参照（SES_NF09_MEMBER:）格納
+#### (4) 参加参加キュー全行の CAS 完了および固定識別子付きの構造化参照（SES_NF09_MEMBER:）格納
 代表以外の参加キュー全行に対し：
 ```sql
 UPDATE t_nf09_scope_repair_queue
@@ -577,8 +577,8 @@ UPDATE t_nf09_scope_repair_queue
 | **TC-REP-BND-10** | 異常系・未承認 / 承認欠落拒絶 | コマンドに承認証跡なし、または DB にチケット不在 | `ApprovalRequiredException` 送出。Tx 開始前に即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-11** | 異常系・承認スコープ相違拒絶 | チケットの承認先が `(tenant-9, entity-900)` | `SecurityException` 送出。ターゲット相違を検知して即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-12** | 異常系・期限切れ承認拒絶 | チケットの `finalized_at` が 8 日前（7 日超過） | `ApprovalExpiredException` 送出。有効期限切れを検知して拒絶 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-13** | 異常系・跨発注 / 異インボイス重放拒絶 | 別インボイス番号 `target_id = 9999` の承認チケットを使用 | `target_id` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-14** | 異常系・データ変更後重放拒絶 | 申請後に対象インボイスの `version` が更新された | `target_version` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-13** | 異常系・発注横断 / 別インボイスへのリプレイ拒否 | 別インボイス番号 `target_id = 9999` の承認チケットを使用 | `target_id` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-14** | 異常系・データ変更後のリプレイ拒否 | 申請後に対象インボイスの `version` が更新された | `target_version` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-15** | 異常系・キュー欠落（野良 NULL 孤立行）拒絶 | 親スコープ NULL であるにもかかわらずキュー不在 | `MISSING_SCOPE_NO_QUEUE` を検知、`IllegalStateException` で停止 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-16** | 異常系・親インボイス CAS バージョン競合 | `expectedInvoiceVersion = 0` に対し実値 `version = 1` | 無条件バージョン検証失敗。`OptimisticLockingFailureException`、全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-17** | 異常系・MySQL 外部キー RESTRICT 拒絶 | 子イベントを親と異なるスコープで更新試行 | MySQL エラー 1452 発生。即時ロールバック、現場証跡保全 | **Real MySQL 必須（Docker / AI-1 排隊）** |
@@ -591,9 +591,9 @@ UPDATE t_nf09_scope_repair_queue
 | **TC-REP-BND-23a** | 異常系・管理者ロールの財務資格フォールバック拒絶 | `sys_user.role = '管理者'` だが資格プロバイダに財務資格マッピング不在 | 管理者の財務自動フォールバックを排除。`SecurityException` で即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-23b** | 異常系・業務承認資格の失効 / 期限切れ拒絶 | 資格登録はあるが `revokedFlag = true` または評価時刻が有効期限外 | 資格失効を検知。`SecurityException` で Fail-Closed 即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-23c** | 異常系・テナント管轄外資格拒絶 | テナント A 用に付与された資格でテナント B の修復を承認試行 | テナント不一致を検知。`SecurityException` で Fail-Closed 即時拒絶 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-24** | 異常系・実行操作者冒用拒絶 | 認証コンテキストと異なるユーザー ID を実行者として詐称試行 | 認証コンテキストからの直接取得により冒用を無効化／未認証時即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-24** | 異常系・実行操作者のなりすまし拒否 | 認証コンテキストと異なるユーザー ID を実行者として詐称試行 | 認証コンテキストからの直接取得によりなりすましを無効化／未認証時即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-25a** | 正常系・大量子イベント長参加集合のハッシュ圧縮完了と再試行 | 子イベント 50 件 (qCnt=50)、qHash 64文字 | 実バイト長 $\le 500$ 検査合格、再実行時 SHA-256 照合合致、DML=0 再試行成功 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-25b** | 異常系・完了証跡 500 文字超過フェイルクローズ | 不正な過長パラメータで証跡が 500 文字超過 | 截断を禁止し `IllegalStateException` 送出、全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-25b** | 異常系・完了証跡 500 文字超過フェイルクローズ | 不正な過長パラメータで証跡が 500 文字超過 | 切り詰めを禁止し `IllegalStateException` 送出、全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-26a** | 正常系・親 NO_QUEUE ＋ 子 PENDING 初回実行 | 親スコープ完備 (キューなし)、子 2 件 PENDING | 親 ver=0 (+0)。`min(childQueue.id)` に証跡格納、全子キュー RESOLVED | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-26b** | 正常系・親 NO_QUEUE ＋ 子 PENDING 完了後同一チケット再実行 | TC-REP-BND-26a 完了済、同一 ticket | 厳密一致で `min(childQueue.id)` 照合合致。DML=0、`SKIPPED_ALREADY_RESOLVED` 返却 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-26c** | 異常系・親 NO_QUEUE ＋ 子 PENDING 途中失敗全量ロールバック | 子キュー 2 の完了時に例外発生 | 子イベント更新もロールバック、親・子共に開始前の整合状態復元 | Fast H2 & MySQL (両方) |
@@ -605,8 +605,8 @@ UPDATE t_nf09_scope_repair_queue
 | **TC-REP-BND-28c** | 異常系・参加行レコードのラウンド相違・関連不整合拒絶 | 参加キューの round がチケットと不一致、または carrierId が別代表行を指定 | 関連不整合を検知。`LinkageConflictException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-28d** | 異常系・再試行時の参加行欠落・ハッシュ不一致拒絶 | 参加参加キューが欠落または改変され、再構成集合の件数/ハッシュ不一致 | 集合破損を検知。`CorruptedEvidenceException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-28e** | 異常系・同一集約内複数代表行衝突拒絶 | 同一集約内に同一 ticket/round/invId の SES_NF09_COMPL: 代表行が複数存在 | 証跡多重破損を検知。`IllegalStateException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-29a** | 正常系・旧キュー自由テキスト存在下での新チケット代表行・参加行正常判定 | 集約内旧キューに `[IDEMPOTENT_CLOSE]` や自由テキストが存在、新チケットの親・子は固定標識付きで完了済 | 旧自由テキストを非プロトコル行として無視。新プロトコル標識を持つ代表行・参加行のみで正しく再構成・ハッシュ検証に成功し、DML=0 で `SKIPPED_ALREADY_RESOLVED` 返却 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-29b** | 異常系・プロトコル証跡破損 / 未知バージョン / 必須フィールド欠落拒絶 | キューに `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる証跡が存在するが、JSON 文法破損、`v=2`、または `vBf`/`qc` 等が欠落 | プロトコル標識行の不正を看過せず、直ちに `CorruptedEvidenceException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29a** | 正常系・旧キュー自由テキスト存在下での新チケット代表行・参加行正常判定 | 集約内旧キューに `[IDEMPOTENT_CLOSE]` や自由テキストが存在、新チケットの親・子は固定の識別子付きで完了済 | 旧自由テキストを非プロトコル行として無視。新プロトコル識別子を持つ代表行・参加行のみで正しく再構成・ハッシュ検証に成功し、DML=0 で `SKIPPED_ALREADY_RESOLVED` 返却 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29b** | 異常系・プロトコル証跡破損 / 未知バージョン / 必須フィールド欠落拒絶 | キューに `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる証跡が存在するが、JSON 文法破損、`v=2`、または `vBf`/`qc` 等が欠落 | プロトコル識別行の不正を看過せず、直ちに `CorruptedEvidenceException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-29c** | 異常系・再試行時テナント / 法人スコープ不一致拒絶 | 再試行実行時、特定された代表行の `carrier.tenant != command.targetTenantId` または `carrier.legalEntity != command.targetLegalEntityId` | スコープ不一致を検知。`SecurityException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-29d** | 異常系・再試行時 vBf 承認版不一致拒絶 | 再試行実行時、特定された代表行の `carrier.vBf != approval.targetVersion` | 承認対象バージョン不整合を検知。`OptimisticLockingFailureException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-29e** | 異常系・分類別 vAf/vBf 整合不一致および未知分類拒絶 | 再試行時代表行の関係不正（(1) P1 で `vAf != vBf`、(2) P2 で `vAf != vBf + 1`、(3) 未知分類 `pCls="P9"`） | 代表行内部の論理不整合または未知分類を検知。`IllegalStateException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
@@ -645,7 +645,7 @@ UPDATE t_nf09_scope_repair_queue
    - `--dry-run` オプションの既定値は `true`。
    - 明示的に `--dry-run=false` が渡されない限り、前述 2.3 節のトランザクション内ロールバックが必ず作動する。
 
-### 8.2 本番実有効化の 3 大前置ゲート (Production Activation Gates)
+### 8.2 本番実有効化の 3 つの事前ゲート (Production Activation Gates)
 本エグゼキュータを本番環境で実行可能とするためには、以下の 3 つの承認ゲートをすべて通過しなければならない：
 
 ```mermaid

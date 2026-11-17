@@ -274,7 +274,7 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         }
     }
 
-    /** 耐久・engine・session 時区の判定（§2.2）。 */
+    /** 耐久・engine・session タイムゾーンの判定（§2.2）。 */
     static List<String> instanceViolations(Map<String, Object> config) {
         List<String> violations = new ArrayList<>();
         if (flag(config.get("flush_commit")) != 1) {

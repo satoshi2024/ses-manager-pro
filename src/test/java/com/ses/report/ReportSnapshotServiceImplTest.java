@@ -412,7 +412,7 @@ class ReportSnapshotServiceImplTest {
     }
 
     @Test
-    void 確定runの稼働率sectionはUtilizationCalcServiceの実績口径を使う() {
+    void 確定runの稼働率sectionはUtilizationCalcServiceの実績の集計基準を使う() {
         ReportTemplateVersion version = templateVersionMapper.selectOne(any());
         version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
         when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);

@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** T075 F1: ポジション状態機械・CRUDの定向test（L1〜L2）。 */
+/** T075 F1: ポジション状態機械・CRUDの対象限定test（L1〜L2）。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

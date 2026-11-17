@@ -11,7 +11,7 @@
 #   旧版 0.8.33-1 の SHA-256 は一次資料で確認できないため）。repo の InRelease は同じ fingerprint の
 #   現行鍵（RPM-GPG-KEY-mysql-2025、有効期限 2027-10-23）で署名されている。
 # - restic は GitHub release から version 固定で導入し、公式 SHA256SUMS の値で検証する。
-# - 固定値が占位値（UNPINNED）のまま、または検証が一致しなければ build を失敗させる（fail-closed）。
+# - 固定値が仮置きの値（UNPINNED）のまま、または検証が一致しなければ build を失敗させる（fail-closed）。
 #   導入処理と固定値の検査は image/install-toolchain.sh、Debian パッケージ版の lock は
 #   image/apt-packages.lock。導入結果の版一覧は image 内 /usr/local/share/ses-backup/image-manifest/。
 # - registry は使わない。build 後の識別子の記録（image store に依存しない content ID と、記録用の

@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
-/** raw CSV一時ファイルが既存の孤児ファイル清理で回収できる場所・命名であることを確認する。 */
+/** raw CSV一時ファイルが既存の孤児ファイル清掃で回収できる場所・命名であることを確認する。 */
 class ImportRawTempFileStoreTest {
     @TempDir Path uploadRoot;
 

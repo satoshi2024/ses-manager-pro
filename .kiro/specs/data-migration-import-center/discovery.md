@@ -2,7 +2,7 @@
 
 ## 0. この文書の位置付け
 
-本文書は data-migration-import-center の開工時Discovery記録である。NF-06は候補段階、DG-06は未決定であり、Approved entity/schema、Owner、Base commit の入力もプレースホルダのままである。
+本文書は data-migration-import-center の着手時Discovery記録である。NF-06は候補段階、DG-06は未決定であり、Approved entity/schema、Owner、Base commit の入力もプレースホルダのままである。
 
 したがって、本コミットで許可される成果物は以下に限定する。
 

@@ -8,7 +8,7 @@
 ## 0. 結論
 
 **A8-01〜09 の監査指摘・スキルシート取込機能は、方針どおり実装されている。**
-基盤対応（AI基盤の設定駆動化・偽AI死コード削除・孤児清理のプロバイダ集約・スキル名解決・
+基盤対応（AI基盤の設定駆動化・偽AI死コード削除・孤児清掃のプロバイダ集約・スキル名解決・
 DTO値域・PII保持バッチ・候補者連携）はいずれも設計意図に沿っており、確定トランザクションの
 CAS二重確定ガードやロールバックも論理的に正しい。
 
@@ -22,7 +22,7 @@ CAS二重確定ガードやロールバックも論理的に正しい。
 |---|---|---|
 | A8-01 | AI基盤の設定値未使用・クライアント供給キー・タイムアウト無し | 解消。`GeminiTextServiceImpl` が apiKey/apiUrl/model/maxTokens を使用、専用 `aiRestTemplate`(5s/60s)、エラー分類＋サニタイズ。`AiRestController` はクライアント apiKey 撤去。※ただし R8-03 の副作用を混入 |
 | A8-02 | `/api/ai` 二重controller・偽skill-sheet死コード | 解消。`AiSkillSheetService`/`generateSkillSheet` 削除、`checkAiEnabled` を `error.ai.disabled` キー化、責務コメント付与 |
-| A8-03 | 孤児清理の参照列allowlistハードコード | 解消。`FileReferenceProvider` 集約方式へ（推奨案）。足し忘れ構造的防止 |
+| A8-03 | 孤児清掃の参照列allowlistハードコード | 解消。`FileReferenceProvider` 集約方式へ（推奨案）。足し忘れ構造的防止 |
 | A8-04 | ファイルDLのアクセス制御無し | 対応済だが **R8-01 の不具合を混入**（存在しない列参照） |
 | A8-05 | 要員PIIの保持方針未定義 | 解消。`ResumeRetentionCleanupServiceImpl`（`app.resume.retention-days`、確定済/却下の extracted_text を期限後クリア） |
 | A8-06 | 候補者→要員が手入力 | 解消。取込機能＋候補者詳細「スキルシートから要員化」（candidateId 連携） |

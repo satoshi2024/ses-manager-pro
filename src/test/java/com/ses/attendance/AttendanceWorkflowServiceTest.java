@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 
-/** T070の月次状態機械と締め済み編集拒否を確認するL2定向test。 */
+/** T070の月次状態機械と締め済み編集拒否を確認するL2対象限定test。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

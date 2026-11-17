@@ -144,7 +144,7 @@ class LifecycleResignationPortalTenantTest {
     }
 
     @Test
-    @DisplayName("紐付けのtenantが案件tenantと違う場合はゲートを不通過にし、自動処理も撤権せず409で止める")
+    @DisplayName("紐付けのtenantが案件tenantと違う場合はゲートを不通過にし、自動処理も権限を取り消さず409で止める")
     void foreignTenantLinkFailsTheGateAndAutomaticActions() {
         Long portalUserId = portalUserWithActiveSession("default", "other-" + email);
         registerLink("tenant-other-portal", portalUserId);

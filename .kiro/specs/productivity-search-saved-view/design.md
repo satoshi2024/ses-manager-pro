@@ -75,7 +75,7 @@ scope付きqueryをそのまま呼ぶ。検索用に新しいSQLを書くと母�
 
 ### 6.3 状態機械と競合
 
-| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 | task 未着手 | →進行中 / →取消 | 状態CAS | 二重click | 未着手へ戻す |
 | 進行中 | →完了 / →取消 | 状態CAS＋`version` | 担当者と依頼者の同時操作 | 進行中へ戻す |

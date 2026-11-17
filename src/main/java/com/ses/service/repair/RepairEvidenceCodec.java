@@ -38,9 +38,9 @@ public class RepairEvidenceCodec {
     }
 
     /**
-     * 代表載体証跡レコードを固定標識付きコンパクト文字列へシリアライズする。
+     * 代表行の証跡レコードを固定の識別子付きコンパクト文字列へシリアライズする。
      *
-     * @param evidence 代表載体証跡レコード
+     * @param evidence 代表行の証跡レコード
      * @return シリアライズ後文字列
      * @throws IllegalStateException UTF-8実バイト長が500バイトを超過した場合
      */
@@ -57,12 +57,12 @@ public class RepairEvidenceCodec {
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("代表載体証跡のシリアライズに失敗しました", e);
+            throw new IllegalStateException("代表行の証跡のシリアライズに失敗しました", e);
         }
     }
 
     /**
-     * 参加部材参照レコードを固定標識付きコンパクト文字列へシリアライズする。
+     * 参加部材参照レコードを固定の識別子付きコンパクト文字列へシリアライズする。
      *
      * @param evidence 参加部材参照レコード
      * @return シリアライズ後文字列
@@ -86,15 +86,15 @@ public class RepairEvidenceCodec {
     }
 
     /**
-     * 文字列から代表載体証跡レコードを厳格にパースする。
+     * 文字列から代表行の証跡レコードを厳格にパースする。
      * <p>
-     * 固定標識プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
-     * 固定標識プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
+     * 固定の識別プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
+     * 固定の識別プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
      * </p>
      *
      * @param note キューの resolution_note 文字列
-     * @return パースされた代表載体証跡レコード、または非プロトコル行の場合は null
-     * @throws CorruptedEvidenceException プロトコル標識行が破損している場合
+     * @return パースされた代表行の証跡レコード、または非プロトコル行の場合は null
+     * @throws CorruptedEvidenceException プロトコル識別行が破損している場合
      */
     public CarrierEvidence parseCarrier(String note) {
         if (note == null || !note.startsWith(CARRIER_PREFIX)) {
@@ -104,7 +104,7 @@ public class RepairEvidenceCodec {
         try (JsonParser parser = objectMapper.createParser(json)) {
             JsonNode node = objectMapper.readTree(parser);
             if (node == null || !node.isObject()) {
-                throw new CorruptedEvidenceException("代表載体証跡がJSONオブジェクトではありません");
+                throw new CorruptedEvidenceException("代表行の証跡がJSONオブジェクトではありません");
             }
             // 末尾に余剰トークンや第2のJSONが存在しないことを厳格検証
             if (parser.nextToken() != null) {
@@ -129,20 +129,20 @@ public class RepairEvidenceCodec {
         } catch (CorruptedEvidenceException e) {
             throw e;
         } catch (Exception e) {
-            throw new CorruptedEvidenceException("代表載体証跡の解析に失敗しました", e);
+            throw new CorruptedEvidenceException("代表行の証跡の解析に失敗しました", e);
         }
     }
 
     /**
      * 文字列から参加部材参照レコードを厳格にパースする。
      * <p>
-     * 固定標識プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
-     * 固定標識プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
+     * 固定の識別プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
+     * 固定の識別プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
      * </p>
      *
      * @param note キューの resolution_note 文字列
      * @return パースされた参加部材参照レコード、または非プロトコル行の場合は null
-     * @throws CorruptedEvidenceException プロトコル標識行が破損している場合
+     * @throws CorruptedEvidenceException プロトコル識別行が破損している場合
      */
     public MemberEvidence parseMember(String note) {
         if (note == null || !note.startsWith(MEMBER_PREFIX)) {

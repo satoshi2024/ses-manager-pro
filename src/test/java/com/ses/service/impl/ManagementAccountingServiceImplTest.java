@@ -41,7 +41,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** 管理会計が既存金額口径と組織scopeを同じ集計に使うことを検証する。 */
+/** 管理会計が既存金額の算定基準と組織scopeを同じ集計に使うことを検証する。 */
 @ExtendWith(MockitoExtension.class)
 @EnableDefaultTenantTestContext
 class ManagementAccountingServiceImplTest {

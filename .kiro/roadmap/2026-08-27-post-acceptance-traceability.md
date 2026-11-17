@@ -9,7 +9,7 @@
 
 | NF | 現行実装/Reviewの再判定 | productionの未完条件 |
 |---|---|---|
-| 01 | R01a・canonical証跡/DUAL防御基盤をcontrol6ce313ceへ限定統合。基盤fast59/0/0/0受理。readonly preflight source c4045575は限定CODE・fast4/MySQL7件PASS、control5206ee4a統合・同control unit/inventory4件PASS。実epoch/current-read/CONFIRMは未実装 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
+| 01 | R01a・canonical証跡/DUAL防御基盤をcontrol6ce313ceへ限定統合。基盤fast59/0/0/0受理。readonly preflight source c4045575は限定CODE・fast4/MySQL7件PASS、control5206ee4a統合・同control unit/inventory4件PASS。実epoch/current-read/CONFIRMは未実装 | 文書ACL/version、二者確認、信頼できる退社時の権限取消し要求・確認、legacy scope、運用承認 |
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。bootstrap撤回競合P1を修復しfull06 fixed38f684acは11 class17/0/0/0。G2をcontrol6980dff8へ統合、同SHA browser17/0/0/0と対象限定fast13 class85/0/0/0をAstra限定受理 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
@@ -17,7 +17,7 @@
 | 06 | F1a/V184・candidate/lease・wave2をcontrolf932a888へ限定統合。wave2 source fast64/0/0/0と別SHA MySQL95/0/0/0受理。W3A source0f45 fast64/0/0/0、旧MySQL97/1/56 FAIL後に修復8f9が98/0/0/0・限定CODE/証拠PASS、controld8469ecb統合（別SHA結果を合算しない）。seal/publish/apply/UI未実装 | 全synthetic実装/独立Review、実source/mapping/data owner、移行承認 |
 | 07 | SF基盤・D2b2・W3a限定scope統合済み。全gateでPrivacy自由競合失敗、診断3ddは53/1/0/0。fence no-op upsert修復125eは限定CODE・5class MySQL56/0/0/0 PASS、control670b7b5c統合。旧35件/26件成功を最新競合問題の解決としない。本人同定/交付/処分・実provider未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | A/B/C1・C2-A1/A2・B1/B2aとB2b限定境界をcontrol703647aaへ統合。B2b source bdaは20class116/0/0/0、Astra限定CODE/証拠PASS。並行test違反とJaCoCo警告を記録しcoverage結論なし。B2c-0 source647bは122/0/0/0限定PASS、controla16ea908統合。実TLS issuer、durable claim、dispatch/usage authority未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
-| 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
+| 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実際の権限取消し/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 
 2026-10-23最新: fixed control `19bdbebc` の全fast第8回は695 class 4247/0/0/0（独立証拠PASS）。同verify-like-ciのMySQLは部分73class 249/4/0/0で中断、完全gateは未完。同SHAの別run performance 1/0/0/0・browser 17/0/0/0・backup 476 assertions/0 failure + PITR SUCCESSは個別受理済みであり、完全gateへ合成しない。最新sourceと未完範囲は実行台帳の2026-10-23節を参照。全体NO-GO。
@@ -40,7 +40,7 @@ remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照�
 | DISCOVERY | 現行inventory、利用者ヒアリング、KPI baselineを収集中 |
 | DECISION_REQUIRED | scope、法務、security、外部契約等の判断待ち |
 | APPROVED | requirements/design/tasksとowner、予算、開始条件を承認済み |
-| IMPLEMENTING | 開工対話で実装中 |
+| IMPLEMENTING | 着手対話で実装中 |
 | REVIEWING | 独立Review中。新機能の追加変更は禁止し、指摘修正だけ行う |
 | CONDITIONAL_PASS | codeは合格だが、本番gateまたは外部環境証拠が未完 |
 | PASS | Reviewとrelease gate完了 |
@@ -58,7 +58,7 @@ remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照�
 | NF-05 | `integration-hub-public-api` | APPROVED | `PROJECT_OWNER` | API成功率、DLQ滞留、p95、rate境界 | identity、outbox、audit、data scope | DG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（2026-08-30）。OwnerRef=PROJECT_OWNER、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd。F1/F2 PLAN/IMPLEMENTATION PASS、A1 IMPLEMENTATION PASS（fixed Head 69f857d3ac7d513b66265b02871688b28d2e7e5d、P0/P1/P2=0/0/0）。B1初回Review FAIL（fixed Head 0f1a92974ea914d16de07ccf5a586fac215283f0、P0/P1/P2=0/4/1）を`30199db8`でremediateし、再Review fixed Head 29d749bbのP1-006/P1-007を`2684ff8f`でremediateした。P1-007追加remediation後のNF05-IMPL-B1-008（初回送信前primary binding）をcode `c2cbfb99133d0df3f8d5eee285be340163747e31`で対応し、独立再Review待ち。B2/M APPROVED_SEQUENCED、A2 NOT_APPLICABLE_UNDER_CURRENT_DECISION。production enablement、実顧客credential、実provider送信、PR/mergeは禁止。詳細: .kiro/specs/integration-hub-public-api/approval-decision.md | B1再Review後にB2→Mを順次実装・独立Review |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
-| NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | Plan CONDITIONAL PASS（2026-09-01）。spec+対話文書完了。F1着手可。具体モデル未決定・pipelineモデル非依存。開工: `.kiro/specs/ai-management-copilot/start-conversations.md`。Review: `review-conversations.md`。branch=`codex/ai-management-copilot` | F1実装後 |
+| NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | Plan CONDITIONAL PASS（2026-09-01）。spec+対話文書完了。F1着手可。具体モデル未決定・pipelineモデル非依存。着手: `.kiro/specs/ai-management-copilot/start-conversations.md`。Review: `review-conversations.md`。branch=`codex/ai-management-copilot` | F1実装後 |
 | NF-09 | `asset-account-license-lifecycle` | APPROVED | `PROJECT_OWNER` | 未返却0件、外部account残存0件、ライセンス席数超過0件 | NF-01、identity、document | `DG-09-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`。branch `codex/asset-account-license-lifecycle`。期間重複代数排他、秘密非保存、席数CAS、不変イベント台帳、NF-01退社ゲート（`RESIGN_ASSET_RETURN`/`LIFECYCLE_EXCEPTION`）連携、自己完結型プロバイダ境界を承認。詳細: `.kiro/specs/asset-account-license-lifecycle/` | 実装・独立Review完了後 |
 | NF-10 | `scheduled-management-reporting` | APPROVED | 管理者（経営管理責任者） | 作成時間、配布失敗率、scope外配布0件、snapshot不変性 | dashboard、document、notification、NF-02（ServiceDesk sectionはNF-02 PASSまで対象外） | 2026-08-28承認。管理者/マネージャーを利用者とし、月次report、Asia/Tokyo、7年保持、immutable snapshot、outbox経由のアプリ内通知＋期限付きlink、recipient preview・生成時/取得時scope検証を確定 | 実装・独立Review完了後 |
 
@@ -239,7 +239,7 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 - 期限監視・アラート通知（返却期限超過、リース満了30日前、紛失インシデント緊急初動通知、日次スケジューラ）
 - 要員マイポータル（`/my/assets`、有効貸与/アカウント/ライセンス確認、紛失・盗難自己報告）
 - NF-01 退社ゲート連携（`RESIGN_ASSET_RETURN` 未返却/未失効ブロック、`LIFECYCLE_EXCEPTION` による特例免除 WAIVE 連携、退社確定時一括失効トリガー）
-- 外部プロバイダ連携境界（NF-09配下自己完結型 `ExternalAccountProviderClient` / Mock、タイムアウト/未確認を成功扱いにしない統制。NF-05開工時にNF-05実アダプターへ委譲）
+- 外部プロバイダ連携境界（NF-09配下自己完結型 `ExternalAccountProviderClient` / Mock、タイムアウト/未確認を成功扱いにしない統制。NF-05着手時にNF-05実アダプターへ委譲）
 
 **Out of scope:**
 - パスワード・クレデンシャル・シークレット・回復コードの保存（厳格禁止）
@@ -252,7 +252,7 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 | DG-09-2 秘密非保持・外部参照 | `t_external_account_reference` にシークレット列を一切持たない。外部アカウント識別子と状態（`ACTIVE`, `SUSPENDED`, `REVOKED`）、失効要求/確認日時のみ保持 |
 | DG-09-3 ライセンス席数CAS | `UPDATE m_license_plan SET allocated_count = allocated_count + 1 WHERE allocated_count < seat_limit AND version = :v` で席数上限を原子保護 |
 | DG-09-4 NF-01 Link Contract | 退社タスク `RESIGN_ASSET_RETURN` に対し、未返却端末・未失効アカウント・未解放ライセンス残存時は退社ブロック。`LIFECYCLE_EXCEPTION` 承認時のみ WAIVED バイパス |
-| DG-09-5 外部連携所有境界 | NF-09配下の `ExternalAccountProviderClient` / Mock を利用。失効要求と確証ステータス確認を厳格分離し、タイムアウトは未完了（非成功）として保持。NF-05開工時に実アダプターへ透過委譲 |
+| DG-09-5 外部連携所有境界 | NF-09配下の `ExternalAccountProviderClient` / Mock を利用。失効要求と確証ステータス確認を厳格分離し、タイムアウトは未完了（非成功）として保持。NF-05着手時に実アダプターへ透過委譲 |
 
 詳細: `.kiro/specs/asset-account-license-lifecycle/`
 

@@ -36,7 +36,7 @@ detail/download/第二確認時に現在の可視性を再検証し、非公開t
 回帰: 同tenant別scope、tenant境界越え、別documentのversion、隔離/廃棄、後続version作成、権限撤回、
 download入口、document状態変更と確認競合。
 
-## NF09 撤権要求と確定の分離
+## NF09 権限取消しの要求と確定の分離
 
 実コードの`ExternalAccountServiceImpl.requestRevokeWithIdempotency`はNOT_SUPPORTEDで、
 claimを保存してからproviderを直接呼ぶ。同key再送はreturnするため、claim後・送信前crashを回復できるとは言えない。
@@ -48,11 +48,11 @@ pollを未送信要求の再送と同一視しない。外側case/task lockを�
   actor、generationとdurable revoke request/outboxを記録する。
 - commit後workerが送信する。送信と確認のstatus/attempt/lease/安定idempotency key/失敗/retryを分離する。
 - 多accountの部分結果を保持し、二重開始は需要を二重作成しない。
-- 要求後hold/cancelでも既に確定した撤権を自動復元しない。commit済み安全撤権は継続し、その事実を表示する。
+- 要求後hold/cancelでも既に確定した権限取消しを自動復元しない。commit済み安全な権限取消しは継続し、その事実を表示する。
 - PENDING/UNKNOWN/送信失敗はblocker。信頼できる確認または既存の有効waiver以外では解除しない。
 - finalization時に再確認する。新規account/asset/license割当と同じengineer/offboarding fenceを使い、
   最終check直後の割当競合を排除する。各割当入口への変更範囲を実装計画で列挙する。
 
 回帰: 提出後送信前crash、未受理provider、部分成功、重複操作、2 worker、遅延確認、hold/cancel、
 finalizationと新規割当競合、fail-closed providerの実service chain。
-synthetic providerはprotocol検証専用であり、実撤権・waiver・production承認の代替にはしない。
+synthetic providerはprotocol検証専用であり、実際の権限取消し・waiver・production承認の代替にはしない。

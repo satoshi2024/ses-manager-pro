@@ -217,7 +217,7 @@ class PrivacyJournalStartupVerifierTest {
     }
 
     @Test
-    void pool設定は起動時に接続せずsession時区をUTCに固定しsocket_timeoutを持つ() {
+    void pool設定は起動時に接続せずsessionタイムゾーンをUTCに固定しsocket_timeoutを持つ() {
         HikariConfig config = PrivacyJournalConnections.poolConfig(valid());
 
         assertThat(config.getPoolName()).isEqualTo("privacy-journal");
@@ -365,7 +365,7 @@ class PrivacyJournalStartupVerifierTest {
     // ---------------------------------------------------------------- instance・Flyway 履歴
 
     @Test
-    void 耐久設定と時区の不適合を項目ごとに返す() {
+    void 耐久設定とタイムゾーンの不適合を項目ごとに返す() {
         assertThat(PrivacyJournalStartupVerifier.instanceViolations(durable())).isEmpty();
         assertThat(PrivacyJournalStartupVerifier.instanceViolations(with("flush_commit", 2)))
                 .containsExactly("durability.innodbFlushLogAtTrxCommit");

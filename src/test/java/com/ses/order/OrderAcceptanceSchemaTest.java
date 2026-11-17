@@ -24,7 +24,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T054定向テスト: 注文/明細/検収DDLのH2 replay検証（L1〜L3）。
+ * T054対象限定テスト: 注文/明細/検収DDLのH2 replay検証（L1〜L3）。
  * 親テーブル(m_customer/t_engineer/t_project)の行は各testが自分で作る
  * （既存test順依存を作らない。AGENTS.md「Never read rows you did not insert」）。
  */

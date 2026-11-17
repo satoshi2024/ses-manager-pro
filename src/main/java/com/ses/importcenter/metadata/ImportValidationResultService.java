@@ -61,7 +61,7 @@ import java.util.function.LongSupplier;
  * DBからkeyset（source行番号順、{@value #EXPORT_PAGE_ROWS}行ずつ）で読み、pageごとにflushする（全件をmemoryへ載せない）。
  * 原文・値は出さないため一時fileを作らず、{@code FileReferenceProvider}・{@code FileScopeValidationService}への
  * 追加登録は不要である。各cellは{@link ImportErrorCsvWriter#sanitize}でCSV injectionを無害化する。
- * page読取の前ごとに認可を再確認し、撤権・法人変更があれば以後を出力しない（応答は途中で切れる）。
+ * page読取の前ごとに認可を再確認し、権限取消し・法人変更があれば以後を出力しない（応答は途中で切れる）。
  * 全pageを書き終えた場合だけ最終行 {@code #END,<code行の件数>,<REJECTED行の件数>} を書く（b-14。W3-05 review P3-1）。
  * flush済みの応答は途中の失敗でも200のまま切れ、page境界で切れると完全なCSVに見えるため、この行の有無と件数で欠落を発見する。
  */

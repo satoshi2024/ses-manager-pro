@@ -15,7 +15,7 @@
   -> TypedParameterBinder + validation + parameter hash
   -> Authorization/ScopeResolver（role/menu/DataScope/組織）
   -> CatalogQueryGateway（固定adapterのみ）
-  -> Canonical service（正本口径・scope・期間）
+  -> Canonical service（正本の集計基準・scope・期間）
   -> TypedResultEnvelope（円/割合/期間/timezone/freshness/basis/state）
   -> SummaryProvider（redacted result + claim key。数値再計算なし）
   -> CitationResolver（source keyを再認可）
@@ -52,7 +52,7 @@ catalogはquery IDを返すが、SQLやtable/column情報を返さない。入�
 
 | query ID | adapter | 注意点 |
 |---|---|---|
-| `dashboard.summary` | `DashboardService` | 年指定、actual/forecast、scope、月別値を保持。既存dashboardの口径を複製しない |
+| `dashboard.summary` | `DashboardService` | 年指定、actual/forecast、scope、月別値を保持。既存dashboardの集計基準を複製しない |
 | `dashboard.profit-analysis` | `DashboardService` | 契約行をboundedに返す。名称/IDの露出はscopeとcitation再認可後のみ |
 | `dashboard.utilization-forecast` | `UtilizationForecastService` | 月数1〜12。roll-offを含む場合もscope後に返す |
 | `management-accounting.summary` | `ManagementAccountingService` | `YearMonth`と承認済みfilterだけ。snapshot/forecast fallbackをresult basisに残す |
@@ -73,7 +73,7 @@ parserの出力へSQL、table、column、repository、Java class、raw free text
 
 ### 3.2 期間・表示意味
 
-各adapterはtenant timezoneの`Clock/asOf`を受け取れる境界を持つ。現行serviceが内部でnowを読む場合は、production実装時に正本口径を変えない明示的context overloadまたはrun context wrapperを追加し、copilotだけ別の日付計算をしない。
+各adapterはtenant timezoneの`Clock/asOf`を受け取れる境界を持つ。現行serviceが内部でnowを読む場合は、production実装時に正本の集計基準を変えない明示的context overloadまたはrun context wrapperを追加し、copilotだけ別の日付計算をしない。
 
 - `YearMonth`: tenant timezoneで月初から翌月月初までの半開区間。
 - `from + months`: 1〜12のbounded期間。
@@ -141,13 +141,13 @@ tenant=<tenant id>
 
 ### 5.2 正本service対応
 
-| 正本 | 既存の口径を守る箇所 | copilotで禁止する複製 |
+| 正本 | 既存の集計基準を守る箇所 | copilotで禁止する複製 |
 |---|---|---|
 | `DashboardService` | work-record優先・contract fallback、forecast pipeline、dashboard scope | 月次売上/粗利式の再計算 |
 | `UtilizationForecastService` | `UtilizationCalcService`に基づく稼働率、roll-off、scope | engineer/contractを再取得して稼働率を再計算 |
 | `ManagementAccountingService` | snapshot、forecast fallback、予算、wait cost、monthly resolver | 契約行からAI側で粗利を集計 |
 | `CashFlowForecastService` | invoice/BP payment/payroll、opening balance、reconciliation、scope | Dashboard売上をcash inflowへ直接変換 |
-| `SalesPerformanceService` | 成約口径、提案口径のwin rate、work-record優先、commission rule | 成約率・commission式の再実装 |
+| `SalesPerformanceService` | 成約基準、提案基準のwin rate、work-record優先、commission rule | 成約率・commission式の再実装 |
 
 serviceが返す値が空、NULL、未確認の場合、adapterはその状態をtyped resultへ保持する。LLMに「0とみなす」判断をさせない。
 

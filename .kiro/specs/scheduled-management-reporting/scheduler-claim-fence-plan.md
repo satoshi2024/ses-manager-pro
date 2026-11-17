@@ -8,7 +8,7 @@
 - テストは統括（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの対象限定fast（9 class）は288/0/0/0、対象限定MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は統括のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 - 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。
 - 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。統括Runnerの対象限定実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は統括のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。2026-11-14追記: 統合候補に対するCIは、第1・2波の全batchを取り込んだ `8000d94e` で7 job（fast・MySQL shard 1〜3・backup integration・browser・performance）すべて通過した（run 43387006667、統括の記録）。手元での `verify-like-ci` 全体実行は本書の記録対象外。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
-- 2026-11-17追記: ON前のP2/P3（引き継ぎを含むretry上限、entityの書き戻し、tenant単位の隔離、metricの結果区分、時計の差の観測、alert rule草案）をRB-NF10で扱った（§15、§10.6）。MySQL testは主控Runnerの実行待ちである。
+- 2026-11-17追記: ON前のP2/P3（引き継ぎを含むretry上限、entityの書き戻し、tenant単位の隔離、metricの結果区分、時計の差の観測、alert rule草案）をRB-NF10で扱った（§15、§10.6）。MySQL testは統括のRunnerの実行待ちである。
 
 ## 1. 確認した欠陥と影響
 
@@ -392,7 +392,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
     - 時刻・timezoneとの関係: tenant timezoneを先へ進める変更（例: UTC→Asia/Tokyo）をすると、実行中のleaseは直ちにstaleと判定されて引き継がれ、失敗1回として数えられる（§11 P2-3）。node間の時刻差sがあると、他nodeはs分だけ早くstaleと判定する（§11 P2-2）。
   - **Report Ownerの確認（未取得）**:
     - 「12回」の数え方が「同一論理runの中の、初回を含む連続失敗（completionに至らずlease期限を超えた試行を含む）12回」になった。P3-5の数え方の確認と合わせて確認する。
-    - **正常な実行が30分を超え得るなら、数え方の定義ではなくB-NF10-2（lease延長はしない）を見直す**（lease更新〔heartbeat〕またはより長いlease）。主控の判断（2026-11-17）で数え方の定義は現状のまま（「同一runが引き継がれた時だけ数える」等には変えない）とした。生成・配布の所要時間の見込みはReport Ownerが示す（未取得）。
+    - **正常な実行が30分を超え得るなら、数え方の定義ではなくB-NF10-2（lease延長はしない）を見直す**（lease更新〔heartbeat〕またはより長いlease）。統括の判断（2026-11-17）で数え方の定義は現状のまま（「同一runが引き継がれた時だけ数える」等には変えない）とした。生成・配布の所要時間の見込みはReport Ownerが示す（未取得）。
 
 ### 14.3 確定的claim SQL失敗（P3-3 / review P3-8）
 
@@ -464,7 +464,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 15. ON前のP2/P3（2026-11-17、RB-NF10）
 
-状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。messagesは第2回（下記）で1 key（4言語）を追加した。
+状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（統括のRunnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。messagesは第2回（下記）で1 key（4言語）を追加した。
 
 依拠: FINAL複審 §7 (b) b-19・§6.3 L-2、review `nf10-v185` P2-2・P2-3・P2-8、`w2-nf10-policy-30e058ce` P3-6・P3-9・P3-12。
 
@@ -478,13 +478,13 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | P2-3 timezone変更の方針 | 挙動不変・文書のみ | §11追記（Report Ownerが決める、未決） |
 | Report Owner署名・確定版の配布方針 | 人が行う（未取得） | `deploy-runbook.md` §1.7 のNF10の行と `feature-switches.md` 4.5 に列挙した |
 
-- 対象限定のtest（主控Runnerへ渡す一覧）:
+- 対象限定のtest（統括のRunnerへ渡す一覧）:
   - fast: `ManagementReportSchedulerTest`、`ReportScheduleMapperH2SqlTest`、`ReportScheduleApiBoundaryTest`、`ReportScheduleServiceImplTest`、`FeatureSwitchSchedulerGateTest`（NF10 OFFでmapperに触れないこと）、global guard `ScheduledMethodsHaveSchedulerLockTest`・`TestIsolationAuditTest`
   - MySQL: `ReportScheduleClaimFenceMySqlTest`（`scripts/test-suites/mysql-shard-1.txt`、既存classへのcase追加と期待値更新のためshard登録の変更なし）、`ReportScheduleDispatchPolicyMySqlTest`（`mysql-shard-2.txt`、変更なしだが引き継ぎの数え方の変更の影響を受ける）
 
 ### 15.1 独立レビュー（`4ffcfb72`、PASS 附条件）への対応（第2回、2026-11-17）
 
-主控の判断: 引き継ぎの数え方は現状のまま（「同一runが引き継がれた時だけ数える」には変えない）。clock skewのWARNのコード既定5秒は受け入れる。
+統括の判断: 引き継ぎの数え方は現状のまま（「同一runが引き継がれた時だけ数える」には変えない）。clock skewのWARNのコード既定5秒は受け入れる。
 
 | 指摘 | 処理 | 内容 |
 |---|---|---|

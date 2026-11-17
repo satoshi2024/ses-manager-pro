@@ -105,7 +105,7 @@
 
 ### 6.3 状態機械と競合
 
-| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 | opportunity 見込 | →要件確認 | 状態CAS | — | 前stageへ戻す（監査あり） |
 | 要件確認 | →提案準備 / →失注 | 状態CAS | — | 同上 |

@@ -9,10 +9,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 境界A 重試発見および全不変条件検証コンポーネント (Retry Discovery & Invariants Verification)
+ * 境界A 再試行時の発見および全不変条件検証コンポーネント (Retry Discovery & Invariants Verification)
  * <p>
  * データベース行および承認証跡の不変スナップショット群を受領し、純粋計算として入力整合性・集約バインディング・
- * 重試発見・集合再構成・全不変条件検証を実施する。
+ * 再試行時の発見・集合再構成・全不変条件検証を実施する。
  * </p>
  * <p>
  * <strong>アーキテクチャ境界の限定事項:</strong><br>
@@ -34,14 +34,14 @@ public class RepairRetryDiscoveryService {
     }
 
     /**
-     * 集約スナップショット群から、本決裁チケットの完了証跡載体を探索・再構成し、全不変条件を検証する。
+     * 集約スナップショット群から、本決裁チケットの完了証跡の代表行を探索・再構成し、全不変条件を検証する。
      *
      * @param aggregateQueues 集約内の全修復キュー不変スナップショット（親キューおよび全子イベントキュー）
      * @param parentInvoice 親インボイス不変スナップショット
      * @param childEvents 子イベント不変スナップショット一覧（空リスト許容、null不可）
      * @param targetScope コマンド修復ターゲットスコープ
      * @param approvalEvidence 決裁承認証跡スナップショット
-     * @return 重試発見結果
+     * @return 再試行時の発見結果
      */
     public RetryDiscoveryResult discoverAndVerifyRetry(
         List<ScopeRepairQueueSnapshot> aggregateQueues,
@@ -130,21 +130,21 @@ public class RepairRetryDiscoveryService {
                     + q.id() + ", status=" + q.status());
             }
 
-            // (e) プロトコル標識行の事前構文検証（carrier探索・早期リターンの前に全件検証）
+            // (e) プロトコル識別行の事前構文検証（carrier探索・早期リターンの前に全件検証）
             String note = q.resolutionNote();
             if (note != null) {
                 if (note.startsWith(RepairEvidenceCodec.CARRIER_PREFIX)) {
-                    // 代表載体標識行のパース検証（構文不正・未知バージョン・欠落時は CorruptedEvidenceException が送出される）
+                    // 代表行の識別行のパース検証（構文不正・未知バージョン・欠落時は CorruptedEvidenceException が送出される）
                     codec.parseCarrier(note);
                 } else if (note.startsWith(RepairEvidenceCodec.MEMBER_PREFIX)) {
-                    // 参加部材標識行のパース検証（破損時は CorruptedEvidenceException が送出される）
+                    // 参加部材の識別行のパース検証（破損時は CorruptedEvidenceException が送出される）
                     codec.parseMember(note);
                 }
                 // それ以外の歴史的普通備考（例: [IDEMPOTENT_CLOSE] 等）は安全に無視・現状維持
             }
         }
 
-        // 2. 代表載体の精確探索
+        // 2. 代表行の厳密探索
         List<CarrierMatch> matchingCarriers = new ArrayList<>();
         for (ScopeRepairQueueSnapshot q : aggregateQueues) {
             if (!"RESOLVED".equals(q.status())) {
@@ -162,12 +162,12 @@ public class RepairRetryDiscoveryService {
         }
 
         if (matchingCarriers.isEmpty()) {
-            // 本チケット・輪次による完了証跡不在（初回実行または未結案経路）
+            // 本チケット・輪次による完了証跡不在（初回実行または未完了の経路）
             return RetryDiscoveryResult.notResolved();
         }
 
         if (matchingCarriers.size() > 1) {
-            throw new IllegalStateException("同一決裁チケットの完了証跡載体が複数検知されました: count=" + matchingCarriers.size());
+            throw new IllegalStateException("同一決裁チケットの完了証跡の代表行が複数検知されました: count=" + matchingCarriers.size());
         }
 
         CarrierMatch match = matchingCarriers.get(0);
@@ -189,7 +189,7 @@ public class RepairRetryDiscoveryService {
             }
             if (member.ticket().equals(approvalEvidence.requestNo()) && member.round() == approvalEvidence.roundNo()) {
                 if (member.carrierId() != carrierQueue.id()) {
-                    throw new LinkageConflictException("部材レコードが異なる載体IDを指定しています: expected="
+                    throw new LinkageConflictException("部材レコードが異なる代表行IDを指定しています: expected="
                         + carrierQueue.id() + ", actual=" + member.carrierId() + ", queueId=" + q.id());
                 }
                 members.add(q);
@@ -202,45 +202,45 @@ public class RepairRetryDiscoveryService {
 
         // 4. 暗号学的ハッシュおよび件数の厳格検証
         if (reconstructed.size() != carrier.qc()) {
-            throw new CorruptedEvidenceException("再構成された参加キュー件数が載体の記録と不一致です: expected="
+            throw new CorruptedEvidenceException("再構成された参加キュー件数が代表行の記録と不一致です: expected="
                 + carrier.qc() + ", actual=" + reconstructed.size());
         }
 
         List<Long> reconstructedIds = reconstructed.stream().map(ScopeRepairQueueSnapshot::id).toList();
         String calculatedHash = codec.calculateQueueDigest(reconstructedIds);
         if (!calculatedHash.equals(carrier.qh())) {
-            throw new CorruptedEvidenceException("再構成された参加キューのハッシュ値が載体の記録と不一致です: expected="
+            throw new CorruptedEvidenceException("再構成された参加キューのハッシュ値が代表行の記録と不一致です: expected="
                 + carrier.qh() + ", actual=" + calculatedHash);
         }
 
-        // 5. 重試時全不変条件の復帰検証
+        // 5. 再試行時全不変条件の復帰検証
         // (1) テナントスコープ一致
         if (!carrier.tenant().equals(targetScope.targetTenantId())) {
-            throw new SecurityException("載体に記録されたテナントスコープがコマンド対象と一致しません: expected="
+            throw new SecurityException("代表行に記録されたテナントスコープがコマンド対象と一致しません: expected="
                 + targetScope.targetTenantId() + ", actual=" + carrier.tenant());
         }
 
         // (2) 法人スコープ一致
         if (!Objects.equals(carrier.legalEntity(), targetScope.targetLegalEntityId())) {
-            throw new SecurityException("載体に記録された法人スコープがコマンド対象と一致しません: expected="
+            throw new SecurityException("代表行に記録された法人スコープがコマンド対象と一致しません: expected="
                 + targetScope.targetLegalEntityId() + ", actual=" + carrier.legalEntity());
         }
 
         // (3) 承認正本バージョン合致
         if (carrier.vBf() != approvalEvidence.targetVersion()) {
-            throw new OptimisticLockingFailureException("載体の修復前版が決裁承認対象バージョンと一致しません: approval="
+            throw new OptimisticLockingFailureException("代表行の修復前版が決裁承認対象バージョンと一致しません: approval="
                 + approvalEvidence.targetVersion() + ", carrier=" + carrier.vBf());
         }
 
         // (4) 分類別バージョン整合性
         if ("P1".equals(carrier.pCls())) {
             if (carrier.vAf() != carrier.vBf()) {
-                throw new IllegalStateException("P1 載体の修復後バージョンが修復前バージョンと一致しません: vAf="
+                throw new IllegalStateException("P1 代表行の修復後バージョンが修復前バージョンと一致しません: vAf="
                     + carrier.vAf() + ", vBf=" + carrier.vBf());
             }
         } else if ("P2".equals(carrier.pCls())) {
             if (carrier.vAf() != carrier.vBf() + 1) {
-                throw new IllegalStateException("P2 載体の修復後バージョンが修復前バージョン+1と一致しません: vAf="
+                throw new IllegalStateException("P2 代表行の修復後バージョンが修復前バージョン+1と一致しません: vAf="
                     + carrier.vAf() + ", vBf=" + carrier.vBf());
             }
         } else {
@@ -249,7 +249,7 @@ public class RepairRetryDiscoveryService {
 
         // (5) 親行 DB 現バージョン一致
         if (!Objects.equals(parentInvoice.version(), carrier.vAf())) {
-            throw new OptimisticLockingFailureException("親インボイスの現在バージョンが載体修復後バージョンと一致しません: db="
+            throw new OptimisticLockingFailureException("親インボイスの現在バージョンが代表行の修復後バージョンと一致しません: db="
                 + parentInvoice.version() + ", carrier=" + carrier.vAf());
         }
 

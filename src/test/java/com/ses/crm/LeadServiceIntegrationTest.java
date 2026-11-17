@@ -23,7 +23,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T051定向テスト: leadの重複候補、可視性、顧客・商機転換の冪等性を検証する。 */
+/** T051対象限定テスト: leadの重複候補、可視性、顧客・商機転換の冪等性を検証する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

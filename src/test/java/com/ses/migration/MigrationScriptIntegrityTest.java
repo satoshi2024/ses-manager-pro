@@ -513,12 +513,12 @@ class MigrationScriptIntegrityTest {
     }
 
     @Test
-    void V66_1は非管理者の全局wildcardを削除して既知actionへ置換すること() throws Exception {
+    void V66_1は非管理者のグローバルwildcardを削除して既知actionへ置換すること() throws Exception {
         String sql = new PathMatchingResourcePatternResolver()
                 .getResource("classpath:db/migration/V66_1__close_security_review_boundaries.sql")
                 .getContentAsString(StandardCharsets.UTF_8);
 
-        assertTrue(sql.contains("AND a.action_key = '*'"), "旧全局wildcardの削除条件が必要です");
+        assertTrue(sql.contains("AND a.action_key = '*'"), "旧グローバルwildcardの削除条件が必要です");
         assertTrue(sql.contains("SELECT 'dashboard.*'") && sql.contains("SELECT 'proposal.*'"),
                 "後方互換は既知resourceの明示許可で維持してください");
         assertTrue(sql.contains("ADD COLUMN allowed_actions"), "break-glass scope列が必要です");
@@ -881,7 +881,7 @@ class MigrationScriptIntegrityTest {
     /**
      * メニューを足したら、その resource の権限seedも足さなければならない。
      *
-     * <p>V66_1が非管理者groupから全局 {@code *} を削除して「既知resource wildcardの列挙」へ
+     * <p>V66_1が非管理者groupからグローバルな {@code *} を削除して「既知resource wildcardの列挙」へ
      * 置換したため、権限modelは baseline+deny ではなく<b>許可listの列挙制</b>になっている。
      * 新しいresource rootを {@code RESOURCE_NAMES} へ登録しても
      * {@code t_permission_group_action} へ {@code <resource>.*} をseedしなければ、

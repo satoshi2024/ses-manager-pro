@@ -1,6 +1,6 @@
 # 結合テスト キックオフ・欠陥対応 Runbook
 
-本書は、`schedule-and-resources.md` の Wave と Defect gate を実行現場で回すための操作手順書である。全フェーズの開工チェック（対話形式）、欠陥の対応 SOP、発見者と対応者の役割分担を定義する。計画書の数式・gate は本書の正本であり、本書は現場の「誰が・いつ・何を言うか」を定める。
+本書は、`schedule-and-resources.md` の Wave と Defect gate を実行現場で回すための操作手順書である。全フェーズの着手チェック（対話形式）、欠陥の対応 SOP、発見者と対応者の役割分担を定義する。計画書の数式・gate は本書の正本であり、本書は現場の「誰が・いつ・何を言うか」を定める。
 
 ## 1. 役割（RACI の原則）
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 2. フェーズ別キックオフ（開工対話）
+## 2. フェーズ別キックオフ（着手対話）
 
 各フェーズの開始前に、QA lead が下記の質問を参加者へ投げ、**証跡（ファイル・画面・数値）で回答**を得る。口頭 OK は受け付けない。1 件でも NG があればフェーズは開始せず、原因を環境修正票または開発チケットとして発行してから再開する。
 
@@ -28,7 +28,7 @@
 
 **Exit**: モジュールごとの M-PASS evidence が揃う。
 
-### 2.1 W1 Freeze / Pilot（全体開工）
+### 2.1 W1 Freeze / Pilot（全体着手）
 
 - 「Candidate build の commit SHA・branch・dirty 有無・build artifact checksum を出してください」
 - 「route / API / template / menu-action / state / adapter inventory の生成スクリプトを実行し、SHA-256 と件数を出してください。前回との diff は？」

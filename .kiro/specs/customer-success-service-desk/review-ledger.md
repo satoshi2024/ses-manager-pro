@@ -10,7 +10,7 @@
 | Base branch / commit | `996289c00983bfccd0b75c4d3bdd3dcc26904136` |
 | Head | commitログ参照（`git rev-parse HEAD`） |
 | 公式Status | **DISCOVERY**（Owner未定、DG-02未APPROVED）。COMPLETE/APPROVEDではない |
-| Owner | 未定（開工プレースホルダ `<OWNER>` 未置換） |
+| Owner | 未定（着手プレースホルダ `<OWNER>` 未置換） |
 | Approved scope | 未指定（`<APPROVED_SCOPE>` 未置換） |
 | Review開始 | **NO**（Owner / Approved scope / DecisionId / DG-02未確定。実装検証結果はhandoff用に記録するがReview開始とは扱わない） |
 | PR | 実装対話では作成しない（Review PASS後に独立Reviewerが作成） |

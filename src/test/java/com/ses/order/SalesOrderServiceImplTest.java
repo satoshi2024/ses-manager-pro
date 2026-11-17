@@ -39,7 +39,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
-/** T054定向テスト: 注文の状態機械・採番・金額集計・PO重複（L1）。 */
+/** T054対象限定テスト: 注文の状態機械・採番・金額集計・PO重複（L1）。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class SalesOrderServiceImplTest {

@@ -40,9 +40,9 @@ import static org.mockito.Mockito.when;
 /**
  * ダッシュボードKPIの当月稼働率と、将来稼働率予測(FR-07)の当月値が一致することを検証する。
  *
- * <p>FR-07 Requirement 1.3 /「完了条件」: 予測の口径は既存ダッシュボードの当月稼働率と一致すること。
+ * <p>FR-07 Requirement 1.3 /「完了条件」: 予測の算定基準は既存ダッシュボードの当月稼働率と一致すること。
  * 両者は {@link UtilizationCalcServiceImpl} を共用するため構造的に一致するが、
- * 片方だけ独自集計に戻した場合(A7-09 の口径分裂の再発)を検知するための回帰テスト。
+ * 片方だけ独自集計に戻した場合(A7-09 の集計基準の分裂の再発)を検知するための回帰テスト。
  */
 @ExtendWith(MockitoExtension.class)
 class UtilizationCalcConsistencyTest {
@@ -70,7 +70,7 @@ class UtilizationCalcConsistencyTest {
     @Mock
     private DataScopeService dataScopeService;
 
-    // 共通口径サービスは純粋ロジックのため実体を注入する
+    // 共通集計基準サービスは純粋ロジックのため実体を注入する
     @Spy
     private MonthlyRevenueCalcServiceImpl monthlyRevenueCalcService = new MonthlyRevenueCalcServiceImpl();
     @Spy
@@ -118,7 +118,7 @@ class UtilizationCalcConsistencyTest {
         LocalDate farFuture = currentYm.plusMonths(6).atEndOfMonth();
 
         // Engineer.status と契約実態が意図的にズレたデータ。
-        // 契約ベース(共通口径)では E1/E2/E5 の3名が稼働 = 60.0%、
+        // 契約ベース(共通の集計基準)では E1/E2/E5 の3名が稼働 = 60.0%、
         // 旧 Engineer.status ベースでは E1/E4 の2名 = 40.0% となり、値が異なる。
         Engineer e1 = engineer(1L, StatusConstants.ENGINEER_ACTIVE);   // 稼動中 + 有効契約あり
         Engineer e2 = engineer(2L, "提案中");                           // 提案中だが有効契約あり
@@ -148,10 +148,10 @@ class UtilizationCalcConsistencyTest {
 
         // 予測の先頭要素は当月であること
         assertEquals(currentYm.toString(), currentMonth.getYearMonth());
-        // 口径一致 (FR-07 Requirement 1.3)
+        // 集計基準の一致 (FR-07 Requirement 1.3)
         assertEquals(kpiUtilization, currentMonth.getUtilizationRate(),
-                "ダッシュボードKPIの当月稼働率と予測の当月値は同一口径でなければならない");
-        // 契約ベース口径の期待値(旧 Engineer.status ベースなら 40.0 となり検知できる)
+                "ダッシュボードKPIの当月稼働率と予測の当月値は同一の集計基準でなければならない");
+        // 契約ベースの集計基準の期待値(旧 Engineer.status ベースなら 40.0 となり検知できる)
         assertEquals(60.0, kpiUtilization);
         assertEquals(3, currentMonth.getWorkingCount());
         assertEquals(5, currentMonth.getTotalCount());

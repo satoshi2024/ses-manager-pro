@@ -23,7 +23,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-/** T069のL2〜L3定向test。法人・asOf期間からV83の協定行を解決する。 */
+/** T069のL2〜L3対象限定test。法人・asOf期間からV83の協定行を解決する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

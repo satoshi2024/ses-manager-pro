@@ -26,7 +26,7 @@ public class ProfileApiController {
     private final SysUserService sysUserService;
     private final PasswordEncoder passwordEncoder;
 
-    /** bootstrap sessionの改密時に同じユーザーの他sessionを失効させる。slice等で不在ならbootstrap sessionの改密を拒否する。 */
+    /** bootstrap sessionのパスワード変更時に同じユーザーの他sessionを失効させる。slice等で不在ならbootstrap sessionのパスワード変更を拒否する。 */
     private PersistentSessionService persistentSessionService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -46,8 +46,8 @@ public class ProfileApiController {
         if (passwordEncoder.matches(req.getNewPassword(), user.getPassword()))
             throw BusinessException.of("error.password.sameAsCurrent");
         PasswordPolicyValidator.validate(req.getNewPassword());
-        // 本番初回bootstrap sessionの改密では、同じユーザーの他のsession（初期パスワードで先にloginした別端末等）を
-        // 先に失効させる（review P3-e）。失効できなければ改密もしない（fail-closed）。
+        // 本番初回bootstrap sessionのパスワード変更では、同じユーザーの他のsession（初期パスワードで先にloginした別端末等）を
+        // 先に失効させる（review P3-e）。失効できなければパスワード変更もしない（fail-closed）。
         revokeOtherSessionsIfBootstrap(request, authentication, user.getId());
         // 初回ログイン時のパスワード変更要求（配備時の初期admin）は、本人の変更が成功した時点で解除する。
         // password と変更要求の2列だけを書く専用メソッドを使う（継承した汎用更新をcontrollerから呼ばない。NF01計画 §4.1）。
@@ -66,7 +66,7 @@ public class ProfileApiController {
     }
 
     /**
-     * bootstrap session（{@link ProductionBootstrapMode}）の改密なら、同じユーザーの他の永続sessionを失効させる。
+     * bootstrap session（{@link ProductionBootstrapMode}）のパスワード変更なら、同じユーザーの他の永続sessionを失効させる。
      * 失効したsessionは次の要求で {@code PersistentSessionFilter} が401にする（既存の失効の仕組み）。
      * 現在のsessionが追跡されていない（hashが無い）場合は、DB上の行は全て他sessionのものなので全件を失効させる。
      */
@@ -76,7 +76,7 @@ public class ProfileApiController {
             return;
         }
         if (persistentSessionService == null) {
-            throw new IllegalStateException("[bootstrap] 他sessionを失効できないため、bootstrap sessionの改密を中止します");
+            throw new IllegalStateException("[bootstrap] 他sessionを失効できないため、bootstrap sessionのパスワード変更を中止します");
         }
         String currentHash = (String) session.getAttribute(PersistentSessionService.SESSION_HASH_ATTRIBUTE);
         if (StringUtils.hasText(currentHash)) {
@@ -86,6 +86,6 @@ public class ProfileApiController {
         }
     }
 
-    /** bootstrap sessionの改密で他sessionを失効させた理由（{@code t_user_session.revoke_reason}）。 */
+    /** bootstrap sessionのパスワード変更で他sessionを失効させた理由（{@code t_user_session.revoke_reason}）。 */
     static final String BOOTSTRAP_REVOKE_REASON = "BOOTSTRAP_PASSWORD_CHANGED";
 }

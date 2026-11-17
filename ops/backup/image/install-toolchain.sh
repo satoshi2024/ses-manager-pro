@@ -4,7 +4,7 @@
 #
 # 方針（W1-B1 / X-08(b)。registry を使わず「ローカル build + SHA-256 検証 + image ID 記録 +
 # docker save/load 配布」で運用するための再現性・供給網の担保）:
-#   - 固定値（SHA-256・fingerprint・version）が占位値や不正な形式なら、何もダウンロードせずに失敗する。
+#   - 固定値（SHA-256・fingerprint・version）が仮置きの値や不正な形式なら、何もダウンロードせずに失敗する。
 #   - Oracle MySQL APT repo の署名鍵は SHA-256 と full fingerprint の両方で検証し、その鍵だけを
 #     keyring にする。mysql-apt-config（旧版 deb の SHA-256 を一次資料で確認できない）は使わず、
 #     apt source を直接定義する。MySQL client / server-core は exact version で固定する。
@@ -51,7 +51,7 @@ verify_sha256() { # <file> <expected> <label>
 }
 
 # ------------------------------------------------------------
-# 0. 固定値の検査（ダウンロード・apt より前。占位値のままなら失敗する）
+# 0. 固定値の検査（ダウンロード・apt より前。仮置きの値のままなら失敗する）
 # ------------------------------------------------------------
 [[ "${BASE_IMAGE:-}" == *@sha256:* ]] || die "BASE_IMAGE が digest で固定されていません（現在値: ${BASE_IMAGE:-未設定}）"
 [[ "${MYSQL_CLIENT_VERSION:-}" =~ ^8\.0\.[0-9]{1,3}$ ]] || die "MYSQL_CLIENT_VERSION が不正です（現在値: ${MYSQL_CLIENT_VERSION:-未設定}）"

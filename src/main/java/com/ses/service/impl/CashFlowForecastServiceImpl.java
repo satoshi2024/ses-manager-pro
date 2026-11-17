@@ -214,7 +214,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
     }
 
     /**
-     * 起点月の売上口径を全社KPI（{@link MonthlyRevenueCalcService}）と突合する（FR-05 要件1.4）。
+     * 起点月の売上の集計基準を全社KPI（{@link MonthlyRevenueCalcService}）と突合する（FR-05 要件1.4）。
      * ダッシュボードと同じ対象契約・確定実績の絞り込みを用いることで、CFの入金予定の元になっている
      * 請求額が全社KPIの売上と同じ母集団から来ていることを確認できるようにする。
      */

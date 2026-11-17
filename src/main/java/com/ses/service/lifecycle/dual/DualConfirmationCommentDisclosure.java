@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /**
  * 二者確認の業務comment（提出comment {@code business_comment}・確認/差戻しcomment {@code decision_comment}）の表示範囲
- * （W3-21a review P3-3、W3-21b 主控の決定。Privacyの署名で確定または緩和するまでの既定＝最小公開）。
+ * （W3-21a review P3-3、W3-21b 統括の決定。Privacyの署名で確定または緩和するまでの既定＝最小公開）。
  *
  * <table>
  *   <caption>本文を返す相手（A1・A5の応答で判定する。画面で隠すだけにしない）</caption>

@@ -28,7 +28,7 @@ import java.io.IOException;
  *   <li>通す: 変更画面のGET、変更APIのPUT、logout、静的リソース、ERRORディスパッチ。</li>
  *   <li>MFA未完了の間は {@link MfaEnforcementFilter} の判定に任せる（MFA → パスワード変更の順に完了させる）。</li>
  *   <li>bootstrap session（{@link ProductionBootstrapMode}）はMFA pendingを立てないため、本filterが先に
- *       パスワード変更を強制し、変更後に {@link BootstrapSessionFilter} がMFA登録を強制する（改密 → MFAの順）。</li>
+ *       パスワード変更を強制し、変更後に {@link BootstrapSessionFilter} がMFA登録を強制する（パスワード変更 → MFAの順）。</li>
  * </ul>
  * 依存beanを持たないため、{@code @WebMvcTest} 等のsliceでもsession属性が無ければ何もしない。
  */

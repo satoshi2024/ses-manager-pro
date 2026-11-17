@@ -198,7 +198,7 @@ class ResignationRevocationOutboxMySqlTest {
         }
     }
 
-    @Test void 再入社後の事後登録を撤権せずUNKNOWNの再要求は新しいgenerationになる() {
+    @Test void 再入社後の事後登録を権限を取り消さずUNKNOWNの再要求は新しいgenerationになる() {
         // このテストの登録操作だけ対象法人Bを選択する。完了テストのHRは法人Aに所属する。
         when(legalContext.requireCurrentLegalEntityId()).thenReturn(2L);
         LifecycleCase resignation = createCase("RESIGNATION", "COMPLETED");

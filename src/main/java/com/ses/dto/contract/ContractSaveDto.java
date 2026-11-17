@@ -19,7 +19,7 @@ import java.util.Set;
  * {@link com.ses.entity.Contract} の {@code FieldStrategy.ALWAYS} 列のうち、本 DTO が運ぶものは
  * JSON にキーが来た時点で「payload 出現」とみなし、明示 null ならクリアを許可する。
  * 本 DTO に存在しない ALWAYS 列（{@code positionId} / {@code renewalDecision}）は画面保存では
- * 触れないため、更新時はサービス側で行ロック後の旧値から回填する（CON-01）。
+ * 触れないため、更新時はサービス側で行ロック後の旧値から補完する（CON-01）。
  */
 @Getter
 @Setter
@@ -31,7 +31,7 @@ public class ContractSaveDto {
 
     /**
      * 本 DTO が運ぶ ALWAYS フィールド名。コントローラ経由の更新ではこれらを「payload 出現」と扱う。
-     * ここに無い ALWAYS 列は未出現として old から回填する。
+     * ここに無い ALWAYS 列は未出現として old から補完する。
      */
     public static final Set<String> SAVE_PAYLOAD_ALWAYS_FIELDS = Set.of(
             "endDate",
@@ -43,7 +43,7 @@ public class ContractSaveDto {
             "commissionRate",
             "acceptanceExemptionReason");
 
-    /** Contract エンティティ上の ALWAYS フィールド名一覧（回填対象の照合用）。 */
+    /** Contract エンティティ上の ALWAYS フィールド名一覧（補完対象の照合用）。 */
     public static final Set<String> ALL_ALWAYS_FIELDS = Set.of(
             "positionId",
             "endDate",

@@ -277,7 +277,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     /**
      * 対象月のBench要員の待機原価を組織・原価部門別に集計する。
      *
-     * <p>Bench判定は {@link com.ses.service.UtilizationCalcService} と同じ契約ベースの口径を使う
+     * <p>Bench判定は {@link com.ses.service.UtilizationCalcService} と同じ契約ベースの集計基準を使う
      * （対象月に 稼動中/準備中/終了 の契約が期間として重ならない要員をBenchとする）。
      * {@code t_engineer.status} は「現在」の値しか持たないため、過去月を照会したときに
      * 数字が後から変わってしまう。月次実績は対象月時点で確定していなければならない（R2.2）。

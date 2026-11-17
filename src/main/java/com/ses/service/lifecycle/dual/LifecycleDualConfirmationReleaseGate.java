@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * 二者確認の子スイッチ（{@link Feature#NF01_DUAL_CONFIRMATION}）を本番でONにする前の署名gate
- * （NF01細粒度epoch計画 §7.8 開始条件・§10 Privacy・§12 O-8、主控の判断）。
+ * （NF01細粒度epoch計画 §7.8 開始条件・§10 Privacy・§12 O-8、統括の判断）。
  *
  * <p>二者確認は提出・確認の業務comment（{@code t_lifecycle_dual_submission.business_comment}・
  * {@code t_lifecycle_dual_confirmation.decision_comment}）を追記専用表へ保存する。これらの保存期間と削除・匿名化の経路は

@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 拾い直す。照会は keyset で進み、先頭の hold 中の副本が後ろの副本を止めない。
  *
  * <p>本 class は H2 の外側 transaction の中で動くため、副本ごとの transaction・lock・失敗の隔離は
- * {@code ResumeIngestionLedgerRetentionMySqlTest} が実 MySQL で確かめる。清理 service が内部で読む当日と試験の当日が
- * 0時をまたいでずれないよう、清理を通す試験は前後の日付の範囲で比べる。
+ * {@code ResumeIngestionLedgerRetentionMySqlTest} が実 MySQL で確かめる。清掃 service が内部で読む当日と試験の当日が
+ * 0時をまたいでずれないよう、清掃を通す試験は前後の日付の範囲で比べる。
  */
 @SpringBootTest
 @ActiveProfiles("test")

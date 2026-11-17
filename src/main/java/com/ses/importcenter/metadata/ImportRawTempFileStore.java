@@ -20,8 +20,8 @@ import java.util.Objects;
  * raw CSV ingressの一時ファイル置場。
  *
  * <p>upload rootの{@code quarantine}直下（FileStorageServiceImplの未scan領域と同じ）に作成し、どの
- * FileReferenceProviderにも登録しない。そのため削除に失敗しても、既存の孤児ファイル清理
- * {@code FileCleanupServiceImpl.cleanupOrphanFiles()}で回収される。この清理は次の二つのschedulerから呼ばれる。
+ * FileReferenceProviderにも登録しない。そのため削除に失敗しても、既存の孤児ファイル清掃
+ * {@code FileCleanupServiceImpl.cleanupOrphanFiles()}で回収される。この清掃は次の二つのschedulerから呼ばれる。
  * <ul>
  *   <li>{@code DocumentArchiveFileCleanupScheduler}：毎日02:00</li>
  *   <li>{@code FileCleanupScheduler}：毎週日曜03:00</li>
@@ -61,7 +61,7 @@ public class ImportRawTempFileStore {
     }
 
     /**
-     * 孤児清理の走査対象（upload root直下のquarantine、非再帰）へ一時ファイルを作る。
+     * 孤児清掃の走査対象（upload root直下のquarantine、非再帰）へ一時ファイルを作る。
      * POSIXではowner限定権限、Windowsではdirectory ACLの継承となる。file名は乱数由来でPIIを含まない。
      */
     Path create() throws IOException {
@@ -72,7 +72,7 @@ public class ImportRawTempFileStore {
     /**
      * 一時ファイルを削除する。例外は投げず、呼出元の成功結果や元の失敗を隠さない。
      *
-     * @return 削除できた（または元々存在しない）場合true。失敗時はfalseで、孤児清理による回収待ちとなる。
+     * @return 削除できた（または元々存在しない）場合true。失敗時はfalseで、孤児清掃による回収待ちとなる。
      */
     boolean deleteOrReport(Path file) {
         if (file == null) return true;
@@ -87,7 +87,7 @@ public class ImportRawTempFileStore {
         if (meterRegistry != null) {
             try {
                 Counter.builder(CLEANUP_FAILURE_METRIC)
-                        .description("raw CSV取込一時ファイルの削除失敗件数（孤児ファイル清理で回収）")
+                        .description("raw CSV取込一時ファイルの削除失敗件数（孤児ファイル清掃で回収）")
                         .register(meterRegistry)
                         .increment();
             } catch (RuntimeException metricFailure) {
@@ -96,7 +96,7 @@ public class ImportRawTempFileStore {
             }
         }
         // 例外messageには絶対pathが入るため出さない。file名は乱数由来でPIIを含まない。
-        log.error("[取込] raw CSV一時ファイルの削除に失敗しました。孤児ファイル清理で回収されるまで残存します: "
+        log.error("[取込] raw CSV一時ファイルの削除に失敗しました。孤児ファイル清掃で回収されるまで残存します: "
                         + "tempFile={} contentTruncated={} exceptionType={}",
                 file.getFileName(), truncated, LogRedaction.exceptionType(failure));
         return false;
@@ -112,7 +112,7 @@ public class ImportRawTempFileStore {
             channel.force(true);
             return true;
         } catch (IOException | RuntimeException ignored) {
-            // 切詰め不能でも削除失敗の通知・孤児清理による回収は変わらない。
+            // 切詰め不能でも削除失敗の通知・孤児清掃による回収は変わらない。
             return false;
         }
     }

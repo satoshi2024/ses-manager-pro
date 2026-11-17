@@ -68,7 +68,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/users/**`, `/api/role-menus/**`, `/api/security/**`, `/api/audit-logs`
 - 実装済みDB: `sys_user`, `m_menu`, `t_role_menu`, `t_user_mfa`, `t_mfa_recovery_code`, `t_mfa_attempt_guard`, `t_user_session`, `t_audit_log`
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD01-01 | N,D | 有効な `s300.admin01` で正しいパスワードを入力してログイン | `sys_user.failed_count=0`, `locked_until IS NULL`; `t_user_session` に生IDではなくhashを1件記録 | 認証成功後 `/` へ遷移し、APIレスポンスやログへpassword/session IDを漏らさない |
 | MOD01-02 | B,E,D | 同一有効ユーザーで失敗1〜4回、5回目、ロック30分直前/直後を固定Clockで検証 | 1〜4回は `failed_count` 増加、5回目は `locked_until` 設定、期限後の成功で状態リセット | 閾値前は通常拒否、5回目はロック表示、期限後のみ再ログイン可能 |
@@ -96,7 +96,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/candidates/**`
 - 実装済みDB: `t_candidate`, `t_candidate_activity`, `t_engineer`
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD02-01 | N,D,U | HRが氏名、連絡先、スキル、次回予定日を登録 | `t_candidate` 1件、`current_stage='応募受付'`, `created_by` 設定 | 一覧先頭に表示し、再読込後も同値 |
 | MOD02-02 | B,P,U | 300人環境で氏名/ステージ/skillKeyword、page 1/最終/最終+1、size 0/上限超過を検索 | SELECTのみ。totalとrecords数を独立SQLで突合 | 上限へ正規化し全件無制限取得を許さず、空ページも崩れない |
@@ -122,7 +122,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/engineers/**`
 - 実装済みDB: `t_engineer`, `t_engineer_skill`, `t_engineer_career`, `t_engineer_sales`, `t_engineer_account_link`
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD03-01 | N,D,U | 営業/HRが要員を登録・更新し、許可されたstatusを切替 | `t_engineer` の入力値、監査列、statusが一致 | 一覧/詳細/再読込で同値、金額は円単位表示 |
 | MOD03-02 | B,E,D | 必須氏名欠落、未知status、終了日逆転等DTO/業務境界を送信 | 不正時更新0件 | 4xxで項目エラー表示、500やMySQL ENUM例外にしない |
@@ -153,7 +153,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `m_customer`, `t_customer_contact`, `t_sales_activity`, `t_lead`, `t_opportunity`
 - `m_customer` にインボイス登録番号は存在しないため、MOD-04の分母へ架空項目を追加しない。BP会社の登録番号はMOD-10で扱う。
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD04-01 | N,D,U | 営業が顧客を登録し会社名、商流、信用度、住所を更新 | `m_customer` 1件。旧contact列へ新規書込みなし | 一覧/詳細へ反映し、連絡先は専用APIで管理 |
 | MOD04-02 | B,E,D | 会社名空白/100/101文字、信用度1/2文字、住所255/256文字、存在しないIDを送信 | 許可境界のみ保存、不正時INSERT/UPDATE 0件 | 項目別4xx、SQL/stack trace非表示 |
@@ -180,7 +180,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/projects/**`, `/api/ai/matching/project/{projectId}`, `/api/ai/match/engineer-to-projects`, `/api/ai/chat`
 - 実装済みDB: `t_project`, `t_project_skill`, `t_engineer_skill`（マッチ結果の永続キャッシュテーブルは存在しない）
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD05-01 | N,D,U | 顧客、案件名、円単位の単価幅、期間、必須/尚可skillを登録 | `t_project` 1件、`t_project_skill` が入力集合と一致 | 一覧/詳細に単価・期間・skill区分を正しく表示 |
 | MOD05-02 | B,E,D | 単価min=max、min>max、start=end、end<start、顧客欠落を送信 | 許可境界のみ保存。不正はproject/skillとも0更新 | Bean Validationを4xx表示し部分保存しない |
@@ -205,7 +205,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/proposals/**`, `/api/email-templates/**`, `/api/ai/proposal-draft`
 - 実装済みDB: `t_proposal`, `t_proposal_history`, `m_email_template`, `t_contract`, `t_notification`, `t_mail_delivery`
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD06-01 | N,D,U | scope内の要員と案件で提案を新規作成 | `t_proposal.status='書類選考中'`, proposed_by/at設定。Bench要員は提案中へ連動 | Kanbanの書類選考中列に1枚表示し再読込後も一致 |
 | MOD06-02 | E,C,D | 同一要員×案件を二重クリック/2セッション同時POST | active提案1件、重複INSERT 0件 | 一方だけ成功、他方409。ボタンを再有効化し二重カードなし |
@@ -229,7 +229,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `t_contract`, `t_contract_price_history`, `t_contract_document`, `t_contract_compliance_profile`, `t_contract_compliance_snapshot`, `t_contract_compliance_worker_snapshot`, `t_compliance_finding` 等
 - S10/G2中央ledgerはIN PROGRESSである。route/tableが存在しても、実在責任者assignment、対象version/hashへの実actor承認、freeze済みpolicyを満たす実在external review、実在CLEAN evidence、T066及び最終Reviewが揃うまで `ACTIVE` 化・本番帳票交付・S10全体PASSを認めない。
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD07-01 | N,D,U | 要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成 | `t_contract.selling_price/cost_price` 等が円単位で一致 | 一覧/詳細に正しい名称・粗利・精算条件を表示 |
 | MOD07-02 | B,E,D | selling/cost=0、負数、精算min=max/min>max、start=end/end<start、commission 0/100/範囲外 | 許可境界のみ保存、不正時0更新 | 4xx項目エラーで部分保存なし |
@@ -261,7 +261,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/my/timesheet/**`, `/api/my/attendance/**`, `/api/work-records/**`, `/api/work-records/attendance/**`, `/api/my/leave/**`, `/api/leave/**`, `/api/monthly-closing/**`
 - 実装済みDB: `t_work_record`, `t_work_record_daily`, `t_employee_attendance`, `t_employee_attendance_break`, `t_attendance_month`, `t_leave_request`, `t_leave_ledger`, `m_system_config`（締め済み月JSON）
 
-| テストID | 次元 | 実行条件・操作 | DB断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DBの検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD08-01 | N,D,U | 紐付済み要員が本人契約へ日次開始/終了/休憩を保存し月提出 | daily行とactual_hours集計、status=`提出済`が一致 | カレンダーと月合計を更新、提出後のPDF導線を表示 |
 | MOD08-02 | A,S,D | 未紐付要員、他要員contractId/workRecordIdをAPIへ差し込む | 全勤怠表更新0件 | 未紐付403、純不存在404、所有者不一致403を区別し他人情報を返さない |
@@ -292,7 +292,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `t_invoice`, `t_invoice_item`, `t_invoice_payment`, `t_bank_deposit`, `t_mail_delivery`
 - S16 JP PINT: 現時点ではM-PASS前。予定ルート/テーブルを実装済みとして扱わない。
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD09-01 | N,D,U | 確定工数を持つ1顧客×1月で請求生成 | invoice 1件、item集合、subtotal、税切捨て、totalを独立計算と突合 | `/invoice` に未送付で表示しPDF金額も一致 |
 | MOD09-02 | B,D | 精算下限/上限ちょうど、1時間不足/超過、月途中単価改定、税率0/10%を試験 | item控除/超過、適用単価、税の円単位を突合 | 境界の丸めを一貫させ二重按分しない |
@@ -323,7 +323,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `m_bp_company`, `t_bp_contact`, `t_bp_bank_account`, `t_bp_terms`, `t_bp_availability`, `t_bp_availability_ingestion`, `t_engineer_bp_affiliation`
 - S12 capacity planning、S13外部ポータル: M-PASS前。未定義の`外部BP`ロールを使用しない。
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD10-01 | N,D,U | 管理者/営業がBP会社、契約条件、contactを登録・更新 | master/terms/contactの有効期間とversion一致 | 一覧/detailへ再読込後も正しく表示 |
 | MOD10-02 | B,E,D | 必須欠落、重複法人番号、validTo<validFrom、未知statusを送信 | 不正時全関連表0更新 | 4xx項目エラーでtransactionを部分保存しない |
@@ -364,7 +364,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `t_bp_payment`, `t_work_record`, `m_bp_company`, `t_bp_terms`
 - S15会計仕訳/全銀FB: M-PASS前。財務主体は管理者又は確定した会計担当permission groupで検証する。
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD11-01 | N,D,U | 確定工数からBP支払を作成し親/子layer、支払先、条件snapshotを保存 | `t_bp_payment` のwork_record、layer_order、amount、terms snapshot一致 | invoice画面のBP支払タブに未払として表示 |
 | MOD11-02 | B,E,D | amount=0/1/上限/負数、同一layer order、存在しないworkRecord/BP会社を送信 | 許可境界のみ保存、不正時関連行0件 | 4xxで拒否し親子合計や順序を壊さない |
@@ -373,7 +373,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD11-05 | C,D | 同一支払を2セッションで編集/支払済化、二重作成、同一version更新 | version CASで片方だけ成功、支払行/approval request重複0件 | stale更新409、二重支払なし |
 | MOD11-06 | E,D | 締め済み月の作成/更新/削除、承認失敗、transaction途中例外を注入 | `t_bp_payment` とclosing/approval関連が全不変 | 月次締めガードを迂回せず全rollback |
 | MOD11-07 | N,D | **BLOCKED(M-PASS/S15)** route/format inventory確定後、請求・入金・BP支払から仕訳を生成 | 仕訳物理保存先、借方/貸方、税、業務キーを確定migrationと突合 | 借方合計=貸方合計、円単位・勘定科目規則が一致 |
-| MOD11-08 | B,E,X | **BLOCKED(M-PASS/S15)** 0円、取消、月跨ぎ、文字コード、CSV injection、同一月再出力を検証 | 出力hash/履歴/冪等規則を実装契約に従って断言 | 不正対象を除外又は4xx、再出力を追跡可能 |
+| MOD11-08 | B,E,X | **BLOCKED(M-PASS/S15)** 0円、取消、月跨ぎ、文字コード、CSV injection、同一月再出力を検証 | 出力hash/履歴/冪等規則を実装契約に従って検証 | 不正対象を除外又は4xx、再出力を追跡可能 |
 | MOD11-09 | A,C,D | **BLOCKED(M-PASS/S15)** FB出力を会計担当2セッションで同時実行し、非許可主体も直送 | 二重振込防止キー、承認、監査、失敗時記録を確定スキーマと突合 | 一方のみ確定し二重FBなし、権限なしはdownload 0件 |
 | MOD11-10 | P,U,X | **BLOCKED(M-PASS/S15)** 300人分の仕訳/FBを生成し件数・合計・p95・ファイル検証 | source件数との完全突合、全銀validator、memory/生成時間を保存 | 欠落/重複0、基準内、UIに対象件数/合計/再実行状態を表示 |
 
@@ -383,7 +383,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 
 現時点で、S14固有のプロフィール/資格/経費画面・API・DBはM-PASS前である。既存の `/my/timesheet`, `/my/attendance`, `/my/leave`, `/api/profile/**` はMOD-08/MOD-01の対象であり、S14 v2実装済みの根拠にはしない。以下はすべて `BLOCKED(M-PASS/S14)` とする。
 
-| テストID | 次元 | 実行条件・操作 | M-PASS後の断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | M-PASS後の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD12-01 | D,A | **BLOCKED(M-PASS/S14)** route/migration/entity/permission/UI inventoryを生成し相互照合 | 全method+path、物理表、FK、owner key、action keyが対応 | 不足0になるまで他ケースを実行しない |
 | MOD12-02 | N,U | **BLOCKED(M-PASS/S14)** 要員が本人プロフィールを表示し、営業側の許可された表示と比較 | owner user/engineer linkと表示項目を物理保存先に突合 | 本人値が再読込後も一致し、編集可能/参照のみを区別 |
@@ -402,7 +402,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 
 現時点でS17固有の学習画面・API・DBはM-PASS前である。既存AI matchingはMOD-05、提案文生成はMOD-06で検証する。以下はすべて `BLOCKED(M-PASS/S17)` とし、学習済みモデルや永続ログの存在を仮定しない。
 
-| テストID | 次元 | 実行条件・操作 | M-PASS後の断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | M-PASS後の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD13-01 | D,A | **BLOCKED(M-PASS/S17)** route/model-job/migration/permission/provider inventoryを照合 | input snapshot、model version、job、auditの物理対応が全て存在 | manifest不足0まで実行開始しない |
 | MOD13-02 | N,D | **BLOCKED(M-PASS/S17)** 成約/見送りfixtureを学習入力としてdry-run→確定 | 対象件数、除外理由、feature version、model versionを保存先と突合 | UI preview件数と確定入力が一致 |
@@ -423,7 +423,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/dashboard/**`, `/api/organizations/**`, `/api/management-accounting/**`, `/api/sales-performance/**`, `/api/system-configs/**`
 - 実装済みDB: `m_organization_unit`, `t_user_organization`, `m_cost_center`, `t_management_budget`, `t_monthly_accounting_dimension`, `m_system_config`（営業歩合snapshot表は存在せず都度計算）
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD14-01 | N,A,U | 管理者/営業/HR/managerで`/`、要員で`/`へアクセス | DB不変 | 4管理ロールはdashboard、要員は`/my/timesheet`へ転送し「全ロールdashboard」と誤認しない |
 | MOD14-02 | N,D | 稼働/Bench/退場予定、確定工数あり/なしのfixtureでKPIを表示 | 利用率、売上、粗利、bench数を共通計算Service/独立SQLと突合 | 金額は円、0分母の表示規則、対象月が一致 |
@@ -450,7 +450,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みAPI: `/api/approval/**`, `/api/quotations/**`, `/api/sales-orders/**`, `/api/acceptances/**`, `/api/documents/**`
 - 実装済みDB: `m_approval_route`, `m_approval_route_step`, `t_approval_request`, `t_approval_action`, `t_approval_participant`, `t_quotation`, `t_sales_order`, `t_sales_order_line`, `t_acceptance`, `t_document`, `t_document_version`, `t_document_hash_claim`, `t_document_access_log`, `t_document_disposal_request`
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD15-01 | N,D,U | 見積を作成しPDF preview/download | `t_quotation` の番号、顧客、案件、要員、単価/精算、status=`下書き`一致 | 日本語font、円、改頁、ファイル名、再読込が正しい |
 | MOD15-02 | B,E,D | 単価0/負数、精算min=max/min>max、顧客と案件不一致、要員/案件欠落で提出を試験 | 不正時quotation/contract 0更新 | 4xx/409で項目を示し部分保存なし |
@@ -481,7 +481,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `freee_connection`, `freee_employee_link`（給与明細は外部取得、ローカル明細表は実在扱いしない）
 - freee は OAuth 連携であり、attendance provider（MOD-08 の mock/freee）と分離する。`ai.provider` 等の adapter 固定は manifest に記録する。
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD16-01 | N,D | 管理者が `/integrations/freee/authorize` → callback の OAuth フローを stub で成功させ、`/api/payroll/status` を確認 | `freee_connection` に token（暗号化）が保存され、status が接続済み。token 原文が DB/DOM/log に露出しない | authorize/callback が正しく遷移し、再認証不要で給与 API が利用可能 |
 | MOD16-02 | E,D | 未設定/revoked の connection で employees/statements を取得し、401→refresh→再401 を注入 | refresh は規定回数だけ実行され、再401 は接続切れとして 401/4xx を返す | 失敗状態が画面に表示され、再認証導線へ誘導される |
@@ -497,7 +497,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 - 実装済みDB: `t_task`, `t_notification`, `t_notification_read`, `t_notification_outbox`, `t_mail_delivery`, `saved_view`, `permission_group`, `permission_group_action`, `user_permission_group`, `identity_provider`, `user_external_identity`, `break_glass_incident`, `file_security_metadata`
 - 本モジュールは横断基盤であり、各 endpoint の許可・scope・監査は inventory から mapping して判定する。要員ロールは `/api/notifications/**`, `/api/profile/**` のみ許可される点を正とする。
 
-| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+| テストID | 次元 | 実行条件・操作 | DB/外部の検証 | 期待結果 |
 |---|---|---|---|---|
 | MOD17-01 | N,B,D,U | tasks の CRUD・status 遷移（NOT_STARTED→IN_PROGRESS→COMPLETED/CANCELLED）・overdue・page を 4 管理ロールで実行 | 遷移 matrix と version が整合。終端状態から再開は拒否。通知/タスク連動が1件 | タスク一覧が再読込後も同値で、終端状態の誤再開がない |
 | MOD17-02 | N,A,D | notifications の page/unread-count/read/read-all を要員を含む全ロールで実行し、`generate`（管理者限定）を二重実行 | read 済みは再 read で変化なし。generate は business key ごと1件 | 未読数が操作に連動し、他ユーザーの通知は返却0件 |

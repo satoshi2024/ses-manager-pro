@@ -2,13 +2,13 @@
 # W1-B1 / X-08(b) ツールイメージの再現性・配布の検証（実 Docker・ネットワークは使わない）
 #
 # - image/tool-image.sh check / compose: production compose の pin（x-ses-backup-tool-content-id）が
-#   占位値・不正・ローカルの content ID と不一致なら拒否し、docker compose を実行しない。
+#   仮置きの値・不正・ローカルの content ID と不一致なら拒否し、docker compose を実行しない。
 #   pin と照合は image store（classic / containerd）に依存しない content ID で行う（W1-B1 r2 P2-2）。
 # - image/tool-image.sh compose: 許可した使い方（run --rm <service> / up -d binlog / ps / logs / stop）だけを渡し、
 #   -f・--pull・--build などの compose 側 option や未定義の service は docker を呼ばずに拒否する。
 # - image/tool-image.sh record / save / load: image store の種類・content ID・image ID を記録し、
 #   配布 tar は SHA-256 が一致しなければ docker load せず、読み込んだ tag の content ID で照合する。
-# - image/install-toolchain.sh: 固定値が占位値なら何もダウンロードせずに失敗し、署名鍵は SHA-256・
+# - image/install-toolchain.sh: 固定値が仮置きの値なら何もダウンロードせずに失敗し、署名鍵は SHA-256・
 #   primary key が 1 つであること・primary key の fingerprint・有効期限を検証してから keyring にする。
 # - Dockerfile / compose / .dockerignore の静的契約
 set -uo pipefail
@@ -107,7 +107,7 @@ case_check_rejects_placeholder_pin() {
   setup_fake_docker
   pinned_compose "$T/compose.yml" "sha256:UNPINNED"
   run_tool check --compose "$T/compose.yml"
-  assert_nonzero "$TOOL_RC" "占位値の pin は拒否"
+  assert_nonzero "$TOOL_RC" "仮置きの値の pin は拒否"
   assert_contains "$TOOL_OUT" "未 pin" "未 pin を通知"
 }
 
@@ -351,14 +351,14 @@ write_gpg_listing() { # <file> <pub expiry> <primary fpr> [2 つ目の pub を�
 case_installer_rejects_placeholders_before_download() {
   setup_fake_installer
   run_installer MYSQL_REPO_KEY_SHA256=UNPINNED
-  assert_nonzero "$INSTALL_RC" "署名鍵の SHA-256 が占位値なら失敗"
-  assert_contains "$INSTALL_OUT" "MYSQL_REPO_KEY_SHA256 が SHA-256" "占位値の項目を通知"
-  assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "占位値のままでは apt・ダウンロードを一切行わない"
+  assert_nonzero "$INSTALL_RC" "署名鍵の SHA-256 が仮置きの値なら失敗"
+  assert_contains "$INSTALL_OUT" "MYSQL_REPO_KEY_SHA256 が SHA-256" "仮置きの値の項目を通知"
+  assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "仮置きの値のままでは apt・ダウンロードを一切行わない"
 
   : > "$FAKE_INSTALL_LOG"
   run_installer RESTIC_LINUX_AMD64_SHA256=UNPINNED
-  assert_nonzero "$INSTALL_RC" "restic の SHA-256 が占位値なら失敗"
-  assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "restic の占位値でも何も実行しない"
+  assert_nonzero "$INSTALL_RC" "restic の SHA-256 が仮置きの値なら失敗"
+  assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "restic の仮置きの値でも何も実行しない"
 
   : > "$FAKE_INSTALL_LOG"
   run_installer BASE_IMAGE=debian:bookworm-slim

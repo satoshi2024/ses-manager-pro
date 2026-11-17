@@ -3,7 +3,7 @@ package com.ses.service.repair;
 import java.util.List;
 
 /**
- * 重試発見・再構成の判定結果
+ * 再試行時の発見・再構成の判定結果
  */
 public record RetryDiscoveryResult(
     boolean alreadyResolved,

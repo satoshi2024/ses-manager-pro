@@ -47,7 +47,7 @@ UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key='project-in
 
 ## 3. バックエンド
 
-- `entity/ProjectIngestion` / `mapper/ProjectIngestionMapper`（`selectAllStoredFileNames` 清理用）。
+- `entity/ProjectIngestion` / `mapper/ProjectIngestionMapper`（`selectAllStoredFileNames` 清掃用）。
 - `dto/projectingestion/ParsedProjectDto`（案件項目＋skills[]＋warnings[]）、`ReviewedProjectDto`。
 - `service/ai/ProjectParseService` + impl:
   - `GeminiProjectParseServiceImpl`（`@ConditionalOnProperty ai.provider=gemini`）: `AiTextService.generate` で厳格JSON抽出。単価は円単位・共通フォーマッタ規約（A7-24）。
@@ -60,7 +60,7 @@ UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key='project-in
   - `reject(id, reason)` 状態ガード付きCAS（確定済不可）。
 - `controller/api/ProjectIngestionApiController`（`/api/project-ingestions`: upload/paste・list・get・review・confirm・reject・reparse。`PageUtils.safePage`）。
 - `controller/page/ProjectIngestionPageController`（`/project-ingestion`）。
-- 清理: `ProjectIngestionFileReferenceProvider`（eml保存名を参照集合へ）。
+- 清掃: `ProjectIngestionFileReferenceProvider`（eml保存名を参照集合へ）。
 
 ## 4. フロント
 - `templates/project-ingestion/list.html` ＋ `review.html`（左=案件フォーム/右=原本テキスト）、`static/js/modules/project-ingestion.js`（貼付/emlアップロード・saveReview・confirm・reject・ポーリング・スキルオートコンプリート）、`sidebar.html` に `project-ingestion` の `<li>`。

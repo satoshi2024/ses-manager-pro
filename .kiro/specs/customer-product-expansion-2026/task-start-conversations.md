@@ -3543,7 +3543,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 - [ ] F2. 集計/時間外calculator
   - **Objective**: F2. 集計/時間外calculator を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: official boundary fixtures、rolling平均、warning。
-  - **テスト要件**: 全境界、跨夜/休日/休憩。
+  - **テスト要件**: 全境界、日跨ぎ/休日/休憩。
   - **Demo**: fixture結果をHRへ提示。
 
 【着手判定】

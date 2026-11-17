@@ -64,7 +64,7 @@ class UtilizationForecastServiceTest {
     @Mock
     private DataScopeService dataScopeService;
 
-    // 稼働判定は共通口径サービスの実ロジックを通す(ダッシュボードKPIと同一実装であることを担保する)
+    // 稼働判定は共通集計基準サービスの実ロジックを通す(ダッシュボードKPIと同一実装であることを担保する)
     @org.mockito.Spy
     private UtilizationCalcServiceImpl utilizationCalcService = new UtilizationCalcServiceImpl();
 

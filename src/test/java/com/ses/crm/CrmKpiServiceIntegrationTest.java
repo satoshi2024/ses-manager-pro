@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T052定向テスト: 集計口径、source追跡、forecast排他、全社合計を確認する。 */
+/** T052対象限定テスト: 集計基準、source追跡、forecast排他、全社合計を確認する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional

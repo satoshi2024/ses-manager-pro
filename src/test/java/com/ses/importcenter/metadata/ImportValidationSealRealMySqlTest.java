@@ -1365,7 +1365,7 @@ class ImportValidationSealRealMySqlTest {
     void negSeal21_expiryDuringLockWaitCausesRejectionOnFreshDbNow() throws Exception {
         // NEG-SEAL-21: ロック待機中に実時間が経過しリース有効期限を跨ぐ -> fresh DB現在時刻判定で 409 拒絶。
         // DB と capability の expiry を同一の短期限（現在時刻 + 2000ms）に設定し、待機開始時は未期限であることを確認。
-        // awaitLockWait 成功直後に独立接続から DB 時刻を取得し、observedWaitTime < shortExpiry（待機突入時点で未期限かつ有効）を厳格断言。
+        // awaitLockWait 成功直後に独立接続から DB 時刻を取得し、observedWaitTime < shortExpiry（待機突入時点で未期限かつ有効）を厳密に検証。
         // その後 2500ms 待機して同一期限を確実に跨ぎ、blocker 解放前に DB 時刻 >= shortExpiry を確認。
         String csv = "externalKey,companyName\ncust-1,株式会社A\n";
         var fixture = setupFixture(csv);
@@ -1411,7 +1411,7 @@ class ImportValidationSealRealMySqlTest {
 
             awaitLockWait(trackingManager, blockerPid, sealFuture);
 
-            // awaitLockWait 成功直後、独立観測接続から DB 現在時刻を読み取り、待機中時点で未期限（尚且つ有効）であることを厳格断言
+            // awaitLockWait 成功直後、独立観測接続から DB 現在時刻を読み取り、待機中時点で未期限（尚且つ有効）であることを厳密に検証
             Timestamp observedWaitTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
             assertNotNull(observedWaitTime);
             assertTrue(observedWaitTime.before(shortExpiry),

@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * サービスリクエスト添付ファイルの storage key を孤児清理から保護するプロバイダー
+ * サービスリクエスト添付ファイルの storage key を孤児清掃から保護するプロバイダー
  */
 @Service
 @RequiredArgsConstructor

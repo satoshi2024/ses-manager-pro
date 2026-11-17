@@ -9,7 +9,7 @@
   UTC2026-10-23T03:50:38.0254507Z〜03:55:07.6031110Z、exit0、起止同SHA/clean。
   log `D97A932390C8CCF01AA097CF489610A3F1C0A59CE65CD4C995EDD91EBD456868`。
   Astraが8 report hashと実XML（Metadata81/Candidate6/Lease9/V184 migration2）を照合し限定受理。
-  oracle正負例、8 source待機撤権分岐、batch/EOF tail、prefix/EOF SHA差分、読取失敗、空source境界を含む。
+  oracle正負例、8 source待機中の権限取消し分岐、batch/EOF tail、prefix/EOF SHA差分、読取失敗、空source境界を含む。
   unsafe全例外分岐へのfault injectionを完了したとは呼ばない。旧97/1/56 FAILは保存する。
   fast64/0/0/0は別SHA0f45の結果であり、このSHAのsame-head fastとは合算しない。
 - 四fileをcontrol `d8469ecb4f18468fc8eface6e69b65e36a52f41f` へ同一Git blobで統合した。
@@ -28,7 +28,7 @@
   Astraが40 report hash/XML、実gateway/summary/policy拒否、QUERY保持、SUMMARY零書込、順序/監査例外caseを独立受理。
   9 fileをcontrol `a16ea908e89a815f0e0d657e9cf94c98c74f1170` へ同一blobで統合し、raw48 fileを
   `verification-evidence/20261024-nf08-b2c0-source-fast-02/` にhash一致保存した。旧FAILを上書きしない。
-  既知policy拒否の前置処理、candidateのsnapshot比較はB2c-0の範囲。fresh current-source drift検査やdurable claimは未実装。
+  既知policy拒否の前処理、candidateのsnapshot比較はB2c-0の範囲。fresh current-source drift検査やdurable claimは未実装。
 - 次に統合候補を固定し、selectorなしの `scripts/verify-like-ci.ps1` を新規packetで再実行する。
   full fast/MySQL/performance/browserとbackup unit/integrationを同一HEADで要求し、旧個別成功を新runへ転用しない。
   runnerは各clean前のraw退避、zero skipped、起止SHA/clean、全profile・backup終了のAND判定を維持する。
@@ -45,7 +45,7 @@
   journal不変はhead/events API snapshot範囲である。直接SQL再現を過去失敗の唯一根因の遡及確定とは呼ばない。
   JaCoCo mismatchはcoverage証拠不受理。旧53/1 FAILを保存し、新成功は所定5classの範囲に限定する。
   六fileをcontrol `670b7b5ceaa66e6b5bbfdfe5a17005b322b23e03` へ同一blobで統合し、18証拠fileを
-  `verification-evidence/20261023-mysql-remediation-source-02/` にhash一致保存。Astraが集成も独立受理した。
+  `verification-evidence/20261023-mysql-remediation-source-02/` にhash一致保存。Astraが統合も独立受理した。
 - NF01 readonly preflight source `c40455759f6b9bdd113de0c5ba4182fd56052693` はAstra限定CODE/runtime PASS。
   fastはclean test、2 class **4/0/0/0**、UTC03:40:27.2714250〜03:41:22.5692716、
   log `2AA00F784741856DE6214AAB20043953AF98808C8F3379EA845F55FC0A15203A`。
@@ -61,16 +61,16 @@
   同controlのunit/inventory限定clean testは2 class **4/0/0/0**、UTC03:44:37.6317733〜03:45:35.4843613、
   log `4EDD8CA7DE44B2158F395F5B207119C6152472CDBFFEEB006EB66FDD033183E8`。Astraが全report hashと実XMLを独立受理。全fast/全MySQLではない。
 - NF06 W3Aの97/1/56/0 FAILは未閉鎖。test-only修復75cccは、LOCK_DATA変動をrecord equalsへ含めた点と
-  finallyの無界待機をAstraが差し戻した。限定修復を継続し、未集成・未PASSを保持する。
+  finallyの無界待機をAstraが差し戻した。限定修復を継続し、未統合・未PASSを保持する。
 - NF08 B2c計画78f9a00dはpreflightをsummary attemptより前にするDDLなしのB2c-0だけ限定PLAN PASS。
   QUERY結果を保持し、denyはsummary attempt/nonce/claim/transportを作らない。実装・runtimeは別gateである。
-  B2c-1/2はschema/版本未割当、commit確定後permit、公開transport迂回封鎖、socket前の競合境界を未決事項として保持する。
+  B2c-1/2はschema/版未割当、commit確定後permit、公開transport迂回封鎖、socket前の競合境界を未決事項として保持する。
 
 
 ## 限定修復の再検証（2026-10-23）
 
 - **全体NO-GO継続**。NF08 B2bの6 fileをsource `bda9fa984d507b251cd0abc7ca214d73c70009aa` から
-  control `703647aa1185a115890225eca9a32c20a7c9ab4a` へ同一Git blobで統合した。Astraが集成差分を独立確認した。
+  control `703647aa1185a115890225eca9a32c20a7c9ab4a` へ同一Git blobで統合した。Astraが統合差分を独立確認した。
   source限定fastは20 class **116/0/0/0**、UTC03:19:01.4794022〜03:21:07.0198905、exit0、起止SHA一致・clean。
   log SHA-256 `F634A30E3C1733DC75FF2DCDFC484E89D9D89539DBF6AF3B880662EF0227C745`。
   40 report hashを独立照合し、49 raw fileを `verification-evidence/20261023-nf08-b2b-source-01/` にhash一致で保存した。
@@ -89,7 +89,7 @@
   log `EAF1B95B0B46C1032726A3E245E60873A67141FA1165995395A05FBBF68CF819`。
   JaCoCo stale execution-data warningのためcoverage証拠にはしない。joint MySQLは4 class **97/1/56/0 FAIL**、controlには未統合。
   UTC03:28:51.5952557〜03:32:23.5898988、log `257966F82F55DA86741F39230EF2AD9B76AB89D7074CD30513FDD2EF83ABF83C`。
-  最初はregisterJob撤権caseのsource PRIMARY待機判定でLOCK_DATAがNULLとなり、続くcleanupがimport_job外部キーで失敗した。
+  最初はregisterJob権限取消しcaseのsource PRIMARY待機判定でLOCK_DATAがNULLとなり、続くcleanupがimport_job外部キーで失敗した。
   後続fixture重複による連鎖errorを含む。NULLを対象行一致とみなさず、観測と終了時cleanupの両方を診断する。
   fast32 fileとMySQL16 fileをcontrolの `verification-evidence/20261023-nf06-w3a-source-*-01/` にhash一致で保存した。
 - MySQL診断fixed `3dd2ea364f8aba4f01473552676dd5a82b0343ad` は5 class **53/1/0/0 FAIL**。
@@ -187,7 +187,7 @@
   同期限renew・version増加・commit後応答喪失・明示ACL拒否・旧grant append拒否を補強し、
   非source mutation-firstも実worker接続へwaitを結合した。source runtime gateは実行中、control未統合。
 - NF01 R01b `5f2ef897` とNF08 B2 `7daa0e9e` はPLAN CONDITIONAL。
-  NF01はNULL担当に伴う広域撤権、current read、全体設定writerを補完中。
+  NF01はNULL担当に伴う広範囲の権限取消し、current read、全体設定writerを補完中。
   NF08はclaim後時刻再確認、permit一回消費、schema authority、最小B2a境界を補完中。
   計画・限定CODE PASSを業務機能完成やmigration承認へ読み替えない。
 - 全体NO-GO。最新統合Headの全MySQL/performance/browser/backup/verify-like-ciとstaging、
@@ -339,7 +339,7 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
 ## 実測による追加修復（2026-10-16 15:19 JST）
 
 - **NO-GO**。control固定 `172a363d99c8920fcb55c0ca4ac7d3384759602c` の残留fast fixtureは
-  **3 class、11/0/0/0**（IntegrationHub3、撤権反復2、隔離監査6）。UTC06:12:48.7870050〜06:14:49.3788411。
+  **3 class、11/0/0/0**（IntegrationHub3、権限取消し反復2、隔離監査6）。UTC06:12:48.7870050〜06:14:49.3788411。
   log SHA-256 `519B35CE56392ABDEA96ED07F8290AFE94F5E108D6387BB9FEB0B111727131F0`、6 report hash一致。
   これは対象限定gateで、全fast第6回FAILをPASSへ変更しない。
 - NF06 F1b-1旧固定 `b766e3d1` のMySQLは **44/0/1/0、FAIL**。
@@ -396,7 +396,7 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
   **692 class、4210/2/1/0、FAIL**。UTC05:38:46.2440343〜05:53:52.0586530、起止SHA一致・clean、exit1。
   `verification-evidence/20261016-control-fast-06/`、1384 report hash一致、log SHA-256
   `0C2B7A2B2FAC7178BA5D025434749A929475A030867A49F4E51ADE8E31D981E8`。
-  H2再初期化の連鎖errorは本runでは再現せず、IntegrationHubのreadiness前提2件と撤権poll状態1件が残った。
+  H2再初期化の連鎖errorは本runでは再現せず、IntegrationHubのreadiness前提2件と権限取消しpoll状態1件が残った。
   AstraはFAIL証拠として受理した。Maven集計は4209件、XML集計は4210件であり、offboardingの反復実行
   Run 2: PASSを伴う集計基準の差を保持する。両方とも2 failure/1 error/0 skippedで、PASSではない。
 - H2修復source `fd628f6e` は対象限定8 class **27/0/0/0**、Astra限定CODE/証拠PASS。
@@ -1043,7 +1043,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - NF06 auth-lock-04 fixed `068aaad29f0a793a3defe39a322b62022d91b92e` は **16/0/0/0**、exit0、起止SHA一致・clean。
   UTC05:28:36.1459996〜05:30:25.6412991、log SHA-256 `B5D441F3B5D76A6DDC36B99B481E7486DC1466E97873950D039B82A10DCE07A7`。
   Astraが2 report hash/XMLを独立照合し限定受理。raw10 fileをcontrolへhash一致保存した。
-  実metadata registerJobのsource待機中撤権拒否、直接helperが持つ認可lock下のaction/membership INSERT待機、
+  実metadata registerJobのsource待機中の権限取消しによる拒否、直接helperが持つ認可lock下のaction/membership INSERT待機、
   解放後のinsert成功と次回403を実証した。観測対象はchild unique indexであり、FK parent PRIMARY待機の証明ではない。
   createMapping/bindMapping/disableSource等の実service競合matrixは追加候補であり、全metadata write・candidate/leaseの競合解決へ拡張しない。
 - control D1 pure fixed `a9e8c360` の5 class18/0/0/0についてもAstraが10 report hash・起止SHA/cleanを独立照合し限定受理した。
@@ -1081,6 +1081,6 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   completeSummaryAttemptの条件式でnull費用が自動unboxされNPEとなった。raw44 fileを保存し、
   `3d95d3f5` でenum switchによるnullable代入と旧actual/upper metadata消去・回帰を追加。Astra静的受理、再試験待ち。
   C2のACTUAL/rate-card・outer usage/inner失敗の分離は未実装であり、C1の対象限定実行の成功で完成としない。
-- NF06実service撤権matrix候補 `a498b162/000b2574` はrace-matrix01で **compile FAIL・XMLなし**。
+- NF06実service権限取消しmatrix候補 `a498b162/000b2574` はrace-matrix01で **compile FAIL・XMLなし**。
   UTC05:41:07.1109752〜05:41:44.2104230、log SHA-256 `0235FCD764BBBBA7E02DBE152334417A2B26BCFA261FDEB9A76C46423490FF95`。
   test method識別子内の空白を `1daff170` で修正し、単一file javacはexit0。raw6 fileを保存した。23件候補の実MySQL再試験前にPASSとしない。

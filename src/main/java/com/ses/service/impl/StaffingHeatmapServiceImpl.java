@@ -46,7 +46,7 @@ import static com.ses.entity.AllocationPlan.STATUS_CONFIRMED;
  * 需給heatmap集計の実装（T078 B1）。
  *
  * <p>集計はengineer×月のループで行い、全engineer×全dayの直積をJava memoryへ作らない（design §4）。
- * 需要/供給のFTEはdesign §5.2の月別FTE口径（月内稼働日数=法人既定の平日で按分）に揃える。
+ * 需要/供給のFTEはdesign §5.2の月別FTEの算定基準（月内稼働日数=法人既定の平日で按分）に揃える。
  * グループ帰属は分割性を保つため、供給はengineer1人を1グループへ、需要はposition1件を1グループへ
  * 割り当てる（全社合計＝内訳合計）。
  */

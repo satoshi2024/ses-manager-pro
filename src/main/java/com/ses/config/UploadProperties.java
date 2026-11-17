@@ -15,7 +15,7 @@ public class UploadProperties {
     /** 保存先ベースディレクトリ（既定: ./uploads） */
     private String basePath = "./uploads";
 
-    /** 孤児清理の安全マージン（時間）。 */
+    /** 孤児清掃の安全マージン（時間）。 */
     private int cleanupSafetyHours = 24;
 
     /** falseの場合はscanner unavailableとして全uploadを拒否する。 */

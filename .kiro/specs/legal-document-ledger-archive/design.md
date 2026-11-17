@@ -79,7 +79,7 @@
 
 ### 6.3 状態機械と競合
 
-| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 | `t_document` 下書き | →確定 | 状態CAS | 同一文書の同時確定 | 下書きへ戻す |
 | 確定 | →訂正済 / →取消 / →廃棄済 | 状態CAS＋`version` | 訂正と廃棄の同時要求 | **物理削除しない。訂正/取消versionで表現** |

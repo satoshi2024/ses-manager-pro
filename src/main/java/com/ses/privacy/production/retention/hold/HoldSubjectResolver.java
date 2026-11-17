@@ -214,7 +214,7 @@ public class HoldSubjectResolver {
             names = jdbc.queryForList("SELECT stored_file_name FROM t_resume_ingestion WHERE tenant_id = ? "
                     + "AND stored_file_name IS NOT NULL", String.class, tenantId);
         } else if (IngestionTextProvider.BP_ORIGINAL.equals(dataElementId)) {
-            // 表に tenant 列が無い。F2 provider（変換先の tenant）と清理（作成者の tenant）の両方の境界を和集合で取る
+            // 表に tenant 列が無い。F2 provider（変換先の tenant）と清掃（作成者の tenant）の両方の境界を和集合で取る
             names = jdbc.queryForList("SELECT b.stored_file_name FROM t_bp_availability_ingestion b "
                     + "WHERE b.stored_file_name IS NOT NULL AND (b.file_ext IS NULL OR b.file_ext <> 'PASTE') "
                     + "AND (b.converted_availability_id IN (SELECT a.id FROM t_bp_availability a WHERE a.tenant_id = ?) "

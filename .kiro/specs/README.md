@@ -6,7 +6,7 @@
 
 ## 2026-08-12 既存半完成機能の本番完成化
 
-ソース・既存spec・公式外部契約を再監査した結果、S01〜S17を除く高確度の半完成機能は `payroll-management`、`contract-document-esign`、`database-backup-recovery` の3件に限定した。実行順、開始gate、task、外部実機証拠、開工対話、独立Review、再Review収束の正本は `.kiro/specs/half-finished-production-readiness/README.md` とする。
+ソース・既存spec・公式外部契約を再監査した結果、S01〜S17を除く高確度の半完成機能は `payroll-management`、`contract-document-esign`、`database-backup-recovery` の3件に限定した。実行順、開始gate、task、外部実機証拠、着手対話、独立Review、再Review収束の正本は `.kiro/specs/half-finished-production-readiness/README.md` とする。
 
 旧taskのcheckboxだけで未実装判定を行わない。AIの既定mock、skillsheet ingestion、proposal/work-record/sales-activity等は現行ソースの実装を確認済みであり、本プログラムへ混ぜない。三specを実装する場合は別branch・別worktreeを使用し、各ディレクトリの `start-conversation.md` と `review-conversation.md` を入口とする。
 

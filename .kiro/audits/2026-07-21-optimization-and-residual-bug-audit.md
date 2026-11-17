@@ -13,7 +13,7 @@
 
 ## 監査で「問題なし」を確認した領域（重複調査の防止）
 
-精読の結果、以下は安全と確認した: ファイルアップロード（`FileStorageServiceImpl`：UUID名・拡張子/Content-Type検証・パストラバーサル二重チェック、`FileKind` は SVG/HTML を許可せず配信も安全な拡張子のみ）、CSVエクスポートの数式インジェクション（`CsvUtils.sanitizeForSpreadsheet` で CWE-1236 対策済み）、アカウントロック（`AccountLockServiceImpl`：条件付きDB更新で lost update 防止・ロック期限処理あり）、**孤児ファイル清理**（`FileCleanupServiceImpl`：契約書PDFは `uploads/contracts/{id}/` サブディレクトリ保存で、`Files.list` の非再帰＋`isRegularFile` フィルタにより走査対象外＝誤削除しない）、`RuleMatchingServiceImpl` のスキル突合（スキル・タグを一括ロードしてin-memory照合＝N+1なし）。
+精読の結果、以下は安全と確認した: ファイルアップロード（`FileStorageServiceImpl`：UUID名・拡張子/Content-Type検証・パストラバーサル二重チェック、`FileKind` は SVG/HTML を許可せず配信も安全な拡張子のみ）、CSVエクスポートの数式インジェクション（`CsvUtils.sanitizeForSpreadsheet` で CWE-1236 対策済み）、アカウントロック（`AccountLockServiceImpl`：条件付きDB更新で lost update 防止・ロック期限処理あり）、**孤児ファイル清掃**（`FileCleanupServiceImpl`：契約書PDFは `uploads/contracts/{id}/` サブディレクトリ保存で、`Files.list` の非再帰＋`isRegularFile` フィルタにより走査対象外＝誤削除しない）、`RuleMatchingServiceImpl` のスキル突合（スキル・タグを一括ロードしてin-memory照合＝N+1なし）。
 
 ---
 

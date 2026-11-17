@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
-@DisplayName("ACC-OPS-P0-001 Actuator Health & Probes 門禁テスト")
+@DisplayName("ACC-OPS-P0-001 Actuator Health & Probes ゲートテスト")
 class ActuatorHealthEndpointTest {
 
     @Autowired

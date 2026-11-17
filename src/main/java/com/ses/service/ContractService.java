@@ -28,7 +28,7 @@ public interface ContractService extends IService<Contract> {
     /**
      * 業務ルール付き更新（検証＋要員連動＋労務コンプライアンスチェック）。
      * 画面 DTO 経由でない呼び出し向け。ALWAYS 列は {@link com.ses.dto.contract.ContractSaveDto#SAVE_PAYLOAD_ALWAYS_FIELDS}
-     * を「出現済み」とみなす（DTO に無い positionId / renewalDecision は old から回填）。
+     * を「出現済み」とみなす（DTO に無い positionId / renewalDecision は old から補完）。
      * @param contract 契約情報
      * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）
      */
@@ -36,7 +36,7 @@ public interface ContractService extends IService<Contract> {
 
     /**
      * ALWAYS 列の部分更新安全版。JSON に未出現のキーは {@code presentAlwaysFields} に入れず、
-     * 行ロック後の旧値で回填する。明示 null（クリア）したい列だけを含めること（CON-01）。
+     * 行ロック後の旧値で補完する。明示 null（クリア）したい列だけを含めること（CON-01）。
      * @param contract 契約情報
      * @param presentAlwaysFields JSON に出現した ALWAYS フィールド名
      * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）

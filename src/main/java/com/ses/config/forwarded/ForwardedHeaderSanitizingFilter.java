@@ -65,7 +65,7 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
      * <p>Springは {@code String#equalsIgnoreCase} でも照合する（{@code ForwardedPrefixExtractor}）。
      * {@code toLowerCase} してからの集合照合だと、U+017F（long s）や U+212A（Kelvin sign）を含む名前が
      * 「Springには同じ名前、清浄化には別の名前」に見えるため、照合もequalsIgnoreCaseにそろえる
-     * （TomcatはISO-8859-1外・token外の名前を拒否するので実際には届かないが、判定の口径を一致させておく）。
+     * （TomcatはISO-8859-1外・token外の名前を拒否するので実際には届かないが、判定基準を一致させておく）。
      */
     static String canonicalForwardedName(String name) {
         if (name == null) {

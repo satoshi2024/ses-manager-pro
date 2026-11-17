@@ -37,7 +37,7 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
     private static final String ROOT_PASSWORD = UUID.randomUUID().toString();
     private static final String JOURNAL_ID = "journal-a1h-reconcile";
     private static final java.time.Instant T0 = java.time.Instant.parse("2026-11-16T03:00:00Z");
-    /** 本番 adapter の event 時刻の時計（進めない）。用例の時刻は用例ごとの {@link #clock} で進める（Review P3-10）。 */
+    /** 本番 adapter の event 時刻の時計（進めない）。ケースの時刻はケースごとの {@link #clock} で進める（Review P3-10）。 */
     private static final PrivacyHoldTestFixture.MutableClock ADAPTER_CLOCK = new PrivacyHoldTestFixture.MutableClock(T0);
 
     private PrivacyHoldTestFixture.MutableClock clock;

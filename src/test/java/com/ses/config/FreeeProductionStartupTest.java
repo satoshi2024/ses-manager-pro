@@ -53,7 +53,7 @@ class FreeeProductionStartupTest {
         try {
             return catchThrowable(() -> {
                 try (ConfigurableApplicationContext started = application.run(args.toArray(String[]::new))) {
-                    // 起動してしまった場合は閉じ、呼出し側の断言で失敗させる
+                    // 起動してしまった場合は閉じ、呼出し側のassertで失敗させる
                     assertThat(started.isActive()).isTrue();
                 }
             });

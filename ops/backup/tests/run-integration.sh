@@ -763,7 +763,7 @@ fixed_timeout_call() {
 #     marker を残して以降の処理を止める（切り捨てた部分の PEM 状態が分からないため fail-closed）。
 #   - ファイルには先頭 headCap バイトと末尾 tailCap バイト（リングバッファ）を残し、間を省略した場合は
 #     省略バイト数の marker を挟む。失敗行は通常末尾にあるため末尾を必ず残す。合計は maxBytes 以内。
-#   - echoStdout=1（stream）のときは脱敏済みの全行を逐次 fflush して端末へ流す（上限なし）。
+#   - echoStdout=1（stream）のときは秘匿化済みの全行を逐次 fflush して端末へ流す（上限なし）。
 #   - inputCap > 0（bounded）のときは処理する入力をそのバイト数までにする。上限後は読み捨てるだけで、
 #     上流を SIGPIPE で壊さない。
 #   - PEM 秘密鍵ブロック（PGP PRIVATE KEY BLOCK を含む）は BEGIN と同じ種別の END まで伏字化し、END の後続は残す。
@@ -985,7 +985,7 @@ END {
 '
 
 # usage: redact_stream_to_file <出力ファイル> <最大出力バイト（1024 以上）> [stream|bounded]
-#   stream（既定）: compose/PITR/drill 本体の出力用。脱敏済みの全行を端末へ流し、ファイルには先頭と末尾を残す。
+#   stream（既定）: compose/PITR/drill 本体の出力用。秘匿化済みの全行を端末へ流し、ファイルには先頭と末尾を残す。
 #     上流コマンドの寿命に従うため時間上限は付けないが、行長と保存バイトは有界。
 #   bounded: 失敗時診断用。端末へは流さず、処理する入力を最大出力の 4 倍までにし、awk も診断予算付き
 #     timeout で打ち切る（打ち切り時は非 0）。

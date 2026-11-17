@@ -21,7 +21,7 @@
 
 ## 2. 事前準備・バックアップ・PITR 要件 (Prerequisites: Backup, Restore & PITR)
 
-本番マイグレーション実行前に、以下の前置条件がすべて満たされていることを確認しなければならない。
+本番マイグレーション実行前に、以下の前提条件がすべて満たされていることを確認しなければならない。
 
 ### 2.1 前提諸元の区分定義（「確認済みの事実」と「推奨値・計画目標」）
 運用計画における重大な誤認を排除するため、本番前提諸元を以下のように厳格に区分する：
@@ -401,7 +401,7 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 ## 8. 修復トランザクション・CAS・ロック順序・障害保全 (Transaction, CAS, Locking & Fail-Stop)
 
 ### 8.1 構造的トランザクション境界（Transaction Boundaries）の厳格定義
-「1レコードごとの単純な逐件トランザクション」では、外部キー制約違反や重複コールバックの整合性破壊を招く。したがって、以下の**3つの集約トランザクション境界**を厳格に適用する：
+「1レコードごとの単純な1件ずつのトランザクション」では、外部キー制約違反や重複コールバックの整合性破壊を招く。したがって、以下の**3つの集約トランザクション境界**を厳格に適用する：
 
 ```mermaid
 flowchart TD
@@ -409,7 +409,7 @@ flowchart TD
         LockInv[1. 親インボイス行 FOR UPDATE] --> LockEvts[2. 子イベント全行 id ASC で FOR UPDATE]
         LockEvts --> LockInvQ[3. 親キュー行 FOR UPDATE]
         LockInvQ --> LockEvtQs[4. 子イベントキュー全行 id ASC で FOR UPDATE]
-        LockEvtQs --> ClassifyEvts{5. 子イベント逐項分類<br/>1:一致確認 / 2:欠落補完 / 3:衝突}
+        LockEvtQs --> ClassifyEvts{5. 子イベントの項目ごとの分類<br/>1:一致確認 / 2:欠落補完 / 3:衝突}
         ClassifyEvts -->|3:衝突あり| FailStopA[即時中止 ROLLBACK<br/>全行PENDING維持・人工裁定へ]
         ClassifyEvts -->|1及び2のみ| UpdInv[6. 親インボイス更新 version CAS]
         UpdInv --> UpdEvts[7. 分類2の子イベントのみ親スコープ補完<br/>精密ID・親ID・原値NULL-safe比較]
@@ -544,13 +544,13 @@ UPDATE t_nf09_scope_repair_queue
       ```
       -- 各淘汰行ごとに更新行数 == 1 を検証。
       ※**【禁止】敗者行のスコープを NULL のまま完了することは厳禁**。勝者のスコープを異 Owner の敗者へコピーすることも厳禁。
-##### 2. 子イベントレコード（`t_digital_invoice_event`）の逐項分類と並行制御
+##### 2. 子イベントレコード（`t_digital_invoice_event`）の項目ごとの分類と並行制御
 - **MySQL 即時制約検査の技術的現実**:
   - 3列複合外部キー `fk_digital_invoice_event_scope`（`(tenant_id, legal_entity_id, digital_invoice_id)` 参照）は、**MySQL 8 の仕様により各 SQL 文の実行時点（Statement-by-Statement）で即時に RESTRICT 検査**が行われる（遅延外部キー検査は MySQL 未対応）。
   - したがって、`@Transactional` が付与されていることのみをもって文途中の一時的外部キー不整合を許容することはできず、**外部キー制約を無効化（`SET FOREIGN_KEY_CHECKS = 0`）することも固く禁止**する。本バッチでは既存の非 NULL 衝突スコープの再帰属は取り扱わない。
 - **ロック取得と 3 分類（Three-way Item-by-item Classification）**:
   - 親インボイスのロック取得後、紐づく全子イベントを `SELECT ... WHERE digital_invoice_id = :parentInvoiceId ORDER BY id ASC FOR UPDATE` により行ロックする。
-  - ロック取得した子イベント全行を、親インボイスの承認済スコープ `(:parentTenantId, :parentLegalEntityId)` に対し、**逐項（1行ずつ）以下の 3 分類で厳格に判定**する：
+  - ロック取得した子イベント全行を、親インボイスの承認済スコープ `(:parentTenantId, :parentLegalEntityId)` に対し、**1行ずつ以下の 3 分類で厳格に判定**する：
     1. **分類 1（完全一致・検証済）**:
        - `tenant_id` および `legal_entity_id` の**双方が親と完全一致**している行。
        - **処置**: 整合性が確認されたため、再更新は行わずスキップする（更新行数カウント $N_1 = 0$）。
@@ -636,16 +636,16 @@ V182 DDL の中途失敗等によりロールバックが必要となった場�
      - 対象 4 テーブルおよびキューテーブルの現在の `SHOW CREATE TABLE` スキーマ定義
      - 直前の MySQL エラーログおよび直近 1 時間の Binlog ファイル
      - 上記ファイルの SHA-256 チェックサムマニフェスト
-4. **切替前核検（Pre-Switch Verification）**:
+4. **切替前の確認（Pre-Switch Verification）**:
    - リストアされた新 DB インスタンスにおいて、以下の 3 点を確認する：
      1. `flyway_schema_history` の最新行が V181 (`success=1`) であり、V182 の痕跡がないこと。
      2. Preflight SQL-02, 03 を再実行し、追加予定列（`tenant_id` 等）が存在しないこと。
      3. 業務テーブルのレコード件数が Preflight 時点と完全一致すること。
-5. **切替後核検と人工放行（Post-Switch Verification & Human Go-Live Gate）**:
+5. **切替後の確認と人による本番承認（Post-Switch Verification & Human Go-Live Gate）**:
    - アプリケーションの接続先をリストア済み DB に切り替え、保守モード（読取専用）下で基本ヘルスチェックを実施。
-   - **インシデントコマンダー（運用統括責任者）およびリード DBA の両名が書面／チャット記録にて「人工放行（Go-Live Approval）」を発行**した後に限り、保守モードを解除して一般トラフィックを再開する。
+   - **インシデントコマンダー（運用統括責任者）およびリード DBA の両名が書面／チャット記録にて「人による本番承認（Go-Live Approval）」を発行**した後に限り、保守モードを解除して一般トラフィックを再開する。
 
-### 9.3.1 アプリケーション／DB 配対復元契約と人工放行 4 大前置核検 (App & DB Pairing Recovery Contract)
+### 9.3.1 アプリケーション／DB を対で復元する契約と、人による本番承認の前に行う 4 つの事前確認 (App & DB Pairing Recovery Contract)
 PITR 発動によりデータベースが V181 時点へ巻き戻された場合、アプリケーション層との整合性を保つため、以下の契約を厳格に順守する。本契約は **Staging リハーサル Gate（ステージング環境での事前検証必須項目）** として位置付け、本番環境への接触や直接変更は行わない。
 
 #### 1. V181 配対合法アプリケーション製品・設定・ダイジェスト登記台帳
@@ -672,7 +672,7 @@ PITR 発動によりデータベースが V181 時点へ巻き戻された場合
 - V182 スキーマ（`tenant_id` 列や `t_nf09_scope_repair_queue`）に依存するビルド成果物を用いて V181 DB へ接続・稼働させることを固く禁ずる。
 - 必ず上記登記台帳で承認された V181 互換製品 Jar へロールバックした上で接続する。
 
-#### 4. 人工放行（Human Go-Live Sign-Off）前の 4 大前置核検（Pre-Go-Live Gates）
+#### 4. 人による本番承認（Human Go-Live Sign-Off）の前に行う 4 つの事前確認（Pre-Go-Live Gates）
 リストア後の一般トラフィック再開にあたり、以下の 4 つの検証ゲートがすべて完了していなければならない：
 1. **Gate 1: アプリ／DB バージョン配対整合性検証**:
    起動対象の Jar が V181 互換リリース版であり、`spring.flyway.enabled=false` が適用されていることを確認。
@@ -683,7 +683,7 @@ PITR 発動によりデータベースが V181 時点へ巻き戻された場合
 4. **Gate 4: 障害現場証跡および復旧証拠の保全完了確認**:
    V182 障害時のエラーログ、中途スキーマダンプ、Binlog 座標記録、PITR リストア完了ログが退避ストレージに保全され、SHA-256 が検証されていること。
 
-上記 4 Gate すべての PASS をもって、インシデントコマンダーおよび DBA リードによる正式な「人工放行（Go-Live Approval）」を発行する。
+上記 4 Gate すべての PASS をもって、インシデントコマンダーおよび DBA リードによる正式な「人による本番承認（Go-Live Approval）」を発行する。
 
 ### 9.4 前向修正（Forward-Fix）の取扱境界と PENDING 表明
 1. **原マイグレーションファイルと SHA-256 チェックサムの絶対維持**:

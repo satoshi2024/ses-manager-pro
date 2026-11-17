@@ -2,7 +2,7 @@
 
 > この文書は**独立Review専用**である。実装対話と必ず分離した新規対話で使用する。
 > Review AIは原則read-onlyであり、コード、spec、checkbox、ledgerを変更しない。
-> 指摘修正は元の開工対話へ返し、同じReview対話で修正diffを再Reviewする。
+> 指摘修正は元の着手対話へ返し、同じReview対話で修正diffを再Reviewする。
 > **Reviewも通常checkoutおよび実装worktreeと分離した専用Codex worktreeで行う。Review PASS後、
 > Review済みremote HeadをheadとしてPRを自動作成または更新する。PRの自動mergeは行わない。**
 

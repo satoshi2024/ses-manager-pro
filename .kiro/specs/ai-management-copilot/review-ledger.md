@@ -20,7 +20,7 @@
 | Working branch | `codex/ai-management-copilot` |
 | Working tree | `C:\work\ses-manager-pro-ai-management-copilot` |
 | Remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
-| 開工対話正本 | `start-conversations.md` |
+| 着手対話正本 | `start-conversations.md` |
 | Review対話正本 | `review-conversations.md` §4 **R-NF08** |
 | SNF01〜10横断Review | `review-conversations.md` §5 |
 

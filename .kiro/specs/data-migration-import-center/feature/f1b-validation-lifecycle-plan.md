@@ -8,7 +8,7 @@
 - F2にはstreaming CSV parser、5 entityのcanonical row、pure/read-only validation foundationがある。これは永続validation lifecycleやDB resolver統合を意味しない。
 - V184にはsource/mapping/job/validation run/validation row/identity registryのmetadata schemaとjob lease列がある。現在のproduction serviceはsource/mapping/job登録と`UPLOADED → MAPPED` bind、MAPPED専用lease、completed runのcandidate登録までである。
 - `ImportIdentityCandidateService`は`COMPLETED`かつjob current pointer/published slotのあるrunとaccepted rowを読むが、validation runを作成・再開・append・seal・publishするserviceはない。test fixtureがrun/rowを直接SQLで完成状態にseedすることはservice実装やlifecycle証拠ではない。
-- F1aのcandidate/lease ACL gate修正はSHA `4900a621`、そのMySQL証拠は`8b21b8d6`、javac修正は`d9641b96`、gate後のfresh DB時刻は`e318c277`、expiry跨越テスト補強は`37c4c3d8`にある。rootによる直近MySQL/fast-suite検証は本計画の範囲外であり、未確認結果をPASSと扱わない。
+- F1aのcandidate/lease ACL gate修正はSHA `4900a621`、そのMySQL証拠は`8b21b8d6`、javac修正は`d9641b96`、gate後のfresh DB時刻は`e318c277`、expiryをまたぐテスト補強は`37c4c3d8`にある。rootによる直近MySQL/fast-suite検証は本計画の範囲外であり、未確認結果をPASSと扱わない。
 - F1bは`.kiro/specs/data-migration-import-center/feature/f1a-schema-draft.md`、`f1a-validation-lease-slice-plan.md`、`f1a-candidate-lease-authorization-plan.md`、`execution-contract.md`を踏襲する。異なる契約が必要と判明した場合は実装前に差分をAstraへ戻す。
 
 ## 2. 目的と明示的な境界

@@ -71,7 +71,7 @@ frozen page inventory の各 route に対して、適用可能なプリミティ
 
 以下に列挙する ID が current scope（現行実装）である。MOD-12/13（S14/S17）は `BLOCKED(M-PASS)` として ID のみ定義する。各 ID は browser engine × viewport を instance として 1 組以上実行する。
 
-| ID | 画面と実操作の流れ | 期待される表示・UX 断言 | プリミティブ | instance 方針 |
+| ID | 画面と実操作の流れ | 期待される表示・UX の検証 | プリミティブ | instance 方針 |
 |---|---|---|---|---|
 | `UI-01-01` | `/login` → `/`。誤パスワード→エラー表示→正しい値でログイン。要員は `/my/timesheet` へ転送、再読込後もセッション維持 | エラー文言が画面上に表示され input が残る。ログイン後に 200 画面、console 0 | CLK/KEY/NWS/SES | 3 engine×desktop |
 | `UI-01-02` | `/user/list` の検索・ページング、新規/編集モーダルを実クリック。バリデーションエラー後に入力が保持され再編集可能。保存ボタン連打 | 二重登録 0。エラー後も入力値保持。モーダルが focus を維持 | CLK/DBL/KEY/PST | 3 engine |
@@ -130,7 +130,7 @@ frozen page inventory の各 route に対して、適用可能なプリミティ
 
 ### 4.2 横断 UX パターン `UI-XX-nn`
 
-| ID | パターン | 実操作 | 期待される表示・UX 断言 |
+| ID | パターン | 実操作 | 期待される表示・UX の検証 |
 |---|---|---|---|
 | `UI-XX-01` | 二重送信 | 全更新系モーダルの保存ボタンを 50ms 間隔で連打 | 業務レコード 1 件、toast 1 件、ボタンが処理中 disabled |
 | `UI-XX-02` | back/forward | 一覧で filter・ページ位置を設定→詳細→戻る→進む | 検索条件・ページ位置・モーダル開閉が復元。二重 submit 0 |
@@ -152,7 +152,7 @@ frozen page inventory の各 route に対して、適用可能なプリミティ
 
 `e2e-business-scenarios.md` の 7 シナリオ正常系を、実クリック・think time・scroll・モーダル操作を含めてブラウザのみで再実行する。oracle は表示値・遷移・状態保持であり、DB oracle は E2E 側に委ねる（二重計上しない）。E2E-01/02/03/07 が current、E2E-04/05/06 は `BLOCKED(M-PASS)`。
 
-| ID | リプレイ対象 | 追加の UX 断言 |
+| ID | リプレイ対象 | 追加の UX の検証 |
 |---|---|---|
 | `UI-E2E-01` | 採用→要員化→歩合（MOD-02/03/14） | 各画面が同一候補者名・金額を表示し、Kanban/一覧遷移で値が欠落しない |
 | `UI-E2E-02` | CRM→AI→提案→承認→契約→署名（MOD-04/05/06/15/07） | 承認 inbox から次の承認者へ切替が正しく、ドラフト導線が戻れる |
@@ -172,7 +172,7 @@ frozen page inventory の各 route に対して、適用可能なプリミティ
 | A11 | 主要導線の自動検査（axe 相当）で critical/serious なし | 0 件 |
 | Evidence | video/trace/screenshot/HAR/DB 前後が揃う instance / 実行 instance | 100% |
 
-- 判定は「操作・表示・復帰」の合格であり、API/DB の合格へ読み替えない。API 応答の oracle が必要なケースは ITa/ITb/E2E に下位ケースを持ち、本レイヤーでは表示と復帰のみを断言する。
+- 判定は「操作・表示・復帰」の合格であり、API/DB の合格へ読み替えない。API 応答の oracle が必要なケースは ITa/ITb/E2E に下位ケースを持ち、本レイヤーでは表示と復帰のみを検証する。
 - モバイル viewport ではタッチ操作（タップ・スクロール・ドラッグ）を実操作で行い、hover 前提の操作が存在しないことを確認する。
 - `UI-00` スモークは build ごとの回帰として CI 常設を目指す。時間的制約が CI を圧迫する場合は、代表 route のみを CI に置き、全 route は wave 実行時に走らせる（skip のまま放置しない）。
 

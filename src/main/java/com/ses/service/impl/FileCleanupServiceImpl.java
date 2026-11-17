@@ -21,10 +21,10 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 /**
- * アップロード済みファイルの孤児清理サービス実装。
+ * アップロード済みファイルの孤児清掃サービス実装。
  * FileReferenceProvider の全実装を集約して参照集合を構築する。
  * 新機能がファイルを追加する際は FileReferenceProvider を1つ実装することで
- * 清理対象から自動的に除外される（足し忘れ防止）。
+ * 清掃対象から自動的に除外される（足し忘れ防止）。
  */
 @Slf4j
 @Service

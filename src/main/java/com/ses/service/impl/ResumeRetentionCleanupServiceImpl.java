@@ -70,13 +70,13 @@ public class ResumeRetentionCleanupServiceImpl {
     }
 
     /**
-     * 1 tenant 分の清理（test から tenant を限定して呼べるよう package-private）。
+     * 1 tenant 分の清掃（test から tenant を限定して呼べるよう package-private）。
      *
      * <p>NF07 A1H-2（D4・D5）: 回の初めに保全 hold の gate を1回だけ照会し（D4 と D5 で共有する snapshot）、hold に当たる・
      * 分類が UNKNOWN・gate が判定できない行は消さずに件数を警告する。本人は F2 provider の宣言で導出する（履歴取込は
      * {@code converted_engineer_id} と {@code candidate_id} の和集合、BP 取込は {@code converted_availability_id}）。
      * どの本人にも帰属しない行は SUBJECT hold では止めず、DATA_ELEMENT hold のときだけ止める（§3.4.3 規則4）。
-     * hold 機構を使っていない tenant では増える照会はこの1回だけで、清理の結果は変わらない。
+     * hold 機構を使っていない tenant では増える照会はこの1回だけで、清掃の結果は変わらない。
      */
     void cleanupTenant(String tenantId, LocalDateTime threshold) {
         PrivacyHoldPathGuard.Batch resumeHold = privacyHoldPathGuard.openBatch(PrivacyHoldPath.D4, tenantId);
@@ -126,7 +126,7 @@ public class ResumeRetentionCleanupServiceImpl {
         }
         alignLedgerCopies(tenantId);
 
-        // BP取込側も同じinventory境界でPIIを清理する。既存の監査行は論理削除しない。
+        // BP取込側も同じinventory境界でPIIを消去する。既存の監査行は論理削除しない。
         List<BpAvailabilityIngestion> bpTargets = bpAvailabilityIngestionMapper
                 .selectExpiredWithTextForTenant(tenantId, threshold);
         int cleared = 0;
@@ -141,7 +141,7 @@ public class ResumeRetentionCleanupServiceImpl {
             cleared++;
         }
         if (purged > 0 || cleared > 0) {
-            log.info("保持期限清理を実行しました: tenantId={}, resumeJobs={}, bpJobs={}",
+            log.info("保持期限による清掃を実行しました: tenantId={}, resumeJobs={}, bpJobs={}",
                     tenantId, purged, cleared);
         }
     }

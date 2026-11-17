@@ -113,7 +113,7 @@ public final class ApprovalEnvelopeVerifier {
         // Step 3: Scope 照合 (Kernel)
         PurePolicyVerificationKernel.verifyAuthorityScope(envelopeKind, dataElementId, metadata, action, provider, anchor);
 
-        // Step 4: 時間窓検査 (Kernel)
+        // Step 4: 有効期間の検査 (Kernel)
         PurePolicyVerificationKernel.verifyTimeWindow(now, anchor, metadata);
 
         // Step 5: 失効プロバイダー照会 (Wrapper: 鍵→Envelope順、例外ハンドリング)

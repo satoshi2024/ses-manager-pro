@@ -74,7 +74,7 @@ class DocumentFileProviderTest {
                 .doesNotContainKeys("counterparty_name_snapshot", "amount", "created_by", "human_user_id"));
         PrivacyProviderH2Fixture.assertOnlyAllowListed(records, DocumentFileProvider.DOCUMENT, DocumentFileProvider.VERSION);
         PrivacyProviderH2Fixture.assertTenant(records, TENANT);
-        // 論理削除されていない版の保存名は、孤児清理を止める既存の FileReferenceProvider も参照ありとする（P3-9）
+        // 論理削除されていない版の保存名は、孤児清掃を止める既存の FileReferenceProvider も参照ありとする（P3-9）
         assertThat(archiveFileReferenceProvider.referencedFileNames()).contains("doc-v1.pdf", "sheet.pdf");
     }
 

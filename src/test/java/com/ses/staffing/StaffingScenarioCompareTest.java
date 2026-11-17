@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T079 B2: scenario compareの定向test（L2〜L3）。
+ * T079 B2: scenario compareの対象限定test（L2〜L3）。
  * scenario操作後に実データ（t_allocation_plan/契約/提案）が不変であること・owner/共有の区別・
  * 比較値（供給FTE・稼働率・粗利）を検証する。
  */

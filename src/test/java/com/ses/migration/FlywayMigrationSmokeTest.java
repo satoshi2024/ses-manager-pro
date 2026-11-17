@@ -379,14 +379,14 @@ class FlywayMigrationSmokeTest {
                         "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
             }
             assertColumnExists(st, "t_permission_group_action", "deny_flag");
-            // V66.1: 全局wildcardは管理者だけに限定し、未知actionを既定拒否する。
+            // V66.1: グローバルwildcardは管理者だけに限定し、未知actionを既定拒否する。
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "
                             + "JOIN m_permission_group g ON g.id = a.group_id "
                             + "WHERE g.group_key IN ('role-admin','role-sales','role-hr','role-manager') "
                             + "AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
-                        "全局wildcardは管理者だけにseedされるはず");
+                        "グローバルwildcardは管理者だけにseedされるはず");
             }
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "

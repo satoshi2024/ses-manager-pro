@@ -283,7 +283,7 @@ class ApprovalEnvelopeVerifierTest {
                 fixture.policy.action(), fixture.policy.providerId(), fixture.policy.purpose(), fixture.policy.trigger(),
                 fixture.policy.retentionRule(), fixture.policy.disposition(), tamperedSignature);
 
-        // Policy の署名検証失敗（SIGNATURE_INVALID）を精密に断言
+        // Policy の署名検証失敗（SIGNATURE_INVALID）を厳密に検証
         PolicySecurityException pse = assertThrows(PolicySecurityException.class,
                 () -> verifier.verify(tamperedPolicy, fixture.approval,
                         SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
@@ -396,7 +396,7 @@ class ApprovalEnvelopeVerifierTest {
         assertEquals("職務分離違反: 申請者と承認者は異なる必要があります", pse.getMessage());
 
         // 2. Policy SoD under verify: sodPolicy に正しく紐付けられた Case を生成し、
-        // digest・時間・scope 等の前置条件を通過させて確実に SoD 判定へ到達させる
+        // digest・時間・scope 等の前提条件を通過させて確実に SoD 判定へ到達させる
         CaseApprovalEnvelope validCaseForSodPolicy = fixture.signedCase(
                 fixture.metadata("case-for-sod-policy", SyntheticAuthorityFixture.NOW.minusSeconds(30), SyntheticAuthorityFixture.NOW.plusSeconds(300)),
                 sodPolicy,

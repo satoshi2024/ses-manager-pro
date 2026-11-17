@@ -323,7 +323,7 @@ public class ResignationGateChecker {
      * <p>NF01 N1-4（決定 B-NF01-8・Q-10）: ポータルsessionを失効させるのは、管理者が登録した紐付け
      * （V188 t_portal_user_engineer_link）があり、紐付け・ポータル組織とも案件tenantに属するポータルユーザーだけ。
      * emailでは照合しない（同じemailの無関係なユーザー・他tenantのユーザーを処理しない）。紐付けの無いポータルユーザーは
-     * {@link #evaluate} が「要確認」として列挙する。紐付けにtenant不整合があれば、どの撤権より先に409で止める。
+     * {@link #evaluate} が「要確認」として列挙する。紐付けにtenant不整合があれば、どの権限取消しより先に409で止める。
      * 紐付けは要員行（rank 7）のX保持下で安定するため、読取だけでlockしない（rank 12、§3.4）。</p>
      *
      * @return session失効の対象（{@link #revokeSessionsAfterScopeActions} へ渡す）
@@ -426,7 +426,7 @@ public class ResignationGateChecker {
 
     /**
      * 自動処理の対象にする紐付け済みポータルユーザーを返す。tenant不整合の現行紐付けが1件でもあれば、
-     * 誤撤権・撤権漏れを避けるため409で中断する（NF01 N1-4。batch 0 L6のemail照合を置き換える）。
+     * 誤った権限取消し・権限取消し漏れを避けるため409で中断する（NF01 N1-4。batch 0 L6のemail照合を置き換える）。
      */
     private List<PortalUserEngineerLink> linkedPortalUsersFailClosed(Long engineerId, String tenantId) {
         Long mismatched = portalUserEngineerLinkMapper.countActiveScopeMismatchForEngineer(engineerId, tenantId);

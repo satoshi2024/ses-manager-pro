@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 経費管理一覧が、null scopeを跨tenant全件として解釈しないことをHTTP境界で検証する。
+ * 経費管理一覧が、null scopeをtenant横断全件として解釈しないことをHTTP境界で検証する。
  */
 @SpringBootTest(properties = "app.security.oidc.tenant-id=")
 @AutoConfigureMockMvc

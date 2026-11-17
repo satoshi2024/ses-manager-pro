@@ -116,7 +116,7 @@ class ImportJdbcReconnectGuardTest {
      * {@code jdbc:mysql://app:p%40ss,word@db-a:3306/...} は、Connector/J が authority を {@code ,} で先に分けてから user 情報を
      * 取るため、{@code app:p%40ss} と {@code word@db-a:3306} の2つの host になる（8.3.0 では解析に失敗する）。単一 host という
      * 期待値そのものが誤りだったため、拒否の側（下の試験）へ移した。
-     * 断言を緩めたのではない。
+     * assertを緩めたのではない。
      */
     @Test
     void 単一hostのURLはuser情報とIPv6とqueryがあっても通しMySQL以外のURLは対象にしない() {
@@ -141,7 +141,7 @@ class ImportJdbcReconnectGuardTest {
     /**
      * RB-NF05 delta review N-P3-1: 自前の文字列判定だけでは通っていたが、Connector/J 8.3.0 が複数 host・load-balance として
      * 解析する（または解析できない）URL。判定の正本は Connector/J の解析結果であり、各 URL の前提として Connector/J 自身の
-     * 解析結果も断言する（Connector/J を上げて解析が変われば、この試験が気付く）。
+     * 解析結果も検証する（Connector/J を上げて解析が変われば、この試験が気付く）。
      */
     @Test
     void user情報のカンマとschemeの空白と百分率符号化もdriverの解析に合わせて拒否する() {
@@ -183,7 +183,7 @@ class ImportJdbcReconnectGuardTest {
     /**
      * 判定の不変条件（oracle）: Connector/J が単一接続・host 1件と解析しない URL は、必ず拒否する。逆に、自前の前段判定は
      * Connector/J より厳しくてよい（{@code ;}・{@code (}・{@code =} を含む host 部、空の host 部は Connector/J が1 host と
-     * 解析しても拒否する）。ここに並べた全ての URL で、通した URL が Connector/J の単一接続であることを断言する。
+     * 解析しても拒否する）。ここに並べた全ての URL で、通した URL が Connector/J の単一接続であることを検証する。
      */
     @Test
     void 通すURLは全てConnectorJの単一接続で前段判定はそれより厳しい() {
@@ -347,7 +347,7 @@ class ImportJdbcReconnectGuardTest {
      * RB-NF05 delta review D-P3-1 (b): data-source-properties に置くと接続の型・接続先・failover／load-balance／replication の
      * 動作を変える key を、値と大文字小文字に関係なく拒否する。全ての key について、前提として Connector/J 8.3.0 の key
      * （{@code PropertyKey} の key 名か旧名、または {@code MysqlDataSource} の setter）であることと、その Properties での
-     * driver 自身の解析結果を断言してから拒否を断言する。{@code dnsSrv} 以外は driver の解析では単一接続のままで、
+     * driver 自身の解析結果を検証してから拒否を検証する。{@code dnsSrv} 以外は driver の解析では単一接続のままで、
      * 型の判定だけでは見えないため key で拒否する。
      */
     @Test

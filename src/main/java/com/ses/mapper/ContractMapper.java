@@ -161,7 +161,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
             @org.apache.ibatis.annotations.Param("allowedIds") Collection<Long> allowedIds);
 
-    /** tenant・version CASによる通常更新。更新対象はサービス側で旧値を回填した全列。 */
+    /** tenant・version CASによる通常更新。更新対象はサービス側で旧値で補完した全列。 */
     @org.apache.ibatis.annotations.Update("""
         UPDATE t_contract
            SET contract_no = #{contract.contractNo}, proposal_id = #{contract.proposalId},

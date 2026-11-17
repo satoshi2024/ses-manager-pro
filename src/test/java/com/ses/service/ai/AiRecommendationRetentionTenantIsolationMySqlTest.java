@@ -36,7 +36,7 @@ class AiRecommendationRetentionTenantIsolationMySqlTest {
             .withPassword("ses");
 
     @Test
-    void 双tenant過期データは指定tenantだけpurgeされる() throws Exception {
+    void 二つのtenantの期限切れデータは指定tenantだけpurgeされる() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")

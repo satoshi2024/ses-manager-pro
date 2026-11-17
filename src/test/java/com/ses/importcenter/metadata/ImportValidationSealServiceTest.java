@@ -823,7 +823,7 @@ class ImportValidationSealServiceTest {
 
         service.seal(fixture.capability);
 
-        // NEG-SEAL-26: アクター権限 revoke 時は 403 Forbidden（認可ゲート維持、撤権バイパス厳禁）
+        // NEG-SEAL-26: アクター権限 revoke 時は 403 Forbidden（認可ゲート維持、権限取消しのバイパス厳禁）
         when(authorization.requireCurrentAuthorizationForWrite(context))
                 .thenThrow(BusinessException.of(403, "error.forbidden"));
         var ex26 = assertThrows(BusinessException.class, () -> service.seal(fixture.capability));
@@ -838,7 +838,7 @@ class ImportValidationSealServiceTest {
         var ex27a = assertThrows(BusinessException.class, () -> service.seal(fixture.capability));
         assertEquals(409, ex27a.getCode());
 
-        // NEG-SEAL-27b: expiry 回退（capability の期限より過去へ回退）
+        // NEG-SEAL-27b: expiry の巻き戻り（capability の期限より過去へ巻き戻る）
         jdbc.update("UPDATE t_import_job SET lease_expires_at = TIMESTAMPADD(SECOND, -60, CAST(? AS TIMESTAMP)) WHERE tenant_id=? AND id=?",
                 fixture.capability.expiresAt(), TENANT, fixture.jobId);
         var ex27b = assertThrows(BusinessException.class, () -> service.seal(fixture.capability));

@@ -36,7 +36,7 @@ public final class ImportErrorCsvWriter {
 
     /**
      * error export（A1a）の最終行（b-14。W3-05 review P3-1）。{@code #END,<code行の件数>,<REJECTED行の件数>}。
-     * 全pageを書き終えた後にだけ書くため、途中の失敗（撤権・DB障害・行の不一致）で応答が切れたCSVにはこの行が無く、
+     * 全pageを書き終えた後にだけ書くため、途中の失敗（権限取消し・DB障害・行の不一致）で応答が切れたCSVにはこの行が無く、
      * 件数との照合で欠落を発見できる。列数はheaderと同じ3列にする。
      */
     public static void writeRowCodeTrailer(Writer writer, long codeLines, long rejectedRows) throws IOException {

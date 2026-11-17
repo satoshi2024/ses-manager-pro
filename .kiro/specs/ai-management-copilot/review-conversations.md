@@ -121,7 +121,7 @@ semantic catalog、各正本集計 service、DataScope、provider 契約 gate、
 - LLM 生成 SQL / table / column / service 名の任意実行経路が存在しないか。
 - intent→catalog→typed parameter→scope→service→typed result→summary→citation の各境界。
 - **deterministic core と summary 層の分離**。adapter / gateway にモデル依存が漏れていないか。
-- 画面 / export / AI 値の口径、円/割合/期間/timezone/freshness/confirmed/forecast/NULL/0。
+- 画面 / export / AI 値の集計基準、円/割合/期間/timezone/freshness/confirmed/forecast/NULL/0。
 - source link と個票再認可。回答文 / error / log / run / feedback から scope 外 ID / PII の推測。
 - prompt injection、DB 本文の instruction 化、巨大 result、token/cost limit、provider retention/越境 gate。
 - model / prompt / catalog / data version、latency / cost、feedback / outcome、回答再現性。
@@ -156,7 +156,7 @@ semantic catalog、各正本集計 service、DataScope、provider 契約 gate、
 | # | 横断観点 | NF-08 証跡の読み方 |
 |---|---|---|
 | 1 | 既存 AI gateway との競合 | `MANAGEMENT_COPILOT` useCase が `AiExecutionGateway` 経由のみ。直結 HTTP を増やしていないか |
-| 2 | 正本 service 口径 | Dashboard / UtilizationForecast / ManagementAccounting / CashFlow と **同一** service を AI が呼ぶか。NF-10 定期レポートと metric 定義が矛盾しないか |
+| 2 | 正本 service 集計基準 | Dashboard / UtilizationForecast / ManagementAccounting / CashFlow と **同一** service を AI が呼ぶか。NF-10 定期レポートと metric 定義が矛盾しないか |
 | 3 | DataScope / 組織 scope | NF-08 `CopilotScopeResolver` が `DataScopeService` と NF-02/NF-10 と同じ母集団か |
 | 4 | PII / retention | NF-07 と G10 allowlist。raw prompt 0 日。copilot 独自 allowlist を作っていないか |
 | 5 | 本番 gate | `GATE-S17-G10-PROD`、DG-08、NF-07 が他 NF と同時に未完了でも、NF-08 だけ flag ON していないか |

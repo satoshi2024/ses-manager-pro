@@ -61,7 +61,7 @@ public class HeatmapDto {
         }
     }
 
-    /** 1月分のセル。FTEは月別FTE（design §5.2の口径）。 */
+    /** 1月分のセル。FTEは月別FTE（design §5.2の算定基準）。 */
     public static class MonthCell {
         private String month;
         private BigDecimal demandFte;

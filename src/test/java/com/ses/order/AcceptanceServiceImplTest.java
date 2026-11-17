@@ -27,7 +27,7 @@ import java.time.LocalDate;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T057定向テスト: 月次検収service（L2〜L3）。
+ * T057対象限定テスト: 月次検収service（L2〜L3）。
  * 状態遷移・snapshot不変・差戻し→再提出・検収取消（承認適用）・work record再openガード。
  */
 @SpringBootTest

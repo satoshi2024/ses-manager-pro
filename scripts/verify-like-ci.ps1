@@ -684,7 +684,7 @@ if ($endHeadSha -ne $startHeadSha) {
     $sessionData['failureReason'] = "HEAD_CHANGED_DURING_EXECUTION (start=$startHeadSha, end=$endHeadSha)"
     $sessionData['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
-    Write-Error "FATAL: 実行中に Git HEAD SHA が変化しました ($startHeadSha -> $endHeadSha)。門禁は拒絶されます."
+    Write-Error "FATAL: 実行中に Git HEAD SHA が変化しました ($startHeadSha -> $endHeadSha)。ゲートは拒否されます."
     exit 1
 }
 

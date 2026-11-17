@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** T057定向テスト: 検収取消の承認adapter（L1）。 */
+/** T057対象限定テスト: 検収取消の承認adapter（L1）。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AcceptanceApprovalAdapterTest {

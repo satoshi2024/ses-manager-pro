@@ -50,7 +50,7 @@
 |---|---|---|---|
 | order-acceptance-workflow-R7-P1-02 | P1 | 最終code/evidence Headでの単一クリーンL4未取得 | afad974上で`verify-like-ci.ps1`単一クリーン実行 → **1549/0/0/0・Skipped 0・BUILD SUCCESS（Total 1:28h・verify-like-ci-r8.log）**（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-03 | P2 | ledger provenanceが実Headと不一致 | review-ledger §1/§2/§21・中央ledger row9を code/evidence Head afad974・L4 1549/0/0/0・runId へ同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-04 | P2 | Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結） | `CdpBrowser`（JDK標準WebSocket+Jacksonのみ）による実Chrome/CDP制御へ書き換え。同一セッション認証→`/acceptance?...&acceptanceId=<動的ID>`→最終URL≠/login→`tr[data-acceptance-id].table-warning`存在→ビューポート内可視を実DOM断言。PNG（SHA-256実ファイル照合）・実HAR（Networkイベント）・実console（favicon 404のみ）を同一runから生成。旧偽証跡を削除（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結） | `CdpBrowser`（JDK標準WebSocket+Jacksonのみ）による実Chrome/CDP制御へ書き換え。同一セッション認証→`/acceptance?...&acceptanceId=<動的ID>`→最終URL≠/login→`tr[data-acceptance-id].table-warning`存在→ビューポート内可視を実DOMでの検証。PNG（SHA-256実ファイル照合）・実HAR（Networkイベント）・実console（favicon 404のみ）を同一runから生成。旧偽証跡を削除（VERIFIED_CLOSED） |
 
 NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreenshotTestの共有H2分離強化推奨・postfix browser Demoは本番前gateとして継続管理。
 
@@ -506,10 +506,10 @@ R07終局判定（Base 5eabc51 / code-evidence Head 327e87c / FAIL: P0=0/P1=1/P2
 
 - **同一ブラウザセッション内でログイン**（フォーム送信・CSRF hidden inputはフォームが保持）→
   通知遷移URL `/acceptance?workMonth=2026-07&acceptanceId=<動的ID>` へ遷移。
-- **最終URLが /login でない**ことを実DOM（`location.href`）で断言。
-- **`tr[data-acceptance-id='<動的ID>'].table-warning` が存在**することを実DOMで断言
+- **最終URLが /login でない**ことを実DOM（`location.href`）で検証。
+- **`tr[data-acceptance-id='<動的ID>'].table-warning` が存在**することを実DOMで検証
   （`acceptance.js` に `tr.dataset.acceptanceId` 付与を追加しDOM検証可能化）。
-- **ビューポート内可視**（`getBoundingClientRect`）でscrollIntoViewの結果を断言。
+- **ビューポート内可視**（`getBoundingClientRect`）でscrollIntoViewの結果を検証。
 - **PNG / HAR / console を同一ブラウザrunから生成**: HARはCDP `Network.*` 実イベント、
   consoleはCDP `Runtime.consoleAPICalled` / `Log.entryAdded` 実イベントから構成。
   結論（"0 errors"等）をJava文字列で連結しない。
@@ -518,7 +518,7 @@ R07終局判定（Base 5eabc51 / code-evidence Head 327e87c / FAIL: P0=0/P1=1/P2
   `finalUrl=/acceptance`・`targetRowTableWarning=true`・`targetRowVisibleInViewport=true` を実測。
   console error は実favicon 404の1件のみ（実ブラウザ挙動・ベニン）。
 - 旧偽証跡（auto-login-redirect.html / browser-runner.ps1 / 偽console・HAR・provenance / postfix-browser-demo）を削除。
-- `AcceptanceJsRuntimeTest` に dataset モックと data-acceptance-id 断言を追加。
+- `AcceptanceJsRuntimeTest` に dataset モックと data-acceptance-id の検証を追加。
 
 ### R7-P1-02（REOPEN・P1）: 最終code/evidence Headでの単一クリーンL4未取得
 
@@ -544,7 +544,7 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
 - `src/test/java/com/ses/web/RealBrowserScreenshotTest.java`（実Chrome/CDP制御へ書き換え）
 - `src/test/java/com/ses/web/CdpBrowser.java`（新規: 最小CDPクライアント）
 - `src/main/resources/static/js/modules/acceptance.js`（tr.dataset.acceptanceId付与）
-- `src/test/java/com/ses/web/AcceptanceJsRuntimeTest.java`（datasetモック＋断言）
+- `src/test/java/com/ses/web/AcceptanceJsRuntimeTest.java`（datasetモック＋検証）
 - `.kiro/specs/order-acceptance-workflow/evidence/browser-r8/*`（実証跡: PNG/HAR/console/summary/seed-provenance）
 - `.kiro/specs/order-acceptance-workflow/evidence/` 旧偽証跡削除
 - `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
@@ -563,7 +563,7 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
 
 独立Review（R09 Round8、read-only、Base 5eabc51 → code/evidence Head afad974 → current Head 1735ef5）:
 判定 **PASS（P0=0 / P1=0 / P2=0 / NOTE=3 / open release gates=0）**。
-R7終局判定の3指摘（R7-P1-02 / R7-P2-03 / R7-P2-04）を実diff・実DOM断言・PNG SHA-256照合・
+R7終局判定の3指摘（R7-P1-02 / R7-P2-03 / R7-P2-04）を実diff・実DOMでの検証・PNG SHA-256照合・
 実HAR/console・L4ログ（1549/0/0/0・zero-skip・Total 1:28h）で解決確認。新規P0/P1なし。
 
 - 最終Head `1735ef5` のコードtreeはL4証拠commit `afad974` と同一（差分はdocs/evidenceのみ）。

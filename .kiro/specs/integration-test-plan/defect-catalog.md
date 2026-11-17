@@ -6,7 +6,7 @@
 
 ## 1. 欠陥サマリ
 
-| 欠陥ID | Severity | 対象モジュール | 関連用例ID | 状態 | 担当Owner | 概要 |
+| 欠陥ID | Severity | 対象モジュール | 関連テストID | 状態 | 担当Owner | 概要 |
 |---|:---:|---|---|:---:|:---:|---|
 | D-20260816-001 | P2 | MOD-10 S12 / StaffingHeatmapService | `StaffingPerformanceTest` | OPEN | 開発（S12） | 代表データ量（200要員×50position×24月）需給集計時のN+1多表クエリによるp95遅延超過（実測402s > 10s閾値） |
 | D-20260817-002 | P2 | MOD-07 / ContractApiController | `E2E-07-R / MOD07-07 / PILOT-05` | VERIFIED_CLOSED | 開発（契約管理） | `ContractSaveDto` に `version` 属性が欠落しており、更新APIでMyBatis-Plus楽観ロックがバイパスされる。行ロック（`selectByIdForUpdate`）により直列化されるが、409競合検知が行われず後勝ち上書きとなる。 |
@@ -23,7 +23,7 @@
 - **欠陥ID**: `D-20260816-001`
 - **Severity**: `P2`（性能gate未達 / S12未受入範囲）
 - **対象モジュール**: `MOD-10 S12 / StaffingHeatmapService`
-- **関連用例ID**: `StaffingPerformanceTest.データ量増加でp95とheap増加を実測`
+- **関連テストID**: `StaffingPerformanceTest.データ量増加でp95とheap増加を実測`
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `CI-20260816-001`
 - **状態**: `OPEN`
@@ -39,7 +39,7 @@
   - heap増加 < 256MB
 - **実際の結果**:
   - 5回測定値: `[88214ms, 169877ms, 241060ms, 328255ms, 402086ms]`
-  - `p95 = 402,086ms`（約402秒）となり、断言 `assertTrue(p95 < 10_000)` に違反。
+  - `p95 = 402,086ms`（約402秒）となり、assert `assertTrue(p95 < 10_000)` に違反。
 - **Root Cause**:
   - `StaffingHeatmapServiceImpl` 内の需給集計ロジックにおいて、要員（200件）× 月（24か月）に対してループ内で個別テーブル（`m_work_calendar`, `t_leave_request`, `t_allocation_plan` 等）の `selectList` を発行する N+1 クエリ構造が存在し、データ量増加に伴いクエリ回数・実行時間が急増している。
 - **証跡**:
@@ -54,7 +54,7 @@
 - **欠陥ID**: `D-20260817-002`
 - **Severity**: `P2`（行ロック `selectByIdForUpdate` によりデータ破損は防がれ直列化されるが、409 楽観ロック競合検知が動作せず後勝ち上書きとなる）
 - **対象モジュール**: `MOD-07 / ContractApiController`
-- **関連用例ID**: `E2E-07-R / MOD07-07 / PILOT-05`
+- **関連テストID**: `E2E-07-R / MOD07-07 / PILOT-05`
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `E2E-20260816-001`
 - **状態**: `VERIFIED_CLOSED`
@@ -86,7 +86,7 @@
 - **欠陥ID**: `D-20260817-003`
 - **Severity**: `P2`（要員BP所属履歴 API `/api/bp-affiliations/**` へのアクセスが全ロールで遮断される）
 - **対象モジュール**: `MOD-03 / ActionPermissionResolver`
-- **関連用例ID**: `MOD03-18`
+- **関連テストID**: `MOD03-18`
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `E2E-20260816-001`
 - **状態**: `OPEN`
@@ -110,7 +110,7 @@
 - **欠陥ID**: `D-20260818-004`
 - **Severity**: `P1`（RELEASE-BLOCKING / 外部SaaS状態とDB状態の不可逆的不整合）
 - **対象モジュール**: `MOD-07 / CloudSignDispatchService`
-- **関連用例ID**: `MOD07-09`（KNOWN_RISK / RELEASE-BLOCKING）
+- **関連テストID**: `MOD07-09`（KNOWN_RISK / RELEASE-BLOCKING）
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `E2E-20260816-001`
 - **状態**: `OPEN`
@@ -133,7 +133,7 @@
 - **欠陥ID**: `D-20260818-005`
 - **Severity**: `P2`
 - **対象モジュール**: `MOD-03 / ActionPermissionResolver`
-- **関連用例ID**: `MOD03-19 / BpMigrationApiController`
+- **関連テストID**: `MOD03-19 / BpMigrationApiController`
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `E2E-20260816-001`
 - **状態**: `OPEN`

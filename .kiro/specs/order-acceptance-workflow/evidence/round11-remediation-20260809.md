@@ -22,8 +22,8 @@
 
 | 範囲 | command / 結果 |
 |---|---|
-| 定向 storage/order回帰 | `mvn -B -Dtest=DocumentStorageTest,DocumentServiceImplTest,SalesOrderServiceImplTest -DfailIfNoTests=false test` — 30 tests / 0 failures / 0 errors / 0 skipped |
-| 定向 scope回帰 | `mvn -B -Dtest=SalesOrderDocumentScopeTest,AcceptanceAsOfScopeTest -DfailIfNoTests=false test` — 9 / 0 / 0 / 0 |
+| 対象限定の storage/order回帰 | `mvn -B -Dtest=DocumentStorageTest,DocumentServiceImplTest,SalesOrderServiceImplTest -DfailIfNoTests=false test` — 30 tests / 0 failures / 0 errors / 0 skipped |
+| 対象限定の scope回帰 | `mvn -B -Dtest=SalesOrderDocumentScopeTest,AcceptanceAsOfScopeTest -DfailIfNoTests=false test` — 9 / 0 / 0 / 0 |
 | 実MySQL concurrency | `mvn -B -Dtest=ConcurrentSubmitReopenTest -DfailIfNoTests=false test` — 3 / 0 / 0 / 0 |
 | L4 | `scripts/verify-like-ci.ps1`のMaven/Surefire child完了後に全reportを集計 — 282 classes / 1582 tests / 0 failures / 0 errors / 0 skipped。Docker MySQL smokeを含む |
 | diff hygiene | `git diff --check` — exit 0 |

@@ -218,7 +218,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | dto.portal.* | portal向けの顧客/BP/請求/契約/検収 DTO | REUSE-CANDIDATEの設計例。ただしportal principalと公開client scopeは別 |
 | dto.accounting.canonical.* | freee向けcanonical payload/result | internal provider契約。公開responseとしては使用しない |
 | dto.contract / engineer / project / invoice | internal UI/APIのresponse shaping | field inventoryとscopeを再確認し、公開DTOへコピーする |
-| dto.report / dashboard / analytics | 管理画面集計 | 公開APIのscope・freshness・金額口径を別途承認 |
+| dto.report / dashboard / analytics | 管理画面集計 | 公開APIのscope・freshness・金額の算定基準を別途承認 |
 | InvoiceDetailDto | Invoiceをextendsする既存DTO | 使用禁止。internal entity serializationの危険な前例 |
 | Entity全般 | MyBatis-Plus persistence model | 使用禁止。external mapperでallow-list DTOへ変換 |
 

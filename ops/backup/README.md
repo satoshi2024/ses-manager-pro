@@ -113,7 +113,7 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    ```bash
    ops/backup/image/tool-image.sh build-record --out <evidence-dir-2>
    ```
-   - `Dockerfile` → `image/install-toolchain.sh` が、固定値の占位値（`UNPINNED`）を拒否し、MySQL APT 署名鍵の
+   - `Dockerfile` → `image/install-toolchain.sh` が、固定値の仮置きの値（`UNPINNED`）を拒否し、MySQL APT 署名鍵の
      SHA-256・primary key が 1 つであること・primary key の full fingerprint・有効期限、restic の SHA-256
      （公式 `SHA256SUMS`）を検証する。1 つでも満たさなければ build が失敗する。lock に記載があれば完全一致も要求する。
    - MySQL APT 署名鍵（`RPM-GPG-KEY-mysql-2025`）の有効期限は **2027-10-23**。期限を過ぎると build が失敗するため、
@@ -206,7 +206,7 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 ## テスト
 
 - unit: `tests/run-unit-tests.sh`（fake CLI に対する全 script の検証、Docker 必須。ツールイメージを build するため、
-  Dockerfile の固定値が占位値のままだと build で失敗する）
+  Dockerfile の固定値が仮置きの値のままだと build で失敗する）
 - integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合、
   最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合。CI の `backup-integration` job と同一）
 - ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`

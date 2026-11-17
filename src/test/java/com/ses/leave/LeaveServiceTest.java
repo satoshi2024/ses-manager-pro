@@ -37,7 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * T071の申請・分計算・期間重複・残数両モード・取消・付与・scopeのL2定向test。
+ * T071の申請・分計算・期間重複・残数両モード・取消・付与・scopeのL2対象限定test。
  * approval engineはmock（承認後のadapter動作はLeaveApprovalAdapterTestと統合testが検証する）。
  */
 @SpringBootTest

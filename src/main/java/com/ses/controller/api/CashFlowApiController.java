@@ -63,11 +63,11 @@ public class CashFlowApiController {
                     m.getBalance().toPlainString());
         }
 
-        // 起点月の売上口径突合（全社KPIとの照合用）を末尾に付記する。
+        // 起点月の売上の集計基準突合（全社KPIとの照合用）を末尾に付記する。
         CashFlowForecastDto.ReconciliationDto rec = result.getReconciliation();
         if (rec != null) {
             writer.println();
-            writer.println("口径突合(起点月),全社KPI売上(税抜),当月請求(税抜),差分");
+            writer.println("集計基準突合(起点月),全社KPI売上(税抜),当月請求(税抜),差分");
             writer.printf("%s,%s,%s,%s%n",
                     rec.getMonth(),
                     rec.getKpiSales().toPlainString(),

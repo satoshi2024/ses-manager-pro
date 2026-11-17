@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T075 F1: シナリオのisolation（R3.3）・dates検証・可視性の定向test（L2〜L3）。
+ * T075 F1: シナリオのisolation（R3.3）・dates検証・可視性の対象限定test（L2〜L3）。
  * scenario操作の前後で実データ（t_allocation_plan）が不変であることを固定する。
  */
 @SpringBootTest

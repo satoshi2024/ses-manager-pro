@@ -159,7 +159,7 @@ certificate の成功内容は PDF である。レスポンスの Content-Type �
 
 ### 6.2 dispatch state
 
-| state | 許可遷移 | 防重/competing writer | timeout/crash |
+| state | 許可遷移 | 重複防止/competing writer | timeout/crash |
 |---|---|---|---|
 | `NONE` | `QUEUED` | `(id, version, state)` CAS | 変化なし |
 | `QUEUED` | `CREATING` | worker claim CAS | stale 前なら他worker禁止 |

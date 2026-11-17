@@ -20,7 +20,7 @@ import java.util.Map;
  * <ul>
  *   <li>plan/actualの二重計上は<b>SQLのWHERE句</b>で排他する（source_contract_id IS NULL/NOT NULL。
  *       design §5.4。memory filterにしない）。</li>
- *   <li>稼働率の口径は {@link UtilizationCalcService} に委譲し、dashboard KPIと同一値にする（design §5.1）。</li>
+ *   <li>稼働率の集計基準は {@link UtilizationCalcService} に委譲し、dashboard KPIと同一値にする（design §5.1）。</li>
  *   <li>更新済契約（autoRenew=1∧assumeRenew∧renewalDecision≠'END'）は終了日以降もactualとして延長。
  *       {@code UtilizationCalcService.isActiveInMonth} と同一規則。</li>
  *   <li>退場予定（engineer.status='退場予定'）は最終契約終了日以降の供給を0にする。</li>
@@ -52,7 +52,7 @@ public interface StaffingCapacityService {
     List<EngineerMonthSupply> supplyBatch(List<Engineer> engineers, YearMonth from, YearMonth to, LocalDate asOf);
 
     /**
-     * 稼働率（%）。{@link UtilizationCalcService#calc} に委譲し、dashboard KPIと同一口径を保証する。
+     * 稼働率（%）。{@link UtilizationCalcService#calc} に委譲し、dashboard KPIと同一の集計基準を保証する。
      * 対象契約/有効判定/自動更新の扱いはUtilizationCalcServiceが唯一の正。
      */
     UtilizationCalcService.UtilizationSnapshot utilization(YearMonth month, List<Engineer> engineers,

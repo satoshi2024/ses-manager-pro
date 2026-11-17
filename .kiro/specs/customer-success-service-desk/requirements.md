@@ -69,7 +69,7 @@
 ## CS-R6 非機能（CR-01〜CR-06の適用）
 
 1. THE 更新API SHALL CSRF、menu/action permission、domain scopeを全て通過した場合だけ実行する。
-2. THE 状態変更 SHALL `version` と旧statusを条件にしたCASで防重し、affected rows=0は409とする。CAS失敗後に状態イベントを作成してはならない。
+2. THE 状態変更 SHALL `version` と旧statusを条件にしたCASで重複を防ぎ、affected rows=0は409とする。CAS失敗後に状態イベントを作成してはならない。
 3. THE 外部I/O（通知outbox、file scan）SHALL DB transaction外で実行する。
 4. THE 文言 SHALL 4 bundle（`messages`/`_en`/`_zh_CN`/`_ko`）へ同一keyを追加し、日本語を正として翻訳する。`messages_ja` は作らない。
 5. THE UI SHALL desktopと390pxで起票・返信・CSAT・内部メモ切替を完了できる。二重click抑止はserver冪等の代替にしない。

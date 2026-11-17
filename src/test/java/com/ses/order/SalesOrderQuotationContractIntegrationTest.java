@@ -29,7 +29,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T055定向テスト: 見積→注文→契約（L2〜L3）。
+ * T055対象限定テスト: 見積→注文→契約（L2〜L3）。
  * 条件引継ぎ・差分検出・契約化2回で1件・取消と契約化の競合。
  */
 @SpringBootTest

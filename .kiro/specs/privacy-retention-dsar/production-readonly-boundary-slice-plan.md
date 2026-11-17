@@ -1,4 +1,4 @@
-# NF07 本番只読境界スライス Batch 4a 設計書
+# NF07 本番読取り専用境界スライス Batch 4a 設計書
 
 状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ CODE REVIEW PENDING（直近REQUEST CHANGESへの修正後、再審査待ち）**（作成時の記録）
 
@@ -124,7 +124,7 @@ Providerと`ProductionApprovalEnvelopeVerifier`は注入されたtrusted `Clock`
 * identity positive: `LoginUser`の有効な内部tenant/actorと明示authority、およびOIDC内部bindingと全claimが一致するケースでcaller contextが作られる。
 * guard positive: test `Environment`が明示的に`prod`をactive profileとして返し、audienceが`PRODUCTION`のときだけguardが通る。
 * wrapper positive fixture: unit test内でのみ生成したephemeral key/current-candidate/revocation ACTIVE fixtureで、共通検証経路がmetadataを返すことを確認する。fixture keyはproduction Trust Anchorではなく、bean/config/storeへ登録されない。結果はテスト専用コード経路の検証であり、本番鍵登録、本番ポリシー承認、Production PASSを意味しない。
-* synthetic fixtureでの既存合成経路の正向テストはsynthetic suite内に保つ。Production wrapperにsynthetic audience/keyを通すテストは作らず、拒否を確認する。
+* synthetic fixtureでの既存合成経路の正常系テストはsynthetic suite内に保つ。Production wrapperにsynthetic audience/keyを通すテストは作らず、拒否を確認する。
 
 いずれのテストも、DB、Spring ApplicationContext、外部ネットワーク、KMS/CRL、Controllerを起動しない。成功テストは純粋kernel委任と防護境界の検証に限る。
 

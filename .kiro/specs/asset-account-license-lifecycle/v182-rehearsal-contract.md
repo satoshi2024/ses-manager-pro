@@ -206,7 +206,7 @@ UPDATE t_nf09_scope_repair_queue
 
 ## 7. 検証・検収テストケースマトリクス
 
-| 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
+| ケース ID | カテゴリ | テスト条件 | 期待される動作・結果 |
 |---|---|---|---|
 | `TC-REP-01` | 正常系 | 孤立インボイスの正しいスコープを特定し同一Txで修復完了 | インボイスの `tenant_id` 更新成功、キュー行 `status='RESOLVED'`, `version` 加算。 |
 | `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `status='VERIFIED'`, `deleted_flag=0` となり、DB生成列 `callback_active_slot=1` が自動導出され一意制約成立。無効化行は `slot IS NULL` となる。キュー行完了。 |

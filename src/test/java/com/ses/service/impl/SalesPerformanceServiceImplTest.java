@@ -259,7 +259,7 @@ public class SalesPerformanceServiceImplTest {
         assertEquals(0, last.getTotalSalesAmount().compareTo(new BigDecimal("600000")));
         assertEquals(0, last.getTotalProfitAmount().compareTo(new BigDecimal("200000")));
 
-        // 全行合計 = 共通口径の全社売上(800000 + 600000)
+        // 全行合計 = 共通の集計基準の全社売上(800000 + 600000)
         BigDecimal totalSales = result.stream()
                 .map(SalesPerformanceDto::getTotalSalesAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);

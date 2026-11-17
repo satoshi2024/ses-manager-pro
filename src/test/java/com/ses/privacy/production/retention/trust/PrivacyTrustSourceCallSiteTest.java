@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link PrivacyTrustSource} の {@code policyAnchors()}・{@code holdReleaseAnchors()}・{@code revocations()} を、main の source で
- * {@link PrivacyTrustSource} の内部（{@code policyAnchorsOf}・{@code holdReleaseAnchorsOf}・{@code revocationsOf} の惰性の包み）
+ * {@link PrivacyTrustSource} の内部（{@code policyAnchorsOf}・{@code holdReleaseAnchorsOf}・{@code revocationsOf} の遅延評価の包み）
  * 以外から呼ばせない（RB-NF07-REG review P2-1 の契約）。
  *
  * <p>構築時に1回呼んで結果を verifier へ渡すと、anchor の削除・失効状態の変化が再起動まで反映されない（NF08 の送信判定も起動時の
@@ -31,16 +31,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>包みの結果を構築時に読んで固定する書き方（{@code policyAnchorsOf(s).anchors()}・{@code revocationsOf(s).statusOf(..)} を
  * 同じ式で呼ぶ）も検出する（RB-NF08-LINK review P3-3(a)）。<b>静的な走査で検出しないもの</b>: reflection（{@code getMethod(...)}）
- * による呼出し、包みを変数へ入れてから別の文で {@code anchors()} を呼ぶ快照。これらを防ぐため、包みの呼出し元は
- * {@link #WRAPPER_CALL_SITES} の一覧に固定し、一覧の各 file には「構築時に trust を読まず、判定のたびに読む」行為 test を対応させる。
- * <b>呼出し元を足すときは、その行為 test を書いてから一覧へ足す</b>（一覧が実際の呼出し元と食い違えば本 test が失敗する）。
+ * による呼出し、包みを変数へ入れてから別の文で {@code anchors()} を呼ぶスナップショット。これらを防ぐため、包みの呼出し元は
+ * {@link #WRAPPER_CALL_SITES} の一覧に固定し、一覧の各 file には「構築時に trust を読まず、判定のたびに読む」挙動 test を対応させる。
+ * <b>呼出し元を足すときは、その挙動 test を書いてから一覧へ足す</b>（一覧が実際の呼出し元と食い違えば本 test が失敗する）。
  */
 class PrivacyTrustSourceCallSiteTest {
 
     /** 呼出し（{@code .name(}）か method 参照（{@code ::name}）。field の参照（{@code this.revocations =}）は拾わない。 */
     private static final Pattern CALL = Pattern.compile(
             "(?:\\.\\s*(policyAnchors|holdReleaseAnchors|revocations)\\s*\\(|::\\s*(policyAnchors|holdReleaseAnchors|revocations)\\b)");
-    /** 包みの結果を同じ式で読んで固定する快照（引数の括弧は1段まで）。 */
+    /** 包みの結果を同じ式で読んで固定するスナップショット（引数の括弧は1段まで）。 */
     private static final Pattern SNAPSHOT = Pattern.compile(
             "(?:(?:policyAnchorsOf|holdReleaseAnchorsOf)\\s*\\((?:[^()]|\\([^()]*\\))*\\)\\s*\\.\\s*anchors\\s*\\("
                     + "|revocationsOf\\s*\\((?:[^()]|\\([^()]*\\))*\\)\\s*\\.\\s*statusOf\\s*\\()");
@@ -48,7 +48,7 @@ class PrivacyTrustSourceCallSiteTest {
     private static final Pattern WRAPPER = Pattern.compile("\\b(?:policyAnchorsOf|holdReleaseAnchorsOf|revocationsOf)\\s*\\(");
     private static final String ALLOWED = "com/ses/privacy/production/retention/trust/PrivacyTrustSource.java";
 
-    /** 包みの呼出し元（main）と、構築時に trust を読まず判定のたびに読むことを確かめる行為 test（src/test/java の相対 path）。 */
+    /** 包みの呼出し元（main）と、構築時に trust を読まず判定のたびに読むことを確かめる挙動 test（src/test/java の相対 path）。 */
     private static final Map<String, String> WRAPPER_CALL_SITES = Map.of(
             "com/ses/privacy/production/PrivacyProductionConfiguration.java",
             "com/ses/privacy/production/retention/policy/PrivacyPolicyRegistrationConfigurationTest.java",
@@ -60,7 +60,7 @@ class PrivacyTrustSourceCallSiteTest {
             "com/ses/privacy/production/PrivacyPolicyEnforcementConfigurationTest.java");
 
     @Test
-    void trust_sourceのanchorと失効状態はPrivacyTrustSourceの惰性の包みからだけ呼ぶ() throws Exception {
+    void trust_sourceのanchorと失効状態はPrivacyTrustSourceの遅延評価の包みからだけ呼ぶ() throws Exception {
         Path root = Path.of("src/main/java");
         List<String> violations = new ArrayList<>();
         Set<String> wrapperCallers = new TreeSet<>();
@@ -79,7 +79,7 @@ class PrivacyTrustSourceCallSiteTest {
                 }
                 Matcher snapshot = SNAPSHOT.matcher(source);
                 while (snapshot.find()) {
-                    violations.add(relative + " 構築時の快照: " + snapshot.group());
+                    violations.add(relative + " 構築時のスナップショット: " + snapshot.group());
                 }
                 if (!ALLOWED.equals(relative) && WRAPPER.matcher(source).find()) {
                     wrapperCallers.add(relative);
@@ -91,15 +91,15 @@ class PrivacyTrustSourceCallSiteTest {
         // 検査が空振りしていない（包みの中の呼出しを検出できている）
         assertTrue(allowedSiteFound, "PrivacyTrustSource 内の呼出しを検出できません");
         assertEquals(new TreeSet<>(WRAPPER_CALL_SITES.keySet()), wrapperCallers,
-                "包みの呼出し元が一覧と違います。新しい呼出し元には行為 test を書いて WRAPPER_CALL_SITES へ足してください");
+                "包みの呼出し元が一覧と違います。新しい呼出し元には挙動 test を書いて WRAPPER_CALL_SITES へ足してください");
         for (Map.Entry<String, String> entry : WRAPPER_CALL_SITES.entrySet()) {
             assertTrue(Files.exists(Path.of("src/test/java").resolve(entry.getValue())),
-                    entry.getKey() + " の行為 test が見つかりません: " + entry.getValue());
+                    entry.getKey() + " の挙動 test が見つかりません: " + entry.getValue());
         }
     }
 
     @Test
-    void 検出規則は呼出しとmethod参照と同じ式の快照を拾い宣言と包みとcommentは拾わない() {
+    void 検出規則は呼出しとmethod参照と同じ式のスナップショットを拾い宣言と包みとcommentは拾わない() {
         for (String call : List.of("source.policyAnchors().anchors()", "trust.revocations()", "x . holdReleaseAnchors()",
                 "PrivacyTrustSource::policyAnchors", "this.revocations()")) {
             assertTrue(CALL.matcher(call).find(), call);

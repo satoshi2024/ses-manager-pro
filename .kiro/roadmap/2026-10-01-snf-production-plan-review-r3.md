@@ -30,7 +30,7 @@ Bench engineerが併存し、通常作成の業務不変条件を破る。
 
 初期proposal限定・成約遷移禁止・Contract派生禁止は維持するが、必要validation、Engineer派生状態同期、
 outcome/auditを同一row transactionまたは信頼できる永続outboxへ含める。
-通常作成との後置条件一致、故障時原子rollback、冪等再実行の副作用重複防止を要求する。
+通常作成との事後条件一致、故障時原子rollback、冪等再実行の副作用重複防止を要求する。
 parser/schema/合成fixture/read-only validator/registry/fence/previewは先行可能。
 child非対応とmanual remediationは初回増分の制約であり、全rollback機能完了ではない。
 

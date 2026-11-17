@@ -26,7 +26,7 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   ('default', 5, 'file.download', 0, 0),
   ('default', 5, 'profile.*', 0, 0);
 
--- V66.1の既知resource許可。非管理者のV66全局wildcardは削除済み。
+-- V66.1の既知resource許可。非管理者のV66グローバルwildcardは削除済み。
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
 SELECT 'default', g.group_id, a.action_key, 0, 0
 FROM (VALUES (2), (3), (4)) g(group_id)
@@ -102,7 +102,7 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
 -- V121: 資格番号の復号（certification.pii.view）は role-admin（1）と role-hr（3）だけに明示許可する。
 -- V126: 資格・学習・skill gap の画面actionは role-admin・role-hr・role-manager（1・3・4）へ付与する。
 -- resource は certification-learning-gap で、certification.pii.view の候補（certification.*）とは別のresourceである。
--- 営業（2）・マネージャー（4）に certification.pii.view の許可根拠が無いことを ActionPermissionMatrixTest が断言する（FINAL P3-4-1）。
+-- 営業（2）・マネージャー（4）に certification.pii.view の許可根拠が無いことを ActionPermissionMatrixTest が検証する（FINAL P3-4-1）。
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
   ('default', 1, 'certification.pii.view', 0, 0),
   ('default', 3, 'certification.pii.view', 0, 0),

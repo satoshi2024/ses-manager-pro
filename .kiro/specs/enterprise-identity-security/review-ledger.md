@@ -301,7 +301,7 @@
 
 | Issue | 深刻度 | 状態 | 修正・再現境界 |
 |---|---|---|---|
-| S03-R03-P1-01 | P1 | VERIFIED_CLOSED | 非管理者の全局`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
+| S03-R03-P1-01 | P1 | VERIFIED_CLOSED | 非管理者のグローバルな`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
 | S03-R03-P1-02 | P1 | VERIFIED_CLOSED | break-glass事件へexact `allowed_actions`を追加。sessionを事件へ固定し、各requestで状態・期限・scopeを再検証してpersistent sessionを即時失効。参照/exportを含む全操作を事前必須監査し、ACTIVE時に申請者・承認者へ即時通知 |
 | S03-R03-P1-03 | P1 | VERIFIED_CLOSED | legacy移行とrescanでmax size・magic/構造検証をscanner前に実施。偽装PDF・上限超過はclean scannerでもquarantine |
 | S03-R03-P1-04 | P1 | VERIFIED_CLOSED | page URIをmatched menuのAPI prefixから同じview actionへ解決し、restrictive groupのpage直達を403 |

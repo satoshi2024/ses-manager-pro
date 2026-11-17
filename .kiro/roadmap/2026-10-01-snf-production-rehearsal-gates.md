@@ -135,7 +135,7 @@ scope修復は別の承認済みdata repairとして扱い、case/task/event/証
 - notification/outbox lag、provider failure/retry、repair count、scope拒否、backup age、DLQ、cost、
   p95/5xxを監視する。alert先と対応者、閾値、観測期間はproduction運用packetで固定する。
 - binary rollbackはschema互換・外部副作用・data変更が安全な場合のみ。互換性不明、data repairや
-  撤権等の不可逆事象では停止・隔離してforward-fixを選び、安易な旧DB復元で新しい取引を失わない。
+  権限取消し等の不可逆事象では停止・隔離してforward-fixを選び、安易な旧DB復元で新しい取引を失わない。
 
 ## Go/No-Go署名
 

@@ -319,7 +319,7 @@ S-9のstaging観測はB2c-2実装・persistent接続完了後、本番開放前�
 
 署名が揃うまで、本番の `ai.external-send-enabled` は false のままとする。
 
-NF07-NF08-LINK は実装済み（RB-NF08-LINK。§0）だが、上の S-1〜S-10 の代わりにはならない。LINK が許可するのは S-3 の NF07 policy が登録・有効化されて `APPROVED_ACTIVE` になった後だけで、その前提（NF07 の D-02・D-03・D-08 の署名、NF07-TRUST の D-03 方式の adapter、`privacy.retention.enabled=true`）も未取得である。LINK の key の data element は本番 catalog（V196）にある `AI_EXTERNAL_PROVIDER_COPY`（外部送信で生じる provider 側の写し、`AI_PAYLOAD`・storage `gemini-adapter.request`）に決めた（主控決定。DDL なし）。**Privacy Owner がこの data element への束縛を確認する（未取得）**。
+NF07-NF08-LINK は実装済み（RB-NF08-LINK。§0）だが、上の S-1〜S-10 の代わりにはならない。LINK が許可するのは S-3 の NF07 policy が登録・有効化されて `APPROVED_ACTIVE` になった後だけで、その前提（NF07 の D-02・D-03・D-08 の署名、NF07-TRUST の D-03 方式の adapter、`privacy.retention.enabled=true`）も未取得である。LINK の key の data element は本番 catalog（V196）にある `AI_EXTERNAL_PROVIDER_COPY`（外部送信で生じる provider 側の写し、`AI_PAYLOAD`・storage `gemini-adapter.request`）に決めた（統括の決定。DDL なし）。**Privacy Owner がこの data element への束縛を確認する（未取得）**。
 
 **S-9 の前提（未定）**: staging も `SPRING_PROFILES_ACTIVE=prod` で動くため LINK が有効であり、prod 以外の profile では LINK が常に拒否するので観測できない。staging で実送信を観測するには、B2c-2・S-1〜S-8 に加えて NF07 の連鎖全体が要る: NF07-TRUST の D-03 方式の adapter、audience `PRODUCTION` の envelope とそれを検証できる staging 用の anchor、REG による登録と別の privacy-admin による有効化、`privacy.retention.enabled=true`、D-01・D-09 の決定ID束縛の有効期間。これらを誰が・いつ準備するか（staging 用の anchor は D-03 owner、policy の登録・有効化は Privacy Owner の想定）は**未定**。
 
@@ -342,7 +342,7 @@ NF07-NF08-LINK は実装済み（RB-NF08-LINK。§0）だが、上の S-1〜S-10
 | `GeminiCopilotInvocationBoundaryTest` | 本番adapterの決定ID・digest束縛（偽造証拠の拒否）、承認証拠でも test用 loopback transport は公開hostへ送らない、未承認adapterの固定 deny-all と config hash の区別（digestでも区別）、承認証拠でもNF07のpolicyを確認できない（拒否・gateなし・実行tenantなし）なら送信直前に拒否（LINK） |
 | `ProductionPolicyEnforcementServiceTest` | NF07の内部判定port: test-only の鍵で署名した policy で flag OFF・要求不完全・UNKNOWN・REVOKED・EXPIRED・DRIFT・policy ID 不一致・承認が policy の発行より前（`APPROVAL_PREDATES_POLICY`、境界 +1ns で許可、改竄 envelope の発行日時は使わない）を拒否し、全て揃ったときだけ許可（呼出し元の認証を要求しない・cacheしない）。許可は public に作れない |
 | `PolicyEnforcementCallSiteTest` | main で許可の判定・内部判定portの参照と実装・NF08 の check と check を受け取る gate を作れる場所を一覧に固定（reflection は対象外） |
-| `PrivacyTrustSourceCallSiteTest` | trust の anchor・失効状態は惰性の包みからだけ読み、同じ式の快照も検出し、包みの呼出し元を行為 test 付きの一覧に固定（reflection・別の文での快照は静的に検出しない） |
+| `PrivacyTrustSourceCallSiteTest` | trust の anchor・失効状態は遅延評価の包みからだけ読み、同じ式のスナップショットも検出し、包みの呼出し元を挙動 test 付きの一覧に固定（reflection・別の文でのスナップショットは静的に検出しない） |
 | `PrivacyPolicyNf08DispatchKeyTest`（H2） | key の data element `AI_EXTERNAL_PROVIDER_COPY` は V196 にあり、その policy を REG で登録・有効化すると LINK が `PERMITTED`、旧 key `AI_PROMPT_LOG` は REG が登録を拒否 |
 | `AiExternalSendPrivacyPolicyCheckTest` | NF08の定数keyと `nf07-policy-id`・実行tenantでの問い合わせ、拒否の固定コードだけのlog・metric、portなし・例外・nullの拒否、手動構築gateの常時拒否、起動時判定に含めないこと |
 | `CopilotExternalSendPrivacyPolicyLinkTest` | 本番の内部判定portと test-only の policy・fake provider で、NF07の各拒否は execute・読取専用 preflight とも送信前に止まり（DENIED監査・metric）、全て揃ったときだけ1回送信する |

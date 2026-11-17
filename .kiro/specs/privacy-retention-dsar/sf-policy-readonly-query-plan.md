@@ -102,10 +102,10 @@ public enum TrustedActorRole {
 1. **身元欠落**:
    `callerProvider.getCallerContext()` が空、または `caller.actorId()` が空白・欠落している場合：
    * 判定: `ACCESS_DENIED`（理由: `MISSING_CALLER_IDENTITY`）
-2. **跨テナント照会**:
+2. **テナント横断照会**:
    照会要求の `query.tenantId()` と `caller.tenantId()` が一致しない場合：
    * 判定: `ACCESS_DENIED`（理由: `CALLER_TENANT_MISMATCH`）
-3. **冒名（アクター不一致）照会**:
+3. **なりすまし（アクター不一致）照会**:
    照会要求の `query.actorId()` と `caller.actorId()` が一致しない場合：
    * 判定: `ACCESS_DENIED`（理由: `CALLER_ACTOR_MISMATCH`）
 4. **無権限アクター**:
@@ -508,7 +508,7 @@ public enum PolicyFailureReason {
 [SyntheticEnvironmentGuard] ──▶ active/default に "prod" 混入時は即座に SecurityException (中断)
        │
        ▼ (Step 1: 呼び出し元検証)
-[Caller Context 検証] ──▶ 欠落/跨テナント/冒名/非認可ロールは即座に ACCESS_DENIED
+[Caller Context 検証] ──▶ 欠落/テナント横断/なりすまし/非認可ロールは即座に ACCESS_DENIED
        │
        ▼ (Step 2: カタログ検索)
 [SyntheticPolicyCatalog] ──▶ 未登録の組み合わせは POLICY_UNKNOWN (POLICY_NOT_FOUND)
@@ -567,7 +567,7 @@ public enum PolicyFailureReason {
 * **背景**: 現時点で NF03 の `CERTIFICATION_PII` に対する DG-07 保持ポリシーは未承認（`POLICY_UNKNOWN`）である。
 * **解釈規約**:
   1. `POLICY_UNKNOWN` は「保持期限到達に伴う廃棄・自動消去等の処分ポリシーが未承認である」ことを意味する。
-  2. これを**「NF03 の通常の資格登録・閲覧・更新・編集業務をすべて停止し、全画面を只読（Read-only）に封鎖しなければならない」と過剰拡大して解釈してはならない**。
+  2. これを**「NF03 の通常の資格登録・閲覧・更新・編集業務をすべて停止し、全画面を読取り専用（Read-only）に封鎖しなければならない」と過剰拡大して解釈してはならない**。
   3. 封鎖されるのは「retention 処分（廃棄・パージ）」の実行パスのみであり、エンジニアの資格管理という日常の通常業務機能は妨げられない。
 
 ### 7.2 NF08（AI 要約・ログ連携）における外部送信の厳格解釈
@@ -601,21 +601,21 @@ src/main/java/com/ses/privacy/foundation/
 └── PolicyReadonlyQueryService.java    // 照会サービス実装クラス（package-private）
 
 src/test/java/com/ses/privacy/foundation/
-└── PolicyReadonlyQueryServiceTest.java // 単体・負向・正向テスト
+└── PolicyReadonlyQueryServiceTest.java // 単体・異常系・正常系テスト
 ```
 
 ---
 
-## 9. 負向および正向テスト設計（Test Cases）
+## 9. 異常系および正常系のテスト設計（Test Cases）
 
 本番 DB・実外部通信を使用せず、メモリ内の合成テスト環境（`SyntheticEnvironmentGuard` + 署名 Fixture）で完全に独立検証する。
 
 ### 9.1 呼び出し元コンテキスト検証テスト
 1. **無権限アクターの拒絶 (`testCallerContext_UnprivilegedUser_ReturnsAccessDenied`)**:
    * プロバイダーから `ROLE_UNPRIVILEGED_USER` を返却するよう構成して照会した場合、`ACCESS_DENIED`（理由: `UNAUTHORIZED_ACTOR_ROLE`）となること。
-2. **跨テナント照会の拒絶 (`testCallerContext_CrossTenantMismatch_ReturnsAccessDenied`)**:
+2. **テナント横断照会の拒絶 (`testCallerContext_CrossTenantMismatch_ReturnsAccessDenied`)**:
    * `caller.tenantId` と `query.tenantId` が不一致の場合、`ACCESS_DENIED`（理由: `CALLER_TENANT_MISMATCH`）となること。
-3. **冒名アクター照会の拒絶 (`testCallerContext_ActorMismatch_ReturnsAccessDenied`)**:
+3. **なりすましアクター照会の拒絶 (`testCallerContext_ActorMismatch_ReturnsAccessDenied`)**:
    * `caller.actorId` と `query.actorId` が不一致の場合、`ACCESS_DENIED`（理由: `CALLER_ACTOR_MISMATCH`）となること。
 4. **身元欠落アクターの拒絶 (`testCallerContext_MissingIdentity_ReturnsAccessDenied`)**:
    * プロバイダーから空コンテキストまたは空白 `actorId` が返却された場合、`ACCESS_DENIED`（理由: `MISSING_CALLER_IDENTITY`）となること。
@@ -672,7 +672,7 @@ src/test/java/com/ses/privacy/foundation/
 28. **本番プロファイルでの実行拒絶 (`testEnvironment_ProdProfile_ThrowsSecurityException`)**:
     * `Environment` に `prod` が含まれる場合、初期化または呼び出しが DTO を返さず未捕捉の `SecurityException` で fail-closed すること。
 
-### 9.4 正向テスト（成功しても実行権限を与えないことの証明）
+### 9.4 正常系テスト（成功しても実行権限を与えないことの証明）
 29. **有効な合成ポリシーの評価 (`testValidSyntheticPolicy_ReturnsApprovedActiveWithoutExecutionCapability`)**:
     * 有効な Ed25519 署名、現在有効期間内、SoD 適合の合成ポリシーを評価した場合：
       * `status` が `APPROVED_ACTIVE`、`failureReason` が `NONE` となること。
@@ -684,7 +684,7 @@ src/test/java/com/ses/privacy/foundation/
 ## 10. 受入条件（Acceptance Criteria）
 
 1. [ ] `PolicyReadonlyQueryPort.evaluate` が `query` のみを受け取り、アクターロールや `asOf` の呼び出し時差し替えが構造上不可能であること。
-2. [ ] サービス内部に `SyntheticCallerContextProvider` がコンストラクタ注入され、身元欠落・跨テナント・冒名・非認可ロール（`ROLE_UNPRIVILEGED_USER`）が `ACCESS_DENIED` として確実に拒絶されること。
+2. [ ] サービス内部に `SyntheticCallerContextProvider` がコンストラクタ注入され、身元欠落・テナント横断・なりすまし・非認可ロール（`ROLE_UNPRIVILEGED_USER`）が `ACCESS_DENIED` として確実に拒絶されること。
 3. [ ] 固定 `SyntheticPolicyCatalog` が要素・操作・プロバイダーを特定ポリシーおよび期待スコープへ決定論的にマッピングし、同要素・異操作が独立して評価されること。
 4. [ ] `PolicyEnvelopeSource` が不透明 `revision` 文字列を保持し、数値ソートを行わず `currentRevision` / `currentDigest` に基づいて現在版を特定すること。
 5. [ ] `lookupResult.status() == CURRENT_CANDIDATE` が明示的に要求され、null/未知ステータスが拒絶されること。ソース例外時に固定日本語説明を返し `e.getMessage()` を漏洩させないこと。三点照合の不一致時にフォールバックせず `POLICY_DRIFT` で fail-closed すること。
@@ -693,4 +693,4 @@ src/test/java/com/ses/privacy/foundation/
 8. [ ] プロファイル防護（`SyntheticEnvironmentGuard`）による拒絶が通常 DTO に丸め込まれず、例外として直接中断されること。
 9. [ ] 返却 DTO `PolicyExplanationResult` から許可ブール値が完全に削除され、`getRecordComponents()` で純粋な説明メタデータのみであることが検証されていること。
 10. [ ] NF03 の通常業務が不当に停止されないこと、および NF08 において許可リスト（ホワイトリスト）が未承認送信の口実にならないことが明文化されていること。
-11. [ ] 新規 DDL、実外部通信、実 IdP 連携、処分 Executor、復旧放行コードが一切含まれていないこと。
+11. [ ] 新規 DDL、実外部通信、実 IdP 連携、処分 Executor、復旧を許可するコードが一切含まれていないこと。

@@ -161,7 +161,7 @@ class PrivacyJournalStartupVerifierMySqlTest {
     }
 
     @Test
-    void session時区が_00_00でない接続は不適合() {
+    void sessionタイムゾーンが_00_00でない接続は不適合() {
         // container の既定 time_zone に依存せず、+09:00 の session を明示的に作る（Review P3-6）
         try (HikariDataSource tokyo = PrivacyJournalTestPools.poolWithSessionTimeZone(JOURNAL.getJdbcUrl(), appender,
                 appenderPassword, "+09:00")) {

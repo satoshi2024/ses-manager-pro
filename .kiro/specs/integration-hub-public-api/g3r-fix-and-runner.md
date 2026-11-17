@@ -37,7 +37,7 @@
 | 6 | inbound HMACとoutbound署名の同一secret利用はcanonical用途分離付きで現状維持。DG-05 OUT-6へ明示し、Securityの受容が無ければ別鍵発行を追加する |
 | 7 | いずれか一方向ONでのみgaugeを登録、12状態のsnapshotを30秒cache。status先頭の既存索引を利用し、scrapeごとのDB反復を抑える |
 | 8 | V192の列COMMENTを保持。DDL暗黙commitとJST→UTCの一度だけ変換、部分失敗からの復旧をrunbookへ明記。version/件数は統合担当が調整 |
-| 9 | 実container、秒精度、再起動、管理MVC等を補強。MySQL/実Tomcat/browserは主控Runner。公開IPの本物egress peerを含む実ネットワーク証拠は外部接続禁止の本作業では作らない |
+| 9 | 実container、秒精度、再起動、管理MVC等を補強。MySQL/実Tomcat/browserは統括のRunner。公開IPの本物egress peerを含む実ネットワーク証拠は外部接続禁止の本作業では作らない |
 | 10 | secret scanにoutbound管理controllerを追加 |
 | 11 | prodコメント、kill説明、証拠の位置と限界を更新 |
 | 12 | FWD-SANITIZEのapp.security.trusted-proxiesとNF05側を同じALB経路へ合わせる。/20〜/22 subnetは承認済みの複数/24で覆い、client CIDRとは分離 |
@@ -57,7 +57,7 @@
 
 ### Runner追加確認
 
-- 既存の `IntegrationHubV192AuditRetentionMySqlTest` は、V192変換・二接続claimに加え、小数秒Clockの実producerを実MyBatis mapperへ通すDATETIME(0)往復を検証する。保存後のsend bindingと移管後のownership拒否も同じ用例で確認する。本作業ではMySQLを実行していない。
+- 既存の `IntegrationHubV192AuditRetentionMySqlTest` は、V192変換・二接続claimに加え、小数秒Clockの実producerを実MyBatis mapperへ通すDATETIME(0)往復を検証する。保存後のsend bindingと移管後のownership拒否も同じケースで確認する。本作業ではMySQLを実行していない。
 - H2の実Spring容器は独立DBを使い、業務commitとenqueue障害のrollbackを終了後の新transactionで再読する。小数秒の本番producer、MOCK worker、起動時の旧PENDING/RETRYABLE/有効lease/期限切れlease隔離、管理APIのCSRF/roleを検証する。
 - replay用TLS確認はHTTP要求を送らず、接続4本・deadline executor1本に制限する。小刻みな未完了TLS応答でもDNS+connect+readの総期限でsocketを閉じ、context終了時も実行中socketを閉じる。
 - scheduler lockは40分のため、crash時の引継ぎに最大40分を要する。network batchの式はDB・隔離監査のlock待ちを上限化しない。CAS fencingとSREの実測・監視を引き続き必須とする。

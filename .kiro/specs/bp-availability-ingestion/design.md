@@ -35,7 +35,7 @@ CREATE TABLE t_bp_availability (
 - 昇格API `POST /api/bp-availabilities/{id}/promote` → `t_engineer`(employmentType=BP) 生成＋`promoted_engineer_id` 記録。
 - スキル名→id は `SkillTagResolver` 再利用（在庫は skills_json 保持、要員化時に `t_engineer_skill` へ展開）。
 - 失効: `available_from` 経過や手動で `status=失効`（任意でスケジューラ）。
-- 清理: `FileReferenceProvider` 追加。
+- 清掃: `FileReferenceProvider` 追加。
 
 ## 3. マッチング連携
 - FR-01/FR-02 のマッチング候補取得を「自社Bench＋`t_bp_availability`(提案可能)」の横断に拡張。

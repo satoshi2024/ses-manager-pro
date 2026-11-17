@@ -27,7 +27,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** T073 B2: 客先工数差異APIのロール・CSRFを確認するL2定向test。 */
+/** T073 B2: 客先工数差異APIのロール・CSRFを確認するL2対象限定test。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")

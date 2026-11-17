@@ -7,10 +7,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 初回実行時における確定載体選定コンポーネント (Initial Carrier Selector)
+ * 初回実行時における確定代表行の選定コンポーネント (Initial Carrier Selector)
  * <p>
  * 注意: 本選定規則は初回書き込み時（全キューが PENDING の状態）にのみ適用され、
- * 重試（Retry）時には決して再評価してはならない。
+ * 再試行（Retry）時には決して再評価してはならない。
  * </p>
  */
 public final class InitialCarrierSelector {
@@ -18,11 +18,11 @@ public final class InitialCarrierSelector {
     private InitialCarrierSelector() {}
 
     /**
-     * 初回実行時における代表載体キューを決定論的に選定する。
+     * 初回実行時における代表キューを決定論的に選定する。
      *
      * @param parentQueue 親インボイスキュー行（存在しない場合は null）
      * @param participatingQueues 本修復トランザクションで参加する PENDING キュー集合
-     * @return 選定された代表載体キュー
+     * @return 選定された代表キュー
      */
     public static ScopeRepairQueueSnapshot selectInitialCarrier(
         ScopeRepairQueueSnapshot parentQueue,
@@ -55,6 +55,6 @@ public final class InitialCarrierSelector {
         // それ以外（親が NO_QUEUE または既に RESOLVED 等）は、参加キュー集合中の最小 ID を選定
         return participatingQueues.stream()
             .min(Comparator.comparing(ScopeRepairQueueSnapshot::id))
-            .orElseThrow(() -> new IllegalStateException("代表載体キューを選定できませんでした"));
+            .orElseThrow(() -> new IllegalStateException("代表キューを選定できませんでした"));
     }
 }

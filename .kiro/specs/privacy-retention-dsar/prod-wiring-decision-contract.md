@@ -15,13 +15,13 @@
 ## 1. 目的とスコープ境界
 
 ### 1.1 目的
-NF07（プライバシー・データ保持・DSAR）における既存の合成検証済み能力（Envelope/Verifier、Journal CAS、Hold/Fence、Watermark Witness/Projection、Recovery、Synthetic Preview、只読Policy照会）と、将来の本番運用能力との間にある「接線（Wiring）」および「意思決定契約（Decision Contract）」を明確化する。
+NF07（プライバシー・データ保持・DSAR）における既存の合成検証済み能力（Envelope/Verifier、Journal CAS、Hold/Fence、Watermark Witness/Projection、Recovery、Synthetic Preview、読取り専用Policy照会）と、将来の本番運用能力との間にある「接線（Wiring）」および「意思決定契約（Decision Contract）」を明確化する。
 
 ### 1.2 スコープ制限・安全原則
 本設計は第一弾（設計フェーズ）であり、以下を厳格に順守する：
 1. **本番変更操作の禁止**: 実データの削除、物理パージ、論理削除、匿名化、外部送信（Dispatch）、本番DBへの書込操作は一切実装しない。
 2. **合成環境守衛の厳格維持**: `SyntheticEnvironmentGuard` による合成環境隔離・本番プロファイル（`prod`）拒絶機構は、合成資産の安全を担保する中核的防護であり、これを解除・改変・弱化しない。また、本番プロファイル下で `SyntheticEnvironmentGuard` が稼働を拒絶することは「誤動作」ではなく「意図された正常なフェイルクローズ動作」である。
-3. **只読結果の権限転用禁止**: 只読 Policy 照会結果（`PolicyExplanationResult`）は説明メタデータに限定し、いかなる実行権限・認可 Capability としても扱わない。
+3. **読取り専用結果の権限転用禁止**: 読取り専用 Policy 照会結果（`PolicyExplanationResult`）は説明メタデータに限定し、いかなる実行権限・認可 Capability としても扱わない。
 4. **既存能力の再実装禁止**: 既存の SF-W2（Journal/Hold）、SF-W2b（Recovery/Witness）、SF-W3a（Preview）の合成能力を白紙化または再作成しない。
 5. **架空承認の禁止**: 人手意思決定事項について、AIが勝手に承認日や署名を偽造・補完しない。
 6. **ゼロデータベース書込（Zero DB Mutation）**: 本接線設計スライスは完全な読み取り専用であり、データベースへの書込・更新・ログ永続化を一切行わない。
@@ -35,15 +35,15 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 
 | 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 基準SHA未検証項目 (Base: `aad2afee`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
 |---|---|---|---|---|---|
-| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基準SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
+| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基準SHAでの新規テスト実行なし（`c8b78dc3` での42件対象限定テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
 | **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 基準SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
 | **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基準SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（作成時「V185未割当」。V185はNF10が使用済み、C-21） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
 | **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 基準SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
 | **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 基準SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
-| **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
+| **読取り専用Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>対象限定42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
 | **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍結） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（導入予定・未実装）<br>ベンダーDPA（Google Cloud等）未合意 |
 
-### 2.1 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
+### 2.1 履歴スキャン統計の分離と将来リリースの完了判定ゲート規約
 過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを直前基準（`9024f7b2` / `b2886c47`）や本フェーズ基準（`aad2afee`）における新しいスキャン結果と混同してはならない。
 
 1. **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
@@ -52,16 +52,16 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 2. **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
    * 対象: マイグレーション 183 ファイル、254 テーブル、244 エンティティ、708 プロバイダー候補。
    * 結果: プライバシーカタログ未分類 74 テーブル、インベントリ欠落 1,082 列、プロバイダー参照欠落 285 件、エンティティ未マップ 68 件で `BLOCKED`。
-3. **将来リリースの閉環ゲート規約**:
+3. **将来リリースの完了判定ゲート規約**:
    * 上記いずれの統計も本設計の基準コミットの直接スキャン結果ではない。2026-11-14 状態整合（C-15）: 以後の 2026-10-04 `ad9bb1c6`（provider候補724）と B0/V182 時点（253 table、未分類73）の値もあるが、いずれも過去SHAの値である。基準 `1be03bea`（V183〜V186 を含む）に対するscanは未実施で、現行coverageは UNKNOWN（BLOCKED想定）とする。
-   * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
+   * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの網羅確認スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
 
 ---
 
-## 3. 最小本番接線設計スライス: 只読Policy説明照会ブリッジ
+## 3. 最小本番接線設計スライス: 読取り専用Policy説明照会ブリッジ
 
-本インクリメントで選定する唯一の最小本番接線スライスは、下流業務・連携モジュール（NF03/NF08）へ向けた**「只読Policy説明照会ブリッジ（Read-only Policy Explanation Bridge）」**である。
-本スライスは**完全只読（0 write, 0 delete, 0 dispatch）**であり、本番データへの副作用を一切持たず、業務機能に不可欠なポリシー状況の安全な可視化のみを提供する。
+本インクリメントで選定する唯一の最小本番接線スライスは、下流業務・連携モジュール（NF03/NF08）へ向けた**「読取り専用Policy説明照会ブリッジ（Read-only Policy Explanation Bridge）」**である。
+本スライスは**完全な読取り専用（0 write, 0 delete, 0 dispatch）**であり、本番データへの副作用を一切持たず、業務機能に不可欠なポリシー状況の安全な可視化のみを提供する。
 
 ```text
 [業務モジュール (NF03/NF08)]
@@ -119,7 +119,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 #### 2. OidcLoginUser のテナント解決とクレーム一致性検証規約（OIDC Tenant & Claim Verification Contract）
 * **可信データソースの単一性（認証バインディング優先）**:
   * `OidcLoginUser` は内部 `LoginUser` を継承しており（`OidcLoginUser extends LoginUser`）、そのテナント解決は認証時に内部 `SysUser` へ固定された `oidc.getTenantId()`（即ち `super.getTenantId()`）を唯一の正本（Single Source of Truth）とする。
-  * `SecurityUtils.currentTenantId()` のような「クレーム優先（Claim-preferring）」または「クレームへのフォールバック」を行うロジックは、IdP トークン改竄や外部クレーム注入による跨テナント越境の脆弱性をもたらすため、可信テナントの導出元として使用することを厳格に禁止する。
+  * `SecurityUtils.currentTenantId()` のような「クレーム優先（Claim-preferring）」または「クレームへのフォールバック」を行うロジックは、IdP トークン改竄や外部クレーム注入によるテナント越境の脆弱性をもたらすため、可信テナントの導出元として使用することを厳格に禁止する。
 * **クレームの役割の限定（一致性検査のみ・フォールバック禁止）**:
   * OIDC トークンに含まれる `tenant_id`、`tenantId`、`tenant` クレームは、内部バインディングの妥当性を二重確認する「整合性検査（Consistency Check）」の用途にのみ使用を許可する。
   * クレームによって内部バインディング `oidc.getTenantId()` を上書き（Override）することは不可。
@@ -128,7 +128,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
   1. **不一致拒絶**: 内部バインディングがテナント A、OIDC クレームがテナント B の場合、照会クエリ（`query.tenantId()`）が B であっても A であっても、テナント不整合として直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却する。
   2. **内部欠落拒絶**: 内部バインディング `oidc.getTenantId()` が未設定・空白の場合、OIDC クレームに有効な値が存在してもフォールバックせず、直ちに `ACCESS_DENIED` (`MISSING_CALLER_IDENTITY` または `CALLER_TENANT_MISMATCH`) を返却する。
   3. **クレーム衝突拒絶**: OIDC トークン内に複数の有効なテナントクレーム（例: `tenant_id="X"` かつ `tenantId="Y"`）が存在し、それらが互いに不一致・衝突している場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却する。
-* **正向通過条件（Positive Acceptance Condition）**:
+* **正常系通過条件（Positive Acceptance Condition）**:
   * 内部バインディング `oidc.getTenantId()` が存在し、かつ
   * トークン内の全テナントクレームが存在しないか、または存在するすべてのクレームが `oidc.getTenantId()` と完全一致し、かつ
   * `query.tenantId()` が `oidc.getTenantId()` と一致し、他のアクター身元・ロール検査に合格する場合に限り、ポリシー評価処理の続行を許可する。
@@ -146,12 +146,12 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
   * `ROLE_SYSTEM_SERVICE` は、内部マイクロサービスまたはデーモンが発行する検証済み内部サービス認証トークンを保持している場合にのみ割り当てられる。
 
 #### 4. 呼び出し元検証の受入条件（Acceptance Criteria）
-1. **跨テナント拒絶**: `caller.tenantId() != query.tenantId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却すること。
+1. **テナント横断拒絶**: `caller.tenantId() != query.tenantId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却すること。
 2. **OIDC テナント不整合・内部欠落・衝突拒絶**:
    * 内部 A、クレーム B、クエリ B の場合に `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) となること。
    * 内部バインディング空白でクレーム有値の場合に `ACCESS_DENIED` となること（フォールバック拒絶）。
    * 複数クレーム衝突時に `ACCESS_DENIED` となること。
-3. **冒名・身元不一致拒絶**: `caller.actorId() != query.actorId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`) を返却すること。
+3. **なりすまし・身元不一致拒絶**: `caller.actorId() != query.actorId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`) を返却すること。
 4. **未認可ロール拒絶**: `caller.actorRole()` が `ROLE_UNPRIVILEGED_USER`（一般営業、HR、マネージャー、要員等）の場合、直ちに `ACCESS_DENIED` (`UNAUTHORIZED_ACTOR_ROLE`) を返却すること。
 5. **サービス身元の非昇格検証**: 通常ログインユーザーが `ROLE_SYSTEM_SERVICE` を名乗るクエリを発行した場合、コンテキスト検証で確実に拒絶されること。
 
@@ -209,7 +209,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 * **契約条項**:
   1. **日常業務の非封鎖原則**:
      `POLICY_UNKNOWN` のステータスは、「retention 期限到達に伴う自動廃棄・物理パージ等の処分ポリシーが未確定である」ことのみを意味する。
-     これを**「資格登録、証明書アップロード、情報閲覧、更新といった日常の資格管理業務を停止・只読化しなければならない」と過剰拡大して解釈してはならない**。日常業務画面・APIは平常どおり稼働を継続する。
+     これを**「資格登録、証明書アップロード、情報閲覧、更新といった日常の資格管理業務を停止・読取り専用化しなければならない」と過剰拡大して解釈してはならない**。日常業務画面・APIは平常どおり稼働を継続する。
   2. **自動処分の厳格封鎖**:
      自動パージやデータ廃棄バッチの実行経路のみが `POLICY_UNKNOWN` によって厳格に封鎖（fail-closed）される。
   3. **自動処分の実施要件**:
@@ -223,7 +223,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
   2. **フィールドホワイトリスト（許可リスト）の性質規定**:
      `g10-allowlist.json` 等に定義されるフィールドホワイトリストは、「法的に送信が許可された場合に送信してよい技術的上限（最大許容範囲）」を定めたものに過ぎない。
      **ホワイトリストへの掲載自体は、送信を認可するライセンスではない**。「ホワイトリストに含まれる項目だから未承認でも送信してよい」という解釈は重大な契約違反として厳格に排除される。
-  3. **只読説明と実行認可の完全分離**:
+  3. **読取り専用説明と実行認可の完全分離**:
      ポリシー照会結果が `APPROVED_ACTIVE` を返した場合であっても、それ自体は外部送信の実行許可を一切付与しない。
      実際の外部送信には、独立Journalによって直列化された `CaseApprovalEnvelope` の検証、および `VerifiedDispatchFence` の発行が不可欠である。
 
@@ -257,14 +257,14 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: 純粋検証カーネル分離と只読Policy本番接線 (Read-Only)"] --> P2["Phase 2: 人手ガバナンスと正式ポリシー・鍵登録"]
+    P1["Phase 1: 純粋検証カーネル分離と読取り専用Policy本番接線 (Read-Only)"] --> P2["Phase 2: 人手ガバナンスと正式ポリシー・鍵登録"]
     P2 --> P3["Phase 3: 独立Journal・Witness本番インフラ構築"]
-    P3 --> P4["Phase 4: 本番プロバイダー実装とカバレッジ閉環"]
+    P3 --> P4["Phase 4: 本番プロバイダー実装とカバレッジの完結"]
     P4 --> P5["Phase 5: 留置・外送直列化、DB監査、トランザクショナルOutbox"]
     P5 --> P6["Phase 6: 受控処分バッチと本番機能フラグ有効化"]
 ```
 
-### Phase 1: 純粋検証カーネル分離と只読Policy本番接線（Read-Only Wiring）
+### Phase 1: 純粋検証カーネル分離と読取り専用Policy本番接線（Read-Only Wiring）
 * **実装内容**:
   * 純粋検証カーネル `PurePolicyVerificationKernel` の分離（Astra 独立技術レビュー必須）。
   * 既存 `ApprovalEnvelopeVerifier` / `PolicyReadonlyQueryService` の合成環境守衛を完全維持。
@@ -275,7 +275,7 @@ flowchart TD
   * 未認可ロールからのアクセスが直ちに `ACCESS_DENIED` となること。
   * OIDC テナント不一致、内部欠落、クレーム衝突がすべて直ちに `ACCESS_DENIED` となること。
   * NF03 の日常資格登録業務に一切の影響を与えないこと。
-  * 42件の定向テストおよび Fast スイートの回帰がないこと。
+  * 42件の対象限定テストおよび Fast スイートの回帰がないこと。
 
 ### Phase 2: 人手ガバナンスと正式ポリシー・鍵登録（Governance & Key Registration）
 * **実装内容**:
@@ -296,14 +296,14 @@ flowchart TD
   * `innodb_flush_log_at_trx_commit=1` の耐久性検証。
   * リストア試験において古いスナップショットへのロールバックが検知・遮断（Quarantine）されること。
 
-### Phase 4: 本番プロバイダー実装とカバレッジ閉環（Production Providers & Coverage Closure）
+### Phase 4: 本番プロバイダー実装とカバレッジの完結（Production Providers & Coverage Closure）
 * **実装内容**:
   * 実テーブル、ファイルストレージ、AIログに対する `PrivacyProvider` 実装。
   * `DataScopeService` との厳格な連携。
   * 第三者情報の自動マスキングエンジンの実装。
-  * **対象リリース SHA に対するインベントリ・カバレッジ閉環スキャンの実行**。
+  * **対象リリース SHA に対するインベントリ・カバレッジ網羅確認スキャンの実行**。
 * **完了・検証条件**:
-  * 対象リリース SHA での未分類（unclassified）0、欠落列 0 の閉環証明。
+  * 対象リリース SHA での未分類（unclassified）0、欠落列 0 の網羅の証明。
   * 検索スコープ外へのアクセスが一切発生しないこと（crossScopeAccess = 0）。
   * 同姓同名・名寄せ曖昧性のあるリクエストが自動マージされず人手待ちとなること。
 

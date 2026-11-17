@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * R2-P1-02方式A（休憩区間保存＋区間intersection）のL2定向test。
+ * R2-P1-02方式A（休憩区間保存＋区間intersection）のL2対象限定test。
  * 深夜前の休憩位置・不一致400拒否・区間不明行のfail-closedを固定する。
  */
 @SpringBootTest

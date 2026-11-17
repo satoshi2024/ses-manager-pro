@@ -202,7 +202,7 @@ class DocumentEvidenceEligibilityTest {
     /**
      * W3-21a review P3-5・RB-NF01 review RB-P3-1: 提出の discovery が適格性の詳細を返してよいのは、文書が tenant にある
      * {@code SKILL_SHEET} で、案件の要員を指す link を持つ場合だけ。不在・他tenant・SKILL_SHEET以外（削除済みでも、
-     * 文書下載の専用ACL種別でも）・link無し・他の要員だけを指す文書は false（存在しない文書と同じ応答にする）。
+     * 文書ダウンロードの専用ACL種別でも）・link無し・他の要員だけを指す文書は false（存在しない文書と同じ応答にする）。
      * 論理削除・hold・link形の不適合は、可視のSKILL_SHEETについてだけ適格性の条件が判定する。
      */
     @Test
@@ -214,7 +214,7 @@ class DocumentEvidenceEligibilityTest {
         links.add(link(TENANT, "ASSET_ASSIGNMENT", 99L));
         assertTrue(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID));
 
-        // SKILL_SHEET 以外は、削除済みでも削除前でも、文書下載のACLが厳しい種別でも、要員を指す link があっても不可視
+        // SKILL_SHEET 以外は、削除済みでも削除前でも、文書ダウンロードのACLが厳しい種別でも、要員を指す link があっても不可視
         for (String type : Arrays.asList("RECEIPT", "CHANGE_REQUEST_ATTACHMENT", "PRIVATE_NOTE", "INVOICE_IN",
                 "INVOICE_OUT", "CONTRACT", "skill_sheet", "SKILL_SHEET ", null)) {
             for (int deleted : new int[] {0, 1}) {
@@ -244,13 +244,13 @@ class DocumentEvidenceEligibilityTest {
     }
 
     /**
-     * RB-NF01 review RB-P3-1: 可視性の前に呼出側が行う文書ACL（管理者、または要員の data scope）が文書下載
+     * RB-NF01 review RB-P3-1: 可視性の前に呼出側が行う文書ACL（管理者、または要員の data scope）が文書ダウンロード
      * （{@code DocumentServiceImpl#assertDocumentAccessAllowed}）と同じ判定になるのは、受け付ける唯一の種別
-     * {@code SKILL_SHEET} が下載の専用ACL種別にも電子インボイスにも当たらず、{@code ENGINEER} link の data scope の分岐を
+     * {@code SKILL_SHEET} がダウンロードの専用ACL種別にも電子インボイスにも当たらず、{@code ENGINEER} link の data scope の分岐を
      * 通るためである。種別ごとの規則に SKILL_SHEET が加わったら、二者確認の可視性も同じ規則に合わせ直す。
      */
     @Test
-    void 受け付ける種別は文書下載の専用ACL種別にも電子インボイスにも当たらない() throws Exception {
+    void 受け付ける種別は文書ダウンロードの専用ACL種別にも電子インボイスにも当たらない() throws Exception {
         for (String field : List.of("FILE_SCOPE_SPECIAL_DOCUMENT_TYPES", "DIGITAL_INVOICE_DOCUMENT_TYPES")) {
             java.lang.reflect.Field declared = com.ses.service.impl.DocumentServiceImpl.class.getDeclaredField(field);
             declared.setAccessible(true);

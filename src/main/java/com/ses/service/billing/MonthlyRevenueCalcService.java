@@ -9,9 +9,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 月次売上・粗利の共通集計サービス(全社共通口径)。
+ * 月次売上・粗利の共通集計サービス(全社共通の集計基準)。
  *
- * <p>口径: 契約単位フォールバック + 準備中除外。
+ * <p>集計基準: 契約単位フォールバック + 準備中除外。
  * <ul>
  *   <li>対象契約: {@code status != '準備中'} かつ 契約期間が対象月と重なるもの。</li>
  *   <li>金額: 対象月に確定済 {@code t_work_record} があれば {@code billing_amount}/{@code payment_amount}

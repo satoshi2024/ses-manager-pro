@@ -376,7 +376,7 @@ V131からの既存行は移行互換のためscope列がNULLのlegacy行とし�
 
 ### 表3: 状態機械 と 競合保護 (`platform-invariants.md` §8)
 
-| エンティティ / 状態 | 許可遷移 | 遷移の防重・競合保護手段 | Competing Writer 発生時の挙動 | Rollback / 補償 |
+| エンティティ / 状態 | 許可遷移 | 遷移の重複防止・競合保護手段 | Competing Writer 発生時の挙動 | Rollback / 補償 |
 |---|---|---|---|---|
 | **資産 (`m_asset`)** | `IN_STOCK ↔ ASSIGNED`（貸与サービス専用）<br>`IN_STOCK ↔ UNDER_MAINTENANCE`<br>`IN_STOCK ↔ RESERVED`<br>`IN_STOCK/LOST/RESERVED` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`)。`ASSIGNED↔IN_STOCK` は `AssetAssignmentService` が貸与行CASと同時更新 | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
 | **貸与 (`t_asset_assignment`)** | `ACTIVE` → `RETURNED`<br>`ACTIVE` → `OVERDUE`<br>`ACTIVE/OVERDUE` → `WAIVED` | **同一資産期間排他判定**: トランザクション内で `SELECT ... FOR UPDATE` により対象資産を行ロックし、重複貸与区間が存在しないことを確認後に INSERT/UPDATE。返却時は `start_date <= actual_return_date <= 今日` をロック内で検証 | 後発の貸与申請が `BusinessException("該当年月日に既に有効な貸与が存在します")` で拒否 | 貸与作成・更新全体がロールバック |

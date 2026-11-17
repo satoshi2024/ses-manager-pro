@@ -3,7 +3,7 @@ package com.ses.service;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 
-/** 既存金額計算口径を使った組織別管理会計サービス。 */
+/** 既存の金額算定基準を使った組織別管理会計サービス。 */
 public interface ManagementAccountingService {
 
     ManagementAccountingSummaryDto summary(String month);

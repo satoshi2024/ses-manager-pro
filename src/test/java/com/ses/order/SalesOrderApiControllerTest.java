@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * T056定向テスト: 注文API（一覧/作成/原本/PDF/download/承認）（L2）。
+ * T056対象限定テスト: 注文API（一覧/作成/原本/PDF/download/承認）（L2）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc

@@ -10,7 +10,7 @@ import java.util.Set;
 
 /**
  * 提案スキルシートの参照ファイル名を提供するプロバイダー。
- * t_proposal.skill_sheet_path を孤児清理から保護する。
+ * t_proposal.skill_sheet_path を孤児清掃から保護する。
  */
 @Service
 @RequiredArgsConstructor
