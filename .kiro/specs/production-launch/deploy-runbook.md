@@ -263,7 +263,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 | # | 前提 | 理由 | 正本 |
 |---|---|---|---|
-| SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
+| SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする。NF02のSLA営業日カレンダー（`m_work_calendar`）もtenant列を持たず、`ServiceSlaCalculator.findCalendarForScope` の4段目（全社共通）のカレンダーは全tenantで共用される（W3 review P3-N2-4。tenant列の追加はDDLが要るため未対応。多tenant化の前に対応する） | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
 | SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
 | SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
@@ -293,6 +293,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 |---|---|---|
 | NF04 のうちスイッチOFFでも止まらない部分（pwa-queueの保存経路、lock中の下書きの復元（local password sessionだけ）、台帳の清掃、restore-sessionのlistener）。スイッチはService Workerとmanifestだけを止める | 次のうちこの部分にかかる署名と真機受入が初回配備の前提になる（全行が未署名）。<br>(1) Privacy: 端末内30日保存（P3-13 を含む）。<br>(2) SRE/Ops: 単一instance・sticky session（SRE-5）。<br>(3) Owner/Security: B-NF04-4（失効の制限。決定待ち）。<br>(4) 業務の受入担当: 真機受入 S-01〜S-15 | `feature-switches.md` 4.4「次はOFFでも止めない」、`mobile-pwa-self-service/first-release-user-and-operations-notes.md` §4、`mobile-pwa-self-service/real-device-browser-acceptance-template.md` |
 | 履歴取込の副本・取込センターCSV（文書種別 `RESUME_INGESTION` / `IMPORT`、V197） | 保存年数（3年・TRANSACTION_DATE）は暫定値で、文書ownerの確認待ち。<br>副本の処分方針について、Privacy owner と文書 owner の書面署名を得る。**署名までは `RESUME_INGESTION` の副本の廃棄申請を承認も執行もしない**（確認SQLは §4.3）。<br>副本の調整がするのは廃棄候補（PENDING）を作ることだけで、削除は管理者の承認と執行を経る。そのため、署名を待つために scheduler（`APP_SCHEDULING_ENABLED`）を止めなくてよい。この scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用で、止めると通常運用が再開できない。<br>初回配備は `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false`（雛形の値）で副本の調整だけを止め、署名後に `true` にする（§4.3）。<br>`IMPORT` の保持期間は、Privacy の書面受理まで開放の条件のまま | 冒頭の V197 の項、§4.3 |
+| 顧客ポータル全画面（login・招待受諾・規約・customer・bp。`templates/portal/**`）のBootstrap参照の修正（RB-I18N `5a7e2bbd`）。機能スイッチと関係なく配備した時点で全画面に効く | 実ブラウザでの確認（**未取得**）。修正前はBootstrapのCSS・JSとも404で、`d-none`・モーダルが効かず全tab・全モーダルが常に表示されていた。修正後は設計どおり隠れて切り替わるため見た目が大きく変わる。確認する項目: login・MFA設定・招待受諾・規約同意の入力と送信、customerの各tab（検収・契約・請求・見積・注文請）の切替と検収・請求のモーダル、bpの各画面、header のボタンの視認性（濃色の背景に `btn-outline-secondary`）。desktop と 390px。担当: 業務の受入担当（顧客ポータル）。NF02の子スイッチ（問い合わせ）をONにする前の確認は別（`feature-switches.md` 4.3.1） | `feature-switches.md` 4.3.1 (4)、`StaticAssetLocalityTest`（参照先の実在） |
 
 **機能スイッチをONにする前に要る署名・受理**（揃うまでOFFのまま。ONの手順は各正本）
 

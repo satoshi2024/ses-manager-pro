@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.LogRedaction;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.portal.PortalCsatCreateRequest;
 import com.ses.dto.portal.PortalServiceCommentDto;
@@ -260,16 +261,21 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         } catch (BusinessException be) {
             throw be;
         } catch (DuplicateKeyException dke) {
-            log.warn("サービスリクエスト起票で一意制約違反が発生しました: {}", dke.getMessage());
-            throw BusinessException.of(409, "リクエスト番号が重複しました。再試行してください");
+            // DB例外のmessageは一意制約の値（Duplicate entry '...'）やSQLを含み得るため、型と件数だけの安全な要約を出す
+            // （RB-I18N P3-N2-7）。応答の文言もkeyで返し、例外の内容を含めない。
+            log.warn("サービスリクエスト起票で一意制約違反が発生しました: {}", LogRedaction.safeThrowableSummary(dke));
+            throw BusinessException.of(409, "service.request.numberConflict");
         } catch (TransientDataAccessException tdae) {
-            log.warn("サービスリクエスト起票でトランザクション競合が発生しました: {}", tdae.getMessage());
-            throw BusinessException.of(503, "データベース処理で一時的な競合が発生しました。再試行してください");
+            log.warn("サービスリクエスト起票でトランザクション競合が発生しました: {}", LogRedaction.safeThrowableSummary(tdae));
+            throw BusinessException.of(503, "service.request.temporarilyUnavailable");
         } catch (DataAccessException dae) {
-            log.error("サービスリクエスト起票でDB例外が発生しました: {}", dae.getMessage(), dae);
-            throw BusinessException.of(503, "サービスリクエストの登録に失敗しました: " + dae.getMessage());
+            log.error("サービスリクエスト起票でDB例外が発生しました: {}", LogRedaction.safeThrowableSummary(dae));
+            throw BusinessException.of(503, "service.request.registerFailed");
         }
     }
+
+    /** 理由を入力しなかった状態変更の記録（状態イベントのreason。「新規起票」等と同じく既定の理由は日本語で持つ）。 */
+    static final String DEFAULT_STATUS_CHANGE_REASON = "ステータス更新";
 
     @Override
     @Transactional(readOnly = true)
@@ -642,7 +648,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .roundNo(currentRound)
                 .fromStatus(fromStatus)
                 .toStatus(toStatus)
-                .reason(req.getReason())
+                // 理由が空の変更は言語に依らない既定の理由で記録する（画面の言語ごとに既定文言が混ざらないようにする）。
+                .reason(StringUtils.hasText(req.getReason()) ? req.getReason().trim() : DEFAULT_STATUS_CHANGE_REASON)
                 .actorType(executionContext.actorType())
                 .actorId(effectiveActorId != null ? effectiveActorId : 0L)
                 .actorName(effectiveActorName)
@@ -785,7 +792,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .portalUserId(portalUserId)
                 .score(req.getScore())
                 .feedbackComment(req.getFeedbackComment())
-                .answeredAt(LocalDateTime.now(clock))
+                // 顧客ヘルスの90日の窓（tenantのtimezone）と同じ基準にするため、他の問い合わせの日時と同じくtenantの
+                // timezoneのローカル日時で保存する（P3-N2-5）。
+                .answeredAt(LocalDateTime.now(clock.withZone(com.ses.service.accounting.AccountingTenantContextHolder.getZoneId())))
                 .build();
 
         try {
@@ -1191,6 +1200,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .createdAt(req.getCreatedAt())
                 .comments(commentDtos)
                 .csatScore(csat != null ? csat.getScore() : null)
+                .csatComment(csat != null ? csat.getFeedbackComment() : null)
                 .csatAnswerable(answerable)
                 .build();
     }

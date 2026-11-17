@@ -19,6 +19,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import com.ses.service.security.CustomerScopeResolver;
 import com.ses.service.security.ReportScopeContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -92,6 +93,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             List<ServiceSlaEscalation> retryRows = escalationMapper.selectRetryByClockAndTenant(clk.getId(), tenantId);
             boolean responseFirstRetryPending = hasRetry(retryRows, "RESPONSE", "FIRST");
             boolean resolveFirstRetryPending = hasRetry(retryRows, "RESOLVE", "FIRST");
+            // 再送待ちの超過継続がある間は、新しい時間枠の超過継続を出さない。再送は台帳のdedupe keyのまま送り、
+            // 送れた時点を次の超過継続（30分後）の起点にする（RB-NF02 delta review D-P3-1）。
+            // 再送の上限に達した行は待ちとして数えない（下で閉じ、次の時間枠の超過継続を出す）。宛先の一部が失敗し続けると、
+            // 同じkeyの再送は届いた宛先をdedupeするため、上限が無いと超過の間ずっと健全な宛先へ継続通知が届かない（RB-I18N review P3-4）。
+            boolean responseContinuingRetryPending = hasPendingContinuingRetry(retryRows, "RESPONSE");
+            boolean resolveContinuingRetryPending = hasPendingContinuingRetry(retryRows, "RESOLVE");
 
             // 1. 初回応答期限超過チェック
             if (!responseWasBreached && clk.getFirstRespondedAt() == null
@@ -102,7 +109,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 notices.add(new SlaNotice("RESPONSE", "FIRST", "SLA初回応答期限超過",
                         String.format("リクエスト %s [%s] の初回応答期限を超過しました", req.getRequestNo(), req.getSubject())));
             } else if (responseWasBreached && clk.getFirstRespondedAt() == null && !responseFirstRetryPending
-                    && shouldContinue(clk.getLastResponseAlertAt(), now)) {
+                    && !responseContinuingRetryPending && shouldContinue(clk.getLastResponseAlertAt(), now)) {
                 // 超過後に初回応答を記録した依頼は「超過が継続」していないため送らない（RB-NF02 review P3-4）。
                 notices.add(new SlaNotice("RESPONSE", "CONTINUING", "SLA初回応答超過継続",
                         String.format("リクエスト %s [%s] の初回応答期限超過が継続しています", req.getRequestNo(), req.getSubject())));
@@ -118,7 +125,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 notices.add(new SlaNotice("RESOLVE", "FIRST", "SLA解決目標期限超過",
                         String.format("リクエスト %s [%s] の解決目標期限を超過しました", req.getRequestNo(), req.getSubject())));
             } else if (resolveWasBreached && !resolveFirstRetryPending
-                    && shouldContinue(clk.getLastResolveAlertAt(), now)) {
+                    && !resolveContinuingRetryPending && shouldContinue(clk.getLastResolveAlertAt(), now)) {
                 notices.add(new SlaNotice("RESOLVE", "CONTINUING", "SLA解決目標超過継続",
                         String.format("リクエスト %s [%s] の解決目標期限超過が継続しています", req.getRequestNo(), req.getSubject())));
                 clockUpdated = true;
@@ -146,10 +153,17 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             // 期限前のwarningは、初回応答の記録（RESPONSE）・解決（RESOLVE）・期限超過（超過通知が引き継ぐ）で
             // 意味を失う。その再送は送らず台帳をCANCELLEDで閉じ、同じwarningを応答後・超過後に出さない（HYG1 P3-5）。
             // 初回応答の超過継続も、超過後に初回応答を記録すれば同様に閉じる（RB-NF02 review P3-4）。
+            // 同じ種別の超過継続の再送待ちが複数ある場合（修正前に時間枠ごとの行が残ったもの）は最新の1行だけを再送し、
+            // 古い行は閉じる（RB-NF02 delta review D-P3-1）。
             List<ServiceSlaEscalation> obsoleteRetries = new java.util.ArrayList<>();
+            List<ServiceSlaEscalation> supersededRetries = new java.util.ArrayList<>();
             for (ServiceSlaEscalation retry : retryRows) {
                 if (isObsoleteRetry(retry, clk)) {
                     obsoleteRetries.add(retry);
+                    continue;
+                }
+                if (isSupersededContinuingRetry(retry, retryRows) || isExhaustedContinuingRetry(retry)) {
+                    supersededRetries.add(retry);
                     continue;
                 }
                 if (retry.getNextRetryAt() != null && retry.getNextRetryAt().isAfter(now)) {
@@ -191,6 +205,9 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             for (ServiceSlaEscalation obsolete : obsoleteRetries) {
                 cancelObsoleteRetry(obsolete, now);
             }
+            for (ServiceSlaEscalation superseded : supersededRetries) {
+                cancelSupersededRetry(superseded, now);
+            }
 
             boolean responseAlertSent = false;
             boolean resolveAlertSent = false;
@@ -226,11 +243,9 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private boolean notifySlaEvent(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice, LocalDateTime now) {
         List<Long> recipients = resolveNotificationRecipients(req);
-        String bucket = "CONTINUING".equals(notice.stage())
-                ? String.valueOf(now.toLocalDate().toString() + "-" + (now.getHour() * 60 + now.getMinute()) / 30)
-                : notice.stage();
-        String dedupeKey = String.format("SLA_%s:%d:%d:%s:%s", notice.stage(), req.getId(),
-                clk.getRoundNo(), notice.breachType(), bucket);
+        // 再送は台帳のdedupe keyをそのまま使う。超過継続のkeyは作成時の30分枠を含むため、再送時刻で作り直すと
+        // 別の台帳行になり、元の行がRETRYのまま毎回の実行で処理され続ける（RB-NF02 delta review D-P3-1）。
+        String dedupeKey = notice.dedupeKey() != null ? notice.dedupeKey() : newDedupeKey(req, clk, notice, now);
         if (recipients.isEmpty()) {
             persistEscalation(req, clk, notice, dedupeKey, 0, "受信者が存在しません", now);
             return false;
@@ -255,13 +270,29 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 sent = true;
             } catch (Exception e) {
                 allRecipientsSent = false;
-                error = e.getMessage() != null && !e.getMessage().isBlank()
-                        ? e.getMessage() : "SLAアラート通知送信失敗";
-                log.error("SLAアラート通知送信失敗: recipientId={}, dedupeKey={}", recipientId, dedupeKey, e);
+                // 例外のmessage（宛先・本文・SQL等を含み得る）は台帳にもログにも出さず、型と件数だけの要約にする（RB-I18N）。
+                error = safeErrorSummary(e);
+                log.error("SLAアラート通知送信失敗: recipientId={}, dedupeKey={} {}", recipientId, dedupeKey, error);
             }
         }
         persistEscalation(req, clk, notice, dedupeKey, recipients.size(), error, now);
         return sent && allRecipientsSent;
+    }
+
+    /** escalationの {@code last_error}（VARCHAR(1000)）へ入れる安全な例外要約。 */
+    private static String safeErrorSummary(Throwable failure) {
+        String summary = LogRedaction.safeThrowableSummary(failure);
+        return summary.length() <= LAST_ERROR_MAX_LENGTH ? summary : summary.substring(0, LAST_ERROR_MAX_LENGTH);
+    }
+
+    private static final int LAST_ERROR_MAX_LENGTH = 1000;
+
+    private String newDedupeKey(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice, LocalDateTime now) {
+        String bucket = "CONTINUING".equals(notice.stage())
+                ? String.valueOf(now.toLocalDate().toString() + "-" + (now.getHour() * 60 + now.getMinute()) / 30)
+                : notice.stage();
+        return String.format("SLA_%s:%d:%d:%s:%s", notice.stage(), req.getId(),
+                clk.getRoundNo(), notice.breachType(), bucket);
     }
 
     private boolean dueForWarning(LocalDateTime deadline, LocalDateTime now) {
@@ -313,6 +344,50 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         return false;
     }
 
+    /**
+     * 同じ種別の超過継続の再送待ちのうち、より新しい行（idが大きい行）がある古い行か。
+     * 超過継続は再送待ちの間に新しい時間枠の通知を出さないため、修正前に残った行を閉じるためだけに使う。
+     */
+    private boolean isSupersededContinuingRetry(ServiceSlaEscalation retry, List<ServiceSlaEscalation> retryRows) {
+        if (!"CONTINUING".equals(retry.getStage()) || retry.getId() == null || retry.getBreachType() == null) {
+            return false;
+        }
+        return retryRows.stream().anyMatch(other -> other != retry && other.getId() != null
+                && "CONTINUING".equals(other.getStage()) && "RETRY".equals(other.getStatus())
+                && retry.getBreachType().equals(other.getBreachType()) && other.getId() > retry.getId());
+    }
+
+    /** 超過継続の再送の上限（5分ごとの再送でおよそ30分。上限後は次の時間枠の超過継続へ引き継ぐ）。 */
+    public static final int CONTINUING_RETRY_LIMIT = 6;
+
+    private boolean isExhaustedContinuingRetry(ServiceSlaEscalation retry) {
+        return "CONTINUING".equals(retry.getStage()) && retry.getAttemptCount() != null
+                && retry.getAttemptCount() >= CONTINUING_RETRY_LIMIT;
+    }
+
+    private boolean hasPendingContinuingRetry(List<ServiceSlaEscalation> rows, String breachType) {
+        return rows.stream().anyMatch(row -> breachType.equals(row.getBreachType()) && "CONTINUING".equals(row.getStage())
+                && "RETRY".equals(row.getStatus()) && !isExhaustedContinuingRetry(row));
+    }
+
+    /**
+     * 新しい超過継続の再送待ちへ引き継いだ古い再送待ち、または再送の上限に達した超過継続をCANCELLEDにする
+     * （別workerが先にSENTへ確定した行は変えない）。
+     */
+    private void cancelSupersededRetry(ServiceSlaEscalation retry, LocalDateTime now) {
+        int affected = escalationMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ServiceSlaEscalation>()
+                        .eq(ServiceSlaEscalation::getId, retry.getId())
+                        .eq(ServiceSlaEscalation::getStatus, "RETRY")
+                        .set(ServiceSlaEscalation::getStatus, "CANCELLED")
+                        .set(ServiceSlaEscalation::getNextRetryAt, null)
+                        .set(ServiceSlaEscalation::getUpdatedAt, now));
+        if (affected == 1) {
+            log.info("SLA超過継続の再送待ちを閉じました（新しい再送待ちまたは次の時間枠へ引き継ぎ）: escalationId={} breachType={} "
+                    + "attemptCount={}", retry.getId(), retry.getBreachType(), retry.getAttemptCount());
+        }
+    }
+
     /** 再送待ちの台帳だけをCANCELLEDにする（別workerが先にSENTへ確定した行は変えない）。 */
     private void cancelObsoleteRetry(ServiceSlaEscalation retry, LocalDateTime now) {
         int affected = escalationMapper.update(null,
@@ -348,7 +423,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             default -> String.format("リクエスト %s [%s] のSLA期限超過通知を再送します",
                     req.getRequestNo(), req.getSubject());
         };
-        return new SlaNotice(retry.getBreachType(), retry.getStage(), title, message);
+        return new SlaNotice(retry.getBreachType(), retry.getStage(), title, message, retry.getDedupeKey());
     }
 
     private void persistEscalation(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice,
@@ -379,7 +454,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         escalationMapper.updateById(row);
     }
 
-    private record SlaNotice(String breachType, String stage, String title, String message) { }
+    /** dedupeKeyは再送のときだけ台帳の値を持つ（新規の通知はnullで、送信時刻から作る）。 */
+    private record SlaNotice(String breachType, String stage, String title, String message, String dedupeKey) {
+        SlaNotice(String breachType, String stage, String title, String message) {
+            this(breachType, stage, title, message, null);
+        }
+    }
 
     /**
      * 通知受信者の4段階エスカレーション解決

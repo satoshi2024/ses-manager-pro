@@ -276,6 +276,45 @@ class CustomerHealthServiceTest {
                 .calculateCustomerHealth(tenantBCustomer.getId()).getCustomerId());
     }
 
+    /**
+     * P3-N2-5: SLA clockの超過時刻はtenantのtimezoneのローカル日時で保存されるため、30日の窓もtenantのtimezoneの現在時刻で
+     * 決める。東京（JVM）より19時間遅いtenantで、窓の境界の両側を確かめる（東京基準では結果が逆になる位置に置く）。
+     */
+    @Test
+    @DisplayName("SLA超過の30日窓はJVMではなくtenantのtimezoneの現在時刻で決めること")
+    void testSlaBreachWindow_usesTenantTimezone() {
+        java.time.ZoneId tenantZone = java.time.ZoneId.of("Pacific/Honolulu");
+        AccountingTenantContextHolder.setZoneId(tenantZone);
+        LocalDateTime tenantNow = LocalDateTime.now(tenantZone);
+
+        // tenantの窓の先頭の2時間後: tenant基準では窓内、東京基準（19時間進む）では窓より前
+        Customer nearWindowStart = customerWithResponseBreachAt(tenantNow.minusDays(30).plusHours(2));
+        // tenantの現在の2時間後: tenant基準では未来（窓外）、東京基準では過去
+        Customer tenantFuture = customerWithResponseBreachAt(tenantNow.plusHours(2));
+
+        assertEquals(1, customerHealthService.calculateCustomerHealth(nearWindowStart.getId()).getSlaBreachCount30d());
+        assertEquals(0, customerHealthService.calculateCustomerHealth(tenantFuture.getId()).getSlaBreachCount30d());
+    }
+
+    private Customer customerWithResponseBreachAt(LocalDateTime breachedAt) {
+        Customer customer = Customer.builder()
+                .companyName("SLA窓顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
+                .build();
+        customerMapper.insert(customer);
+        ServiceRequest request = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(customer.getId()).category("SYSTEM").priority("P2")
+                .subject("SLA窓検証").description("tenant timezone").build(), 100L, false, null);
+        ServiceSlaClock clock = slaClockMapper.selectOne(new LambdaQueryWrapper<ServiceSlaClock>()
+                .eq(ServiceSlaClock::getServiceRequestId, request.getId()));
+        clock.setResponseBreached(true);
+        clock.setResponseBreachedAt(breachedAt);
+        clock.setResolveBreached(false);
+        clock.setResolveBreachedAt(null);
+        slaClockMapper.updateById(clock);
+        return customer;
+    }
+
     @Test
     @DisplayName("SLA30日集計はround作成時刻ではなく実際のresponse/resolve breach時刻を使うこと")
     void testSlaBreachCount_usesActualBreachTimestamps() {

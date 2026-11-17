@@ -47,6 +47,9 @@ public class PortalServiceRequestDto {
     /** CSATスコア (未回答時null) */
     private Integer csatScore;
 
+    /** CSATの自由記述（回答した顧客自身の入力。未回答・未記入時null） */
+    private String csatComment;
+
     /** CSAT回答可能フラグ (RESOLVED/CLOSED かつ未回答) */
     private Boolean csatAnswerable;
 }

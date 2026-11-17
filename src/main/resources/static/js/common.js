@@ -27,7 +27,9 @@ const SES = {
             if (args.length === 1 && args[0] !== null && typeof args[0] === 'object' && !Array.isArray(args[0])) {
                 var params = args[0];
                 Object.keys(params).forEach(function(k) {
-                    msg = msg.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k]);
+                    // 置換文字列の $& や $` 等を解釈させない（名前等の利用者データに $ が含まれ得る）。
+                    var value = String(params[k]);
+                    msg = msg.replace(new RegExp('\\{' + k + '\\}', 'g'), function() { return value; });
                 });
                 return msg;
             }
@@ -39,7 +41,8 @@ const SES = {
 
             // 位置プレースホルダー {0},{1},{2}... を置換
             for (var i = 0; i < args.length; i++) {
-                msg = msg.replace(new RegExp('\\{' + i + '\\}', 'g'), args[i]);
+                var arg = String(args[i]);
+                msg = msg.replace(new RegExp('\\{' + i + '\\}', 'g'), function() { return arg; });
             }
             return msg;
         },

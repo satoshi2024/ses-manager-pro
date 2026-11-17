@@ -176,6 +176,87 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    /**
+     * RB-I18N P3-N2-2・RB-NF02 review R-1: GEHの固定文言（415・パラメータ不正・本文不正・PWA競合・500）と、keyを解決できない
+     * 業務例外のstatus別文言は、同梱bundleから利用者のlocaleで返す。日本語は従来の固定文言と同じ文字列のまま。
+     */
+    @Test
+    void 固定文言とstatus別文言は同梱bundleから利用者のlocaleで返す() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", bundledMessageSource());
+        java.util.Map<java.util.Locale, String[]> expected = java.util.Map.of(
+                java.util.Locale.JAPANESE, new String[]{"入力内容を確認してください。", "リクエストパラメータが不正です",
+                        "リクエスト内容が不正です", "他の操作と競合しました。再読み込みして再試行してください。",
+                        "システムエラーが発生しました。", "対象が見つかりません。"},
+                java.util.Locale.ENGLISH, new String[]{"Please check your input.", "The request parameters are invalid.",
+                        "The request content is invalid.",
+                        "The operation conflicted with another change. Please reload and try again.",
+                        "A system error occurred.", "The requested item was not found."},
+                java.util.Locale.KOREAN, new String[]{"\uc785\ub825 \ub0b4\uc6a9\uc744 \ud655\uc778\ud574 \uc8fc\uc138\uc694.", "\uc694\uccad \ud30c\ub77c\ubbf8\ud130\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+                        "\uc694\uccad \ub0b4\uc6a9\uc774 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.", "\ub2e4\ub978 \uc791\uc5c5\uacfc \ucda9\ub3cc\ud588\uc2b5\ub2c8\ub2e4. \uc0c8\ub85c \uace0\uce5c \ud6c4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.",
+                        "\uc2dc\uc2a4\ud15c \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.", "\ub300\uc0c1\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4."},
+                java.util.Locale.SIMPLIFIED_CHINESE, new String[]{"\u8bf7\u68c0\u67e5\u8f93\u5165\u5185\u5bb9\u3002",
+                        "\u8bf7\u6c42\u53c2\u6570\u65e0\u6548\u3002", "\u8bf7\u6c42\u5185\u5bb9\u65e0\u6548\u3002",
+                        "\u4e0e\u5176\u4ed6\u64cd\u4f5c\u53d1\u751f\u51b2\u7a81\u3002\u8bf7\u91cd\u65b0\u52a0\u8f7d\u540e\u91cd\u8bd5\u3002",
+                        "\u53d1\u751f\u7cfb\u7edf\u9519\u8bef\u3002", "\u672a\u627e\u5230\u76ee\u6807\u6570\u636e\u3002"});
+        try {
+            for (var entry : expected.entrySet()) {
+                org.springframework.context.i18n.LocaleContextHolder.setLocale(entry.getKey());
+                String[] messages = entry.getValue();
+                String locale = entry.getKey().toLanguageTag();
+
+                assertEquals(messages[0], handler.handleUnsupportedMediaType(
+                        new org.springframework.web.HttpMediaTypeNotSupportedException("text/plain"))
+                        .getBody().getMessage(), locale);
+                assertEquals(messages[1], handler.handleRequestParameterException(
+                        new org.springframework.web.bind.MissingServletRequestParameterException("month", "String"))
+                        .getBody().getMessage(), locale);
+                assertEquals(messages[2], handler.handleUnreadableBody(new HttpMessageNotReadableException("broken",
+                        new org.springframework.mock.http.MockHttpInputMessage(new byte[0])))
+                        .getBody().getMessage(), locale);
+                assertEquals(messages[3], handler.handlePwaConflict(new PwaConflictException("stale", null))
+                        .getBody().getMessage(), locale);
+                assertEquals(messages[4], handler.handleException(new IllegalStateException("内部の詳細"))
+                        .getBody().getMessage(), locale);
+                // keyでない日本語の生文言の業務例外は、status別の文言（利用者のlocale）にする。原文は返さない。
+                var raw = handler.handleBusinessException(BusinessException.of(404, "指定されたリクエストが見つかりません"));
+                assertEquals(messages[5], raw.getBody().getMessage(), locale);
+            }
+        } finally {
+            org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void MessageSourceが無い場合の固定文言は従来の日本語のままにする() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.ENGLISH);
+        try {
+            assertEquals("リクエストパラメータが不正です", handler.handleRequestParameterException(
+                    new org.springframework.web.bind.MissingServletRequestParameterException("month", "String"))
+                    .getBody().getMessage());
+            assertEquals(SafeErrorPolicy.DEFAULT_SYSTEM_MESSAGE,
+                    handler.handleException(new IllegalStateException("x")).getBody().getMessage());
+            assertEquals("他の操作と競合しました。再読み込みして再試行してください。",
+                    handler.handlePwaConflict(new PwaConflictException("stale", null)).getBody().getMessage());
+        } finally {
+            org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+            CorrelationContext.clear();
+        }
+    }
+
+    /** application.ymlの spring.messages と同じ設定の、同梱4言語bundleを読むMessageSource。 */
+    private static org.springframework.context.MessageSource bundledMessageSource() {
+        org.springframework.context.support.ResourceBundleMessageSource source =
+                new org.springframework.context.support.ResourceBundleMessageSource();
+        source.setBasename("messages");
+        source.setDefaultEncoding("UTF-8");
+        source.setFallbackToSystemLocale(false);
+        source.setUseCodeAsDefaultMessage(true);
+        return source;
+    }
+
     @Test
     void 五百系BusinessExceptionはシステム分類を保持する() {
         GlobalExceptionHandler handler = new GlobalExceptionHandler();

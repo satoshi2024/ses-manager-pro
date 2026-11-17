@@ -56,7 +56,8 @@ class FeatureSwitchChildTemplateRenderingTest {
         String html = render("portal/customer/index", disabledOnly(Feature.NF02_CUSTOMER_PORTAL).disabledKeys());
 
         assertThat(html).doesNotContain("id=\"tabBtnServiceDesk\"", "id=\"tab-service-desk\"",
-                "id=\"portalNewRequestModal\"", "id=\"portalCsatModal\"", "/portal/js/portal-service-desk.js");
+                "id=\"portalNewRequestModal\"", "id=\"portalCsatModal\"", "id=\"portalRequestDetailModal\"",
+                "PORTAL_SERVICE_DESK_MESSAGES", "/portal/js/portal-service-desk.js");
         assertThat(html).contains("data-tab=\"acceptances\"", "data-tab=\"contracts\"", "data-tab=\"invoices\"",
                 "data-tab=\"quotations\"", "data-tab=\"sales-orders\"", "/portal/js/portal.js");
     }
@@ -69,11 +70,14 @@ class FeatureSwitchChildTemplateRenderingTest {
     }
 
     @Test
-    void 顧客ポータルの子スイッチONなら問い合わせ導線を5か所とも描画する() {
+    void 顧客ポータルの子スイッチONなら問い合わせ導線と文言を全て描画する() {
         String html = render("portal/customer/index", allOn().disabledKeys());
 
+        // 詳細・返信はpage routeを持たず、同じ画面のモーダルで開く（P3-N2-9）。文言はserver側で解決して渡す（RB-I18N）。
         assertThat(html).contains("id=\"tabBtnServiceDesk\"", "id=\"tab-service-desk\"", "id=\"portalNewRequestModal\"",
-                "id=\"portalCsatModal\"", "/portal/js/portal-service-desk.js");
+                "id=\"portalCsatModal\"", "id=\"portalRequestDetailModal\"", "id=\"portalReplyForm\"",
+                "window.PORTAL_SERVICE_DESK_MESSAGES", "/portal/js/portal-service-desk.js");
+        assertThat(html).doesNotContain("/portal/customer/service-desk/requests/");
     }
 
     @Test

@@ -57,15 +57,70 @@
     const TAB_ID = newRequestId();
     let unloadGuardBound = false;
 
-    /** 画面文言。共通のi18n（window.SES_MESSAGES）があれば使い、offline.html等では日本語の既定文言にする。 */
+    // 画面文言の端末内コピー（pwa.* のkeyだけ）。offline.htmlは静的ページで /js/i18n.js（no-store、SWもcacheしない）を
+    // 読めないため、オンラインの画面で使っていた言語の文言をここから引く（RB-I18N P3-N4-6）。利用者データではない。
+    const UI_MESSAGES_KEY = 'ses_pwa_ui_messages';
+    const UI_MESSAGE_PREFIX = 'pwa.';
+    let storedUiMessages;
+
+    /** 端末に保存した画面文言（{lang, messages}）。無い・壊れている場合はnull。 */
+    function readStoredUiMessages() {
+        if (storedUiMessages !== undefined) return storedUiMessages;
+        storedUiMessages = null;
+        try {
+            const parsed = JSON.parse(localStorage.getItem(UI_MESSAGES_KEY) || 'null');
+            if (parsed && typeof parsed === 'object' && typeof parsed.lang === 'string'
+                && parsed.messages && typeof parsed.messages === 'object') {
+                storedUiMessages = parsed;
+            }
+        } catch (_) { /* 既定文言を使う */ }
+        return storedUiMessages;
+    }
+
+    /** オンラインの画面（window.SES_MESSAGESあり）で、pwa.* の文言と言語を端末へ写す。内容が同じなら書かない。 */
+    function persistUiMessages() {
+        try {
+            const messages = window.SES_MESSAGES;
+            if (!messages || typeof messages !== 'object') return;
+            const subset = {};
+            Object.keys(messages).sort().forEach(key => {
+                if (key.startsWith(UI_MESSAGE_PREFIX) && typeof messages[key] === 'string') subset[key] = messages[key];
+            });
+            const serialized = JSON.stringify({ lang: String(window.SES_LANG || 'ja'), messages: subset });
+            if (localStorage.getItem(UI_MESSAGES_KEY) !== serialized) localStorage.setItem(UI_MESSAGES_KEY, serialized);
+            storedUiMessages = undefined;
+        } catch (_) { /* 保存できなくても画面の表示は続ける */ }
+    }
+
+    /**
+     * 画面文言。共通のi18n（window.SES_MESSAGES）→ 端末に保存した文言 → 日本語の既定文言の順に使う。
+     * 既定文言はjaのbundleと同じ文字列にしておく（offline.htmlで端末の文言が無い場合も日本語で表示される）。
+     */
     function uiText(key, fallback, ...args) {
         let template = fallback;
         try {
             const messages = window.SES_MESSAGES;
-            if (messages && typeof messages[key] === 'string' && messages[key]) template = messages[key];
+            if (messages && typeof messages[key] === 'string' && messages[key]) {
+                template = messages[key];
+            } else {
+                const stored = readStoredUiMessages();
+                const value = stored && stored.messages[key];
+                if (typeof value === 'string' && value) template = value;
+            }
         } catch (_) { /* 既定文言を使う */ }
         return String(template).replace(/\{(\d+)\}/g,
             (match, index) => (args[index] === undefined ? match : String(args[index])));
+    }
+
+    /** 画面の言語（BCP 47）。オンラインの画面ではSES_LANG、offline.htmlでは端末に保存した文言の言語。 */
+    function uiLanguage() {
+        if (typeof window.SES_LANG === 'string' && window.SES_LANG) return window.SES_LANG;
+        const stored = readStoredUiMessages();
+        return stored && stored.lang ? stored.lang : 'ja';
+    }
+
+    function uiError(key, fallback, ...args) {
+        return new Error(uiText(key, fallback, ...args));
     }
 
     function restoreUnavailableError() {
@@ -184,7 +239,7 @@
         let token = '';
         try { token = match ? decodeURIComponent(match[1]) : ''; }
         catch (_) { /* 不正なcookieはCSRF tokenとして使わない */ }
-        if (!token) throw new Error('CSRFトークンを確認できません。オンラインで再読み込みしてください');
+        if (!token) throw uiError('pwa.error.csrfUnavailable', 'CSRFトークンを確認できません。オンラインで再読み込みしてください');
         return { 'X-XSRF-TOKEN': token };
     }
 
@@ -330,7 +385,7 @@
 
     function openDb() {
         return new Promise((resolve, reject) => {
-            if (!window.indexedDB) return reject(new Error('このブラウザではoffline保存を利用できません'));
+            if (!window.indexedDB) return reject(uiError('pwa.error.storageUnsupported', 'このブラウザではoffline保存を利用できません'));
             const request = indexedDB.open(DB_NAME, DB_VERSION);
             request.onupgradeneeded = event => {
                 const db = request.result;
@@ -358,7 +413,7 @@
                         }
                         if (record.conflict || JSON.stringify(record).length > MAX_PAYLOAD_BYTES) {
                             record.status = 'ERROR';
-                            record.error = '安全な競合情報へ更新できないため、この下書きは破棄して再入力してください。';
+                            record.error = uiText('pwa.error.conflictUnsafe', '安全な競合情報へ更新できないため、この下書きは破棄して再入力してください。');
                             record.payload = null;
                             record.payloadHash = null;
                             delete record.conflict;
@@ -370,7 +425,7 @@
                 }
             };
             request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error || new Error('offline保存を初期化できません'));
+            request.onerror = () => reject(request.error || uiError('pwa.error.storageInitFailed', 'offline保存を初期化できません'));
         });
     }
 
@@ -389,8 +444,8 @@
                 return;
             }
             tx.oncomplete = () => { db.close(); if (!failed) resolve(result); };
-            tx.onerror = () => { failed = true; db.close(); reject(tx.error || new Error('offline保存に失敗しました')); };
-            tx.onabort = () => { failed = true; db.close(); reject(tx.error || new Error('offline保存を中断しました')); };
+            tx.onerror = () => { failed = true; db.close(); reject(tx.error || uiError('pwa.error.storageSaveFailed', 'offline保存に失敗しました')); };
+            tx.onabort = () => { failed = true; db.close(); reject(tx.error || uiError('pwa.error.storageAborted', 'offline保存を中断しました')); };
         }));
     }
 
@@ -429,7 +484,7 @@
                     }
                 };
                 tx.oncomplete = () => resolve(wrote);
-                tx.onerror = tx.onabort = () => reject(tx.error || new Error('offline保存に失敗しました'));
+                tx.onerror = tx.onabort = () => reject(tx.error || uiError('pwa.error.storageSaveFailed', 'offline保存に失敗しました'));
             });
         } finally { db.close(); }
     }
@@ -451,7 +506,7 @@
                     }
                 };
                 tx.oncomplete = () => resolve(removed);
-                tx.onerror = tx.onabort = () => reject(tx.error || new Error('offline削除に失敗しました'));
+                tx.onerror = tx.onabort = () => reject(tx.error || uiError('pwa.error.storageDeleteFailed', 'offline削除に失敗しました'));
             });
         } finally { db.close(); }
     }
@@ -617,46 +672,46 @@
     }
 
     function rejectPayload(message) {
-        throw new Error(`offline保存できないpayloadです: ${message}`);
+        throw uiError('pwa.error.payloadRejected', 'offline保存できないpayloadです: {0}', message);
     }
 
     function validateSafeValue(value, path, depth) {
-        if (depth > MAX_PAYLOAD_DEPTH) rejectPayload('階層が深すぎます');
+        if (depth > MAX_PAYLOAD_DEPTH) rejectPayload(uiText('pwa.error.payload.tooDeep', '階層が深すぎます'));
         if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-            if (typeof value === 'string' && value.length > 8192) rejectPayload(`${path}が長すぎます`);
+            if (typeof value === 'string' && value.length > 8192) rejectPayload(uiText('pwa.error.payload.tooLong', '{0}が長すぎます', path));
             return;
         }
         if (typeof value === 'number') {
-            if (!Number.isFinite(value)) rejectPayload(`${path}が不正です`);
+            if (!Number.isFinite(value)) rejectPayload(uiText('pwa.error.payload.invalidValue', '{0}が不正です', path));
             return;
         }
-        if (typeof value !== 'object') rejectPayload(`${path}の型は保存できません`);
+        if (typeof value !== 'object') rejectPayload(uiText('pwa.error.payload.typeNotAllowed', '{0}の型は保存できません', path));
         if ((typeof Blob !== 'undefined' && value instanceof Blob)
             || (typeof File !== 'undefined' && value instanceof File)
             || (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer)
             || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value))) {
-            rejectPayload(`${path}にbinaryを含められません`);
+            rejectPayload(uiText('pwa.error.payload.binary', '{0}にbinaryを含められません', path));
         }
         if (Array.isArray(value)) {
             value.forEach((item, index) => validateSafeValue(item, `${path}[${index}]`, depth + 1));
             return;
         }
-        if (!isPlainObject(value)) rejectPayload(`${path}の型は保存できません`);
+        if (!isPlainObject(value)) rejectPayload(uiText('pwa.error.payload.typeNotAllowed', '{0}の型は保存できません', path));
         Object.keys(value).forEach(key => {
-            if (FORBIDDEN_KEY.test(key)) rejectPayload(`${path}.${key}は保存できません`);
+            if (FORBIDDEN_KEY.test(key)) rejectPayload(uiText('pwa.error.payload.forbiddenKey', '{0}は保存できません', `${path}.${key}`));
             validateSafeValue(value[key], `${path}.${key}`, depth + 1);
         });
     }
 
     function assertExactKeys(value, allowed, path) {
-        if (!isPlainObject(value)) rejectPayload(`${path}はobjectが必要です`);
+        if (!isPlainObject(value)) rejectPayload(uiText('pwa.error.payload.objectRequired', '{0}はobjectが必要です', path));
         const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-        if (unknown.length) rejectPayload(`${path}の項目がoffline許可外です`);
+        if (unknown.length) rejectPayload(uiText('pwa.error.payload.notAllowedFields', '{0}の項目がoffline許可外です', path));
     }
 
     function validatePayload(spec, method, payload) {
         if (!validMethod(spec.screen, spec.path, method)) {
-            rejectPayload('screen/method/pathの組み合わせが不正です');
+            rejectPayload(uiText('pwa.error.payload.invalidOperation', 'screen/method/pathの組み合わせが不正です'));
         }
         validateSafeValue(payload, 'payload', 0);
         const path = spec.path;
@@ -665,7 +720,7 @@
                 ? ['month', 'workDate']
                 : ['workDate', 'clockIn', 'clockOut', 'breaks', 'breakMinutes', 'workType', 'workplaceType', 'remarks'], 'attendance');
             if (method === 'POST' && payload.breaks !== undefined && payload.breaks !== null) {
-                if (!Array.isArray(payload.breaks)) rejectPayload('attendance.breaksが不正です');
+                if (!Array.isArray(payload.breaks)) rejectPayload(uiText('pwa.error.payload.invalidValue', '{0}が不正です', 'attendance.breaks'));
                 payload.breaks.forEach(item => assertExactKeys(item, ['startTime', 'endTime'], 'attendance.breaks'));
             }
         } else if (spec.screen === 'timesheet' && path === '/api/my/pwa/timesheet/daily') {
@@ -679,7 +734,7 @@
             if (method === 'PUT') {
                 const pathId = path.match(/\/(\d+)$/)[1];
                 if (payload.id === undefined || String(payload.id) !== pathId) {
-                    rejectPayload('expenseのURL IDとpayload.idが一致しません');
+                    rejectPayload(uiText('pwa.error.payload.idMismatch', 'expenseのURL IDとpayload.idが一致しません'));
                 }
             }
         } else if (spec.screen === 'change-request' && path === '/api/my/pwa/change-requests/drafts') {
@@ -692,21 +747,21 @@
                     'experienceYears', 'japaneseLevel', 'resumeSummary', 'email', 'phone'], 'change-request.payload');
             } else if (requestType === 'skill.change') {
                 assertExactKeys(nested, ['skills'], 'change-request.payload');
-                if (!Array.isArray(nested.skills)) rejectPayload('change-request.skillsが不正です');
+                if (!Array.isArray(nested.skills)) rejectPayload(uiText('pwa.error.payload.invalidValue', '{0}が不正です', 'change-request.skills'));
                 nested.skills.forEach(item => assertExactKeys(item, ['skillId', 'proficiency', 'experienceYears'], 'change-request.skills'));
             } else if (requestType === 'career.change') {
                 assertExactKeys(nested, ['careers'], 'change-request.payload');
-                if (!Array.isArray(nested.careers)) rejectPayload('change-request.careersが不正です');
+                if (!Array.isArray(nested.careers)) rejectPayload(uiText('pwa.error.payload.invalidValue', '{0}が不正です', 'change-request.careers'));
                 nested.careers.forEach(item => assertExactKeys(item, ['periodFrom', 'periodTo', 'projectName', 'clientIndustry',
                     'role', 'description', 'techStack', 'teamSize'], 'change-request.careers'));
             } else {
-                rejectPayload('change-request.requestTypeが不正です');
+                rejectPayload(uiText('pwa.error.payload.invalidValue', '{0}が不正です', 'change-request.requestType'));
             }
         } else {
-            rejectPayload('screen/method/pathの組み合わせが不正です');
+            rejectPayload(uiText('pwa.error.payload.invalidOperation', 'screen/method/pathの組み合わせが不正です'));
         }
         const bytes = new TextEncoder().encode(JSON.stringify(canonical(payload)).replace(/\u2028|\u2029/g, '')).byteLength;
-        if (bytes > MAX_PAYLOAD_BYTES) rejectPayload('payloadが大きすぎます');
+        if (bytes > MAX_PAYLOAD_BYTES) rejectPayload(uiText('pwa.error.payload.tooLarge', 'payloadが大きすぎます'));
     }
 
     function now() { return Date.now(); }
@@ -796,20 +851,20 @@
             if (!oldScope || bootstrapEpoch === 'uninitialized' || bootstrapEpoch === 'unverified'
                     || localStorage.getItem(SCOPE_EPOCH_KEY) !== bootstrapEpoch) {
                 state.quarantined = true;
-                throw new Error('logout後の下書きは復元できません');
+                throw uiError('pwa.error.restoreAfterLogout', 'logout後の下書きは復元できません');
             }
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             state.candidateRestoreScope = oldScope;
             state.scope = oldScope;
             state.revocationEpoch = bootstrapEpoch;
             const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             state.lockedDraftCount = lockedDraftCount;
-            if (!state.scope) throw new Error('offlineで利用するには一度オンラインでログインしてください');
+            if (!state.scope) throw uiError('pwa.error.loginOnlineFirst', 'offlineで利用するには一度オンラインでログインしてください');
             return state.scope;
         }
         try {
@@ -820,21 +875,21 @@
                 headers: contextHeaders
             });
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             if (response.status === 401) throw Object.assign(new Error('Session timeout'), { sessionExpired: true });
-            if (!response.ok) throw new Error('ユーザーscopeを確認できません');
+            if (!response.ok) throw uiError('pwa.error.scopeUnavailable', 'ユーザーscopeを確認できません');
             const result = await response.json();
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             const scope = result && result.data && result.data.userScope;
-            if (!scope || typeof scope !== 'string') throw new Error('ユーザーscopeが不正です');
+            if (!scope || typeof scope !== 'string') throw uiError('pwa.error.scopeInvalid', 'ユーザーscopeが不正です');
             // 復元可否はserverのsession認証主体で決まる（OIDC等はfalse）。欠落は復元できない側に倒す。
             state.restoreAvailable = result.data.restoreAvailable === true;
             if (bootstrapEpoch === 'uninitialized' || bootstrapEpoch === 'unverified') {
                 bootstrapEpoch = newRevocationEpoch();
-                if (!persistRevocationEpoch(bootstrapEpoch)) throw new Error('撤回状態を永続化できません');
+                if (!persistRevocationEpoch(bootstrapEpoch)) throw uiError('pwa.error.revocationPersistFailed', '撤回状態を永続化できません');
             } else {
                 // Safari ITPの7日上限に対し、照合済みの同じepochでcookie期限だけを延ばす（失敗しても続行し、次回照合で隔離される）。
                 refreshRevocationEpochCookie(bootstrapEpoch);
@@ -848,7 +903,7 @@
                 if (!preserveQueue) await deleteScope(oldScope);
             }
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             state.scope = scope;
             state.revocationEpoch = bootstrapEpoch;
@@ -859,7 +914,7 @@
             const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
             if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)
                     || state.scope !== scope || state.revocationEpoch !== bootstrapEpoch) {
-                throw new Error('logout後のscope再確認が必要です');
+                throw uiError('pwa.error.scopeRecheck', 'logout後のscope再確認が必要です');
             }
             state.lockedDraftCount = lockedDraftCount;
             return scope;
@@ -955,7 +1010,7 @@
                     ? uiText('pwa.queue.quarantinedUnavailable', '下書きはロックされています。現在のログイン方式（シングルサインオン）では復元できません。')
                     : uiText('pwa.queue.quarantinedRestorable', '下書きはロックされています。オンラインで再認証し、明示的に復元してください。');
             }
-            else if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
+            else if (state.paused) status.textContent = uiText('pwa.queue.sessionExpired', 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。');
             else if (unsentWarning) {
                 // 復元できない（未確認を含む）sessionでは、同期中でも警告を隠さない（iOSでは離脱確認が出ないため）。
                 let warning;
@@ -969,14 +1024,14 @@
                 status.textContent = lockedText ? `${warning} ${lockedText}` : warning;
             }
             else if (state.lockedDraftCount) status.textContent = lockedText;
-            else if (!navigator.onLine && pending.length) status.textContent = `オフライン: 未送信 ${pending.length} 件`;
+            else if (!navigator.onLine && pending.length) status.textContent = uiText('pwa.queue.offlineUnsent', 'オフライン: 未送信 {0} 件', pending.length);
             else if (sending > 0) {
                 status.textContent = uiText('pwa.queue.sending', '送信中を含む未送信 {0} 件（サーバーの応答を待っています）。', pending.length);
             }
-            else if (state.flushing) status.textContent = `同期中: ${pending.length} 件`;
-            else if (pending.length) status.textContent = `未送信 ${pending.length} 件`;
-            else if (conflicts.length) status.textContent = `競合 ${conflicts.length} 件。サーバー版と端末版を確認してください。`;
-            else if (errors.length) status.textContent = `同期停止 ${errors.length} 件。再認証または破棄を確認してください。`;
+            else if (state.flushing) status.textContent = uiText('pwa.queue.syncing', '同期中: {0} 件', pending.length);
+            else if (pending.length) status.textContent = uiText('pwa.queue.unsent', '未送信 {0} 件', pending.length);
+            else if (conflicts.length) status.textContent = uiText('pwa.queue.conflicts', '競合 {0} 件。サーバー版と端末版を確認してください。', conflicts.length);
+            else if (errors.length) status.textContent = uiText('pwa.queue.errors', '同期停止 {0} 件。再認証または破棄を確認してください。', errors.length);
             else status.textContent = '';
             conflictBox.innerHTML = conflicts.concat(errors).map(renderConflict).join('');
         }
@@ -992,34 +1047,35 @@
     function renderConflict(record) {
         if (record.status === 'ERROR') {
             return `<div class="pwa-queue-conflict" data-request-id="${escapeHtml(record.clientRequestId)}">` +
-                `<div class="fw-bold">同期エラー: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
-                `<div class="small mt-1">${escapeHtml(record.error || '同期できません')}</div>` +
-                `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">破棄して再入力</button>` +
+                `<div class="fw-bold">${escapeHtml(uiText('pwa.queue.syncErrorTitle', '同期エラー'))}: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
+                `<div class="small mt-1">${escapeHtml(record.error || uiText('pwa.queue.syncFailed', '同期できません'))}</div>` +
+                `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">${escapeHtml(uiText('pwa.queue.discardAndReenter', '破棄して再入力'))}</button>` +
                 `</div>`;
         }
         const conflict = record.conflict || {};
-        const title = record.status === 'CONFLICT' ? '競合' : '同期エラー';
+        const title = record.status === 'CONFLICT'
+            ? uiText('pwa.queue.conflictTitle', '競合') : uiText('pwa.queue.syncErrorTitle', '同期エラー');
         const server = conflict.server === undefined ? { hash: conflict.serverHash } : conflict.server;
         const client = conflict.client === undefined ? record.payload : conflict.client;
         const fields = Array.isArray(conflict.fields) ? conflict.fields : [];
         const fieldMarkup = fields.length
-            ? `<div class="small mt-1">差分項目</div><ul class="small">${fields.map(field =>
+            ? `<div class="small mt-1">${escapeHtml(uiText('pwa.queue.diffFields', '差分項目'))}</div><ul class="small">${fields.map(field =>
                 `<li><code>${escapeHtml(field.name)}</code>: server=${escapeHtml(safeJson(field.serverValue))}, client=${escapeHtml(safeJson(field.clientValue))}</li>`).join('')}</ul>`
             : '';
         const refreshed = conflict.serverRefreshAt
-            ? `<div class="small text-muted">server再取得: ${escapeHtml(conflict.serverRefreshAt)} / version ${escapeHtml(conflict.serverVersion)}</div>` : '';
+            ? `<div class="small text-muted">${escapeHtml(uiText('pwa.queue.serverRefreshed', 'server再取得: {0} / version {1}', conflict.serverRefreshAt, conflict.serverVersion))}</div>` : '';
         const reapply = conflict.serverVersion === undefined ? ''
-            : `<button type="button" class="btn btn-sm btn-outline-primary me-1" data-pwa-reapply="${escapeHtml(record.clientRequestId)}">server版を確認して再適用</button>`;
+            : `<button type="button" class="btn btn-sm btn-outline-primary me-1" data-pwa-reapply="${escapeHtml(record.clientRequestId)}">${escapeHtml(uiText('pwa.queue.reapply', 'server版を確認して再適用'))}</button>`;
         return `<div class="pwa-queue-conflict" data-request-id="${escapeHtml(record.clientRequestId)}">` +
-            `<div class="fw-bold">${title}: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
+            `<div class="fw-bold">${escapeHtml(title)}: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
             `<div class="small text-muted">clientRequestId: ${escapeHtml(record.clientRequestId)}</div>` +
             `<div class="small text-muted">resource: ${escapeHtml(conflict.resource || record.resourceKey || '')} / ${escapeHtml(conflict.resourceId || '')}</div>` +
             refreshed + fieldMarkup +
-            `<div class="small mt-1">サーバー版</div><pre>${escapeHtml(safeJson(server))}</pre>` +
-            `<div class="small">端末版</div><pre>${escapeHtml(safeJson(client))}</pre>` +
-            `<button type="button" class="btn btn-sm btn-outline-secondary me-1" data-pwa-refresh="${escapeHtml(record.clientRequestId)}">server版を再取得</button>` +
+            `<div class="small mt-1">${escapeHtml(uiText('pwa.queue.serverVersion', 'サーバー版'))}</div><pre>${escapeHtml(safeJson(server))}</pre>` +
+            `<div class="small">${escapeHtml(uiText('pwa.queue.deviceVersion', '端末版'))}</div><pre>${escapeHtml(safeJson(client))}</pre>` +
+            `<button type="button" class="btn btn-sm btn-outline-secondary me-1" data-pwa-refresh="${escapeHtml(record.clientRequestId)}">${escapeHtml(uiText('pwa.queue.refreshServer', 'server版を再取得'))}</button>` +
             reapply +
-            `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">端末版を破棄</button>` +
+            `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">${escapeHtml(uiText('pwa.queue.discardDevice', '端末版を破棄'))}</button>` +
             `</div>`;
     }
 
@@ -1065,7 +1121,7 @@
                     }
                 };
                 tx.oncomplete = () => resolve(claimed);
-                tx.onerror = tx.onabort = () => reject(tx.error || new Error('同期claimを取得できません'));
+                tx.onerror = tx.onabort = () => reject(tx.error || uiError('pwa.error.claimFailed', '同期claimを取得できません'));
             });
         } finally { db.close(); }
     }
@@ -1181,11 +1237,11 @@
             }
             const result = await response.json();
             if (!ticketIsCurrent(ticket)) return;
-            if (!response.ok || !result || result.code !== 200) throw new Error('server版を再取得できません');
+            if (!response.ok || !result || result.code !== 200) throw uiError('pwa.error.serverFetchFailed', 'server版を再取得できません');
             const server = refreshedSnapshot(result, record);
             const version = server && Number.isInteger(Number(server.version))
                 ? Number(server.version) : refreshedVersion(result, record);
-            if (version === null) throw new Error('server versionを再取得できません');
+            if (version === null) throw uiError('pwa.error.serverVersionFetchFailed', 'server versionを再取得できません');
             // change-requestは外側の {requestType,payload,reason} ではなく申請内容（payload.payload）と比べる（P3-N4-5）。
             const clientPayload = record.screen === 'change-request'
                 ? ((record.payload || {}).payload || {}) : record.payload;
@@ -1199,7 +1255,7 @@
             await put(record, ticket);
         } catch (error) {
             if (!ticketIsCurrent(ticket)) return;
-            record.error = error.message || 'server版を再取得できません';
+            record.error = error.message || uiText('pwa.error.serverFetchFailed', 'server版を再取得できません');
             await put(record, ticket);
         }
         await render();
@@ -1211,7 +1267,7 @@
         if (!ticketIsCurrent(ticket) || !record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
         const serverVersion = Number(record.conflict && record.conflict.serverVersion);
         if (!Number.isInteger(serverVersion) || serverVersion < 0) return;
-        if (!window.confirm('server版との差分を確認しました。端末版を新しいbase versionで再適用しますか？')) return;
+        if (!window.confirm(uiText('pwa.queue.reapplyConfirm', 'server版との差分を確認しました。端末版を新しいbase versionで再適用しますか？'))) return;
         record.baseVersion = serverVersion;
         record.payloadHash = await commandHash(record);
         if (!ticketIsCurrent(ticket)) return;
@@ -1225,14 +1281,14 @@
 
     async function markError(record, message, ticket, claim) {
         record.status = 'ERROR';
-        record.error = message || '同期できません';
+        record.error = message || uiText('pwa.queue.syncFailed', '同期できません');
         if (await putClaimed(record, ticket, claim) === false) return;
         await render();
     }
 
     async function markExpired(record, message, ticket, claim) {
         record.status = 'ERROR';
-        record.error = message || '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+        record.error = message || uiText('error.pwa.queueExpired', '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。');
         record.payload = null;
         record.payloadHash = null;
         if (await putClaimed(record, ticket, claim) === false) return { skipped: true };
@@ -1309,9 +1365,7 @@
             if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             if (response.status === 409 || (result && result.code === 409)) {
                 if (result && result.data && result.data.type === 'QUEUE_EXPIRED') {
-                    const fallback = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
-                    const message = window.SES && SES.i18n
-                        ? SES.i18n.t('error.pwa.queueExpired', fallback) : fallback;
+                    const message = uiText('error.pwa.queueExpired', '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。');
                     return markExpired(record, message, ticket, claim);
                 }
                 return markConflict(record, result && result.data, ticket, claim);
@@ -1343,12 +1397,12 @@
 
     async function request(spec) {
         if (!spec || !validPath(spec.path) || !spec.screen || !spec.method) {
-            throw new Error('offline対象外の操作です');
+            throw uiError('pwa.error.notOfflineOperation', 'offline対象外の操作です');
         }
         const method = String(spec.method).toUpperCase();
         const payload = spec.payload || {};
         const baseVersion = Number(spec.baseVersion);
-        if (!Number.isInteger(baseVersion) || baseVersion < 0) throw new Error('baseVersionが不正です');
+        if (!Number.isInteger(baseVersion) || baseVersion < 0) throw uiError('pwa.error.invalidBaseVersion', 'baseVersionが不正です');
         validatePayload(spec, method, payload);
         const dedupeKey = JSON.stringify(canonical({
             screen: spec.screen, month: spec.month || null, method, path: spec.path,
@@ -1357,8 +1411,8 @@
         if (state.inFlight.has(dedupeKey)) return state.inFlight.get(dedupeKey);
         const operation = (async () => {
             await state.ready;
-            if (state.paused || state.quarantined || !state.scope) throw new Error('オンラインでユーザーを確認してください');
-            if (!state.scope) throw new Error('ユーザーscopeを確認できません');
+            if (state.paused || state.quarantined || !state.scope) throw uiError('pwa.error.confirmUserOnline', 'オンラインでユーザーを確認してください');
+            if (!state.scope) throw uiError('pwa.error.scopeUnavailable', 'ユーザーscopeを確認できません');
             const ticket = scopeTicket();
             const record = {
                 clientRequestId: spec.clientRequestId || newRequestId(),
@@ -1480,6 +1534,7 @@
     function init() {
         if (state.initialized) return;
         state.initialized = true;
+        persistUiMessages();
         bind();
         state.ready = cleanupExpired().catch(() => undefined)
             .then(() => bootstrapScope())
@@ -1563,6 +1618,10 @@
 
     targetSes.pwaQueue = {
         init,
+        /** 画面文言（offline.htmlも使う）。key・既定文言・{0}等の引数。 */
+        text: uiText,
+        /** 画面の言語（BCP 47）。 */
+        language: uiLanguage,
         whenReady: () => state.ready,
         request,
         flush,
@@ -1592,24 +1651,24 @@
         },
         prepareRestore: async password => {
             await state.ready;
-            if (!navigator.onLine || !password || state.quarantined) throw new Error('オンラインでログインし直してください');
+            if (!navigator.onLine || !password || state.quarantined) throw uiError('pwa.error.loginAgainOnline', 'オンラインでログインし直してください');
             // パスワードを送る前に、このsessionがパスワード再認証に対応するかを確かめる（OIDC等では送らない）。
             const availability = await checkRestoreAvailability();
             if (availability === false) throw restoreUnavailableError();
-            if (availability !== true) throw new Error('復元できるかを確認できません。オンラインで再読み込みしてください');
+            if (availability !== true) throw uiError('pwa.error.availabilityUnknown', '復元できるかを確認できません。オンラインで再読み込みしてください');
             const generation = state.documentGeneration;
             const oldScope = state.candidateRestoreScope;
             if (generation !== state.documentGeneration || !oldScope
-                    || await countScope(oldScope) === 0) throw new Error('復元対象を一意に確認できません');
+                    || await countScope(oldScope) === 0) throw uiError('pwa.error.restoreTargetAmbiguous', '復元対象を一意に確認できません');
             if (generation !== state.documentGeneration || state.quarantined || oldScope !== state.candidateRestoreScope) {
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             const response = await fetch('/api/my/pwa/restore/reauthenticate', {
                 method: 'POST', cache: 'no-store', credentials: 'same-origin',
                 headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
                 body: JSON.stringify({ password, documentNonce: state.documentNonce, userScope: oldScope })
             });
-            if (generation !== state.documentGeneration) throw new Error('復元が取り消されました。最初からやり直してください');
+            if (generation !== state.documentGeneration) throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             const result = await response.json().catch(() => null);
             if (result && result.data && result.data.type === 'PWA_RESTORE_REAUTH_UNSUPPORTED') {
                 // serverが「このsessionはパスワード再認証に対応しない」と返した。以後は復元入口を出さない。
@@ -1618,7 +1677,7 @@
                 throw restoreUnavailableError();
             }
             if (!response.ok || !result || result.code !== 200 || !result.data || !result.data.proof) {
-                throw new Error('再認証できませんでした。入力を確認してください');
+                throw uiError('pwa.error.reauthFailed', '再認証できませんでした。入力を確認してください');
             }
             state.restoreProof = result.data.proof;
             state.restoreScope = oldScope;
@@ -1632,7 +1691,7 @@
             }
             const generation = state.documentGeneration;
             const operationEpoch = state.revocationEpoch;
-            if (!state.restoreProof || !state.restoreScope || !navigator.onLine) throw new Error('再認証からやり直してください');
+            if (!state.restoreProof || !state.restoreScope || !navigator.onLine) throw uiError('pwa.error.reauthRequired', '再認証からやり直してください');
             const response = await fetch('/api/my/pwa/restore/confirm', {
                 method: 'POST', cache: 'no-store', credentials: 'same-origin',
                 headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
@@ -1651,7 +1710,7 @@
                     || !result.data || result.data.documentNonce !== state.documentNonce
                     || result.data.userScope !== oldScope || !result.data.serverTime || !result.data.permitExpiresAt) {
                 clearRestorePermit();
-                throw new Error('復元を確認できませんでした。再認証からやり直してください');
+                throw uiError('pwa.error.restoreConfirmFailed', '復元を確認できませんでした。再認証からやり直してください');
             }
             const serverTime = Date.parse(result.data.serverTime);
             const expiresAt = Date.parse(result.data.permitExpiresAt);
@@ -1660,7 +1719,7 @@
             if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt) || expiresAt <= serverTime
                     || expiresAt - serverTime > 15 * 60 * 1000 || Math.abs(wallTime - serverTime) > 5000) {
                 clearRestorePermit();
-                throw new Error('時刻を安全に確認できません。再認証からやり直してください');
+                throw uiError('pwa.error.clockUnsafe', '時刻を安全に確認できません。再認証からやり直してください');
             }
             state.restoreProof = null;
             state.restoreScope = oldScope;
@@ -1677,7 +1736,7 @@
                     || !contextResult || !contextResult.data || !contextResult.data.userScope
                     || !contextResult.data.preserveQueue) {
                 clearRestorePermit();
-                throw new Error('保存した下書きのユーザーを確認できませんでした');
+                throw uiError('pwa.error.draftUserUnknown', '保存した下書きのユーザーを確認できませんでした');
             }
             const newScope = contextResult.data.userScope;
             const records = await readRestoreScope(oldScope);
@@ -1695,23 +1754,23 @@
             }
             if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             try {
                 await rebindScope(oldScope, newScope, new Set(restorable),
                     () => restoreOperationIsCurrent(generation, operationEpoch));
             } catch (_) {
                 clearRestorePermit();
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             if (oldScope !== newScope) await deleteScope(oldScope);
             if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             state.scope = newScope;
             state.candidateRestoreScope = newScope;
@@ -1724,7 +1783,7 @@
             if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
                 clearDraftDom();
-                throw new Error('復元が取り消されました。最初からやり直してください');
+                throw uiError('pwa.error.restoreCancelled', '復元が取り消されました。最初からやり直してください');
             }
             await flush();
             return true;

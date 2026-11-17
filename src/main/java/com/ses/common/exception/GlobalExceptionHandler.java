@@ -68,7 +68,8 @@ public class GlobalExceptionHandler {
         log.warn("PWA command競合: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(new ApiResult<>(409, "他の操作と競合しました。再読み込みして再試行してください。", e.getData()));
+                .body(new ApiResult<>(409, SafeErrorPolicy.statusMessage(409, messageSource, LocaleContextHolder.getLocale()),
+                        e.getData()));
     }
 
     /**
@@ -104,12 +105,14 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("入力バリデーションエラー: fieldCount={} {}",
                 bindingResult == null ? 0 : bindingResult.getErrorCount(), contextFields());
-        String message = bindingResult == null ? "入力内容に誤りがあります。"
+        String invalidInput = SafeErrorPolicy.localizedMessage("error.request.invalidInput", "入力内容に誤りがあります。",
+                messageSource, LocaleContextHolder.getLocale());
+        String message = bindingResult == null ? invalidInput
                 : bindingResult.getAllErrors().stream()
                 .map(org.springframework.validation.ObjectError::getDefaultMessage)
                 .filter(SafeErrorPolicy::isAllowedFixedMessage)
                 .findFirst()
-                .orElse("入力内容に誤りがあります。");
+                .orElse(invalidInput);
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, message));
     }
 
@@ -136,13 +139,14 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
         log.error("システムエラー: category=SYSTEM exceptionClass={} detail={} {}",
                 LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e), contextFields());
-        return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500, SafeErrorPolicy.DEFAULT_SYSTEM_MESSAGE));
+        return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500,
+                SafeErrorPolicy.statusMessage(500, messageSource, LocaleContextHolder.getLocale())));
     }
 
     /**
      * api controller の {@code @RequestBody} 等が受け付けない Content-Type。クライアント側の誤りなので
      * 汎用 Exception ハンドラ（500・SYSTEM）へ落とさず415で返す（RB-NF02 review P3-2）。文言は業務例外の415
-     * （P3-N2-1）と同じ固定文言にし、受け付ける形式は Accept header で示す。
+     * （P3-N2-1）と同じstatus別の文言（利用者のlocale。RB-I18N）にし、受け付ける形式は Accept header で示す。
      */
     @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<ApiResult<Void>> handleUnsupportedMediaType(
@@ -156,7 +160,8 @@ public class GlobalExceptionHandler {
             response.header(org.springframework.http.HttpHeaders.ACCEPT,
                     org.springframework.http.MediaType.toString(e.getSupportedMediaTypes()));
         }
-        return response.body(ApiResult.<Void>error(415, SafeErrorPolicy.statusMessage(415)));
+        return response.body(ApiResult.<Void>error(415,
+                SafeErrorPolicy.statusMessage(415, messageSource, LocaleContextHolder.getLocale())));
     }
 
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class, java.time.format.DateTimeParseException.class})
@@ -165,7 +170,8 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("リクエストパラメータ不正: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
-        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, SafeErrorPolicy.localizedMessage(
+                "error.request.invalidParameter", "リクエストパラメータが不正です", messageSource, LocaleContextHolder.getLocale())));
     }
 
     /**
@@ -181,7 +187,8 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("リクエストボディを解釈できませんでした: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
-        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエスト内容が不正です"));
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, SafeErrorPolicy.localizedMessage(
+                "error.request.invalidBody", "リクエスト内容が不正です", messageSource, LocaleContextHolder.getLocale())));
     }
 
     private String contextFields() {

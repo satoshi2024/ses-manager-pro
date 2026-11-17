@@ -100,6 +100,36 @@ public final class SafeErrorPolicy {
         return STATUS_MESSAGES.getOrDefault(safeHttpCode(code), DEFAULT_SYSTEM_MESSAGE);
     }
 
+    /**
+     * 許可済みstatusの文言を利用者のlocaleで返す（bundleの {@code error.http.<status>}）。MessageSourceが無い・keyを
+     * 解決できない場合は {@link #statusMessage(int)} の日本語の固定文言にする（RB-I18N P3-N2-2、RB-NF02 review R-1）。
+     */
+    public static String statusMessage(int code,
+                                       org.springframework.context.MessageSource source,
+                                       java.util.Locale locale) {
+        int safeCode = safeHttpCode(code);
+        return localizedMessage("error.http." + safeCode, statusMessage(safeCode), source, locale);
+    }
+
+    /**
+     * 固定文言のkeyを利用者のlocaleで解決する。keyが同梱カタログに無い・解決できない場合は {@code fallback}
+     * （日本語の固定文言）を返し、raw keyや例外の内容は返さない。
+     */
+    public static String localizedMessage(String key, String fallback,
+                                          org.springframework.context.MessageSource source,
+                                          java.util.Locale locale) {
+        if (!isConfiguredMessageKey(key, source, locale)) {
+            return fallback;
+        }
+        try {
+            String resolved = source.getMessage(key, null, null,
+                    locale == null ? java.util.Locale.getDefault() : locale);
+            return resolved == null || resolved.isBlank() ? fallback : LogRedaction.redact(resolved);
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
     public static boolean isAllowedMessageKey(String key) {
         return key != null && MESSAGE_KEY.matcher(key).matches() && ALLOWED_MESSAGE_KEYS.contains(key);
     }
@@ -182,7 +212,8 @@ public final class SafeErrorPolicy {
         if (exception != null && isAllowedFixedMessage(exception.getMessage())) {
             return exception.getMessage();
         }
-        return STATUS_MESSAGES.getOrDefault(code, DEFAULT_SYSTEM_MESSAGE);
+        // keyを解決できない業務例外（日本語の生文言を含む）はstatus別の文言にする。利用者のlocaleで返す。
+        return statusMessage(code, source, locale);
     }
 
     /** メッセージ本文を直接許可せず、設定済みリソースのキーだけを応答へ使う。 */
@@ -204,16 +235,16 @@ public final class SafeErrorPolicy {
     public static String resolveMessageKey(String key,
                                            org.springframework.context.MessageSource source,
                                            java.util.Locale locale) {
+        String forbidden = statusMessage(403, source, locale);
         if (!isAllowedMessageKey(key) || source == null) {
-            return STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。");
+            return forbidden;
         }
         try {
             String resolved = source.getMessage(key, null, null,
                     locale == null ? java.util.Locale.getDefault() : locale);
-            return resolved == null || resolved.isBlank() ? STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。")
-                    : LogRedaction.redact(resolved);
+            return resolved == null || resolved.isBlank() ? forbidden : LogRedaction.redact(resolved);
         } catch (RuntimeException ignored) {
-            return STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。");
+            return forbidden;
         }
     }
 
