@@ -1003,6 +1003,8 @@ class ReportScheduleClaimFenceMySqlTest {
         LocalDateTime retryAt = stopAt.plusMinutes(60);
         assertThat(intColumn(id, "enabled")).isZero();
         assertThat(stringColumn(id, "last_error_code")).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(stringColumn(id, "last_error_message")).as("引き継ぎによる停止はmessageで区別できる")
+                .isEqualTo(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY);
         assertThat(intColumn(id, "failure_count")).isEqualTo(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
         assertThat(dateTime(id, "retry_scheduled_at")).isEqualTo(retryAt);
         assertThat(dateTime(id, "processing_logical_run_at")).isEqualTo(SEPT);

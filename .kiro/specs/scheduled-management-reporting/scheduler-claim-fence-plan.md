@@ -253,7 +253,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | ID | 決まっていないこと | 決める人 | RB-NF10で追加したもの（挙動は変えない） |
 |---|---|---|---|
 | P2-2 | NTP同期の運用前提と、許容する本node・DBの時刻差。alertの閾値と通知先（§10.6 A6） | SRE（**未決・未取得**） | claimを始めるpollごとに `SELECT UNIX_TIMESTAMP()`（session time zoneに依存しないepoch秒）で本nodeとDBの時計の差を測り、gauge `ses_report_schedule_clock_skew_seconds`（node − DB、秒）へ出す。測定誤差（DB側の秒切捨て0.5秒と往復時間の半分）を差し引いた差が `management-report.clock-skew-warn-seconds`（コード既定5秒）を超えたら WARN `errorCode=SCHEDULE_CLOCK_SKEW_DETECTED`（差が続く間は60分に1回）。既定の5秒は測定誤差を超える最小限の実装上の値で、許容値の決定ではない。測定に失敗してもpollは止めない。lease・ShedLockの時刻源は変えない（上記の理由）。理由: 時刻差は実効leaseと起動guardの境界（§14.1）を直接ずらすが、従来は観測手段が無く、NTPの前提が崩れても気付けなかったため |
-| P2-3 | tenant timezoneを変える時の方針（scheduleのtimezoneと `next_run_at` の再計算・移行手順を用意するか、変更を禁止するか） | Report Owner（運用手順はSREと合意。**未決・未取得**） | なし（文書のみ）。現状: schedule timezoneはAsia/Tokyo固定で、tenant zoneと違えば `policyFixed` で失敗し、連続12回（引き継ぎを含む、§14.2）で自動停止する。lease・retryの時刻はtenant zoneのwall clockで保存するため、変更の前後で両zoneの差だけstale判定とretry判定がずれる。方針が決まるまでの暫定の扱い（例: NF10をONにしたtenantのtimezone変更を止めるか）も同じく未決で、変えた場合の挙動は上記のとおりで保証しない |
+| P2-3 | tenant timezoneを変える時の方針（scheduleのtimezoneと `next_run_at` の再計算・移行手順を用意するか、変更を禁止するか） | Report Owner（運用手順はSREと合意。**未決・未取得**） | なし（文書のみ）。現状: schedule timezoneはAsia/Tokyo固定で、tenant zoneと違えば `policyFixed` で失敗し、連続12回（引き継ぎを含む、§14.2）で自動停止する。lease・retryの時刻はtenant zoneのwall clockで保存するため、変更の前後で両zoneの差だけstale判定とretry判定がずれる。zoneを先へ進める変更（例: UTC→Asia/Tokyo）では、実行中のleaseが直ちにstaleと判定されて他workerに引き継がれ、RB-NF10以降はその引き継ぎが連続失敗1回として数えられる（§14.2。RB-NF10 review P3-7）。方針が決まるまでの暫定の扱い（例: NF10をONにしたtenantのtimezone変更を止めるか）も同じく未決で、変えた場合の挙動は上記のとおりで保証しない |
 | P2-8 | alert ruleの閾値・評価窓・重要度・通知先 | SRE／Report Owner（**未決・未取得**） | events counterに有限のtag `outcome`（確定的失敗 `DETERMINISTIC`・結果不明 `UNCERTAIN` 等、eventごとに固定）を追加し、alert ruleの草案を§10.6に置いた。tenant単位の中断を `TENANT_DISPATCH_REJECTED`（確定的）・`TENANT_DISPATCH_FAILED`（再試行される）で数える（§15） |
 
 ## 12. 独立レビュー指摘対応表（2026-11-12）
@@ -375,11 +375,24 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
   - **2026-11-17改訂（RB-NF10、§15）**: 引き継ぎも連続失敗1回として数える。DDLは不要で、既存の `failure_count` を使う。
     - 期限切れleaseの引き継ぎclaimは、completionに至らなかった前の実行を失敗1回として、claimと同じUPDATEで `failure_count` を加算する（`ReportScheduleMapper.claimDue`。占有中の行だけに一致する条件で加算し、SET句の評価順に依存しない）。引き継いだ実行が成功すれば0へ戻り、失敗すればさらに1回加算される。
     - 引き継げば上限（12回）に達するleaseは引き継がず、同じsnapshot CASで停止する（`markTakeoverExhausted`）。停止の状態はfailure completionの上限到達と同じで（`enabled = 0`、`SCHEDULE_RETRY_EXHAUSTED`、retry予定は5分×12＝60分後、論理runを保持、lease/tokenをclear）、通知もERROR（`cause=STALE_LEASE`）＋ `RETRY_EXHAUSTED_DISABLED`。管理者の有効化で同一論理runから再開する。tokenをclearするため、期限後も動いていた旧workerのcompletionは0件になる。
-    - `markFailure` のcommit結果が不明で上限に達する場合は、行を読み直し、自分のcompletionだけが作れる停止状態（無効・停止理由code・lease無し・同じ論理run・上限以上の回数）を確かめた時だけ通知する。commitされていなければleaseが残り、期限後の引き継ぎが同じ失敗を数えて停止・通知する。lease期限を過ぎていた場合と読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN` の監視と§10.3 Q4に委ねる。
+    - **停止の原因の見分け方**（RB-NF10 review P3-5）: 停止理由code `SCHEDULE_RETRY_EXHAUSTED` は管理者の再開条件（`updateEnabled` の0戻し）のため両方の停止で共通にし、引き継ぎによる停止だけ `last_error_message` を `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語のbundleに登録したkey）にする。生成失敗による停止は従来どおり失敗completionの安全な既定message。schedule一覧APIの `lastErrorMessage` とERRORログの `cause=STALE_LEASE` で区別できる。DDLは要らない。
+      - 引き継ぎで回数だけが1増えた行（停止前）は、`last_error_code`・`last_error_message` が前回の値のまま残る（引き継ぎのclaimは回数以外の失敗の列を書かない）。一覧では「失敗回数は増えたが理由は前回のまま」に見える。引き継ぎの事実はWARN「期限切れprocessing leaseを引き継ぎました…連続失敗1回として数えました」と `STALE_LEASE_TAKEOVER` で確認する。
+    - 結果不明の停止は、行を読み直して**この試行が作った停止状態**を確かめた時だけ通知する。判定は、無効・停止理由code・lease無し・同じ論理run・この試行のretry時刻（秒精度）・この試行の加算後の回数の全一致で、retry時刻は試行ごとの現在時刻から決まるため他workerの停止と区別できる。読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN`／`CLAIM_UNCERTAIN` の監視（§10.6 A4）と§10.3 Q4に委ねる。
+      - `markFailure` が上限で結果不明: commitされていなければleaseが残り、期限後の引き継ぎが同じ失敗を数えて停止・通知する。lease期限は**読み直す直前の現在時刻**で判定し（RB-NF10 review P3-2。markFailureは接続・lock待ちの後で例外になり得るため、失敗検知時刻では期限切れ後の他workerの停止を見落とす）、期限を過ぎていれば判定しない。
+      - 引き継ぎ停止（`markTakeoverExhausted`）が結果不明（RB-NF10 review P3-1）: 確定的なSQL失敗（commitされない）は読み直さない。それ以外は読み直し、commit済みなら通知する（行は無効になっているため、ここで通知しないと誰も通知しない）。commitされていなければ期限切れleaseのまま残り、次のpollの引き継ぎ停止が通知する。
+  - **数え方の範囲**（RB-NF10 review P3-4）:
+    - 回数は**同一論理runの中でだけ**累積する。success completionが `next_run_at` を進めて0へ戻し、失敗も引き継ぎも同じ論理runを続けるため、周期（月）を跨いで「遅い実行」が累積することはない。停止に至るのは、同じ論理runで成功できない試行が12回続いた場合だけである。
+    - 単一instanceでは、実行中の処理を同じnodeが引き継ぐことはない（`@Scheduled` の同じtaskは重ならず、次のpollは今回の終了後になる）。引き継ぎが起きるのは、process停止・再起動の後と、多instanceで他nodeのpollがShedLockの `lockAtMostFor`（10分）後にstaleのleaseを見た場合である。
+    - 変更前は、同じ状況（毎回completionに至らない試行）が無限の引き継ぎと重複実行になっていた。変更後は約6時間（lease 30分 × 残り回数）で停止し、`RETRY_EXHAUSTED_DISABLED` で通知される。
+    - 典型の長い実行（A が30分を超え、B が引き継いで1回数える）は、B が A の作った成功runを再利用してすぐ成功するため（§14.4）、回数は0へ戻る。
   - 残る限界:
     - poison pillで止まるまでの時間は約 lease 30分 × 残り回数（初回からなら約6時間）である。
-    - 正常でも毎回30分を超える実行は、引き継がれるたびに失敗として数えられ、12回で停止する（引き継いだ側が成功すれば0へ戻る）。事前には `LEASE_OVERRUN` で見える。
-  - **Report Ownerの確認（未取得）**: 「12回」の数え方が「初回を含む連続失敗（completionに至らずlease期限を超えた実行を含む）12回」になった。P3-5の数え方の確認と合わせて確認する。
+    - 同じ論理runで成功できない試行のたびに30分を超える場合（再利用できない長い実行が続く場合）は、正常な実行でも12回で停止する。事前には `LEASE_OVERRUN` で見える。
+    - 悪化する境界: 同じ論理runで既に11回の実失敗がある時、多instanceで30分を超える正常な実行（実際には配布済み）が他nodeに停止と判定され、元の実行のsuccess completionは `OWNERSHIP_LOST` になる。管理者の再有効化が要る（再実行はrun_key・delivery dedupeで収束する）。
+    - 時刻・timezoneとの関係: tenant timezoneを先へ進める変更（例: UTC→Asia/Tokyo）をすると、実行中のleaseは直ちにstaleと判定されて引き継がれ、失敗1回として数えられる（§11 P2-3）。node間の時刻差sがあると、他nodeはs分だけ早くstaleと判定する（§11 P2-2）。
+  - **Report Ownerの確認（未取得）**:
+    - 「12回」の数え方が「同一論理runの中の、初回を含む連続失敗（completionに至らずlease期限を超えた試行を含む）12回」になった。P3-5の数え方の確認と合わせて確認する。
+    - **正常な実行が30分を超え得るなら、数え方の定義ではなくB-NF10-2（lease延長はしない）を見直す**（lease更新〔heartbeat〕またはより長いlease）。主控の判断（2026-11-17）で数え方の定義は現状のまま（「同一runが引き継がれた時だけ数える」等には変えない）とした。生成・配布の所要時間の見込みはReport Ownerが示す（未取得）。
 
 ### 14.3 確定的claim SQL失敗（P3-3 / review P3-8）
 
@@ -444,14 +457,14 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | 確定的SQL失敗 | `ManagementReportSchedulerTest`（先頭行の失敗後も次の行を実行、失敗50行が待機中はLIMIT枠を占有せず健全な行を処理、待機が明けると再試行して待機を延ばす） |
 | cutoffの論理run固定 | `ReportSnapshotServiceImplTest`（締め確定後の引き継ぎでも速報runを再利用し手動生成とキーを共有しない、未完了runのretryは固定cutoffでsectionを作る）、`ReportScheduleDispatchPolicyMySqlTest`（締めを跨ぐ重複実行） |
 | 重複配布の収束 | `ReportScheduleDispatchPolicyMySqlTest`（重複実行・締めを跨ぐ重複実行・8並行） |
-| 引き継ぎを含むretry上限（RB-NF10、§15） | `ManagementReportSchedulerTest`（引き継ぎを1回として数えretry待機と上限判定に含める、上限に達する引き継ぎは生成せずに停止・通知、停止CASが0件・例外なら通知しない、結果不明のcompletionは読み直して停止を確かめた時だけ通知、claim serviceの数え方と停止の入力検証）、`ReportScheduleMapperH2SqlTest`（引き継ぎclaimの加算・上限での不一致・停止SQL・有効化での再開）、`ReportScheduleClaimFenceMySqlTest`（実MySQLでcompletion前に毎回停止する実行が引き継ぎで11・停止で12になり、有効化で同一論理runから再開。stale takeover後の失敗は2回） |
+| 引き継ぎを含むretry上限（RB-NF10、§15） | `ManagementReportSchedulerTest`（引き継ぎを1回として数えretry待機と上限判定に含める、上限に達する引き継ぎは生成せずに停止・通知、停止CASが0件・確定的失敗なら通知も読み直しもしない、結果不明のcompletion・引き継ぎ停止は読み直してこの試行の停止を確かめた時だけ通知、読み直し時点でlease期限を過ぎていれば判定しない、claim serviceの数え方と停止の入力検証）、`ReportScheduleMapperH2SqlTest`（引き継ぎclaimの加算・上限での不一致・停止SQL・有効化での再開）、`ReportScheduleClaimFenceMySqlTest`（実MySQLでcompletion前に毎回停止する実行が引き継ぎで11・停止で12になり、有効化で同一論理runから再開。stale takeover後の失敗は2回） |
 | entityの書き戻し（RB-NF10、review P3-9） | `ReportScheduleApiBoundaryTest`（`enabled`・`lastErrorCode`・`lastErrorMessage` の更新策略）、`ReportScheduleMapperH2SqlTest`（自動停止後に古いentityを `updateById` しても停止と停止理由が残る）、`ReportScheduleClaimFenceMySqlTest`（同、実MySQL。INSERTからも停止理由を設定できない） |
 | tenant単位の隔離（RB-NF10、review P3-12） | `ManagementReportSchedulerTest`（実 `TenantAwareBatchRunner` で先のtenantのdue取得が確定的失敗・一時的失敗のどちらでも、後のtenantを処理し、ERRORとmetricを残す） |
 | 時計の差・outcome tag（RB-NF10、review P2-2・P2-8） | `ManagementReportSchedulerTest`（gaugeの値、誤差を差し引いた閾値判定、60分のWARN間隔、測定失敗でもpollを続ける。outcomeはeventごとに固定で系列数はevent数）、`ReportScheduleMapperH2SqlTest`（`UNIX_TIMESTAMP()` がepoch秒を返す） |
 
 ## 15. ON前のP2/P3（2026-11-17、RB-NF10）
 
-状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・messages・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。
+状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。messagesは第2回（下記）で1 key（4言語）を追加した。
 
 依拠: FINAL複審 §7 (b) b-19・§6.3 L-2、review `nf10-v185` P2-2・P2-3・P2-8、`w2-nf10-policy-30e058ce` P3-6・P3-9・P3-12。
 
@@ -459,7 +472,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 |---|---|---|
 | P3-6 poison pillの無限引き継ぎ | 修正 | 引き継ぎを連続失敗1回として数え、上限では引き継がずに停止・通知する。結果不明のfailure completionは読み直して停止を確かめる（§14.2） |
 | P3-9 `enabled`・`lastErrorCode` の更新策略 | 修正（一部は不修正） | `enabled` は `updateStrategy = NEVER`（INSERTは許可。作成時に0を保存する）、`lastErrorCode`・`lastErrorMessage` はINSERT・UPDATEとも `NEVER`。管理者のenable/disableは従来どおり `updateEnabled` の指名列UPDATEだけ。**不修正**: 自動停止後の初回completion前に手動でdisableすると、一覧に `SCHEDULE_RETRY_EXHAUSTED` が残る点（review P3-9の2点目）。停止理由codeを次のcompletionまで保持するのは§14.2の設計で、変えると有効化の再開判定（`updateEnabled` の0戻し条件）と既存testの前提を変えるため、本批では変えない。区別が要るなら停止の種別を表す列（DDL）か、有効化時の停止理由のclearが要る |
-| P3-12 tenant失敗で後続tenantが止まる | 修正 | NF10の `dispatchDue` だけを、tenantごとに例外を捕まえてERROR（`errorCode=SCHEDULE_TENANT_DISPATCH_REJECTED`／`_FAILED`、tenantId、例外型、diagnosticId）とmetricを残し、残りのtenantを続ける形にした。共有の `TenantAwareBatchRunner` は変えない（他のschedulerが例外の伝播を前提にしている）。起動guardは全tenant共通の判定のため、従来どおり1 tenantの検出失敗でも全tenantを止める（fail-closed） |
+| P3-12 tenant失敗で後続tenantが止まる | 修正 | NF10の `dispatchDue` だけを、tenantごとに例外を捕まえてERROR（`errorCode=SCHEDULE_TENANT_DISPATCH_REJECTED`／`_FAILED`、tenantId、例外型、diagnosticId）とmetricを残し、残りのtenantを続ける形にした。共有の `TenantAwareBatchRunner` は変えない（他のschedulerが例外の伝播を前提にしている）。起動guardは全tenant共通の判定のため、従来どおり1 tenantの検出失敗でも全tenantを止める（fail-closed）。**`Error` は隔離しない**（StackOverflowError等。process停止とみなし、そのpollの残りのtenantも中断する。claim済みの行は引き継ぎで失敗として数えられ、上限で停止する。RB-NF10 review P3-6）。ERRORには例外と原因の型の連鎖だけの安全な要約 `detail=`（`LogRedaction.safeThrowableSummary`。message・SQL・値を含まない）を付ける（同 P3-3） |
 | P2-8 metric/alert（残り） | metricは修正、alertは草案 | §14.5（`outcome` tag）、§10.6（alert rule草案。閾値等は未決） |
 | P2-2 時計 | 挙動不変・観測を追加 | §11追記（gauge・WARN。許容値はSREが決める、未決） |
 | P2-3 timezone変更の方針 | 挙動不変・文書のみ | §11追記（Report Ownerが決める、未決） |
@@ -468,3 +481,19 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 - 対象限定のtest（主控Runnerへ渡す一覧）:
   - fast: `ManagementReportSchedulerTest`、`ReportScheduleMapperH2SqlTest`、`ReportScheduleApiBoundaryTest`、`ReportScheduleServiceImplTest`、`FeatureSwitchSchedulerGateTest`（NF10 OFFでmapperに触れないこと）、global guard `ScheduledMethodsHaveSchedulerLockTest`・`TestIsolationAuditTest`
   - MySQL: `ReportScheduleClaimFenceMySqlTest`（`scripts/test-suites/mysql-shard-1.txt`、既存classへのcase追加と期待値更新のためshard登録の変更なし）、`ReportScheduleDispatchPolicyMySqlTest`（`mysql-shard-2.txt`、変更なしだが引き継ぎの数え方の変更の影響を受ける）
+
+### 15.1 独立レビュー（`4ffcfb72`、PASS 附条件）への対応（第2回、2026-11-17）
+
+主控の判断: 引き継ぎの数え方は現状のまま（「同一runが引き継がれた時だけ数える」には変えない）。clock skewのWARNのコード既定5秒は受け入れる。
+
+| 指摘 | 処理 | 内容 |
+|---|---|---|
+| P3-1 引き継ぎ停止のSQLが結果不明だと通知が出ない | 修正 | 確定的でない例外なら行を読み直し、この試行の停止（retry時刻と加算後の回数まで一致）なら通知する（§14.2） |
+| P3-2 読み直しのlease期限判定が失敗検知時刻基準 | 修正 | 読み直す直前の現在時刻で判定し、停止状態の判定にこの試行のretry時刻と回数の一致を加えた（§14.2） |
+| P3-3 tenant隔離のERRORの診断不足 | 修正 | `detail=`（`LogRedaction.safeThrowableSummary`。例外と原因の型の連鎖だけで、message・SQL・値を含まない）を加えた |
+| P3-4 数え方の説明が誤読されやすい | 文書 | 同一論理runの中だけで累積すること、単一instanceでは実行中に引き継がれないこと、変更前は無限の引き継ぎだったこと、11回の実失敗の後の境界を§14.2に記した。正常な実行が30分を超え得るならB-NF10-2（lease延長しない）を見直すことを、Report Ownerの確認事項として§14.2と `deploy-runbook.md` §1.7 に加えた |
+| P3-5 停止の原因を行で区別できない | 修正（既存列） | 引き継ぎによる停止だけ `last_error_message` を `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語）にした。停止理由codeは再開条件のため変えない。引き継ぎで回数だけが増えた行の表示（理由は前回のまま）は文書で扱う（§14.2） |
+| P3-6 `Error` は隔離しない | 文書 | 上の表のP3-12の行に記した |
+| P3-7 timezone変更と数え方の関係 | 文書 | §11のP2-3の行と§14.2に記した |
+
+- 追加・更新test: `ManagementReportSchedulerTest`（引き継ぎ停止の結果不明は読み直してこの試行の停止だけ通知、読み直し時点でlease期限を過ぎていれば判定しない、他workerの停止を自分の停止と数えない、停止のmessage、tenant隔離のERRORの `detail` とmessage非出力）、`ReportScheduleClaimFenceMySqlTest`（停止行の `last_error_message`）。fastには `MessageBundleConsistencyTest` を加える（bundleに1 keyを追加したため）。

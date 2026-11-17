@@ -120,5 +120,6 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 | metric/alert（review P2-8の残り） | `outcome` tag、alert rule草案（plan §10.6、閾値等は未決） |
 | 時計（review P2-2）・timezone変更（P2-3） | 挙動は変えない。P2-2は本nodeとDBの時計の差のgaugeとWARNを追加（許容値はSREが決める、未決）。P2-3はReport Ownerが決める（未決）（plan §11追記） |
 | 追加・更新test | `ManagementReportSchedulerTest`（8件追加、1件のtag断言を `outcome` 追加に合わせて強化）、`ReportScheduleMapperH2SqlTest`（3件追加）、`ReportScheduleApiBoundaryTest`（1件追加）、`ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`mysql-shard-1.txt`。1件追加。stale takeover後のfailure completionの回数の期待値を1から2へ更新（引き継ぎで1回数えるため）、引き継ぎhelperとentity書き戻しのcaseに断言を追加） |
-| 変更しないもの | DDL、`messages*.properties`、`application*.yml`、機能スイッチ実装、共有の `TenantAwareBatchRunner`。新設定 `management-report.clock-skew-warn-seconds` はコード既定値（5秒）で動く |
-| 人が行うもの（未取得） | Report Owner署名、確定版の配布方針、「12回」の数え方（引き継ぎを含む）の確認、P2-3の方針、alert ruleの閾値と通知先、NTPの前提と許容する時刻差、§10の手順草案のSRE/DBA承認（`deploy-runbook.md` §1.7、`feature-switches.md` 4.5） |
+| 独立レビュー（`4ffcfb72`、PASS附条件）への対応（第2回） | P3-1（引き継ぎ停止のSQLが結果不明なら読み直して通知）、P3-2（読み直しのlease期限判定を読み直す直前の時刻にし、この試行のretry時刻と回数の一致を判定に加えた）、P3-3（tenant隔離のERRORに安全な要約 `detail=`）、P3-5（引き継ぎによる停止の `last_error_message` を別key）を修正。P3-4・P3-6・P3-7は文書（plan §14.2・§11・§15.1）。数え方は主控の判断で現状のまま（plan §15.1） |
+| 変更しないもの | DDL、`application*.yml`、機能スイッチ実装、共有の `TenantAwareBatchRunner`。新設定 `management-report.clock-skew-warn-seconds` はコード既定値（5秒）で動く。`messages*.properties` は第2回で1 key（`error.managementReport.scheduleStoppedByLeaseExpiry`、4言語）を追加 |
+| 人が行うもの（未取得） | Report Owner署名、確定版の配布方針、「12回」の数え方（引き継ぎを含む）の確認、生成・配布の所要時間の見込み（30分を超え得るならB-NF10-2を見直す）、P2-3の方針、alert ruleの閾値と通知先、NTPの前提と許容する時刻差、§10の手順草案のSRE/DBA承認（`deploy-runbook.md` §1.7、`feature-switches.md` 4.5） |
