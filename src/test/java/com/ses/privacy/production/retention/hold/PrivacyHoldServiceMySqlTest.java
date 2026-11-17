@@ -384,6 +384,158 @@ class PrivacyHoldServiceMySqlTest {
                 .containsExactly("copied-admin");
     }
 
+    // ---- A1H-1 delta Review P3-N3・P3-N4: 起動時の人数の SQL と実行時の判定（AuthorizationServiceImpl）の一致を実 MySQL で ----
+
+    /**
+     * 同じ fixture の各利用者について「起動時の人数の SQL に出る ⇔ 実行時に privacy を使える」を実 MySQL で確かめる。拒否の判定は
+     * 両側とも同じ表・同じ照合順序（{@code utf8mb4_unicode_ci}）で比べるため、大文字小文字の違う拒否行（{@code PRIVACY.*}・
+     * {@code Privacy.Hold.View}）も両側で拒否として効く。無効・論理削除の group、論理削除の所属行・拒否行は両側とも評価しない。
+     * 一部だけの拒否（{@code privacy.dsar.view}・{@code PRIVACY.DSAR.VIEW}）は、起動時は数えず実行時はその action だけを拒否する
+     * （少なく数える＝起動を止める側の意図した差）。
+     */
+    @Test
+    void 起動時のprivacy管理者SQLと実行時の判定は無効groupと大文字小文字の違う拒否行で一致する() throws Exception {
+        String tenant = "nf07-dp34-" + UUID.randomUUID().toString().substring(0, 8);
+        String identityTenant = tenant + "-idp";
+        long provider = insertProvider(identityTenant);
+        long privacyAdmin = insertGroup(tenant, "privacy-admin");
+        insertAction(tenant, privacyAdmin, "privacy.*", 0);
+
+        java.util.Map<Long, Boolean> expected = new java.util.LinkedHashMap<>();
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "plain", null), true);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "enabled-deny",
+                denyGroup(tenant, "enabled-deny", "privacy.*")), false);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "upper-wildcard",
+                denyGroup(tenant, "upper-wildcard", "PRIVACY.*")), false);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "upper-action",
+                denyGroup(tenant, "upper-action", "Privacy.Hold.View")), false);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "star-deny",
+                denyGroup(tenant, "star-deny", "*")), false);
+        long disabled = denyGroup(tenant, "disabled-deny", "PRIVACY.*");
+        components.app.update("UPDATE m_permission_group SET enabled = 0 WHERE id = ?", disabled);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "disabled-deny", disabled), true);
+        long deletedGroup = denyGroup(tenant, "deleted-group", "privacy.*");
+        components.app.update("UPDATE m_permission_group SET deleted_flag = 1 WHERE id = ?", deletedGroup);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "deleted-group", deletedGroup), true);
+        long deletedRow = denyGroup(tenant, "deleted-row", "privacy.*");
+        components.app.update("UPDATE t_permission_group_action SET deleted_flag = 1 WHERE group_id = ?", deletedRow);
+        expected.put(consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "deleted-row", deletedRow), true);
+        long deletedMembershipGroup = denyGroup(tenant, "deleted-membership", "privacy.*");
+        long deletedMembership = consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "deleted-membership",
+                deletedMembershipGroup);
+        components.app.update("UPDATE t_user_permission_group SET deleted_flag = 1 WHERE user_id = ? AND group_id = ?",
+                deletedMembership, deletedMembershipGroup);
+        expected.put(deletedMembership, true);
+        long partial = consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "partial",
+                denyGroup(tenant, "partial", "privacy.dsar.view"));
+        long upperPartial = consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "upper-partial",
+                denyGroup(tenant, "upper-partial", "PRIVACY.DSAR.VIEW"));
+
+        List<String> counted = effectivePrivacyAdmins(tenant, identityTenant, provider);
+        com.ses.service.security.impl.AuthorizationServiceImpl runtime = runtimeAuthorization(tenant);
+        for (java.util.Map.Entry<Long, Boolean> entry : expected.entrySet()) {
+            String name = usernameOf(entry.getKey());
+            boolean allowed = runtime.isAllowedForActor(tenant, entry.getKey(), "管理者", "privacy.hold.view");
+            assertThat(counted.contains(name)).as("起動時の人数に数えるか: %s", name).isEqualTo(entry.getValue());
+            assertThat(allowed).as("実行時に privacy を使えるか: %s", name).isEqualTo(entry.getValue());
+        }
+        for (long user : List.of(partial, upperPartial)) {
+            assertThat(counted).as("一部だけの拒否は数えない").doesNotContain(usernameOf(user));
+            assertThat(runtime.isAllowedForActor(tenant, user, "管理者", "privacy.hold.view")).isTrue();
+            assertThat(runtime.isAllowedForActor(tenant, user, "管理者", "privacy.dsar.view")).isFalse();
+        }
+    }
+
+    /**
+     * 許可の側も大文字小文字を区別せずに揃う: privacy-admin の許可行が {@code PRIVACY.*} でも起動時の group の検査
+     * （{@code countPrivacyAdminGroupsGrantingPrivacy}）は許可として数え、実行時も許可する。privacy-admin 以外の group の
+     * {@code PRIVACY.VIEW} の許可行は、実行時に開いてしまうため起動時の検査（{@code selectGroupKeysAllowingPrivacyOutsidePrivacyAdmin}）
+     * が見つける（起動を止める）。
+     */
+    @Test
+    void 大文字の許可行も起動時の検査と実行時の判定で同じく許可として扱う() throws Exception {
+        String tenant = "nf07-dp34-" + UUID.randomUUID().toString().substring(0, 8);
+        String identityTenant = tenant + "-idp";
+        long provider = insertProvider(identityTenant);
+        long privacyAdmin = insertGroup(tenant, "privacy-admin");
+        insertAction(tenant, privacyAdmin, "PRIVACY.*", 0);
+        long admin = consistencyAdmin(tenant, identityTenant, provider, privacyAdmin, "upper-allow", null);
+        long copied = insertGroup(tenant, "copied-upper");
+        insertAction(tenant, copied, "PRIVACY.VIEW", 0);
+        long outsider = insertUser(tenant, "dp34-copied-only", "管理者");
+        member(tenant, outsider, copied);
+
+        com.ses.service.security.impl.AuthorizationServiceImpl runtime = runtimeAuthorization(tenant);
+        assertThat(named().queryForObject(sqlOf(PermissionGroupMapper.class, "countPrivacyAdminGroupsGrantingPrivacy",
+                String.class), new MapSqlParameterSource("tenantId", tenant), Long.class)).isEqualTo(1L);
+        assertThat(runtime.isAllowedForActor(tenant, admin, "管理者", "privacy.hold.view")).isTrue();
+        assertThat(effectivePrivacyAdmins(tenant, identityTenant, provider)).containsExactly(usernameOf(admin));
+
+        assertThat(runtime.isAllowedForActor(tenant, outsider, "管理者", "privacy.view"))
+                .as("privacy-admin 以外の大文字の許可行も実行時は開く").isTrue();
+        assertThat(named().queryForList(sqlOf(PermissionGroupMapper.class,
+                        "selectGroupKeysAllowingPrivacyOutsidePrivacyAdmin", String.class),
+                new MapSqlParameterSource("tenantId", tenant), String.class))
+                .as("その group を起動時の検査が見つける").containsExactly("copied-upper");
+    }
+
+    /** 拒否行を1つ持つ有効な group。 */
+    private long denyGroup(String tenant, String key, String actionKey) {
+        long group = insertGroup(tenant, "consistency-" + key);
+        insertAction(tenant, group, actionKey, 1);
+        return group;
+    }
+
+    /** privacy-admin（と {@code extraGroup}）に所属し、provider に APPROVED の外部 identity を持つ有効な管理者。 */
+    private long consistencyAdmin(String tenant, String identityTenant, long provider, long privacyAdmin, String name,
+                                  Long extraGroup) {
+        long user = insertUser(tenant, "dp34-c-" + name, "管理者");
+        member(tenant, user, privacyAdmin);
+        if (extraGroup != null) {
+            member(tenant, user, extraGroup);
+        }
+        identity(identityTenant, user, provider, "APPROVED");
+        return user;
+    }
+
+    private String usernameOf(long userId) {
+        return components.app.queryForObject("SELECT username FROM sys_user WHERE id = ?", String.class, userId);
+    }
+
+    private List<String> effectivePrivacyAdmins(String tenant, String identityTenant, long provider) throws Exception {
+        String sql = sqlOf(UserPermissionGroupMapper.class, "selectEffectivePrivacyAdminUsernames",
+                String.class, String.class, String.class, Long.class);
+        return named().queryForList(sql, new MapSqlParameterSource()
+                .addValue("tenantId", tenant).addValue("adminRole", "管理者")
+                .addValue("identityTenantId", identityTenant).addValue("providerId", provider), String.class);
+    }
+
+    /**
+     * 実行時の判定（本番の {@code AuthorizationServiceImpl}）を、本番の mapper（MyBatis-Plus の wrapper と {@code @TableLogic}）で
+     * application container に向けて組み立てる。配備の tenant は fixture の tenant にする（{@code isAllowedForActor} は配備の tenant
+     * 以外の利用者を拒否するため）。
+     */
+    private static com.ses.service.security.impl.AuthorizationServiceImpl runtimeAuthorization(String tenant)
+            throws Exception {
+        var configuration = new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        var factory = new com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean();
+        factory.setDataSource(appPool);
+        factory.setConfiguration(configuration);
+        var sessions = factory.getObject();
+        for (Class<?> mapper : List.of(UserPermissionGroupMapper.class, PermissionGroupMapper.class,
+                com.ses.mapper.PermissionGroupActionMapper.class)) {
+            sessions.getConfiguration().addMapper(mapper);
+        }
+        var session = new org.mybatis.spring.SqlSessionTemplate(sessions);
+        com.ses.config.OidcSecurityProperties oidc = new com.ses.config.OidcSecurityProperties();
+        oidc.setTenantId(tenant);
+        return new com.ses.service.security.impl.AuthorizationServiceImpl(
+                session.getMapper(UserPermissionGroupMapper.class),
+                session.getMapper(com.ses.mapper.PermissionGroupActionMapper.class),
+                session.getMapper(PermissionGroupMapper.class), oidc);
+    }
+
     private int journalEvents(String tenantId) {
         Integer count = journalRoot.queryForObject("SELECT COUNT(*) FROM pj_event WHERE tenant_id = ? "
                 + "AND event_type = 'HOLD_STARTED'", Integer.class, tenantId);

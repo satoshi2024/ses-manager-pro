@@ -156,7 +156,7 @@ public class PrivacyHoldProjectionReconciler {
                     counts.merge(outcome, 1, Integer::sum);
                 }
             } catch (RuntimeException e) {
-                counts.merge(hold(Outcome.PENDING_KEPT, "tenantAborted"), 1, Integer::sum);
+                counts.merge(hold(Outcome.PENDING_KEPT, "tenantAborted", e), 1, Integer::sum);
             }
         }
         return counts;
@@ -405,6 +405,16 @@ public class PrivacyHoldProjectionReconciler {
     private Outcome hold(Outcome outcome, String reason) {
         log.warn("[privacy-hold] 判断を保留します（gateはUNAVAILABLEのまま）: code={} outcome={} reason={}", LOG_CODE,
                 outcome, reason);
+        return mark(outcome, reason);
+    }
+
+    /**
+     * 例外で中断した判定: {@link #hold(Outcome, String)} の WARN に例外の class 名を足す（同じ tenant が失敗し続けるときに log から
+     * 原因を辿れるようにする。message は subject 参照等を含み得るため出さない。metric の tag は変えない。A1H-1 delta review P3-N2）。
+     */
+    private Outcome hold(Outcome outcome, String reason, RuntimeException cause) {
+        log.warn("[privacy-hold] 判断を保留します（gateはUNAVAILABLEのまま）: code={} outcome={} reason={} exceptionClass={}",
+                LOG_CODE, outcome, reason, cause.getClass().getSimpleName());
         return mark(outcome, reason);
     }
 

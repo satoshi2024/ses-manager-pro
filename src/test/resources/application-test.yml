@@ -99,6 +99,9 @@ spring:
         # V197: 履歴・スキルシート取込と取込センターCSVの文書種別と catalog 行（H2 でもそのまま実行できる。
         #       schema-document-archive-h2.sql も同じ2行を持つため NOT EXISTS で重複しない。V196 より後）
         - classpath:db/migration/V197__resume_ingestion_and_import_document_types.sql
+        # V201: NF07 F1 の状態・区分の列の CHECK（request の status・channel・delivery_method、hold の hold_kind）。
+        #       context ごとの再実行で重複しないよう H2 変種は IF NOT EXISTS で足す（V190 の H2 変種より後）
+        - classpath:sql/schema-privacy-status-check-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

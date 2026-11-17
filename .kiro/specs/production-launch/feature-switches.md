@@ -212,6 +212,7 @@
 - **DSAR を ON にする前の人の確認（起動時検査では見ない。A2b review P3-6・D14 意見）**: (a) `PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE` は approval digest に入らないため、起動後の INFO log `DSARの設定値（D-06 の決定書と照合する）` の値を D-06 の決定書と照合する。(b) hold を使う tenant で DSAR を ON にする前に、deploy-runbook §4.4 の受理事項 (8)（D14 の開示 package は hold で止めない）を D-05 owner と D-06 owner が受理している。(c) D-06 の redaction 規則（自動交付の field）を設定するのは、承認者による承認前の草案の確認（A2b review P2-3）が使える状態にしてから。
 - 例外messageには固定の違反コード・flag名・group key・人数だけを出し、決定ID・digest・username・例外本文は出さない。照会に失敗した場合は `*.unverifiable` として起動を止める（fail-closed）。
 - **アカウントロックは起動時の人数に影響しない**（W3-14b review P2-1）。ロックは未認証者でもlogin失敗5回で30分起こせる一時的な状態なので、起動条件にすると外部からアプリ全体の再起動を止められてしまう。ロック中の管理者は、実行時に privacy の各要求で拒否される（`SecurityContextCallerContextProvider` が要求ごとに `locked_until` を確認する）。
+- **表の3の拒否行の扱いは実行時の判定と同じ**（A1H-1 delta review P3-N3・P3-N4）: 無効（`enabled = 0`）にした group の拒否行は、実行時も起動時の人数でも効かない。**拒否 group を無効にしても privacy から外れない**（外すなら privacy-admin の所属を外す）。action key は大文字小文字を区別しない（`PRIVACY.*` の拒否行も両側で拒否として効く）。`privacy.<x>` の一部だけの拒否行（例: `privacy.dsar.view`）を持つ管理者は、実行時はその action 以外を使えるが、起動時の人数には数えない（少なく数える側。人数が足りなければ起動が止まる）。
 - privacy-admin が2名を下回った状態（無効化・退職・role変更・OIDC link の解除）でも動作中のprocessは止めないが、次回の起動は失敗する。所属者を無効化する前に後任を割り当てる。**privacy-admin は3名（deploy-runbook.md §5.0 のOIDC管理者 C〜E 全員）を推奨する**。2名だと1名の退職・無効化で次回の起動が止まり、ロック中の1名しか実際に操作できない時間も生じる。
 - `*.unverifiable` で止まった場合は、DB接続とschemaを先に確認する（この検査は `ProductionSchemaVersionGuard` より先に動くことがあるため、schemaが artifact と一致しない場合にもこのコードになる）。
 

@@ -517,7 +517,7 @@ class FlywayProdFreshInstallMySqlTest {
      * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定27件と、文書種別ごとに1件。
      * 件数は文書種別の数に依存させない。owner・分類・inventory は UNKNOWN）。privacy-admin は1件・未割当、privacy.* の
      * deny は既定5 groupに1件ずつ、menu は2件。prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の
-     * 不変条件に違反する group も0件であること。V197 の2種別は受領（INCOMING）として登録できること。
+     * 不変条件に違反する group も0件であること。V197 の2種別は受領（INCOMING）として登録できること。V201 の状態の CHECK が4件あること。
      */
     private void assertNf07PrivacyFreshInstall(Statement st) throws Exception {
         for (String table : List.of("m_retention_policy", "t_legal_hold",
@@ -536,6 +536,11 @@ class FlywayProdFreshInstallMySqlTest {
                 "全文書種別に catalog 行がある");
         assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT') "
                 + "AND direction = 'INCOMING' AND deleted_flag = 0"), "V197 の文書種別");
+        // V201（RB-NF07-HOLD）: request の status・channel・delivery_method と hold の hold_kind の CHECK（deploy-runbook §3.4）
+        assertEquals(4L, scalar(st, "SELECT COUNT(*) FROM information_schema.table_constraints "
+                + "WHERE constraint_schema = DATABASE() AND constraint_type = 'CHECK' AND constraint_name IN "
+                + "('chk_privacy_request_status', 'chk_privacy_request_channel', 'chk_privacy_request_delivery_method', "
+                + "'chk_legal_hold_kind')"), "V201 の状態の CHECK");
         assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id <> 'default' "
                 + "OR owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
                 + "OR owner_ref IS NOT NULL"), "catalog は構造行だけ（法的な値をseedしない）");

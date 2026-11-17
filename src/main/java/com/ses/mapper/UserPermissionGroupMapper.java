@@ -48,6 +48,14 @@ public interface UserPermissionGroupMapper extends BaseMapper<UserPermissionGrou
      * 起動時の人数に含めないと外部からアプリ全体の起動を止められるため（W3-14b review P2-1。既存の
      * {@code ProductionSecurityConfigurationValidator#validateOidcAdministrators} も見ない）。ロック中の利用者は
      * 実行時に {@code SecurityContextCallerContextProvider} が要求ごとに拒否する。
+     *
+     * <p>拒否行の扱いは実行時の判定（{@code AuthorizationServiceImpl}）と次のとおり揃える（A1H-1 delta review P3-N3・P3-N4）。
+     * (1) 無効（{@code enabled = 0}）・論理削除の group、論理削除の所属行・拒否行は、実行時も許可・拒否のどちらにも使わないため、
+     * ここでも除外の理由にしない（無効にした拒否 group では privacy から外せない）。(2) action key は両側とも同じ列の照合順序
+     * （{@code utf8mb4_unicode_ci}）で比べるため、大文字小文字の違う拒否行（{@code PRIVACY.*}）は両側で同じく拒否として効く。
+     * (3) 意図した差: {@code privacy.<x>} の一部だけの拒否行も、ここでは管理者として数えない（実行時はその action だけを拒否する）。
+     * 少なく数える＝起動を止める側に倒す。固定: {@code PrivacyAdministratorDeterminationConsistencyTest}（H2）、
+     * {@code PrivacyHoldServiceMySqlTest}（実 MySQL。大文字小文字）。
      */
     @Select("""
         SELECT DISTINCT u.username
