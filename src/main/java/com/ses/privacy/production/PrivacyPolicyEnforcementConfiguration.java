@@ -23,7 +23,8 @@ import java.time.Clock;
  *   <li>prod: foundation の {@link ProductionPrivacyComponents#productionPolicyEnforcement} が生成する内部判定。
  *       catalog・source・trust anchor・失効状態と公開スイッチ（決定ID束縛の有効期間を含む）は、説明照会
  *       （{@link PrivacyProductionConfiguration}）と同じ部品・同じ判定を使う（policy source は読み取りだけ）。
- *       Bean の構築時に DB へ触れない。</li>
+ *       trust anchor と失効状態は {@link PrivacyTrustSource#policyAnchorsOf}・{@link PrivacyTrustSource#revocationsOf} で包み、
+ *       判定のたびに取る。Bean の構築時に DB・trust source へ触れない。</li>
  *   <li>prod 以外: 常に拒否する {@link UnavailablePolicyEnforcementPort}（DB を読まない）。</li>
  * </ul>
  * 呼出し元は NF08 の外部送信 gate（{@code AiProductionApprovalGate}）だけ。
@@ -46,8 +47,10 @@ public class PrivacyPolicyEnforcementConfiguration {
                 PrivacyProductionConfiguration.retentionSourceEnabled(privacyFeatureProperties, decisionWindowProvider),
                 new DbProductionPolicyCatalog(piiDataElementMapper, retentionPolicyMapper),
                 new DbCurrentPolicySource(retentionPolicyMapper),
-                privacyTrustSource.policyAnchors(),
-                privacyTrustSource.revocations(),
+                // anchor と失効状態は構築時に1回ではなく、送信の判定のたびに PrivacyTrustSource から取る（RB-NF07-REG
+                // review P2-1 の契約。anchor の削除・失効は再起動せずに次の送信判定から拒否になる）。
+                PrivacyTrustSource.policyAnchorsOf(privacyTrustSource),
+                PrivacyTrustSource.revocationsOf(privacyTrustSource),
                 clock);
     }
 
