@@ -245,3 +245,36 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
 - eventId、元createdAt、payload/hashはreplayでも変えない。未送信24時間期限だけは当該generationの不変replay audit.created_atから測る。
   updated_atを使って毎回期限を延長しない。元行がpurge済みなどでauditとのbindingを確認できなければ安全側でDLQに戻す。
   eventはat-least-onceかつ順序保証なし。同一秒の複数eventも並べ替えできないため、順序が必要な受信側はread APIで現在値を再取得する。
+
+## 14. RB-NF05：決定IDの承認内容 digest、credential pepper、lease 回収の間引き
+
+### 14.1 承認内容 digest（FINAL review b-13）
+
+- 開ける方向ごとに `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST` / `INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST` が必須。正規形・二人による再計算・golden vector の正本は DG-05 草案 §1.1。
+- 起動しない場合の文言と初動:
+  - `…approval-digest（決定書の承認内容のSHA-256、小文字hex 64桁）が必要です`: 未転記か形式外。決定書の値を転記する（大文字・前後空白は直して照合される）。
+  - `…approval-digestが現行の…承認内容と一致しません`: 決定書と設定のどちらかが違う。二人で正規形を作り直して照合する。**設定に合わせて digest を作り直して転記しない**（承認値を変えたなら新しい決定IDと署名が要る）。
+  - `outbound承認digestの照合にはexternal-transport.truststore-pathのfileを読める必要があります`: truststore を読めない・空・1 MiB 超。
+  - `…bound-tenant-idを英数字と._:-の100文字以内に…`: tenant の形式。
+- truststore を入れ替えたら（同じ証明書でも file の byte が変われば）outbound digest が変わり、起動しない。証明書の入替えは OUT-4 の変更として新しい決定を取る。
+- 調整値（timeout・lease・purge 間隔、`inbound-lease-seconds` 等）は digest に含めない。`batch-size`・`fixed-delay-ms`（OUT-7）と `unauthenticated-audit-max-per-minute`（IN-7）は含めるため、変えるには新しい決定が要る。
+
+### 14.2 credential hash の pepper（N5-P3-2）
+
+- `INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER`（`integration.hub.crypto.credential-hash-pepper`）: 32 byte を `=` 無しの base64url で書く。暗号鍵（`integration.hub.crypto.keys.*`）と同じ値は拒否する。secret store から全 instance に同じ値で注入する。
+- credential の保存用 hash（`t_credential_version.secret_hash`）は、この pepper を鍵にした HMAC-SHA256（client ID・credential version・secret を長さ前置で連結）。認証は envelope（IHG1）の復号で行い、hash は照合に使わない。pepper を替えても既存 credential の認証は変わらない（以後の発行行だけが新しい pepper の hash になる）。
+- pepper が無い環境では credential を発行できない（fail closed）。prod で NF05 を開けると起動時にも検査する。
+- 発行できる secret は 43 文字以上の base64url だけ（管理 API は 32 byte 乱数から作る）。
+- V134 の列 comment（「平文secretのSHA-256 hex」）は適用済み migration のため直していない。実際の値は上の HMAC である。
+
+### 14.3 要求経路の lease 一括回収（N5-P3-7）
+
+- 受信・claim のたびに行っていた期限切れ lease の一括 UPDATE を、node 単位で `public-api.inbound-lease-seconds`（既定60秒）に1回へ間引いた。時計が間隔より大きく戻った場合は直ちに行う。
+- 個々の期限切れ PROCESSING 行は、同じ event の再送で claim が直接取り直す（`reclaimExpired`）ため、間引いても再送は滞らない。運用・試験の明示回収（`recoverExpiredLeases`）は間隔に関係なく実行する。
+- 同一 client の受信は client 行の `FOR UPDATE` で直列化される（失効との競合を防ぐ設計）。高頻度の取引先では SRE の負荷実測（deploy-runbook §1.7 の NF05 行、未取得）で確かめる。
+
+### 14.4 試験の範囲（実装は開放承認ではない）
+
+- fast: `IntegrationHubApprovalDigestTest`（golden vector）、`IntegrationHubProductionEnablementPolicyTest`、`HttpsIntegrationHubWebhookTransportWireTlsTest`（JVM 内の TLS server へ実 wire で接続。期限切れ leaf・未信頼 CA・名前の不一致を HTTP 送信前に拒否、ClientHello が TLSv1.3/1.2 と承認済み AEAD cipher だけを提示）、`ExternalApiForwardedHeaderConnectorTest`（実 Tomcat connector と production の customizer・`ForwardedHeaderFilter` で XFF の信頼 proxy 経由・直接接続・偽装・複数行）。
+- mysql shard 3: `IntegrationHubV192AuditRetentionMySqlTest` に ownership の project・contract-status・invoice-status 分岐を追加（Runner 未実行）。
+- 代替しないもの: 宛先 guard は loopback を拒否するため TLS 試験では mock にしている。実ネットワークの peer・DNS・egress、ALB 経由の XFF、WAF の証跡は SRE が staging で取得する。
