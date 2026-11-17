@@ -453,6 +453,19 @@ class FlywayMigrationSmokeTest {
                         "uk_document_idempotency は tenant_id を含む4列インデックスでなければならない");
             }
 
+            // V200（b-14）: 取込 stage 照合の storage key 照会に、storage_key 1列の非一意索引がある（実MySQLで作成できる key 長）
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT column_name, non_unique FROM information_schema.statistics " +
+                    "WHERE table_schema=DATABASE() AND table_name='t_document_version' AND index_name='idx_dv_storage_key' " +
+                    "ORDER BY seq_in_index ASC")) {
+                java.util.List<String> cols = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    cols.add(rs.getString("column_name") + ":" + rs.getInt("non_unique"));
+                }
+                org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("storage_key:1"), cols,
+                        "idx_dv_storage_key は storage_key 1列の非一意索引でなければならない");
+            }
+
             // V68: 横断検索・実ToDo・保存ビュー・一括操作 (productivity-search-saved-view)
             assertTableExists(st, "t_task");
             assertTableExists(st, "m_saved_view");

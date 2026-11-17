@@ -224,8 +224,10 @@ class ImportValidationResultServiceTest {
 
         assertTrue(csv.startsWith("﻿sourceRowNumber,sourceRowHash,code\r\n"));
         String[] lines = csv.substring(1).split("\r\n");
-        assertEquals(1 + 1 + 2, lines.length, "header + 行2の1件 + 行3の2件");
+        assertEquals(1 + 1 + 2 + 1, lines.length, "header + 行2の1件 + 行3の2件 + 最終行");
         assertTrue(lines[1].startsWith("2,") && lines[1].endsWith(",DUPLICATE_SOURCE_KEY"));
+        assertEquals("#END,3,2", lines[lines.length - 1], "最終行はcode行3件とREJECTED行2件");
+        assertTrue(csv.endsWith("#END,3,2\r\n"));
         assertTrue(csv.contains(",EMAIL_INVALID\r\n") && csv.contains(",FIELD_REQUIRED\r\n"));
         for (String secret : List.of("HYPERLINK", "山田", "佐藤", "example.co.jp", "株式会社")) {
             assertFalse(csv.contains(secret), "error exportへ原文を出さない: " + secret);
@@ -248,8 +250,36 @@ class ImportValidationResultServiceTest {
         service.writeErrorExport(export, output);
 
         String csv = output.text();
-        assertEquals(1 + 1_200, csv.substring(1).split("\r\n").length);
+        String[] lines = csv.substring(1).split("\r\n");
+        assertEquals(1 + 1_200 + 1, lines.length);
+        assertEquals("#END,1200,1200", lines[lines.length - 1]);
         assertTrue(output.flushesWithData.get() >= 3, "500行pageごとにflushする: " + output.flushesWithData.get());
+    }
+
+    /**
+     * b-14（W3-05 review P3-1）: 1page目をflushした後に撤権されると応答は途中で切れる。page境界で切れたCSVは完全に
+     * 見えるため、最終行（#END）を書かないことで欠落を発見できるようにする（以前の試験は1page目の前に撤権していた）。
+     */
+    @Test
+    void errorExportCutAfterTheFirstFlushedPageHasNoTrailer() throws Exception {
+        StringBuilder large = new StringBuilder("externalKey,companyName,contactPerson,contactEmail,contactPhone,address\n");
+        for (int i = 1; i <= 1_200; i++) {
+            large.append("K-").append(i).append(",,担当").append(i).append(",,,\n");
+        }
+        long jobId = validated(large.toString());
+        ImportValidationResultService service = fixture.resultService(System::nanoTime);
+        ImportValidationResultService.ErrorExport export = service.prepareErrorExport(jobId);
+        when(fixture.authorization.requireCurrentAuthorization()).thenReturn(export.context(),
+                new ImportAuthorizedContext(ImportA1aH2Fixture.TENANT, ImportA1aH2Fixture.ACTOR, 78));
+        CountingOutputStream output = new CountingOutputStream();
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> service.writeErrorExport(export, output));
+
+        assertEquals(403, failure.getCode());
+        String csv = output.text();
+        assertEquals(1 + ImportValidationResultService.EXPORT_PAGE_ROWS, csv.substring(1).split("\r\n").length,
+                "1page目はflush済みで応答に残る");
+        assertFalse(csv.contains(ImportErrorCsvWriter.TRAILER_MARKER), "途中で切れたCSVに最終行を書かない");
     }
 
     @Test

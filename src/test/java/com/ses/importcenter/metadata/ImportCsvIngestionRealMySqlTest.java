@@ -78,6 +78,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -396,7 +397,7 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Test
-    void commitAckUncertainWithoutVisibleRowRetainsStageForReconciliation() {
+    void commitAckUncertainWithoutVisibleRowRetainsStageForReconciliation() throws Exception {
         // COMMIT送信前にserver側で接続を切断し、client側ではCOMMIT結果が判定不能（afterCompletion=UNKNOWN）な状態を作る。
         // serverは切断でtransactionをrollbackするため行は見えず、storage補償もROLLED_BACKではないので走らない。
         FaultInjectingTransactionManager severed = new FaultInjectingTransactionManager(transactionManager,
@@ -418,11 +419,20 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(1, retained.size());
         assertEquals(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN, retained.get(0).reason());
         assertEquals(TENANT, retained.get(0).tenantId());
+        // b-14：実MySQLではCOMMITを送った接続のserver側IDとserverの識別を台帳へ残す。IDはKILLした接続と同じ（review P3-8）。
+        Long commitConnection = retained.get(0).commitConnectionId();
+        assertNotNull(commitConnection, "実MySQLのCOMMIT接続IDを台帳へ残す");
+        assertTrue(killedConnectionId.get() > 0);
+        assertEquals(killedConnectionId.get(), commitConnection.longValue(), "台帳のIDはCOMMITを送ってKILLされた接続のID");
+        assertEquals(jdbc.queryForObject("SELECT @@server_uuid", String.class).toLowerCase(java.util.Locale.ROOT),
+                retained.get(0).commitServerUuid(), "台帳のserver識別は接続先serverの@@server_uuid");
 
         ImportStageReconciler.Result early = reconcilerAt(java.time.Clock.systemUTC()).reconcileDue();
         assertEquals(1, early.pending(), "safety window内は判定せず残す");
         assertEquals(1, storage.objectCount());
 
+        // KILLしたthreadが後始末（Killed）を終えてprocess一覧から外れるまで待つ（実行中の間は照合が判定しない）。
+        awaitConnectionNotExecuting(commitConnection);
         ImportStageReconciler.Result due = reconcilerAt(java.time.Clock.offset(java.time.Clock.systemUTC(),
                 ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1))).reconcileDue();
         assertEquals(1, due.reclaimed());
@@ -459,6 +469,114 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(List.of(), stageLedger.entries());
         verify(documentService, never()).discardImportStage(any());
         assertEquals(committed, metadata.getUploadedJobDetail(committed.jobId()));
+    }
+
+    /**
+     * b-14（W2-NF06 review P3-1）: 照合のCOMMIT接続判定（information_schema.PROCESSLIST）を実MySQLで通す。文を実行中の
+     * 接続は実行中、待機（Sleep）中の接続と存在しない接続は実行中でないと判定し、実行中の間は参照の無い台帳も回収しない。
+     *
+     * <p>RB-NF05 review P3-2: 判定には PROCESS 権限が要らないことを、業務に要る権限（DB の SELECT・INSERT・UPDATE・DELETE）
+     * だけを持つ専用 user で示す。同じ user の別接続は見え、別 user（root）の実行中の接続は見えない（PROCESS が無い証拠）。
+     * server の識別と起動時刻（{@code @@server_uuid}・{@code SHOW GLOBAL STATUS LIKE 'Uptime'}）も同じ user で取れる。
+     */
+    @Test
+    void reconcilerWaitsWhileTheCommitConnectionIsStillExecutingOnTheServer() throws Exception {
+        String user = "nf06_reconcile_probe";
+        String password = "probe-test-only";
+        try (Connection root = dataSource.getConnection(); Statement statement = root.createStatement()) {
+            statement.execute("CREATE USER IF NOT EXISTS '" + user + "'@'%' IDENTIFIED BY '" + password + "'");
+            statement.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON `" + DATABASE + "`.* TO '" + user + "'@'%'");
+        }
+        // delta review N-P3-2 / D-P3-2: Testcontainers の URL を元にし、user と password は引数で替える。
+        // 訂正: Testcontainers 1.20.6 の getJdbcUrl() は useSSL・allowPublicKeyRetrieval を含まない（Testcontainers 自身の
+        // 接続だけが MySQLContainer#constructUrlForConnection で useSSL=false と allowPublicKeyRetrieval=true を足す）。
+        // getJdbcUrl() のままでは、TLS の PREFERRED と自動生成の証明書に頼って caching_sha2_password の認証を通すことになる。
+        // Testcontainers 自身の接続と同じ規則（無い時だけ足す）で2つを明示して足す。
+        String jdbcUrl = MYSQL.getJdbcUrl();
+        String withSsl = jdbcUrl.contains("useSSL=") ? jdbcUrl
+                : jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "useSSL=false";
+        String url = withSsl.contains("allowPublicKeyRetrieval=") ? withSsl : withSsl + "&allowPublicKeyRetrieval=true";
+        assertTrue(url.contains("useSSL=false") && url.contains("allowPublicKeyRetrieval=true"),
+                "Testcontainers 自身の接続と同じ parameter で接続する");
+        assertFalse(url.contains("user=") || url.contains("password="), "user・password は URL ではなく引数で替える");
+        org.springframework.jdbc.datasource.DriverManagerDataSource limitedSource =
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(url, user, password);
+        JdbcTemplate limitedJdbc = new JdbcTemplate(limitedSource);
+        assertEquals(0, limitedJdbc.queryForObject("SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES "
+                + "WHERE PRIVILEGE_TYPE IN ('PROCESS', 'SUPER')", Integer.class), "専用userはPROCESS権限を持たない");
+        ImportStageReconciler.CommitConnectionProbe probe = ImportStageReconciler.processList(limitedJdbc);
+        ImportStageReconciler.CommitConnectionProbe rootProbe = ImportStageReconciler.processList(jdbc);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try (Connection busy = limitedSource.getConnection(); Connection rootBusy = dataSource.getConnection()) {
+            long busyId = connectionId(busy);
+            long rootId = connectionId(rootBusy);
+            assertFalse(probe.isExecuting(busyId), "待機（Sleep）中の接続は文を実行していない");
+            ImportStageReconciler.ServerIdentity server = probe.currentServer();
+            assertEquals(jdbc.queryForObject("SELECT @@server_uuid", String.class).toLowerCase(java.util.Locale.ROOT),
+                    server.serverUuid(), "PROCESS無しでもserver識別を取れる");
+            assertNotNull(server.startedAt(), "PROCESS無しでもUptimeから起動時刻を取れる");
+            assertTrue(!server.startedAt().isAfter(java.time.Instant.now().plusSeconds(60)), "起動時刻は現在より前");
+            String unreferencedKey = UUID.randomUUID().toString().replace("-", "") + "/" + UUID.randomUUID();
+            com.ses.entity.Document document = new com.ses.entity.Document();
+            document.setDocumentType("IMPORT");
+            DocumentVersion version = new DocumentVersion();
+            version.setStorageKey(unreferencedKey);
+            assertTrue(stageLedger.recordRetained(TENANT, new StagedImportDocument(document, version, unreferencedKey,
+                    UUID.randomUUID().toString()), busyId, server.serverUuid()));
+
+            java.util.concurrent.Future<?> rootSleeping = executor.submit(() -> {
+                try (Statement statement = rootBusy.createStatement()) {
+                    statement.execute("DO SLEEP(6)");
+                }
+                return null;
+            });
+            java.util.concurrent.Future<?> sleeping = executor.submit(() -> {
+                try (Statement statement = busy.createStatement()) {
+                    statement.execute("DO SLEEP(5)");
+                }
+                return null;
+            });
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
+            while ((!probe.isExecuting(busyId) || !rootProbe.isExecuting(rootId)) && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+            }
+            assertTrue(probe.isExecuting(busyId), "同じuserの別接続のSLEEPはPROCESS権限なしで実行中に見える");
+            assertTrue(rootProbe.isExecuting(rootId), "前提: rootの接続もSLEEPを実行中");
+            assertFalse(probe.isExecuting(rootId), "PROCESS権限が無いため別userの実行中の接続は見えない");
+
+            // 専用userの接続で照合しても、COMMIT接続が実行中の間は判定しない。
+            ImportStageReconciler.Result waiting = new ImportStageReconciler(stageLedger, limitedJdbc, documentService,
+                    null, java.time.Clock.offset(java.time.Clock.systemUTC(), ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1)))
+                    .reconcileDue();
+            assertEquals(1, waiting.pending(), "COMMIT接続が実行中の間は判定しない");
+            assertEquals(0, waiting.reclaimed());
+            assertEquals(0, waiting.failed());
+            assertEquals(1, stageLedger.entries().size());
+            verify(documentService, never()).discardImportStage(any());
+
+            sleeping.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            rootSleeping.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            awaitConnectionNotExecuting(busyId);
+            assertFalse(probe.isExecuting(Long.MAX_VALUE), "存在しない接続は実行中でない");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static long connectionId(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            assertTrue(result.next());
+            return result.getLong(1);
+        }
+    }
+
+    /** 接続のserver threadが文を実行しなくなる（Sleepになるか一覧から外れる）まで、最大10秒待つ。 */
+    private void awaitConnectionNotExecuting(long connectionId) throws InterruptedException {
+        ImportStageReconciler.CommitConnectionProbe probe = ImportStageReconciler.processList(jdbc);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (probe.isExecuting(connectionId) && System.nanoTime() < deadline) Thread.sleep(50);
+        assertFalse(probe.isExecuting(connectionId), "接続 " + connectionId + " が10秒以内に実行を終えること");
     }
 
     @Test
@@ -564,6 +682,9 @@ class ImportCsvIngestionRealMySqlTest {
         return new ImportCsvUploadCommitService(authorization, documentMetadataCommit, metadata, manager);
     }
 
+    /** 直近に {@link #killTransactionConnection} がKILLした接続のID（RB-NF05 review P3-8 で台帳の値と照合する）。 */
+    private final AtomicLong killedConnectionId = new AtomicLong();
+
     /** 現threadのtransaction接続をserver側でKILLする。COMMIT前に呼び、COMMIT応答を判定不能にする。 */
     private void killTransactionConnection() {
         Connection bound = DataSourceUtils.getConnection(dataSource);
@@ -574,6 +695,7 @@ class ImportCsvIngestionRealMySqlTest {
                 assertTrue(result.next());
                 connectionId = result.getLong(1);
             }
+            killedConnectionId.set(connectionId);
             try (Connection killer = dataSource.getConnection(); Statement kill = killer.createStatement()) {
                 kill.execute("KILL " + connectionId);
             }

@@ -49,7 +49,8 @@ import static org.mockito.Mockito.*;
         "integration.hub.topology.bound-tenant-id=default",
         "integration.hub.public-api.public-id-key=synthetic-container-public-id-key-at-least-32-bytes",
         "integration.hub.crypto.current-key-version=v1",
-        "integration.hub.crypto.keys.v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
+        "integration.hub.crypto.keys.v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "integration.hub.crypto.credential-hash-pepper=c3ludGhldGljLW5mMDUtdGVzdC1vbmx5LXBlcHBlciE"})
 @ActiveProfiles("test")
 @Transactional
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
@@ -110,7 +111,8 @@ class IntegrationHubProducerContainerTest {
             String secret = crypto.encrypt(client, 1, "webhook-signing", "synthetic-webhook-secret");
             jdbc.update("INSERT INTO t_credential_version(api_client_id,credential_version,key_id,encrypted_secret,secret_hash,"
                     + "crypto_key_version,issued_at,expires_at) VALUES(?,1,'key-1',?,?,'v1','2026-01-01 00:00:00','2027-01-01 00:00:00')",
-                    id, crypto.encrypt(client, 1, "credential", "synthetic-webhook-secret"), crypto.sha256Hex("synthetic-webhook-secret"));
+                    id, crypto.encrypt(client, 1, "credential", "synthetic-webhook-secret"),
+                    crypto.credentialHash(client, 1, "synthetic-webhook-secret"));
             jdbc.update("INSERT INTO m_webhook_subscription(client_id,direction,event_type,endpoint_url,key_id,"
                     + "encrypted_signing_secret,crypto_key_version,data_scope_json,signing_credential_version) "
                     + "VALUES(?,'OUTBOUND','resource.changed','https://web.example.com:443/hook','key-1',?,'v1',?,1)", client, secret, scope);

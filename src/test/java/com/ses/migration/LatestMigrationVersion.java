@@ -16,13 +16,14 @@ package com.ses.migration;
 final class LatestMigrationVersion {
 
     /**
-     * 現在の最新versioned migration（V198: NF01 二者確認（B0）の7表と自由記述2列の NF07 data element catalog 登録。
+     * 現在の最新versioned migration（V200: NF-06 取込 stage 照合の t_document_version.storage_key 索引。V199 は欠番
+     * （RB-NF07-REG の予約番号を使わなかった）。V198 は NF01 二者確認（B0）の7表と自由記述2列の NF07 data element catalog 登録、
      * V197 は履歴・スキルシート取込と取込センターCSVの文書種別、V196 は NF07 F2
      * data element catalog seed、V195 は NF01 B0 二者確認coordinatorの7表と不変6表のtrigger、V194 は NF08 B2c-1 durable claimと永続費用ledger、
      * V193 は NF-06 取込センター画面の menuと import.metadata.manage の seed、V192 は外部API監査の保存期限、
      * V189 は NF01 細粒度認可epoch、V190/V191 は NF07 F1表と権限seed）。
      */
-    static final String LATEST = "198";
+    static final String LATEST = "200";
 
     private LatestMigrationVersion() {
     }

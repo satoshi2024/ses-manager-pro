@@ -26,6 +26,13 @@ public class InboundEventServiceImpl implements InboundEventService {
     private final InboundEventAdminReferenceCodec referenceCodec;
     private final ObjectMapper objectMapper;
     private final IntegrationHubExternalApiProperties properties;
+    /**
+     * 要求経路で次に一括lease回収を行ってよい時刻（node単位。N5-P3-7）。以前は受信・claimのたびに期限切れleaseの
+     * 一括UPDATEを2回実行していた。個々のeventの期限切れleaseは{@link #claim}が{@code reclaimExpired}で直接取り直し、
+     * {@link #recordReceived}もlease切れのPROCESSINGをclaim可能として返すため、一括回収は取り残しの掃除にすぎない。
+     */
+    private final java.util.concurrent.atomic.AtomicReference<LocalDateTime> nextRequestPathRecovery =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -39,7 +46,7 @@ public class InboundEventServiceImpl implements InboundEventService {
         if (signedTimestamp == null || receivedAt == null || parsedFieldsSnapshot == null) {
             throw new IllegalArgumentException("invalid inbound event");
         }
-        recoverExpiredLeases(receivedAt);
+        recoverExpiredLeasesOnRequestPath(receivedAt);
         ExternalDtoSnapshot.requireAllowList(parsedFieldsSnapshot, ExternalDtoSnapshot.INBOUND_FIELDS);
         InboundEventBindingValidator.Binding binding = bindingValidator.validateForReceipt(
                 clientId, providerName, eventType(parsedFieldsSnapshot), parsedFieldsSnapshot, receivedAt);
@@ -113,7 +120,7 @@ public class InboundEventServiceImpl implements InboundEventService {
                 || leaseExpiresAt == null || !leaseExpiresAt.isAfter(now)) {
             throw new IllegalArgumentException("invalid inbound claim");
         }
-        recoverExpiredLeases(now);
+        recoverExpiredLeasesOnRequestPath(now);
         InboundEvent row = mapper.selectForUpdate(id);
         if (row == null) {
             return null;
@@ -162,6 +169,23 @@ public class InboundEventServiceImpl implements InboundEventService {
             throw new IllegalArgumentException("now is required");
         }
         return mapper.recoverExpiredLeases(now);
+    }
+
+    /**
+     * 要求経路（受信・claim）の一括lease回収。node単位で{@code inbound-lease-seconds}に1回だけ実行し、間隔内の要求は
+     * 何もしない（N5-P3-7）。同時に来た要求はCASで1件だけが実行する。時計が間隔より大きく戻った場合は実行して起点を
+     * 取り直す。明示の{@link #recoverExpiredLeases}（運用・試験）は間隔に関係なく実行する。
+     */
+    private void recoverExpiredLeasesOnRequestPath(LocalDateTime now) {
+        long intervalSeconds = Math.max(1, properties.getPublicApi().getInboundLeaseSeconds());
+        LocalDateTime due = nextRequestPathRecovery.get();
+        if (due != null && now.isBefore(due) && !now.isBefore(due.minusSeconds(intervalSeconds))) {
+            return;
+        }
+        if (!nextRequestPathRecovery.compareAndSet(due, now.plusSeconds(intervalSeconds))) {
+            return;
+        }
+        mapper.recoverExpiredLeases(now);
     }
 
     private boolean leaseActive(InboundEvent event, LocalDateTime now) {

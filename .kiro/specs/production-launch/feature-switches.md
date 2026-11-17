@@ -331,25 +331,38 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 | # | 項目 | 確認方法 | 満たさない場合 |
 |---|---|---|---|
-| 1 | admission 承認設定（`IMPORT_ADMISSION_*` の6項目）が署名済み Data Owner 決定書の転記で、承認 digest が一致する | a1a §10 の正規形から二者で digest を再計算して照合する | 構造的な不備は起動失敗（`ImportAdmissionStartupValidator`）。署名日前・失効だけなら起動するが upload は403 |
+| 1 | admission 承認設定（`IMPORT_ADMISSION_*` の6項目）が署名済み Data Owner 決定書の転記で、承認 digest が一致する | a1a §10 の正規形から二者がそれぞれ digest を再計算し、決定書の値と照合する。source code は小文字化して **ASCII 順（`LC_ALL=C sort`）** に並べる（locale 依存の並べ方では一致しない）。手順の確認には下の golden vector を使い、二者とも同じ値が出ることを先に確かめる | 構造的な不備は起動失敗（`ImportAdmissionStartupValidator`）。署名日前・失効だけなら起動するが upload は403 |
 | 2 | 行参照の HMAC 鍵 `IMPORT_ROW_REFERENCE_HMAC_KEY` を secret store から注入する（Base64、復号後32 byte以上。例: `openssl rand -base64 32`）。`application.yml` の開発用既定値と `application-test.yml` のtest用の値は使えない（復号後のbyte列で比べるため、`=` の省略やURL-safe表記にしても拒否される）。全instanceで同じ値にする | 起動ログ `[取込] NF-06行参照鍵を確認しました: nf06Enabled=true` | 起動失敗（`ImportRowReferenceKeyStartupValidator`。messageは `state=MISSING` / `INVALID` / `DEVELOPMENT_KEY_IN_PRODUCTION` だけで、鍵の値は出さない） |
 | 3 | `import.metadata.manage` の明示許可（V193）: 管理者専用group `role-admin`・`privacy-admin` に許可行があり、他の全groupに拒否行がある | `deploy-runbook.md` §3.4 の V193 照会 | 管理者でも取込の全操作が403（service層は全体baseline `'*'` を許可根拠に数えない。W3-05 review P2-3(a)） |
 | 4 | 取込を行う管理者が `role-admin` または `privacy-admin` に所属し、`*`・`import.*`・`import.metadata.manage` の拒否行を持つgroupへ所属していない | `SELECT g.group_key FROM t_user_permission_group u JOIN m_permission_group g ON g.id = u.group_id WHERE u.user_id = ? AND u.deleted_flag = 0;` | 403（拒否が許可より優先） |
 | 5 | **単一法人前提**: 論理削除されていない組織（`deleted_flag = 0`）が持つ法人IDが、ちょうど1種類である。判定は `LegalEntityContextService` と同じ条件で、組織の状態（status）と有効期間は見ない（無効・期間外の組織の法人IDも数える）。**新規導入では V60 の移行組織 LEGACY（法人ID NULL）しか無いため0件**で、ONの前に法人IDを持つ組織を登録する | `SELECT COUNT(DISTINCT legal_entity_id) FROM m_organization_unit WHERE legal_entity_id IS NOT NULL AND deleted_flag = 0;` が 1 | 0件でも2件以上でも、管理者の法人contextが決まらず取込の全操作が403（`LEGAL_ENTITY_CONTEXT_REQUIRED`） |
 | 6 | LB / reverse proxy の idle timeout が130秒以上である（検証は同期要求で、最長120秒＋αの間1 byteも返さない） | SREが LB 設定を確認する | 応答が504等で途切れる。画面は `GET /jobs/{id}` で状態の確認を続けるため結果は失われないが、利用者が「開く」で確認し直す場面が増える |
-| 7 | 透過再接続をしない（JDBC URL の `autoReconnect=true` 禁止、透過再接続proxy無し） | a1a §5、`ImportJdbcReconnectGuard` | `autoReconnect` は起動失敗。proxy はDBA/SREが確認する |
+| 7 | 透過再接続・接続先の切替えをしない: JDBC URL の `autoReconnect=true` / `autoReconnectForPools=true` 禁止（百分率符号化した値も）、**multi-host・failover・loadbalance・replication 形の JDBC URL 禁止**（`h1,h2`・`[h1,h2]`・`address=(...)` / `(host=...)`・`jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`・`jdbc:mysqlx://`、MariaDB の `failover`・`sequential`・`loadbalance`・`replication`・`aurora`。DB の切替えは DNS・LB 側で行い、URL には単一 host の `jdbc:mysql://host:port/db` だけを書く）、**data-source-properties で接続の型・接続先・切替えを変える key を置かない**（`dnsSrv`・`host`・`port`・`failOverReadOnly`・`ha.loadBalanceStrategy`・`loadBalance*` 等。一覧は a1a §5）、透過再接続 proxy（ProxySQL・MySQL Router 等）無し、connection pool は Hikari（`spring.datasource.type` を変えない） | a1a §5、`ImportJdbcReconnectGuard`（スイッチと関係なく常に検査する） | `autoReconnect` と複数 host の URL、JDBC driver（Connector/J）が単一接続と解析しない・解析できない URL、接続の型・接続先・切替えを変える data-source-properties の key は起動失敗（property 名と `(multiHost)` / `(unparsable)` / `(connectionTopology)` の印だけを出す。URL の解析には driver へ渡る data-source-properties も渡す）。proxy と pool の種類は DBA/SRE が確認する |
 | 8 | raw CSV（`IMPORT` 文書）の保持期間と、previewのマスク分類（外部キー・会社名・メールdomainを平文で表示）を Privacy が書面で受容している | 決定記録 | ―（運用判断。W3-05 review P3-8） |
 | 9 | 単一instance、または sticky session で運用する（照合台帳は instance local） | a1a §6 | 他instanceの台帳が次にlockを取るまで残る |
+| 10 | **全 instance が同じアプリ DB account（同じ user 名）を使う**。Secrets Manager の alternating-users 方式（2つの user を交互に切り替える rotation）は使わない（password だけを替える single-user rotation は可）。PROCESS 権限は渡さない（RB-NF05 review P3-2） | DBA が account と rotation の方式を確認する（`deploy-runbook.md` §1.2。**未取得**） | 照合は結果不明の COMMIT を送った接続を `information_schema.PROCESSLIST` で確かめるが、PROCESS 権限の無い account には同じ user 名の thread しか見えない。別 user の接続は「実行していない」と見え、COMMIT の確定を待たずに時間だけで判定する（a1a §6） |
 
+- **#1 の golden vector**（合成値。`ImportAdmissionPortTest` の固定値と同じ。RB-NF05、W3-05 review P3-7）: 決定ID `DO-NF06-2026-001`、tenant `default`、署名日 `2026-12-01`、失効日 `2027-11-30`、source code `CRM_2`・`crm-2`・`Crm`・`crm2`・`crm` の場合。
+
+  ```sh
+  printf 'nf06-import-admission-approval-v1\ndecision-id=DO-NF06-2026-001\ntenant-id=default\nsigned-on=2026-12-01\nexpires-on=2027-11-30\nentity=CUSTOMER\nschema-version=ses-import-v1\nsource-codes=crm,crm-2,crm2,crm_2\n' | sha256sum
+  # c5dc5f03efdb4fd22c23cdf86c7d248f22af96d187880a87f07664a97b173550
+  ```
+
+  source code の並びは `crm,crm-2,crm2,crm_2`（`-` ＜数字＜`_`）。`printf 'crm\ncrm-2\ncrm2\ncrm_2\n' | LC_ALL=C sort` で同じ順になることを確かめる（`en_US.UTF-8` 等では `crm,crm_2,crm2,crm-2` になり digest が一致しない）。
+- **エラーCSVの最終行 `#END` の扱い**（RB-NF05 review P3-7）: 全 page を書き終えたCSVの最後の行は `#END,<code行の件数>,<REJECTED行の件数>` で、**データ行ではない**。列の位置は header と同じ3列のため、件数の2つが `sourceRowHash` 列と `code` 列に入る。
+  - Excel で filter・並べ替え・pivot を使う前に、先頭の cell が `#END` の行を削除する（残すと code が数字の行として数えられる）。
+  - script で集計する場合は、最終行が `#END` で始まることと、件数が本文の行数（code 行の数と、異なる行番号の数）と一致することを確かめてから、その行を除いて処理する。最終行が無い・件数が合わない CSV は途中で切れているため使わない（もう一度出力する）。
+  - 行番号は `sourceRowNumber` 列の数字だけ（`#` で始まらない）なので、`#END` の行は先頭の cell で見分けられる。
 - 単一法人前提の理由（W3-05 review P2-3(b)を本バッチでは前提の明記で扱う）: 管理者の法人contextは共通の `LegalEntityContextService`（書込み境界の全writerが使う）が `m_organization_unit` の全法人IDから一意に決める。同表の `tenant_id` は将来用の BIGINT 列で、現行は独立DB運用のため値を持たず、tenantで絞っても結果は変わらない。複数法人の企業で取込を使うには、管理者に法人を選ばせる設計変更（共通serviceの変更）が必要で、Owner判断とする。
 - 法人が2つ以上ある環境でONにしても、情報が漏れる方向には働かない（全操作が403で閉じる）。
 
 #### 4.8.3 ONにする手順（`FEATURE_NF06_ENABLED`）
 
-1. 4.8.2 の1〜9を確認する。
+1. 4.8.2 の1〜10を確認する。
 2. `FEATURE_NF06_ENABLED=true`、`IMPORT_ROW_REFERENCE_HMAC_KEY`、`IMPORT_ADMISSION_*` を全instanceに同じ値で設定し、全停止で再起動する。
 3. 起動ログで `[機能スイッチ] 起動時の状態` の `NF06=ON`、`[取込] NF-06 admission承認設定を確認しました`、`[取込] NF-06行参照鍵を確認しました` を確認する。
-4. 管理者でログインし、サイドバーの「取込センター」を開く。「取込元・mapping」タブで承認済み source code の取込元と mapping 版を登録し、合成CSVで upload → 検証 → preview → エラーCSV を確認する。
+4. 管理者でログインし、サイドバーの「取込センター」を開く。「取込元・mapping」タブで承認済み source code の取込元と mapping 版を登録し、合成CSVで upload → 検証 → preview → エラーCSV を確認する。エラーCSVの最終行が `#END,<code行の件数>,<REJECTED行の件数>` で、件数が本文の行数と一致することを確かめる（この行が無いCSVは途中で切れている。a1a §11）。
 5. 管理者以外のroleではmenuが出ず、`/import-center` が403になることを確認する。
 
 #### 4.8.4 OFF・鍵の差替え

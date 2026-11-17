@@ -164,6 +164,11 @@ public class IntegrationHubExternalApiProperties {
          * productionのinbound有効時は必須。DBのclient行だけで受信元を広げられないようにする。
          */
         private List<String> allowedClientCidrs = new ArrayList<>();
+        /**
+         * 決定書に記載されたinbound承認内容のSHA-256（小文字hex 64桁）。productionのinbound有効時は必須で、
+         * 現行設定から {@link IntegrationHubApprovalDigest#canonicalInbound} で再計算した値と一致しなければ起動しない。
+         */
+        private String approvalDigest;
     }
 
     @Data
@@ -180,6 +185,34 @@ public class IntegrationHubExternalApiProperties {
         private String truststoreType = "PKCS12";
         /** outbound方向のproduction承認（DG-05）。dev/testでは任意。 */
         private OutboundApproval approval = new OutboundApproval();
+        /**
+         * production起動時の承認照合（{@link IntegrationHubProductionEnablementPolicy}）がdigestを計算したtruststoreの
+         * pathとbyte列。HTTPS transportはfileを読み直さずこのbyte列を読み込み、照合後にfileが差し替えられても照合した内容
+         * だけを信頼する（RB-NF05 review P3-6。TOCTOUを無くす）。設定からは束縛しない。
+         */
+        @lombok.Getter(lombok.AccessLevel.NONE)
+        @lombok.Setter(lombok.AccessLevel.NONE)
+        @lombok.EqualsAndHashCode.Exclude
+        @lombok.ToString.Exclude
+        private volatile ApprovedTruststore approvedTruststore;
+
+        /** 承認照合でdigestを計算したtruststoreのbyte列を記録する（照合だけが呼ぶ。byte列は複製して持つ）。 */
+        public void recordApprovedTruststore(String path, byte[] content) {
+            this.approvedTruststore = path == null || content == null ? null
+                    : new ApprovedTruststore(path, content.clone());
+        }
+
+        /**
+         * 承認照合でdigestを計算したtruststoreのbyte列の複製。照合していない（dev/test・OFF）か、その後に
+         * {@code truststore-path} が変わっていればnullを返し、呼出元はfileを読む。
+         */
+        public byte[] approvedTruststoreContent() {
+            ApprovedTruststore current = approvedTruststore;
+            if (current == null || !current.path().equals(truststorePath)) return null;
+            return current.content().clone();
+        }
+
+        private record ApprovedTruststore(String path, byte[] content) { }
     }
 
     @Data
@@ -191,6 +224,12 @@ public class IntegrationHubExternalApiProperties {
          * 送信時のegress照合と登録時検証は実HTTPS transport（W3-06b）で同じ一覧を使う。
          */
         private List<String> allowedDestinations = new ArrayList<>();
+        /**
+         * 決定書に記載されたoutbound承認内容のSHA-256（小文字hex 64桁）。productionのoutbound有効時は必須で、
+         * 現行設定とtruststoreの内容から {@link IntegrationHubApprovalDigest#canonicalOutbound} で再計算した値と
+         * 一致しなければ起動しない。
+         */
+        private String approvalDigest;
     }
 
     @Data

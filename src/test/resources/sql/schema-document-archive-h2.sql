@@ -108,6 +108,9 @@ CREATE TABLE t_document_version (
   CONSTRAINT uk_document_version_no UNIQUE (document_id, version_no),
   CONSTRAINT uk_document_idempotency UNIQUE (tenant_id, source_type, business_key, version_discriminator)
 );
+-- V200 相当: 取込 stage 照合が storage key ごとに版を数える照会の索引。@Sql で本表を作り直す試験でも同じ索引を持たせるため、
+-- replay（application-test.yml）では V200 の file を流さず、本 file が作る。
+CREATE INDEX IF NOT EXISTS idx_dv_storage_key ON t_document_version (storage_key);
 
 CREATE TABLE t_document_link (
   id                             BIGINT       AUTO_INCREMENT PRIMARY KEY,

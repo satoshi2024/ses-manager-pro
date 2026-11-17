@@ -182,6 +182,34 @@ class ImportAdmissionPortTest {
         assertTrue(ImportAdmissionApproval.evaluate(badSource, today).violations().contains("sourceCodes.format"));
     }
 
+    /**
+     * b-14（W3-05 review P3-7）: 二人による再計算（feature-switches.md 4.8.2 #1、a1a §10）の golden vector。
+     * source code は小文字化して ASCII（C locale）の昇順に並べる。{@code -}（0x2D）＜数字＜{@code _}（0x5F）＜英小文字で、
+     * locale 依存の {@code sort} では {@code crm,crm_2,crm2,crm-2} になり digest が一致しない。文書の printf 例と同じ値を固定する。
+     */
+    @Test
+    void admission承認digestの正規形はgolden_vectorと一致しsource_codeをASCII順に並べる() {
+        ImportAdmissionApprovalProperties properties = new ImportAdmissionApprovalProperties();
+        properties.setDecisionId(" DO-NF06-2026-001 ");
+        properties.setTenantId("default");
+        properties.setSignedOn("2026-12-01");
+        properties.setExpiresOn("2027-11-30");
+        properties.setSourceCodes(List.of("CRM_2", "crm-2", "Crm", "crm2", "crm"));
+
+        assertEquals("nf06-import-admission-approval-v1\n"
+                        + "decision-id=DO-NF06-2026-001\ntenant-id=default\nsigned-on=2026-12-01\n"
+                        + "expires-on=2027-11-30\nentity=CUSTOMER\nschema-version=ses-import-v1\n"
+                        + "source-codes=crm,crm-2,crm2,crm_2\n",
+                ImportAdmissionApproval.canonicalContent(new ImportAdmissionApproval.Content(true,
+                        "DO-NF06-2026-001", "default", LocalDate.of(2026, 12, 1), LocalDate.of(2027, 11, 30),
+                        java.util.Set.of("crm", "crm-2", "crm2", "crm_2"))));
+        assertEquals("c5dc5f03efdb4fd22c23cdf86c7d248f22af96d187880a87f07664a97b173550",
+                ImportAdmissionApproval.computeDigest(properties));
+        properties.setApprovalDigest("C5DC5F03EFDB4FD22C23CDF86C7D248F22AF96D187880A87F07664A97B173550");
+        assertTrue(ImportAdmissionApproval.evaluate(properties, LocalDate.of(2026, 12, 1)).complete(),
+                "決定書の大文字の転記も照合できる");
+    }
+
     @Test
     void canonicalContentIsVersionedAndOrderIndependent() {
         ImportAdmissionApprovalProperties first = approved();

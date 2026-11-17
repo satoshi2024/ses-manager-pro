@@ -121,6 +121,93 @@ class IntegrationHubV192AuditRetentionMySqlTest {
         assertThat(ownership.isCurrentOwnership("engineer-availability", engineer, "v192-tenant", 9L)).isFalse();
     }
 
+    /**
+     * b-13（G3s-P3-9）: {@code isCurrentOwnership} の project・contract-status・invoice-status 分岐を実MySQLで実行する。
+     * 以前は engineer 分岐だけを実MySQLで通しており、他の3分岐の SQL（customer・project・engineer の join と、invoice の
+     * NOT EXISTS による明細の全関連行の確認）は H2（{@code ExternalApiCurrentOwnershipH2Test}）でしか実行していなかった。
+     */
+    @Test
+    void 現行ownershipの実SQLはproject_contract_invoiceの分岐でもtenantと法人を全関連行で確認する() throws Exception {
+        String marker = "own-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        String tenant = "own-" + marker.substring(4, 12);
+        long customer = insertReturningId("INSERT INTO m_customer(company_name,tenant_id,legal_entity_id,deleted_flag) "
+                + "VALUES(?,?,9,0)", marker, tenant);
+        long engineer = insertReturningId("INSERT INTO t_engineer(full_name,employment_type,status,available_date,"
+                + "tenant_id,legal_entity_id,deleted_flag) VALUES(?,'正社員','Bench','2026-11-01',?,9,0)", marker, tenant);
+        long project = insertReturningId("INSERT INTO t_project(project_name,customer_id,status,legal_entity_id,"
+                + "deleted_flag) VALUES(?,?,'募集中',9,0)", marker, customer);
+        long contract = insertReturningId("INSERT INTO t_contract(contract_no,engineer_id,project_id,customer_id,"
+                + "contract_type,start_date,selling_price,cost_price,status,legal_entity_id,deleted_flag) "
+                + "VALUES(?,?,?,?,'準委任','2026-11-01',100000,50000,'稼動中',9,0)", marker, engineer, project, customer);
+        long work = insertReturningId("INSERT INTO t_work_record(contract_id,work_month,actual_hours,billing_amount,"
+                + "status) VALUES(?,'2026-11',160,100000,'確定')", contract);
+        long invoice = insertReturningId("INSERT INTO t_invoice(invoice_no,customer_id,billing_month,subtotal,tax,total,"
+                + "status,issued_date,legal_entity_id,deleted_flag) VALUES(?,?,'2026-11',100000,10000,110000,'未送付',"
+                + "'2026-11-30',9,0)", marker, customer);
+        jdbc.update("INSERT INTO t_invoice_item(invoice_id,work_record_id,description,amount) "
+                + "VALUES(?,?,'NF05 ownership item',100000)", invoice, work);
+        var configuration = new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        var factory = new com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean();
+        factory.setDataSource(source);
+        factory.setConfiguration(configuration);
+        var sqlFactory = factory.getObject();
+        sqlFactory.getConfiguration().addMapper(com.ses.mapper.IntegrationHubWebhookResourceScopeMapper.class);
+        var ownership = new org.mybatis.spring.SqlSessionTemplate(sqlFactory)
+                .getMapper(com.ses.mapper.IntegrationHubWebhookResourceScopeMapper.class);
+        Map<String, Long> targets = Map.of("engineer-availability", engineer, "project", project,
+                "contract-status", contract, "invoice-status", invoice);
+        targets.forEach((type, id) -> {
+            assertThat(ownership.isCurrentOwnership(type, id, tenant, 9L)).as(type).isTrue();
+            assertThat(ownership.isCurrentOwnership(type, id, "other-tenant", 9L)).as(type).isFalse();
+            assertThat(ownership.isCurrentOwnership(type, id, tenant, 10L)).as(type).isFalse();
+        });
+
+        // 要員の移管（tenant・法人）は、その要員を参照する契約と、契約の稼働を明細に持つ請求の現行ownershipを外す。
+        jdbc.update("UPDATE t_engineer SET tenant_id='other-tenant' WHERE id=?", engineer);
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("project", project, tenant, 9L)).isTrue();
+        jdbc.update("UPDATE t_engineer SET tenant_id=?, legal_entity_id=10 WHERE id=?", tenant, engineer);
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isFalse();
+        jdbc.update("UPDATE t_engineer SET legal_entity_id=9 WHERE id=?", engineer);
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isTrue();
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isTrue();
+
+        // 案件の論理削除は、案件・その案件の契約・契約の稼働を明細に持つ請求の現行ownershipを外す（NOT EXISTSの分岐）。
+        jdbc.update("UPDATE t_project SET deleted_flag=1 WHERE id=?", project);
+        assertThat(ownership.isCurrentOwnership("project", project, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isFalse();
+        jdbc.update("UPDATE t_project SET deleted_flag=0 WHERE id=?", project);
+
+        // 請求明細の契約だけが別法人へ移ると、請求の法人が同じでも請求の現行ownershipは外れる。
+        jdbc.update("UPDATE t_contract SET legal_entity_id=10 WHERE id=?", contract);
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isFalse();
+        jdbc.update("UPDATE t_contract SET legal_entity_id=9 WHERE id=?", contract);
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isTrue();
+
+        // 顧客の移管は、顧客を参照する案件・契約・請求の全てを外す。
+        jdbc.update("UPDATE m_customer SET tenant_id='other-tenant' WHERE id=?", customer);
+        assertThat(ownership.isCurrentOwnership("project", project, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("contract-status", contract, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("invoice-status", invoice, tenant, 9L)).isFalse();
+        assertThat(ownership.isCurrentOwnership("engineer-availability", engineer, tenant, 9L)).isTrue();
+        assertThat(ownership.isCurrentOwnership("unknown-type", project, tenant, 9L)).isFalse();
+    }
+
+    private static long insertReturningId(String sql, Object... args) {
+        var key = new org.springframework.jdbc.support.GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            var statement = connection.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS);
+            for (int i = 0; i < args.length; i++) statement.setObject(i + 1, args[i]);
+            return statement;
+        }, key);
+        return key.getKey().longValue();
+    }
+
     @Test
     void 永続OFFからの再開だけを隔離しON再起動とreplay期限起点のSQLを検証する() throws Exception {
         String client="restart-"+UUID.randomUUID();

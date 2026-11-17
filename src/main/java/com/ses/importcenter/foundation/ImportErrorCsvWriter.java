@@ -31,6 +31,18 @@ public final class ImportErrorCsvWriter {
         append(writer, Long.toString(sourceRowNumber), sourceRowHash, code);
     }
 
+    /** error exportの最終行の印。この行が無いCSVは途中で切れている。 */
+    public static final String TRAILER_MARKER = "#END";
+
+    /**
+     * error export（A1a）の最終行（b-14。W3-05 review P3-1）。{@code #END,<code行の件数>,<REJECTED行の件数>}。
+     * 全pageを書き終えた後にだけ書くため、途中の失敗（撤権・DB障害・行の不一致）で応答が切れたCSVにはこの行が無く、
+     * 件数との照合で欠落を発見できる。列数はheaderと同じ3列にする。
+     */
+    public static void writeRowCodeTrailer(Writer writer, long codeLines, long rejectedRows) throws IOException {
+        append(writer, TRAILER_MARKER, Long.toString(codeLines), Long.toString(rejectedRows));
+    }
+
     private static void append(Writer writer, String... values) throws IOException {
         for (int i = 0; i < values.length; i++) {
             if (i > 0) writer.write(',');

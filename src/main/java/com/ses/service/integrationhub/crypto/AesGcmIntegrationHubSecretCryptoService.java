@@ -1,15 +1,17 @@
 package com.ses.service.integrationhub.crypto;
 
-import com.ses.service.integrationhub.IntegrationHubDigest;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HexFormat;
 
 /**
  * NF-05 credential/signing secret envelope。
@@ -22,6 +24,9 @@ public class AesGcmIntegrationHubSecretCryptoService implements IntegrationHubSe
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int IV_LENGTH_BYTES = 12;
     private static final int TAG_LENGTH_BITS = 128;
+    private static final String CREDENTIAL_HASH_ALGORITHM = "HmacSHA256";
+    /** credential hashの用途分離。形式を変える場合は版を上げる（既存行のhashは照合に使わないため再計算不要）。 */
+    static final String CREDENTIAL_HASH_DOMAIN = "SES-NF05-CREDENTIAL-HASH-V1";
 
     private final IntegrationHubKeyring keyring;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -80,12 +85,31 @@ public class AesGcmIntegrationHubSecretCryptoService implements IntegrationHubSe
         }
     }
 
+    /**
+     * HMAC-SHA256(pepper, domain‖clientId‖credentialVersion‖secret)。各要素はUTF-8のbyte列に4 byte big-endianの
+     * 長さを前置して連結する（区切り文字の曖昧さを作らない）。pepperはkeyringから取得し、使用後に消去する。
+     */
     @Override
-    public String sha256Hex(String plaintext) {
+    public String credentialHash(String clientId, int credentialVersion, String plaintext) {
+        validateAad(clientId, credentialVersion, "credential");
         if (!StringUtils.hasText(plaintext)) {
             throw new IllegalArgumentException("secret is required");
         }
-        return IntegrationHubDigest.sha256Hex(plaintext);
+        byte[] pepper = keyring.credentialHashPepper();
+        try {
+            Mac mac = Mac.getInstance(CREDENTIAL_HASH_ALGORITHM);
+            mac.init(new SecretKeySpec(pepper, CREDENTIAL_HASH_ALGORITHM));
+            for (String part : new String[]{CREDENTIAL_HASH_DOMAIN, clientId, Integer.toString(credentialVersion), plaintext}) {
+                byte[] bytes = part.getBytes(StandardCharsets.UTF_8);
+                mac.update(ByteBuffer.allocate(4).putInt(bytes.length).array());
+                mac.update(bytes);
+            }
+            return HexFormat.of().formatHex(mac.doFinal());
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("credential hash failed", e);
+        } finally {
+            java.util.Arrays.fill(pepper, (byte) 0);
+        }
     }
 
     private String aad(String clientId, int credentialVersion, String purpose) {

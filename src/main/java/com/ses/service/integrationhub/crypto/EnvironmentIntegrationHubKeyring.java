@@ -57,4 +57,30 @@ public class EnvironmentIntegrationHubKeyring implements IntegrationHubKeyring {
             throw new IllegalStateException("integration hub crypto key is invalid", e);
         }
     }
+
+    /** credential hashのpepperのproperty名。production開放判定も同じ名前を検査する。 */
+    public static final String CREDENTIAL_HASH_PEPPER_PROPERTY = "integration.hub.crypto.credential-hash-pepper";
+
+    /**
+     * {@code integration.hub.crypto.credential-hash-pepper}（32 byte、{@code =}無しのbase64url）。暗号鍵と同じ規則で読み、
+     * 未設定・形式不正ならfail closedする。値はcacheせず呼出しごとに環境から読み、例外・ログへ値を出さない。
+     */
+    @Override
+    public byte[] credentialHashPepper() {
+        String encoded = environment.getProperty(CREDENTIAL_HASH_PEPPER_PROPERTY);
+        if (!StringUtils.hasText(encoded) || encoded.contains("=") || encoded.matches(".*[\\s].*")) {
+            throw new IllegalStateException("integration hub credential hash pepper is not configured");
+        }
+        byte[] decoded;
+        try {
+            decoded = Base64.getUrlDecoder().decode(encoded);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("integration hub credential hash pepper is invalid", e);
+        }
+        if (decoded.length != 32) {
+            Arrays.fill(decoded, (byte) 0);
+            throw new IllegalStateException("integration hub credential hash pepper is invalid");
+        }
+        return decoded;
+    }
 }

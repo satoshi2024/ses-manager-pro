@@ -15,6 +15,12 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class CredentialVersionServiceImpl implements CredentialVersionService {
+    /**
+     * 発行できるsecretの形式（N5-P3-2）。base64url文字で43文字以上（32 byte乱数のbase64url＝256 bit相当）。
+     * 管理APIは{@code SecureRandom}の32 byteから作るため常に満たす。人が考えた短い値・推測しやすい値を保存しない。
+     */
+    static final java.util.regex.Pattern SECRET_FORMAT = java.util.regex.Pattern.compile("[A-Za-z0-9_-]{43,512}");
+
     private final CredentialVersionMapper mapper;
     private final IntegrationHubSecretCryptoService cryptoService;
 
@@ -24,7 +30,8 @@ public class CredentialVersionServiceImpl implements CredentialVersionService {
                                    String plaintextSecret, LocalDateTime now) {
         if (apiClientId == null || clientId == null || clientId.isBlank() || clientId.length() > 100
                 || credentialVersion <= 0 || keyId == null || keyId.isBlank() || keyId.length() > 100
-                || plaintextSecret == null || plaintextSecret.isBlank() || now == null) {
+                || plaintextSecret == null || !SECRET_FORMAT.matcher(plaintextSecret).matches() || now == null) {
+            // 例外文言へsecretの値・長さを出さない。
             throw new IllegalArgumentException("invalid credential issue request");
         }
         // 旧世代は24時間だけOVERLAP。旧secretの値はこのメソッド外へ返さず、新世代のenvelopeのみ保存する。
@@ -45,7 +52,8 @@ public class CredentialVersionServiceImpl implements CredentialVersionService {
                 .credentialVersion(credentialVersion)
                 .keyId(keyId)
                 .encryptedSecret(envelope)
-                .secretHash(cryptoService.sha256Hex(plaintextSecret))
+                // 列名・CHAR(64)はV134のまま。値はpepper付きHMAC-SHA256（V134の列commentの「SHA-256」より強い）。
+                .secretHash(cryptoService.credentialHash(clientId, credentialVersion, plaintextSecret))
                 .cryptoKeyVersion(extractKeyVersion(envelope))
                 .cipherFormat("IHG1")
                 .status("ACTIVE")
