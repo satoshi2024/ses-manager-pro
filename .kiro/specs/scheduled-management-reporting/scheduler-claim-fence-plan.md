@@ -8,6 +8,7 @@
 - テストは統括（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの対象限定fast（9 class）は288/0/0/0、対象限定MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は統括のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 - 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。
 - 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。統括Runnerの対象限定実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は統括のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。2026-11-14追記: 統合候補に対するCIは、第1・2波の全batchを取り込んだ `8000d94e` で7 job（fast・MySQL shard 1〜3・backup integration・browser・performance）すべて通過した（run 43387006667、統括の記録）。手元での `verify-like-ci` 全体実行は本書の記録対象外。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
+- 2026-11-17追記: ON前のP2/P3（引き継ぎを含むretry上限、entityの書き戻し、tenant単位の隔離、metricの結果区分、時計の差の観測、alert rule草案）をRB-NF10で扱った（§15、§10.6）。MySQL testは主控Runnerの実行待ちである。
 
 ## 1. 確認した欠陥と影響
 
@@ -206,6 +207,31 @@ ORDER BY failure_count DESC, tenant_id, id;
 
 - 末尾へのADD COLUMNはMySQL 8.0.12以上でINSTANT対象（列位置指定を付けない理由）。本番MySQLの版とINSTANT可否はDBA確認待ち。対象表は小規模でINPLACEでも影響は限定的と想定するが、未計測。
 
+### 10.6 監視とalert rule（草案。閾値・評価窓・重要度・通知先は**未決**。2026-11-17、RB-NF10）
+
+本節は草案であり、承認・設定されたalert ruleではない。repoにalert配信基盤は無い。metricの定義は§14.5。
+
+- **決める人**（いずれも未決・未取得。`deploy-runbook.md` §1.7 のNF10の行）:
+  - SRE: 各ruleの閾値・評価窓・継続時間・重要度・通知経路。NTPの前提と許容する時刻差（A6）。
+  - Report Owner: 自動停止（`RETRY_EXHAUSTED_DISABLED`）など業務側で受ける通知の宛先と、受けた後の対応手順（§14.2の復旧手順を使うか）。
+- 下表の `<窓>`・`<閾値>`・`<継続>` は決める人が埋めるプレースホルダであり、本書の値ではない。「1件でも通知する」（`> 0`）にするかどうかも決める事項である。
+- 2026-11-13版の§14.5にあった具体的な窓と閾値（`[5m]`・`[1h]`・`> 0`・10分継続等）は案として書いたもので、決定ではなかった。本節でプレースホルダに置き換えた。
+
+| # | 検知したいこと | 条件式の骨格（PromQL） | 閾値・評価窓・継続 | 重要度 | 通知先 | 決める人 |
+|---|---|---|---|---|---|---|
+| A1 | 起動guardが全tenantのclaimを止めた／新旧version混在の痕跡（`LEGACY_LEASE_BLOCKED`・`LEGACY_LEASE_ACTIVE_BLOCKED`・`LEGACY_LEASE_GUARD_FAILED`・`ORPHAN_TOKEN_REPLACED`） | `sum by (event) (increase(ses_report_schedule_events_total{outcome="GUARD"}[<窓>])) > <閾値>` | 未決 | 未決（`ORPHAN_TOKEN_REPLACED` は混在の唯一の痕跡になり得る。§14.1） | 未決 | SRE |
+| A2 | legacy leaseが残っている | `max(ses_report_schedule_legacy_leases) > <閾値>` が `<継続>` 続く | 未決 | 未決 | 未決 | SRE |
+| A3 | 確定的な失敗（人の対処が要る）: `RETRY_EXHAUSTED_DISABLED`（自動停止。引き継ぎを数えた停止を含む）・`CLAIM_SQL_REJECTED`・`TENANT_DISPATCH_REJECTED` | `sum by (event) (increase(ses_report_schedule_events_total{outcome="DETERMINISTIC"}[<窓>])) > <閾値>` | 未決 | 未決 | `RETRY_EXHAUSTED_DISABLED` はReport Owner（宛先は未決）。他は未決 | SRE／Report Owner |
+| A4 | 結果不明・重複実行の痕跡が続く（poison pill、completion結果不明、引き継ぎ、lease超過、所有権喪失）: `CLAIM_UNCERTAIN`・`COMPLETION_UNCERTAIN`・`STALE_LEASE_TAKEOVER`・`LEASE_OVERRUN`・`OWNERSHIP_LOST` | `sum by (event) (increase(ses_report_schedule_events_total{outcome="UNCERTAIN"}[<窓>])) > <閾値>` | 未決 | 未決 | 未決 | SRE |
+| A5 | 自動で再試行される失敗が続く: `RUN_FAILED`・`TENANT_DISPATCH_FAILED` | `sum by (event) (increase(ses_report_schedule_events_total{outcome="RETRYABLE"}[<窓>])) > <閾値>` | 未決 | 未決 | 未決 | SRE／Report Owner |
+| A6 | 本nodeの時計とDBサーバーの時計の差（§11 P2-2） | `max(abs(ses_report_schedule_clock_skew_seconds)) > <許容秒>` が `<継続>` 続く | 未決（許容値はNTPの運用前提と合わせて決める） | 未決 | 未決 | SRE |
+| A7 | drain確認時刻の設定の外し忘れ | `increase(ses_report_schedule_events_total{event="LEGACY_LEASE_DRAIN_ACCEPTED"}[<窓>]) > <閾値>` | 未決 | 未決 | 未決 | SRE |
+
+- 注意:
+  - gauge（`ses_report_schedule_legacy_leases`・`ses_report_schedule_clock_skew_seconds`）は、ShedLockを取ってclaimを始めたnodeだけが更新し、他のnode・guardで止めたpoll・NF10 OFFでは前の値のまま残る。`max(...)` で評価し、event counterと併用する（§14.5）。
+  - `outcome` はeventごとに固定である（`ReportScheduleMetrics.Event`）。eventを追加すると、そのeventのoutcomeの条件に自動で含まれる。
+  - dueの無い期間はeventが出ないため、「schedulerが動いていない」ことはeventの不在だけでは判定できない。監視するかどうかと方法もSREが決める（未決）。
+
 ## 11. Owner判断待ち事項（挙動は変更しない）
 
 > 2026-11-13改訂: P2-1・P2-4・P2-8・P3-3・起動guardはユーザー決定（B-NF10-1/B-NF10-2、`launch-decisions-20261113`）を受けて§14で実装した（testは `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過、§14冒頭）。下表の「現状の実装」列は2026-11-12時点の記述として残し、決定と現在の扱いを「2026-11-13」列に記す。
@@ -221,6 +247,14 @@ ORDER BY failure_count DESC, tenant_id, id;
 | — | 起動guard | 未実装 | なし | SRE／Owner | **実装**: token無しleaseで全claim停止（fail-closed）、drain確認設定（§14.1） |
 
 P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLocalDateTimeで保存しており、DBの `CURRENT_TIMESTAMP` はsession `time_zone` に依存してtenant timezoneを知らない。混在させるとstale判定とretry判定の基準がずれる。(2) completion CASはclaimedAtの完全一致を条件にしているため、DB生成値を使うとclaim後に読み戻す2文構成が必要になる。(3) H2 testの `CURRENT_TIMESTAMP` はJVM timezoneとなり、テスト結果が環境に依存する。node間の時刻差sがある場合、実効leaseは30−s分になる。
+
+**2026-11-17追記（RB-NF10）。下表の判断は変わらない（未決のまま）。**
+
+| ID | 決まっていないこと | 決める人 | RB-NF10で追加したもの（挙動は変えない） |
+|---|---|---|---|
+| P2-2 | NTP同期の運用前提と、許容する本node・DBの時刻差。alertの閾値と通知先（§10.6 A6） | SRE（**未決・未取得**） | claimを始めるpollごとに `SELECT UNIX_TIMESTAMP()`（session time zoneに依存しないepoch秒）で本nodeとDBの時計の差を測り、gauge `ses_report_schedule_clock_skew_seconds`（node − DB、秒）へ出す。測定誤差（DB側の秒切捨て0.5秒と往復時間の半分）を差し引いた差が `management-report.clock-skew-warn-seconds`（コード既定5秒）を超えたら WARN `errorCode=SCHEDULE_CLOCK_SKEW_DETECTED`（差が続く間は60分に1回）。既定の5秒は測定誤差を超える最小限の実装上の値で、許容値の決定ではない。測定に失敗してもpollは止めない。lease・ShedLockの時刻源は変えない（上記の理由）。理由: 時刻差は実効leaseと起動guardの境界（§14.1）を直接ずらすが、従来は観測手段が無く、NTPの前提が崩れても気付けなかったため |
+| P2-3 | tenant timezoneを変える時の方針（scheduleのtimezoneと `next_run_at` の再計算・移行手順を用意するか、変更を禁止するか） | Report Owner（運用手順はSREと合意。**未決・未取得**） | なし（文書のみ）。現状: schedule timezoneはAsia/Tokyo固定で、tenant zoneと違えば `policyFixed` で失敗し、連続12回（引き継ぎを含む、§14.2）で自動停止する。lease・retryの時刻はtenant zoneのwall clockで保存するため、変更の前後で両zoneの差だけstale判定とretry判定がずれる。方針が決まるまでの暫定の扱い（例: NF10をONにしたtenantのtimezone変更を止めるか）も同じく未決で、変えた場合の挙動は上記のとおりで保証しない |
+| P2-8 | alert ruleの閾値・評価窓・重要度・通知先 | SRE／Report Owner（**未決・未取得**） | events counterに有限のtag `outcome`（確定的失敗 `DETERMINISTIC`・結果不明 `UNCERTAIN` 等、eventごとに固定）を追加し、alert ruleの草案を§10.6に置いた。tenant単位の中断を `TENANT_DISPATCH_REJECTED`（確定的）・`TENANT_DISPATCH_FAILED`（再試行される）で数える（§15） |
 
 ## 12. 独立レビュー指摘対応表（2026-11-12）
 
@@ -310,7 +344,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
   - そこで「停止済み」の確認だけを人に委ねる。r1の真偽値は、戻し忘れたまま再起動するとその時点の全leaseを再び受け入れていた（review P3-1）。r2は運用者が書いた確認時刻を境界にするため、戻し忘れても確認後に旧版が取得したleaseは受け入れない。ただしnode間の時刻差sがあると、境界直後s秒間の旧版leaseを境界前とみなし得る（NTP同期を前提とする）。
 - **限界**（review P3-2で補足）:
   - ShedLock名が新旧で共通のため `dispatchDue` は新旧nodeの間で直列になる。新版が旧版の実行中leaseを見るのは、旧版の実行が `lockAtMostFor`（10分）を超えた場合か旧版nodeがcrashした場合に限られ、実際に検出するのは主にcrashの残りである。旧版nodeがclaimしていない（idle）間は検出できない。
-  - 旧版がtoken付きのstale leaseや孤児token行を引き継ぐと、tokenを更新しないためlegacy leaseとしては数えられない。事後に `ORPHAN_TOKEN_REPLACED` のWARNとして現れるだけなので、同eventはcritical alertにする（§14.5）。
+  - 旧版がtoken付きのstale leaseや孤児token行を引き継ぐと、tokenを更新しないためlegacy leaseとしては数えられない。事後に `ORPHAN_TOKEN_REPLACED` のWARNとして現れるだけなので、同eventは重要度の高いalertの候補とする（§10.6 A1。2026-11-17訂正: 重要度は案であり未決。決める人はSRE）。
   - inventory外tenantの行とenabled=0の行は数えない（schedulerがclaimしない行のため。再有効化すれば再び数える）。
   - 全停止デプロイ（B-NF10-1）が一次防御で、guardは誤操作の検出と被害拡大の防止である。
 - **復旧手順（草案、SRE/DBA承認待ち）**:
@@ -337,10 +371,15 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
     2. 戻せない場合は、停止したscheduleを無効のまま残し、同じtemplate版で新しいscheduleを作成する。作成時のscopeを現在のprincipalで保存し、`next_run_at` は次の周期になる。定期runのrun_keyはscheduleごとに分かれるため（§14.4）、新しいscheduleは旧scheduleのrunの影響を受けない。取り逃した月は、明示再生成（`POST /api/management-reports/runs/{runId}/regenerate`）または手動生成・配布で扱う。
     3. `next_run_at` をDBで直接進める操作は行わない（行う場合はDBA承認の手順として別途定める）。
   - コード方針（未実装）: 管理者が「当該論理runを見送り、cronの次回へ進める」操作（skip API。`processing_*` が空の行だけを対象に `next_run_at` を次回へ進め、`retry_scheduled_at` / `processing_logical_run_at` / `failure_count` / 停止理由をclearする専用UPDATE）を追加すれば、新schedule作成は不要になる。監査とUIを伴うため本批では実装しない。
-- **限界（review P3-6）**:
-  - retry上限が数えるのはfailure completionだけである。毎回completion前にprocessが落ちる場合（OOM等のpoison pill）やcompletionの結果が不明な場合は、lease期限後の引き継ぎが続き `failure_count` が増えないため、自動停止しない。`STALE_LEASE_TAKEOVER` / `LEASE_OVERRUN` / `COMPLETION_UNCERTAIN` のalert（§14.5）で検知する。
-  - 方針（未実装）: 同一論理runの引き継ぎ回数を数える列が無いため、上限を設けるにはDDLが要る（例: `takeover_count INT NOT NULL DEFAULT 0` を引き継ぎclaimで加算し、上限で停止）。DDLを伴うため本批では実装しない。
-  - `markFailure` のcommit結果が不明な場合、DB上は停止済みでも `RETRY_EXHAUSTED_DISABLED` は出ず `COMPLETION_UNCERTAIN` だけが出る。
+- **限界（review P3-6）**: ~~retry上限が数えるのはfailure completionだけで、poison pillやcompletion結果不明では引き継ぎが無限に続く。引き継ぎ回数の上限にはDDLが要る~~
+  - **2026-11-17改訂（RB-NF10、§15）**: 引き継ぎも連続失敗1回として数える。DDLは不要で、既存の `failure_count` を使う。
+    - 期限切れleaseの引き継ぎclaimは、completionに至らなかった前の実行を失敗1回として、claimと同じUPDATEで `failure_count` を加算する（`ReportScheduleMapper.claimDue`。占有中の行だけに一致する条件で加算し、SET句の評価順に依存しない）。引き継いだ実行が成功すれば0へ戻り、失敗すればさらに1回加算される。
+    - 引き継げば上限（12回）に達するleaseは引き継がず、同じsnapshot CASで停止する（`markTakeoverExhausted`）。停止の状態はfailure completionの上限到達と同じで（`enabled = 0`、`SCHEDULE_RETRY_EXHAUSTED`、retry予定は5分×12＝60分後、論理runを保持、lease/tokenをclear）、通知もERROR（`cause=STALE_LEASE`）＋ `RETRY_EXHAUSTED_DISABLED`。管理者の有効化で同一論理runから再開する。tokenをclearするため、期限後も動いていた旧workerのcompletionは0件になる。
+    - `markFailure` のcommit結果が不明で上限に達する場合は、行を読み直し、自分のcompletionだけが作れる停止状態（無効・停止理由code・lease無し・同じ論理run・上限以上の回数）を確かめた時だけ通知する。commitされていなければleaseが残り、期限後の引き継ぎが同じ失敗を数えて停止・通知する。lease期限を過ぎていた場合と読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN` の監視と§10.3 Q4に委ねる。
+  - 残る限界:
+    - poison pillで止まるまでの時間は約 lease 30分 × 残り回数（初回からなら約6時間）である。
+    - 正常でも毎回30分を超える実行は、引き継がれるたびに失敗として数えられ、12回で停止する（引き継いだ側が成功すれば0へ戻る）。事前には `LEASE_OVERRUN` で見える。
+  - **Report Ownerの確認（未取得）**: 「12回」の数え方が「初回を含む連続失敗（completionに至らずlease期限を超えた実行を含む）12回」になった。P3-5の数え方の確認と合わせて確認する。
 
 ### 14.3 確定的claim SQL失敗（P3-3 / review P3-8）
 
@@ -379,19 +418,17 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ### 14.5 metric / alert（P2-8）
 
-- 既存のMicrometer（`/actuator/prometheus`）へ接続する。tagは有限のevent種別だけで、tenant/schedule ID・token・PIIを載せない。
-  - `ses_report_schedule_events_total{event=...}`: `RUN_SUCCEEDED` / `RUN_FAILED` / `RETRY_EXHAUSTED_DISABLED` / `CLAIM_SQL_REJECTED` / `CLAIM_UNCERTAIN` / `OWNERSHIP_LOST` / `COMPLETION_UNCERTAIN` / `STALE_LEASE_TAKEOVER` / `ORPHAN_TOKEN_REPLACED` / `LEASE_OVERRUN` / `LEGACY_LEASE_BLOCKED` / `LEGACY_LEASE_ACTIVE_BLOCKED` / `LEGACY_LEASE_DRAIN_ACCEPTED` / `LEGACY_LEASE_GUARD_FAILED`
+- 既存のMicrometer（`/actuator/prometheus`）へ接続する。tagは有限のevent種別と、eventごとに固定の結果区分だけで、tenant/schedule ID・token・PIIを載せない。
+  - `ses_report_schedule_events_total{event=...,outcome=...}`（2026-11-17、RB-NF10で `outcome` tagと2 eventを追加し16種）。`outcome` はreview P2-8の「確定的な失敗と結果不明の区別」をlabelで表すもので、eventから一意に決まるため系列数はevent数を超えない。
+    - `SUCCEEDED`: `RUN_SUCCEEDED`
+    - `RETRYABLE`（失敗を記録し、自動で再試行される）: `RUN_FAILED` / `TENANT_DISPATCH_FAILED`
+    - `DETERMINISTIC`（再試行しても変わらない失敗、または上限で停止した。人の対処が要る）: `RETRY_EXHAUSTED_DISABLED` / `CLAIM_SQL_REJECTED` / `TENANT_DISPATCH_REJECTED`
+    - `UNCERTAIN`（DB上の結果を確認できない、結果不明のまま引き継いだ、重複実行の痕跡）: `CLAIM_UNCERTAIN` / `COMPLETION_UNCERTAIN` / `STALE_LEASE_TAKEOVER` / `LEASE_OVERRUN` / `OWNERSHIP_LOST`
+    - `GUARD`（起動guardが全claimを止めた、新旧version混在の痕跡）: `LEGACY_LEASE_BLOCKED` / `LEGACY_LEASE_ACTIVE_BLOCKED` / `LEGACY_LEASE_GUARD_FAILED` / `ORPHAN_TOKEN_REPLACED`
+    - `INFO`: `LEGACY_LEASE_DRAIN_ACCEPTED`
   - `ses_report_schedule_legacy_leases`（gauge）: 直近に起動guardの集計が成功したpollで検出したlegacy lease件数。集計が失敗したpoll、NF10 OFF、ShedLockを取得しなかったnodeでは前の値のまま残る（review P3-3）。node間で値が古いままになり得るため、alertは `max(...)` で評価し、event counterと併用する。
-- 推奨alert rule（案。repoにalert配信基盤は無く、設定と配信先はSRE）:
-
-| 条件 | 重要度 |
-|---|---|
-| `increase(ses_report_schedule_events_total{event=~"LEGACY_LEASE_BLOCKED\|LEGACY_LEASE_ACTIVE_BLOCKED\|LEGACY_LEASE_GUARD_FAILED\|ORPHAN_TOKEN_REPLACED"}[5m]) > 0` | critical（ORPHAN_TOKEN_REPLACEDは旧版混在の唯一の痕跡になり得るため） |
-| `max(ses_report_schedule_legacy_leases) > 0` が10分継続 | warning |
-| `increase(ses_report_schedule_events_total{event="RETRY_EXHAUSTED_DISABLED"}[1h]) > 0` | warning（Report Ownerへ） |
-| `increase(ses_report_schedule_events_total{event="CLAIM_SQL_REJECTED"}[15m]) > 0` | warning |
-| `increase(ses_report_schedule_events_total{event=~"COMPLETION_UNCERTAIN\|STALE_LEASE_TAKEOVER\|LEASE_OVERRUN"}[1h]) > 0` | warning（poison pill等、retry上限で止まらない反復の検知。§14.2） |
-| `increase(ses_report_schedule_events_total{event="LEGACY_LEASE_DRAIN_ACCEPTED"}[1h]) > 0` | info（drain確認時刻の設定の外し忘れ確認） |
+  - `ses_report_schedule_clock_skew_seconds`（gauge、2026-11-17）: claimを始めたpollで測った本nodeの時計 − DBサーバーの時計（秒、符号付き）。更新されるのはclaimを始めたpollだけで、他のnodeでは前の値のまま残る（§11 P2-2）。
+- alert rule: ~~推奨alert rule（案）の表~~ 2026-11-17に§10.6へ移した。閾値・評価窓・重要度・通知先はプレースホルダとし、決める人（SRE／Report Owner）を明記した（いずれも未決）。旧表の窓と閾値は案であり決定ではなかった。
 
 ### 14.6 機能スイッチとdelivery（A-NF10-6）
 
@@ -407,3 +444,27 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | 確定的SQL失敗 | `ManagementReportSchedulerTest`（先頭行の失敗後も次の行を実行、失敗50行が待機中はLIMIT枠を占有せず健全な行を処理、待機が明けると再試行して待機を延ばす） |
 | cutoffの論理run固定 | `ReportSnapshotServiceImplTest`（締め確定後の引き継ぎでも速報runを再利用し手動生成とキーを共有しない、未完了runのretryは固定cutoffでsectionを作る）、`ReportScheduleDispatchPolicyMySqlTest`（締めを跨ぐ重複実行） |
 | 重複配布の収束 | `ReportScheduleDispatchPolicyMySqlTest`（重複実行・締めを跨ぐ重複実行・8並行） |
+| 引き継ぎを含むretry上限（RB-NF10、§15） | `ManagementReportSchedulerTest`（引き継ぎを1回として数えretry待機と上限判定に含める、上限に達する引き継ぎは生成せずに停止・通知、停止CASが0件・例外なら通知しない、結果不明のcompletionは読み直して停止を確かめた時だけ通知、claim serviceの数え方と停止の入力検証）、`ReportScheduleMapperH2SqlTest`（引き継ぎclaimの加算・上限での不一致・停止SQL・有効化での再開）、`ReportScheduleClaimFenceMySqlTest`（実MySQLでcompletion前に毎回停止する実行が引き継ぎで11・停止で12になり、有効化で同一論理runから再開。stale takeover後の失敗は2回） |
+| entityの書き戻し（RB-NF10、review P3-9） | `ReportScheduleApiBoundaryTest`（`enabled`・`lastErrorCode`・`lastErrorMessage` の更新策略）、`ReportScheduleMapperH2SqlTest`（自動停止後に古いentityを `updateById` しても停止と停止理由が残る）、`ReportScheduleClaimFenceMySqlTest`（同、実MySQL。INSERTからも停止理由を設定できない） |
+| tenant単位の隔離（RB-NF10、review P3-12） | `ManagementReportSchedulerTest`（実 `TenantAwareBatchRunner` で先のtenantのdue取得が確定的失敗・一時的失敗のどちらでも、後のtenantを処理し、ERRORとmetricを残す） |
+| 時計の差・outcome tag（RB-NF10、review P2-2・P2-8） | `ManagementReportSchedulerTest`（gaugeの値、誤差を差し引いた閾値判定、60分のWARN間隔、測定失敗でもpollを続ける。outcomeはeventごとに固定で系列数はevent数）、`ReportScheduleMapperH2SqlTest`（`UNIX_TIMESTAMP()` がepoch秒を返す） |
+
+## 15. ON前のP2/P3（2026-11-17、RB-NF10）
+
+状態: **実装済・対象限定fastのみ手元で通過（worker環境）。MySQL testは未実行（主控Runnerが実行する）。** COMPLETE/PASSではない。Report Owner署名、SRE/DBA承認、alertの設定を意味しない。DDL・messages・`application*.yml`・機能スイッチ実装は変更していない（新設定 `management-report.clock-skew-warn-seconds` はコード既定値5秒で動き、`application.yml` への明示は提案のみ）。
+
+依拠: FINAL複審 §7 (b) b-19・§6.3 L-2、review `nf10-v185` P2-2・P2-3・P2-8、`w2-nf10-policy-30e058ce` P3-6・P3-9・P3-12。
+
+| 指摘 | 処理 | 内容 |
+|---|---|---|
+| P3-6 poison pillの無限引き継ぎ | 修正 | 引き継ぎを連続失敗1回として数え、上限では引き継がずに停止・通知する。結果不明のfailure completionは読み直して停止を確かめる（§14.2） |
+| P3-9 `enabled`・`lastErrorCode` の更新策略 | 修正（一部は不修正） | `enabled` は `updateStrategy = NEVER`（INSERTは許可。作成時に0を保存する）、`lastErrorCode`・`lastErrorMessage` はINSERT・UPDATEとも `NEVER`。管理者のenable/disableは従来どおり `updateEnabled` の指名列UPDATEだけ。**不修正**: 自動停止後の初回completion前に手動でdisableすると、一覧に `SCHEDULE_RETRY_EXHAUSTED` が残る点（review P3-9の2点目）。停止理由codeを次のcompletionまで保持するのは§14.2の設計で、変えると有効化の再開判定（`updateEnabled` の0戻し条件）と既存testの前提を変えるため、本批では変えない。区別が要るなら停止の種別を表す列（DDL）か、有効化時の停止理由のclearが要る |
+| P3-12 tenant失敗で後続tenantが止まる | 修正 | NF10の `dispatchDue` だけを、tenantごとに例外を捕まえてERROR（`errorCode=SCHEDULE_TENANT_DISPATCH_REJECTED`／`_FAILED`、tenantId、例外型、diagnosticId）とmetricを残し、残りのtenantを続ける形にした。共有の `TenantAwareBatchRunner` は変えない（他のschedulerが例外の伝播を前提にしている）。起動guardは全tenant共通の判定のため、従来どおり1 tenantの検出失敗でも全tenantを止める（fail-closed） |
+| P2-8 metric/alert（残り） | metricは修正、alertは草案 | §14.5（`outcome` tag）、§10.6（alert rule草案。閾値等は未決） |
+| P2-2 時計 | 挙動不変・観測を追加 | §11追記（gauge・WARN。許容値はSREが決める、未決） |
+| P2-3 timezone変更の方針 | 挙動不変・文書のみ | §11追記（Report Ownerが決める、未決） |
+| Report Owner署名・確定版の配布方針 | 人が行う（未取得） | `deploy-runbook.md` §1.7 のNF10の行と `feature-switches.md` 4.5 に列挙した |
+
+- 対象限定のtest（主控Runnerへ渡す一覧）:
+  - fast: `ManagementReportSchedulerTest`、`ReportScheduleMapperH2SqlTest`、`ReportScheduleApiBoundaryTest`、`ReportScheduleServiceImplTest`、`FeatureSwitchSchedulerGateTest`（NF10 OFFでmapperに触れないこと）、global guard `ScheduledMethodsHaveSchedulerLockTest`・`TestIsolationAuditTest`
+  - MySQL: `ReportScheduleClaimFenceMySqlTest`（`scripts/test-suites/mysql-shard-1.txt`、既存classへのcase追加と期待値更新のためshard登録の変更なし）、`ReportScheduleDispatchPolicyMySqlTest`（`mysql-shard-2.txt`、変更なしだが引き継ぎの数え方の変更の影響を受ける）
