@@ -1,6 +1,9 @@
 package com.ses.migration;
 
+import com.ses.privacy.foundation.PrivacyCaseState;
+import com.ses.privacy.production.dsar.PrivacyDsarVocabulary;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlConstraintRejections;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -22,7 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * V190（NF07 F1表）と V191（W-5 権限seed）を実MySQLで検証する（production-bridge-phased-plan.md §3.1.6）。
+ * V190（NF07 F1表）と V191（W-5 権限seed）、V201（F1表の状態・区分の列の CHECK）を実MySQLで検証する
+ * （production-bridge-phased-plan.md §3.1.6）。
  *
  * <p>H2 変種（schema-privacy-f1-h2.sql）では生成列・CHECK・複合FKの挙動が異なり得るため、ここが正本の検証になる。
  * 行ロックの待ちは扱わない（LOCK_DATA に依存しない）。
@@ -93,7 +97,12 @@ class FlywayNf07PrivacyF1MigrationTest {
                     {"t_privacy_request", "chk_privacy_request_sod"},
                     {"t_privacy_request", "chk_privacy_request_approval_binding"},
                     {"t_privacy_export_package", "chk_privacy_export_package_sod"},
-                    {"t_privacy_export_package", "chk_privacy_export_package_approval"}}) {
+                    {"t_privacy_export_package", "chk_privacy_export_package_approval"},
+                    // V201（RB-NF07-HOLD）
+                    {"t_privacy_request", "chk_privacy_request_status"},
+                    {"t_privacy_request", "chk_privacy_request_channel"},
+                    {"t_privacy_request", "chk_privacy_request_delivery_method"},
+                    {"t_legal_hold", "chk_legal_hold_kind"}}) {
                 assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM information_schema.table_constraints "
                         + "WHERE constraint_schema=DATABASE() AND table_name='" + check[0] + "' AND constraint_name='"
                         + check[1] + "' AND constraint_type='CHECK'"), check[1]);
@@ -214,6 +223,66 @@ class FlywayNf07PrivacyF1MigrationTest {
             assertMysqlFailure(() -> st.executeUpdate("INSERT INTO t_privacy_projection_state (tenant_id, journal_id, "
                             + "engaged_at, pending_command_id) VALUES ('nf07-cat','j-1',NOW(6),'cmd-1')"),
                     CHECK_VIOLATION, "chk_projection_pending", "pending日時の無いpending");
+        }
+    }
+
+    /**
+     * V201（W3-14 review P3-8・RB-NF07-HOLD）: request の status・channel・delivery_method と hold の hold_kind は、コードの
+     * enum の値だけを受け付ける。enum の全値は書け、大文字小文字の違い・先頭の空白・enum に無い値は CHECK が拒否する（CHECK 違反は
+     * 3819 で SQLState が HY000 のため、例外の型ではなく error code と制約名で判定する）。
+     */
+    @Test
+    void V201は状態と受付経路と交付方法とhold種類をコードのenumの値だけに限る() throws Exception {
+        migrateFresh();
+        String tenant = "nf07-v201-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        try (Connection connection = FRESH.createConnection(""); Statement st = connection.createStatement()) {
+            for (PrivacyCaseState state : PrivacyCaseState.values()) {
+                insertRequest(connection, tenant, "S-" + state.name(), state.name(), "EMAIL");
+            }
+            for (PrivacyDsarVocabulary.Channel channel : PrivacyDsarVocabulary.Channel.values()) {
+                insertRequest(connection, tenant, "C-" + channel.name(), PrivacyCaseState.REQUESTED.name(), channel.name());
+            }
+            long request = insertRequest(connection, tenant, "D-1");
+            for (PrivacyDsarVocabulary.DeliveryMethod method : PrivacyDsarVocabulary.DeliveryMethod.values()) {
+                assertEquals(1, st.executeUpdate("UPDATE t_privacy_request SET delivery_method = '" + method.name()
+                        + "' WHERE id = " + request), method.name());
+            }
+            assertEquals(1, st.executeUpdate("UPDATE t_privacy_request SET delivery_method = NULL WHERE id = " + request),
+                    "交付の記録の前は NULL");
+
+            for (String invalid : List.of("requested", " REQUESTED", "RECEIVED", "")) {
+                MySqlConstraintRejections.assertRejectedBy(
+                        () -> insertRequest(connection, tenant, "X-S-" + invalid.trim() + invalid.length(), invalid, "EMAIL"),
+                        MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_status");
+                MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE t_privacy_request SET status = '"
+                                + invalid + "' WHERE id = " + request),
+                        MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_status");
+            }
+            for (String invalid : List.of("email", "FAX", "WEB")) {
+                MySqlConstraintRejections.assertRejectedBy(
+                        () -> insertRequest(connection, tenant, "X-C-" + invalid, PrivacyCaseState.REQUESTED.name(), invalid),
+                        MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_channel");
+            }
+            for (String invalid : List.of("email", "COURIER", "")) {
+                MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE t_privacy_request SET "
+                                + "delivery_method = '" + invalid + "' WHERE id = " + request),
+                        MySqlConstraintRejections.CHECK_VIOLATION, "chk_privacy_request_delivery_method");
+            }
+
+            // hold の種類: 既定の UNKNOWN だけを受け付ける（D-05 で種類が決まるまで）
+            String holdInsert = "INSERT INTO t_legal_hold (tenant_id, hold_id, target_type, subject_ref, %s status, "
+                    + "reason_code, reason_hash, ticket_ref, requested_by, requested_at, journal_revision, journal_event_hash) "
+                    + "VALUES ('" + tenant + "', '%s', 'SUBJECT', 'ENGINEER:1', %s 'ACTIVE', 'LITIGATION', REPEAT('a',64), "
+                    + "'T-1', 1, NOW(6), 1, REPEAT('b',64))";
+            st.executeUpdate(String.format(holdInsert, "", "h-default", ""));
+            assertEquals("UNKNOWN", queryString(st, "SELECT hold_kind FROM t_legal_hold WHERE tenant_id = '" + tenant
+                    + "' AND hold_id = 'h-default'"));
+            st.executeUpdate(String.format(holdInsert, "hold_kind,", "h-unknown", "'UNKNOWN',"));
+            for (String invalid : List.of("LITIGATION", "unknown", "")) {
+                MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(String.format(holdInsert, "hold_kind,",
+                                "h-x-" + invalid.length() + invalid, "'" + invalid + "',")),
+                        MySqlConstraintRejections.CHECK_VIOLATION, "chk_legal_hold_kind");
+            }
         }
     }
 
@@ -392,11 +461,19 @@ class FlywayNf07PrivacyF1MigrationTest {
     }
 
     private static long insertRequest(Connection connection, String tenant, String requestNo) throws SQLException {
+        // 状態はコードが書く値（PrivacyCaseState）にする。以前の 'RECEIVED' は enum に無く、V201 の CHECK が拒否する
+        return insertRequest(connection, tenant, requestNo, PrivacyCaseState.REQUESTED.name(), "EMAIL");
+    }
+
+    private static long insertRequest(Connection connection, String tenant, String requestNo, String status,
+                                      String channel) throws SQLException {
         try (PreparedStatement insert = connection.prepareStatement("INSERT INTO t_privacy_request (tenant_id, "
                 + "request_no, request_type, status, channel, received_at, intake_ticket_ref, created_by) "
-                + "VALUES (?,?,'ACCESS','RECEIVED','EMAIL',NOW(6),'TICKET-1',1)", Statement.RETURN_GENERATED_KEYS)) {
+                + "VALUES (?,?,'ACCESS',?,?,NOW(6),'TICKET-1',1)", Statement.RETURN_GENERATED_KEYS)) {
             insert.setString(1, tenant);
             insert.setString(2, requestNo);
+            insert.setString(3, status);
+            insert.setString(4, channel);
             insert.executeUpdate();
             try (ResultSet keys = insert.getGeneratedKeys()) {
                 keys.next();

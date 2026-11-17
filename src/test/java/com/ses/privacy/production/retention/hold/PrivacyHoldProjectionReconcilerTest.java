@@ -157,6 +157,48 @@ class PrivacyHoldProjectionReconcilerTest {
         assertThat(fixture.auditUris).isEmpty();
     }
 
+    /**
+     * A1H-1 delta review P3-N2: tenant の処理が例外で中断したときの WARN は例外の class 名を出し（同じ tenant が失敗し続ける原因を
+     * log から辿れる）、message は出さない（subject 参照・氏名を含み得る）。metric の tag は固定の reason のまま。
+     */
+    @Test
+    void tenantの処理が例外で中断したら例外のclass名だけをWARNに出しmessageは出さない() {
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PrivacyHoldProjectionReconciler counted = fixture.reconcilerWith(registry);
+        fixture.store.ensureStateLocked(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, fixture.clock.instant());
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory
+                .getLogger(PrivacyHoldProjectionReconciler.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        // tenant の追随位置の読取り（reconcileTenant の最初の照会）だけを、PII を含む message の例外で失敗させる
+        fixture.dataSource.beforePrepare = sql -> {
+            if (sql.contains("FROM t_privacy_projection_state WHERE tenant_id = ?") && !sql.contains("FOR UPDATE")) {
+                throw new IllegalStateException("ENGINEER:10 山田太郎 の行を読めません");
+            }
+        };
+        try {
+            assertThat(counted.reconcileAll())
+                    .containsEntry(PrivacyHoldProjectionReconciler.Outcome.PENDING_KEPT, 1);
+        } finally {
+            fixture.dataSource.beforePrepare = sql -> { };
+            logger.detachAppender(appender);
+        }
+
+        List<String> warnings = appender.list.stream()
+                .filter(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList();
+        assertThat(warnings).anySatisfy(message -> assertThat(message)
+                .contains("reason=tenantAborted").contains("exceptionClass=IllegalStateException"));
+        assertThat(warnings).noneMatch(message -> message.contains("山田") || message.contains("ENGINEER:10"));
+        assertThat(appender.list).allSatisfy(event -> assertThat(event.getThrowableProxy())
+                .as("例外の本文（stack trace の message）も出さない").isNull());
+        assertThat(registry.get(PrivacyHoldProjectionReconciler.OUTCOME_METRIC)
+                .tags("outcome", "PENDING_KEPT", "reason", "tenantAborted").counter().count()).isEqualTo(1.0);
+    }
+
     @Test
     void 判定の後にpending_sinceが進められていればtimeoutのpendingを消さない() {
         fixture.store.ensureStateLocked(TENANT, PrivacyHoldTestFixture.JOURNAL_ID, fixture.clock.instant());

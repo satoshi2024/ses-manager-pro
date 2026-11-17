@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -24,9 +25,14 @@ import java.util.regex.Pattern;
  *       {@code UNAVAILABLE} になる）。生成は初回の利用時に1回だけ行い、結果（失敗を含む）を保持する。生成時に DB へ触れない。</li>
  *   <li>principal は1つ（方式A）。gate・projection の読み取りも同じ pool を使う。</li>
  *   <li>実行中の誤接続の検出（§3.4.6 の8、Review P3-8）: Journal と application DB の {@code @@server_uuid} を比べ、同じ
- *       （同じ instance を指している）か比べられなければ {@code UNAVAILABLE} とし、固定 code の WARN を出す。比較は reconciler の
+ *       （同じ instance を指している）か比べられなければ {@code UNAVAILABLE} とし、固定 code の WARN を出す（gate の理由は、同じなら
+ *       {@code JOURNAL_SAME_INSTANCE}、比べられなければ {@code JOURNAL_UNAVAILABLE}。A1H-1 delta review P3-N5）。比較は reconciler の
  *       実行ごと（{@link #refreshInstanceCheck}）と、各 process で前回から {@link #INSTANCE_CHECK_INTERVAL} を過ぎた最初の利用時に
  *       行う（ShedLock で reconciler を動かさない process の gate も同じ判定を持つため）。権限の再検査は起動時だけとする。</li>
+ *   <li>比較は process の中で同時に1つだけ行う（single-flight。A1H-1 delta review P3-N1）。期限が来たとき、前回の結果がある間は
+ *       比較中の thread を待たずに前回の結果を使い、Journal pool の接続と application DB の照会を重ねない。前回の結果が無い最初の
+ *       比較だけは、比較中の thread の結果を待つ（根拠の無いまま AVAILABLE にも UNAVAILABLE にもしない）。reconciler の比べ直しも
+ *       同じ lock を取り、比較中の thread が終わってから比べ直す。</li>
  * </ul>
  * Spring の {@code PrivacyJournalPort} 型 Bean は作らない（本 holder の外で adapter を使わせない）。test は package-private の
  * constructor で port・索引・application DB の {@code @@server_uuid} を差し替える（Testcontainers の MySQL test は prod の
@@ -56,6 +62,10 @@ public class PrivacyHoldJournal {
     /** {@code @@server_uuid} の比較結果。 */
     enum InstanceCheck { DISTINCT, SAME, UNVERIFIABLE }
 
+    /** 直近の比較の結果と時刻（1つの参照で読み書きし、結果と時刻の組が食い違わないようにする）。 */
+    private record InstanceCheckResult(InstanceCheck check, Instant checkedAt) {
+    }
+
     private static final Pattern JOURNAL_ID = Pattern.compile("[A-Za-z0-9._-]{4,64}");
 
     private final Supplier<PrivacyJournalStartupVerifier.Result> startupResult;
@@ -67,10 +77,11 @@ public class PrivacyHoldJournal {
     private final Supplier<String> applicationServerUuid;
     private final Clock clock;
     private final Object portLock = new Object();
+    /** 比較を1つの thread に限る lock（同じ package の test が待ち合わせの有無を確かめるため package-private）。 */
+    final ReentrantLock instanceCheckLock = new ReentrantLock();
     private volatile boolean portResolved;
     private volatile PrivacyJournalPort port;
-    private volatile InstanceCheck lastInstanceCheck;
-    private volatile Instant lastInstanceCheckAt;
+    private volatile InstanceCheckResult lastInstanceCheck;
 
     PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
                        Supplier<PrivacyJournalPort> portFactory, PrivacyHoldJournalIndex index, String journalId,
@@ -105,24 +116,33 @@ public class PrivacyHoldJournal {
         if (base != Availability.AVAILABLE) {
             return base;
         }
-        Instant checkedAt = lastInstanceCheckAt;
-        if (lastInstanceCheck == null || checkedAt == null
-                || !clock.instant().isBefore(checkedAt.plus(INSTANCE_CHECK_INTERVAL))) {
-            checkInstance();
+        InstanceCheckResult last = lastInstanceCheck;
+        if (due(last)) {
+            last = checkInstanceSingleFlight(last);
         }
-        return lastInstanceCheck == InstanceCheck.DISTINCT ? Availability.AVAILABLE : Availability.UNAVAILABLE;
+        return last.check() == InstanceCheck.DISTINCT ? Availability.AVAILABLE : Availability.UNAVAILABLE;
     }
 
-    /** reconciler の実行ごとに {@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。 */
+    /**
+     * reconciler の実行ごとに {@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。比較中の thread が
+     * あればその終了を待ってから比べ直す（同時に2つ比べない。A1H-1 delta review P3-N1）。
+     */
     void refreshInstanceCheck() {
-        if (baseAvailability() == Availability.AVAILABLE) {
+        if (baseAvailability() != Availability.AVAILABLE) {
+            return;
+        }
+        instanceCheckLock.lock();
+        try {
             checkInstance();
+        } finally {
+            instanceCheckLock.unlock();
         }
     }
 
     /** 直近の比較で application DB と同じ instance だったか。 */
     boolean sameInstanceDetected() {
-        return lastInstanceCheck == InstanceCheck.SAME;
+        InstanceCheckResult last = lastInstanceCheck;
+        return last != null && last.check() == InstanceCheck.SAME;
     }
 
     /** adapter。{@link #availability()} が {@code AVAILABLE} でなければ {@link JournalUnavailableException}。 */
@@ -179,7 +199,34 @@ public class PrivacyHoldJournal {
         return Availability.AVAILABLE;
     }
 
-    private void checkInstance() {
+    /** 前回の比較が無いか、前回から {@link #INSTANCE_CHECK_INTERVAL} を過ぎたか。 */
+    private boolean due(InstanceCheckResult last) {
+        return last == null || !clock.instant().isBefore(last.checkedAt().plus(INSTANCE_CHECK_INTERVAL));
+    }
+
+    /**
+     * 期限の来た比較を1つの thread だけが行う（A1H-1 delta review P3-N1）。前回の結果があれば、比較中の thread が居るときは待たずに
+     * 前回の結果を返す。前回の結果が無い最初の比較だけは lock を待ち、比較中の thread の結果を使う。lock を取れた thread も、取る前に
+     * 他の thread が比べ終えていればその結果を使い、重ねて比べない。
+     */
+    private InstanceCheckResult checkInstanceSingleFlight(InstanceCheckResult observed) {
+        if (observed != null) {
+            if (!instanceCheckLock.tryLock()) {
+                return observed;
+            }
+        } else {
+            instanceCheckLock.lock();
+        }
+        try {
+            InstanceCheckResult current = lastInstanceCheck;
+            return due(current) ? checkInstance() : current;
+        } finally {
+            instanceCheckLock.unlock();
+        }
+    }
+
+    /** {@code @@server_uuid} を比べて結果を保持する（{@link #instanceCheckLock} を持つ thread だけが呼ぶ）。 */
+    private InstanceCheckResult checkInstance() {
         InstanceCheck result;
         try {
             String journalUuid = index.serverUuid();
@@ -199,8 +246,9 @@ public class PrivacyHoldJournal {
             log.warn("[privacy-journal] Journalとapplication DBのinstanceを比べられません。holdの判定をUNAVAILABLEにします: code={}",
                     LOG_CODE_INSTANCE_UNVERIFIABLE);
         }
-        lastInstanceCheck = result;
-        lastInstanceCheckAt = clock.instant();
+        InstanceCheckResult checked = new InstanceCheckResult(result, clock.instant());
+        lastInstanceCheck = checked;
+        return checked;
     }
 
     private PrivacyJournalPort resolvePort() {

@@ -224,6 +224,14 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         return List.copyOf(violations);
     }
 
+    /**
+     * URL の契約。複数 host へ切り替える形は全て拒否する（NF06 の {@code ImportJdbcReconnectGuard} と同じ範囲。RB-NF07-HOLD で
+     * 各形を {@code PrivacyJournalStartupVerifierTest} に固定）: scheme は {@code jdbc:mysql://} だけ（{@code :loadbalance}・
+     * {@code :replication}・{@code +srv}・{@code mysqlx}・MariaDB の各 scheme は scheme の違反）、host 部は {@code ://} の後から最初の
+     * {@code /}・{@code ?} の手前までで、{@code ,}（failover・{@code [h1,h2]}）・{@code (}（{@code address=(...)}・{@code (host=...)}）・
+     * {@code @} を含めば host の違反。{@code ;} を host の終わりとして扱わないため、{@code h1;x,h2} も {@code ,} で拒否する
+     * （NF06 で見つかった取りこぼしの形）。{@code #} は driver が fragment として以降を捨てるため一律に拒否する（下記）。
+     */
     private static void urlViolations(String url, Set<String> violations) {
         if (!url.toLowerCase(Locale.ROOT).startsWith(URL_PREFIX)) {
             // jdbc:mysql:loadbalance:// 等の多重 host 形式も含めて拒否する（primary に限る。§2.2）
@@ -238,6 +246,12 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         if (authority.isBlank() || authority.contains(",") || authority.contains("(") || authority.contains("@")) {
             // 複数 host（failover）・address=(...) 形式・URL 内の認証情報は使わない
             violations.add("datasource.url.host");
+        }
+        if (url.indexOf('#') >= 0) {
+            // Connector/J は authority・path・query を '#' の手前で終え、'#' 以降を fragment として使わない。本検査は '#' を区切りに
+            // しないため、'#' の後ろの parameter（例: .../privacy_journal#?sslMode=VERIFY_IDENTITY）を検査だけが読み、driver は
+            // 既定の TLS 設定で接続し得る。Journal の URL に fragment は要らないため一律に拒否する（RB-NF07-HOLD）
+            violations.add("datasource.url.fragment");
         }
         if (AUTO_RECONNECT.matcher(url).find()) {
             violations.add("datasource.url.autoReconnect");

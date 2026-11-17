@@ -238,6 +238,33 @@ public class PrivacyExportPackageService {
                 access || !held ? List.of() : holdConflictResolutions(request.getRequestType()));
     }
 
+    /**
+     * 手動対応の完了を記録した直後の応答（{@code POST /api/privacy/dsar/{id}/resolution}。HYG-FINAL P3-F の残り、RB-NF07-HOLD）。
+     * 記録の後に本人の hold の状態を読み、記録した結果が削除・利用停止で本人が HELD なら警告の印を付ける。判定は区画
+     * （{@link #section}）の {@code manualResolution.holdConflict} と同じ1か所（{@link #manualResolution}）を使う。記録は止めない
+     * （system は処分しないため）。記録は既に commit されているため、状態を読めなくても応答を失敗にせず、hold の状態を
+     * {@code UNKNOWN}・印なしで返す（画面は区画を読み直して状態を表示する。失敗の応答にすると利用者が再送して 409 になる）。
+     */
+    public PrivacyDsarViews.ResolutionRecorded resolutionRecorded(PrivacyDsarViews.Transition recorded) {
+        Objects.requireNonNull(recorded, "recorded");
+        String holdState = HOLD_UNKNOWN;
+        boolean conflict = false;
+        try {
+            Context context = begin(PrivacyRequestService.VIEW_ACTION);
+            holdState = holdStatus(context.tenantId(), recorded.requestId()).state();
+            PrivacyDsarViews.ManualResolutionRecord resolution = manualResolution(context.tenantId(),
+                    recorded.requestId(), HOLD_HELD.equals(holdState));
+            conflict = resolution != null && resolution.holdConflict();
+        } catch (RuntimeException e) {
+            holdState = HOLD_UNKNOWN;
+            conflict = false;
+            log.warn("[privacy-dsar] 手動対応の記録の後にholdの状態を確認できません: exceptionClass={}",
+                    e.getClass().getSimpleName());
+        }
+        return new PrivacyDsarViews.ResolutionRecorded(recorded.requestId(), recorded.requestNo(), recorded.status(),
+                recorded.rowVersion(), holdState, conflict);
+    }
+
     /** 本人が HELD のとき、この請求の種別で記録すると警告になる手動対応の結果コード（HYG-FINAL P3-F）。 */
     private static List<String> holdConflictResolutions(String requestType) {
         List<String> codes = new ArrayList<>();

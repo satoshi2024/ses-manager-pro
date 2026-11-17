@@ -3707,3 +3707,13 @@ ALTER TABLE t_lifecycle_dual_idempotency ADD CONSTRAINT IF NOT EXISTS fk_dual_id
     FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id);
 ALTER TABLE t_lifecycle_dual_idempotency ADD CONSTRAINT IF NOT EXISTS fk_dual_idem_actor
     FOREIGN KEY (tenant_id, actor_user_id) REFERENCES sys_user (tenant_id, id);
+
+-- V201（NF07 F1 の状態・区分の列の CHECK）。schema-privacy-status-check-h2.sql と同じ定義（共有H2での再実行に備え IF NOT EXISTS）。
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_status
+  CHECK (status IN ('REQUESTED', 'IDENTITY_VERIFIED', 'SCOPED', 'PREVIEWED', 'APPROVAL_PENDING', 'APPROVED', 'CLAIMED',
+                    'DISPATCH_AUTHORIZED', 'EXECUTING', 'CONFIRMED', 'BLOCKED', 'UNKNOWN', 'PARTIAL_FAILED', 'CANCELLED'));
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_channel
+  CHECK (channel IN ('EMAIL', 'POSTAL', 'WEB_FORM', 'PHONE', 'IN_PERSON', 'OTHER'));
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_delivery_method
+  CHECK (delivery_method IS NULL OR delivery_method IN ('EMAIL', 'POSTAL', 'IN_PERSON', 'SECURE_TRANSFER', 'OTHER'));
+ALTER TABLE t_legal_hold ADD CONSTRAINT IF NOT EXISTS chk_legal_hold_kind CHECK (hold_kind IN ('UNKNOWN'));

@@ -368,23 +368,50 @@ class PrivacyDsarApiControllerTest {
     @Test
     @WithMockUser(roles = "管理者")
     void 手動対応の完了は本文をそのままserviceへ渡しCSRF_tokenが無ければ拒否する() throws Exception {
-        when(requestService.recordManualResolution(eq(12L), any()))
-                .thenReturn(new PrivacyDsarViews.Transition(12L, "DSAR-1", "CONFIRMED", 5L));
+        PrivacyDsarViews.Transition recorded = new PrivacyDsarViews.Transition(12L, "DSAR-1", "CONFIRMED", 5L);
+        when(requestService.recordManualResolution(eq(12L), any())).thenReturn(recorded);
+        when(packageService.resolutionRecorded(recorded))
+                .thenReturn(new PrivacyDsarViews.ResolutionRecorded(12L, "DSAR-1", "CONFIRMED", 5L, "NOT_HELD", false));
 
         mockMvc.perform(post("/api/privacy/dsar/12/resolution").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"rowVersion\":4,\"resolutionCode\":\"DELETED\",\"evidenceRef\":\"ANS-1\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.rowVersion").value(5))
+                .andExpect(jsonPath("$.data.holdState").value("NOT_HELD"))
+                .andExpect(jsonPath("$.data.holdConflict").value(false));
         ArgumentCaptor<PrivacyDsarCommands.ManualResolution> resolution =
                 ArgumentCaptor.forClass(PrivacyDsarCommands.ManualResolution.class);
         verify(requestService).recordManualResolution(eq(12L), resolution.capture());
         assertThat(resolution.getValue().resolutionCode()).isEqualTo("DELETED");
         assertThat(resolution.getValue().evidenceRef()).isEqualTo("ANS-1");
+        verify(packageService).resolutionRecorded(recorded);
 
         mockMvc.perform(post("/api/privacy/dsar/12/resolution").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"rowVersion\":4,\"resolutionCode\":\"DELETED\",\"evidenceRef\":\"ANS-1\"}"))
                 .andExpect(status().isForbidden());
         verify(requestService).recordManualResolution(eq(12L), any());
+    }
+
+    /**
+     * HYG-FINAL P3-F の残り（RB-NF07-HOLD）: 本人が HELD のとき削除・利用停止を記録した応答そのものに警告の印を返す
+     * （区画を読み直す前に画面が警告できる）。記録は止めない。
+     */
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 本人がHELDのとき削除の手動対応の記録の応答はholdの状態と警告の印を返す() throws Exception {
+        PrivacyDsarViews.Transition recorded = new PrivacyDsarViews.Transition(13L, "DSAR-2", "CONFIRMED", 6L);
+        when(requestService.recordManualResolution(eq(13L), any())).thenReturn(recorded);
+        when(packageService.resolutionRecorded(recorded))
+                .thenReturn(new PrivacyDsarViews.ResolutionRecorded(13L, "DSAR-2", "CONFIRMED", 6L, "HELD", true));
+
+        mockMvc.perform(post("/api/privacy/dsar/13/resolution").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rowVersion\":5,\"resolutionCode\":\"DELETED\",\"evidenceRef\":\"DEL-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.holdState").value("HELD"))
+                .andExpect(jsonPath("$.data.holdConflict").value(true));
     }
 
     @Test

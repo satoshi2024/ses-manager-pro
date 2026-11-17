@@ -106,6 +106,9 @@ spring:
         # V200: t_document_version.storage_key の索引 idx_dv_storage_key は、上の schema-document-archive-h2.sql が
         #       作る（@Sql で同表を作り直す試験でも索引を保つため）。V200 の file を重ねて流すと索引名が重複して失敗するため
         #       ここには置かない。V200 と H2 schema の索引の一致は ImportStageStorageKeyIndexContractTest が固定する。
+        # V201: NF07 F1 の状態・区分の列の CHECK（request の status・channel・delivery_method、hold の hold_kind）。
+        #       context ごとの再実行で重複しないよう H2 変種は IF NOT EXISTS で足す（V190 の H2 変種より後）
+        - classpath:sql/schema-privacy-status-check-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

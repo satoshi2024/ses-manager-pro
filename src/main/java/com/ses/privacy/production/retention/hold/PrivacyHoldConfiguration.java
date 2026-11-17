@@ -51,10 +51,10 @@ public class PrivacyHoldConfiguration {
                                                  Environment environment, ObjectProvider<Clock> clock,
                                                  JdbcTemplate jdbcTemplate) {
         // application DB の @@server_uuid（Journal と同じ instance への誤接続を実行中に検出する。Review P3-8）。
-        // Journal が使える前提が揃ったときだけ呼ばれる（未設定・prod 以外では application DB に照会しない）
+        // Journal が使える前提が揃ったときだけ呼ばれる（未設定・prod 以外では application DB に照会しない）。
+        // query timeout と socket の上限を置き、比較の lock を持つ thread が戻らなくならないようにする（RB-NF07-HOLD review P3-1）
         return PrivacyHoldJournal.create(privacyJournalConnections, privacyJournalStartupVerifier,
-                privacyJournalProperties, environment, clockOf(clock),
-                () -> jdbcTemplate.queryForObject("SELECT @@server_uuid", String.class));
+                privacyJournalProperties, environment, clockOf(clock), new ApplicationServerUuidQuery(jdbcTemplate));
     }
 
     @Bean

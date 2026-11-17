@@ -164,11 +164,15 @@ public class PrivacyDsarApiController {
                 .body(draft.content());
     }
 
-    /** 開示以外の請求の手動対応の完了（SCOPED → CONFIRMED。system は処分しない。review P2-2）。 */
+    /**
+     * 開示以外の請求の手動対応の完了（SCOPED → CONFIRMED。system は処分しない。review P2-2）。応答は状態遷移の4項目に、記録した
+     * 直後の本人の hold の状態と警告の印（結果が削除・利用停止で本人が HELD。記録は止めない）を足す（HYG-FINAL P3-F の残り）。
+     */
     @PostMapping("/{id}/resolution")
-    public ApiResult<PrivacyDsarViews.Transition> recordManualResolution(
+    public ApiResult<PrivacyDsarViews.ResolutionRecorded> recordManualResolution(
             @PathVariable long id, @RequestBody PrivacyDsarCommands.ManualResolution request) {
-        return ApiResult.success(requestService.recordManualResolution(id, request));
+        PrivacyDsarViews.Transition recorded = requestService.recordManualResolution(id, request);
+        return ApiResult.success(packageService.resolutionRecorded(recorded));
     }
 
     /** 公開スイッチ OFF は存在しないURLと同じ404（{@code FeatureSwitchFilter} と同じ本文）。 */
