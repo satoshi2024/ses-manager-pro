@@ -4,13 +4,18 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.feature.FeatureSwitchFilter;
 import com.ses.privacy.production.PrivacyAccessGuard;
+import com.ses.privacy.production.retention.policy.PrivacyPolicyActivationRequest;
 import com.ses.privacy.production.retention.policy.PrivacyPolicyExplanation;
 import com.ses.privacy.production.retention.policy.PrivacyPolicyExplanationService;
+import com.ses.privacy.production.retention.policy.PrivacyPolicyRegistrationRequest;
+import com.ses.privacy.production.retention.policy.PrivacyPolicyRegistrationResult;
+import com.ses.privacy.production.retention.policy.PrivacyPolicyRegistrationService;
 import com.ses.privacy.production.retention.policy.PrivacyPolicySummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -19,12 +24,17 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** NF07 policy 説明API（W3-14）: OFF は404、service 層の再認可で403、ApiResult 形式。 */
+/** NF07 policy API（W3-14 の説明・NF07-REG の登録と有効化）: OFF・開放前は404、service 層の再認可で403、ApiResult 形式。 */
 @WebMvcTest(PrivacyPolicyApiController.class)
 class PrivacyPolicyApiControllerTest {
 
@@ -33,6 +43,63 @@ class PrivacyPolicyApiControllerTest {
 
     @MockBean
     private PrivacyPolicyExplanationService explanationService;
+
+    @MockBean
+    private PrivacyPolicyRegistrationService registrationService;
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 登録と有効化はApiResultで返し開放の前はFeatureSwitchFilterと同じ本文の404を返す() throws Exception {
+        when(registrationService.register(any())).thenReturn(new PrivacyPolicyRegistrationResult(7L, "policy-1", "r1",
+                "CANDIDATE", "a".repeat(64), null, false));
+        when(registrationService.activate(eq(7L), isNull())).thenReturn(new PrivacyPolicyRegistrationResult(7L,
+                "policy-1", "r1", "CURRENT", "a".repeat(64), null, false));
+        when(registrationService.activate(eq(8L), any()))
+                .thenThrow(new PrivacyAccessGuard.PrivacyEntryNotFoundException());
+
+        mockMvc.perform(post("/api/privacy/policies").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"envelope\":\"AAAA\",\"signature\":\"BBBB\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.registrationStatus").value("CANDIDATE"));
+        verify(registrationService).register(new PrivacyPolicyRegistrationRequest("AAAA", "BBBB"));
+        mockMvc.perform(post("/api/privacy/policies/7/activate").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.registrationStatus").value("CURRENT"));
+        mockMvc.perform(post("/api/privacy/policies/8/activate").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedCurrentId\":7}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value(FeatureSwitchFilter.NOT_FOUND_MESSAGE))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verify(registrationService).activate(8L, new PrivacyPolicyActivationRequest(7L));
+
+        when(registrationService.withdraw(9L)).thenReturn(new PrivacyPolicyRegistrationResult(9L, "policy-1", "r2",
+                "REVOKED", "b".repeat(64), null, false));
+        when(registrationService.withdraw(10L)).thenThrow(new PrivacyAccessGuard.PrivacyEntryNotFoundException());
+        mockMvc.perform(post("/api/privacy/policies/9/withdraw").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.registrationStatus").value("REVOKED"));
+        mockMvc.perform(post("/api/privacy/policies/10/withdraw").with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(FeatureSwitchFilter.NOT_FOUND_MESSAGE));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 登録の拒否はserviceのcodeをそのまま返しCSRFが無ければ受け付けない() throws Exception {
+        when(registrationService.register(any())).thenThrow(BusinessException.of(403,
+                "error.privacy.policyEnvelopeRejected"));
+
+        mockMvc.perform(post("/api/privacy/policies").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"envelope\":\"AAAA\",\"signature\":\"BBBB\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+        mockMvc.perform(post("/api/privacy/policies").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"envelope\":\"AAAA\",\"signature\":\"BBBB\"}"))
+                .andExpect(status().isForbidden());
+        verify(registrationService, times(1)).register(any());
+    }
 
     @Test
     @WithMockUser(roles = "管理者")

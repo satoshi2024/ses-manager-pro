@@ -45,9 +45,12 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>D-05（hold の種類と権限者）と D-03（署名鍵）の決定ID が、署名日・失効・placeholder を含めて有効（呼出しごとに評価）。</li>
  *   <li>verifier がある（{@code ProductionPrivacyComponents.holdReleaseVerifier} は prod profile でしか生成できない）。</li>
- *   <li>解除 authority の trust anchor が1件以上登録されている（第1期の registry は空。実 registry は NF07-TRUST）。</li>
+ *   <li>解除 authority の trust anchor が1件以上登録されている（第1期の registry は空。実 registry は D-03 の方式の
+ *       {@code PrivacyTrustSource} の adapter）。</li>
+ *   <li>失効 provider が、発行者と承認者に要る2件以上の anchor を ACTIVE と答える（{@code HoldReleaseVerifier#trustReady}。
+ *       第1期の失効 provider は常に UNKNOWN のため開かない。REL review P3-9）。</li>
  * </ul>
- * 加えて第1期の失効 provider は常に UNKNOWN のため、仮に上が揃っても verifier が {@code REVOCATION_UNKNOWN} で拒否する。
+ * 開放の後も、要求ごとに verifier が両 anchor の失効状態を確かめる（{@code REVOCATION_UNKNOWN} / {@code REVOKED}）。
  *
  * <p>解除の手順:
  * <ol>
@@ -118,10 +121,14 @@ public class PrivacyHoldReleaseService {
         this.registry = registry;
     }
 
-    /** 解除の入口が開いているか（D-03・D-05・verifier・trust anchor。画面の表示にも使う）。判定できなければ false。 */
+    /**
+     * 解除の入口が開いているか（D-03・D-05・verifier・trust anchor・失効状態。画面の表示にも使う）。判定できなければ false。
+     * 失効 provider が anchor を ACTIVE と答えない間（第1期の常に UNKNOWN の provider を含む）は、画面に「開放済み」と出して
+     * 要求ごとに403にするのではなく、入口を閉じたままにする（REL review P3-9）。
+     */
     public boolean isOpen() {
         try {
-            return verifier != null && anchorsConfigured() && decisions.releaseReadiness().ready();
+            return verifier != null && anchorsConfigured() && decisions.releaseReadiness().ready() && trustReady();
         } catch (RuntimeException e) {
             return false;
         }
@@ -139,8 +146,9 @@ public class PrivacyHoldReleaseService {
             throw BusinessException.of(403, "error.accessDenied");
         }
         PrivacyHoldDecisions.ReleaseReadiness readiness = decisions.releaseReadiness();
-        if (!readiness.ready() || verifier == null || !anchorsConfigured()) {
-            // 開放の前（D-03・D-05 の署名前・placeholder・失効、trust anchor 未登録、prod 以外）は入口が無いのと同じ404
+        if (!readiness.ready() || verifier == null || !anchorsConfigured() || !trustReady()) {
+            // 開放の前（D-03・D-05 の署名前・placeholder・失効、trust anchor 未登録・失効状態を ACTIVE と確認できない、prod 以外）は
+            // 入口が無いのと同じ404
             throw new PrivacyAccessGuard.PrivacyEntryNotFoundException();
         }
         Validated validated = validate(holdId, request);
@@ -266,15 +274,17 @@ public class PrivacyHoldReleaseService {
     /**
      * 同じ command ID が既に Journal にある場合（同じ command の再送）。内容が同じなら元の ACK を返し、projection が未反映なら補う。
      * 内容の同一性は、提示された束縛が呼出し元・hold・理由本文に対して信頼できる値と一致し、その digest が event の
-     * {@code request_hash} と、束縛から決まる command の payload hash が event の payload hash と一致することで判定する。
+     * {@code request_hash} と、束縛と claim の digest から決まる command の payload hash が event の payload hash と一致することで
+     * 判定する。
      */
     private PrivacyHoldReleaseResult replay(String tenantId, PrivacyHoldProjectionStore.HoldRow hold,
                                             JournalPartition partition, Validated validated, JournalEvent prior,
                                             String requesterRef, PrivacyHoldService.Actor actor) {
         HoldReleaseBinding presented = validated.presented();
-        JournalCommand command = JournalCommand.create(presented.commandId(), partition,
-                presented.expectedJournalRevision(), PrivacyJournalPort.CommandType.HOLD_RELEASED, presented.holdId(),
-                null, presented.digest(), null, 0, null);
+        // 同じ command の再送は束縛だけでなく claim（発行者・承認者の署名）も同じものに限る（command の action_id が claim の
+        // digest を持つため。REL review P3-6）。claim を署名し直した要求は別の内容として409
+        JournalCommand command = VerifiedHoldRelease.command(presented,
+                HoldReleaseAuthorityClaim.claimsDigest(validated.issuer(), validated.approver()));
         boolean sameContent = PrivacyHoldProjector.isHoldRelease(prior, hold.holdId())
                 && presented.tenantId().equals(tenantId) && presented.subjectRef().equals(partition.subjectRef())
                 && presented.holdId().equals(hold.holdId()) && presented.requesterRef().equals(requesterRef)
@@ -337,8 +347,17 @@ public class PrivacyHoldReleaseService {
                         "hold", locked.holdId(), "target", locked.targetType().name(), "element", element,
                         "request", proof.binding().digest().substring(0, 16),
                         "issuer", validated.issuer().authorityId(), "approver", validated.approver().authorityId(),
-                        "starter", proof.binding().starterKnown() ? "KNOWN" : "UNKNOWN_ACCEPTED"),
+                        "starter", proof.binding().starterKnown() ? "KNOWN" : "UNKNOWN_ACCEPTED",
+                        "claims", proof.claimsDigest().substring(0, 16)),
                         202, true);
+                // claim の全項目（anchor・発行日時・期限・署名）を残す。Journal の action_id（claim の digest）と照合し、
+                // 束縛の digest（Journal の request_hash）への署名を anchor の公開鍵で検証し直せる（REL review P3-6）
+                for (HoldReleaseAuthorityClaim claim : List.of(validated.issuer(), validated.approver())) {
+                    audit.record(actor.username(), PrivacyHoldAudit.RELEASE_CLAIM, PrivacyHoldAudit.fields(
+                            "hold", locked.holdId(), "role", claim.role().name(), "anchor", claim.anchorId(),
+                            "issuedAt", claim.issuedAt().toString(), "expiresAt", claim.expiresAt().toString(),
+                            "signature", claim.signatureHex()), 202, true);
+                }
                 audit.record(actor.username(), PrivacyHoldAudit.RELEASE_REASON, PrivacyHoldAudit.fields(
                         "hold", locked.holdId(), "reason", validated.reasonCode(), "ticket", validated.ticketRef()),
                         202, true);
@@ -537,6 +556,15 @@ public class PrivacyHoldReleaseService {
     private boolean anchorsConfigured() {
         try {
             return registry != null && registry.anchors() != null && !registry.anchors().isEmpty();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** 失効 provider が発行者と承認者に要る anchor を ACTIVE と答えるか（verifier の判定。判定できなければ false）。 */
+    private boolean trustReady() {
+        try {
+            return verifier != null && verifier.trustReady();
         } catch (RuntimeException e) {
             return false;
         }

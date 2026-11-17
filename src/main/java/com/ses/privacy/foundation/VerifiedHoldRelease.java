@@ -14,9 +14,10 @@ import java.util.Objects;
  *
  * <p>constructor は package-private で、{@link HoldReleaseProofVerifier}（{@link ProductionPrivacyComponents#holdReleaseVerifier}
  * 経由・prod 専用）だけが生成する。束縛（{@link HoldReleaseBinding}）は trust anchor で検証した発行者・承認者の署名で
- * 確かめたもので、caller の真偽値・actor 名・role 文字列からは作れない。HOLD_RELEASED command は束縛から一意に決まり
- * （{@link #command()}。{@code case_id} は hold ID、{@code request_hash} は束縛の digest）、proof と command の取り違えは
- * 起こらない。Journal は append の transaction の中で {@link #requireAppendable} を呼び、head と hold revision を CAS する。
+ * 確かめたもので、caller の真偽値・actor 名・role 文字列からは作れない。HOLD_RELEASED command は束縛と claim から一意に
+ * 決まり（{@link #command()}。{@code case_id} は hold ID、{@code action_id} は両 claim の digest
+ * （{@link HoldReleaseAuthorityClaim#claimsDigest}。REL review P3-6）、{@code request_hash} は束縛の digest）、proof と command の
+ * 取り違えは起こらない。Journal は append の transaction の中で {@link #requireAppendable} を呼び、head と hold revision を CAS する。
  */
 public final class VerifiedHoldRelease {
 
@@ -24,21 +25,37 @@ public final class VerifiedHoldRelease {
     private final String targetType;
     private final String issuerAnchorId;
     private final String approverAnchorId;
+    private final String claimsDigest;
     private final Instant expiresAt;
     private final Instant verifiedAt;
     private final JournalCommand command;
 
     VerifiedHoldRelease(HoldReleaseBinding binding, String targetType, String issuerAnchorId, String approverAnchorId,
-                        Instant expiresAt, Instant verifiedAt) {
+                        String claimsDigest, Instant expiresAt, Instant verifiedAt) {
         this.binding = Objects.requireNonNull(binding, "binding");
         this.targetType = Objects.requireNonNull(targetType, "targetType");
         this.issuerAnchorId = Objects.requireNonNull(issuerAnchorId, "issuerAnchorId");
         this.approverAnchorId = Objects.requireNonNull(approverAnchorId, "approverAnchorId");
+        if (claimsDigest == null || !claimsDigest.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("解除の claim の digest が不正です");
+        }
+        this.claimsDigest = claimsDigest;
         this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt");
         this.verifiedAt = Objects.requireNonNull(verifiedAt, "verifiedAt");
-        this.command = JournalCommand.create(binding.commandId(), binding.partition(),
-                binding.expectedJournalRevision(), CommandType.HOLD_RELEASED, binding.holdId(), null,
-                binding.digest(), null, 0, null);
+        this.command = command(binding, claimsDigest);
+    }
+
+    /**
+     * 束縛と claim の digest から HOLD_RELEASED command を組み立てる（proof の発行と、同じ command の再送の照合が同じ形を使う）。
+     */
+    public static JournalCommand command(HoldReleaseBinding binding, String claimsDigest) {
+        return JournalCommand.create(binding.commandId(), binding.partition(), binding.expectedJournalRevision(),
+                CommandType.HOLD_RELEASED, binding.holdId(), claimsDigest, binding.digest(), null, 0, null);
+    }
+
+    /** 両 claim の digest（Journal の {@code action_id}）。 */
+    public String claimsDigest() {
+        return claimsDigest;
     }
 
     public HoldReleaseBinding binding() {

@@ -40,8 +40,14 @@ final class PrivacyHoldAudit {
     static final String RECONCILE_PROJECTED = "RECONCILE_PROJECTED";
     static final String RECONCILE_CAUGHT_UP = "RECONCILE_CAUGHT_UP";
     static final String RECONCILE_ABANDONED = "RECONCILE_ABANDONED";
-    /** 解除の要求（NF07-REL。hold ID・対象種別・element・束縛の digest の先頭・発行者と承認者の authority）。 */
+    /** 解除の要求（NF07-REL。hold ID・対象種別・element・束縛の digest の先頭・発行者と承認者の authority・claim の digest の先頭）。 */
     static final String RELEASE_REQUESTED = "RELEASE_REQUESTED";
+    /**
+     * 解除の claim 1件（発行者・承認者ごとに1行。hold ID・役割・anchor・発行日時・期限・署名の hex）。Journal の HOLD_RELEASED の
+     * {@code action_id}（claim の digest）と照合でき、束縛の digest（{@code request_hash}）への署名を anchor の公開鍵で検証し直せる
+     * （REL review P3-6）。署名は秘密ではなく、束縛は理由本文・journal head を含む hash のため subject を推測できない。
+     */
+    static final String RELEASE_CLAIM = "RELEASE_CLAIM";
     /** 解除の理由コードと ticket（理由本文・理由 hash は残さない）。 */
     static final String RELEASE_REASON = "RELEASE_REASON";
     /** 解除の開放の前提にした D-03・D-05 の決定ID（1行の上限に収めるため別の行にする）。 */

@@ -28,7 +28,8 @@ import java.util.Objects;
  *   <li>失効状態（両 trust anchor が {@code ACTIVE} であること。UNKNOWN・provider 無し・照会不能は拒否）。</li>
  * </ol>
  * 主体の比較は正規形（{@link HoldReleaseTrustAnchor#PRINCIPAL}）の文字列の完全一致だけで行う（anchor・束縛の constructor が
- * 正規形以外を受け付けない）。
+ * 正規形以外を受け付けない）。発行する proof の command は両 claim の digest（{@link HoldReleaseAuthorityClaim#claimsDigest}）を
+ * {@code action_id} に持つ（誰が署名したかを Journal に残す。REL review P3-6）。
  */
 final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
 
@@ -109,7 +110,19 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
         Instant expiresAt = min(min(issuer.expiresAt(), approver.expiresAt()),
                 min(issuerAnchor.validUntil(), approverAnchor.validUntil()));
         return new VerifiedHoldRelease(expected, targetType, issuerAnchor.anchorId(), approverAnchor.anchorId(),
-                expiresAt, now);
+                HoldReleaseAuthorityClaim.claimsDigest(issuer, approver), expiresAt, now);
+    }
+
+    @Override
+    public boolean trustReady() {
+        try {
+            Map<String, HoldReleaseTrustAnchor> anchors = registry == null ? null : registry.anchors();
+            // 解除には authority・主体・鍵を共有しない発行者と承認者の組が要るため、その組が ACTIVE と確認できるときだけ開く
+            // （anchor の件数ではなく組で数える。同じ authority の2つの鍵では開かない。RB-NF07-REG review P3-1）
+            return PrivacyTrustReadiness.releasePairAvailable(anchors, revocations);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private static void compareBindings(HoldReleaseBinding presented, HoldReleaseBinding expected) {

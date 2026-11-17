@@ -346,6 +346,10 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort, HoldR
                 if (!held || event.caseId() == null || !event.caseId().equals(activeHoldId)) {
                     throw new JournalUnavailableException("有効なholdに対応しないhold解除eventを検出しました", null);
                 }
+                // 解除は claim の digest（action_id）を持つ（REL review P3-6。verifier の proof からだけ append する）
+                if (event.actionId() == null || !event.actionId().matches("[0-9a-f]{64}")) {
+                    throw new JournalUnavailableException("claimのdigestを持たないhold解除eventを検出しました", null);
+                }
                 held = false;
                 activeHoldId = null;
             } else if (isLeaseCommand(event.type())) {

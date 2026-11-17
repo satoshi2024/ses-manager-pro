@@ -23,7 +23,7 @@ import java.util.TreeSet;
  *       {@code m_retention_policy} の policy_id がちょうど1種類であること。0種類は未登録、2種類以上は曖昧として解決しない。</li>
  *   <li>法人単位の key（legalEntityId != 0）は P-LE 未決のため解決しない。</li>
  * </ul>
- * scope は module code とする（署名 envelope の scope と照合される。正式な scope 規則は NF07-REG で確定する）。
+ * scope は module code とする（署名 envelope の scope と照合される。NF07-REG は envelope の scope を module code として登録する）。
  * 構築時に DB へ触れず、照会のたびに読む。書き込みは行わない。正本 store の所有・改竄検知（P-SRC）は未署名のため、
  * 本 catalog の結果は本番 currentness の証明ではない。
  */

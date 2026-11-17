@@ -37,3 +37,4 @@ ResumeIngestionLedgerRetentionMySqlTest
 DualConfirmationRaceMySqlTest
 DualConfirmationCoordinatorRetryMySqlTest
 PrivacyHoldReleaseMySqlTest
+PrivacyPolicyRegistrationMySqlTest

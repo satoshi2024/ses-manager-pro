@@ -8,6 +8,7 @@ import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalProperties;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
 import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
+import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
 import com.ses.service.AuditLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
@@ -115,18 +116,19 @@ public class PrivacyHoldConfiguration {
     }
 
     /**
-     * hold 解除 authority の trust anchor（NF07-REL）。第1期は空（D-03 の署名前は anchor を登録しない）。KMS / HSM・設定からの
-     * 読込は NF07-TRUST で差し替える。
+     * hold 解除 authority の trust anchor（NF07-REL）。参照のたびに {@link PrivacyTrustSource} から取る（第1期は空。D-03 の方式の adapter は
+     * {@code PrivacyTrustSource} の Bean を差し替える）。
      */
     @Bean
-    public HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry() {
-        return ConfiguredHoldReleaseTrustRegistry.empty();
+    public HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry(PrivacyTrustSource privacyTrustSource) {
+        return PrivacyTrustSource.holdReleaseAnchorsOf(privacyTrustSource);
     }
 
     /**
      * hold の解除（NF07-REL）。verifier は prod profile でだけ生成し（{@code ProductionPrivacyComponents.holdReleaseVerifier}）、
-     * 失効状態は第1期は常に UNKNOWN（{@link UnknownRevocationStatusProvider}）。prod 以外・D-03 と D-05 の署名前・trust anchor
-     * 未登録の間は、解除の入口は存在しない URL と同じ404になる（{@link PrivacyHoldReleaseService#isOpen()}）。
+     * 失効状態は {@link PrivacyTrustSource} の provider（第1期は常に UNKNOWN の {@link UnknownRevocationStatusProvider}）。prod 以外・
+     * D-03 と D-05 の署名前・trust anchor 未登録・失効状態を ACTIVE と確認できない間は、解除の入口は存在しない URL と同じ404になる
+     * （{@link PrivacyHoldReleaseService#isOpen()}）。
      */
     @Bean
     public PrivacyHoldReleaseService privacyHoldReleaseService(PrivacyAccessGuard accessGuard,
@@ -139,7 +141,8 @@ public class PrivacyHoldConfiguration {
                                                                PlatformTransactionManager transactionManager,
                                                                ObjectProvider<Clock> clock,
                                                                HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry,
-                                                               Environment environment) {
+                                                               Environment environment,
+                                                               PrivacyTrustSource privacyTrustSource) {
         PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
@@ -148,7 +151,7 @@ public class PrivacyHoldConfiguration {
         boolean activeProd = java.util.Arrays.asList(environment.getActiveProfiles()).contains("prod");
         HoldReleaseVerifier verifier = activeProd
                 ? ProductionPrivacyComponents.holdReleaseVerifier(environment, privacyHoldReleaseTrustRegistry,
-                new UnknownRevocationStatusProvider(), resolvedClock)
+                PrivacyTrustSource.revocationsOf(privacyTrustSource), resolvedClock)
                 : null;
         return new PrivacyHoldReleaseService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
                 privacyHoldJournal, store, holdSubjectResolver,

@@ -170,6 +170,8 @@ issuerとapproverは、trust anchorで検証された署名付きauthority claim
 
 Journalはproof bindingとcommand payload hashを照合した後、partition headとhold revisionをlock/CASし、expected headが一致する場合だけ一つの`HOLD_RELEASED` eventをappendする。exact同一command ID/hashの再送は元ACKを返し、同ID異payload、古いhead/hold revision、異なるhold IDは競合として拒否する。解除event前後のtransaction失敗ではhead/event/command projectionを一切進めない。実装着手前にこのReleaseProofとauthority SoD契約を別Plan Reviewへ提出する。
 
+実装の記録（NF07-REL、RB-NF07-REG）: `HOLD_RELEASED` commandは`case_id`にhold ID、`request_hash`にbinding digest、`action_id`にissuerとapproverのclaim digest（`HoldReleaseAuthorityClaim.claimsDigest`）を持つ。claim digestはevent hashに含まれるため、Journalは解除に使ったclaimを束縛する（claim本体はrequired監査に残る）。同じcommand IDの再送はclaimも同一の場合だけ元ACKを返す。詳細は`production-bridge-phased-plan.md` §4の実装記録。
+
 ### 11.2 W2a dispatch ACKの非代替性
 
 W2aで`DISPATCH_AUTHORIZED`というsynthetic event名を使う場合も、そのACKは同一partitionのhead CAS、hold blocker、lease fenceに関する合成線形化記録に限る。署名済policy/case approval、expiry/revocation freshness、dispatch fenceを検証した証明ではなく、外部送信を許可しない。W2aにはworker/provider接続もproduction beanも存在しない。後続workerはこのevent/ACKだけで外部副作用を起こしてはならず、別のreview済みdispatch proof/verifier契約が必要である。

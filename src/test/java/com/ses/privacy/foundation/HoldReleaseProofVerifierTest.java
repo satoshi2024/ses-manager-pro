@@ -552,6 +552,134 @@ class HoldReleaseProofVerifierTest {
     }
 
     @Test
+    void claimのdigestを持たない解除eventはchainとして認めない() {
+        List<JournalEvent> withoutClaims = chain(start(1, HOLD, ZERO));
+        withoutClaims.add(releaseWithClaims(2, HOLD, withoutClaims.get(0).eventHash(), null));
+        assertThat(ProductionJournalChainVerification.verify(partition(), head(withoutClaims, false), withoutClaims))
+                .isFalse();
+
+        List<JournalEvent> malformed = chain(start(1, HOLD, ZERO));
+        malformed.add(releaseWithClaims(2, HOLD, malformed.get(0).eventHash(), "not-a-digest"));
+        assertThat(ProductionJournalChainVerification.verify(partition(), head(malformed, false), malformed)).isFalse();
+    }
+
+    // --- Journal に残す claim（REL review P3-6） ---
+
+    @Test
+    void proofのcommandは両claimのdigestをaction_idに持ちclaimのどの項目を変えてもdigestが変わる() {
+        HoldReleaseAuthorityClaim issuer = issuer(binding);
+        HoldReleaseAuthorityClaim approver = approver(binding);
+        VerifiedHoldRelease proof = verify(binding, issuer, approver);
+        String digest = HoldReleaseAuthorityClaim.claimsDigest(issuer, approver);
+
+        assertThat(proof.claimsDigest()).isEqualTo(digest).matches("[0-9a-f]{64}");
+        assertThat(proof.command().actionId()).isEqualTo(digest);
+        assertThat(proof.command()).isEqualTo(VerifiedHoldRelease.command(binding, digest));
+        // 正規形: domain と、発行者・承認者の順に 役割・authority・key・発行日時・期限・署名 hex の長さ付き field
+        StringBuilder canonical = new StringBuilder();
+        for (String value : List.of("NF07-HOLD-RELEASE-CLAIMS-V1", "ISSUER", ISSUER, "k1", issuer.issuedAt().toString(),
+                issuer.expiresAt().toString(), HexFormat.of().formatHex(issuer.signature()), "APPROVER", APPROVER, "k1",
+                approver.issuedAt().toString(), approver.expiresAt().toString(),
+                HexFormat.of().formatHex(approver.signature()))) {
+            canonical.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
+        }
+        assertThat(digest).isEqualTo(sha256(canonical.toString()));
+        assertThat(issuer.signatureHex()).isEqualTo(HexFormat.of().formatHex(issuer.signature()));
+
+        // 同じ束縛でも claim を署名し直せば（発行日時が違えば）digest も command も変わる
+        HoldReleaseAuthorityClaim resigned = authorities.sign(ISSUER, Role.ISSUER, binding, NOW.minusSeconds(30),
+                NOW.plus(Duration.ofHours(1)));
+        assertThat(HoldReleaseAuthorityClaim.claimsDigest(resigned, approver)).isNotEqualTo(digest);
+        assertThat(HoldReleaseAuthorityClaim.claimsDigest(approver, issuer)).as("順序も束縛する").isNotEqualTo(digest);
+        assertThat(verify(binding, resigned, approver).command().payloadHash())
+                .isNotEqualTo(proof.command().payloadHash());
+        assertThatThrownBy(() -> HoldReleaseAuthorityClaim.claimsDigest(issuer, null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // --- 開放の gate（REL review P3-9） ---
+
+    @Test
+    void 失効providerが2件以上のanchorをACTIVEと答えるときだけtrustReadyになる() {
+        assertThat(verifier.trustReady()).isTrue();
+
+        revocations = ref -> RevocationStatus.UNKNOWN;
+        assertThat(verifier.trustReady()).as("常に UNKNOWN の provider").isFalse();
+        revocations = ref -> ref.startsWith(APPROVER) ? RevocationStatus.UNKNOWN : RevocationStatus.ACTIVE;
+        assertThat(verifier.trustReady()).as("発行者と承認者の2件が要る").isFalse();
+        revocations = ref -> ref.startsWith(APPROVER) ? RevocationStatus.REVOKED : RevocationStatus.ACTIVE;
+        assertThat(verifier.trustReady()).isFalse();
+        revocations = ref -> {
+            throw new IllegalStateException("ocsp down");
+        };
+        assertThat(verifier.trustReady()).isFalse();
+
+        assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> java.util.Map.of(),
+                ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+        assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), authorities.registry(), null,
+                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+        assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> {
+            throw new IllegalStateException("registry down");
+        }, ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+    }
+
+    @Test
+    void trustReadyはanchorの件数ではなく別authorityの発行者と承認者の組で判定する() {
+        HoldReleaseTrustAnchor a1 = anchor("issuer-a", "k1", "sys_user:20", Set.of(Role.ISSUER, Role.APPROVER));
+        HoldReleaseTrustAnchor a2 = anchor("issuer-a", "k2", "sys_user:20", Set.of(Role.ISSUER, Role.APPROVER));
+        HoldReleaseTrustAnchor issuerOnlyA = anchor("issuer-a", "k1", "sys_user:20", Set.of(Role.ISSUER));
+        HoldReleaseTrustAnchor issuerOnlyB = anchor("issuer-b", "k1", "sys_user:30", Set.of(Role.ISSUER));
+        HoldReleaseTrustAnchor approverC = anchor("approver-c", "k1", "sys_user:40", Set.of(Role.APPROVER));
+        HoldReleaseTrustAnchor samePrincipal = anchor("approver-d", "k1", "sys_user:20", Set.of(Role.APPROVER));
+
+        // 同じ authority の2つの鍵（rotation の重複期間）では開かない
+        assertThat(readyWith(java.util.Map.of(a1.anchorId(), a1, a2.anchorId(), a2), ref -> RevocationStatus.ACTIVE))
+                .isFalse();
+        // 2件とも ISSUER だけでも開かない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyA.anchorId(), issuerOnlyA, issuerOnlyB.anchorId(), issuerOnlyB),
+                ref -> RevocationStatus.ACTIVE)).isFalse();
+        // 別 authority でも主体が同じなら開かない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyA.anchorId(), issuerOnlyA, samePrincipal.anchorId(),
+                samePrincipal), ref -> RevocationStatus.ACTIVE)).isFalse();
+        // 別 authority・別主体の発行者と承認者の組で開き、承認者が UNKNOWN なら閉じる
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, approverC.anchorId(), approverC),
+                ref -> RevocationStatus.ACTIVE)).isTrue();
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, approverC.anchorId(), approverC),
+                ref -> ref.startsWith("approver-c") ? RevocationStatus.UNKNOWN : RevocationStatus.ACTIVE)).isFalse();
+        // registry の key が anchor 自身の authorityId:keyId と違う anchor は数えない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, "other:k9", approverC),
+                ref -> RevocationStatus.ACTIVE)).isFalse();
+    }
+
+    private boolean readyWith(java.util.Map<String, HoldReleaseTrustAnchor> anchors, RevocationStatusProvider provider) {
+        return ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> anchors, provider,
+                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady();
+    }
+
+    private static HoldReleaseTrustAnchor anchor(String authorityId, String keyId, String principal, Set<Role> roles) {
+        return new HoldReleaseTrustAnchor(authorityId, keyId, HoldReleaseTestAuthorities.generate().getPublic(),
+                principal, Set.of(TENANT), roles, Set.of("SUBJECT", "DATA_ELEMENT"), NOW.minusSeconds(3600),
+                NOW.plusSeconds(3600));
+    }
+
+    // --- anchor の鍵の算法（REL review P3-8） ---
+
+    @Test
+    void trust_anchorはEd25519以外の公開鍵を登録の時点で拒否する() throws Exception {
+        for (String algorithm : List.of("RSA", "EC", "Ed448")) {
+            java.security.PublicKey key = java.security.KeyPairGenerator.getInstance(algorithm).generateKeyPair()
+                    .getPublic();
+            assertThat(Ed25519PublicKeys.isEd25519(key)).as(algorithm).isFalse();
+            assertThatThrownBy(() -> new HoldReleaseTrustAnchor("issuer-x", "k1", key, "sys_user:40", Set.of(TENANT),
+                    Set.of(Role.ISSUER), Set.of("SUBJECT"), NOW.minusSeconds(60), NOW.plusSeconds(60)))
+                    .as(algorithm).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Ed25519");
+        }
+        java.security.PublicKey ed25519 = HoldReleaseTestAuthorities.generate().getPublic();
+        assertThat(Ed25519PublicKeys.isEd25519(ed25519)).isTrue();
+        assertThat(Ed25519PublicKeys.isEd25519(null)).isFalse();
+    }
+
+    @Test
     void 解除を含まないchainは従来どおりfoundationの検証で決まる() {
         List<JournalEvent> events = chain(start(1, HOLD, ZERO));
         assertThat(ProductionJournalChainVerification.verify(partition(), head(events, true), events)).isTrue();
@@ -622,22 +750,28 @@ class HoldReleaseProofVerifierTest {
     }
 
     private static JournalEvent start(long revision, String holdId, String previous) {
-        return event(revision, "hs-" + holdId.substring(3), CommandType.HOLD_STARTED, holdId, "1".repeat(64), previous);
+        return event(revision, "hs-" + holdId.substring(3), CommandType.HOLD_STARTED, holdId, null, "1".repeat(64),
+                previous);
     }
 
+    /** 解除の event（claim の digest を action_id に持つ。REL review P3-6）。 */
     private static JournalEvent release(long revision, String holdId, String previous) {
-        return event(revision, "hr-" + Long.toString(revision).repeat(32).substring(0, 32), CommandType.HOLD_RELEASED,
-                holdId, "2".repeat(64), previous);
+        return releaseWithClaims(revision, holdId, previous, "3".repeat(64));
     }
 
-    private static JournalEvent event(long revision, String commandId, CommandType type, String caseId,
+    private static JournalEvent releaseWithClaims(long revision, String holdId, String previous, String claimsDigest) {
+        return event(revision, "hr-" + Long.toString(revision).repeat(32).substring(0, 32), CommandType.HOLD_RELEASED,
+                holdId, claimsDigest, "2".repeat(64), previous);
+    }
+
+    private static JournalEvent event(long revision, String commandId, CommandType type, String caseId, String actionId,
                                       String requestHash, String previous) {
         Instant createdAt = NOW.minusSeconds(100 - revision);
         String payload = PrivacyJournalPort.JournalCommand.create(commandId, partition(), revision - 1, type, caseId,
-                null, requestHash, null, 0, null).payloadHash();
-        JournalEvent draft = new JournalEvent(revision, commandId, payload, type, caseId, null, requestHash, null, 0, null,
-                previous, null, createdAt);
-        return new JournalEvent(revision, commandId, payload, type, caseId, null, requestHash, null, 0, null, previous,
+                actionId, requestHash, null, 0, null).payloadHash();
+        JournalEvent draft = new JournalEvent(revision, commandId, payload, type, caseId, actionId, requestHash, null, 0,
+                null, previous, null, createdAt);
+        return new JournalEvent(revision, commandId, payload, type, caseId, actionId, requestHash, null, 0, null, previous,
                 eventHash(draft, previous), createdAt);
     }
 

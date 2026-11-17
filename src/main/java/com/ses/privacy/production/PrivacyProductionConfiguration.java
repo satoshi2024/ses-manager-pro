@@ -6,11 +6,10 @@ import com.ses.mapper.privacy.PiiDataElementMapper;
 import com.ses.mapper.privacy.RetentionPolicyMapper;
 import com.ses.privacy.foundation.PolicyReadonlyQueryPort;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
-import com.ses.privacy.production.retention.policy.ConfiguredPolicyTrustRegistry;
 import com.ses.privacy.production.retention.policy.DbCurrentPolicySource;
 import com.ses.privacy.production.retention.policy.DbProductionPolicyCatalog;
 import com.ses.privacy.production.retention.policy.UnavailablePolicyReadonlyQueryPort;
-import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
+import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.LegalEntityContextService;
 import org.springframework.beans.factory.ObjectProvider;
@@ -29,7 +28,8 @@ import java.util.function.BooleanSupplier;
  * <ul>
  *   <li>prod: foundation の {@link ProductionPrivacyComponents} が生成する production の読み取り専用照会。
  *       catalog・source は application DB の F1 表（{@code m_pii_data_element}・{@code m_retention_policy}）、
- *       trust registry は空、失効状態は常に UNKNOWN。公開スイッチ（{@code privacy.retention.enabled}）と決定ID束縛の
+ *       trust anchor と失効状態は照会のたびに {@link PrivacyTrustSource} から取る（第1期は anchor 0件・失効状態は常に UNKNOWN。D-03 の方式の
+ *       adapter は同じ Bean を差し替える）。公開スイッチ（{@code privacy.retention.enabled}）と決定ID束縛の
  *       有効期間（{@link PrivacyDecisionWindowMonitor}）は照会のたびに読み、OFF・期間外なら source を読まない。
  *       Bean の構築時に DB へ触れない。</li>
  *   <li>prod 以外: 常に {@code POLICY_UNKNOWN} を返す {@link UnavailablePolicyReadonlyQueryPort}（DB を読まない）。</li>
@@ -51,6 +51,7 @@ public class PrivacyProductionConfiguration {
             PiiDataElementMapper piiDataElementMapper,
             RetentionPolicyMapper retentionPolicyMapper,
             ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider,
+            PrivacyTrustSource privacyTrustSource,
             Clock clock) {
         String authorizationTenantId = StringUtils.hasText(oidcProperties.getTenantId())
                 ? oidcProperties.getTenantId() : "default";
@@ -63,8 +64,8 @@ public class PrivacyProductionConfiguration {
                 authorizationTenantId,
                 new DbProductionPolicyCatalog(piiDataElementMapper, retentionPolicyMapper),
                 new DbCurrentPolicySource(retentionPolicyMapper),
-                ConfiguredPolicyTrustRegistry.empty(),
-                new UnknownRevocationStatusProvider(),
+                PrivacyTrustSource.policyAnchorsOf(privacyTrustSource),
+                PrivacyTrustSource.revocationsOf(privacyTrustSource),
                 clock);
     }
 
