@@ -19,7 +19,7 @@ class CertificationLearningGapUiContractTest {
         String js = Files.readString(RESOURCE_ROOT.resolve("static/js/modules/certification-learning-skill-gap.js"));
 
         assertTrue(html.contains("max-width: 390px"));
-        assertTrue(js.contains("対象データがありません"));
+        assertTrue(js.contains("certGap.empty"));
         assertTrue(js.contains("/api/certification-learning-gap"));
         assertTrue(js.contains("/api/certification-learning-gap/"));
         assertTrue(js.contains("/api/certification-learning-gap/export"));

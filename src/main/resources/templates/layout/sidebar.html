@@ -72,7 +72,7 @@
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myCertificationLearningGap')}">
                     <a th:href="@{/my/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
-                        <i class="bi bi-mortarboard me-2"></i><span>資格・学習計画</span>
+                        <i class="bi bi-mortarboard me-2"></i><span th:text="#{myCertGap.title}">資格・学習計画</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myOneOnOnes')}">
@@ -116,7 +116,7 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('certification-learning-skill-gap')}">
                     <a th:href="@{/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-mortarboard me-2"></i>
-                        <span>資格・学習・スキルギャップ</span>
+                        <span th:text="#{certGap.title}">資格・学習・スキルギャップ</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">

@@ -27,8 +27,8 @@ class PwaAssetContractTest {
         String worker = read("service-worker.js");
 
         assertThat(worker).contains("const SHELL_ASSETS = [");
-        // shell資産（pwa-queue.js・offline.html）を変えたためcache版を上げ、旧shellを入れ替える（W3-09）。
-        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v4'");
+        // shell資産（pwa-queue.js・offline.html）を変えたためcache版を上げ、旧shellを入れ替える（W3-09、RB-I18N P3-N4-6）。
+        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v5'");
         assertThat(worker).doesNotContain("isDynamicOrSensitive");
         assertThat(worker).contains("path === '/js/i18n.js'");
         assertThat(worker).contains("request.method === 'GET'");
@@ -52,17 +52,44 @@ class PwaAssetContractTest {
     }
 
     @Test
-    void offline下書きは日本語labelと表示許可項目だけを使う() throws Exception {
+    void offline下書きは端末の文言か日本語の既定文言で表示許可項目だけを使う() throws Exception {
         String offline = read("offline.html");
 
+        // 文言はpwa-queue.jsが端末へ写したpwa.*（利用者の言語）を引き、無ければ日本語の既定文言にする（RB-I18N P3-N4-6）。
         assertThat(offline).contains("下書きはロックされています", "再認証", "下書きを復元する",
                 "勤怠", "作業報告", "未送信", "競合確認が必要",
-                "workDate: '日付'", "clockIn: '出勤'", "expenseDate: '日付'");
+                "workDate: dateLabel", "clockIn: T('pwa.offline.field.clockIn', '出勤')", "expenseDate: dateLabel",
+                "const dateLabel = T('pwa.offline.field.date', '日付')", "data-pwa-text=\"pwa.offline.heading\"",
+                "element.textContent = T(element.getAttribute('data-pwa-text'), element.textContent)");
         assertThat(offline).contains("ses:pwa-revoked", "prepareRestore", "confirmRestore")
                 .doesNotContain("getOfflineDrafts();\n            if (!drafts.length) return");
         assertThat(offline.indexOf("confirmRestore.addEventListener('click'"))
                 .isLessThan(offline.indexOf("getOfflineDrafts();"));
         assertThat(offline).doesNotContain("JSON.stringify(draft.payload", "<pre>", "draft.screen} /", "draft.status}`");
+    }
+
+    /**
+     * RB-I18N P3-N4-6: offline.htmlは静的ページで /js/i18n.js（no-store・SW対象外）を読めないため、オンラインの画面で
+     * pwa-queue.jsが pwa.* の文言と言語だけを端末へ写し、offline.htmlはそれを引く。オンラインの画面ではSES_MESSAGESを優先する。
+     */
+    @Test
+    void offline用の画面文言はpwa接頭辞のkeyだけを端末へ写しSES_MESSAGESを優先する() throws Exception {
+        String queue = read("js/pwa-queue.js");
+        String offline = read("offline.html");
+
+        assertThat(queue).contains("const UI_MESSAGES_KEY = 'ses_pwa_ui_messages'", "const UI_MESSAGE_PREFIX = 'pwa.'",
+                "key.startsWith(UI_MESSAGE_PREFIX)", "lang: String(window.SES_LANG || 'ja')", "text: uiText",
+                "language: uiLanguage");
+        int init = queue.indexOf("function init()");
+        assertThat(queue.indexOf("persistUiMessages();", init)).isGreaterThan(init)
+                .isLessThan(queue.indexOf("bind();", init));
+        int text = queue.indexOf("function uiText(key, fallback, ...args)");
+        String uiText = queue.substring(text, queue.indexOf("function uiLanguage()", text));
+        assertThat(uiText.indexOf("window.SES_MESSAGES")).isNotNegative()
+                .isLessThan(uiText.indexOf("readStoredUiMessages()"));
+        // 端末の文言はtextContentだけで描画する（innerHTMLへ入れない）。
+        assertThat(offline).contains("SES.pwaQueue.language()", "document.documentElement.lang = language")
+                .doesNotContain("innerHTML");
     }
 
     @Test

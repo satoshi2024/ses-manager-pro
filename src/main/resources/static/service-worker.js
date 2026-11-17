@@ -3,7 +3,7 @@
 
 const CACHE_PREFIX = 'ses-pwa-shell-';
 // shell資産（pwa-queue.js・offline.html等）はcache優先で配るため、資産を変えたら版を上げて入れ替える。
-const CACHE_NAME = CACHE_PREFIX + 'v4';
+const CACHE_NAME = CACHE_PREFIX + 'v5';
 const SHELL_ASSETS = [
     '/manifest.webmanifest',
     '/offline.html',
