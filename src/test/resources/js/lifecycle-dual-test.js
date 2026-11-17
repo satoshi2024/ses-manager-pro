@@ -233,7 +233,8 @@ async function main() {
         await env.D.decide('CONFIRM');
         const third = env.posts()[2].init.headers['Idempotency-Key'];
         assert.notStrictEqual(third, second);
-        env.responders.push(ok({ state: 'CONFIRMED', decision: 'CONFIRM', replayed: true }),
+        // 応答のdecisionは確認結果（CONFIRMED / REJECTED）。要求のCONFIRM / REJECTとは値域が違う（RB-PRERUN 6）。
+        env.responders.push(ok({ state: 'CONFIRMED', decision: 'CONFIRMED', replayed: true }),
             ok(Object.assign({}, PENDING_VIEW, { state: 'CONFIRMED', canDecide: false })));
         await env.D.decide('CONFIRM');
         assert.strictEqual(env.posts()[3].init.headers['Idempotency-Key'], third);
@@ -246,7 +247,7 @@ async function main() {
         env.responders.push(ok(PENDING_VIEW));
         await env.D.open(7);
         env.D.onChanged = async () => { throw new Error('page reload failed'); };
-        env.responders.push(ok({ state: 'REJECTED', decision: 'REJECT' }),
+        env.responders.push(ok({ state: 'REJECTED', decision: 'REJECTED' }),
             ok(Object.assign({}, PENDING_VIEW, { state: 'REJECTED', canDecide: false })));
         await env.D.decide('REJECT');
         assert.ok(env.toasts.some(t => t[0] === 'success' && t[1] === 'lifecycle.dual.toast.rejected'));
@@ -270,11 +271,13 @@ async function main() {
         env.responders.push(ok({
             taskId: 7, taskStatus: 'IN_PROGRESS', taskGeneration: 3, state: 'REJECTED', submissionId: 55,
             submissionRevision: 1, documentId: 10, documentVersionNo: 2, submitterUserId: 2, commentsVisible: false,
-            submissionComment: null, submissionCommentPresent: true, decision: 'REJECT', decisionComment: null,
+            submissionComment: null, submissionCommentPresent: true, decision: 'REJECTED', decisionComment: null,
             decisionCommentPresent: false, canSubmit: false, canDecide: false
         }));
         await env.D.open(7);
         const html = env.els.dualSummary.innerHTML;
+        // 確認結果はAPIの値（REJECTED）のkeyで表示する。bundleにそのkeyがあることは LifecycleDualConfirmationScreenTest が見る
+        assert.ok(html.includes('lifecycle.dual.decision.REJECTED'));
         assert.ok(html.includes('lifecycle.dual.comment.present'));
         assert.ok(html.includes('lifecycle.dual.comment.hidden'));
         assert.ok(html.includes('lifecycle.dual.comment.none'));

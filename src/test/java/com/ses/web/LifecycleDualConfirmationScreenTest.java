@@ -67,6 +67,10 @@ class LifecycleDualConfirmationScreenTest {
             "error.authorization.epochUnavailable");
     private static final Pattern JS_KEY_LITERAL =
             Pattern.compile("'((?:lifecycle\\.dual|error\\.lifecycle|common)\\.[A-Za-z0-9_.]*[A-Za-z0-9_])'");
+    /** 値を連結してkeyを作る箇所の接頭辞（例: {@code this.t('lifecycle.dual.decision.' + v.decision)}）。 */
+    private static final Pattern JS_COMPOSED_KEY_PREFIX =
+            Pattern.compile("['\"`]((?:lifecycle\\.dual|error\\.lifecycle|common)\\.[A-Za-z0-9_.]*\\.)['\"`]\\s*\\+");
+    private static final Pattern MIGRATION_FILE = Pattern.compile("^V([0-9]+(?:[._][0-9]+)*)__.+\\.sql$");
 
     private static SpringTemplateEngine engine;
     private static ResourceBundleMessageSource messages;
@@ -152,12 +156,12 @@ class LifecycleDualConfirmationScreenTest {
                 keys.add(matcher.group(1));
             }
         }
-        // 組み立てて参照するkey（'lifecycle.dual.state.' + state 等）
-        for (String suffix : List.of("none", "PENDING", "CONFIRMED", "REJECTED")) {
-            keys.add("lifecycle.dual.state." + suffix);
-        }
-        keys.add("lifecycle.dual.decision.CONFIRM");
-        keys.add("lifecycle.dual.decision.REJECT");
+        // 組み立てて参照するkey（'lifecycle.dual.state.' + state 等）は、APIが返しうる値（DBのCHECK制約の値域）から作る。
+        // 期待値を手で列挙すると、実装と同じ思い込み（decisionをCONFIRM/REJECTとみなす）がtestにも入り、欠落を見逃す
+        // （RB-PRERUN 6: 差戻し後の確認結果に lifecycle.dual.decision.REJECTED がkeyのまま表示された）。
+        keys.addAll(composedKeys());
+        assertThat(keys).contains("lifecycle.dual.decision.CONFIRMED", "lifecycle.dual.decision.REJECTED",
+                "lifecycle.dual.state.PENDING", "lifecycle.dual.state.none");
         // error.lifecycle.idempotencyConflict はserverのmessageをそのまま表示するため画面部品からは参照しない
         // （W3-21b review P3-2で文言比較による競合判定を廃止した）。
         assertThat(keys).contains("lifecycle.dual.button.open", "lifecycle.dual.comment.present",
@@ -173,6 +177,41 @@ class LifecycleDualConfirmationScreenTest {
             }
         }
         assertThat(missing).as("画面部品が参照するkeyの欠落").isEmpty();
+    }
+
+    /**
+     * 画面部品が値を連結してkeyを作る箇所（{@code 'lifecycle.dual.xxx.' + 値}）は、すべて値域（APIが返しうる値）を
+     * {@link #composedKeyDomains()} に持つこと。値域の無い連結を足すと、そのkeyの欠落は上のtestでも検出できない。
+     */
+    @Test
+    void 値を連結して作るkeyはすべてAPIの値域を持ち各言語のbundleにある() throws IOException {
+        Set<String> prefixes = new TreeSet<>();
+        for (String js : List.of("static/js/modules/lifecycle-dual.js", "static/js/modules/lifecycle.js",
+                "static/js/modules/my-lifecycle.js")) {
+            Matcher matcher = JS_COMPOSED_KEY_PREFIX.matcher(
+                    Files.readString(RESOURCES.resolve(js), StandardCharsets.UTF_8));
+            while (matcher.find()) {
+                prefixes.add(matcher.group(1));
+            }
+        }
+        Map<String, Set<String>> domains = composedKeyDomains();
+        assertThat(prefixes).as("連結でkeyを作る箇所を読めていること")
+                .contains("lifecycle.dual.state.", "lifecycle.dual.decision.");
+        assertThat(domains.keySet()).as("連結の接頭辞ごとに値域を定義すること").containsAll(prefixes);
+        // 確認結果（t_lifecycle_dual_confirmation.decision）は確認済み・差戻しの2値。要求のCONFIRM/REJECTとは別の値域。
+        assertThat(domains.get("lifecycle.dual.decision.")).containsExactlyInAnyOrder("CONFIRMED", "REJECTED");
+        assertThat(domains.get("lifecycle.dual.state.")).contains("PENDING", "CONFIRMED", "REJECTED", "none");
+
+        List<String> missing = new ArrayList<>();
+        for (Map.Entry<String, String> bundle : BUNDLES.entrySet()) {
+            Properties properties = load(bundle.getValue());
+            for (String key : composedKeys()) {
+                if (properties.getProperty(key) == null || properties.getProperty(key).isBlank()) {
+                    missing.add(bundle.getKey() + ":" + key);
+                }
+            }
+        }
+        assertThat(missing).as("APIの値から組み立てるkeyの欠落（画面にkeyがそのまま表示される）").isEmpty();
     }
 
     @Test
@@ -212,6 +251,60 @@ class LifecycleDualConfirmationScreenTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** 連結で作るkeyの全件（接頭辞 × 値域）。 */
+    private static Set<String> composedKeys() throws IOException {
+        Set<String> keys = new TreeSet<>();
+        composedKeyDomains().forEach((prefix, values) -> values.forEach(value -> keys.add(prefix + value)));
+        return keys;
+    }
+
+    /**
+     * 連結の接頭辞 → 画面が受け取りうる値。値はAPIが返すDB列のCHECK制約から読む（最も新しいmigrationの定義）。
+     * {@code state} の {@code none} は、提出が無いとき画面部品自身が選ぶkey。
+     */
+    private static Map<String, Set<String>> composedKeyDomains() throws IOException {
+        Map<String, Set<String>> domains = new LinkedHashMap<>();
+        Set<String> states = new TreeSet<>(checkConstraintValues("ck_dual_projection_state"));
+        states.add("none");
+        domains.put("lifecycle.dual.state.", states);
+        domains.put("lifecycle.dual.decision.", new TreeSet<>(checkConstraintValues("ck_dual_confirmation_decision")));
+        return domains;
+    }
+
+    private static Set<String> checkConstraintValues(String constraint) throws IOException {
+        Pattern definition = Pattern.compile("CONSTRAINT\\s+" + constraint + "\\s+CHECK\\s*\\(\\s*\\w+\\s+IN\\s*\\(([^)]*)\\)",
+                Pattern.CASE_INSENSITIVE);
+        String latest = null;
+        org.flywaydb.core.api.MigrationVersion latestVersion = null;
+        try (java.util.stream.Stream<Path> files = Files.list(RESOURCES.resolve("db/migration"))) {
+            for (Path file : files.toList()) {
+                Matcher name = MIGRATION_FILE.matcher(file.getFileName().toString());
+                if (!name.matches()) {
+                    continue;
+                }
+                Matcher check = definition.matcher(Files.readString(file, StandardCharsets.UTF_8));
+                String found = null;
+                while (check.find()) {
+                    found = check.group(1);
+                }
+                org.flywaydb.core.api.MigrationVersion version =
+                        org.flywaydb.core.api.MigrationVersion.fromVersion(name.group(1).replace('_', '.'));
+                if (found != null && (latestVersion == null || version.compareTo(latestVersion) > 0)) {
+                    latest = found;
+                    latestVersion = version;
+                }
+            }
+        }
+        assertThat(latest).as(constraint + "のCHECK制約をmigrationから読めること").isNotNull();
+        Set<String> values = new TreeSet<>();
+        Matcher literal = Pattern.compile("'([^']+)'").matcher(latest);
+        while (literal.find()) {
+            values.add(literal.group(1));
+        }
+        assertThat(values).as(constraint + "の値").isNotEmpty();
+        return values;
+    }
 
     private static String render(String template, Locale locale) {
         Context context = new Context(locale);
