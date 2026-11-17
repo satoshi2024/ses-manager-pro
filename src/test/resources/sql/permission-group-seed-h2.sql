@@ -1,4 +1,4 @@
--- V64〜V66.1・V78 のpermission group seedをH2で再現するfixture。
+-- V64〜V66.1・V78・V121・V126・V191・V193 のpermission group seedをH2で再現するfixture。
 -- 本体migrationは MySQL 固有構文（INSERT IGNORE / DELETE a FROM ... JOIN）を使うため
 -- そのままH2へ流せない。最終状態だけを同じ内容で作る。
 -- 差異が出ないよう、action keyと deny_flag は V64/V66 と1対1で対応させること。
@@ -98,6 +98,20 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   -- V78: 承認画面の口座fieldは専用actionで明示拒否する。BP会社マスタのbp-company.*は維持。
   ('default', 2, 'bp-company.bank-account.view', 1, 0),
   ('default', 4, 'bp-company.bank-account.view', 1, 0);
+
+-- V121: 資格番号の復号（certification.pii.view）は role-admin（1）と role-hr（3）だけに明示許可する。
+-- V126: 資格・学習・skill gap の画面actionは role-admin・role-hr・role-manager（1・3・4）へ付与する。
+-- resource は certification-learning-gap で、certification.pii.view の候補（certification.*）とは別のresourceである。
+-- 営業（2）・マネージャー（4）に certification.pii.view の許可根拠が無いことを ActionPermissionMatrixTest が断言する（FINAL P3-4-1）。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
+  ('default', 1, 'certification.pii.view', 0, 0),
+  ('default', 3, 'certification.pii.view', 0, 0),
+  ('default', 1, 'certification-learning-gap.view', 0, 0),
+  ('default', 3, 'certification-learning-gap.view', 0, 0),
+  ('default', 4, 'certification-learning-gap.view', 0, 0),
+  ('default', 1, 'certification-learning-gap.*', 0, 0),
+  ('default', 3, 'certification-learning-gap.*', 0, 0),
+  ('default', 4, 'certification-learning-gap.*', 0, 0);
 
 -- V191: privacy.* は privacy-admin だけが許可し（'*' と privacy.* の明示許可）、他の全 group は deny する。
 -- privacy の判定では '*' を許可根拠に数えないため、group 6 の許可根拠は privacy.* の行だけである。
