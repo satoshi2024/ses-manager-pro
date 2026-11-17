@@ -28,7 +28,7 @@ import java.util.function.BooleanSupplier;
  * <ul>
  *   <li>prod: foundation の {@link ProductionPrivacyComponents} が生成する production の読み取り専用照会。
  *       catalog・source は application DB の F1 表（{@code m_pii_data_element}・{@code m_retention_policy}）、
- *       trust anchor と失効状態は {@link PrivacyTrustSource}（第1期は anchor 0件・失効状態は常に UNKNOWN。D-03 の方式の
+ *       trust anchor と失効状態は照会のたびに {@link PrivacyTrustSource} から取る（第1期は anchor 0件・失効状態は常に UNKNOWN。D-03 の方式の
  *       adapter は同じ Bean を差し替える）。公開スイッチ（{@code privacy.retention.enabled}）と決定ID束縛の
  *       有効期間（{@link PrivacyDecisionWindowMonitor}）は照会のたびに読み、OFF・期間外なら source を読まない。
  *       Bean の構築時に DB へ触れない。</li>
@@ -64,8 +64,8 @@ public class PrivacyProductionConfiguration {
                 authorizationTenantId,
                 new DbProductionPolicyCatalog(piiDataElementMapper, retentionPolicyMapper),
                 new DbCurrentPolicySource(retentionPolicyMapper),
-                privacyTrustSource.policyAnchors(),
-                privacyTrustSource.revocations(),
+                PrivacyTrustSource.policyAnchorsOf(privacyTrustSource),
+                PrivacyTrustSource.revocationsOf(privacyTrustSource),
                 clock);
     }
 

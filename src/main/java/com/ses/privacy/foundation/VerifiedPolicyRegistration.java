@@ -27,6 +27,7 @@ public final class VerifiedPolicyRegistration {
     private final String digest;
     private final byte[] canonical;
     private final byte[] signature;
+    private final Instant issuedAt;
     private final Instant effectiveAt;
     private final Instant expiresAt;
 
@@ -47,8 +48,14 @@ public final class VerifiedPolicyRegistration {
         this.digest = verified.policyDigest();
         this.canonical = Objects.requireNonNull(canonical, "canonical").clone();
         this.signature = envelope.signature();
+        this.issuedAt = envelope.metadata().issuedAt();
         this.effectiveAt = verified.effectiveAt();
         this.expiresAt = verified.expiresAt();
+    }
+
+    /** envelope の発行日時（署名の範囲内。有効化で current より後に署名されたかの比較に使う）。 */
+    public Instant issuedAt() {
+        return issuedAt;
     }
 
     public String tenantId() {

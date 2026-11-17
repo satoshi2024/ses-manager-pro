@@ -628,6 +628,7 @@ privacy:
     package-max-age: ${PRIVACY_DSAR_PACKAGE_MAX_AGE:}
   # 決定ID束縛（PrivacyDecisionBinding）。値は署名済み決定書の転記で、秘密値を置かない。既定は全て未設定＝ONにできない。
   # retention は D-01・D-09、dsar は D-01・D-06・D-09 を必要とする。AI・実装者は値を設定しない。
+  # D-02・D-03・D-05 は capability の digest に入れず、それぞれの入口（policy 登録・hold 開始・hold 解除）が要求ごとに検査する。
   approval:
     # 承認tenant。OIDC_TENANT_ID（未設定なら default）と完全一致しなければ拒否
     tenant-id: ${PRIVACY_APPROVAL_TENANT_ID:}
@@ -639,6 +640,21 @@ privacy:
       decision-id: ${PRIVACY_APPROVAL_D01_DECISION_ID:}
       signed-on: ${PRIVACY_APPROVAL_D01_SIGNED_ON:}
       expires-on: ${PRIVACY_APPROVAL_D01_EXPIRES_ON:}
+    # D-02（保持期間・起算trigger・法的根拠）。policy の登録・有効化（NF07-REG）の開放の前提。digest に含めない
+    d02:
+      decision-id: ${PRIVACY_APPROVAL_D02_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D02_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D02_EXPIRES_ON:}
+    # D-03（署名鍵・Trust Anchor・失効）。hold 解除（NF07-REL）と policy の登録・有効化の開放の前提。digest に含めない
+    d03:
+      decision-id: ${PRIVACY_APPROVAL_D03_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D03_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D03_EXPIRES_ON:}
+    # D-05（hold の種類と権限者）。hold 開始（NF07-A1H）・解除の開放の前提。digest に含めない
+    d05:
+      decision-id: ${PRIVACY_APPROVAL_D05_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D05_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D05_EXPIRES_ON:}
     d06:
       decision-id: ${PRIVACY_APPROVAL_D06_DECISION_ID:}
       signed-on: ${PRIVACY_APPROVAL_D06_SIGNED_ON:}

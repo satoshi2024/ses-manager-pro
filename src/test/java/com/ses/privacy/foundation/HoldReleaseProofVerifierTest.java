@@ -623,6 +623,45 @@ class HoldReleaseProofVerifierTest {
         }, ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
     }
 
+    @Test
+    void trustReadyはanchorの件数ではなく別authorityの発行者と承認者の組で判定する() {
+        HoldReleaseTrustAnchor a1 = anchor("issuer-a", "k1", "sys_user:20", Set.of(Role.ISSUER, Role.APPROVER));
+        HoldReleaseTrustAnchor a2 = anchor("issuer-a", "k2", "sys_user:20", Set.of(Role.ISSUER, Role.APPROVER));
+        HoldReleaseTrustAnchor issuerOnlyA = anchor("issuer-a", "k1", "sys_user:20", Set.of(Role.ISSUER));
+        HoldReleaseTrustAnchor issuerOnlyB = anchor("issuer-b", "k1", "sys_user:30", Set.of(Role.ISSUER));
+        HoldReleaseTrustAnchor approverC = anchor("approver-c", "k1", "sys_user:40", Set.of(Role.APPROVER));
+        HoldReleaseTrustAnchor samePrincipal = anchor("approver-d", "k1", "sys_user:20", Set.of(Role.APPROVER));
+
+        // 同じ authority の2つの鍵（rotation の重複期間）では開かない
+        assertThat(readyWith(java.util.Map.of(a1.anchorId(), a1, a2.anchorId(), a2), ref -> RevocationStatus.ACTIVE))
+                .isFalse();
+        // 2件とも ISSUER だけでも開かない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyA.anchorId(), issuerOnlyA, issuerOnlyB.anchorId(), issuerOnlyB),
+                ref -> RevocationStatus.ACTIVE)).isFalse();
+        // 別 authority でも主体が同じなら開かない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyA.anchorId(), issuerOnlyA, samePrincipal.anchorId(),
+                samePrincipal), ref -> RevocationStatus.ACTIVE)).isFalse();
+        // 別 authority・別主体の発行者と承認者の組で開き、承認者が UNKNOWN なら閉じる
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, approverC.anchorId(), approverC),
+                ref -> RevocationStatus.ACTIVE)).isTrue();
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, approverC.anchorId(), approverC),
+                ref -> ref.startsWith("approver-c") ? RevocationStatus.UNKNOWN : RevocationStatus.ACTIVE)).isFalse();
+        // registry の key が anchor 自身の authorityId:keyId と違う anchor は数えない
+        assertThat(readyWith(java.util.Map.of(issuerOnlyB.anchorId(), issuerOnlyB, "other:k9", approverC),
+                ref -> RevocationStatus.ACTIVE)).isFalse();
+    }
+
+    private boolean readyWith(java.util.Map<String, HoldReleaseTrustAnchor> anchors, RevocationStatusProvider provider) {
+        return ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> anchors, provider,
+                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady();
+    }
+
+    private static HoldReleaseTrustAnchor anchor(String authorityId, String keyId, String principal, Set<Role> roles) {
+        return new HoldReleaseTrustAnchor(authorityId, keyId, HoldReleaseTestAuthorities.generate().getPublic(),
+                principal, Set.of(TENANT), roles, Set.of("SUBJECT", "DATA_ELEMENT"), NOW.minusSeconds(3600),
+                NOW.plusSeconds(3600));
+    }
+
     // --- anchor の鍵の算法（REL review P3-8） ---
 
     @Test

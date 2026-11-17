@@ -327,6 +327,70 @@ class PrivacyPolicyRegistrationServiceTest {
         assertThat(currentRows()).isEqualTo(1L);
     }
 
+    @Test
+    void currentより前に署名されたrevisionの有効化は409で戻すには新しいrevisionとして署名し直して登録する() {
+        Long r1 = service.register(signer.signIssuedAt(POLICY_ID, "r1", NOW.minusSeconds(3000)).request()).id();
+        Long r2 = service.register(signer.signIssuedAt(POLICY_ID, "r2", NOW.minusSeconds(2400)).request()).id();
+        Long sameTime = service.register(signer.signIssuedAt(POLICY_ID, "r2b", NOW.minusSeconds(2400)).request()).id();
+        Long r3 = service.register(signer.signIssuedAt(POLICY_ID, "r3", NOW.minusSeconds(1800)).request()).id();
+        as(ACTIVATOR);
+        service.activate(r2, new PrivacyPolicyActivationRequest(null));
+
+        assertBusiness(() -> service.activate(r1, new PrivacyPolicyActivationRequest(r2)), 409,
+                "error.privacy.policyRevisionRollback");
+        assertBusiness(() -> service.activate(sameTime, new PrivacyPolicyActivationRequest(r2)), 409,
+                "error.privacy.policyRevisionRollback");
+        assertThat(auditUris).anyMatch(uri -> uri.contains("#REJECTED?operation=ACTIVATE&id=" + r1)
+                && uri.contains("reason=REVISION_ROLLBACK"));
+        assertThat(status(r1)).isEqualTo("CANDIDATE");
+        assertThat(status(r2)).isEqualTo("CURRENT");
+
+        PrivacyPolicyRegistrationResult switched = service.activate(r3, new PrivacyPolicyActivationRequest(r2));
+        assertThat(switched.supersededId()).isEqualTo(r2);
+        assertThat(status(r3)).isEqualTo("CURRENT");
+        assertThat(currentRows()).isEqualTo(1L);
+    }
+
+    // --- 取下げ ---
+
+    @Test
+    void CANDIDATEは登録者も別のprivacy_adminも取り下げられ同じkeyの別policyの登録を止めなくなる() {
+        PolicyEnvelopeTestSigner.Signed wrong = signer.sign("wrong-policy", "r1");
+        Long wrongId = service.register(wrong.request()).id();
+        assertBusiness(() -> service.register(signer.sign(POLICY_ID, "r1").request()), 409,
+                "error.privacy.policyKeyConflict");
+
+        PrivacyPolicyRegistrationResult withdrawn = service.withdraw(wrongId);
+
+        assertThat(withdrawn.registrationStatus()).isEqualTo("REVOKED");
+        assertThat(withdrawn.replayed()).isFalse();
+        RetentionPolicy row = policyMapper.selectById(wrongId);
+        assertThat(row.getStatus()).isEqualTo("REVOKED");
+        assertThat(row.getActivatedBy()).as("有効化されたことは無い").isNull();
+        assertThat(row.getRowVersion()).isEqualTo(1L);
+        assertThat(auditUris).anyMatch(uri -> uri.startsWith("/api/privacy/policies#WITHDRAWN?id=" + wrongId)
+                && uri.contains("by=REGISTRANT"));
+        assertThat(service.withdraw(wrongId).replayed()).as("取り下げた行の再送").isTrue();
+        // 取り下げた revision は再利用できない（同じ内容の再送は取り下げた行、別の内容は409）
+        assertThat(service.register(wrong.request()).registrationStatus()).isEqualTo("REVOKED");
+        assertBusiness(() -> service.register(signer.sign("wrong-policy", "r1", PolicyEnvelopeTestSigner.AUTHORITY,
+                "requester-test", "approver-test", "TEST_ONLY_RULE_OTHER").request()), 409,
+                "error.privacy.policyRevisionConflict");
+
+        Long r1 = service.register(signer.sign(POLICY_ID, "r1").request()).id();
+        Long r2 = service.register(signer.sign(POLICY_ID, "r2").request()).id();
+        as(ACTIVATOR);
+        assertThat(service.withdraw(r2).registrationStatus()).isEqualTo("REVOKED");
+        assertThat(auditUris).anyMatch(uri -> uri.contains("#WITHDRAWN?id=" + r2) && uri.contains("by=OTHER_PRIVACY_ADMIN"));
+        assertBusiness(() -> service.activate(r2, new PrivacyPolicyActivationRequest(null)), 409,
+                "error.privacy.policyNotCandidate");
+
+        // 有効化した行（CURRENT・SUPERSEDED）は取り下げられない
+        service.activate(r1, new PrivacyPolicyActivationRequest(null));
+        assertBusiness(() -> service.withdraw(r1), 409, "error.privacy.policyNotCandidate");
+        assertThat(status(r1)).isEqualTo("CURRENT");
+    }
+
     // --- 再送・key の競合・catalog ---
 
     @Test
@@ -378,6 +442,7 @@ class PrivacyPolicyRegistrationServiceTest {
         approval.getD03().setExpiresOn("2026-11-17");
         assertNotFound(() -> service.register(signed.request()));
         assertNotFound(() -> service.activate(1L, new PrivacyPolicyActivationRequest(null)));
+        assertNotFound(() -> service.withdraw(1L));
         decision(approval.getD03(), "D03-NF07-TEST-001");
         approval.getD02().setDecisionId("D03-NF07-TEST-001");
         assertNotFound(() -> service.register(signed.request()));
@@ -439,6 +504,8 @@ class PrivacyPolicyRegistrationServiceTest {
         assertInvalid(() -> service.activate(1L, new PrivacyPolicyActivationRequest(0L)));
         assertInvalid(() -> service.activate(0L, null));
         assertBusiness(() -> service.activate(Long.MAX_VALUE, null), 404, "error.scope.notFound");
+        assertInvalid(() -> service.withdraw(0L));
+        assertBusiness(() -> service.withdraw(Long.MAX_VALUE), 404, "error.scope.notFound");
         assertThat(rows()).isZero();
     }
 
@@ -452,6 +519,7 @@ class PrivacyPolicyRegistrationServiceTest {
 
         assertBusiness(() -> service.register(signer.sign(POLICY_ID, "r1").request()), 403, "error.accessDenied");
         assertBusiness(() -> service.activate(1L, null), 403, "error.accessDenied");
+        assertBusiness(() -> service.withdraw(1L), 403, "error.accessDenied");
         assertThat(rows()).isZero();
     }
 

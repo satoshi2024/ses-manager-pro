@@ -36,6 +36,7 @@ final class PolicyEnvelopeTestSigner {
     private final Instant now;
     private final Map<String, TrustedAuthority> anchors = new LinkedHashMap<>();
     private final Map<String, PrivateKey> keys = new LinkedHashMap<>();
+    private int signatures;
 
     PolicyEnvelopeTestSigner(String tenantId, Instant now) {
         this.tenantId = tenantId;
@@ -58,16 +59,40 @@ final class PolicyEnvelopeTestSigner {
         return () -> Map.copyOf(anchors);
     }
 
+    /** 登録済みの anchor の一覧（その時点の値）。 */
+    Map<String, TrustedAuthority> anchors() {
+        return Map.copyOf(anchors);
+    }
+
+    /** anchor を registry から外す（鍵の削除の再現。署名の秘密鍵は残す）。 */
+    void remove(String authorityId) {
+        anchors.remove(authorityId + ":" + KEY_ID);
+    }
+
     /** 署名済み envelope（既定の key・登録済みの authority）。 */
     Signed sign(String policyId, String revision) {
         return sign(policyId, revision, AUTHORITY, "requester-test", "approver-test", "TEST_ONLY_RULE");
     }
 
-    /** 値を指定して署名する（{@code authorityId} が未登録なら、登録されていない鍵で署名する）。 */
+    /**
+     * 値を指定して署名する（{@code authorityId} が未登録なら、登録されていない鍵で署名する）。発行日時は署名のたびに1秒ずつ進める
+     * （後に署名した revision ほど新しい。有効化の順序の規則に合わせる）。
+     */
     Signed sign(String policyId, String revision, String authorityId, String requesterId, String approverId,
                 String retentionRule) {
+        return sign(policyId, revision, authorityId, requesterId, approverId, retentionRule,
+                now.minus(Duration.ofHours(1)).plusSeconds(signatures++));
+    }
+
+    /** 発行日時を指定して署名する。 */
+    Signed signIssuedAt(String policyId, String revision, Instant issuedAt) {
+        return sign(policyId, revision, AUTHORITY, "requester-test", "approver-test", "TEST_ONLY_RULE", issuedAt);
+    }
+
+    private Signed sign(String policyId, String revision, String authorityId, String requesterId, String approverId,
+                        String retentionRule, Instant issuedAt) {
         ApprovalEnvelopeMetadata metadata = new ApprovalEnvelopeMetadata("1", authorityId, KEY_ID, tenantId, MODULE,
-                "PRODUCTION", revision, requesterId, approverId, REVOCATION_REF, now.minus(Duration.ofHours(1)),
+                "PRODUCTION", revision, requesterId, approverId, REVOCATION_REF, issuedAt,
                 now.minus(Duration.ofHours(1)), now.plus(Duration.ofDays(30)));
         PolicyApprovalEnvelope unsigned = new PolicyApprovalEnvelope(metadata, policyId, "v1", ELEMENT, ACTION,
                 PROVIDER, "TEST_PURPOSE", "TEST_TRIGGER", retentionRule, "TEST_ONLY_DISPOSITION", new byte[]{0});

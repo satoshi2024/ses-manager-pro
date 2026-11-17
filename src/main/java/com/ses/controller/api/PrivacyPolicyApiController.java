@@ -30,10 +30,12 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET /api/privacy/policies/evaluate}: key を指定した説明照会</li>
  *   <li>{@code POST /api/privacy/policies}: 署名済み envelope の登録（verify-then-store。NF07-REG）</li>
  *   <li>{@code POST /api/privacy/policies/{id}/activate}: 登録者と別の privacy-admin による current の切替（NF07-REG）</li>
+ *   <li>{@code POST /api/privacy/policies/{id}/withdraw}: 有効化されたことの無い CANDIDATE の取下げ（NF07-REG）</li>
  * </ul>
- * 照会の action は {@code privacy.policy.view}、登録・有効化は {@code privacy.policy.manage}（どちらも privacy-admin だけが
+ * 照会の action は {@code privacy.policy.view}、登録・有効化・取下げは {@code privacy.policy.manage}（どちらも privacy-admin だけが
  * 許可）。公開スイッチが OFF なら {@code FeatureSwitchFilter} と service 層の {@link PrivacyAccessGuard} がどちらも同じ本文の
- * 404を返す。登録・有効化は D-01・D-02・D-03 の署名と trust anchor の登録が揃うまで、service が存在しない URL と同じ404を返す。
+ * 404を返す。登録・有効化・取下げは D-01・D-02・D-03 の署名と trust anchor の登録が揃うまで、service が存在しない URL と同じ404を
+ * 返す。
  * 説明照会は policy が未知・未承認・検証不能なら {@code APPROVED_ACTIVE} 以外を返し（fail-closed）、実行認可は付与しない。
  */
 @RestController
@@ -77,6 +79,11 @@ public class PrivacyPolicyApiController {
     public ApiResult<PrivacyPolicyRegistrationResult> activate(
             @PathVariable long id, @RequestBody(required = false) PrivacyPolicyActivationRequest request) {
         return ApiResult.success(registrationService.activate(id, request));
+    }
+
+    @PostMapping("/{id:\\d+}/withdraw")
+    public ApiResult<PrivacyPolicyRegistrationResult> withdraw(@PathVariable long id) {
+        return ApiResult.success(registrationService.withdraw(id));
     }
 
     /** 公開スイッチ OFF・登録の開放の前は存在しないURLと同じ404（{@code FeatureSwitchFilter} と同じ本文）。 */

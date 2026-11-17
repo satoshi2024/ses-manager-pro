@@ -20,6 +20,16 @@ public interface PolicyRegistrationVerifier {
     VerifiedPolicyRegistration verify(String callerTenant, byte[] canonical, byte[] signature);
 
     /**
+     * 保存した envelope の発行日時（canonical bytes を厳格に復号した値）。有効化の順序の比較（current より後に署名された
+     * revision だけを current にする）にだけ使い、trust の判定には使わない（current の鍵が失効・rotation 済みでも、置き換えの
+     * 判定のために読めるようにする）。
+     *
+     * @throws PolicyRegistrationRejectedException canonical bytes を復号できない
+     * @throws SecurityException                   prod profile ではない
+     */
+    java.time.Instant signedIssuedAt(byte[] canonical, byte[] signature);
+
+    /**
      * 登録・有効化を受け付けられる trust の状態か（開放の gate）。trust anchor が1件以上登録され、そのうち1件以上の失効状態が
      * {@link RevocationStatus#ACTIVE} と確認できること。失効 provider が UNKNOWN を返す・例外・未設定なら false（第1期は
      * registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。

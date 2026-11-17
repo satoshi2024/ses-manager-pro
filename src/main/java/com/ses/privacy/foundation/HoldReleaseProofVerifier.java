@@ -117,8 +117,9 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
     public boolean trustReady() {
         try {
             Map<String, HoldReleaseTrustAnchor> anchors = registry == null ? null : registry.anchors();
-            // 解除には発行者と承認者の別々の anchor が要るため、ACTIVE と確認できる anchor が2件以上あるときだけ開く
-            return anchors != null && PrivacyTrustReadiness.activeAnchors(anchors.keySet(), revocations, 2) >= 2;
+            // 解除には authority・主体・鍵を共有しない発行者と承認者の組が要るため、その組が ACTIVE と確認できるときだけ開く
+            // （anchor の件数ではなく組で数える。同じ authority の2つの鍵では開かない。RB-NF07-REG review P3-1）
+            return PrivacyTrustReadiness.releasePairAvailable(anchors, revocations);
         } catch (RuntimeException e) {
             return false;
         }

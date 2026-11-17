@@ -141,6 +141,10 @@ final class ProductionApprovalEnvelopeVerifier {
         if (anchor == null) {
             throw failure(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "production Trust Anchorが登録されていません");
         }
+        if (!Ed25519PublicKeys.isEd25519(anchor.publicKey())) {
+            // adapter が Configured registry を使わずに Ed25519 以外の鍵を返しても anchor として扱わない（RB-NF07-REG review P3-2）
+            throw failure(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "production Trust AnchorがEd25519の鍵ではありません");
+        }
         PurePolicyVerificationKernel.verifyAnchorIdentity(candidate.metadata(), anchor);
         PurePolicyVerificationKernel.verifyAuthorityScope("POLICY", candidate.dataElementId(),
                 candidate.metadata(), candidate.action(), candidate.providerId(), anchor);
