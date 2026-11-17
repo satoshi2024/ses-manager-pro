@@ -438,6 +438,38 @@ class AuthorizationEpochSchemaMySqlTest {
                         LockKey.exclusive(Rank.LIFECYCLE_TASK, f.tenant(), other.taskA()))))));
     }
 
+    /**
+     * W3-10 review P3-1: 要員（rank 7）の SHARED の SQL（{@code SELECT id … WHERE id=? AND tenant_id=? FOR SHARE}）は、
+     * {@code (tenant_id, id)} を覆う二次索引（V169 の {@code idx_engineer_tenant_population}。二次索引は主キーを含む）だけで
+     * 答えられる形である。二次索引の記録にだけS lockが付くと、主キーで更新するwriterは待たない。上の試験では同じ行のS+XがXに
+     * 合わさるため、要員だけをSHAREDで取るplanで、PRIMARYの {@code S,REC_NOT_GAP} がちょうど1件で二次索引のlockが無いこと、
+     * 主キーでXを取るwriterがそのS lockを待つことを確かめる（{@code LOCK_DATA} に依存しない）。
+     */
+    @Test
+    void 要員だけのSHARED_lockはPRIMARYの共有record_lockになり主キーのwriterを待たせる() throws Exception {
+        Fixture f = fixture();
+        LifecycleLockPlan plan = LifecycleLockPlan.from(List.of(LockKey.shared(Rank.ENGINEER, f.tenant(), f.engineerId())));
+
+        Map<String, List<String>> held = readCommitted().execute(status -> {
+            lockExecutor.acquire(plan);
+            long connection = connectionId();
+            Map<String, List<String>> locks = primaryRecordLocks(connection);
+            assertEquals(0L, secondaryRecordLockCount(connection, "t_engineer"),
+                    "要員のSHAREDは二次索引だけのlockにならない");
+            status.setRollbackOnly();
+            return locks;
+        });
+        assertEquals(Map.of("t_engineer", List.of("S,REC_NOT_GAP")), held,
+                "lock planの要員SHAREDはPRIMARYの共有record lock1件だけ");
+
+        // readerはlock planのSHAREDだけを取り、epochは非lockの読取で返す（epoch mapperのFOR SHAREを足さない）
+        assertWriterWaitsForSharedReader("要員（lock planのSHARED）", "t_engineer", () -> {
+            lockExecutor.acquire(plan);
+            return jdbc.queryForObject("SELECT engineer_scope_epoch FROM t_engineer WHERE id = ?", Long.class,
+                    f.engineerId());
+        }, () -> fence.lockForUpdate(AuthorizationEpochAnchor.engineer(f.tenant(), f.engineerId())));
+    }
+
     @Test
     void lock計画の各rankのSQLは実MySQLで実行でき対象行が無ければ依存変更になる() {
         Fixture f = fixture();
@@ -817,6 +849,15 @@ class AuthorizationEpochSchemaMySqlTest {
                     locks.computeIfAbsent(rs.getString(1), ignored -> new ArrayList<>()).add(rs.getString(2));
                 }, connectionId);
         return locks;
+    }
+
+    /** 接続が表の二次索引（PRIMARY以外）に持つrecord lockの件数。 */
+    private long secondaryRecordLockCount(long connectionId, String table) {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_locks dl "
+                + "JOIN performance_schema.threads th ON th.THREAD_ID = dl.THREAD_ID "
+                + "WHERE th.PROCESSLIST_ID = ? AND dl.OBJECT_SCHEMA = DATABASE() AND dl.OBJECT_NAME = ? "
+                + "AND dl.LOCK_TYPE = 'RECORD' AND dl.INDEX_NAME <> 'PRIMARY'", Long.class, connectionId, table);
+        return count == null ? 0L : count;
     }
 
     private static void awaitQuietly(CountDownLatch latch, long seconds) {

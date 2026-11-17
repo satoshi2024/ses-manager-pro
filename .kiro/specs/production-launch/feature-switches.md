@@ -355,7 +355,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 1. `FEATURE_NF01_ENABLED=true` であることを確認する（親がOFFなら子の値は無効）。4.9.5 の確認SQLが全て0件であることを確認する。
 2. `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` に署名の参照を、`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=true` を設定して全停止で再起動する。
 3. 起動ログで `NF01=ON, NF01_DUAL_CONFIRMATION=ON` と上記の署名参照ログを確認する。
-4. 監視: 再試行の予算超過（409 `error.lifecycle.concurrentUpdateRetryExhausted`、WARN `[二者確認] 再試行の予算を使い切りました`）と拒否eventの `reason_code` の発生率を確認する。
+4. 監視: 再試行の予算超過（409 `error.lifecycle.concurrentUpdateRetryExhausted`、WARN `[二者確認] 再試行の予算を使い切りました`）と拒否eventの `reason_code` の発生率を確認する。`reason_code` は 400 の状態の不成立（DUAL以外・案件が ACTIVE でない・タスクが IN_PROGRESS でない）を `INVALID_STATE`、409 の世代不一致・決定済みを `SUBMISSION_STALE`、確認時に提出者の述語が成り立たないのに認可epochが変わっていない場合を `SUBMITTER_PREDICATE_LOST` として分ける（RB-NF01。actor epoch の変化 `AUTHORIZATION_CHANGED_ACTOR` と混ぜない）。提出者に見えない文書（文書ACL外・案件の要員に紐付かない）は存在しない文書と同じ400 `error.document.notFound` で、`reason_code` は `SCOPE_DENIED`・`NOT_FOUND_OR_FOREIGN`（応答では区別しない）。
 
 #### 4.9.4 OFF
 

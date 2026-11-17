@@ -83,7 +83,12 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private LifecycleEvidenceLinkMapper evidenceLinkMapper;
     @Autowired private LifecycleTemplateMapper templateMapper;
+    /** test profileの値を写す元（読むだけで変えない。W3-21b review P3-4）。 */
     @Autowired private com.ses.config.feature.FeatureSwitchProperties featureSwitchProperties;
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private com.ses.config.feature.FeatureSwitches featureSwitches;
+    /** 試験専用のスイッチ設定（共有contextの設定を書き換えない）。 */
+    private com.ses.config.feature.FeatureSwitchProperties switchProperties;
     @Autowired private DocumentLinkMapper documentLinkMapper;
     @Autowired private LifecycleTaskService taskService;
 
@@ -102,6 +107,8 @@ class LifecycleEvidenceVersionSelectionApiTest {
 
     @BeforeEach
     void setUp() {
+        switchProperties = com.ses.config.feature.IsolatedFeatureSwitches.isolate(featureSwitches,
+                featureSwitchProperties);
         long suffix = System.nanoTime();
         adminUser = user("lc_evidence_admin_" + suffix, "管理者");
         // fixtureのテンプレート作成・起票（担当者解決・営業参照）はtenant contextを要求するため、起票者として束縛する
@@ -376,14 +383,10 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @Test
     @DisplayName("テンプレートAPIは二者確認の子スイッチOFFでDUAL_CONFIRMATIONを含む作成を400で拒否しテンプレートを残さない")
     void テンプレートAPIはDUAL_CONFIRMATIONを含む作成を400で拒否する() throws Exception {
-        // test profileは子スイッチON（W3-21bでスイッチ連動に変更）。OFFの拒否をHTTP経路で確かめるため試験の間だけOFFにする
-        boolean dualBefore = featureSwitchProperties.getNf01DualConfirmation().isEnabled();
-        featureSwitchProperties.getNf01DualConfirmation().setEnabled(false);
-        try {
-            postDualTemplateAndExpectRejected();
-        } finally {
-            featureSwitchProperties.getNf01DualConfirmation().setEnabled(dualBefore);
-        }
+        // test profileは子スイッチON（W3-21bでスイッチ連動に変更）。OFFの拒否をHTTP経路で確かめるため、この試験専用の
+        // 設定だけをOFFにする（共有contextの設定は変えない。W3-21b review P3-4）
+        switchProperties.getNf01DualConfirmation().setEnabled(false);
+        postDualTemplateAndExpectRejected();
     }
 
     private void postDualTemplateAndExpectRejected() throws Exception {

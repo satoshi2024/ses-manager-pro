@@ -21,8 +21,9 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
     LifecycleCase selectLatestCompletedResignationWithoutReentry(@Param("tenantId") String tenantId,
                                                                  @Param("engineerId") Long engineerId);
 
-    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
-    LifecycleCase selectByIdForUpdate(@Param("id") Long id);
+    // tenantを持たない案件のlocking read（selectByIdForUpdate(Long)）は置かない（w1b4 review P3-5）。案件行のlockは常に
+    // tenantで照合する selectByIdForUpdateAndTenant（または LifecycleLockMapper#lockLifecycleCase）を使う
+    // （LifecycleMapperTenantLockingReadTest が固定する）。
 
     @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
     LifecycleCase selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);

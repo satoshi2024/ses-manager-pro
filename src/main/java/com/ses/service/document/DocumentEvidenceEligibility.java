@@ -194,6 +194,30 @@ public class DocumentEvidenceEligibility {
                 version.getSizeBytes()));
     }
 
+    /**
+     * 提出者に対して文書の存在を示してよいか（W3-21a review P3-5、計画 §5.9「存在を推測させない」）。文書が指定tenantに
+     * 存在し（論理削除済みを含む）、有効なlinkのうち同じtenantで案件の要員（{@code ENGINEER}）を指すものが1件以上ある
+     * 場合だけ true を返す。不在・他tenant・link無し・他の要員だけを指す文書は false で、呼出側は適格性の詳細を返さずに
+     * 存在しない文書と同じ応答にする。要員を指すlinkに加えて別のlinkがある等のlink形の不適合は {@link #evaluate} の
+     * 条件8が判定する。actorの文書ACL（条件11）は含まない（呼出側が先に判定する）。
+     */
+    public boolean linkedToEngineer(String tenantId, long documentId, long engineerId) {
+        if (tenantId == null || tenantId.isBlank() || documentId <= 0 || engineerId <= 0) {
+            return false;
+        }
+        Document document = documentMapper.selectEvidenceCandidate(documentId, tenantId);
+        if (document == null || !tenantId.equals(document.getTenantId())) {
+            return false;
+        }
+        List<DocumentLink> links = documentLinkMapper.findByDocumentId(documentId);
+        if (links == null) {
+            return false;
+        }
+        return links.stream().anyMatch(link -> link != null && tenantId.equals(link.getTenantId())
+                && ACCEPTED_TARGET_TYPE.equals(link.getTargetType())
+                && Long.valueOf(engineerId).equals(link.getTargetId()));
+    }
+
     private static boolean singleEngineerLink(List<DocumentLink> links, Candidate candidate) {
         if (links == null || links.size() != 1) {
             return false;

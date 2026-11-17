@@ -190,12 +190,17 @@ public class LifecycleDualConfirmationAttemptService {
                 current.organizations());
         long documentEpoch = epochReader.readDocument(tenant, attempt.documentId());
 
-        // 4. 文書適格性と提出者の文書ACL
-        EligibleVersion version = requireEligible(tenant, attempt.documentId(), attempt.documentVersionId(),
-                context.engineerId(), attempt.verifiedVersion());
+        // 4. 提出者の文書ACLと文書の可視性 → 文書適格性。範囲外の文書は適格性の詳細を返さず、存在しない文書と同じ
+        //    400 error.document.notFound にする（coordinatorのdiscoveryと同じ順。W3-21a review P3-5、計画 §5.9）
         if (!documentAclAllows(submitter, context.engineerId())) {
             throw DualConfirmationRejection.of(400, "error.document.notFound", DualConfirmationDenyReason.SCOPE_DENIED);
         }
+        if (!eligibility.linkedToEngineer(tenant, attempt.documentId(), context.engineerId())) {
+            throw DualConfirmationRejection.of(400, "error.document.notFound",
+                    DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
+        }
+        EligibleVersion version = requireEligible(tenant, attempt.documentId(), attempt.documentVersionId(),
+                context.engineerId(), attempt.verifiedVersion());
 
         // 5. 冪等性（現在のタスク世代で検索する）
         LifecycleDualIdempotency stored = findIdempotency(tenant, context.taskId(), generation, OPERATION_SUBMIT,
@@ -206,13 +211,14 @@ public class LifecycleDualConfirmationAttemptService {
 
         // 6. 状態
         requireDualTask(context.task(), 400, "error.lifecycle.invalidStateTransition");
+        // 400 の状態の不成立は INVALID_STATE、409 の世代不一致は SUBMISSION_STALE（W3-21a review P3-8）
         if (!CASE_ACTIVE.equals(context.lcCase().getStatus())) {
             throw DualConfirmationRejection.of(400, "error.lifecycle.caseNotActive",
-                    DualConfirmationDenyReason.SUBMISSION_STALE);
+                    DualConfirmationDenyReason.INVALID_STATE);
         }
         if (!TASK_IN_PROGRESS.equals(context.task().getStatus())) {
             throw DualConfirmationRejection.of(400, "error.lifecycle.invalidStateTransition",
-                    DualConfirmationDenyReason.SUBMISSION_STALE);
+                    DualConfirmationDenyReason.INVALID_STATE);
         }
         if (attempt.requestedTaskGeneration() != generation) {
             throw DualConfirmationRejection.of(409, "error.lifecycle.submissionStale",
@@ -455,17 +461,21 @@ public class LifecycleDualConfirmationAttemptService {
         return confirmer;
     }
 
-    /** 確認時に提出者の述語が成り立たない場合、どの世代が変わったかで拒否理由を細かくする（判定できなければactor）。 */
+    /**
+     * 確認時に提出者の述語が成り立たない場合、どの世代が変わったかで拒否理由を細かくする。fenceに変化が無い（例: 世代に
+     * 現れない述語の変化）か変化を判定できなければ {@code SUBMITTER_PREDICATE_LOST}（actor epochの変化と区別する。
+     * W3-21a review P3-8）。
+     */
     private DualConfirmationDenyReason classifySubmitterChange(String tenant, LifecycleDualSubmission submission,
                                                                ConfirmDependencies current, TaskContext context) {
         try {
             LifecycleAuthorizationFence now = currentFence(tenant, submission.getSubmitterUserId(),
                     context.engineerId(), current.currentSubmitterOrganizations());
             LifecycleAuthorizationFence.Component change = storedFence(submission).firstChange(now);
-            return change == null ? DualConfirmationDenyReason.AUTHORIZATION_CHANGED_ACTOR
+            return change == null ? DualConfirmationDenyReason.SUBMITTER_PREDICATE_LOST
                     : DualConfirmationDenyReason.authorizationChanged(change);
         } catch (RuntimeException unreadable) {
-            return DualConfirmationDenyReason.AUTHORIZATION_CHANGED_ACTOR;
+            return DualConfirmationDenyReason.SUBMITTER_PREDICATE_LOST;
         }
     }
 
@@ -630,9 +640,19 @@ public class LifecycleDualConfirmationAttemptService {
             if (!allDone) {
                 continue;
             }
-            successor.setStatus(TASK_IN_PROGRESS);
-            successor.setUpdatedBy(actorUserId);
-            if (taskMapper.updateById(successor) != 1) {
+            // 書く列（status・updated_by・updated_at・version）だけを指名する（W3-21a review P3-13）。entity全体の updateById は
+            // lock後に読んだ非key列をそのまま書き戻すため、列が増えたときに意図しない上書きの経路になる。
+            int version = successor.getVersion() == null ? 0 : successor.getVersion();
+            LambdaUpdateWrapper<LifecycleTask> promote = new LambdaUpdateWrapper<LifecycleTask>()
+                    .eq(LifecycleTask::getId, successor.getId())
+                    .eq(LifecycleTask::getCaseId, context.caseId())
+                    .eq(LifecycleTask::getStatus, "PENDING")
+                    .eq(LifecycleTask::getVersion, version)
+                    .set(LifecycleTask::getStatus, TASK_IN_PROGRESS)
+                    .set(LifecycleTask::getUpdatedBy, actorUserId)
+                    .set(LifecycleTask::getUpdatedAt, now)
+                    .set(LifecycleTask::getVersion, version + 1);
+            if (taskMapper.update(null, promote) != 1) {
                 throw new LifecycleLockPlan.DependencyChangedException();
             }
             lifecycleEventMapper.insert(LifecycleEvent.builder()
@@ -742,9 +762,10 @@ public class LifecycleDualConfirmationAttemptService {
         return result.version();
     }
 
+    /** DUAL以外のタスクは初回要求の状態の不成立（400 {@code INVALID_STATE}。W3-21a review P3-8）。 */
     private static void requireDualTask(LifecycleTask task, int status, String messageKey) {
         if (!EVIDENCE_TYPE_DUAL.equals(task.getEvidenceType())) {
-            throw DualConfirmationRejection.of(status, messageKey, DualConfirmationDenyReason.SUBMISSION_STALE);
+            throw DualConfirmationRejection.of(status, messageKey, DualConfirmationDenyReason.INVALID_STATE);
         }
     }
 

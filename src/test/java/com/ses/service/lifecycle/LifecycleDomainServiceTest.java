@@ -392,6 +392,69 @@ class LifecycleDomainServiceTest {
     }
 
     @Test
+    @DisplayName("W3-02 P3-3: 種別は正規の表記との完全一致だけを受け付け、テンプレートの種別と一致しない起票も拒否する")
+    void 種別の表記揺れとテンプレートの種別の不一致は400で拒否し案件を作らない() {
+        LifecycleTemplateDto created = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("RESIGNATION")
+                .name("種別検査用退社フロー-" + System.nanoTime())
+                .validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder()
+                        .taskCode("TYPE_CHECK")
+                        .taskName("種別検査")
+                        .assigneeRule("ROLE")
+                        .assigneeRuleValue("HR")
+                        .sortOrder(10)
+                        .build()))
+                .build(), adminUser.getId());
+        Long casesBefore = caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
+                .eq(LifecycleCase::getEngineerId, testEngineer.getId()));
+
+        // DBの照合順序（ci・PAD SPACE）では退社案件に数えられるが、Java側の完全一致では退社gateを通らない表記揺れ
+        for (String type : java.util.Arrays.asList("resignation", "RESIGNATION ", " RESIGNATION", "Resignation",
+                "ＲＥＳＩＧＮＡＴＩＯＮ", "OFFBOARDING", "", null)) {
+            BusinessException ex = assertThrows(BusinessException.class, () -> caseService.createCase(hrUser.getId(),
+                    CreateLifecycleCaseCommand.builder()
+                            .engineerId(testEngineer.getId())
+                            .lifecycleType(type)
+                            .templateId(created.getId())
+                            .anchorDate(LocalDate.now())
+                            .build()), String.valueOf(type));
+            assertEquals(400, ex.getCode(), String.valueOf(type));
+            assertEquals("error.lifecycle.invalidLifecycleType", ex.getMessageKey(), String.valueOf(type));
+        }
+
+        // 退社のテンプレートを他の種別で起票すると、退社のタスクを持ちながら完了時の退社gateを通らない案件になる
+        BusinessException mismatch = assertThrows(BusinessException.class, () -> caseService.createCase(hrUser.getId(),
+                CreateLifecycleCaseCommand.builder()
+                        .engineerId(testEngineer.getId())
+                        .lifecycleType("ASSIGNMENT")
+                        .templateId(created.getId())
+                        .anchorDate(LocalDate.now())
+                        .build()));
+        assertEquals(400, mismatch.getCode());
+        assertEquals("error.lifecycle.templateTypeMismatch", mismatch.getMessageKey());
+        assertEquals(casesBefore, caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
+                .eq(LifecycleCase::getEngineerId, testEngineer.getId())), "拒否した起票は案件を作らない");
+
+        // テンプレートの作成も正規の表記だけを受け付ける
+        BusinessException template = assertThrows(BusinessException.class, () -> templateService.createTemplate(
+                LifecycleTemplateDto.builder()
+                        .templateType("resignation")
+                        .name("種別検査用表記揺れ-" + System.nanoTime())
+                        .validFrom(LocalDate.now().minusDays(1))
+                        .tasks(List.of(LifecycleTemplateTaskDto.builder()
+                                .taskCode("TYPE_CHECK")
+                                .taskName("種別検査")
+                                .assigneeRule("ROLE")
+                                .assigneeRuleValue("HR")
+                                .sortOrder(10)
+                                .build()))
+                        .build(), adminUser.getId()));
+        assertEquals(400, template.getCode());
+        assertEquals("error.lifecycle.invalidLifecycleType", template.getMessageKey());
+    }
+
+    @Test
     @DisplayName("F2-4: 退社ゲート（ResignationGateChecker）と未完了阻害タスクのブロック")
     void testResignationGateAndBlockingTasks() {
         LifecycleTemplateDto tpl = LifecycleTemplateDto.builder()

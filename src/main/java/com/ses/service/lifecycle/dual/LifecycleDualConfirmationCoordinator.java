@@ -408,6 +408,7 @@ public class LifecycleDualConfirmationCoordinator {
                 deny.resolved(context, discoveredGeneration(actor.tenantId(), context), null);
                 preAuthorizeSubmitter(actor, channel, context);
                 requireDualTask(context);
+                requireVisibleToSubmitter(actor, documentId, context.engineerId());
                 EligibleVersion version = requireEligibleAtDiscovery(actor.tenantId(), documentId, documentVersionId,
                         context.engineerId());
                 requireStorageMatches(version);
@@ -522,6 +523,24 @@ public class LifecycleDualConfirmationCoordinator {
         }
     }
 
+    /**
+     * 提出者に見えない文書は、存在しない文書と同じ400 {@code error.document.notFound} にする（W3-21a review P3-5、
+     * 計画 §5.9「文書・版が無い、他tenant、版が別文書、提出者の文書ACL外」の行）。適格性（種別・状態・hold・廃棄申請・
+     * link形・版）の判定より前に行い、範囲外の文書について「無い」「SKILL_SHEETでない」「hold・廃棄申請がある」
+     * 「他の要員の文書」を応答で区別させない。拒否eventのreasonは、文書ACL外を {@code SCOPE_DENIED}、文書が無い・他tenant・
+     * 案件の要員を指すlinkが無いを {@code NOT_FOUND_OR_FOREIGN} に分けて残す（応答のHTTP状態とmessage keyは同じ）。
+     * attemptもlock下で同じ順に判定する。
+     */
+    private void requireVisibleToSubmitter(ExplicitActor actor, long documentId, long engineerId) {
+        if (!documentAclAllows(actor, engineerId)) {
+            throw DualConfirmationRejection.of(400, "error.document.notFound", DualConfirmationDenyReason.SCOPE_DENIED);
+        }
+        if (!eligibility.linkedToEngineer(actor.tenantId(), documentId, engineerId)) {
+            throw DualConfirmationRejection.of(400, "error.document.notFound",
+                    DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
+        }
+    }
+
     private EligibleVersion requireEligibleAtDiscovery(String tenant, long documentId, long documentVersionId,
                                                        long engineerId) {
         DocumentEvidenceEligibility.Result result = eligibility.evaluate(
@@ -552,7 +571,7 @@ public class LifecycleDualConfirmationCoordinator {
         }
     }
 
-    /** DUAL以外のタスクは400（照会でも使うため業務例外で投げる。提出では拒否eventの reason が SUBMISSION_STALE になる）。 */
+    /** DUAL以外のタスクは400（照会でも使うため業務例外で投げる。提出では拒否eventの reason が INVALID_STATE になる）。 */
     private void requireDualTask(TaskContext context) {
         if (!LifecycleDualConfirmationAttemptService.EVIDENCE_TYPE_DUAL.equals(context.task().getEvidenceType())) {
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition");

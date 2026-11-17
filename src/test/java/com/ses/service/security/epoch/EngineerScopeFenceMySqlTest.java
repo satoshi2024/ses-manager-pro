@@ -14,6 +14,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
+import com.ses.service.OrganizationService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.LegalEntityContextService;
 import com.ses.test.InnoDbRecordLockWaits;
@@ -79,6 +80,8 @@ import static org.mockito.Mockito.when;
  *       actorとengineerが各+1（§11 F-5）。</li>
  *   <li>並行する利用者削除がcommitした後の紐付けは、共有lock下の読み直しで拒否する（W3-15 review P3-8）。</li>
  *   <li>上限では409で業務更新ごとrollbackし、呼出側が409を握りつぶしてもcommitできない。</li>
+ *   <li>要員の所属変更は、FK検査が付ける統合先の組織行の共有lock（rank 6 S）を要員行（rank 7 X）より先に取る。統合
+ *       （6 X → 7 X）と同じ要員・同じ組織で両順序に競合させても、待ちは組織行で起き循環待ちにならない（W3-16b review P3-5）。</li>
  * </ul>
  *
  * <p>計画 §6.1 M4 の「契約の sales_user_id NULL→B でepochが変わらない」は、契約のwriterがepochのanchorに触れないことを
@@ -116,6 +119,7 @@ class EngineerScopeFenceMySqlTest {
     @Autowired private EngineerSalesService engineerSalesService;
     @Autowired private EngineerAccountLinkService engineerAccountLinkService;
     @Autowired private EngineerService engineerService;
+    @Autowired private OrganizationService organizationService;
     @Autowired private AuthorizationEpochReader reader;
     @Autowired private EngineerMapper engineerMapper;
     @Autowired private SysUserMapper sysUserMapper;
@@ -518,6 +522,198 @@ class EngineerScopeFenceMySqlTest {
 
         assertEquals(before + 1, read);
         assertEquals(0, sysUserMapper.selectById(linked.getId()).getStatus());
+    }
+
+    // ===== W3-16b review P3-5: 要員writerはFK検査の組織行（rank 6 S）を要員行（rank 7 X）より先に取る =====
+
+    /**
+     * 統合（6 X{統合元・統合先} → 7 X{統合元の要員}）が先に統合先をlockしている間、同じ要員を統合先へ移す所属変更は、
+     * 統合先の組織行の共有lock（{@code OrganizationShareLock}、rank 6 S）で待ち、要員行には1件もlockを持たない。
+     * 旧順序（7 X{要員} → UPDATE の FK 検査で 6 S{統合先}）では、統合が要員行で待って循環待ち（1213）になり得た
+     * （W3-16a後半 review P3-1）。統合のcommit後、所属変更は要員の版の競合で409になり、1213・500にならない。
+     */
+    @Test
+    void 統合が先に統合先をlockすると要員の所属変更は組織行の共有lockで待ち要員行を持たず循環待ちにならない()
+            throws Exception {
+        OrganizationMove f = organizationMove();
+        int mergeVersion = organizationVersion(f.source());
+        String label = "統合先行 × 要員の所属変更";
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch mergeDone = new CountDownLatch(1);
+        CountDownLatch releaseMerge = new CountDownLatch(1);
+        AtomicLong mergeConnection = new AtomicLong();
+        AtomicLong moveConnection = new AtomicLong();
+        try {
+            Future<Object> merge = pool.submit(() -> {
+                bindContexts();
+                return EpochFenceMySqlSupport.readCommitted(transactionManager).execute(status -> {
+                    mergeConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
+                    organizationService.merge(f.source(), f.target(), mergeVersion);
+                    mergeDone.countDown();
+                    awaitQuietly(releaseMerge);
+                    return null;
+                });
+            });
+            if (!mergeDone.await(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS) || merge.isDone()) {
+                fail(label + ": 統合が書込みを終えてcommit前に止まらなかった: " + outcome(merge));
+            }
+            Future<Object> move = pool.submit(() -> {
+                bindContexts();
+                return EpochFenceMySqlSupport.readCommitted(transactionManager).execute(status -> {
+                    moveConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
+                    return engineerService.updateWithStatusGuard(f.moveTo(f.target()));
+                });
+            });
+            InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc,
+                    () -> moveConnection.get() > 0 ? moveConnection.get() : null, mergeConnection::get,
+                    "m_organization_unit", "PRIMARY", EpochFenceMySqlSupport.SHARED_RECORD_MODES,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.primaryKey(f.target()),
+                    TimeUnit.SECONDS.toMillis(EpochFenceMySqlSupport.WAIT_SECONDS), () -> {
+                        if (move.isDone()) {
+                            fail(label + ": 所属変更が統合先の組織行で待たずに終了した: " + outcome(move));
+                        }
+                    }, label);
+            assertEquals(0L, grantedRecordLockCount(moveConnection.get(), "t_engineer"),
+                    label + ": 所属変更は組織行で待つ間、要員行のlockを1件も持たない（6 S が 7 X より先）");
+            assertFalse(move.isDone(), label + ": 所属変更は統合のcommitまで待つこと");
+
+            releaseMerge.countDown();
+            merge.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> move.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS));
+            BusinessException conflict = assertInstanceOf(BusinessException.class, failure.getCause(),
+                    label + ": 1213・1205ではなく版の競合で拒否される");
+            assertEquals(409, conflict.getCode());
+            assertEquals("error.common.optimisticLock", conflict.getMessageKey());
+        } finally {
+            releaseMerge.countDown();
+            pool.shutdownNow();
+        }
+        assertEquals(f.target(), jdbc.queryForObject("SELECT merged_into FROM m_organization_unit WHERE id = ?",
+                Long.class, f.source()), label + ": 統合は成功する");
+        assertEquals(f.target(), jdbc.queryForObject("SELECT organization_id FROM t_engineer WHERE id = ?",
+                Long.class, f.engineer()), label + ": 要員は統合で統合先へ移る");
+    }
+
+    /**
+     * 所属変更が先に統合先の組織行を共有lock（6 S）し要員行を排他lock（7 X）している間、統合は統合先の組織行（6 X）で待ち、
+     * 要員行へ進まない。所属変更のcommit後に統合が進み、両方が成功する（循環待ちにならない）。
+     */
+    @Test
+    void 要員の所属変更が先に統合先を共有lockすると統合は組織行で待ち循環待ちにならず両方成功する() throws Exception {
+        OrganizationMove f = organizationMove();
+        int mergeVersion = organizationVersion(f.source());
+        String label = "要員の所属変更先行 × 統合";
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch moveDone = new CountDownLatch(1);
+        CountDownLatch releaseMove = new CountDownLatch(1);
+        AtomicLong mergeConnection = new AtomicLong();
+        AtomicLong moveConnection = new AtomicLong();
+        try {
+            Future<Object> move = pool.submit(() -> {
+                bindContexts();
+                return EpochFenceMySqlSupport.readCommitted(transactionManager).execute(status -> {
+                    moveConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
+                    engineerService.updateWithStatusGuard(f.moveTo(f.target()));
+                    moveDone.countDown();
+                    awaitQuietly(releaseMove);
+                    return null;
+                });
+            });
+            if (!moveDone.await(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS) || move.isDone()) {
+                fail(label + ": 所属変更が書込みを終えてcommit前に止まらなかった: " + outcome(move));
+            }
+            assertFalse(InnoDbRecordLockWaits.grantedRecordLocks(jdbc, moveConnection.get(), "m_organization_unit",
+                    "PRIMARY", EpochFenceMySqlSupport.SHARED_RECORD_MODES).isEmpty(),
+                    label + ": 所属変更は統合先の組織行を共有lockしている（6 S）");
+            assertFalse(InnoDbRecordLockWaits.grantedRecordLocks(jdbc, moveConnection.get(), "t_engineer",
+                    "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES).isEmpty(),
+                    label + ": 所属変更は要員行を排他lockしている（7 X）");
+            Future<Object> merge = pool.submit(() -> {
+                bindContexts();
+                return EpochFenceMySqlSupport.readCommitted(transactionManager).execute(status -> {
+                    mergeConnection.set(EpochFenceMySqlSupport.connectionId(jdbc));
+                    return organizationService.merge(f.source(), f.target(), mergeVersion);
+                });
+            });
+            InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc,
+                    () -> mergeConnection.get() > 0 ? mergeConnection.get() : null, moveConnection::get,
+                    "m_organization_unit", "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    EpochFenceMySqlSupport.SHARED_RECORD_MODES, InnoDbRecordLockWaits.primaryKey(f.target()),
+                    TimeUnit.SECONDS.toMillis(EpochFenceMySqlSupport.WAIT_SECONDS), () -> {
+                        if (merge.isDone()) {
+                            fail(label + ": 統合が統合先の組織行で待たずに終了した: " + outcome(merge));
+                        }
+                    }, label);
+            assertEquals(0L, grantedRecordLockCount(mergeConnection.get(), "t_engineer"),
+                    label + ": 統合は組織行で待つ間、要員行のlockを持たない");
+            assertFalse(merge.isDone(), label + ": 統合は所属変更のcommitまで待つこと");
+
+            releaseMove.countDown();
+            move.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            merge.get(EpochFenceMySqlSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+        } finally {
+            releaseMove.countDown();
+            pool.shutdownNow();
+        }
+        assertEquals(f.target(), jdbc.queryForObject("SELECT organization_id FROM t_engineer WHERE id = ?",
+                Long.class, f.engineer()), label + ": 所属変更は成功する");
+        assertEquals(f.target(), jdbc.queryForObject("SELECT merged_into FROM m_organization_unit WHERE id = ?",
+                Long.class, f.source()), label + ": 統合も成功する");
+    }
+
+    /** 統合元に所属する要員（会計履歴つき）と、統合先（どちらも親を持たない組織。親子履歴つき）。 */
+    private record OrganizationMove(long source, long target, long engineer, int engineerVersion) {
+        Engineer moveTo(long organizationId) {
+            Engineer moved = Engineer.builder().organizationId(organizationId).build();
+            moved.setId(engineer);
+            moved.setVersion(engineerVersion);
+            return moved;
+        }
+    }
+
+    private OrganizationMove organizationMove() {
+        long source = insertOrganizationWithHistory();
+        long target = insertOrganizationWithHistory();
+        long engineer = insertEngineer(null);
+        jdbc.update("UPDATE t_engineer SET organization_id = ? WHERE id = ?", source, engineer);
+        engineerAccountingHistoryMapper.insert(EngineerAccountingHistory.builder().engineerId(engineer)
+                .organizationId(source).validFrom(LocalDate.now()).validTo(null).build());
+        return new OrganizationMove(source, target, engineer, version(engineer));
+    }
+
+    /** 統合が祖先鎖を辿れるよう、初版の親子履歴（親なし）も作る（各文はautocommit）。 */
+    private long insertOrganizationWithHistory() {
+        long id = insertOrganization();
+        jdbc.update("INSERT INTO t_organization_relation_history (organization_id, parent_id, status, valid_from) "
+                + "VALUES (?, NULL, '有効', '2020-01-01')", id);
+        return id;
+    }
+
+    private int organizationVersion(long organizationId) {
+        Integer version = jdbc.queryForObject("SELECT version FROM m_organization_unit WHERE id = ?", Integer.class,
+                organizationId);
+        return version == null ? 0 : version;
+    }
+
+    /** 接続が表に持つ付与済みのrecord lockの件数（索引・modeを問わない。明示lockだけを数える前提の試験で使う）。 */
+    private long grantedRecordLockCount(long connectionId, String table) {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_locks dl "
+                + "JOIN performance_schema.threads th ON th.THREAD_ID = dl.THREAD_ID "
+                + "WHERE th.PROCESSLIST_ID = ? AND dl.OBJECT_SCHEMA = DATABASE() AND dl.OBJECT_NAME = ? "
+                + "AND dl.LOCK_TYPE = 'RECORD' AND dl.LOCK_STATUS = 'GRANTED'", Long.class, connectionId, table);
+        return count == null ? 0L : count;
+    }
+
+    private static String outcome(Future<?> future) {
+        if (!future.isDone()) {
+            return "running";
+        }
+        try {
+            return "result=" + future.get();
+        } catch (Exception e) {
+            return "failure=" + e;
+        }
     }
 
     // ===== helper =====

@@ -6,8 +6,16 @@ import com.ses.service.lifecycle.evidence.LifecycleAuthorizationFence;
  * 拒否eventの {@code reason_code}（NF01細粒度epoch計画 §5.8）。値は固定のcodeだけで、文書title・storage key・
  * 業務comment・client指定のhash・氏名を含めない。
  *
- * <p>状態の不成立（DUAL以外のtask、案件・タスクの状態、世代不一致、supersede済み・決定済み）は計画の一覧に専用codeが無いため
- * {@link #SUBMISSION_STALE} にまとめる（HTTPの状態とmessage keyは §5.9 のとおり分ける）。</p>
+ * <p>状態の拒否は2つに分ける（W3-21a review P3-8。{@code reason_code} にDBのCHECKは無く、codeの追加にDDLは要らない）:</p>
+ * <ul>
+ *   <li>{@link #INVALID_STATE}: 400 で返す初回要求の状態の不成立（DUAL以外のtask、案件が ACTIVE でない、タスクが
+ *       IN_PROGRESS でない。message key は {@code error.lifecycle.invalidStateTransition}・{@code caseNotActive}）。</li>
+ *   <li>{@link #SUBMISSION_STALE}: 409 {@code error.lifecycle.submissionStale}（世代不一致・supersede済み・決定済み・
+ *       確認時のcase/task状態の不成立）。</li>
+ * </ul>
+ * <p>確認時に提出者の述語が成り立たないのにfence（global・actor・engineer・組織）が変わっていない場合
+ * （または変化を判定できない場合）は {@link #SUBMITTER_PREDICATE_LOST} とし、actor epochの変化
+ * （{@link #AUTHORIZATION_CHANGED_ACTOR}）と区別する（監視で誤読しない）。</p>
  */
 public enum DualConfirmationDenyReason {
     NOT_FOUND_OR_FOREIGN,
@@ -21,12 +29,14 @@ public enum DualConfirmationDenyReason {
     EVIDENCE_VERSION_NOT_CLEAN,
     EVIDENCE_UNAVAILABLE,
     STORAGE_INTEGRITY,
+    INVALID_STATE,
     SUBMISSION_STALE,
     AUTHORIZATION_CHANGED_GLOBAL,
     AUTHORIZATION_CHANGED_ACTOR,
     AUTHORIZATION_CHANGED_ENGINEER,
     AUTHORIZATION_CHANGED_ORGANIZATION,
     AUTHORIZATION_CHANGED_DOCUMENT,
+    SUBMITTER_PREDICATE_LOST,
     IDEMPOTENCY_CONFLICT,
     RETRY_EXHAUSTED,
     EPOCH_UNAVAILABLE;
@@ -58,8 +68,8 @@ public enum DualConfirmationDenyReason {
             case "error.lifecycle.evidenceDocumentTypeUnsupported" -> EVIDENCE_TYPE_UNSUPPORTED;
             case "error.lifecycle.evidenceDocumentTargetUnsupported" -> EVIDENCE_TARGET_UNSUPPORTED;
             case "error.lifecycle.evidenceDocumentUnavailable" -> EVIDENCE_UNAVAILABLE;
-            case "error.lifecycle.submissionStale", "error.lifecycle.invalidStateTransition",
-                 "error.lifecycle.caseNotActive" -> SUBMISSION_STALE;
+            case "error.lifecycle.invalidStateTransition", "error.lifecycle.caseNotActive" -> INVALID_STATE;
+            case "error.lifecycle.submissionStale" -> SUBMISSION_STALE;
             case "error.lifecycle.idempotencyConflict" -> IDEMPOTENCY_CONFLICT;
             default -> SCOPE_DENIED;
         };

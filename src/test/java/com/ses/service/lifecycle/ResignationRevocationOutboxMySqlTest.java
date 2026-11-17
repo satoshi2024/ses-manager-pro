@@ -6,6 +6,7 @@ import com.ses.mapper.*;
 import com.ses.service.*;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.provider.ExternalAccountProviderClient;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +31,10 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/** M10 / §5.13: 実MySQLの完了commit、全法人登録、送信CAS、再入社とpoll除外。Runner専用。 */
+/**
+ * M10 / §5.13: 実MySQLの完了commit、全法人登録、送信CAS、再入社とpoll除外、外部アカウントの事後登録と退社完了の
+ * 両順序（G4 review P3-9(4)。要員行での待ちを {@link InnoDbRecordLockWaits} で実測する）。Runner専用。
+ */
 @Tag("mysql")
 @Testcontainers
 @SpringBootTest(properties = {"app.features.nf01.enabled=true", "app.security.oidc.tenant-id="})
@@ -214,6 +218,129 @@ class ResignationRevocationOutboxMySqlTest {
                     .isEqualTo("lifecycle-resign:100:" + unknown.getId() + ":g2");
             status.setRollbackOnly();
         });
+    }
+
+    // ===== G4 review P3-9(4): 外部アカウントの事後登録 × 退社完了の両順序（同じ要員X。InnoDbRecordLockWaits で実測） =====
+
+    /**
+     * 退社完了が要員行（rank 7 X）を持ったままcommit前に止まっている間、同じ要員への外部アカウントの事後登録は
+     * 要員行で待つ（登録serviceは要員行をX lockしてから退社の完了を読む）。完了のcommit後に登録が進み、完了済みの
+     * 退社を見て失効要求（世代 g1）を同じ登録で作る（取りこぼさない）。
+     */
+    @Test void 退社完了が要員行をlockしている間の事後登録は要員行で待ち完了のcommit後に失効要求を登録する() throws Exception {
+        when(legalContext.requireCurrentLegalEntityId()).thenReturn(2L);
+        LifecycleCase resignation = createCase("RESIGNATION", "ACTIVE");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch completed = new CountDownLatch(1), release = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong completer = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicLong registrar = new java.util.concurrent.atomic.AtomicLong();
+        try {
+            Future<Object> completion = pool.submit(() -> AccountingTenantContextHolder.runWithTenant(tenant, () ->
+                    readCommitted().execute(status -> {
+                        completer.set(connectionId());
+                        lifecycle.completeCase(resignation.getId(), actor.getId());
+                        completed.countDown();
+                        awaitQuietly(release);
+                        return null;
+                    })));
+            assertThat(completed.await(20, TimeUnit.SECONDS)).as("完了がcommit前に止まる").isTrue();
+            assertThat(completion.isDone()).isFalse();
+            Future<ExternalAccountReference> registration = pool.submit(() -> AccountingTenantContextHolder
+                    .runWithTenant(tenant, () -> readCommitted().execute(status -> {
+                        registrar.set(connectionId());
+                        return accounts.registerAccountReference(system.getId(), "synthetic-after@example.invalid",
+                                "ENGINEER", engineer.getId(), "MEMBER", actor.getId());
+                    })));
+            InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc, () -> registrar.get() > 0 ? registrar.get() : null,
+                    completer::get, "t_engineer", "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.primaryKey(engineer.getId()),
+                    TimeUnit.SECONDS.toMillis(20), () -> {
+                        if (registration.isDone()) fail("事後登録が退社完了の要員行を待たずに終了した");
+                    }, "退社完了先行 × 事後登録");
+            assertThat(registration.isDone()).isFalse();
+            release.countDown();
+            completion.get(20, TimeUnit.SECONDS);
+            ExternalAccountReference late = registration.get(20, TimeUnit.SECONDS);
+            assertThat(cases.selectById(resignation.getId()).getStatus()).isEqualTo("COMPLETED");
+            assertThat(references.selectById(late.getId()).getIdempotencyKey())
+                    .isEqualTo("lifecycle-resign:" + resignation.getId() + ":" + late.getId() + ":g1");
+        } finally { release.countDown(); pool.shutdownNow(); }
+    }
+
+    /**
+     * 事後登録が要員行（rank 7 X）を持ったままcommit前に止まっている間、同じ要員の退社完了は要員行で待つ。登録のcommit後、
+     * 完了はlock後の依存先（未失効の外部アカウント）がdiscoveryと違うため409で止まり、案件を完了しない（lockを途中で足さない。
+     * 計画 §3.5 規則1）。再実行した完了は登録済みの口座も失効要求に含める（取りこぼさない）。
+     */
+    @Test void 事後登録が要員行をlockしている間の退社完了は要員行で待ち登録のcommit後は409になり再実行で失効要求に含める()
+            throws Exception {
+        when(legalContext.requireCurrentLegalEntityId()).thenReturn(2L);
+        LifecycleCase resignation = createCase("RESIGNATION", "ACTIVE");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch registered = new CountDownLatch(1), release = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong completer = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicLong registrar = new java.util.concurrent.atomic.AtomicLong();
+        ExternalAccountReference late;
+        try {
+            Future<ExternalAccountReference> registration = pool.submit(() -> AccountingTenantContextHolder
+                    .runWithTenant(tenant, () -> readCommitted().execute(status -> {
+                        registrar.set(connectionId());
+                        ExternalAccountReference row = accounts.registerAccountReference(system.getId(),
+                                "synthetic-before@example.invalid", "ENGINEER", engineer.getId(), "MEMBER", actor.getId());
+                        registered.countDown();
+                        awaitQuietly(release);
+                        return row;
+                    })));
+            assertThat(registered.await(20, TimeUnit.SECONDS)).as("登録がcommit前に止まる").isTrue();
+            assertThat(registration.isDone()).isFalse();
+            Future<Object> completion = pool.submit(() -> AccountingTenantContextHolder.runWithTenant(tenant, () ->
+                    readCommitted().execute(status -> {
+                        completer.set(connectionId());
+                        lifecycle.completeCase(resignation.getId(), actor.getId());
+                        return null;
+                    })));
+            InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc, () -> completer.get() > 0 ? completer.get() : null,
+                    registrar::get, "t_engineer", "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.primaryKey(engineer.getId()),
+                    TimeUnit.SECONDS.toMillis(20), () -> {
+                        if (completion.isDone()) fail("退社完了が事後登録の要員行を待たずに終了した");
+                    }, "事後登録先行 × 退社完了");
+            assertThat(completion.isDone()).isFalse();
+            release.countDown();
+            late = registration.get(20, TimeUnit.SECONDS);
+            Throwable failure = catchThrowable(() -> completion.get(20, TimeUnit.SECONDS));
+            assertThat(failure).as("完了は依存先の変化で拒否される（1213・1205ではない）").isInstanceOf(ExecutionException.class);
+            assertThat(failure.getCause()).isInstanceOf(com.ses.common.exception.BusinessException.class);
+            com.ses.common.exception.BusinessException conflict = (com.ses.common.exception.BusinessException) failure.getCause();
+            assertThat(conflict.getCode()).isEqualTo(409);
+            assertThat(conflict.getMessageKey()).isEqualTo("error.common.optimisticLock");
+        } finally { release.countDown(); pool.shutdownNow(); }
+        assertThat(cases.selectById(resignation.getId()).getStatus()).isEqualTo("ACTIVE");
+        assertThat(references.selectById(late.getId()).getIdempotencyKey()).as("登録時点では退社が未完了").isNull();
+
+        AccountingTenantContextHolder.runWithTenant(tenant, () -> lifecycle.completeCase(resignation.getId(), actor.getId()));
+        assertThat(cases.selectById(resignation.getId()).getStatus()).isEqualTo("COMPLETED");
+        assertThat(references.selectById(late.getId()).getIdempotencyKey())
+                .isEqualTo("lifecycle-resign:" + resignation.getId() + ":" + late.getId() + ":g1");
+    }
+
+    private TransactionTemplate readCommitted() {
+        TransactionTemplate template = new TransactionTemplate(manager);
+        template.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        return template;
+    }
+
+    private long connectionId() {
+        Long id = jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class);
+        return id == null ? 0L : id;
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            if (!latch.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("解放待ちが時間切れになりました");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private ExternalAccountReference account(Long legal) {

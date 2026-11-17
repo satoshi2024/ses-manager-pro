@@ -199,6 +199,38 @@ class DocumentEvidenceEligibilityTest {
         assertNull(Result.denied(Verdict.DOCUMENT_UNAVAILABLE).version());
     }
 
+    /**
+     * W3-21a review P3-5: 提出の discovery が適格性の詳細を返してよいのは、文書が tenant にあり案件の要員を指す link を
+     * 持つ場合だけ。不在・他tenant・link無し・他の要員だけを指す文書は false（存在しない文書と同じ応答にする）。
+     * 論理削除・hold・SKILL_SHEET以外・link形の不適合は可視性では拒否しない（適格性の条件が判定する）。
+     */
+    @Test
+    void 文書の可視性は案件の要員を指すlinkがある同tenantの文書だけを真とする() {
+        assertTrue(eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID));
+        // 適格性では拒否されるが、要員の文書なので可視（詳細の応答を返してよい）
+        document.setDeletedFlag(1);
+        document.setLegalHoldFlag(1);
+        document.setDocumentType("CONTRACT");
+        links.add(link(TENANT, "ASSET_ASSIGNMENT", 99L));
+        assertTrue(eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID));
+
+        setUp();
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID + 1), "他の要員の文書");
+        links.set(0, link(TENANT, "ASSET_ASSIGNMENT", ENGINEER_ID));
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "要員以外を指すlink");
+        links.set(0, link("tenant-other", "ENGINEER", ENGINEER_ID));
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantのlink");
+        links.clear();
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "linkが無い");
+
+        setUp();
+        document.setTenantId("tenant-other");
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantの文書");
+        document = null;
+        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "文書が無い");
+        assertEquals(false, eligibility.linkedToEngineer(" ", DOCUMENT_ID, ENGINEER_ID), "tenantが空");
+    }
+
     private void expect(Verdict expected, Consumer<Void> mutation) {
         setUp();
         mutation.accept(null);
