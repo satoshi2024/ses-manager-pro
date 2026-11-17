@@ -364,6 +364,14 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                         .content(objectMapper.writeValueAsString(csatReq)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
+
+        // 詳細は回答した評価と自由記述を返す（portalの詳細モーダルが表示する。RB-I18N review P3-7）
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId())
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.csatScore").value(5))
+                .andExpect(jsonPath("$.data.csatComment").value("非常に迅速で助かりました"))
+                .andExpect(jsonPath("$.data.csatAnswerable").value(false));
     }
 
     @Test

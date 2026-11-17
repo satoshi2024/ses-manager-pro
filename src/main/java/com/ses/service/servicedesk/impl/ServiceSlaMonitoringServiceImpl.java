@@ -95,8 +95,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             boolean resolveFirstRetryPending = hasRetry(retryRows, "RESOLVE", "FIRST");
             // 再送待ちの超過継続がある間は、新しい時間枠の超過継続を出さない。再送は台帳のdedupe keyのまま送り、
             // 送れた時点を次の超過継続（30分後）の起点にする（RB-NF02 delta review D-P3-1）。
-            boolean responseContinuingRetryPending = hasRetry(retryRows, "RESPONSE", "CONTINUING");
-            boolean resolveContinuingRetryPending = hasRetry(retryRows, "RESOLVE", "CONTINUING");
+            // 再送の上限に達した行は待ちとして数えない（下で閉じ、次の時間枠の超過継続を出す）。宛先の一部が失敗し続けると、
+            // 同じkeyの再送は届いた宛先をdedupeするため、上限が無いと超過の間ずっと健全な宛先へ継続通知が届かない（RB-I18N review P3-4）。
+            boolean responseContinuingRetryPending = hasPendingContinuingRetry(retryRows, "RESPONSE");
+            boolean resolveContinuingRetryPending = hasPendingContinuingRetry(retryRows, "RESOLVE");
 
             // 1. 初回応答期限超過チェック
             if (!responseWasBreached && clk.getFirstRespondedAt() == null
@@ -160,7 +162,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                     obsoleteRetries.add(retry);
                     continue;
                 }
-                if (isSupersededContinuingRetry(retry, retryRows)) {
+                if (isSupersededContinuingRetry(retry, retryRows) || isExhaustedContinuingRetry(retry)) {
                     supersededRetries.add(retry);
                     continue;
                 }
@@ -355,7 +357,23 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 && retry.getBreachType().equals(other.getBreachType()) && other.getId() > retry.getId());
     }
 
-    /** 新しい超過継続の再送待ちへ引き継いだ古い再送待ちをCANCELLEDにする（別workerが先にSENTへ確定した行は変えない）。 */
+    /** 超過継続の再送の上限（5分ごとの再送でおよそ30分。上限後は次の時間枠の超過継続へ引き継ぐ）。 */
+    public static final int CONTINUING_RETRY_LIMIT = 6;
+
+    private boolean isExhaustedContinuingRetry(ServiceSlaEscalation retry) {
+        return "CONTINUING".equals(retry.getStage()) && retry.getAttemptCount() != null
+                && retry.getAttemptCount() >= CONTINUING_RETRY_LIMIT;
+    }
+
+    private boolean hasPendingContinuingRetry(List<ServiceSlaEscalation> rows, String breachType) {
+        return rows.stream().anyMatch(row -> breachType.equals(row.getBreachType()) && "CONTINUING".equals(row.getStage())
+                && "RETRY".equals(row.getStatus()) && !isExhaustedContinuingRetry(row));
+    }
+
+    /**
+     * 新しい超過継続の再送待ちへ引き継いだ古い再送待ち、または再送の上限に達した超過継続をCANCELLEDにする
+     * （別workerが先にSENTへ確定した行は変えない）。
+     */
     private void cancelSupersededRetry(ServiceSlaEscalation retry, LocalDateTime now) {
         int affected = escalationMapper.update(null,
                 new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ServiceSlaEscalation>()
@@ -365,8 +383,8 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         .set(ServiceSlaEscalation::getNextRetryAt, null)
                         .set(ServiceSlaEscalation::getUpdatedAt, now));
         if (affected == 1) {
-            log.info("SLA超過継続の古い再送待ちを閉じました（新しい再送待ちへ引き継ぎ）: escalationId={} breachType={}",
-                    retry.getId(), retry.getBreachType());
+            log.info("SLA超過継続の再送待ちを閉じました（新しい再送待ちまたは次の時間枠へ引き継ぎ）: escalationId={} breachType={} "
+                    + "attemptCount={}", retry.getId(), retry.getBreachType(), retry.getAttemptCount());
         }
     }
 

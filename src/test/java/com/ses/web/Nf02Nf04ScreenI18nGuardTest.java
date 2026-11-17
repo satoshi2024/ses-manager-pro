@@ -189,8 +189,9 @@ class Nf02Nf04ScreenI18nGuardTest {
                 if (KANA.matcher(value).find()) {
                     violations.add(lang + ": " + key + " に仮名が残る: " + value);
                 }
-                // en・koは日本語の値と同じなら写し。zh_CNは漢字語が日本語と一致し得るため、既知の欠陥（要員状態）だけ比べる。
-                boolean compare = !"zh_CN".equals(lang) || key.startsWith("enum.engineerStatus.");
+                // en・koは日本語の値と同じなら写し。zh_CNは漢字語が日本語と一致し得るため比べない（enum.* のzh_CNは
+                // EnumMessageTranslationTest が理由付きのallow-listで検査する）。
+                boolean compare = !"zh_CN".equals(lang);
                 if (compare && JAPANESE.matcher(base == null ? "" : base).find() && value.equals(base)) {
                     violations.add(lang + ": " + key + " が日本語の値と同じ: " + value);
                 }

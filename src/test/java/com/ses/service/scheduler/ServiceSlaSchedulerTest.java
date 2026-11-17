@@ -716,6 +716,32 @@ class ServiceSlaSchedulerTest {
                 .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "RETRY")));
     }
 
+    /**
+     * RB-I18N review P3-4: 宛先の一部が失敗し続ける超過継続の再送は上限（約30分）で閉じ、次の時間枠の超過継続を出す。
+     * 上限が無いと、同じkeyの再送は届いた宛先をdedupeするため、超過の間ずっと健全な宛先へ継続通知が届かない。
+     */
+    @Test
+    @DisplayName("再送の上限に達した超過継続は閉じ、同じ実行で次の時間枠の超過継続を新しいkeyで出す")
+    void exhaustedContinuingRetryIsClosedAndTheNextWindowIsNotified() {
+        String tenantId = "nf02-continuing-cap-" + UUID.randomUUID();
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = respondedClockWithResolveDeadline(tenantId, "continuing cap", base.minusMinutes(90), true);
+        SysUser admin = activeAdmin("cap_admin", tenantId);
+        com.ses.entity.ServiceSlaEscalation exhausted = continuingRetry(clock, "2026-08-31-18", base);
+        exhausted.setAttemptCount(com.ses.service.servicedesk.impl.ServiceSlaMonitoringServiceImpl.CONTINUING_RETRY_LIMIT);
+        escalationMapper.updateById(exhausted);
+
+        monitoringService.checkSlaBreaches(base);
+
+        assertEquals("CANCELLED", escalationMapper.selectById(exhausted.getId()).getStatus());
+        verify(notificationService, never()).publishToUser(any(), anyString(),
+                anyString(), anyString(), anyString(), eq(exhausted.getDedupeKey()), anyString());
+        verify(notificationService, times(1)).publishToUser(eq(admin.getId()), eq("SLA_BREACH_CONTINUING"),
+                anyString(), anyString(), anyString(),
+                eq("SLA_CONTINUING:" + clock.getServiceRequestId() + ":1:RESOLVE:2026-08-31-20"), anyString());
+        assertEquals(2, countContinuing(clock.getId()));
+    }
+
     @Test
     @DisplayName("同じ種別の超過継続の再送待ちが複数残っている場合は最新の行だけを元のkeyで再送し古い行はCANCELLEDで閉じる")
     void olderResolveContinuingRetryIsClosedWhenANewerRetryExists() {

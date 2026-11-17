@@ -274,6 +274,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
     }
 
+    /** 理由を入力しなかった状態変更の記録（状態イベントのreason。「新規起票」等と同じく既定の理由は日本語で持つ）。 */
+    static final String DEFAULT_STATUS_CHANGE_REASON = "ステータス更新";
+
     @Override
     @Transactional(readOnly = true)
     public ServiceRequestDto getInternalDetail(Long id) {
@@ -645,7 +648,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .roundNo(currentRound)
                 .fromStatus(fromStatus)
                 .toStatus(toStatus)
-                .reason(req.getReason())
+                // 理由が空の変更は言語に依らない既定の理由で記録する（画面の言語ごとに既定文言が混ざらないようにする）。
+                .reason(StringUtils.hasText(req.getReason()) ? req.getReason().trim() : DEFAULT_STATUS_CHANGE_REASON)
                 .actorType(executionContext.actorType())
                 .actorId(effectiveActorId != null ? effectiveActorId : 0L)
                 .actorName(effectiveActorName)
@@ -1196,6 +1200,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .createdAt(req.getCreatedAt())
                 .comments(commentDtos)
                 .csatScore(csat != null ? csat.getScore() : null)
+                .csatComment(csat != null ? csat.getFeedbackComment() : null)
                 .csatAnswerable(answerable)
                 .build();
     }

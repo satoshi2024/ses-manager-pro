@@ -186,7 +186,7 @@
             $('#csatRequestId').val(reqId);
             $('#portalCsatModalError').addClass('d-none').text('');
             $('#portalCsatForm')[0].reset();
-            new bootstrap.Modal($('#portalCsatModal')[0]).show();
+            bootstrap.Modal.getOrCreateInstance($('#portalCsatModal')[0]).show();
         });
     }
 

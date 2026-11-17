@@ -346,9 +346,12 @@ function initDetailPage(requestId) {
             cancelButtonText: sdT('common.cancel')
         }).then(function (result) {
             if (result.isConfirmed) {
+                // APIの項目名は toStatus（以前は targetStatus を送っていたため必須検査で400になっていた）。
+                // 理由が空なら送らず、serverが言語に依らない既定の理由を記録する（RB-I18N review P3-10）。
+                const reason = result.value && result.value.trim() ? result.value.trim() : null;
                 const payload = {
-                    targetStatus: targetStatus,
-                    reason: result.value || sdT('servicedesk.statusChange.defaultReason'),
+                    toStatus: targetStatus,
+                    reason: reason,
                     version: version
                 };
                 $.ajax({
