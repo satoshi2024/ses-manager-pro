@@ -25,5 +25,10 @@ public enum PolicyEnforcementReason {
     /** 署名・digest・binding・SoD・trust anchor の不整合（{@code POLICY_DRIFT}）。 */
     POLICY_DRIFT,
     /** current policy の ID が、呼出し側の承認に記載された policy ID と一致しない。 */
-    POLICY_ID_MISMATCH
+    POLICY_ID_MISMATCH,
+    /**
+     * 呼出し側の承認が current policy の envelope の発行より前に署名されている（policy の再発行で置き換えられた承認の再利用。
+     * W3-03 P3-2）。
+     */
+    APPROVAL_PREDATES_POLICY
 }

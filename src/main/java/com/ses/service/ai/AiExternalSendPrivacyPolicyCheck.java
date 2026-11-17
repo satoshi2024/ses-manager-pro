@@ -8,6 +8,7 @@ import com.ses.privacy.foundation.PolicyFailureReason;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -17,8 +18,9 @@ import java.util.function.Supplier;
  *
  * <p>key はコードの定数（module {@value #MODULE_CODE}・data element {@value #DATA_ELEMENT_ID}・action {@value #ACTION}・
  * provider は {@link #POLICY_PROVIDER_IDS}）、期待 policy ID は承認設定の {@code nf07-policy-id}、tenant は送信の実行 tenant。
- * NF07 の公開スイッチ OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・policy ID の不一致、port を取得できない・例外は全て拒否する
- * （fail-closed）。結果を cache しない（policy の失効・期限切れは NF08 の設定を変えなくても次の送信から止まる）。
+ * NF07 の公開スイッチ OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・policy ID の不一致、承認の署名日が current policy の発行より前
+ * （W3-03 P3-2）、port を取得できない・例外は全て拒否する（fail-closed）。結果を cache しない（policy の失効・期限切れは NF08 の
+ * 設定を変えなくても次の送信から止まる）。
  *
  * <p>拒否は固定コードの WARN log（{@value #LOG_CODE_DENIED}）と metric（{@value #DENIED_METRIC}、tag は stage と reason）だけを
  * 出す。tenant・policy ID・決定ID・PII は log と metric に出さない。
@@ -100,9 +102,13 @@ public final class AiExternalSendPrivacyPolicyCheck {
             return PolicyEnforcementDecision.deny(PolicyEnforcementReason.ENFORCEMENT_UNAVAILABLE,
                     PolicyFailureReason.NONE);
         }
+        Instant signedBefore = approvalSignedBefore(approval);
+        if (signedBefore == null) {
+            return PolicyEnforcementDecision.deny(PolicyEnforcementReason.REQUEST_INVALID, PolicyFailureReason.NONE);
+        }
         try {
             PolicyEnforcementDecision decision = enforcement.check(new PolicyEnforcementRequest(tenantId,
-                    MODULE_CODE, DATA_ELEMENT_ID, ACTION, providerId, approval.nf07PolicyId()));
+                    MODULE_CODE, DATA_ELEMENT_ID, ACTION, providerId, approval.nf07PolicyId(), signedBefore));
             return decision == null
                     ? PolicyEnforcementDecision.deny(PolicyEnforcementReason.ENFORCEMENT_UNAVAILABLE,
                             PolicyFailureReason.NONE)
@@ -112,6 +118,18 @@ public final class AiExternalSendPrivacyPolicyCheck {
             return PolicyEnforcementDecision.deny(PolicyEnforcementReason.ENFORCEMENT_UNAVAILABLE,
                     PolicyFailureReason.NONE);
         }
+    }
+
+    /**
+     * 承認が署名された時点の上限。承認の署名日はJST業務日なので、その翌日0時（JST）とする。current policy の envelope が
+     * これ以後に発行されていれば、承認は policy の再発行より前のもの（置き換えられた承認の再利用）として NF07 が拒否する
+     * （W3-03 P3-2。external-send-approval-gate.md §7.4）。署名日が無ければnull。
+     */
+    static Instant approvalSignedBefore(AiExternalSendApproval.Snapshot approval) {
+        if (approval == null || approval.signedOn() == null) {
+            return null;
+        }
+        return approval.signedOn().plusDays(1).atStartOfDay(AiExternalSendApproval.BUSINESS_ZONE).toInstant();
     }
 
     private void recordDenied(Stage stage, PolicyEnforcementDecision decision) {

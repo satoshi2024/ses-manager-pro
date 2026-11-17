@@ -90,6 +90,7 @@ public final class AiExternalSendApprovalFixtures {
                         && AiExternalSendPrivacyPolicyCheck.ACTION.equals(request.action())
                         && "gemini-adapter".equals(request.providerId())
                         && request.tenantId() != null && !request.tenantId().isBlank()
+                        && request.approvalSignedBefore() != null
                         ? com.ses.privacy.foundation.PolicyEnforcementDecision.permit()
                         : com.ses.privacy.foundation.PolicyEnforcementDecision.deny(
                                 com.ses.privacy.foundation.PolicyEnforcementReason.POLICY_ID_MISMATCH,

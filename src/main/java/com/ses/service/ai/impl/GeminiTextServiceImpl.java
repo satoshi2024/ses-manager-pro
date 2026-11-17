@@ -487,10 +487,11 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         } catch (HttpClientErrorException e) {
             // provider 応答本文・例外メッセージは一切出さない（REV-B2.2-P2-002）。
             // responseSha256 は機微応答の安定指紋になるため記録しない。
+            int providerStatus = e.getStatusCode().value();
             log.error("Gemini API クライアントエラー: status={} category={} responseBytes={}",
-                    e.getStatusCode().value(), "CLIENT_ERROR",
+                    providerStatus, "CLIENT_ERROR",
                     responseByteLength(e.getResponseBodyAsString()));
-            throw BusinessException.of(e.getStatusCode().value(), "error.ai.clientError");
+            throw BusinessException.of(clientErrorStatus(providerStatus), "error.ai.clientError");
         } catch (HttpServerErrorException e) {
             log.error("Gemini API サーバーエラー: status={} category={} responseBytes={}",
                     e.getStatusCode().value(), "SERVER_ERROR",
@@ -526,6 +527,16 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
             log.error("Gemini APIレスポンスのパースに失敗しました: category={}", "PARSE_ERROR");
             throw BusinessException.of(500, "error.ai.parseError");
         }
+    }
+
+    /**
+     * provider の 4xx を利用者へ返す status に変換する。provider の 4xx は本サーバーが送った要求への応答で、利用者の要求の誤りでは
+     * ないため、429（流量制限。従来どおり429）以外は 502（SYSTEM）にする。401 を返すと画面がログイン切れとして扱い利用者を
+     * ログイン画面へ戻し、415 等を返すと本サーバーの連携の不具合が業務エラーに見えて SYSTEM の監視から漏れる（RB-NF02 review P3-1）。
+     * 共有の {@code SafeErrorPolicy} には例外を足さず、ここで丸める。provider の status は log にだけ残す。
+     */
+    static int clientErrorStatus(int providerStatus) {
+        return providerStatus == 429 ? 429 : 502;
     }
 
     /** 応答本文はログに出さず、長さのみ返す。 */

@@ -39,6 +39,9 @@ public class AiProductionSafetyValidator {
     /** 費用ledgerが永続方式でないことを示す起動拒否コード。 */
     public static final String GATE_COST_LEDGER_NOT_PERSISTENT = "costLedger.notPersistent";
 
+    /** {@code ai.provider} が登録済みの値に前後の空白（trim・stripで除かれる文字）を付けた値であることを示す起動拒否コード。 */
+    public static final String CODE_PROVIDER_NOT_CANONICAL = "AI_PROVIDER_NOT_CANONICAL";
+
     /**
      * B2c-2（permit-only送信入口とgatewayの永続費用ledger接続）の完了と独立Reviewまでfalse。
      * 設定・環境変数からは変更できない。falseの間、prodは external-send=true を起動拒否する。
@@ -73,6 +76,11 @@ public class AiProductionSafetyValidator {
         } catch (com.ses.common.exception.BusinessException ex) {
             throw new IllegalStateException("本番のAI providerが未登録です: AI_PROVIDER_NOT_REGISTERED");
         }
+        if (!isCanonicalProviderValue(aiConfig.getProvider())) {
+            // registryとsnapshotは前後の空白を除いて判定するが、Bean条件（havingValue・SpEL）は除かない。
+            // 「 gemini」でBeanがMockへ倒れる等の解釈差を起動時に止める（G1r N-P3-1）。値は出さない。
+            throw new IllegalStateException("本番のAI providerの設定値に前後の空白があります: " + CODE_PROVIDER_NOT_CANONICAL);
+        }
         if (aiConfig.isExternalSendEnabled()) {
             AiProductionApprovalGate.AiExternalSendGateStatus decision = productionApprovalGate.externalSendStatus();
             if (decision == null) {
@@ -103,6 +111,14 @@ public class AiProductionSafetyValidator {
         if (aiConfig.isManagementCopilotEnabled() && !productionApprovalGate.status().approved()) {
             throw new IllegalStateException("本番のmanagement Copilotの独立承認gateが未完了です");
         }
+    }
+
+    /**
+     * provider設定値がBean条件と同じ解釈になる形か。registryは {@code trim()}、Bean条件は値をそのまま比較するため、
+     * {@code trim()}・{@code strip()} のどちらで除かれる文字も前後に付けない（大文字小文字はBean条件も無視するため対象外）。
+     */
+    static boolean isCanonicalProviderValue(String provider) {
+        return provider != null && provider.equals(provider.trim()) && provider.equals(provider.strip());
     }
 
     /** permit-only送信と永続費用ledgerの準備状況。空でなければ external-send=true の起動を拒否する。 */

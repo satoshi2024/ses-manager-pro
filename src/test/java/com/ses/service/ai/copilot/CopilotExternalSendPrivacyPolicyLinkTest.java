@@ -79,7 +79,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
  * <p>NF07 側は本番の内部判定 port（{@link ProductionPrivacyComponents#productionPolicyEnforcement}）を test-only の鍵で
  * 署名した policy（合成値）と in-memory の catalog・source・trust・失効状態で動かし、provider は送信を記録するだけの fake
  * （ネットワーク I/O・実 provider・実 secret・DB なし）。NF07 の flag OFF・UNKNOWN・REVOKED・EXPIRED・DRIFT・policy ID の不一致は
- * 全て送信前に拒否し、全て揃ったときだけ1回送信する。
+ * 全て送信前に拒否し、NF08 の承認が current policy の再発行より前に署名されたもの（W3-03 P3-2 の再利用）も拒否し、
+ * 全て揃ったときだけ1回送信する。
  */
 class CopilotExternalSendPrivacyPolicyLinkTest {
 
@@ -96,7 +97,9 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
     /** NF07 側の状態（test-only）。 */
     enum Scenario {
         ALL_SATISFIED, RETENTION_OFF, REVOCATION_UNKNOWN, ENVELOPE_REVOKED, POLICY_EXPIRED, SIGNATURE_TAMPERED,
-        POLICY_ID_MISMATCH
+        POLICY_ID_MISMATCH,
+        /** NF08 の承認（署名日 2026-11-12）が current policy の再発行（2026-11-13）より前（W3-03 P3-2 の再利用）。 */
+        APPROVAL_PREDATES_POLICY
     }
 
     private AuditLogService auditLogService;
@@ -193,6 +196,7 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
             case POLICY_EXPIRED -> "POLICY_EXPIRED";
             case SIGNATURE_TAMPERED -> "POLICY_DRIFT";
             case POLICY_ID_MISMATCH -> "POLICY_ID_MISMATCH";
+            case APPROVAL_PREDATES_POLICY -> "APPROVAL_PREDATES_POLICY";
             case ALL_SATISFIED -> "PERMITTED";
         };
     }
@@ -200,10 +204,12 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
     /** 本番の内部判定 port を、test-only の鍵で署名した合成 policy と in-memory の部品で構成する。 */
     private static PolicyEnforcementPort nf07(Scenario scenario) throws Exception {
         KeyPair keyPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        // 既定は NF08 の承認の署名日（fixture: 2026-11-12 JST）より前に発行した envelope。再利用の場面だけ署名日の後に再発行する。
+        Instant issuedAt = scenario == Scenario.APPROVAL_PREDATES_POLICY
+                ? NOW.minus(Duration.ofHours(1)) : NOW.minus(Duration.ofDays(2));
         ApprovalEnvelopeMetadata metadata = new ApprovalEnvelopeMetadata("1", "policy-issuer-test", "k1", TENANT,
                 AiExternalSendPrivacyPolicyCheck.MODULE_CODE, "PRODUCTION", "r1", "requester-test", "approver-test",
-                REVOCATION_REF, NOW.minus(Duration.ofHours(1)), NOW.minus(Duration.ofHours(1)),
-                NOW.plus(Duration.ofDays(30)));
+                REVOCATION_REF, issuedAt, issuedAt, NOW.plus(Duration.ofDays(30)));
         PolicyApprovalEnvelope unsigned = new PolicyApprovalEnvelope(metadata, POLICY_ID, "v1",
                 AiExternalSendPrivacyPolicyCheck.DATA_ELEMENT_ID, AiExternalSendPrivacyPolicyCheck.ACTION,
                 "gemini-adapter", "TEST_PURPOSE", "TEST_TRIGGER", "TEST_ONLY_RULE", "TEST_ONLY_DISPOSITION",
@@ -220,7 +226,7 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
                 Set.of(TENANT), Set.of(AiExternalSendPrivacyPolicyCheck.MODULE_CODE),
                 Set.of(AiExternalSendPrivacyPolicyCheck.DATA_ELEMENT_ID), Set.of("POLICY"), Set.of("PRODUCTION"),
                 Set.of(AiExternalSendPrivacyPolicyCheck.ACTION), Set.of("gemini-adapter"),
-                NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(365)));
+                NOW.minus(Duration.ofDays(7)), NOW.plus(Duration.ofDays(365)));
         String currentPolicyId = scenario == Scenario.POLICY_ID_MISMATCH ? "NF07-POL-2026-0099" : POLICY_ID;
         ProductionCatalogBinding binding = new ProductionCatalogBinding(currentPolicyId,
                 AiExternalSendPrivacyPolicyCheck.MODULE_CODE, ProductionCatalogBinding.TENANT_WIDE_ACTOR_BINDING,

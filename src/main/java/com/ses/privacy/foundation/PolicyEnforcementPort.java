@@ -13,7 +13,8 @@ package com.ses.privacy.foundation;
  * {@code APPROVED_ACTIVE} は実行の必要条件の1つであって十分条件ではない（呼出し側の承認設定は別に要る）。
  *
  * <p>実装の契約: 呼出しのたびに判定し、結果を cache しない。例外を投げない（判定できなければ拒否を返す）。
- * 公開スイッチ OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・policy ID の不一致は全て拒否する。
+ * 公開スイッチ OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・policy ID の不一致、および呼出し側の承認が current policy の発行より前に
+ * 署名されていること（{@link PolicyEnforcementRequest#approvalSignedBefore()}）は全て拒否する。
  */
 public interface PolicyEnforcementPort {
 

@@ -66,8 +66,10 @@ class AiExternalSendPrivacyPolicyCheckTest {
 
         assertTrue(check.permits(TENANT, approval(), AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
 
+        // 承認の署名日（fixture は TODAY の前日 2026-11-12）の翌日0時 JST を上限として渡す（W3-03 P3-2）
         assertEquals(List.of(new PolicyEnforcementRequest(TENANT, "NF08_AI_SUMMARY", "AI_PROMPT_LOG",
-                "EXTERNAL_DISPATCH", "gemini-adapter", AiExternalSendApprovalFixtures.NF07_POLICY_ID)), requests);
+                "EXTERNAL_DISPATCH", "gemini-adapter", AiExternalSendApprovalFixtures.NF07_POLICY_ID,
+                Instant.parse("2026-11-12T15:00:00Z"))), requests);
         assertTrue(appender.list.isEmpty(), "許可はlogを出さない");
         assertTrue(meters.getMeters().isEmpty(), "許可はmetricを出さない");
     }
@@ -137,6 +139,12 @@ class AiExternalSendPrivacyPolicyCheckTest {
                 check.evaluate(TENANT, null, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
         assertEquals(PolicyEnforcementReason.REQUEST_INVALID,
                 check.evaluate(TENANT, otherProvider, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
+        AiExternalSendApproval.Snapshot noSignedOn = new AiExternalSendApproval.Snapshot(approval.decisionId(),
+                approval.dg08DecisionId(), approval.nf07PolicyId(), approval.dpaReference(), null,
+                approval.expiresOn(), approval.provider(), approval.model(), approval.purposes(),
+                approval.dataCategories(), approval.destinationHost(), approval.costLimit(), approval.approvalDigest());
+        assertEquals(PolicyEnforcementReason.REQUEST_INVALID,
+                check.evaluate(TENANT, noSignedOn, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
         assertEquals(0, calls.get());
     }
 

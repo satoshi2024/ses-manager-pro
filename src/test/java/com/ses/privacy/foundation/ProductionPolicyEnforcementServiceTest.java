@@ -127,14 +127,15 @@ class ProductionPolicyEnforcementServiceTest {
 
         assertDenied(port.check(null), PolicyEnforcementReason.REQUEST_INVALID, PolicyFailureReason.NONE);
         for (PolicyEnforcementRequest invalid : java.util.List.of(
-                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, null),
-                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, " "),
-                new PolicyEnforcementRequest(null, MODULE, ELEMENT, ACTION, PROVIDER, POLICY_ID),
-                new PolicyEnforcementRequest(" ", MODULE, ELEMENT, ACTION, PROVIDER, POLICY_ID),
-                new PolicyEnforcementRequest(TENANT, null, ELEMENT, ACTION, PROVIDER, POLICY_ID),
-                new PolicyEnforcementRequest(TENANT, MODULE, "", ACTION, PROVIDER, POLICY_ID),
-                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, null, PROVIDER, POLICY_ID),
-                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, "", POLICY_ID))) {
+                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, null, NOW),
+                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, " ", NOW),
+                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, POLICY_ID, null),
+                new PolicyEnforcementRequest(null, MODULE, ELEMENT, ACTION, PROVIDER, POLICY_ID, NOW),
+                new PolicyEnforcementRequest(" ", MODULE, ELEMENT, ACTION, PROVIDER, POLICY_ID, NOW),
+                new PolicyEnforcementRequest(TENANT, null, ELEMENT, ACTION, PROVIDER, POLICY_ID, NOW),
+                new PolicyEnforcementRequest(TENANT, MODULE, "", ACTION, PROVIDER, POLICY_ID, NOW),
+                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, null, PROVIDER, POLICY_ID, NOW),
+                new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, "", POLICY_ID, NOW))) {
             assertDenied(port.check(invalid), PolicyEnforcementReason.REQUEST_INVALID, PolicyFailureReason.NONE);
         }
         assertEquals(0, catalogReads.get());
@@ -311,6 +312,32 @@ class ProductionPolicyEnforcementServiceTest {
         assertEquals(0, sourceReads.get(), "policy IDの不一致はsourceを読む前に拒否する");
     }
 
+    // ---------------------------------------------------------------- 承認の再利用（W3-03 P3-2）
+
+    /**
+     * 呼出し側の承認が current policy の envelope の発行より前に署名されていれば（policy の再発行で置き換えられた承認の
+     * 再利用）、他の前提が全て揃っていても拒否する。発行日時は署名の検証が通った envelope の値（NOW-1h）。
+     */
+    @Test
+    void 承認がcurrent_policyの発行より前に署名されていればAPPROVAL_PREDATES_POLICYで拒否する() throws Exception {
+        allSatisfied();
+        Instant issuedAt = NOW.minus(Duration.ofHours(1));
+
+        assertDenied(port().check(request(POLICY_ID, issuedAt)), PolicyEnforcementReason.APPROVAL_PREDATES_POLICY,
+                PolicyFailureReason.NONE);
+        assertDenied(port().check(request(POLICY_ID, issuedAt.minus(Duration.ofDays(30)))),
+                PolicyEnforcementReason.APPROVAL_PREDATES_POLICY, PolicyFailureReason.NONE);
+        assertTrue(port().check(request(POLICY_ID, issuedAt.plusNanos(1))).permitted(), "発行の直後の上限なら許可");
+
+        // 署名の検証より前には判定しない（改竄された envelope の発行日時を根拠にしない）
+        Signed signed = allSatisfied();
+        byte[] tampered = signed.signature();
+        tampered[0] ^= 1;
+        sourceResult = CurrentPolicySnapshot.current(POLICY_ID, REVISION, signed.digest(), signed.canonical(), tampered);
+        assertDenied(port().check(request(POLICY_ID, issuedAt)), PolicyEnforcementReason.POLICY_DRIFT,
+                PolicyFailureReason.SIGNATURE_INVALID);
+    }
+
     // ---------------------------------------------------------------- 許可
 
     /** 対照: 全ての前提が揃った fake でだけ許可する（検査が空振りしていないことの確認。本番の証明ではない）。 */
@@ -405,8 +432,14 @@ class ProductionPolicyEnforcementServiceTest {
         return environment;
     }
 
+    /** 呼出し側の承認は current policy の発行（NOW-1h）より後に署名された（上限 NOW）。 */
     private static PolicyEnforcementRequest request(String expectedPolicyId) {
-        return new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, expectedPolicyId);
+        return request(expectedPolicyId, NOW);
+    }
+
+    private static PolicyEnforcementRequest request(String expectedPolicyId, Instant approvalSignedBefore) {
+        return new PolicyEnforcementRequest(TENANT, MODULE, ELEMENT, ACTION, PROVIDER, expectedPolicyId,
+                approvalSignedBefore);
     }
 
     private static ProductionCatalogBinding binding(String policyId) {

@@ -26,7 +26,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class PrivacyPolicyEnforcementConfigurationTest {
 
     private static final PolicyEnforcementRequest REQUEST = new PolicyEnforcementRequest("tenant-a",
-            "NF08_AI_SUMMARY", "AI_PROMPT_LOG", "EXTERNAL_DISPATCH", "gemini-adapter", "NF07-POL-2026-0007");
+            "NF08_AI_SUMMARY", "AI_PROMPT_LOG", "EXTERNAL_DISPATCH", "gemini-adapter", "NF07-POL-2026-0007",
+            Instant.parse("2026-11-17T15:00:00Z"));
 
     @Test
     void prod以外のprofileでは常に拒否するportだけを登録する() {

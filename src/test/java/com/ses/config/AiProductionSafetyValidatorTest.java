@@ -56,6 +56,32 @@ class AiProductionSafetyValidatorTest {
         assertFalse(failure.getMessage().contains("gemni"));
     }
 
+    /**
+     * G1r N-P3-1: registry・snapshot は前後の空白を除いて判定するが、Bean 条件は除かないため、空白付きの既知値は Bean が Mock へ
+     * 倒れる・legacy が 503 になる等の解釈差を生む。本番は起動時に拒否し、値は出さない。
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" gemini", "gemini ", "\tgemini", "mock ", " rule",
+            "gemini\n"})
+    void 前後に空白がある既知providerは外部送信OFFでも本番起動時に拒否する(String provider) {
+        AiConfig config = new AiConfig();
+        config.setProvider(provider);
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> validator(config).validate());
+        assertTrue(failure.getMessage().contains(AiProductionSafetyValidator.CODE_PROVIDER_NOT_CANONICAL),
+                failure.getMessage());
+        assertFalse(failure.getMessage().contains("gemini"), "設定値を出さない");
+        assertFalse(failure.getMessage().contains("mock"), "設定値を出さない");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"mock", "rule", "MOCK", "Rule"})
+    void 空白の無い既知のlocal_providerは本番起動を妨げない(String provider) {
+        AiConfig config = new AiConfig();
+        config.setProvider(provider);
+        assertDoesNotThrow(() -> validator(config).validate());
+    }
+
     private static final Clock FIXED = Clock.fixed(Instant.parse("2026-11-13T01:00:00Z"), ZoneId.of("UTC"));
     private static final LocalDate TODAY = LocalDate.of(2026, 11, 13);
 

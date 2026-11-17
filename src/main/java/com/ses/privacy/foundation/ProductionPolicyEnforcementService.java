@@ -22,6 +22,8 @@ import java.util.function.BooleanSupplier;
  *       {@link PolicyEnforcementReason#POLICY_ID_MISMATCH}（source を読まない）。</li>
  *   <li>source の current snapshot を1回読み、policy ID・digest を照合してから envelope を厳格に復号する。</li>
  *   <li>trust anchor・失効状態・時刻・署名・SoD・binding を {@link ProductionApprovalEnvelopeVerifier} で検証する。</li>
+ *   <li>検証済みの envelope の発行日時が要求の {@code approvalSignedBefore} 以後なら、呼出し側の承認は current policy の
+ *       発行より前のものとして {@link PolicyEnforcementReason#APPROVAL_PREDATES_POLICY}（W3-03 P3-2）。</li>
  * </ol>
  * 失敗理由は説明照会と同じ対応（{@link ProductionPolicyReadonlyQueryService#mapStatus}）で UNKNOWN・EXPIRED・REVOKED・DRIFT に
  * 分類する。第1期は trust registry が空・失効 provider が常に UNKNOWN のため、許可には到達しない。例外は外へ出さず拒否に閉じる。
@@ -89,7 +91,7 @@ final class ProductionPolicyEnforcementService implements PolicyEnforcementPort 
                     PolicyFailureReason.NONE);
         }
         String expectedPolicyId = request.expectedPolicyId();
-        if (expectedPolicyId == null || expectedPolicyId.isBlank()) {
+        if (expectedPolicyId == null || expectedPolicyId.isBlank() || request.approvalSignedBefore() == null) {
             return PolicyEnforcementDecision.deny(PolicyEnforcementReason.REQUEST_INVALID, PolicyFailureReason.NONE);
         }
         PolicyLookupKey key;
@@ -175,6 +177,12 @@ final class ProductionPolicyEnforcementService implements PolicyEnforcementPort 
                     binding.policyId(), binding.scope(), key.dataElementId(), key.action(), key.providerId());
             if (!expectedPolicyId.equals(verified.policyId())) {
                 return PolicyEnforcementDecision.deny(PolicyEnforcementReason.POLICY_ID_MISMATCH,
+                        PolicyFailureReason.NONE);
+            }
+            // 呼出し側の承認は current policy の発行の後に署名されていなければならない。発行日時は署名の検証が通った envelope
+            // の値だけを使う（W3-03 P3-2: 置き換えられた承認の再利用を、署名済みで二者が有効化した current policy に束縛して止める）。
+            if (!envelope.metadata().issuedAt().isBefore(request.approvalSignedBefore())) {
+                return PolicyEnforcementDecision.deny(PolicyEnforcementReason.APPROVAL_PREDATES_POLICY,
                         PolicyFailureReason.NONE);
             }
             return PolicyEnforcementDecision.permit();
