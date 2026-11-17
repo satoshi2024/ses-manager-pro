@@ -3,6 +3,8 @@ package com.ses.service.lifecycle;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.feature.FeatureSwitchProperties;
+import com.ses.config.feature.FeatureSwitches;
+import com.ses.config.feature.IsolatedFeatureSwitches;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.LifecycleTemplate;
@@ -11,7 +13,6 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.mapper.LifecycleTemplateTaskMapper;
 import com.ses.mapper.SysUserMapper;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,8 +43,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * 証跡種別は許可値一覧で検査し、Unicodeの表記揺れ（NBSP・ゼロ幅文字・全角文字）や一覧外の値は400で1件も書かない
  * （review P2-1）。子スイッチOFFの間はDUALを含むテンプレートを有効に戻せない（review P3-1）。
  *
- * <p>test profileは子スイッチON。OFFの試験はスイッチ設定を試験の中で切り替え、試験後に元へ戻す
- * （設定値は {@code FeatureSwitches} が毎回読むため再起動は要らない。JUnitの並列実行は無効）。</p>
+ * <p>test profileは子スイッチON。OFFの試験は試験専用のスイッチ設定を切り替える（W3-21b review P3-4）。
+ * 共有contextの {@link FeatureSwitchProperties} は書き換えず、{@code @MockBean FeatureSwitches} の判定を
+ * 試験ごとに作る専用の設定の実物へ委ねる（{@link IsolatedFeatureSwitches}。親子の論理積は実物が判定する）。</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -53,16 +56,20 @@ class LifecycleTemplateDualPolicyTest {
     @Autowired private LifecycleTemplateMapper templateMapper;
     @Autowired private LifecycleTemplateTaskMapper templateTaskMapper;
     @Autowired private SysUserMapper sysUserMapper;
+    /** test profileの値を写す元（読むだけで変えない）。 */
     @Autowired private FeatureSwitchProperties featureSwitchProperties;
+    @MockBean private FeatureSwitches featureSwitches;
+    /** 実物の FeatureSwitches と同じ実行時条件（context の bean。無ければ null）。 */
+    @Autowired(required = false) private java.util.List<com.ses.config.feature.FeatureRuntimeCondition> runtimeConditions;
 
     private SysUser hrUser;
-    private boolean nf01Before;
-    private boolean dualBefore;
+    /** 試験専用のスイッチ設定（試験ごとに作り直す）。 */
+    private FeatureSwitchProperties switchProperties;
 
     @BeforeEach
     void setUp() {
-        nf01Before = featureSwitchProperties.getNf01().isEnabled();
-        dualBefore = featureSwitchProperties.getNf01DualConfirmation().isEnabled();
+        switchProperties = IsolatedFeatureSwitches.isolate(featureSwitches, featureSwitchProperties,
+                runtimeConditions);
         hrUser = SysUser.builder()
                 .tenantId("default")
                 .username("lc_dual_policy_hr_" + System.nanoTime())
@@ -72,12 +79,6 @@ class LifecycleTemplateDualPolicyTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(hrUser);
-    }
-
-    @AfterEach
-    void restoreSwitches() {
-        featureSwitchProperties.getNf01().setEnabled(nf01Before);
-        featureSwitchProperties.getNf01DualConfirmation().setEnabled(dualBefore);
     }
 
     // ===================================================================== 子スイッチOFF
@@ -323,8 +324,8 @@ class LifecycleTemplateDualPolicyTest {
     // ===================================================================== helpers
 
     private void switches(boolean nf01, boolean dualConfirmation) {
-        featureSwitchProperties.getNf01().setEnabled(nf01);
-        featureSwitchProperties.getNf01DualConfirmation().setEnabled(dualConfirmation);
+        switchProperties.getNf01().setEnabled(nf01);
+        switchProperties.getNf01DualConfirmation().setEnabled(dualConfirmation);
     }
 
     private Map<String, String> storedEvidenceTypes(Long templateId) {

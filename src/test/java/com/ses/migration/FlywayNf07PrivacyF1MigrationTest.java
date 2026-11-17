@@ -299,7 +299,8 @@ class FlywayNf07PrivacyF1MigrationTest {
                     + "VALUES ('nf07-seed', 'nf07-seed-user', 'x', 'NF07 seed', '管理者', 1)");
             for (int i = 0; i < 2; i++) {
                 for (String script : List.of("db/migration/V196__nf07_privacy_data_element_catalog_seed.sql",
-                        "db/migration/V197__resume_ingestion_and_import_document_types.sql")) {
+                        "db/migration/V197__resume_ingestion_and_import_document_types.sql",
+                        "db/migration/V198__nf01_dual_confirmation_privacy_catalog.sql")) {
                     org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
                             new org.springframework.core.io.support.EncodedResource(
                                     new org.springframework.core.io.ClassPathResource(script),
@@ -316,8 +317,11 @@ class FlywayNf07PrivacyF1MigrationTest {
         }
     }
 
-    /** V196 が tenant ごとに入れる文書以外の固定の data element の件数（DOCUMENT:<code> は文書種別ごとに数える）。 */
-    private static final long CATALOG_FIXED_ELEMENTS = 27L;
+    /**
+     * tenant ごとに入る文書以外の固定の data element の件数（V196 の27件と、V198 の NF01 二者確認（B0）の9件。
+     * DOCUMENT:<code> は文書種別ごとに数える）。
+     */
+    private static final long CATALOG_FIXED_ELEMENTS = 36L;
 
     // ---------------------------------------------------------------- helper
 

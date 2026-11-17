@@ -99,6 +99,9 @@ spring:
         # V197: 履歴・スキルシート取込と取込センターCSVの文書種別と catalog 行（H2 でもそのまま実行できる。
         #       schema-document-archive-h2.sql も同じ2行を持つため NOT EXISTS で重複しない。V196 より後）
         - classpath:db/migration/V197__resume_ingestion_and_import_document_types.sql
+        # V198: NF01 二者確認（B0）の7表と自由記述2列の catalog 行（構造行だけ。H2 でもそのまま実行できる。
+        #       V195 の表と sys_user の tenant の作成・seed より後）
+        - classpath:db/migration/V198__nf01_dual_confirmation_privacy_catalog.sql
       data-locations:
         - classpath:sql/dummy.sql
 

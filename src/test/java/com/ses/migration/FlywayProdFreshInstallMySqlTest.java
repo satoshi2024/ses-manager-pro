@@ -513,8 +513,8 @@ class FlywayProdFreshInstallMySqlTest {
     }
 
     /**
-     * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）と F2 catalog seed（V196・V197）の新規導入直後の件数。
-     * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定27件と、文書種別ごとに1件。
+     * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）と F2 catalog seed（V196・V197・V198）の新規導入直後の件数。
+     * catalog 以外の F1表は行を持たず、catalog は tenant default の構造行だけ（文書以外の固定36件と、文書種別ごとに1件。
      * 件数は文書種別の数に依存させない。owner・分類・inventory は UNKNOWN）。privacy-admin は1件・未割当、privacy.* の
      * deny は既定5 groupに1件ずつ、menu は2件。prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の
      * 不変条件に違反する group も0件であること。V197 の2種別は受領（INCOMING）として登録できること。
@@ -526,8 +526,16 @@ class FlywayProdFreshInstallMySqlTest {
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table),
                     "NF07 F1表はfresh installで0件であること（法的な値をseedしない）: " + table);
         }
-        assertEquals(27L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "V196 の catalog は文書以外が固定27件");
+        assertEquals(36L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "catalog は文書以外が固定36件（V196 の27件と V198 の9件）");
+        // V198: NF01 二者確認（B0）の7表と自由記述2列は provider 未登録・分類 UNKNOWN の構造行（保持期間は持たない）
+        assertEquals(9L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id LIKE 'LIFECYCLE_DUAL_%' AND storage_kind = 'DB_COLUMN' AND provider_id IS NULL "
+                + "AND subject_attribution = 'UNKNOWN' AND inventory_ref LIKE 'pii-inventory.md#DB-14%'"),
+                "V198 の B0 catalog 行");
+        assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND storage_ref IN ('t_lifecycle_dual_submission.business_comment', "
+                + "'t_lifecycle_dual_confirmation.decision_comment')"), "自由記述の2列は別の data element");
         assertEquals(scalar(st, "SELECT COUNT(*) FROM m_document_type"), scalar(st, "SELECT COUNT(*) FROM "
                 + "m_pii_data_element WHERE tenant_id = 'default' AND data_element_id LIKE 'DOCUMENT:%'"),
                 "文書種別ごとに catalog 行が1件");

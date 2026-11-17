@@ -94,13 +94,18 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         if (cmd.getEngineerId() == null) {
             throw BusinessException.of(400, "error.lifecycle.engineerRequired", "対象要員は必須です");
         }
+        // 種別は正規の表記との完全一致だけを受け付ける（W3-02 review P3-3）。小文字等の表記揺れはDBの照合順序では退社案件に
+        // 数えられるが、以降の完全一致の判定（退社gate・自動処理・失効要求）を通らないため、正規化せずに拒否する。
+        LifecycleType lifecycleType = LifecycleType.parseStrict(cmd.getLifecycleType())
+                .orElseThrow(() -> BusinessException.of(400, "error.lifecycle.invalidLifecycleType",
+                        "ライフサイクル種別が不正です"));
         Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
                 .eq(Engineer::getId, cmd.getEngineerId()).eq(Engineer::getTenantId, tenantId));
         if (engineer == null) {
             throw BusinessException.of(404, "error.lifecycle.engineerNotFound", "要員が見つかりません");
         }
         scopeService.assertCanAccessEngineer(applicantUser, engineer);
-        if (List.of("JOIN", "REINSTATEMENT").contains(cmd.getLifecycleType())) {
+        if (lifecycleType == LifecycleType.JOIN || lifecycleType == LifecycleType.REINSTATEMENT) {
             engineer = engineerMapper.selectByIdForUpdateForTenant(cmd.getEngineerId(), tenantId);
             if (engineer == null) throw BusinessException.of(404, "error.lifecycle.engineerNotFound");
         }
@@ -109,7 +114,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         // この確認はlocking readではないため並行起票を止められない。正はV187の一意制約
         // uk_lifecycle_case_active_resignation で、違反はinsert時に同じ400へ変換する（insertCase）。
         // 未終結の定義は一意制約の生成列と同じ「COMPLETED / CANCELLED 以外」にそろえる。
-        if ("RESIGNATION".equals(cmd.getLifecycleType())) {
+        if (lifecycleType == LifecycleType.RESIGNATION) {
             Long activeResignCount = caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
                     .eq(LifecycleCase::getTenantId, tenantId)
                     .eq(LifecycleCase::getEngineerId, cmd.getEngineerId())
@@ -127,11 +132,17 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         if (cmd.getTemplateId() != null) {
             template = templateMapper.selectById(cmd.getTemplateId());
         } else {
-            template = templateService.findActiveByTypeAndDate(cmd.getLifecycleType(), anchorDate);
+            template = templateService.findActiveByTypeAndDate(lifecycleType.name(), anchorDate);
         }
         if (template == null) {
             throw BusinessException.of(400, "error.lifecycle.noActiveTemplate",
-                    "指定された種別(" + cmd.getLifecycleType() + ")と基準日(" + anchorDate + ")に対応する有効なテンプレートが見つかりません");
+                    "指定された種別(" + lifecycleType.name() + ")と基準日(" + anchorDate + ")に対応する有効なテンプレートが見つかりません");
+        }
+        // テンプレートの種別は案件の種別と完全一致でなければならない（W3-02 review P3-3）。退社のテンプレートを他の種別の案件で
+        // 起票すると、退社のタスクを持ちながら完了時の退社gateを通らない案件になる。
+        if (!lifecycleType.name().equals(template.getTemplateType())) {
+            throw BusinessException.of(400, "error.lifecycle.templateTypeMismatch",
+                    "テンプレートの種別が案件の種別と一致しません");
         }
 
         List<LifecycleTemplateTask> rawTplTasks = templateTaskMapper.selectByTemplateId(template.getId());
@@ -219,7 +230,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         LifecycleCase lcCase = LifecycleCase.builder()
                 .tenantId(tenantId)
                 .caseNo(caseNo)
-                .lifecycleType(cmd.getLifecycleType())
+                .lifecycleType(lifecycleType.name())
                 .engineerId(engineer.getId())
                 .templateId(template.getId())
                 .templateVersion(template.getVersionNo())

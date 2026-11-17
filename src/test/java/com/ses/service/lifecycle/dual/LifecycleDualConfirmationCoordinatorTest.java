@@ -164,6 +164,9 @@ class LifecycleDualConfirmationCoordinatorTest {
                 .thenReturn(Optional.of(confirmDependencies(SUBMITTER)));
         lenient().when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(
                 Verdict.ELIGIBLE, ELIGIBLE));
+        // 提出のdiscoveryは適格性の前に文書ACLと案件の要員へのlinkを確かめる（W3-21a review P3-5）
+        lenient().when(eligibility.visibleEvidenceCandidate(eq(TENANT), anyLong(), anyLong())).thenReturn(true);
+        lenient().when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(true);
         lenient().when(verifier.verify(any())).thenReturn(DocumentEvidenceStorageVerifier.Outcome.MATCH);
         lenient().when(epochMapper.selectTaskGeneration(TASK, CASE, TENANT))
                 .thenReturn(new AuthorizationEpochMapper.EpochRow(GENERATION, 0));
@@ -457,8 +460,50 @@ class LifecycleDualConfirmationCoordinatorTest {
         TaskContext other = new TaskContext(task("DOCUMENT_LINK"), lifecycleCase(), engineer());
         when(reader.readTaskContext(TENANT, TASK)).thenReturn(Optional.of(other));
 
+        // 400の状態の不成立は409の世代不一致（SUBMISSION_STALE）と分けて記録する（W3-21a review P3-8）
         assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 400,
-                "error.lifecycle.invalidStateTransition", DualConfirmationDenyReason.SUBMISSION_STALE);
+                "error.lifecycle.invalidStateTransition", DualConfirmationDenyReason.INVALID_STATE);
+    }
+
+    @Test
+    void 提出のdiscoveryは案件の要員に紐付かない文書を存在しない文書と同じ400にし適格性を評価しない() {
+        // 範囲外の文書がhold中（適格性ならEVIDENCE_UNAVAILABLE・409）でも、応答は存在しない文書と区別できない
+        when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(
+                Verdict.DOCUMENT_UNAVAILABLE, null));
+        when(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER)).thenReturn(false);
+
+        assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 400, "error.document.notFound",
+                DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
+
+        verify(eligibility, never()).evaluate(any());
+        verify(verifier, never()).verify(any());
+        verify(attempts, never()).submit(any());
+    }
+
+    @Test
+    void 提出のdiscoveryは提出者の文書ACL外の文書を存在しない文書と同じ400にしlinkも適格性も見ない() {
+        when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(false);
+
+        assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 400, "error.document.notFound",
+                DualConfirmationDenyReason.SCOPE_DENIED);
+
+        verify(eligibility, never()).visibleEvidenceCandidate(any(), anyLong(), anyLong());
+        verify(eligibility, never()).evaluate(any());
+        verify(attempts, never()).submit(any());
+    }
+
+    @Test
+    void 提出のdiscoveryは文書の可視性を適格性より先に判定し可視の文書だけ適格性の詳細を返す() {
+        when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(
+                Verdict.DOCUMENT_UNAVAILABLE, null));
+
+        assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 409,
+                "error.lifecycle.evidenceDocumentUnavailable", DualConfirmationDenyReason.EVIDENCE_UNAVAILABLE);
+
+        InOrder order = inOrder(evaluator, eligibility);
+        order.verify(evaluator).isEngineerAllowedByDataScope(any(), eq(ENGINEER));
+        order.verify(eligibility).visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER);
+        order.verify(eligibility).evaluate(any());
     }
 
     @Test

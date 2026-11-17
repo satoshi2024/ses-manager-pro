@@ -18,6 +18,7 @@ import com.ses.mapper.LifecycleTemplateTaskMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.lifecycle.LifecycleDagValidator;
 import com.ses.service.lifecycle.LifecycleTemplateService;
+import com.ses.service.lifecycle.LifecycleType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -165,6 +166,11 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto createTemplate(LifecycleTemplateDto dto, Long userId) {
         requireTemplateManager(userId);
+        // テンプレートの種別も案件と同じ正規の表記だけを受け付ける（W3-02 review P3-3）。揺れた種別のテンプレートは
+        // 案件の起票で種別の不一致として拒否され、使えないまま残るため、作成の時点で拒否する。
+        if (LifecycleType.parseStrict(dto.getTemplateType()).isEmpty()) {
+            throw BusinessException.of(400, "error.lifecycle.invalidLifecycleType", "ライフサイクル種別が不正です");
+        }
         rejectUnavailableEvidenceTypes(dto.getTasks());
         dagValidator.validateDtoDag(dto.getTasks());
 

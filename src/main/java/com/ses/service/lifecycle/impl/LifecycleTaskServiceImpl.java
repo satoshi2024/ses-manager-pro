@@ -565,9 +565,20 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
             if (!allDone) {
                 continue;
             }
-            succ.setStatus("IN_PROGRESS");
-            succ.setUpdatedBy(actorUserId);
-            if (taskMapper.updateById(succ) != 1) {
+            // 書く列（status・updated_by・updated_at・version）だけを指名する（W3-21a review P3-13）。lock後に読んだ entity全体を
+            // updateById で書き戻すと、昇格と無関係な列まで同じ値で上書きする経路になる。
+            int version = succ.getVersion() == null ? 0 : succ.getVersion();
+            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<LifecycleTask> promote =
+                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<LifecycleTask>()
+                            .eq(LifecycleTask::getId, succId)
+                            .eq(LifecycleTask::getCaseId, lcCase.getId())
+                            .eq(LifecycleTask::getStatus, "PENDING")
+                            .eq(LifecycleTask::getVersion, version)
+                            .set(LifecycleTask::getStatus, "IN_PROGRESS")
+                            .set(LifecycleTask::getUpdatedBy, actorUserId)
+                            .set(LifecycleTask::getUpdatedAt, LocalDateTime.now())
+                            .set(LifecycleTask::getVersion, version + 1);
+            if (taskMapper.update(null, promote) != 1) {
                 throw BusinessException.of(409, "error.common.optimisticLock");
             }
 

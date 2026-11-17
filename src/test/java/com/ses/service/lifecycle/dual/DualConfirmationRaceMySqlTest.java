@@ -88,6 +88,8 @@ import static org.mockito.Mockito.when;
  *       anchor行を {@code FOR UPDATE} してepochを進める最小の形で模す（業務writerがanchorをXで取って増分することは
  *       M2〜M7が固定済み）。待ちの判定は {@link InnoDbRecordLockWaits} のrequester/blocker対で行い、{@code LOCK_DATA}を
  *       連結条件にしない。</li>
+ *   <li>実際の業務writer（{@code EngineerSalesService.release}・{@code DocumentService.placeLegalHold}）も確認と両順序で
+ *       競合させ、他のlockと混ざっても循環待ちにならず、writer先行は409・reader先行は確認成功になる（W3-21a review P3-11）。</li>
  * </ul>
  *
  * <p>B0の不変表はtriggerが削除を拒否するため後始末で行を消さない。専用のMySQL containerを使い、試験ごとに新しい
@@ -263,6 +265,8 @@ class DualConfirmationRaceMySqlTest {
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private LifecycleTaskDepMapper taskDepMapper;
     @Autowired private HookedLifecycleLockExecutor lockExecutor;
+    @Autowired private com.ses.service.EngineerSalesService engineerSalesService;
+    @Autowired private com.ses.service.DocumentService documentService;
     @MockBean private DocumentEvidenceStorageVerifier storageVerifier;
     @MockBean private LifecycleNotificationService notificationService;
     @MockBean private LegalEntityContextService legalEntityContextService;
@@ -498,12 +502,98 @@ class DualConfirmationRaceMySqlTest {
         assertEquals(before + 1, currentEpoch(anchor, f));
     }
 
+    // ===================================================================== 確認×実際の業務writer（W3-21a review P3-11）
+
+    /**
+     * 最小形のwriter（anchor行のFOR UPDATE＋epoch増分）ではなく、実際の {@code EngineerSalesService.release}（7 X{要員} →
+     * 10 の割当行 → engineer epoch）を確認と競合させる。writer先行では確認が要員行のcommitを待ち、提出者（担当営業）の
+     * 述語とengineer epochの変化で409になる。
+     */
+    @Test
+    void 確認と実際の担当営業解除のwriter先行では確認が要員行のcommitを待ち409で拒否される() throws Exception {
+        Fixture f = fixtures.create("w321a-m8-rw-sales");
+        DualConfirmationResultDto submitted = submit(f, f.sales(), "key-submit-1");
+
+        Throwable outcome = writerFirst("writer先行 担当営業解除（実writer）", "t_engineer", f.engineer(), () -> {
+            bindOperator(f);
+            engineerSalesService.release(f.engineer(), f.salesAssignment());
+        }, () -> capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認")));
+
+        assertBusiness(outcome, 409, "error.lifecycle.authorizationChanged");
+        assertEquals(List.of(DualConfirmationDenyReason.AUTHORIZATION_CHANGED_ENGINEER.name()),
+                fixtures.deniedReasons(f));
+        assertEquals("IN_PROGRESS", fixtures.taskStatus(f.taskId()));
+    }
+
+    /** 実際の担当営業解除のreader先行: 解除は確認の共有lockを待ち、確認のcommit後に解除してengineer epochを1進める。 */
+    @Test
+    void 確認と実際の担当営業解除のreader先行では解除が確認のcommitを待ち確認は成功する() throws Exception {
+        Fixture f = fixtures.create("w321a-m8-rr-sales");
+        DualConfirmationResultDto submitted = submit(f, f.sales(), "key-submit-1");
+        long before = currentEpoch(Anchor.ENGINEER, f);
+
+        Throwable outcome = readerFirst("reader先行 担当営業解除（実writer）", "t_engineer", f.engineer(), () -> {
+            bindOperator(f);
+            engineerSalesService.release(f.engineer(), f.salesAssignment());
+        }, () -> capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認")));
+
+        assertNull(outcome, String.valueOf(outcome));
+        assertEquals("COMPLETED", fixtures.taskStatus(f.taskId()));
+        assertEquals(before + 1, currentEpoch(Anchor.ENGINEER, f), "解除は確認のcommit後に1だけ進める");
+    }
+
+    /**
+     * 実際の {@code DocumentService.placeLegalHold}（15 X{文書} → 法的holdのCAS → 文書epoch）を確認と競合させる。
+     * writer先行では確認が文書行のcommitを待ち、文書epochの変化で409になる（holdした証跡で確定しない）。
+     */
+    @Test
+    void 確認と実際の法的hold設定のwriter先行では確認が文書行のcommitを待ち409で拒否される() throws Exception {
+        Fixture f = fixtures.create("w321a-m8-rw-hold");
+        DualConfirmationResultDto submitted = submit(f, f.manager(), "key-submit-1");
+
+        Throwable outcome = writerFirst("writer先行 法的hold（実writer）", "t_document", f.documentId(), () -> {
+            bindOperator(f);
+            documentService.placeLegalHold(f.documentId(), true, "W3-21a検証");
+        }, () -> capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認")));
+
+        assertBusiness(outcome, 409, "error.lifecycle.authorizationChanged");
+        assertEquals(List.of(DualConfirmationDenyReason.AUTHORIZATION_CHANGED_DOCUMENT.name()),
+                fixtures.deniedReasons(f));
+        assertEquals("IN_PROGRESS", fixtures.taskStatus(f.taskId()));
+    }
+
+    /** 実際の法的hold設定のreader先行: holdは確認の共有lockを待ち、確認のcommit後に設定して文書epochを1進める。 */
+    @Test
+    void 確認と実際の法的hold設定のreader先行ではholdが確認のcommitを待ち確認は成功する() throws Exception {
+        Fixture f = fixtures.create("w321a-m8-rr-hold");
+        DualConfirmationResultDto submitted = submit(f, f.manager(), "key-submit-1");
+        long before = currentEpoch(Anchor.DOCUMENT, f);
+
+        Throwable outcome = readerFirst("reader先行 法的hold（実writer）", "t_document", f.documentId(), () -> {
+            bindOperator(f);
+            documentService.placeLegalHold(f.documentId(), true, "W3-21a検証");
+        }, () -> capture(() -> decide(f, f.hr1(), submitted, "CONFIRM", "key-confirm-1", "確認")));
+
+        assertNull(outcome, String.valueOf(outcome));
+        assertEquals("COMPLETED", fixtures.taskStatus(f.taskId()));
+        assertEquals(before + 1, currentEpoch(Anchor.DOCUMENT, f), "holdは確認のcommit後に1だけ進める");
+    }
+
     // ===================================================================== 両順序の部品
 
     /** writerがanchorをXで取りepochを進めてcommit前に止まっている間に、試行がそのanchorで待つことを確かめる。 */
     private Throwable writerFirst(Anchor anchor, Fixture f, java.util.concurrent.Callable<Throwable> operation)
             throws Exception {
-        String label = "writer先行 " + anchor;
+        return writerFirst("writer先行 " + anchor, anchor.table, anchor.rowId(f),
+                () -> anchor.lockAndIncrement(epochMapper, f), operation);
+    }
+
+    /**
+     * writer（最小形または実際の業務writer）がanchor行をXで取りcommit前に止まっている間に、試行がその行で待つことを確かめる。
+     * writerはanchorの表・主キーにちょうど1件のrecord lockを持つこと（{@code requireSinglePointLock}）を前提とする。
+     */
+    private Throwable writerFirst(String label, String table, long rowId, Runnable writerCall,
+                                  java.util.concurrent.Callable<Throwable> operation) throws Exception {
         Pause hook = new Pause(false);
         pause = hook;
         lockExecutor.reset(hook);
@@ -514,7 +604,7 @@ class DualConfirmationRaceMySqlTest {
         try {
             Future<Object> writer = pool.submit(() -> required().execute(status -> {
                 writerConnection.set(connectionId());
-                anchor.lockAndIncrement(epochMapper, f);
+                writerCall.run();
                 locked.countDown();
                 awaitQuietly(releaseWriter);
                 return null;
@@ -523,8 +613,7 @@ class DualConfirmationRaceMySqlTest {
                 fail(label + ": writerがanchorをlockできなかった");
             }
             InnoDbRecordLockWaits.PointLock point = InnoDbRecordLockWaits.requireSinglePointLock(jdbc,
-                    writerConnection.get(), anchor.table, "PRIMARY", InnoDbRecordLockWaits.primaryKey(anchor.rowId(f)),
-                    label);
+                    writerConnection.get(), table, "PRIMARY", InnoDbRecordLockWaits.primaryKey(rowId), label);
             Future<Throwable> attempt = pool.submit(operation);
             InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, point,
                     hook::connectionOrNull, SHARED, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
@@ -546,7 +635,13 @@ class DualConfirmationRaceMySqlTest {
     /** 試行がlock列を取り終えて止まっている間に、writerがanchorの共有lockで待つことを確かめる。 */
     private Throwable readerFirst(Anchor anchor, Fixture f, java.util.concurrent.Callable<Throwable> operation)
             throws Exception {
-        String label = "reader先行 " + anchor;
+        return readerFirst("reader先行 " + anchor, anchor.table, anchor.rowId(f),
+                () -> anchor.lockAndIncrement(epochMapper, f), operation);
+    }
+
+    /** 試行がlock列を取り終えて止まっている間に、writer（最小形または実際の業務writer）がその行の共有lockで待つことを確かめる。 */
+    private Throwable readerFirst(String label, String table, long rowId, Runnable writerCall,
+                                  java.util.concurrent.Callable<Throwable> operation) throws Exception {
         Pause hook = new Pause(true);
         pause = hook;
         lockExecutor.reset(hook);
@@ -559,13 +654,13 @@ class DualConfirmationRaceMySqlTest {
             }
             Future<Object> writer = pool.submit(() -> required().execute(status -> {
                 writerConnection.set(connectionId());
-                anchor.lockAndIncrement(epochMapper, f);
+                writerCall.run();
                 return null;
             }));
             InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc,
                     () -> writerConnection.get() == 0 ? null : writerConnection.get(), hook::connectionOrNull,
-                    anchor.table, "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, SHARED,
-                    InnoDbRecordLockWaits.primaryKey(anchor.rowId(f)), DETECT_MILLIS, () -> {
+                    table, "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, SHARED,
+                    InnoDbRecordLockWaits.primaryKey(rowId), DETECT_MILLIS, () -> {
                         if (writer.isDone()) {
                             fail(label + ": writerが試行の共有lockを待たずに終了した: " + outcome(writer));
                         }

@@ -24,12 +24,14 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * V196（F2 data element catalog seed）を H2 で確認する（application-test.yml が起動時に V196 をそのまま実行する）。
+ * V196（F2 data element catalog seed）と V198（NF01 二者確認 B0 の catalog 行）を H2 で確認する（application-test.yml が
+ * 起動時に V196・V198 をそのまま実行する）。
  *
  * <ul>
  *   <li>C-2-2: §3.4.1 で hold の gate に接続する data element は seed で UNKNOWN にならない</li>
@@ -45,7 +47,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PrivacyDataElementCatalogSeedTest {
 
     private static final String SEED = "db/migration/V196__nf07_privacy_data_element_catalog_seed.sql";
+    /** V198: NF01 二者確認（B0）の7表と自由記述2列の catalog 行。 */
+    private static final String B0_SEED = "db/migration/V198__nf01_dual_confirmation_privacy_catalog.sql";
     private static final String TENANT = "default";
+
+    /** V198 が入れる B0 の data element と保存先（V195 の7表と、別の data element にした自由記述2列）。 */
+    static final Map<String, String> B0_ELEMENTS = Map.of(
+            "LIFECYCLE_DUAL_SUBMISSION", "t_lifecycle_dual_submission.(business_comment以外)",
+            "LIFECYCLE_DUAL_SUBMISSION_COMMENT", "t_lifecycle_dual_submission.business_comment",
+            "LIFECYCLE_DUAL_SUBMISSION_DOCUMENT", "t_lifecycle_dual_submission_document",
+            "LIFECYCLE_DUAL_SUBMISSION_ORG_FENCE", "t_lifecycle_dual_submission_org_fence",
+            "LIFECYCLE_DUAL_CONFIRMATION", "t_lifecycle_dual_confirmation.(decision_comment以外)",
+            "LIFECYCLE_DUAL_DECISION_COMMENT", "t_lifecycle_dual_confirmation.decision_comment",
+            "LIFECYCLE_DUAL_PROJECTION", "t_lifecycle_dual_projection",
+            "LIFECYCLE_DUAL_IDEMPOTENCY", "t_lifecycle_dual_idempotency",
+            "LIFECYCLE_DUAL_EVENT", "t_lifecycle_dual_event");
 
     /** §3.4.1 で hold の gate に接続する data element（D4〜D7・D9。D1〜D3 は下の文書種別ごと）。 */
     static final List<String> GATE_CONNECTED = List.of("RESUME_INGESTION_ORIGINAL", "RESUME_INGESTION_TEXT",
@@ -100,8 +116,9 @@ class PrivacyDataElementCatalogSeedTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? AND "
                 + "(owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
                 + "OR owner_ref IS NOT NULL)", Long.class, TENANT)).isZero();
+        // V196 の27件と V198（NF01 二者確認 B0）の9件
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(27L);
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(36L);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
                 + "AND inventory_ref IS NULL", Long.class, TENANT)).isZero();
     }
@@ -132,6 +149,54 @@ class PrivacyDataElementCatalogSeedTest {
                 + "AND provider_id IS NOT NULL AND (provider_id LIKE '%gemini%' OR provider_id LIKE '%cloudsign%' "
                 + "OR provider_id LIKE '%freee%' OR provider_id LIKE '%mail%' OR provider_id LIKE '%backup%' "
                 + "OR provider_id LIKE '%replica%')", Long.class, TENANT)).isZero();
+    }
+
+    /**
+     * V198（RB-NF01、W3-21a review P3-4）: NF01 二者確認（B0）の7表と自由記述2列は、V196 の未登録の data element と同じ形
+     * （provider 無し・分類 UNKNOWN・owner・データ分類・inventory 状態は UNKNOWN の構造行。保持期間は持たない）で catalog にある。
+     * V195 が作る表は1つも漏れず、coverage report では欠落（CATALOG_MISSING）ではなく PROVIDER_UNREGISTERED として報告される。
+     */
+    @Test
+    void NF01二者確認の7表と自由記述2列はprovider未登録の構造行としてcatalogにありV195の表を漏らさない() throws Exception {
+        List<PiiDataElement> rows = catalog(TENANT).stream()
+                .filter(row -> B0_ELEMENTS.containsKey(row.getDataElementId())).toList();
+        assertThat(rows).extracting(PiiDataElement::getDataElementId)
+                .containsExactlyInAnyOrderElementsOf(B0_ELEMENTS.keySet());
+        for (PiiDataElement row : rows) {
+            String id = row.getDataElementId();
+            assertThat(row.getStorageRef()).as(id).isEqualTo(B0_ELEMENTS.get(id));
+            assertThat(row.getStorageKind()).as(id).isEqualTo("DB_COLUMN");
+            assertThat(row.getProviderId()).as(id).isNull();
+            assertThat(row.getSubjectAttribution()).as(id).isEqualTo("UNKNOWN");
+            assertThat(row.getOwnerState()).as(id).isEqualTo("UNKNOWN");
+            assertThat(row.getDataClass()).as(id).isEqualTo("UNKNOWN");
+            assertThat(row.getInventoryStatus()).as(id).isEqualTo("UNKNOWN");
+            assertThat(row.getInventoryRef()).as(id).matches("pii-inventory\\.md#DB-14[1-7]");
+        }
+
+        // V195 の CREATE TABLE を読み、全ての表と自由記述の2列が catalog の storage_ref で覆われる
+        String v195 = new String(new ClassPathResource("db/migration/V195__nf01_dual_confirmation_coordinator.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        java.util.regex.Matcher created = java.util.regex.Pattern.compile("CREATE TABLE\\s+(t_lifecycle_dual_\\w+)")
+                .matcher(v195);
+        Set<String> tables = new java.util.TreeSet<>();
+        while (created.find()) {
+            tables.add(created.group(1));
+        }
+        assertThat(tables).hasSize(7);
+        for (String table : tables) {
+            assertThat(rows).as(table).anyMatch(row -> row.getStorageRef().equals(table)
+                    || row.getStorageRef().startsWith(table + ".("));
+        }
+        assertThat(v195).contains("business_comment", "decision_comment");
+
+        PrivacyCoverageReport report = PrivacyCoverageReport.build(TENANT, catalog(TENANT), registry);
+        assertThat(report.unregisteredElements()).filteredOn(entry -> B0_ELEMENTS.containsKey(entry.dataElementId()))
+                .hasSize(B0_ELEMENTS.size())
+                .allSatisfy(entry -> assertThat(entry.reason()).isEqualTo(PrivacyCoverageReport.PROVIDER_UNREGISTERED));
+        assertThat(report.registeredElements()).noneMatch(entry -> B0_ELEMENTS.containsKey(entry.dataElementId()));
+        assertThat(report.uncatalogedProviderElements())
+                .noneMatch(missing -> missing.dataElementId().startsWith("LIFECYCLE_DUAL_"));
     }
 
     /**
@@ -238,7 +303,11 @@ class PrivacyDataElementCatalogSeedTest {
         return mapper.selectList(new LambdaQueryWrapper<PiiDataElement>().eq(PiiDataElement::getTenantId, tenant));
     }
 
+    /** catalog の seed（V196 と V198）を再実行する。 */
     private static void runSeed(Connection connection) {
-        ScriptUtils.executeSqlScript(connection, new EncodedResource(new ClassPathResource(SEED), StandardCharsets.UTF_8));
+        for (String script : List.of(SEED, B0_SEED)) {
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(new ClassPathResource(script),
+                    StandardCharsets.UTF_8));
+        }
     }
 }

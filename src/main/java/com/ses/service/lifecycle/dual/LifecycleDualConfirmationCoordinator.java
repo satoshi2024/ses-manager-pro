@@ -408,6 +408,7 @@ public class LifecycleDualConfirmationCoordinator {
                 deny.resolved(context, discoveredGeneration(actor.tenantId(), context), null);
                 preAuthorizeSubmitter(actor, channel, context);
                 requireDualTask(context);
+                requireVisibleToSubmitter(actor, documentId, context.engineerId());
                 EligibleVersion version = requireEligibleAtDiscovery(actor.tenantId(), documentId, documentVersionId,
                         context.engineerId());
                 requireStorageMatches(version);
@@ -522,6 +523,28 @@ public class LifecycleDualConfirmationCoordinator {
         }
     }
 
+    /**
+     * 提出者に見えない文書は、存在しない文書と同じ400 {@code error.document.notFound} にする（W3-21a review P3-5、
+     * RB-NF01 review RB-P3-1、計画 §5.9「文書・版が無い、他tenant、版が別文書、提出者の文書ACL外、SKILL_SHEET以外」の行）。
+     * 可視は「提出者の文書ACL（{@code SKILL_SHEET}×{@code ENGINEER} link の文書下載と同じ判定: 管理者、または要員の
+     * data scope）」かつ「tenantに存在する {@code SKILL_SHEET} で、案件の要員を指す {@code ENGINEER} linkを持つ」
+     * （{@link DocumentEvidenceEligibility#visibleEvidenceCandidate}）。適格性（削除・種別・状態・hold・廃棄申請・link形・版）の
+     * 判定より前に行うため、範囲外の文書や、種別ごとに下載のACLが厳しい文書（RECEIPT・CHANGE_REQUEST_ATTACHMENT・
+     * 電子インボイス等）について「無い」「削除済み」「SKILL_SHEETでない」「hold・廃棄申請がある」「他の要員の文書」を応答で
+     * 区別させない。具体的な拒否（409等）は、提出者に見えるSKILL_SHEETについてだけ返す。拒否eventのreasonは、文書ACL外を
+     * {@code SCOPE_DENIED}、それ以外を {@code NOT_FOUND_OR_FOREIGN} に分けて残す（応答のHTTP状態とmessage keyは同じ）。
+     * attemptもlock下で同じ順に判定する。
+     */
+    private void requireVisibleToSubmitter(ExplicitActor actor, long documentId, long engineerId) {
+        if (!documentAclAllows(actor, engineerId)) {
+            throw DualConfirmationRejection.of(400, "error.document.notFound", DualConfirmationDenyReason.SCOPE_DENIED);
+        }
+        if (!eligibility.visibleEvidenceCandidate(actor.tenantId(), documentId, engineerId)) {
+            throw DualConfirmationRejection.of(400, "error.document.notFound",
+                    DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
+        }
+    }
+
     private EligibleVersion requireEligibleAtDiscovery(String tenant, long documentId, long documentVersionId,
                                                        long engineerId) {
         DocumentEvidenceEligibility.Result result = eligibility.evaluate(
@@ -552,7 +575,7 @@ public class LifecycleDualConfirmationCoordinator {
         }
     }
 
-    /** DUAL以外のタスクは400（照会でも使うため業務例外で投げる。提出では拒否eventの reason が SUBMISSION_STALE になる）。 */
+    /** DUAL以外のタスクは400（照会でも使うため業務例外で投げる。提出では拒否eventの reason が INVALID_STATE になる）。 */
     private void requireDualTask(TaskContext context) {
         if (!LifecycleDualConfirmationAttemptService.EVIDENCE_TYPE_DUAL.equals(context.task().getEvidenceType())) {
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition");

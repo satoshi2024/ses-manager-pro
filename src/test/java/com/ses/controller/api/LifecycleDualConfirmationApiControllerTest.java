@@ -65,8 +65,10 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -95,9 +97,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * coordinatorの結果を差し替える。</p>
  *
  * <p>W3-21b: 照会（A1・A5）の応答でのcomment本文の表示範囲（review P3-3の最小公開）を、実物のcoordinatorの照会経路で確かめる。</p>
+ *
+ * <p>RB-NF01（review RB-P3-1・RB-P3-2）: 提出者に見えない文書を指定した提出は、理由（不存在・文書ACL外・他の要員の文書・
+ * ENGINEER以外のlink・SKILL_SHEET以外・削除済み）にかかわらず、HTTPのstatusとbodyが存在しない文書と同じになることを、
+ * 実物のcoordinatorと文書の適格性判定（{@link DocumentEvidenceEligibility}）を通して確かめる。</p>
  */
 @WebMvcTest(LifecycleDualConfirmationApiController.class)
-@Import({LifecycleDualConfirmationCoordinator.class, LifecycleDualConfirmationApiControllerTest.Switches.class})
+@Import({LifecycleDualConfirmationCoordinator.class, DocumentEvidenceEligibility.class,
+        LifecycleDualConfirmationApiControllerTest.Switches.class})
 class LifecycleDualConfirmationApiControllerTest {
 
     private static final String TENANT = "tenant-a";
@@ -134,7 +141,6 @@ class LifecycleDualConfirmationApiControllerTest {
     @MockBean private SysUserMapper sysUserMapper;
     @MockBean private ExplicitActorAuthorizationEvaluator evaluator;
     @MockBean private LifecycleDualConfirmationDependencyReader dependencyReader;
-    @MockBean private DocumentEvidenceEligibility eligibility;
     @MockBean private DocumentEvidenceStorageVerifier storageVerifier;
     @MockBean private LifecycleDualConfirmationAttemptService attemptService;
     @MockBean private LifecycleDualConfirmationDenyRecorder denyRecorder;
@@ -145,6 +151,8 @@ class LifecycleDualConfirmationApiControllerTest {
     @MockBean private DocumentLinkMapper documentLinkMapper;
     @MockBean private DocumentVersionMapper documentVersionMapper;
     @MockBean private DocumentMapper documentMapper;
+    // 文書の適格性・可視性は実物（DocumentEvidenceEligibility）で判定し、文書のmapperだけを差し替える（RB-NF01 review RB-P3-2）
+    @MockBean private com.ses.mapper.DocumentDisposalRequestMapper disposalRequestMapper;
 
     // web sliceのfilter・adviceが参照する部品（既存のWebMvcTestと同じ）
     @MockBean private com.ses.service.security.DataScopeService dataScopeService;
@@ -418,6 +426,111 @@ class LifecycleDualConfirmationApiControllerTest {
         when(confirmationMapper.selectOne(any())).thenReturn(LifecycleDualConfirmation.builder().tenantId(TENANT)
                 .taskId(7L).submissionId(55L).confirmerUserId(9L).decision("REJECT").decisionComment(decisionComment)
                 .decidedAt(LocalDateTime.now()).build());
+    }
+
+    // ===================================================================== 提出の文書の可視性（RB-NF01 review RB-P3-1・RB-P3-2）
+
+    /**
+     * 提出者に見えない文書は、どの理由でもHTTPのstatusとbody（{@code {code, message, data}}）が存在しない文書と完全に同じ
+     * 400 {@code error.document.notFound} になり、試行もstorageの検証も行わない。対照として、提出者に見える
+     * SKILL_SHEETの削除済みだけは具体的な409（{@code error.lifecycle.evidenceDocumentUnavailable}）になる。
+     */
+    @Test
+    void 提出者に見えない文書はどの理由でもHTTPのstatusとbodyが存在しない文書と同じになる() throws Exception {
+        String path = "/api/lifecycle/tasks/7/dual-confirmation/submissions";
+        stubSubmitDiscovery();
+        Map<String, Runnable> invisible = new LinkedHashMap<>();
+        invisible.put("不存在", () -> stubDocument(null, List.of()));
+        invisible.put("文書ACL外", () -> {
+            stubDataScope(false);
+            stubDocument(evidenceDocument("SKILL_SHEET", 0), List.of(documentLink("ENGINEER", 40L)));
+        });
+        invisible.put("他の要員を指すlink", () ->
+                stubDocument(evidenceDocument("SKILL_SHEET", 0), List.of(documentLink("ENGINEER", 41L))));
+        invisible.put("ENGINEER以外のlink", () ->
+                stubDocument(evidenceDocument("SKILL_SHEET", 0), List.of(documentLink("ASSET_ASSIGNMENT", 40L))));
+        invisible.put("SKILL_SHEET以外（要員のdata scopeあり）", () ->
+                stubDocument(evidenceDocument("RECEIPT", 0), List.of(documentLink("ENGINEER", 40L))));
+        invisible.put("削除済みのSKILL_SHEET以外", () ->
+                stubDocument(evidenceDocument("CHANGE_REQUEST_ATTACHMENT", 1), List.of(documentLink("ENGINEER", 40L))));
+        invisible.put("文書ACL外の削除済みSKILL_SHEET", () -> {
+            stubDataScope(false);
+            stubDocument(evidenceDocument("SKILL_SHEET", 1), List.of(documentLink("ENGINEER", 40L)));
+        });
+
+        String expectedBody = null;
+        for (Map.Entry<String, Runnable> scenario : invisible.entrySet()) {
+            stubDataScope(true);
+            scenario.getValue().run();
+            ResultActions actions = mockMvc.perform(submit(path, KEY, SUBMIT_BODY));
+            expectError(actions, 400, "error.document.notFound");
+            String body = actions.andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            if (expectedBody == null) {
+                expectedBody = body;
+            }
+            assertThat(body).as(scenario.getKey() + " のbodyは不存在と同じ").isEqualTo(expectedBody);
+        }
+        verifyNoInteractions(attemptService, storageVerifier);
+
+        // 対照: 提出者に見えるSKILL_SHEETの削除済みだけは具体的な拒否になる（判定が文書の状態を見ていることの確認）
+        stubDataScope(true);
+        stubDocument(evidenceDocument("SKILL_SHEET", 1), List.of(documentLink("ENGINEER", 40L)));
+        expectError(mockMvc.perform(submit(path, KEY, SUBMIT_BODY)), 409, "error.lifecycle.evidenceDocumentUnavailable");
+        verifyNoInteractions(attemptService, storageVerifier);
+    }
+
+    /** 提出のdiscoveryを文書の判定まで進める（営業の提出者、案件の要員40、DUALのタスク7）。 */
+    private void stubSubmitDiscovery() {
+        SysUser submitter = new SysUser();
+        submitter.setId(1L);
+        submitter.setRole("営業");
+        submitter.setStatus(1);
+        submitter.setTenantId(TENANT);
+        when(sysUserMapper.selectById(1L)).thenReturn(submitter);
+        when(evaluator.resolveActor(eq(TENANT), eq(1L), any(LocalDate.class)))
+                .thenReturn(Optional.of(new ExplicitActor(TENANT, 1L, "営業", LocalDate.now())));
+        LifecycleTask task = LifecycleTask.builder().caseId(30L).taskCode("DUAL").taskName("二者確認")
+                .evidenceType("DUAL_CONFIRMATION").status("IN_PROGRESS").isEngineerVisible(1).build();
+        task.setId(7L);
+        LifecycleCase lcCase = LifecycleCase.builder().tenantId(TENANT).caseNo("LC-RB-NF01").engineerId(40L)
+                .status("ACTIVE").build();
+        lcCase.setId(30L);
+        Engineer engineer = Engineer.builder().tenantId(TENANT).build();
+        engineer.setId(40L);
+        when(dependencyReader.readTaskContext(TENANT, 7L))
+                .thenReturn(Optional.of(new LifecycleDualConfirmationDependencyReader.TaskContext(task, lcCase, engineer)));
+        when(epochMapper.selectTaskGeneration(anyLong(), anyLong(), anyString()))
+                .thenReturn(new AuthorizationEpochMapper.EpochRow(0L, 0));
+    }
+
+    private void stubDataScope(boolean allowed) {
+        when(evaluator.isEngineerAllowedByDataScope(any(), eq(40L))).thenReturn(allowed);
+    }
+
+    private void stubDocument(com.ses.entity.Document document, List<com.ses.entity.DocumentLink> links) {
+        when(documentMapper.selectEvidenceCandidate(10L, TENANT)).thenReturn(document);
+        when(documentLinkMapper.findByDocumentId(10L)).thenReturn(links);
+    }
+
+    private static com.ses.entity.Document evidenceDocument(String documentType, int deletedFlag) {
+        com.ses.entity.Document document = new com.ses.entity.Document();
+        document.setId(10L);
+        document.setTenantId(TENANT);
+        document.setDocumentType(documentType);
+        document.setStatus("DRAFT");
+        document.setLegalHoldFlag(0);
+        document.setDeletedFlag(deletedFlag);
+        return document;
+    }
+
+    private static com.ses.entity.DocumentLink documentLink(String targetType, long targetId) {
+        com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
+        link.setTenantId(TENANT);
+        link.setDocumentId(10L);
+        link.setTargetType(targetType);
+        link.setTargetId(targetId);
+        link.setDeletedFlag(0);
+        return link;
     }
 
     // ===================================================================== helpers
