@@ -109,9 +109,9 @@
   - failover・load-balance・replication の動作: `failOverReadOnly`・`retriesAllDown`・`secondsBeforeRetrySource`・`queriesBeforeRetrySource`・`allowSourceDownConnections`・`allowReplicaDownConnections`・`readFromSourceWhenNoReplicas`（旧名の `secondsBeforeRetryMaster`・`queriesBeforeRetryMaster`・`allowMasterDownConnections`・`allowSlaveDownConnections`・`readFromMasterWhenNoSlaves` も）、`ha.loadBalanceStrategy`・`ha.enableJMX`・`loadBalance*` の10件（旧名 `loadBalanceBlacklistTimeout` も）・`replicationConnectionGroup`・`serverAffinityOrder`、再接続の `maxReconnects`・`reconnectAtTxEnd`。
   - 属性そのものを書き換える: `propertiesTransform`（classpath の `ConnectionPropertiesTransform` 実装が解析時に任意の属性・host を書き換える。RB-NF05 delta review E-P3-1）。
   - 照合して対象から外した key: `localSocketAddress`（ローカル側の bind address）、`socksProxyHost`・`socksProxyPort`・`socksProxyRemoteDns`（TCP の中継で、切断は driver へ失敗として届き、別の接続へ切り替えない）、`resourceId`（XA の識別）。
+  - `autoReconnect`・`autoReconnectForPools` は従来どおり値（`true`/`yes`）で判定し、key の大文字小文字と値の前後の空白は問わない（`false`・`no` は通す）。
 - **driver が展開した後の有効な属性も見る**（RB-NF05 delta review E-P3-1、RB-HYG）: Connector/J は解析の中で `useConfigs`（同梱の設定 file。`clusterBase` は `autoReconnect=true`・`failOverReadOnly=false`、`coldFusion` は `autoReconnect=true` を足す）と `propertiesTransform` を展開する。接続先の検査を通った URL（`spring.datasource.url`・`hikari.jdbc-url`・data-source-properties の `url`）について、展開後の main host の属性（`getHostProperties()`。接続はこの属性で初期化される）で autoReconnect 系が有効なら `名前(effectiveAutoReconnect)`、上の key があれば `名前(connectionTopology)` で起動を中止する。URL・data-source-properties に直接書いた違反と重ねては出さない。明示の `autoReconnect=false` は展開より優先される（driver の結果どおり）。存在しない変換 class・未知の `useConfigs` は driver 自身が解析できず `(unparsable)`。`useConfigs=maxPerformance` 等、再接続・切替えを変えない同梱設定は通す。
 - **staging での確認**: 本番と同じ形式の `DB_URL`（secret の実値と同じ host 部・query）で staging を一度起動し、この guard が通ることを確かめる（guard はスイッチと関係なく起動時に必ず動くため、全停止の deploy で初めて起動中止に気付かないように。RB-HYG review P3-1）。
-  - `autoReconnect`・`autoReconnectForPools` は従来どおり値（`true`/`yes`）で判定し、key の大文字小文字と値の前後の空白は問わない（`false`・`no` は通す）。
 - 例外文言には property 名だけを出し、URL・host 名・認証情報は出さない。
 - 透過再接続 proxy と Hikari 以外の pool はアプリから検出できない（または検査の対象外）ため、配備 checklist で DBA / SRE が確認する（`feature-switches.md` 4.8.2 #7）。
 
