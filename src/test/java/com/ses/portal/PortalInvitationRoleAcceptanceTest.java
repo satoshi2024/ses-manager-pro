@@ -116,6 +116,77 @@ class PortalInvitationRoleAcceptanceTest extends PortalTestSupport {
         assertThat(orgAdminCount(org.getId())).isEqualTo(1);
     }
 
+    /** RB-PRERUN 追加 P2-2: reactivateで旧組織の権限行（org.admin を含む）を持ち越さない。 */
+    @Test
+    void 論理削除された旧組織管理者をMEMBER招待で別組織へ受諾させても組織管理者の権限を持ち越さない() {
+        PortalOrganization former = createBpOrg("role-former-" + unique());
+        PortalOrganization next = createCustomerOrg("role-next-" + unique());
+        String email = "role-former-admin-" + unique() + "@example.com";
+        PortalUser formerAdmin = deletedFormerAdmin(former, email);
+        String token = invite(next, email, "MEMBER");
+
+        portalAuthService.acceptInvitation(acceptRequest(token, email), new MockHttpServletRequest());
+
+        PortalUser accepted = userMapper.selectByEmail(email);
+        assertThat(accepted.getId()).as("同じuserを再活性化する").isEqualTo(formerAdmin.getId());
+        assertThat(accepted.getPortalOrgId()).isEqualTo(next.getId());
+        assertThat(permissionKeys(accepted.getId()))
+                .as("招待の権限（MEMBER・顧客組織の初期権限）だけになり、旧組織のorg.adminと権限を残さない")
+                .containsExactly("service-desk.create", "service-desk.view");
+        assertThat(orgAdminCount(next.getId())).isZero();
+    }
+
+    @Test
+    void 論理削除された旧組織管理者のADMIN招待は受諾先に組織管理者がいれば409で権限行も変えない() {
+        PortalOrganization former = createBpOrg("role-former2-" + unique());
+        PortalOrganization next = createBpOrg("role-next2-" + unique());
+        String adminEmail = "role-existing-admin-" + unique() + "@example.com";
+        String adminToken = invite(next, adminEmail, "ADMIN");
+        portalAuthService.acceptInvitation(acceptRequest(adminToken, adminEmail), new MockHttpServletRequest());
+        String email = "role-former-admin2-" + unique() + "@example.com";
+        PortalUser formerAdmin = deletedFormerAdmin(former, email);
+        String token = invite(next, email, "ADMIN");
+
+        BusinessException rejected = catchThrowableOfType(() -> portalAuthService.acceptInvitation(
+                acceptRequest(token, email), new MockHttpServletRequest()), BusinessException.class);
+
+        assertThat(rejected).isNotNull();
+        assertThat(rejected.getCode()).isEqualTo(409);
+        assertThat(rejected.getMessageKey()).isEqualTo("error.portal.invite.orgAdminExists");
+        assertThat(userMapper.selectByEmail(email)).as("再活性化しない").isNull();
+        assertThat(permissionKeys(formerAdmin.getId()))
+                .as("受諾しなかったので旧い権限行は変えない（論理削除のまま）")
+                .containsExactly(ORG_ADMIN, "service-desk.create", "service-desk.view");
+        assertThat(orgAdminCount(next.getId())).as("受諾先の組織管理者は既存の1人だけ").isEqualTo(1);
+    }
+
+    @Test
+    void 論理削除された旧組織管理者がADMIN招待で組織管理者のいない組織へ受諾すると権限は招待どおりに置き換わる() {
+        PortalOrganization former = createCustomerOrg("role-former3-" + unique());
+        PortalOrganization next = createBpOrg("role-next3-" + unique());
+        String email = "role-former-admin3-" + unique() + "@example.com";
+        PortalUser formerAdmin = deletedFormerAdmin(former, email);
+        String token = invite(next, email, "ADMIN");
+
+        portalAuthService.acceptInvitation(acceptRequest(token, email), new MockHttpServletRequest());
+
+        assertThat(permissionKeys(formerAdmin.getId()))
+                .as("BP組織のADMIN招待の権限（org.adminだけ）になり、旧組織（顧客）のservice-desk権限を残さない")
+                .containsExactly(ORG_ADMIN);
+        assertThat(orgAdminCount(next.getId())).isEqualTo(1);
+    }
+
+    /** 旧組織の組織管理者で、論理削除済みのuser（旧組織の権限行を持ったまま）。 */
+    private PortalUser deletedFormerAdmin(PortalOrganization formerOrg, String email) {
+        PortalUser user = createUser(formerOrg, email);
+        for (String key : List.of(ORG_ADMIN, "service-desk.view", "service-desk.create")) {
+            jdbcTemplate.update("INSERT INTO t_portal_user_permission (user_id, permission_key) VALUES (?, ?)",
+                    user.getId(), key);
+        }
+        jdbcTemplate.update("UPDATE t_portal_user SET deleted_flag = 1 WHERE id = ?", user.getId());
+        return user;
+    }
+
     private String invite(PortalOrganization org, String email, String role) {
         String rawToken = "role-token-" + unique();
         PortalInvitation invitation = new PortalInvitation();

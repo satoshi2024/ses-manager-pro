@@ -348,6 +348,13 @@ public class PortalAuthServiceImpl implements PortalAuthService {
             throw BusinessException.of(409, "error.portal.invite.alreadyRegistered");
         }
         sessionService.revokeAllForUser(existing.getId(), "REACTIVATE");
+        // 招待は権限へ固定する（G3）。reactivateは別組織・別権限の招待でも受諾し得るため、旧組織の権限行
+        // （org.admin を含む）を残すと、MEMBER招待で組織管理者になり、受諾時の組織管理者の確認も通らない
+        // （RB-PRERUN 追加 P2-2）。権限行をすべて消し、新規作成と同じ初期権限を付け直す。ADMIN招待のorg.adminは
+        // 呼出元（acceptInvitation）が組織行のlock下の確認を経て付与する。lock順は user → 権限（新規作成と同じ）。
+        portalUserPermissionMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.PortalUserPermission>()
+                .eq(com.ses.entity.PortalUserPermission::getUserId, existing.getId()));
+        grantDefaultCustomerPermissions(existing.getId(), invitation.getPortalOrgId());
         return userMapper.selectById(existing.getId());
     }
 
