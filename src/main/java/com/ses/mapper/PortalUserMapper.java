@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * ポータルユーザーマッパー（t_portal_user）。
@@ -45,4 +46,13 @@ public interface PortalUserMapper extends BaseMapper<PortalUser> {
      */
     @Update("UPDATE t_portal_user SET last_login_at = #{at} WHERE id = #{id} AND deleted_flag = 0")
     int updateLastLogin(@Param("id") Long id, @Param("at") LocalDateTime at);
+
+    /**
+     * 組織のACTIVE userのIDをlocking readで取得する（ADMIN招待受諾の組織管理者確認用。RB-PRERUN 3）。
+     * 受諾のtransactionは先に招待を非lock読みしているため、REPEATABLE READのread viewより後にcommitされた
+     * 組織管理者も見えるよう、通常のSELECTではなくlocking readで最新の確定値を読む。
+     */
+    @Select("SELECT id FROM t_portal_user WHERE portal_org_id = #{orgId} AND status = 'ACTIVE'"
+            + " AND deleted_flag = 0 FOR UPDATE")
+    List<Long> selectActiveIdsByOrgForUpdate(@Param("orgId") Long orgId);
 }

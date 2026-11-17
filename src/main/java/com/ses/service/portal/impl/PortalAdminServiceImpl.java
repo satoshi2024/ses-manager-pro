@@ -213,7 +213,8 @@ public class PortalAdminServiceImpl implements PortalAdminService {
         }
         // G3: 初回組織管理者は内部管理者が発行する。既にACTIVEな組織管理者が存在する組織への
         // ADMIN招待は、組織管理者の承認（現行運用: 内部管理者経由の手続き）を必要とするため
-        // 直接発行を拒否する（S13-R1-P2-09）。
+        // 直接発行を拒否する（S13-R1-P2-09）。ADMIN招待は受諾時にorg.adminを付与し、その時点でも組織行をlockして
+        // 組織管理者の不在を確かめ直す（PortalAuthServiceImpl.acceptInvitation。RB-PRERUN 3）。
         if ("ADMIN".equals(role) && hasActiveOrgAdmin(orgId)) {
             throw BusinessException.of(409, "error.portal.admin.orgAdminExists");
         }

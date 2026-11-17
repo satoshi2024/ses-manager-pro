@@ -3,6 +3,7 @@ package com.ses.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.entity.PortalOrganization;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 /**
@@ -23,4 +24,10 @@ public interface PortalOrganizationMapper extends BaseMapper<PortalOrganization>
      */
     @Select("SELECT * FROM m_portal_organization WHERE bp_company_id = #{bpCompanyId} AND deleted_flag = 0")
     PortalOrganization selectByBpCompanyId(Long bpCompanyId);
+
+    /**
+     * 組織行をX lockして読む。ADMIN招待の受諾を組織ごとに直列化し、組織管理者が2人にならないようにする（RB-PRERUN 3）。
+     */
+    @Select("SELECT * FROM m_portal_organization WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    PortalOrganization selectByIdForUpdate(@Param("id") Long id);
 }

@@ -1192,10 +1192,12 @@ input[type="date"]::-webkit-datetime-edit-text {
     }
 
     /* Modals: use full viewport height comfortably, avoid clipped footers */
-    .modal-dialog {
+    /* 全画面の変種（modal-fullscreen / modal-fullscreen-*-down）はBootstrapの margin:0・全高のままにする。
+       :where() で除外し、通常のモーダルへの詳細度（.modal-dialog / .modal-content の1class分）は変えない（RB-PRERUN 7） */
+    .modal-dialog:where(:not([class*="modal-fullscreen"])) {
         margin: 0.75rem;
     }
-    .modal-content {
+    :where(.modal-dialog:not([class*="modal-fullscreen"])) .modal-content {
         max-height: calc(100vh - 1.5rem);
         max-height: calc(100dvh - 1.5rem);
     }
@@ -1270,10 +1272,11 @@ input[type="date"]::-webkit-datetime-edit-text {
         flex-basis: auto;
     }
 
-    .modal-dialog {
+    /* 全画面の変種は除外する（上の max-width: 768px の Modals と同じ。RB-PRERUN 7） */
+    .modal-dialog:where(:not([class*="modal-fullscreen"])) {
         margin: 0.35rem;
     }
-    .modal-content {
+    :where(.modal-dialog:not([class*="modal-fullscreen"])) .modal-content {
         max-height: calc(100vh - 0.7rem);
         max-height: calc(100dvh - 0.7rem);
         border-radius: 0.75rem;

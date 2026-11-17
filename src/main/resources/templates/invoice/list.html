@@ -263,9 +263,11 @@
                 <div class="modal-body">
                     <div class="mb-3">
                         <span th:text="#{invoice.bulkReminder.sent}">送信済</span>: <span id="bulkSentCount" class="fw-bold text-success"></span> /
+                        <span th:text="#{invoice.bulkReminder.accepted}">送信受付</span>: <span id="bulkAcceptedCount" class="fw-bold text-info"></span> /
                         <span th:text="#{invoice.bulkReminder.skipped}">スキップ</span>: <span id="bulkSkippedCount" class="fw-bold"></span> /
                         <span th:text="#{invoice.bulkReminder.failed}">失敗</span>: <span id="bulkFailedCount" class="text-danger fw-bold"></span>
                     </div>
+                    <p class="small text-muted" th:text="#{invoice.bulkReminder.acceptedHint}">送信受付の行は送信処理中です。</p>
                     <table class="table table-sm table-bordered" id="bulkReminderResultTable">
                         <thead>
                             <tr>

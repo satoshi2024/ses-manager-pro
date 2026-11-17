@@ -55,6 +55,8 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     /** MFA設定完了までの短命ticket cookie（login MFA_SETUP時に発行。S13-P1-02） */
     static final String MFA_SETUP_COOKIE = "PORTAL_MFA_SETUP";
     private static final long MFA_SETUP_TICKET_TTL_MILLIS = 10 * 60_000L;
+    /** 組織管理者としての招待（t_portal_invitation.role）。 */
+    private static final String INVITE_ROLE_ADMIN = "ADMIN";
 
     private final PortalUserMapper userMapper;
     private final PortalOrganizationMapper organizationMapper;
@@ -219,9 +221,19 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         if (!invitation.getEmail().equalsIgnoreCase(normalizeEmail(request.getEmail()))) {
             throw BusinessException.of(400, "error.portal.invite.emailMismatch");
         }
-        PortalOrganization org = organizationMapper.selectById(invitation.getPortalOrgId());
+        // 招待は権限へ固定する（G3、field-inventory §1.1）。ADMIN招待は受諾した時点でorg.adminを付与する。
+        // 初回の組織管理者だけが招待で就けるため（2人目以降は組織管理者の承認が要る）、ADMIN招待は組織行をX lockして
+        // 組織ごとに直列化し、受諾時にも組織管理者の不在を確かめる。発行時の確認（PortalAdminServiceImpl）だけでは、
+        // 同じ組織へ発行済みの複数のADMIN招待を順に・同時に受諾すると組織管理者が2人になる。
+        boolean adminInvitation = INVITE_ROLE_ADMIN.equals(invitation.getRole());
+        PortalOrganization org = adminInvitation
+                ? organizationMapper.selectByIdForUpdate(invitation.getPortalOrgId())
+                : organizationMapper.selectById(invitation.getPortalOrgId());
         if (org == null || !"ACTIVE".equals(org.getStatus())) {
             throw BusinessException.of(403, "error.portal.org.suspended");
+        }
+        if (adminInvitation && hasActiveOrgAdminLocked(org.getId())) {
+            throw BusinessException.of(409, "error.portal.invite.orgAdminExists");
         }
         // 一回性はDB CAS。同時使用の敗者は0件で拒否される（design §6.3）
         int consumed = invitationMapper.consumeIfUnused(invitation.getId(),
@@ -230,6 +242,9 @@ public class PortalAuthServiceImpl implements PortalAuthService {
             throw BusinessException.of(409, "error.portal.invite.used");
         }
         PortalUser user = createOrReactivateUser(invitation, request);
+        if (adminInvitation) {
+            grantOrgAdmin(user.getId());
+        }
         invitationMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PortalInvitation>()
                 .eq("id", invitation.getId())
                 .set("accepted_by", user.getId()));
@@ -333,6 +348,13 @@ public class PortalAuthServiceImpl implements PortalAuthService {
             throw BusinessException.of(409, "error.portal.invite.alreadyRegistered");
         }
         sessionService.revokeAllForUser(existing.getId(), "REACTIVATE");
+        // 招待は権限へ固定する（G3）。reactivateは別組織・別権限の招待でも受諾し得るため、旧組織の権限行
+        // （org.admin を含む）を残すと、MEMBER招待で組織管理者になり、受諾時の組織管理者の確認も通らない
+        // （RB-PRERUN 追加 P2-2）。権限行をすべて消し、新規作成と同じ初期権限を付け直す。ADMIN招待のorg.adminは
+        // 呼出元（acceptInvitation）が組織行のlock下の確認を経て付与する。lock順は user → 権限（新規作成と同じ）。
+        portalUserPermissionMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.PortalUserPermission>()
+                .eq(com.ses.entity.PortalUserPermission::getUserId, existing.getId()));
+        grantDefaultCustomerPermissions(existing.getId(), invitation.getPortalOrgId());
         return userMapper.selectById(existing.getId());
     }
 
@@ -453,6 +475,37 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         if (email != null) {
             loginFailureGuards.remove(email);
         }
+    }
+
+    /**
+     * 組織にACTIVEな組織管理者がいるかを、locking readで最新の確定値から判定する（呼出元は組織行をX lock済み）。
+     * 受諾のtransactionは先に招待を非lock読みしてREPEATABLE READのread viewを作っているため、通常のSELECTでは
+     * lock待ちの間にcommitされた別の受諾の組織管理者が見えない。
+     */
+    private boolean hasActiveOrgAdminLocked(Long portalOrgId) {
+        List<Long> activeUserIds = userMapper.selectActiveIdsByOrgForUpdate(portalOrgId);
+        if (activeUserIds == null || activeUserIds.isEmpty()) {
+            return false;
+        }
+        List<Long> admins = portalUserPermissionMapper.selectUserIdsWithPermissionForUpdate(
+                activeUserIds, PortalSessionServiceImpl.PERMISSION_ORG_ADMIN);
+        return admins != null && !admins.isEmpty();
+    }
+
+    /** ADMIN招待の受諾者へorg.adminを付与する（reactivateで既に持っていれば追加しない）。 */
+    private void grantOrgAdmin(Long userId) {
+        Long existing = portalUserPermissionMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.PortalUserPermission>()
+                        .eq(com.ses.entity.PortalUserPermission::getUserId, userId)
+                        .eq(com.ses.entity.PortalUserPermission::getPermissionKey,
+                                PortalSessionServiceImpl.PERMISSION_ORG_ADMIN));
+        if (existing != null && existing > 0) {
+            return;
+        }
+        com.ses.entity.PortalUserPermission permission = new com.ses.entity.PortalUserPermission();
+        permission.setUserId(userId);
+        permission.setPermissionKey(PortalSessionServiceImpl.PERMISSION_ORG_ADMIN);
+        portalUserPermissionMapper.insert(permission);
     }
 
     private void grantDefaultCustomerPermissions(Long userId, Long portalOrgId) {

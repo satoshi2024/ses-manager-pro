@@ -123,7 +123,9 @@
    > 💡 既存の（旧 `sql/001`〜`008` を手動適用済みの）DBに対しては、`baseline-on-migrate: true` / `baseline-version: 9` により V1〜V9 は再実行されず V10 以降のみ適用されます。
    > 💡 既定の `mvn test` はH2/unit/MVCの高速feedback suiteで、`mysql`/`performance` tagを明示的に除外します。Dockerの有無で実行範囲が変化することはありません。
    > 💡 実MySQL/Flywayは `mvn test -Pmysql-tests`（Docker必須）、性能回帰は `mvn test -Pperformance-tests` で実行します。push前は `scripts/verify-like-ci.sh`（Windowsは `scripts\verify-like-ci.ps1`）を実行すると、CIと同じ3つのgateとbackup integrationを検証します。
-   > 💡 本番系profileでは `ACCOUNTING_TENANT_IDS` が必須です。対象tenant IDをカンマ区切り（例: `tenant-a,tenant-b`）で設定してください。未設定・空白のみの場合は起動を停止します。schedulerは設定された各tenantを個別contextで処理します。
+   > 💡 `ACCOUNTING_TENANT_IDS`（定期処理の対象tenant。カンマ区切りで複数可、例: `tenant-a,tenant-b`）は `test` 以外の全profileで必須で、未設定・空白のみの場合は起動を停止します。schedulerは設定された各tenantを個別contextで処理します。
+   > 💡 **ローカル起動のtenant設定**: `mvn spring-boot:run`（`dev` profile）では `application-dev.yml` が `OIDC_TENANT_ID` と `ACCOUNTING_TENANT_IDS` の既定値を `default`（初期管理者 `admin` と権限groupのtenant）にするため、設定は不要です。`dev` 以外のprofileでローカル起動する場合は、両方に `default` を設定してください。`OIDC_TENANT_ID` が空のままだと、ログイン自体は成功しますがログインユーザーのtenantが決まらず（`sys_user.tenant_id` は使いません）、ログイン後の全画面・APIが 403 `TENANT_CONTEXT_REQUIRED` になります。本番は `application-dev.yml` を読まないため、両方を明示設定してください（`.kiro/specs/production-launch/deploy-runbook.md` §1.0）。
+   > 💡 `dev` profile は `db/migration-dev` の開発用seedも適用します。以前の版で V173（AI推薦データのtenant検査）の失敗で止まったローカルDBは、V173 のDDLが途中まで適用済みのため、`flyway repair` ではなく空のDBから作り直してください。
 
 3. **プロジェクトのビルドと起動**:
    プロジェクトのルートディレクトリで以下のコマンドを実行します。
