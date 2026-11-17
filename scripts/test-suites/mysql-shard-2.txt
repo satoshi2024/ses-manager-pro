@@ -39,3 +39,4 @@ DualConfirmationCoordinatorRetryMySqlTest
 PrivacyHoldReleaseMySqlTest
 PrivacyPolicyRegistrationMySqlTest
 SkillSheetConfirmFirstAttemptMySqlTest
+FlywayDevProfileFreshInstallMySqlTest

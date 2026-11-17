@@ -118,6 +118,108 @@ class MigrationScriptIntegrityTest {
     }
 
     /**
+     * RB-PRERUN 4: dev profileは {@code application-dev.yml} のlocations（{@code db/migration} + {@code db/migration-dev}）を
+     * 1つのversion空間として解決する。devのseedが {@code db/migration} と同じversion（{@code 1.0} と {@code 1} の同値を含む）を
+     * 使うと、dev profileだけが {@code Found more than one migration with version} で起動できなくなるが、
+     * {@link #マイグレーションのバージョンが重複していないこと} は {@code db/migration} しか見ないため検出できない。
+     * locationsはyamlから読み、devの設定へlocationを足したときも検査範囲が追従するようにする。
+     */
+    @Test
+    void devプロファイルのlocationsを合わせてもversionが重複していないこと() throws Exception {
+        List<String> locations = devFlywayLocations();
+        assertTrue(locations.contains("classpath:db/migration") && locations.contains("classpath:db/migration-dev"),
+                "dev profileのlocationsはdb/migrationとdb/migration-devを含むこと: " + locations);
+
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        Map<MigrationVersion, List<String>> byVersion = new java.util.TreeMap<>();
+        int devScripts = 0;
+        for (String location : locations) {
+            String path = location.substring("classpath:".length());
+            for (String pattern : List.of("classpath*:" + path + "/V*.sql", "classpath*:" + path + "/V*.class")) {
+                for (Resource resource : resolver.getResources(pattern)) {
+                    String fileName = resource.getFilename();
+                    Matcher m = fileName == null ? null : VERSIONED_SQL_OR_JAVA.matcher(fileName);
+                    if (m == null || !m.matches()) {
+                        continue;
+                    }
+                    if (path.endsWith("migration-dev")) {
+                        devScripts++;
+                    }
+                    byVersion.computeIfAbsent(MigrationVersion.fromVersion(m.group(1).replace('_', '.')),
+                            k -> new ArrayList<>()).add(path + "/" + fileName);
+                }
+            }
+        }
+
+        assertTrue(devScripts > 0, "db/migration-dev のseedを1件も解決できていません");
+        List<String> duplicates = byVersion.entrySet().stream()
+                .filter(e -> e.getValue().size() > 1)
+                .map(e -> "V" + e.getKey().getVersion() + " -> " + e.getValue())
+                .toList();
+        assertTrue(duplicates.isEmpty(),
+                "dev profileで同一versionのmigrationが複数解決されます（dev起動がFlywayの例外で止まります）。"
+                        + "devのseedは db/migration と衝突しない番号にしてください: " + duplicates);
+    }
+
+    /**
+     * RB-PRERUN 4: devのseedが {@code t_ai_recommendation_run} へ入れたrunは、V173（親runのtenantを
+     * item/feedback/outcomeへ写し、写せない行があれば停止する）より前に、devのseedでtenantを補われていること。
+     * V161はrunのtenant列をNULLで追加するため、V161より前のseedのrunにはtenantが無い。
+     */
+    @Test
+    void devのseedのAI_recommendation_runはV173より前にtenantを補われること() throws Exception {
+        MigrationVersion v173 = MigrationVersion.fromVersion("173");
+        MigrationVersion v161 = MigrationVersion.fromVersion("161");
+        List<String> seededRunIds = new ArrayList<>();
+        StringBuilder tenantFixes = new StringBuilder();
+        Pattern runInsert = Pattern.compile(
+                "INSERT\\s+(?:IGNORE\\s+)?INTO\\s+`?t_ai_recommendation_run`?\\s*\\(\\s*`?id`?\\s*,[^)]*\\)\\s*VALUES\\s*(.*?);",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Pattern rowId = Pattern.compile("^\\s*\\(\\s*'?(\\d+)'?\\s*,", Pattern.MULTILINE);
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:db/migration-dev/V*.sql")) {
+            Matcher name = resource.getFilename() == null ? null : VERSIONED.matcher(resource.getFilename());
+            if (name == null || !name.matches()) {
+                continue;
+            }
+            MigrationVersion version = MigrationVersion.fromVersion(name.group(1).replace('_', '.'));
+            if (version.compareTo(v173) >= 0) {
+                continue;
+            }
+            String sql = resource.getContentAsString(StandardCharsets.UTF_8);
+            Matcher insert = runInsert.matcher(sql);
+            while (insert.find()) {
+                Matcher ids = rowId.matcher(insert.group(1));
+                while (ids.find()) {
+                    seededRunIds.add(ids.group(1));
+                }
+            }
+            if (version.compareTo(v161) > 0
+                    && Pattern.compile("UPDATE\\s+t_ai_recommendation_run\\s+SET\\s+tenant_id",
+                    Pattern.CASE_INSENSITIVE).matcher(sql).find()) {
+                tenantFixes.append(sql.replaceAll("--[^\\n]*", "")).append('\n');
+            }
+        }
+
+        assertTrue(seededRunIds.contains("85071"), "V145のseed run（85071）を読めていること: " + seededRunIds);
+        List<String> uncovered = seededRunIds.stream()
+                .filter(id -> !Pattern.compile("\\bid\\s*=\\s*" + id + "\\b").matcher(tenantFixes).find())
+                .toList();
+        assertEquals(List.of(), uncovered,
+                "V161〜V173の間のdev seedでtenantを補っていないseed runがあります（dev起動がV173で停止します）");
+    }
+
+    private static List<String> devFlywayLocations() {
+        org.springframework.beans.factory.config.YamlPropertiesFactoryBean yaml =
+                new org.springframework.beans.factory.config.YamlPropertiesFactoryBean();
+        yaml.setResources(new org.springframework.core.io.ClassPathResource("application-dev.yml"));
+        java.util.Properties properties = yaml.getObject();
+        String value = properties == null ? null : properties.getProperty("spring.flyway.locations");
+        assertTrue(value != null && !value.isBlank(), "application-dev.yml の spring.flyway.locations を読めること");
+        return java.util.Arrays.stream(value.split(",")).map(String::trim).toList();
+    }
+
+    /**
      * 空のスクリプトは {@code spring.sql.init}（テストのH2スキーマ投入）に拒否されるため、
      * 意図的なno-opでも {@code SELECT 1;} を残す必要がある（CLAUDE.md の V3/V8 の経緯）。
      */
