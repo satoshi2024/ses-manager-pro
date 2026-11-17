@@ -195,18 +195,31 @@ public class DocumentEvidenceEligibility {
     }
 
     /**
-     * 提出者に対して文書の存在を示してよいか（W3-21a review P3-5、計画 §5.9「存在を推測させない」）。文書が指定tenantに
-     * 存在し（論理削除済みを含む）、有効なlinkのうち同じtenantで案件の要員（{@code ENGINEER}）を指すものが1件以上ある
-     * 場合だけ true を返す。不在・他tenant・link無し・他の要員だけを指す文書は false で、呼出側は適格性の詳細を返さずに
-     * 存在しない文書と同じ応答にする。要員を指すlinkに加えて別のlinkがある等のlink形の不適合は {@link #evaluate} の
-     * 条件8が判定する。actorの文書ACL（条件11）は含まない（呼出側が先に判定する）。
+     * 提出者に対して文書の存在を示してよいか（W3-21a review P3-5・RB-NF01 review RB-P3-1、計画 §5.9「存在を推測させない」）。
+     * 次を全て満たす場合だけ true を返し、呼出側はそれ以外を適格性の詳細（削除・種別・状態・hold・廃棄申請・link形・版）を
+     * 返さずに存在しない文書と同じ応答にする。
+     * <ol>
+     *   <li>文書が指定tenantに存在する（論理削除済みも読む。削除状態は可視の文書についてだけ {@link #evaluate} が判定する）。</li>
+     *   <li>文書種別が {@link #ACCEPTED_DOCUMENT_TYPE}（{@code SKILL_SHEET}）。削除状態より先に判定し、種別ごとに文書下載の
+     *       ACLが厳しい種別（{@code RECEIPT}・{@code CHANGE_REQUEST_ATTACHMENT}・{@code PRIVATE_NOTE}・電子インボイスの
+     *       {@code INVOICE_IN}/{@code INVOICE_OUT} 等）は、要員の data scope を持つ提出者にも「無い」と同じに見せる。</li>
+     *   <li>有効なlinkのうち同じtenantで案件の要員（{@code ENGINEER}）を指すものが1件以上ある。</li>
+     * </ol>
+     * actorの文書ACL（条件11）は含まない。{@code SKILL_SHEET} は文書下載
+     * （{@code DocumentServiceImpl#assertDocumentAccessAllowed}）の専用ACL種別にも電子インボイスにも当たらないため、
+     * 下載と同じ判定は {@code ENGINEER} link の要員 data scope（管理者は無条件）になり、呼出側はそれを本判定より先に行う。
+     * 要員を指すlinkに加えて別のlinkがある等のlink形の不適合は {@link #evaluate} の条件8が判定する（可視の文書だけ）。
      */
-    public boolean linkedToEngineer(String tenantId, long documentId, long engineerId) {
+    public boolean visibleEvidenceCandidate(String tenantId, long documentId, long engineerId) {
         if (tenantId == null || tenantId.isBlank() || documentId <= 0 || engineerId <= 0) {
             return false;
         }
         Document document = documentMapper.selectEvidenceCandidate(documentId, tenantId);
         if (document == null || !tenantId.equals(document.getTenantId())) {
+            return false;
+        }
+        // 種別は削除状態より先に見る（削除済みの専用ACL種別の文書も、無い文書と同じに見せる）
+        if (!ACCEPTED_DOCUMENT_TYPE.equals(document.getDocumentType())) {
             return false;
         }
         List<DocumentLink> links = documentLinkMapper.findByDocumentId(documentId);

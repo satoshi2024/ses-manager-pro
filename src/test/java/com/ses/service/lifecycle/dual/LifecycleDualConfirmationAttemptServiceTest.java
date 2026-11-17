@@ -181,7 +181,7 @@ class LifecycleDualConfirmationAttemptServiceTest {
         lenient().when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(true);
         lenient().when(epochReader.readTaskGeneration(TENANT, CASE, TASK)).thenReturn(GENERATION);
         lenient().when(epochReader.readOrganizations(any())).thenAnswer(invocation -> new TreeMap<Long, Long>());
-        lenient().when(eligibility.linkedToEngineer(TENANT, DOCUMENT, ENGINEER)).thenReturn(true);
+        lenient().when(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER)).thenReturn(true);
         lenient().when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(Verdict.ELIGIBLE,
                 ELIGIBLE));
         lenient().when(submissionMapper.selectList(any())).thenReturn(List.of());
@@ -231,7 +231,7 @@ class LifecycleDualConfirmationAttemptServiceTest {
         order.verify(epochReader).readTaskGeneration(TENANT, CASE, TASK);
         order.verify(epochReader).readDocument(TENANT, DOCUMENT);
         order.verify(evaluator).isEngineerAllowedByDataScope(any(), eq(ENGINEER));
-        order.verify(eligibility).linkedToEngineer(TENANT, DOCUMENT, ENGINEER);
+        order.verify(eligibility).visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER);
         order.verify(eligibility).evaluate(any());
         order.verify(idempotencyMapper).selectOne(any());
         order.verify(submissionMapper).insert(any(LifecycleDualSubmission.class));
@@ -323,10 +323,10 @@ class LifecycleDualConfirmationAttemptServiceTest {
         when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(false);
         assertRejected(() -> service.submit(submitAttempt(GENERATION)), 400, "error.document.notFound",
                 DualConfirmationDenyReason.SCOPE_DENIED);
-        verify(eligibility, never()).linkedToEngineer(any(), anyLong(), anyLong());
+        verify(eligibility, never()).visibleEvidenceCandidate(any(), anyLong(), anyLong());
 
         when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(true);
-        when(eligibility.linkedToEngineer(TENANT, DOCUMENT, ENGINEER)).thenReturn(false);
+        when(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER)).thenReturn(false);
         assertRejected(() -> service.submit(submitAttempt(GENERATION)), 400, "error.document.notFound",
                 DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
 

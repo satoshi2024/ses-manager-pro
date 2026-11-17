@@ -165,7 +165,7 @@ class LifecycleDualConfirmationCoordinatorTest {
         lenient().when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(
                 Verdict.ELIGIBLE, ELIGIBLE));
         // 提出のdiscoveryは適格性の前に文書ACLと案件の要員へのlinkを確かめる（W3-21a review P3-5）
-        lenient().when(eligibility.linkedToEngineer(eq(TENANT), anyLong(), anyLong())).thenReturn(true);
+        lenient().when(eligibility.visibleEvidenceCandidate(eq(TENANT), anyLong(), anyLong())).thenReturn(true);
         lenient().when(evaluator.isEngineerAllowedByDataScope(any(), any())).thenReturn(true);
         lenient().when(verifier.verify(any())).thenReturn(DocumentEvidenceStorageVerifier.Outcome.MATCH);
         lenient().when(epochMapper.selectTaskGeneration(TASK, CASE, TENANT))
@@ -470,7 +470,7 @@ class LifecycleDualConfirmationCoordinatorTest {
         // 範囲外の文書がhold中（適格性ならEVIDENCE_UNAVAILABLE・409）でも、応答は存在しない文書と区別できない
         when(eligibility.evaluate(any())).thenReturn(new DocumentEvidenceEligibility.Result(
                 Verdict.DOCUMENT_UNAVAILABLE, null));
-        when(eligibility.linkedToEngineer(TENANT, DOCUMENT, ENGINEER)).thenReturn(false);
+        when(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER)).thenReturn(false);
 
         assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 400, "error.document.notFound",
                 DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
@@ -487,7 +487,7 @@ class LifecycleDualConfirmationCoordinatorTest {
         assertDenied(() -> submit(DualConfirmationChannel.INTERNAL, submitBody()), 400, "error.document.notFound",
                 DualConfirmationDenyReason.SCOPE_DENIED);
 
-        verify(eligibility, never()).linkedToEngineer(any(), anyLong(), anyLong());
+        verify(eligibility, never()).visibleEvidenceCandidate(any(), anyLong(), anyLong());
         verify(eligibility, never()).evaluate(any());
         verify(attempts, never()).submit(any());
     }
@@ -502,7 +502,7 @@ class LifecycleDualConfirmationCoordinatorTest {
 
         InOrder order = inOrder(evaluator, eligibility);
         order.verify(evaluator).isEngineerAllowedByDataScope(any(), eq(ENGINEER));
-        order.verify(eligibility).linkedToEngineer(TENANT, DOCUMENT, ENGINEER);
+        order.verify(eligibility).visibleEvidenceCandidate(TENANT, DOCUMENT, ENGINEER);
         order.verify(eligibility).evaluate(any());
     }
 

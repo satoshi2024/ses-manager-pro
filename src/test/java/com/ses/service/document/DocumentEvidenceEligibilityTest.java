@@ -200,35 +200,65 @@ class DocumentEvidenceEligibilityTest {
     }
 
     /**
-     * W3-21a review P3-5: 提出の discovery が適格性の詳細を返してよいのは、文書が tenant にあり案件の要員を指す link を
-     * 持つ場合だけ。不在・他tenant・link無し・他の要員だけを指す文書は false（存在しない文書と同じ応答にする）。
-     * 論理削除・hold・SKILL_SHEET以外・link形の不適合は可視性では拒否しない（適格性の条件が判定する）。
+     * W3-21a review P3-5・RB-NF01 review RB-P3-1: 提出の discovery が適格性の詳細を返してよいのは、文書が tenant にある
+     * {@code SKILL_SHEET} で、案件の要員を指す link を持つ場合だけ。不在・他tenant・SKILL_SHEET以外（削除済みでも、
+     * 文書下載の専用ACL種別でも）・link無し・他の要員だけを指す文書は false（存在しない文書と同じ応答にする）。
+     * 論理削除・hold・link形の不適合は、可視のSKILL_SHEETについてだけ適格性の条件が判定する。
      */
     @Test
-    void 文書の可視性は案件の要員を指すlinkがある同tenantの文書だけを真とする() {
-        assertTrue(eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID));
-        // 適格性では拒否されるが、要員の文書なので可視（詳細の応答を返してよい）
+    void 文書の可視性は案件の要員を指すlinkがある同tenantのSKILL_SHEETだけを真とする() {
+        assertTrue(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID));
+        // 適格性では拒否されるが、要員の SKILL_SHEET なので可視（詳細の応答を返してよい）
         document.setDeletedFlag(1);
         document.setLegalHoldFlag(1);
-        document.setDocumentType("CONTRACT");
         links.add(link(TENANT, "ASSET_ASSIGNMENT", 99L));
-        assertTrue(eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID));
+        assertTrue(eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID));
+
+        // SKILL_SHEET 以外は、削除済みでも削除前でも、文書下載のACLが厳しい種別でも、要員を指す link があっても不可視
+        for (String type : Arrays.asList("RECEIPT", "CHANGE_REQUEST_ATTACHMENT", "PRIVATE_NOTE", "INVOICE_IN",
+                "INVOICE_OUT", "CONTRACT", "skill_sheet", "SKILL_SHEET ", null)) {
+            for (int deleted : new int[] {0, 1}) {
+                setUp();
+                document.setDocumentType(type);
+                document.setDeletedFlag(deleted);
+                assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID),
+                        type + " deleted=" + deleted);
+            }
+        }
 
         setUp();
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID + 1), "他の要員の文書");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID + 1), "他の要員の文書");
         links.set(0, link(TENANT, "ASSET_ASSIGNMENT", ENGINEER_ID));
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "要員以外を指すlink");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID), "要員以外を指すlink");
         links.set(0, link("tenant-other", "ENGINEER", ENGINEER_ID));
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantのlink");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantのlink");
         links.clear();
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "linkが無い");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID), "linkが無い");
 
         setUp();
         document.setTenantId("tenant-other");
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantの文書");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID), "他tenantの文書");
         document = null;
-        assertEquals(false, eligibility.linkedToEngineer(TENANT, DOCUMENT_ID, ENGINEER_ID), "文書が無い");
-        assertEquals(false, eligibility.linkedToEngineer(" ", DOCUMENT_ID, ENGINEER_ID), "tenantが空");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(TENANT, DOCUMENT_ID, ENGINEER_ID), "文書が無い");
+        assertEquals(false, eligibility.visibleEvidenceCandidate(" ", DOCUMENT_ID, ENGINEER_ID), "tenantが空");
+    }
+
+    /**
+     * RB-NF01 review RB-P3-1: 可視性の前に呼出側が行う文書ACL（管理者、または要員の data scope）が文書下載
+     * （{@code DocumentServiceImpl#assertDocumentAccessAllowed}）と同じ判定になるのは、受け付ける唯一の種別
+     * {@code SKILL_SHEET} が下載の専用ACL種別にも電子インボイスにも当たらず、{@code ENGINEER} link の data scope の分岐を
+     * 通るためである。種別ごとの規則に SKILL_SHEET が加わったら、二者確認の可視性も同じ規則に合わせ直す。
+     */
+    @Test
+    void 受け付ける種別は文書下載の専用ACL種別にも電子インボイスにも当たらない() throws Exception {
+        for (String field : List.of("FILE_SCOPE_SPECIAL_DOCUMENT_TYPES", "DIGITAL_INVOICE_DOCUMENT_TYPES")) {
+            java.lang.reflect.Field declared = com.ses.service.impl.DocumentServiceImpl.class.getDeclaredField(field);
+            declared.setAccessible(true);
+            java.util.Set<?> types = (java.util.Set<?>) declared.get(null);
+            assertTrue(!types.isEmpty(), field + " が読めること");
+            assertTrue(!types.contains(DocumentEvidenceEligibility.ACCEPTED_DOCUMENT_TYPE),
+                    field + " に " + DocumentEvidenceEligibility.ACCEPTED_DOCUMENT_TYPE + " が無いこと");
+        }
     }
 
     private void expect(Verdict expected, Consumer<Void> mutation) {

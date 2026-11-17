@@ -87,6 +87,9 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @Autowired private com.ses.config.feature.FeatureSwitchProperties featureSwitchProperties;
     @org.springframework.boot.test.mock.mockito.MockBean
     private com.ses.config.feature.FeatureSwitches featureSwitches;
+    /** 実物の FeatureSwitches と同じ実行時条件（context の bean。無ければ null）。 */
+    @Autowired(required = false)
+    private List<com.ses.config.feature.FeatureRuntimeCondition> runtimeConditions;
     /** 試験専用のスイッチ設定（共有contextの設定を書き換えない）。 */
     private com.ses.config.feature.FeatureSwitchProperties switchProperties;
     @Autowired private DocumentLinkMapper documentLinkMapper;
@@ -108,7 +111,7 @@ class LifecycleEvidenceVersionSelectionApiTest {
     @BeforeEach
     void setUp() {
         switchProperties = com.ses.config.feature.IsolatedFeatureSwitches.isolate(featureSwitches,
-                featureSwitchProperties);
+                featureSwitchProperties, runtimeConditions);
         long suffix = System.nanoTime();
         adminUser = user("lc_evidence_admin_" + suffix, "管理者");
         // fixtureのテンプレート作成・起票（担当者解決・営業参照）はtenant contextを要求するため、起票者として束縛する

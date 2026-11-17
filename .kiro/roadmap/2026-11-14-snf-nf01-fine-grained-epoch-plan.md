@@ -512,7 +512,7 @@ CONFIRM（A4）:
 - 追記先: B0の `t_lifecycle_dual_event`（`event_type = 'DENIED'`）。FKを持たない監査ログとし、他tenantのIDが要求されてもinsertが失敗しないようにする。
 - 列: tenant_id（確認者または提出者のDB上のtenant。主体を解決できなければ記録しない）、actor_user_id、operation（SUBMIT/CONFIRM/REJECT）、requested_task_id、requested_submission_id、case_id・task_generation（主体のtenant内で解決できた場合だけ）、reason_code、http_status、attempt_count、occurred_at。
 - 記録しない内容: 文書title、storage path・key、業務comment、clientが送ったhash、氏名。
-- reason_code: `NOT_FOUND_OR_FOREIGN`、`SCOPE_DENIED`、`CONFIRMER_ROLE_DENIED`、`SELF_CONFIRMATION`、`EVIDENCE_TYPE_UNSUPPORTED`、`EVIDENCE_TARGET_UNSUPPORTED`、`EVIDENCE_SELECTION_INVALID`、`EVIDENCE_VERSION_REQUIRED`、`EVIDENCE_VERSION_NOT_CLEAN`、`EVIDENCE_UNAVAILABLE`、`STORAGE_INTEGRITY`、`SUBMISSION_STALE`、`AUTHORIZATION_CHANGED_GLOBAL`、`AUTHORIZATION_CHANGED_ACTOR`、`AUTHORIZATION_CHANGED_ENGINEER`、`AUTHORIZATION_CHANGED_ORGANIZATION`、`AUTHORIZATION_CHANGED_DOCUMENT`、`IDEMPOTENCY_CONFLICT`、`RETRY_EXHAUSTED`、`EPOCH_UNAVAILABLE`。
+- reason_code: `NOT_FOUND_OR_FOREIGN`、`SCOPE_DENIED`、`CONFIRMER_ROLE_DENIED`、`SELF_CONFIRMATION`、`EVIDENCE_TYPE_UNSUPPORTED`、`EVIDENCE_TARGET_UNSUPPORTED`、`EVIDENCE_SELECTION_INVALID`、`EVIDENCE_VERSION_REQUIRED`、`EVIDENCE_VERSION_NOT_CLEAN`、`EVIDENCE_UNAVAILABLE`、`STORAGE_INTEGRITY`、`INVALID_STATE`、`SUBMISSION_STALE`、`AUTHORIZATION_CHANGED_GLOBAL`、`AUTHORIZATION_CHANGED_ACTOR`、`AUTHORIZATION_CHANGED_ENGINEER`、`AUTHORIZATION_CHANGED_ORGANIZATION`、`AUTHORIZATION_CHANGED_DOCUMENT`、`SUBMITTER_PREDICATE_LOST`、`IDEMPOTENCY_CONFLICT`、`RETRY_EXHAUSTED`、`EPOCH_UNAVAILABLE`。
 - 記録しない拒否: スイッチOFF（機能を公開していない）、bodyの形式違反（未知property、桁数等）。
 - **補足（RB-NF01、W3-21a review P3-8）**: 状態の拒否は2つに分ける。400 で返す初回要求の不成立（DUAL以外のtask、案件が ACTIVE でない、タスクが IN_PROGRESS でない）は `INVALID_STATE`、409 `error.lifecycle.submissionStale`（世代不一致・supersede済み・決定済み・確認時のcase/task状態の不成立）は `SUBMISSION_STALE`。確認時に提出者の述語が成り立たないのに fence（global・actor・engineer・組織）が変わっていない、または変化を判定できない場合は `SUBMITTER_PREDICATE_LOST` とし、actor epoch の変化（`AUTHORIZATION_CHANGED_ACTOR`）へ回落させない（監視で誤読しない）。`reason_code` に DB の CHECK は無く、code の追加に DDL は要らない。
 
@@ -532,8 +532,8 @@ key名はW3-02（9f6d7c0e）の `messages.properties` で確認した（`error.l
 | 文書指定が1件でない | 400 | `error.lifecycle.evidenceSelectionInvalid` | 新規 |
 | 版IDなし | 400 | `error.lifecycle.evidenceVersionRequired` | 既存（W3-02） |
 | 提出時に版がCLEANでない | 400 | `error.lifecycle.evidenceVersionNotClean` | 既存（W3-02） |
-| 文書・版が無い、他tenant、版が別文書、提出者の文書ACL外、案件の要員を指すlinkが無い（提出） | 400 | `error.document.notFound` | 既存（batch 0と同じく存在を推測させない。RB-NF01・W3-21a review P3-5: 提出は文書ACLと案件の要員へのlinkを、下の適格性の判定より先に discovery と attempt の両方で検査する。範囲外の文書について種別・状態・hold・廃棄申請・link形を応答で区別させない。拒否eventのreasonは ACL外が `SCOPE_DENIED`、それ以外が `NOT_FOUND_OR_FOREIGN`） |
-| SKILL_SHEET以外 | 400 | `error.lifecycle.evidenceDocumentTypeUnsupported` | 新規 |
+| 文書・版が無い、他tenant、版が別文書、提出者の文書ACL外、案件の要員を指すlinkが無い、SKILL_SHEET以外（提出。削除済みを含む） | 400 | `error.document.notFound` | 既存（batch 0と同じく存在を推測させない。RB-NF01・W3-21a review P3-5・RB-NF01 review RB-P3-1: 提出は「文書ACL（SKILL_SHEET×ENGINEER link の文書下載と同じ判定）」と「tenantに存在する SKILL_SHEET で案件の要員を指す ENGINEER link を持つ」を、下の適格性の判定（削除・状態・hold・廃棄申請・link形・版）より先に discovery と attempt の両方で検査する。RECEIPT・CHANGE_REQUEST_ATTACHMENT・電子インボイス等の下載ACLが厳しい種別や範囲外の文書について、削除・種別・状態等を応答で区別させない。拒否eventのreasonは ACL外が `SCOPE_DENIED`、それ以外が `NOT_FOUND_OR_FOREIGN`） |
+| SKILL_SHEET以外（確認時の再評価・候補の判定。提出では上の行の notFound） | 400 | `error.lifecycle.evidenceDocumentTypeUnsupported` | 新規 |
 | link形の不適合（案件の要員を指すlinkを持つ文書で、別のlinkも持つ等） | 400 | `error.lifecycle.evidenceDocumentTargetUnsupported` | 新規 |
 | hold・廃棄申請・DISPOSED・deleted・状態不適合・storage不一致 | 409 | `error.lifecycle.evidenceDocumentUnavailable` | 新規（storage不一致はERRORログも出す） |
 | 世代不一致・supersede済み・決定済み・確認時のcase/task状態不成立 | 409 | `error.lifecycle.submissionStale` | 新規 |

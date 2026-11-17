@@ -348,14 +348,14 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 - 署名の参照を `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（設定キー `app.features.nf01-dual-confirmation.privacy-sign-off-ref`）へ設定する。値は英数字で始まる4〜128文字（英数字と `._:/#-`）で**英字と数字の両方を含む**review文書ID・ticket番号等（例: `PRIV-REVIEW-2026-11-20`）。placeholderとみなす値は受け付けない: `todo`・`tbd`・`xxx`・`placeholder`・`changeme`（`change-me`・`change_me`）・`dummy`・`fixme`・`sample`・`example`・`unsigned`・`replace`・`your-` を一部にでも含む値、`test`・`pending`・`tmp`・`temp`・`none`・`null`・`n/a`・`dev`・`local` で始まる値（大文字小文字を区別しない。例: `TODO-1`・`TBD2026`・`test-ref-1` は不可）。
 - prod profileでは `LifecycleDualConfirmationReleaseGate` が、子スイッチの実効値がONなのに参照が無い・形式不正・placeholderの場合に起動を止める（固定コード `NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING`）。参照値は秘密情報ではないため、起動ログ `[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef=...` に出す（監査で署名と配備を突き合わせる）。
 - gateは「署名を記録したこと」を強制するだけで、署名の内容は検証しない。参照の値は署名者（Privacy）が発行したものを配備担当が転記する。
-- NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録は V198 で登録済み（`m_pii_data_element` の `LIFECYCLE_DUAL_*` 9件と `privacy-retention-dsar/pii-inventory.md` の DB-141〜DB-147。provider は未登録、分類・owner・inventory 状態は UNKNOWN で、保持期間は持たない）。保存期間等の値は D-02 の署名で確定する（署名は未取得）。ONの前に browser の手動確認9項目（`deploy-runbook.md` §1.7.1）を済ませる。ONの前提の一覧は同 §1.7。
+- NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録は V198 で登録済み（`m_pii_data_element` の `LIFECYCLE_DUAL_*` 9件と `privacy-retention-dsar/pii-inventory.md` の DB-141〜DB-147。provider は未登録、分類・owner・inventory 状態は UNKNOWN で、保持期間は持たない）。保存期間等の値は D-02 の署名で確定する（署名は未取得）。分類が UNKNOWN のため、NF07 hold 画面の「未分類の data element」と `PrivacyCoverageReport` の未分類件数（`unknownAttributionCount`）にもこの9件が加わり、D-02 で分類を決めるまで0にならない（回帰ではない）。ONの前に browser の手動確認9項目（`deploy-runbook.md` §1.7.1）を済ませる。ONの前提の一覧は同 §1.7。
 
 #### 4.9.3 ONにする手順
 
 1. `FEATURE_NF01_ENABLED=true` であることを確認する（親がOFFなら子の値は無効）。4.9.5 の確認SQLが全て0件であることを確認する。
 2. `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` に署名の参照を、`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=true` を設定して全停止で再起動する。
 3. 起動ログで `NF01=ON, NF01_DUAL_CONFIRMATION=ON` と上記の署名参照ログを確認する。
-4. 監視: 再試行の予算超過（409 `error.lifecycle.concurrentUpdateRetryExhausted`、WARN `[二者確認] 再試行の予算を使い切りました`）と拒否eventの `reason_code` の発生率を確認する。`reason_code` は 400 の状態の不成立（DUAL以外・案件が ACTIVE でない・タスクが IN_PROGRESS でない）を `INVALID_STATE`、409 の世代不一致・決定済みを `SUBMISSION_STALE`、確認時に提出者の述語が成り立たないのに認可epochが変わっていない場合を `SUBMITTER_PREDICATE_LOST` として分ける（RB-NF01。actor epoch の変化 `AUTHORIZATION_CHANGED_ACTOR` と混ぜない）。提出者に見えない文書（文書ACL外・案件の要員に紐付かない）は存在しない文書と同じ400 `error.document.notFound` で、`reason_code` は `SCOPE_DENIED`・`NOT_FOUND_OR_FOREIGN`（応答では区別しない）。
+4. 監視: 再試行の予算超過（409 `error.lifecycle.concurrentUpdateRetryExhausted`、WARN `[二者確認] 再試行の予算を使い切りました`）と拒否eventの `reason_code` の発生率を確認する。`reason_code` は 400 の状態の不成立（DUAL以外・案件が ACTIVE でない・タスクが IN_PROGRESS でない）を `INVALID_STATE`、409 の世代不一致・決定済みを `SUBMISSION_STALE`、確認時に提出者の述語が成り立たないのに認可epochが変わっていない場合を `SUBMITTER_PREDICATE_LOST` として分ける（RB-NF01。actor epoch の変化 `AUTHORIZATION_CHANGED_ACTOR` と混ぜない）。提出者に見えない文書（文書ACL外・案件の要員に紐付かない・SKILL_SHEET以外・それらの削除済み）は存在しない文書と同じ400 `error.document.notFound` で、`reason_code` は `SCOPE_DENIED`・`NOT_FOUND_OR_FOREIGN`（応答では区別しない）。
 
 #### 4.9.4 OFF
 

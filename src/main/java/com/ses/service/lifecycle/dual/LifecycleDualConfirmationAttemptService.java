@@ -190,12 +190,13 @@ public class LifecycleDualConfirmationAttemptService {
                 current.organizations());
         long documentEpoch = epochReader.readDocument(tenant, attempt.documentId());
 
-        // 4. 提出者の文書ACLと文書の可視性 → 文書適格性。範囲外の文書は適格性の詳細を返さず、存在しない文書と同じ
-        //    400 error.document.notFound にする（coordinatorのdiscoveryと同じ順。W3-21a review P3-5、計画 §5.9）
+        // 4. 提出者の文書ACLと文書の可視性（tenantに存在するSKILL_SHEETで案件の要員を指すlinkを持つ）→ 文書適格性。
+        //    見えない文書は削除・種別等の詳細を返さず、存在しない文書と同じ 400 error.document.notFound にする
+        //    （coordinatorのdiscoveryと同じ順。W3-21a review P3-5、RB-NF01 review RB-P3-1、計画 §5.9）
         if (!documentAclAllows(submitter, context.engineerId())) {
             throw DualConfirmationRejection.of(400, "error.document.notFound", DualConfirmationDenyReason.SCOPE_DENIED);
         }
-        if (!eligibility.linkedToEngineer(tenant, attempt.documentId(), context.engineerId())) {
+        if (!eligibility.visibleEvidenceCandidate(tenant, attempt.documentId(), context.engineerId())) {
             throw DualConfirmationRejection.of(400, "error.document.notFound",
                     DualConfirmationDenyReason.NOT_FOUND_OR_FOREIGN);
         }

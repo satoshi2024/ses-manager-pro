@@ -59,6 +59,8 @@ class LifecycleTemplateDualPolicyTest {
     /** test profileの値を写す元（読むだけで変えない）。 */
     @Autowired private FeatureSwitchProperties featureSwitchProperties;
     @MockBean private FeatureSwitches featureSwitches;
+    /** 実物の FeatureSwitches と同じ実行時条件（context の bean。無ければ null）。 */
+    @Autowired(required = false) private java.util.List<com.ses.config.feature.FeatureRuntimeCondition> runtimeConditions;
 
     private SysUser hrUser;
     /** 試験専用のスイッチ設定（試験ごとに作り直す）。 */
@@ -66,7 +68,8 @@ class LifecycleTemplateDualPolicyTest {
 
     @BeforeEach
     void setUp() {
-        switchProperties = IsolatedFeatureSwitches.isolate(featureSwitches, featureSwitchProperties);
+        switchProperties = IsolatedFeatureSwitches.isolate(featureSwitches, featureSwitchProperties,
+                runtimeConditions);
         hrUser = SysUser.builder()
                 .tenantId("default")
                 .username("lc_dual_policy_hr_" + System.nanoTime())
