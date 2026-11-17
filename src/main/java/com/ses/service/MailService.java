@@ -31,6 +31,8 @@ public interface MailService {
 
     /**
      * 件名・本文を直接指定して非同期送信する（テンプレートを使わない場合）。
+     *
+     * @return 受付結果。status は常に {@code QUEUED}（送信の結果は deliveryId の配信履歴で確かめる）
      */
     MailDispatchResult send(String to, String subject, String body, Long invoiceId);
 

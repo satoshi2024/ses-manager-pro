@@ -75,6 +75,41 @@ class MailServiceImplTest {
         verify(sender, times(1)).send(any(SimpleMailMessage.class));
     }
 
+    /**
+     * RB-PRERUN 追加 P2-1: send() は受付結果（QUEUED）を返す。送信を同期で終えた場合（Springを使わない構成）でも
+     * 返却値は変わらず、送信の結果（DRY_RUN）は配信履歴の複製へ書く。
+     */
+    @Test
+    void send_返却値は受付結果QUEUEDで送信結果は配信履歴へ書く() {
+        com.ses.mapper.MailDeliveryMapper mapper = mock(com.ses.mapper.MailDeliveryMapper.class);
+        java.util.List<com.ses.entity.MailDelivery> inserted = new java.util.ArrayList<>();
+        java.util.List<String> updatedStatuses = new java.util.ArrayList<>();
+        java.util.List<com.ses.entity.MailDelivery> updated = new java.util.ArrayList<>();
+        when(mapper.insert(any(com.ses.entity.MailDelivery.class))).thenAnswer(invocation -> {
+            com.ses.entity.MailDelivery delivery = invocation.getArgument(0);
+            delivery.setId(501L);
+            inserted.add(delivery);
+            return 1;
+        });
+        when(mapper.updateById(any(com.ses.entity.MailDelivery.class))).thenAnswer(invocation -> {
+            com.ses.entity.MailDelivery delivery = invocation.getArgument(0);
+            updated.add(delivery);
+            updatedStatuses.add(delivery.getStatus());
+            return 1;
+        });
+        MailServiceImpl service = new MailServiceImpl(mock(EmailTemplateService.class), senderProvider(null),
+                noNotification(), mapper, "", "noreply@example.com");
+
+        com.ses.dto.mail.MailDispatchResult result = service.send("to@example.com", "件名", "本文", 12L);
+
+        org.junit.jupiter.api.Assertions.assertEquals("QUEUED", result.getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(501L, result.getDeliveryId());
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("DRY_RUN"), updatedStatuses);
+        org.junit.jupiter.api.Assertions.assertNotSame(inserted.get(0), updated.get(0), "送信側は複製を更新する");
+        org.junit.jupiter.api.Assertions.assertEquals("QUEUED", inserted.get(0).getStatus(), "呼出元の配信履歴は書き換えない");
+        org.junit.jupiter.api.Assertions.assertEquals(12L, updated.get(0).getInvoiceId());
+    }
+
     @Test
     void sendWithTemplate_テンプレートの変数を置換して送信する() {
         EmailTemplate template = new EmailTemplate();

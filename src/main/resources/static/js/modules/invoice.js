@@ -594,6 +594,23 @@ function openReminderModal(invoiceId, invoiceNo) {
     new bootstrap.Modal(document.getElementById('reminderModal')).show();
 }
 
+/**
+ * 一括督促の行結果を数える。メール送信は非同期のため、サーバーは送信の受付（QUEUED）を返し、送信の結果は履歴で確かめる。
+ * QUEUED（とドライランのDRY_RUN）は失敗ではなく「送信受付」に数える（失敗と数えると利用者が再送し、督促が重複する。
+ * RB-PRERUN 追加 P2-1）。SENT・SKIPPED 以外で受付でもない状態（FAILED 等）だけを失敗に数える。
+ */
+function countBulkReminderResults(rows) {
+    const counts = { sent: 0, accepted: 0, skipped: 0, failed: 0 };
+    (rows || []).forEach(r => {
+        const status = r ? r.status : null;
+        if (status === 'SENT') counts.sent++;
+        else if (status === 'QUEUED' || status === 'DRY_RUN') counts.accepted++;
+        else if (status === 'SKIPPED') counts.skipped++;
+        else counts.failed++;
+    });
+    return counts;
+}
+
 function submitReminder() {
     const templateId = document.getElementById('reminderTemplate').value;
     if (!templateId) return;
@@ -606,13 +623,10 @@ function submitReminder() {
         }).then(res => res.json()).then(data => {
             if (data.code === 200) {
                 bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
-                let sent = 0, skipped = 0, failed = 0;
+                const counts = countBulkReminderResults(data.data);
                 const tbody = document.querySelector('#bulkReminderResultTable tbody');
                 tbody.innerHTML = '';
                 data.data.forEach(r => {
-                    if (r.status === 'SENT') sent++;
-                    else if (r.status === 'SKIPPED') skipped++;
-                    else failed++;
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${SES.escapeHtml(String(r.invoiceId))}</td>
@@ -621,9 +635,10 @@ function submitReminder() {
                     `;
                     tbody.appendChild(tr);
                 });
-                document.getElementById('bulkSentCount').textContent = sent;
-                document.getElementById('bulkSkippedCount').textContent = skipped;
-                document.getElementById('bulkFailedCount').textContent = failed;
+                document.getElementById('bulkSentCount').textContent = counts.sent;
+                document.getElementById('bulkAcceptedCount').textContent = counts.accepted;
+                document.getElementById('bulkSkippedCount').textContent = counts.skipped;
+                document.getElementById('bulkFailedCount').textContent = counts.failed;
                 new bootstrap.Modal(document.getElementById('bulkReminderResultModal')).show();
             } else {
                 alert(data.message);

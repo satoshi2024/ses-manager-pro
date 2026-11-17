@@ -31,6 +31,9 @@ import java.util.Map;
 @Service
 public class MailServiceImpl implements MailService {
 
+    /** send() が返す受付結果の状態。送信の結果（SENT・FAILED・DRY_RUN）は配信履歴に残る。 */
+    static final String STATUS_QUEUED = "QUEUED";
+
     private final EmailTemplateService emailTemplateService;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final ObjectProvider<NotificationService> notificationServiceProvider;
@@ -115,7 +118,7 @@ public class MailServiceImpl implements MailService {
         delivery.setRecipient(to);
         delivery.setSubject(subject == null ? "" : subject);
         delivery.setBody(body == null ? "" : body);
-        delivery.setStatus("QUEUED");
+        delivery.setStatus(STATUS_QUEUED);
         delivery.setAttemptCount(0);
         delivery.setQueuedAt(java.time.LocalDateTime.now());
         delivery.setInvoiceId(invoiceId);
@@ -124,14 +127,40 @@ public class MailServiceImpl implements MailService {
         if (mailDeliveryMapper != null) {
             mailDeliveryMapper.insert(delivery);
         }
+        // 返すのは受付結果（QUEUED）で、送信結果は配信履歴（deliveryId）で追う。非同期threadが書き換える
+        // オブジェクトを呼出元と共有しないよう、渡す前に値を固定し、非同期側には複製を渡す（RB-PRERUN 追加 P2-1。
+        // 共有すると返却値が QUEUED / DRY_RUN のどちらになるか定まらず、一括督促が送信受付を失敗と数えた）。
+        MailDispatchResult accepted = new MailDispatchResult(delivery.getId(), STATUS_QUEUED);
+        MailDelivery handoff = copyForSend(delivery);
         // thisで直接呼ぶと@Asyncのproxyを通らず、呼出元のthreadでSMTP送信まで行ってしまう。
         MailService self = selfProvider == null ? null : selfProvider.getIfAvailable();
         if (self != null) {
-            self.executeSend(delivery, tenantId);
+            self.executeSend(handoff, tenantId);
         } else {
-            executeSend(delivery, tenantId); // Springを使わない単体テスト向け（同期実行）
+            executeSend(handoff, tenantId); // Springを使わない単体テスト向け（同期実行）
         }
-        return new MailDispatchResult(delivery.getId(), delivery.getStatus());
+        return accepted;
+    }
+
+    /** 非同期送信へ渡す配信履歴の複製（呼出元のオブジェクトと状態を共有しない）。 */
+    private static MailDelivery copyForSend(MailDelivery source) {
+        MailDelivery copy = new MailDelivery();
+        copy.setId(source.getId());
+        copy.setRecipient(source.getRecipient());
+        copy.setSubject(source.getSubject());
+        copy.setBody(source.getBody());
+        copy.setStatus(source.getStatus());
+        copy.setAttemptCount(source.getAttemptCount());
+        copy.setErrorMessage(source.getErrorMessage());
+        copy.setInvoiceId(source.getInvoiceId());
+        copy.setContactId(source.getContactId());
+        copy.setOpportunityId(source.getOpportunityId());
+        copy.setQueuedAt(source.getQueuedAt());
+        copy.setSentAt(source.getSentAt());
+        copy.setFailedAt(source.getFailedAt());
+        copy.setCreatedAt(source.getCreatedAt());
+        copy.setUpdatedAt(source.getUpdatedAt());
+        return copy;
     }
 
     /** 実際の SMTP 呼び出し。send() が作成した履歴を必ず結果で更新する。 */

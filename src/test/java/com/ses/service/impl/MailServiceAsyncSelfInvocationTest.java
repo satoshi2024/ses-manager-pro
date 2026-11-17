@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.ses.config.AsyncConfig;
+import com.ses.dto.mail.MailDispatchResult;
 import com.ses.entity.MailDelivery;
 import com.ses.mapper.MailDeliveryMapper;
 import com.ses.service.EmailTemplateService;
@@ -87,6 +88,33 @@ class MailServiceAsyncSelfInvocationTest {
         });
     }
 
+    /**
+     * RB-PRERUN 追加 P2-1: send() が返すのは受付結果で、status は非同期送信の進み具合に関係なく常に QUEUED。
+     * 非同期threadには複製を渡し、呼出元のオブジェクトと状態を共有しない（共有すると返却値が QUEUED / DRY_RUN の
+     * どちらになるか定まらず、一括督促が送信受付を失敗と数えた）。
+     */
+    @Test
+    void sendの返却値は送信の完了後も受付結果QUEUEDのままで非同期threadには複製を渡す() {
+        runner.run(context -> {
+            MailService mailService = context.getBean(MailService.class);
+            MailFixture fixture = context.getBean(MailFixture.class);
+            AccountingTenantContextHolder.setTenantId("default");
+
+            MailDispatchResult result = mailService.send(INVITEE, "督促", "本文", 77L);
+
+            assertThat(fixture.updated.await(10, TimeUnit.SECONDS)).as("非同期送信が終わること").isTrue();
+            assertThat(fixture.updatedStatuses).containsExactly("SENT");
+            assertThat(result.getStatus()).as("送信の完了後も返却値は受付結果のまま").isEqualTo("QUEUED");
+            assertThat(result.getDeliveryId()).isEqualTo(fixture.insertedDeliveries.get(0).getId());
+            assertThat(fixture.updatedDeliveries.get(0))
+                    .as("非同期threadは保存した配信履歴の複製を更新する（呼出元のオブジェクトを書き換えない）")
+                    .isNotSameAs(fixture.insertedDeliveries.get(0));
+            assertThat(fixture.updatedDeliveries.get(0).getId()).isEqualTo(result.getDeliveryId());
+            assertThat(fixture.updatedDeliveries.get(0).getInvoiceId()).isEqualTo(77L);
+            assertThat(fixture.insertedDeliveries.get(0).getStatus()).isEqualTo("QUEUED");
+        });
+    }
+
     @Test
     void 実装class型ではproxyへ解決できないため自己注入はinterface型で行う() {
         runner.run(context -> {
@@ -109,6 +137,8 @@ class MailServiceAsyncSelfInvocationTest {
 
         final List<String> insertedStatuses = new CopyOnWriteArrayList<>();
         final List<String> updatedStatuses = new CopyOnWriteArrayList<>();
+        final List<MailDelivery> insertedDeliveries = new CopyOnWriteArrayList<>();
+        final List<MailDelivery> updatedDeliveries = new CopyOnWriteArrayList<>();
         final List<String> updateThreads = new CopyOnWriteArrayList<>();
         final List<SimpleMailMessage> sentMessages = new CopyOnWriteArrayList<>();
         final CountDownLatch updated = new CountDownLatch(1);
@@ -133,11 +163,13 @@ class MailServiceAsyncSelfInvocationTest {
                 MailDelivery delivery = invocation.getArgument(0);
                 delivery.setId(ids.incrementAndGet());
                 insertedStatuses.add(delivery.getStatus());
+                insertedDeliveries.add(delivery);
                 return 1;
             });
             when(mapper.updateById(any(MailDelivery.class))).thenAnswer(invocation -> {
                 MailDelivery delivery = invocation.getArgument(0);
                 updatedStatuses.add(delivery.getStatus());
+                updatedDeliveries.add(delivery);
                 updateThreads.add(Thread.currentThread().getName());
                 updated.countDown();
                 return 1;
