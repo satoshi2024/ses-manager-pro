@@ -20,13 +20,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * V201（NF07 F1 の状態・区分の列の CHECK。W3-14 review P3-8・RB-NF07-HOLD）の値の集合が、コードの enum と一致することを
  * Docker なしで固定する。enum に値を足して CHECK を広げ忘れると、本番（MySQL）でだけ書込みが 3819 で失敗する。逆に CHECK が
- * enum より広ければ、綴り違いの値を DB が受け付ける。H2 変種（{@code schema-privacy-status-check-h2.sql}）も同じ集合であることを
- * 確かめる（fast の test が本番と違う制約で動かないように）。実 MySQL での拒否は {@code FlywayNf07PrivacyF1MigrationTest} が見る。
+ * enum より広ければ、綴り違いの値を DB が受け付ける。H2 変種（{@code schema-privacy-status-check-h2.sql}）と
+ * 統合 H2 schema（{@code engineer-schema-h2.sql}）も同じ集合であることを確かめる（fast の test が本番と違う制約で動かないように）。
+ * 実 MySQL での拒否は {@code FlywayNf07PrivacyF1MigrationTest} が見る。
  */
 class PrivacyStatusCheckConstraintTest {
 
     private static final String MIGRATION = "db/migration/V201__nf07_privacy_status_check_constraints.sql";
     private static final String H2_VARIANT = "sql/schema-privacy-status-check-h2.sql";
+    /** {@code @Sql} で読む統合 H2 schema（V201 の4件を末尾に持つ）。 */
+    private static final String CONSOLIDATED_H2 = "sql/engineer-schema-h2.sql";
     /** {@code CONSTRAINT [IF NOT EXISTS] 名前 CHECK (... 列 IN ('A', 'B'))}。 */
     private static final Pattern CHECK = Pattern.compile(
             "CONSTRAINT\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(\\w+)\\s+CHECK\\s*\\((?:[^()]|\\([^()]*\\))*?(\\w+)\\s+IN\\s*\\(([^()]*)\\)",
@@ -46,11 +49,18 @@ class PrivacyStatusCheckConstraintTest {
 
         assertThat(constraints(MIGRATION)).as(MIGRATION).containsExactlyEntriesOf(expected);
         assertThat(constraints(H2_VARIANT)).as(H2_VARIANT).containsExactlyEntriesOf(expected);
+        // 3つ目の定義: @Sql で読む統合 H2 schema。他の表の CHECK も持つため、制約名で V201 の4件だけを取り出して照合する
+        // （RB-NF07-HOLD review P3-2）
+        String consolidated = stripComments(read(CONSOLIDATED_H2));
+        for (Map.Entry<String, Constraint> entry : expected.entrySet()) {
+            assertThat(named(consolidated, entry.getKey())).as("%s の %s", CONSOLIDATED_H2, entry.getKey())
+                    .isEqualTo(entry.getValue());
+        }
     }
 
     @Test
     void 交付方法のCHECKはNULLを明示して受け付ける() throws IOException {
-        for (String resource : List.of(MIGRATION, H2_VARIANT)) {
+        for (String resource : List.of(MIGRATION, H2_VARIANT, CONSOLIDATED_H2)) {
             assertThat(stripComments(read(resource))).as(resource)
                     .containsPattern("chk_privacy_request_delivery_method\\s+CHECK\\s*\\(\\s*delivery_method\\s+IS\\s+NULL\\s+OR");
         }
@@ -69,6 +79,26 @@ class PrivacyStatusCheckConstraintTest {
                     .as("制約名の重複: %s", matcher.group(1)).isNull();
         }
         assertThat(found).as("%s から CHECK を読めない", resource).isNotEmpty();
+        return found;
+    }
+
+    /** 指定した名前の CHECK を1件だけ取り出す（無い・2件以上は失敗）。 */
+    private static Constraint named(String sql, String name) {
+        Matcher matcher = CHECK.matcher(sql);
+        Constraint found = null;
+        while (matcher.find()) {
+            if (!matcher.group(1).equals(name)) {
+                continue;
+            }
+            assertThat(found).as("制約名の重複: %s", name).isNull();
+            List<String> values = new ArrayList<>();
+            Matcher quoted = QUOTED.matcher(matcher.group(3));
+            while (quoted.find()) {
+                values.add(quoted.group(1));
+            }
+            found = new Constraint(matcher.group(2), values);
+        }
+        assertThat(found).as("%s が無い", name).isNotNull();
         return found;
     }
 

@@ -883,6 +883,39 @@ class PrivacyExportPackageServiceTest {
         assertThat(requestMapper.selectById(restriction).getStatus()).isEqualTo("CONFIRMED");
     }
 
+    /**
+     * RB-NF07-HOLD review P3-5: gate の例外は区画の hold の判定の内側で UNKNOWN になるが、応答を作る処理そのもの（照会者の解決・
+     * 照会）が例外になっても、記録済みの応答を失敗にせず UNKNOWN・印なしで返す（外側の catch）。ここでは記録の後に照会者の tenant が
+     * 配備の tenant と食い違う状態にして {@code begin} を 403 にする。gate には触れない。
+     */
+    @Test
+    void 記録の後の応答を作る処理が例外になっても記録済みの応答はUNKNOWNで返し失敗にしない() {
+        PrivacyHoldGate gate = mock(PrivacyHoldGate.class);
+        holdGate.set(gate);
+        when(gate.inspect(TENANT)).thenReturn(new PrivacyHoldGate.Decision(PrivacyHoldGate.State.VERIFIED, null,
+                Set.of("ENGINEER:101"), Set.of(), Map.of()));
+        long deletion = scopedRequest("T-RESP-OUTER", "DELETION");
+        PrivacyDsarViews.Transition recorded = requestService.recordManualResolution(deletion,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "DEL-2026-0003"));
+        org.mockito.Mockito.clearInvocations(gate);
+
+        PrivacyRequestService.Actor recorder = actor.get();
+        actor.set(new PrivacyRequestService.Actor("other-tenant", recorder.userId(), recorder.username()));
+        PrivacyDsarViews.ResolutionRecorded response;
+        try {
+            response = service.resolutionRecorded(recorded);
+        } finally {
+            actor.set(recorder);
+        }
+
+        assertThat(response.status()).isEqualTo("CONFIRMED");
+        assertThat(response.rowVersion()).isEqualTo(recorded.rowVersion());
+        assertThat(response.holdState()).isEqualTo("UNKNOWN");
+        assertThat(response.holdConflict()).as("確かめられないときは印を付けない（画面は UNKNOWN の警告を出す）").isFalse();
+        org.mockito.Mockito.verifyNoInteractions(gate);
+        assertThat(requestMapper.selectById(deletion).getStatus()).isEqualTo("CONFIRMED");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private PrivacyRequestService requestService() {

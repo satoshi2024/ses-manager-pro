@@ -448,9 +448,12 @@
         confirmThen(confirmText, function () {
             send('POST', '/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/resolution', payload).then(function (data) {
                 // 記録の応答が本人の hold との矛盾の印を返したら、成功の代わりに警告で知らせる（判定は server。記録は済んでいる。
-                // HYG-FINAL P3-F の残り）
+                // HYG-FINAL P3-F の残り）。hold の状態を確かめられなかった（UNKNOWN）ときも成功だけで済ませず、確かめ直すよう知らせる
+                // （RB-NF07-HOLD review P3-5）
                 if (data && data.holdConflict) {
                     SES.toast.warning(t('privacyDsar.resolution.recordedHoldWarning'));
+                } else if (data && data.holdState === 'UNKNOWN') {
+                    SES.toast.warning(t('privacyDsar.resolution.recordedHoldUnknown'));
                 } else {
                     SES.toast.success(t('privacyDsar.toast.saved'));
                 }

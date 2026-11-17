@@ -71,10 +71,11 @@ final class PrivacyHoldMySqlComponents {
         oidc.setTenantId(tenantId);
 
         this.store = new PrivacyHoldProjectionStore(app);
-        // application DB と Journal は別 container（@@server_uuid が異なる）。本番と同じく application DB を実際に照会する
+        // application DB と Journal は別 container（@@server_uuid が異なる）。本番と同じ照会（query timeout・socket の上限付き。
+        // RB-NF07-HOLD review P3-1）で application DB を実際に照会する
         this.journal = new PrivacyHoldJournal(() -> startupResult, () -> port,
                 new JdbcPrivacyHoldJournalIndex(journalDataSource), journalId, pendingTimeout, Duration.ofSeconds(35),
-                () -> app.queryForObject("SELECT @@server_uuid", String.class), clock);
+                new ApplicationServerUuidQuery(app), clock);
         this.resolver = new HoldSubjectResolver(app, new ProductionPrivacyProviderRegistry(List.of()));
         this.decisions = new PrivacyHoldDecisions(approval, holdProperties, clockProperties, clock);
         ObjectProvider<io.micrometer.core.instrument.MeterRegistry> noMetrics = emptyProvider();
