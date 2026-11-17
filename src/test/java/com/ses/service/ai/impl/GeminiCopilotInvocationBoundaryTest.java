@@ -4,8 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.config.AiConfig;
+import com.ses.privacy.foundation.PolicyEnforcementDecision;
+import com.ses.privacy.foundation.PolicyEnforcementReason;
+import com.ses.privacy.foundation.PolicyFailureReason;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiExternalSendApprovalFixtures;
+import com.ses.service.ai.AiExternalSendPrivacyPolicyCheck;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
 import com.ses.service.ai.copilot.summary.ApprovedExternalSendCostPolicy;
@@ -171,7 +176,10 @@ class GeminiCopilotInvocationBoundaryTest {
             config.setApiKey("synthetic-key");
             OutboundUrlGuard guard = mock(OutboundUrlGuard.class);
             RestTemplate legacy = mock(RestTemplate.class);
-            GeminiTextServiceImpl adapter = new GeminiTextServiceImpl(config, legacy, new ObjectMapper(), guard, transport);
+            // NF07-NF08-LINK の判定は fixture の policy だけを許可する test-only の check（NF07 側の拒否は下の別 test）。
+            GeminiTextServiceImpl adapter = new GeminiTextServiceImpl(config, legacy, new ObjectMapper(), guard, transport,
+                    AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(),
+                            AiExternalSendApprovalFixtures.permittingPrivacyPolicy()), Clock.systemUTC());
             CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
             AiExternalSendApproval.Snapshot approval = AiExternalSendApproval.evaluate(
                     config, AiExternalSendApprovalFixtures.today()).snapshot();
@@ -199,8 +207,9 @@ class GeminiCopilotInvocationBoundaryTest {
                     org.mockito.ArgumentMatchers.any());
 
             // 承認済み証拠はcost gateを通過するが、test用loopback transportは公開hostを送信前に拒否する。
-            BusinessException destination = assertThrows(BusinessException.class,
-                    () -> adapter.generateCopilotSummary("synthetic", invocation(snapshot, approved)));
+            BusinessException destination = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(BusinessException.class,
+                            () -> adapter.generateCopilotSummary("synthetic", invocation(snapshot, approved))));
             org.junit.jupiter.api.Assertions.assertEquals("COPILOT_DESTINATION_REJECTED", destination.getMessage());
             verify(guard).validateExactHostHttpsUrl(
                     org.mockito.ArgumentMatchers.startsWith("https://generativelanguage.googleapis.com/v1beta/models/"),
@@ -208,6 +217,61 @@ class GeminiCopilotInvocationBoundaryTest {
             org.junit.jupiter.api.Assertions.assertEquals(0, submissions.get());
             verify(legacy, never()).postForObject(org.mockito.ArgumentMatchers.anyString(),
                     org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(String.class));
+        } finally {
+            transport.close();
+        }
+    }
+
+    /** NF07-NF08-LINK: 承認済みの証拠でも、送信直前に NF07 の policy を確認できなければ送信しない（宛先検査へ進まない）。 */
+    @Test
+    void 承認済み本番adapterでもNF07のpolicyを確認できなければ送信直前に拒否する() throws Exception {
+        AtomicInteger submissions = new AtomicInteger();
+        CopilotDnsSnapshotResolver.AddressSet addressSet = CopilotDnsSnapshotResolver.AddressSet.fromAddressBytes(
+                "generativelanguage.googleapis.com", List.of(new byte[]{127, 0, 0, 1}), Instant.now().plusSeconds(60));
+        CopilotBoundedHttpTransport transport = new CopilotBoundedHttpTransport(new CopilotDnsSnapshotResolver(
+                new CopilotDnsSnapshotResolver.DnsSnapshot(Map.of("generativelanguage.googleapis.com", addressSet)),
+                Clock.systemUTC()), true, submissions::incrementAndGet);
+        try {
+            transport.start();
+            AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(AiExternalSendApprovalFixtures.today());
+            config.setApiKey("synthetic-key");
+            OutboundUrlGuard guard = mock(OutboundUrlGuard.class);
+            AtomicInteger nf07Calls = new AtomicInteger();
+            AiExternalSendPrivacyPolicyCheck denying = AiExternalSendApprovalFixtures.privacyPolicyCheck(request -> {
+                nf07Calls.incrementAndGet();
+                return PolicyEnforcementDecision.deny(PolicyEnforcementReason.POLICY_REVOKED,
+                        PolicyFailureReason.ENVELOPE_REVOKED);
+            }, null);
+            AiExternalSendApproval.Snapshot approval = AiExternalSendApproval.evaluate(
+                    config, AiExternalSendApprovalFixtures.today()).snapshot();
+            for (GeminiTextServiceImpl adapter : List.of(
+                    new GeminiTextServiceImpl(config, mock(RestTemplate.class), new ObjectMapper(), guard, transport,
+                            AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(), denying), Clock.systemUTC()),
+                    // 共有gateを持たない手動構築は NF07 を確認できないため送信しない
+                    new GeminiTextServiceImpl(config, mock(RestTemplate.class), new ObjectMapper(), guard, transport))) {
+                CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
+                PreflightCostEvidence approved = new ApprovedExternalSendCostPolicy(approval).preflight(snapshot, 50, 100);
+                BusinessException rejection = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                        () -> assertThrows(BusinessException.class,
+                                () -> adapter.generateCopilotSummary("synthetic", invocation(snapshot, approved))));
+                org.junit.jupiter.api.Assertions.assertEquals("COPILOT_COST_UNKNOWN", rejection.getMessage());
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(1, nf07Calls.get());
+
+            // 実行tenantが無ければ、許可するcheckでもNF07へ問い合わせずに拒否する
+            GeminiTextServiceImpl linked = new GeminiTextServiceImpl(config, mock(RestTemplate.class),
+                    new ObjectMapper(), guard, transport, AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(),
+                            AiExternalSendApprovalFixtures.permittingPrivacyPolicy()), Clock.systemUTC());
+            CopilotConfigSnapshot linkedSnapshot = CopilotConfigSnapshot.capture(config, linked);
+            PreflightCostEvidence linkedEvidence = new ApprovedExternalSendCostPolicy(approval)
+                    .preflight(linkedSnapshot, 50, 100);
+            BusinessException noTenant = assertThrows(BusinessException.class,
+                    () -> linked.generateCopilotSummary("synthetic", invocation(linkedSnapshot, linkedEvidence)));
+            org.junit.jupiter.api.Assertions.assertEquals("COPILOT_COST_UNKNOWN", noTenant.getMessage());
+
+            verify(guard, never()).validateExactHostHttpsUrl(org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any());
+            org.junit.jupiter.api.Assertions.assertEquals(0, submissions.get());
         } finally {
             transport.close();
         }

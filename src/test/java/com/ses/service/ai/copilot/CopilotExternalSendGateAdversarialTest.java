@@ -741,6 +741,63 @@ class CopilotExternalSendGateAdversarialTest {
         assertTrue(adapter.prompts.isEmpty());
     }
 
+    /** G1r N-P3-3(b): サイズ超過の拒否監査に、拒否した送信候補のbyte数を残す（0にしない。原文は残さない）。 */
+    @Test
+    void サイズ超過の拒否監査には超過したbyte数を残し原文は残さない() {
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        Map<String, Object> fields = minimalFields();
+        fields.put("summary.claimKeys", CLAIM_KEY + "," + "x".repeat(9000));
+
+        CopilotExecutionFailure ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(CopilotExecutionFailure.class, () -> gateway.execute(request(50, fields, null))));
+
+        assertEquals("AI_EXTERNAL_SEND_REQUEST_TOO_LARGE", ex.reasonCode());
+        AuditLog denied = capturedAudits(1).get(0);
+        assertEquals(AiExternalSendAuditor.APPLICATION_DENIED, denied.getApplicationCode());
+        Matcher bytes = Pattern.compile("(?:^|;)bytes=(\\d+);").matcher(denied.getAfterState());
+        assertTrue(bytes.find(), denied.getAfterState());
+        assertTrue(Integer.parseInt(bytes.group(1)) > 8192, "承認のmaxRequestBytesを超えたbyte数: " + bytes.group(1));
+        assertFalse(auditText(denied).contains("xxxxxxxx"), "拒否監査にpromptの原文を残さない");
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    /** G1r N-P3-3(a): budget欠落・負値は、サイズ判定より前に従来どおり503で拒否する（費用policyの入力検査で500にしない）。 */
+    @ParameterizedTest
+    @ValueSource(ints = {-1, Integer.MIN_VALUE})
+    void budgetが負値ならサイズ超過のpromptでも500ではなく503で拒否する(int budget) {
+        assertBudgetRequired(budget);
+    }
+
+    @Test
+    void budgetが無ければサイズ超過のpromptでも500ではなく503で拒否する() {
+        assertBudgetRequired(null);
+    }
+
+    private void assertBudgetRequired(Integer budget) {
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        for (boolean readOnly : List.of(false, true)) {
+            AiGatewayRequest input = request(50, minimalFields(), null);
+            input.setTrustedInstruction("a".repeat(9000));
+            input.setCostBudgetYen(budget);
+            BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(BusinessException.class,
+                            () -> {
+                                if (readOnly) {
+                                    gateway.preflightCopilot(input);
+                                } else {
+                                    gateway.execute(input);
+                                }
+                            }));
+            assertEquals(503, ex.getCode());
+            assertEquals("COPILOT_COST_BUDGET_REQUIRED", ex.getMessage());
+        }
+        assertTrue(adapter.prompts.isEmpty());
+        verifyNoInteractions(auditLogService);
+        verify(probe, never()).record(any());
+    }
+
     @Test
     void 既存transaction内では予約も独立監査もprovider呼出しもしない() {
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
@@ -887,7 +944,10 @@ class CopilotExternalSendGateAdversarialTest {
     }
 
     private AiExecutionGatewayImpl gateway(AiConfig config, CopilotBoundedAiTextService adapter) {
-        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock);
+        // NF07-NF08-LINK の判定は本 class の対象外のため、fixture の policy だけを許可する test-only の check を使う
+        // （NF07 側の拒否は CopilotExternalSendPrivacyPolicyLinkTest が確かめる）。
+        AiProductionApprovalGate gate = AiExternalSendApprovalFixtures.gate(config, clock,
+                AiExternalSendApprovalFixtures.permittingPrivacyPolicy());
         return new AiExecutionGatewayImpl(adapter, config, probe, new ObjectMapper(),
                 mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
                 mock(PlatformTransactionManager.class), clock, gate,

@@ -76,6 +76,48 @@ class GeminiResponseLogMetaTest {
         assertThat(logs).doesNotContain("responseSha256");
     }
 
+    /**
+     * RB-NF02 review P3-1: provider の 4xx は利用者の要求の誤りではないため、429 以外は 502（SYSTEM）にする。
+     * 401 をそのまま返すと画面が利用者をログイン画面へ戻し、415 等は業務エラーに見える。provider の status は log にだけ残す。
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {400, 401, 403, 404, 408, 409, 413, 415, 422})
+    void provider_の429以外の4xxは502で返しproviderのstatusはlogにだけ残す(int providerStatus) {
+        RestTemplate rest = mock(RestTemplate.class);
+        when(rest.postForObject(anyString(), any(), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.valueOf(providerStatus), "client error",
+                        HttpHeaders.EMPTY, sensitiveBody().getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service(rest).generate("ping"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo(502);
+                    assertThat(be.getMessageKey()).isEqualTo("error.ai.clientError");
+                    // 外部へ返す status も 502 のまま（共有 policy の許可 status）。GlobalExceptionHandler は 500 以上を SYSTEM に分類する。
+                    assertThat(com.ses.common.exception.SafeErrorPolicy.safeHttpCode(be.getCode())).isEqualTo(502);
+                });
+        assertThat(joinedLogs()).contains("status=" + providerStatus).contains("category=CLIENT_ERROR");
+    }
+
+    @Test
+    void provider_の429は従来どおり429で返す() {
+        RestTemplate rest = mock(RestTemplate.class);
+        when(rest.postForObject(anyString(), any(), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests",
+                        HttpHeaders.EMPTY, new byte[0], StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service(rest).generate("ping"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo(429);
+                    assertThat(be.getMessageKey()).isEqualTo("error.ai.clientError");
+                });
+        assertThat(GeminiTextServiceImpl.clientErrorStatus(429)).isEqualTo(429);
+        assertThat(GeminiTextServiceImpl.clientErrorStatus(401)).isEqualTo(502);
+    }
+
     @Test
     void サーバーエラーログに本文と機微情報が含まれない() {
         String body = sensitiveBody();

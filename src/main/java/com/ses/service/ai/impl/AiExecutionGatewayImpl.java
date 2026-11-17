@@ -13,6 +13,7 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiExternalSendAuditor;
 import com.ses.service.ai.AiExternalSendBudgetLedger;
+import com.ses.service.ai.AiExternalSendPrivacyPolicyCheck;
 import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
@@ -168,7 +169,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             }
             throw ex;
         } catch (CopilotExecutionFailure ex) {
-            recordExternalSendDenied(request, "", ex.preflight(), ex.reasonCode());
+            recordExternalSendDenied(request, ex.rejectedPromptBytes() == null ? 0 : ex.rejectedPromptBytes(),
+                    ex.preflight(), ex.reasonCode());
             throw ex;
         }
         Map<String, Object> masked = prepared.maskedFields();
@@ -285,6 +287,11 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (approved && source != null) throw BusinessException.of(400, REASON_UNTRUSTED);
         boolean invalidFieldType = false;
         if (approved) {
+            // サイズ超過の判定は費用policyにbudgetを渡すため、その前にbudgetを確かめる（null・負値は従来どおり503。
+            // 費用policyの入力検査の例外を500として外へ出さない。G1r N-P3-3）。
+            if (request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0) {
+                throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
+            }
             invalidFieldType = input.entrySet().stream().anyMatch(e -> e.getKey() != null && e.getValue() != null
                     && AiPiiMasker.ALLOWED_SEND.contains(e.getKey()) && !(e.getValue() instanceof String));
             // HTML正規表現より先に、送信候補を同一Stringへ固定してサイズを制限する。
@@ -294,11 +301,13 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                         && !AiPiiMasker.NEVER_SEND.contains(key)) strings.put(key, value.toString());
             });
             String raw = buildPrompt(marker, instruction, strings, null);
-            if (utf8Length(raw) > startupExternalSendApproval.costLimit().maxRequestBytes()) {
+            int rawBytes = utf8Length(raw);
+            if (rawBytes > startupExternalSendApproval.costLimit().maxRequestBytes()) {
                 PreflightCostEvidence evidence = approvedExternalSendCostPolicy.preflight(startupCopilotConfigSnapshot,
-                        request.getCostBudgetYen(), utf8Length(raw));
+                        request.getCostBudgetYen(), rawBytes);
+                // 拒否監査に超過したbyte数を残す（promptの原文は渡さない）。
                 throw new CopilotExecutionFailure(evidence.reasonCode(), evidence,
-                        DispatchOutcome.notStarted(evidence.reasonCode()));
+                        DispatchOutcome.notStarted(evidence.reasonCode()), null, rawBytes);
             }
             input = strings;
         }
@@ -382,6 +391,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 assertExternalSendTenantBinding(request);
                 assertBoundedIdentity(request, configured);
                 assertApprovedExternalSendBinding(configured);
+                // NF07-NF08-LINK: 承認設定の nf07-policy-id が指す NF07 policy が現行で有効か（送信ごと、cacheしない）。
+                productionApprovalGate.assertExternalSendPrivacyPolicy(request.getExecutionContext().tenantId(),
+                        startupExternalSendApproval, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY);
                 // 空文字を含む自由文はサイズ判定より前に400で拒否する。
                 if (request.getUntrustedSourceText() != null) {
                     throw BusinessException.of(400, REASON_UNTRUSTED);
@@ -629,6 +641,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     /** 承認済み経路の送信前拒否をbest effortで監査する。承認がない場合（既定deny-all）は記録しない。 */
     private void recordExternalSendDenied(AiGatewayRequest request, String prompt, PreflightCostEvidence preflight,
                                           String reason) {
+        recordExternalSendDenied(request, utf8Length(prompt), preflight, reason);
+    }
+
+    /** promptを組み立てる前の拒否（サイズ超過等）は、拒否した送信候補のbyte数だけを記録する。 */
+    private void recordExternalSendDenied(AiGatewayRequest request, int promptBytes, PreflightCostEvidence preflight,
+                                          String reason) {
         if (startupExternalSendApproval == null) {
             return;
         }
@@ -644,7 +662,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 request.getUseCase(), hostOf(startupCopilotConfigSnapshot.canonicalEndpoint()),
                 context == null ? null : context.tenantId(), context == null ? null : context.legalEntityId(),
                 context == null ? null : context.queryId(), request.getExpectedArtifactVersionId(),
-                startupCopilotConfigSnapshot.configHash(), utf8Length(prompt),
+                startupCopilotConfigSnapshot.configHash(), Math.max(0, promptBytes),
                 preflight == null ? null : preflight.upperBoundYen(), null, null,
                 DispatchOutcome.State.NOT_STARTED.name(), safeReason, null, 0, CopilotCostState.NOT_SENT.name(),
                 status, false, null));
