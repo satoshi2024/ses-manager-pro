@@ -375,16 +375,16 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
   - **2026-11-17改訂（RB-NF10、§15）**: 引き継ぎも連続失敗1回として数える。DDLは不要で、既存の `failure_count` を使う。
     - 期限切れleaseの引き継ぎclaimは、completionに至らなかった前の実行を失敗1回として、claimと同じUPDATEで `failure_count` を加算する（`ReportScheduleMapper.claimDue`。占有中の行だけに一致する条件で加算し、SET句の評価順に依存しない）。引き継いだ実行が成功すれば0へ戻り、失敗すればさらに1回加算される。
     - 引き継げば上限（12回）に達するleaseは引き継がず、同じsnapshot CASで停止する（`markTakeoverExhausted`）。停止の状態はfailure completionの上限到達と同じで（`enabled = 0`、`SCHEDULE_RETRY_EXHAUSTED`、retry予定は5分×12＝60分後、論理runを保持、lease/tokenをclear）、通知もERROR（`cause=STALE_LEASE`）＋ `RETRY_EXHAUSTED_DISABLED`。管理者の有効化で同一論理runから再開する。tokenをclearするため、期限後も動いていた旧workerのcompletionは0件になる。
-    - **停止の原因の見分け方**（RB-NF10 review P3-5）: 停止理由code `SCHEDULE_RETRY_EXHAUSTED` は管理者の再開条件（`updateEnabled` の0戻し）のため両方の停止で共通にし、引き継ぎによる停止だけ `last_error_message` を `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語のbundleに登録したkey）にする。生成失敗による停止は従来どおり失敗completionの安全な既定message。schedule一覧APIの `lastErrorMessage` とERRORログの `cause=STALE_LEASE` で区別できる。DDLは要らない。
+    - **停止の原因の見分け方**（RB-NF10 review P3-5）: 停止理由code `SCHEDULE_RETRY_EXHAUSTED` は管理者の再開条件（`updateEnabled` の0戻し）のため両方の停止で共通にし、引き継ぎによる停止だけ `last_error_message` を `error.managementReport.scheduleStoppedByLeaseExpiry`（4言語のbundleに登録したkey）にする。生成失敗による停止（と停止前の失敗completion）は `error.managementReport.scheduleGenerationFailed`（2026-11-17、RB-HYG。review RB-NF10 P3-D2。以前は `safeJobMessage` の既定分岐の日本語固定文言で、引き継ぎ停止の key と形式がそろわず意味も違っていた）。どちらも key を保存し、画面を作るときは `SES.i18n.t` で訳す。schedule一覧APIの `lastErrorMessage` とERRORログの `cause=STALE_LEASE` で区別できる。DDLは要らない。
       - 引き継ぎで回数だけが1増えた行（停止前）は、`last_error_code`・`last_error_message` が前回の値のまま残る（引き継ぎのclaimは回数以外の失敗の列を書かない）。一覧では「失敗回数は増えたが理由は前回のまま」に見える。引き継ぎの事実はWARN「期限切れprocessing leaseを引き継ぎました…連続失敗1回として数えました」と `STALE_LEASE_TAKEOVER` で確認する。
-    - 結果不明の停止は、行を読み直して**この試行が作った停止状態**を確かめた時だけ通知する。判定は、無効・停止理由code・lease無し・同じ論理run・この試行のretry時刻（秒精度）・この試行の加算後の回数の全一致で、retry時刻は試行ごとの現在時刻から決まるため他workerの停止と区別できる。読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN`／`CLAIM_UNCERTAIN` の監視（§10.6 A4）と§10.3 Q4に委ねる。
+    - 結果不明の停止は、行を読み直して**この試行が作った停止状態**を確かめた時だけ通知する。判定は、無効・停止理由code・lease無し・同じ論理run・この試行のretry時刻（秒精度）・この試行の加算後の回数の全一致で、retry時刻は試行ごとの現在時刻から決まるため、pollがShedLockの `lockAtMostFor`（10分）以内でnode間に直列の間は他workerの停止と区別できる。pollが10分を超えて他nodeのpollと重なると、同じ秒に同じsnapshotで同じ行を扱い、自分の停止SQLがcommitされずに例外となり他nodeがcommitした場合だけ一致し、重複して通知する（停止状態は正しく、重複するのはERRORとmetricの1回。review RB-NF10 P3-D1）。読み直しの失敗は判定せず、`COMPLETION_UNCERTAIN`／`CLAIM_UNCERTAIN` の監視（§10.6 A4）と§10.3 Q4に委ねる。
       - `markFailure` が上限で結果不明: commitされていなければleaseが残り、期限後の引き継ぎが同じ失敗を数えて停止・通知する。lease期限は**読み直す直前の現在時刻**で判定し（RB-NF10 review P3-2。markFailureは接続・lock待ちの後で例外になり得るため、失敗検知時刻では期限切れ後の他workerの停止を見落とす）、期限を過ぎていれば判定しない。
       - 引き継ぎ停止（`markTakeoverExhausted`）が結果不明（RB-NF10 review P3-1）: 確定的なSQL失敗（commitされない）は読み直さない。それ以外は読み直し、commit済みなら通知する（行は無効になっているため、ここで通知しないと誰も通知しない）。commitされていなければ期限切れleaseのまま残り、次のpollの引き継ぎ停止が通知する。
   - **数え方の範囲**（RB-NF10 review P3-4）:
     - 回数は**同一論理runの中でだけ**累積する。success completionが `next_run_at` を進めて0へ戻し、失敗も引き継ぎも同じ論理runを続けるため、周期（月）を跨いで「遅い実行」が累積することはない。停止に至るのは、同じ論理runで成功できない試行が12回続いた場合だけである。
     - 単一instanceでは、実行中の処理を同じnodeが引き継ぐことはない（`@Scheduled` の同じtaskは重ならず、次のpollは今回の終了後になる）。引き継ぎが起きるのは、process停止・再起動の後と、多instanceで他nodeのpollがShedLockの `lockAtMostFor`（10分）後にstaleのleaseを見た場合である。
     - 変更前は、同じ状況（毎回completionに至らない試行）が無限の引き継ぎと重複実行になっていた。変更後は約6時間（lease 30分 × 残り回数）で停止し、`RETRY_EXHAUSTED_DISABLED` で通知される。
-    - 典型の長い実行（A が30分を超え、B が引き継いで1回数える）は、B が A の作った成功runを再利用してすぐ成功するため（§14.4）、回数は0へ戻る。
+    - 典型の長い実行（A が30分を超え、B が引き継いで1回数える）は、B が A の作った成功runを再利用してすぐ成功するため（§14.4）、回数は0へ戻る。これは B の開始時に A が生成を終えている場合で、A の生成途中に B が始まると B は重複 insert で失敗して回数が2になり、retry の成功で0へ戻る（review RB-NF10 c837e5d0 §2.4）。
   - 残る限界:
     - poison pillで止まるまでの時間は約 lease 30分 × 残り回数（初回からなら約6時間）である。
     - 同じ論理runで成功できない試行のたびに30分を超える場合（再利用できない長い実行が続く場合）は、正常な実行でも12回で停止する。事前には `LEASE_OVERRUN` で見える。
