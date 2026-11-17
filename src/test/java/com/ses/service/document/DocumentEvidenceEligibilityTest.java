@@ -261,6 +261,124 @@ class DocumentEvidenceEligibilityTest {
         }
     }
 
+    /**
+     * RB-NF01 delta review D-P3-1: 上の反射は2つの定数しか見ない。ダウンロード ACL には、method の中に直接書いた種別の規則
+     * （HR の ORDER_*／ACCEPTANCE 拒否、ACCEPTANCE の契約 scope）と、{@code FileScopeValidationService} 自身の種別ごとの規則が
+     * ある。どちらかへ SKILL_SHEET が加わると、二者確認の可視性（ENGINEER link の data scope だけを見る）がダウンロードより
+     * 広くなり得るため、source を読んで次を固定する。
+     * <ul>
+     *   <li>{@code DocumentServiceImpl#assertDocumentAccessAllowed} と、そこから呼ぶ同じ file の private method の本体に書いた
+     *       種別らしい文字列（大文字・数字・{@code _}）と、参照する {@code *_DOCUMENT_TYPE(S)} 定数（反射で値を読む）に
+     *       SKILL_SHEET が無い。</li>
+     *   <li>{@code FileScopeValidationService} で {@code documentType} と比べる種別と {@code *_DOCUMENT_TYPE(S)} 定数に SKILL_SHEET が
+     *       無い。</li>
+     * </ul>
+     * method 名の変更や抽出の失敗は、既知の種別が見つからないことで失敗させる（tripwire）。
+     */
+    @Test
+    void ダウンロードACLのmethodに直接書いた種別とFileScopeValidationServiceの種別にもSKILL_SHEETが無い() throws Exception {
+        String accepted = DocumentEvidenceEligibility.ACCEPTED_DOCUMENT_TYPE;
+        java.nio.file.Path documentService = java.nio.file.Path.of(
+                "src/main/java/com/ses/service/impl/DocumentServiceImpl.java");
+        String source = com.ses.testsupport.JavaSourceText.stripComments(
+                java.nio.file.Files.readString(documentService, java.nio.charset.StandardCharsets.UTF_8));
+        String body = methodBody(source, "public void assertDocumentAccessAllowed(Document doc)");
+        StringBuilder scanned = new StringBuilder(body);
+        // 呼出し先の private method を推移的にたどる（isDigitalInvoiceDocument のように、さらに先で定数を参照する）。
+        java.util.Set<String> helpers = new java.util.TreeSet<>();
+        java.util.Deque<String> pending = new java.util.ArrayDeque<>(List.of(body));
+        while (!pending.isEmpty()) {
+            java.util.regex.Matcher call = java.util.regex.Pattern.compile("\\b([a-z]\\w*)\\s*\\(").matcher(pending.pop());
+            while (call.find()) {
+                String name = call.group(1);
+                java.util.regex.Matcher declaration = java.util.regex.Pattern.compile(
+                        "private\\s+[\\w<>.,\\s]+\\s" + name + "\\s*\\([^)]*\\)\\s*\\{").matcher(source);
+                if (declaration.find() && helpers.add(name)) {
+                    String helperBody = methodBody(source, declaration.group());
+                    scanned.append('\n').append(helperBody);
+                    pending.push(helperBody);
+                }
+            }
+        }
+        assertTrue(helpers.contains("assertDigitalInvoiceDocumentAccess") && helpers.contains("assertFileScopeSpecialDocumentAccess"),
+                "前提: 呼出し先の private method も読む: " + helpers);
+        java.util.Set<String> literals = documentTypeLiterals(scanned.toString());
+        assertTrue(literals.containsAll(List.of("ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE")),
+                "前提: method に直接書いた種別を読めている: " + literals);
+        assertTrue(!literals.contains(accepted), "ダウンロード ACL の method に直接書いた種別に " + accepted + " が無いこと");
+        java.util.Set<String> constants = constantReferences(scanned.toString());
+        assertTrue(constants.containsAll(List.of("FILE_SCOPE_SPECIAL_DOCUMENT_TYPES", "DIGITAL_INVOICE_DOCUMENT_TYPES")),
+                "前提: 参照する種別の定数を読めている: " + constants);
+        for (String constant : constants) {
+            assertTrue(!constantValues(com.ses.service.impl.DocumentServiceImpl.class, constant).contains(accepted),
+                    constant + " に " + accepted + " が無いこと");
+        }
+
+        java.nio.file.Path fileScope = java.nio.file.Path.of(
+                "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java");
+        String fileScopeSource = com.ses.testsupport.JavaSourceText.stripComments(
+                java.nio.file.Files.readString(fileScope, java.nio.charset.StandardCharsets.UTF_8));
+        java.util.Set<String> fileScopeTypes = new java.util.TreeSet<>();
+        java.util.regex.Matcher compared = java.util.regex.Pattern.compile(
+                "\"([A-Z][A-Z0-9_]*)\"\\s*\\.\\s*equals\\s*\\(\\s*documentType\\s*\\)").matcher(fileScopeSource);
+        while (compared.find()) fileScopeTypes.add(compared.group(1));
+        assertTrue(fileScopeTypes.containsAll(List.of("PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT",
+                "CERTIFICATION_EVIDENCE", "MANAGEMENT_REPORT")), "前提: FileScope の種別ごとの規則を読めている: " + fileScopeTypes);
+        assertTrue(!fileScopeTypes.contains(accepted), "FileScopeValidationService の種別ごとの規則に " + accepted + " が無いこと");
+        for (String constant : constantReferences(fileScopeSource)) {
+            assertTrue(!constantValues(com.ses.service.security.impl.FileScopeValidationService.class, constant)
+                    .contains(accepted), "FileScopeValidationService." + constant + " に " + accepted + " が無いこと");
+        }
+    }
+
+    /** {@code signature} から始まる method の本体（波括弧の対応で切り出す。文字列の中の波括弧は数えない）。 */
+    private static String methodBody(String source, String signature) {
+        int start = source.indexOf(signature);
+        assertTrue(start >= 0, "method が見つからない: " + signature);
+        int open = source.indexOf('{', start + signature.length() - 1);
+        int depth = 0;
+        boolean inString = false;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (inString) {
+                if (c == '\\') i++;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') inString = true;
+            else if (c == '{') depth++;
+            else if (c == '}' && --depth == 0) return source.substring(open, i + 1);
+        }
+        throw new AssertionError("method の終わりが見つからない: " + signature);
+    }
+
+    /** 種別らしい文字列（大文字で始まり大文字・数字・{@code _} だけの literal）。 */
+    private static java.util.Set<String> documentTypeLiterals(String text) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        java.util.regex.Matcher literal = java.util.regex.Pattern.compile("\"([A-Z][A-Z0-9_]*)\"").matcher(text);
+        while (literal.find()) found.add(literal.group(1));
+        return found;
+    }
+
+    /** 参照する種別の定数（{@code *_DOCUMENT_TYPE}・{@code *_DOCUMENT_TYPES}）。 */
+    private static java.util.Set<String> constantReferences(String text) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        java.util.regex.Matcher constant = java.util.regex.Pattern.compile("\\b([A-Z][A-Z0-9_]*_DOCUMENT_TYPES?)\\b").matcher(text);
+        while (constant.find()) found.add(constant.group(1));
+        return found;
+    }
+
+    /** 定数の値（Set は要素、String は1件）。 */
+    private static java.util.Set<String> constantValues(Class<?> owner, String name) throws Exception {
+        java.lang.reflect.Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        Object value = field.get(null);
+        java.util.Set<String> values = new java.util.TreeSet<>();
+        if (value instanceof java.util.Collection<?> collection) collection.forEach(v -> values.add(String.valueOf(v)));
+        else values.add(String.valueOf(value));
+        return values;
+    }
+
     private void expect(Verdict expected, Consumer<Void> mutation) {
         setUp();
         mutation.accept(null);

@@ -526,8 +526,8 @@ public class LifecycleDualConfirmationCoordinator {
     /**
      * 提出者に見えない文書は、存在しない文書と同じ400 {@code error.document.notFound} にする（W3-21a review P3-5、
      * RB-NF01 review RB-P3-1、計画 §5.9「文書・版が無い、他tenant、版が別文書、提出者の文書ACL外、SKILL_SHEET以外」の行）。
-     * 可視は「提出者の文書ACL（{@code SKILL_SHEET}×{@code ENGINEER} link の文書ダウンロードと同じ判定: 管理者、または要員の
-     * data scope）」かつ「tenantに存在する {@code SKILL_SHEET} で、案件の要員を指す {@code ENGINEER} linkを持つ」
+     * 可視は「提出者の文書ACL（{@code SKILL_SHEET}×{@code ENGINEER} link の文書ダウンロードの部分集合: 管理者、または要員の
+     * data scope。ダウンロードは {@code CUSTOMER} link 等のどれか1件でも通るため、ここはそれより広くならない。D-P3-2）」かつ「tenantに存在する {@code SKILL_SHEET} で、案件の要員を指す {@code ENGINEER} linkを持つ」
      * （{@link DocumentEvidenceEligibility#visibleEvidenceCandidate}）。適格性（削除・種別・状態・hold・廃棄申請・link形・版）の
      * 判定より前に行うため、範囲外の文書や、種別ごとにダウンロードのACLが厳しい文書（RECEIPT・CHANGE_REQUEST_ATTACHMENT・
      * 電子インボイス等）について「無い」「削除済み」「SKILL_SHEETでない」「hold・廃棄申請がある」「他の要員の文書」を応答で

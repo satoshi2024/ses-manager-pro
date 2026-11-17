@@ -30,7 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       gate へ渡す・本番の port を別の key で問い合わせ直す経路を作らせない）。</li>
  *   <li>NF08: {@code AiExternalSendPrivacyPolicyCheck} と、check を受け取る {@code AiProductionApprovalGate} の constructor は
  *       package-private。check を作れるのは gate だけで、gate を手動構築できる場所（check を受け取らない拒否だけの constructor）も
- *       一覧に固定する。</li>
+ *       一覧に固定する。gate は final で、継承（{@code extends AiProductionApprovalGate}）の一覧は空（RB-NF08-LINK delta review
+ *       D-P3-1）。呼出し・構築の規則は method 参照（{@code ::permit}・{@code ::new}）も拾う。</li>
  * </ul>
  * test の source（{@code PolicyEnforcementTestDecisions}・{@code AiExternalSendApprovalFixtures}）は main の classpath に入らないため
  * 対象外。<b>静的な走査で検出しないもの</b>: reflection（{@code setAccessible} 等）による呼出し。一覧を変えるときは review を通す。
@@ -39,12 +40,19 @@ class PolicyEnforcementCallSiteTest {
 
     private static final Pattern PORT_REFERENCE = Pattern.compile("\\bPolicyEnforcementPort\\b");
     private static final Pattern PORT_IMPLEMENTATION = Pattern.compile("\\bimplements\\s+[^{]*\\bPolicyEnforcementPort\\b");
-    private static final Pattern PERMIT_CALL = Pattern.compile("\\bPolicyEnforcementDecision\\s*\\.\\s*permit\\s*\\(");
+    // 呼出しと構築は method 参照（::permit・::new）でも書けるため、どちらの形も同じ規則で拾う（RB-NF08-LINK delta review D-P3-1）。
+    private static final Pattern PERMIT_CALL = Pattern.compile(
+            "\\bPolicyEnforcementDecision\\s*(?:\\.\\s*permit\\s*\\(|::\\s*permit\\b)");
     private static final Pattern PERMIT_STATIC_IMPORT = Pattern.compile(
             "import\\s+static\\s+[\\w.]*PolicyEnforcementDecision\\s*\\.\\s*(?:permit|\\*)\\s*;");
-    private static final Pattern DECISION_CONSTRUCTION = Pattern.compile("\\bnew\\s+PolicyEnforcementDecision\\s*\\(");
-    private static final Pattern CHECK_CONSTRUCTION = Pattern.compile("\\bnew\\s+AiExternalSendPrivacyPolicyCheck\\s*\\(");
-    private static final Pattern GATE_CONSTRUCTION = Pattern.compile("\\bnew\\s+AiProductionApprovalGate\\s*\\(");
+    private static final Pattern DECISION_CONSTRUCTION = Pattern.compile(
+            "\\bnew\\s+PolicyEnforcementDecision\\s*\\(|\\bPolicyEnforcementDecision\\s*::\\s*new\\b");
+    private static final Pattern CHECK_CONSTRUCTION = Pattern.compile(
+            "\\bnew\\s+AiExternalSendPrivacyPolicyCheck\\s*\\(|\\bAiExternalSendPrivacyPolicyCheck\\s*::\\s*new\\b");
+    private static final Pattern GATE_CONSTRUCTION = Pattern.compile(
+            "\\bnew\\s+AiProductionApprovalGate\\s*\\(|\\bAiProductionApprovalGate\\s*::\\s*new\\b");
+    /** gate を継承して承認判定を上書きする class（final にしたため compile も通らないが、一覧でも空に固定する）。 */
+    private static final Pattern GATE_SUBCLASS = Pattern.compile("\\bextends\\s+(?:[\\w.]+\\.)?AiProductionApprovalGate\\b");
 
     /** 規則ごとの、main で一致してよい file（src/main/java の相対 path）。一覧と実際の出現が完全に一致することを求める。 */
     private static final Map<Pattern, Set<String>> ALLOWED = new LinkedHashMap<>();
@@ -71,6 +79,7 @@ class PolicyEnforcementCallSiteTest {
         ALLOWED.put(GATE_CONSTRUCTION, Set.of(
                 "com/ses/config/AiProductionSafetyValidator.java",
                 "com/ses/service/ai/copilot/CopilotFeatureGate.java"));
+        ALLOWED.put(GATE_SUBCLASS, Set.of());
     }
 
     @Test
@@ -107,6 +116,8 @@ class PolicyEnforcementCallSiteTest {
             assertFalse(java.util.Arrays.asList(constructor.getParameterTypes()).contains(check),
                     "checkを受け取るgateのconstructorはpublicにしない");
         }
+        assertTrue(java.lang.reflect.Modifier.isFinal(gate.getModifiers()),
+                "gateはfinal（継承して承認判定のpublic methodを上書きした別beanを作らせない。D-P3-1）");
     }
 
     @Test
@@ -122,5 +133,16 @@ class PolicyEnforcementCallSiteTest {
                 "/** {@link PolicyEnforcementDecision.permit()} */ int x;")).find());
         assertTrue(CHECK_CONSTRUCTION.matcher("new AiExternalSendPrivacyPolicyCheck(() -> port, () -> null)").find());
         assertTrue(GATE_CONSTRUCTION.matcher("new AiProductionApprovalGate(config)").find());
+        // method 参照（D-P3-1）
+        assertTrue(PERMIT_CALL.matcher("Supplier<PolicyEnforcementDecision> s = PolicyEnforcementDecision::permit;").find());
+        assertTrue(PERMIT_CALL.matcher("PolicyEnforcementDecision :: permit").find());
+        assertFalse(PERMIT_CALL.matcher("PolicyEnforcementDecision::permitted").find(), "読取りの accessor は拾わない");
+        assertTrue(DECISION_CONSTRUCTION.matcher("map(PolicyEnforcementDecision::new)").find());
+        assertTrue(CHECK_CONSTRUCTION.matcher("Factory f = AiExternalSendPrivacyPolicyCheck::new;").find());
+        assertTrue(GATE_CONSTRUCTION.matcher("Function<AiConfig, AiProductionApprovalGate> f = AiProductionApprovalGate::new;")
+                .find());
+        assertTrue(GATE_SUBCLASS.matcher("class Lenient extends AiProductionApprovalGate {").find());
+        assertTrue(GATE_SUBCLASS.matcher("class Lenient extends com.ses.service.ai.AiProductionApprovalGate {").find());
+        assertFalse(GATE_SUBCLASS.matcher("class X extends AiProductionApprovalGateSupport {").find());
     }
 }

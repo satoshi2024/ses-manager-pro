@@ -207,7 +207,9 @@ public class DocumentEvidenceEligibility {
      * </ol>
      * actorの文書ACL（条件11）は含まない。{@code SKILL_SHEET} は文書ダウンロード
      * （{@code DocumentServiceImpl#assertDocumentAccessAllowed}）の専用ACL種別にも電子インボイスにも当たらないため、
-     * ダウンロードと同じ判定は {@code ENGINEER} link の要員 data scope（管理者は無条件）になり、呼出側はそれを本判定より先に行う。
+     * 呼出側の ACL はダウンロードの {@code ENGINEER} link 分岐と同じ判定（要員 data scope。管理者は無条件）になり、本判定より先に行う。
+     * ダウンロードは link のどれか1件（{@code CUSTOMER} link 等）が通れば足りるため、二者確認の可視はダウンロードの部分集合で、
+     * ダウンロードより広くならない（RB-NF01 delta review D-P3-2）。
      * 要員を指すlinkに加えて別のlinkがある等のlink形の不適合は {@link #evaluate} の条件8が判定する（可視の文書だけ）。
      */
     public boolean visibleEvidenceCandidate(String tenantId, long documentId, long engineerId) {

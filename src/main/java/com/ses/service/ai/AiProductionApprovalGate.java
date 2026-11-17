@@ -21,9 +21,14 @@ import java.util.Locale;
  * 承認設定の完全性・一致 ∧ 用途の承認、の全てを満たす場合だけ許可する。</p>
  * <p>加えて、承認済み外部送信は送信ごとに NF07 の policy（承認設定の {@code nf07-policy-id}）が現行で有効かを
  * NF07 の内部判定 port で確かめる（NF07-NF08-LINK、{@link #assertExternalSendPrivacyPolicy}）。</p>
+ * <p>class は final（RB-NF08-LINK delta review D-P3-1）。main で継承して承認判定の public method を上書きし、別の bean として
+ * 差し替える経路を compile で閉じる。この bean には Spring の proxy（CGLIB の継承）を要する annotation（{@code @Transactional}・
+ * {@code @Async}・{@code @SchedulerLock} 等）も main の {@code @Aspect} も掛からないため、final でも起動に影響しない。
+ * test の {@code mock(AiProductionApprovalGate.class)} は Mockito 5 の inline mock maker が final class も扱う。
+ * 継承と method 参照による構築は {@code PolicyEnforcementCallSiteTest} でも固定する。</p>
  */
 @Component
-public class AiProductionApprovalGate {
+public final class AiProductionApprovalGate {
 
     /** legacy入口（CHAT/MATCHING/PROPOSAL_DRAFT）を表す用途marker。外部送信の承認用途には含められない。 */
     public static final String PURPOSE_LEGACY_ENDPOINT = "LEGACY_ENDPOINT";

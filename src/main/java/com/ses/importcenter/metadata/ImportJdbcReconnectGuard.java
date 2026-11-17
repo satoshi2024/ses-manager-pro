@@ -36,6 +36,11 @@ import java.util.regex.Pattern;
  *       DNS SRV の failover にする。D-P3-1）。</li>
  *   <li>data-source-properties に置いた、接続の型・接続先・failover／load-balance／replication の動作を変える key
  *       （{@link #CONNECTION_TOPOLOGY_KEYS}。値に関係なく、大文字小文字を問わない）。</li>
+ *   <li>Connector/J が解析時に展開した後の有効な属性（{@code getMainHost().getHostProperties()}）で、autoReconnect 系が
+ *       有効、または接続の型・接続先・切替えを変える key がある（RB-NF05 delta review E-P3-1）。{@code useConfigs}
+ *       （同梱の {@code clusterBase}・{@code coldFusion} は {@code autoReconnect=true} を足す）と {@code propertiesTransform}
+ *       （classpath の変換 class が属性を書き換える）は、URL の文字列と data-source-properties の key 名だけを見る検査を
+ *       迂回できるため、driver の解析結果そのものを見る（{@link #effectivePropertyViolations}）。</li>
  * </ul>
  * ProxySQL・MySQL Router等の透過再接続proxyと、Hikari以外のconnection pool（{@code spring.datasource.type}）も同じ理由で
  * 禁止だが、前者はアプリから検出できず、後者は本検査の対象外のため、配備文書
@@ -72,7 +77,8 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
         if (!violations.isEmpty()) {
             throw new IllegalStateException("JDBC接続設定で透過再接続（autoReconnect）または複数hostへの切替え"
                     + "（failover・loadbalance・replication・multi-host・SRV）が有効、JDBC driverが解析できないURL、"
-                    + "またはdata-source-propertiesで接続の型・接続先・切替えを変えているため起動を中止します。"
+                    + "またはdata-source-properties・driverの展開後の属性（useConfigs・propertiesTransform）で"
+                    + "接続の型・接続先・切替えを変えているため起動を中止します。"
                     + "取込commitの結果分類が成立しなくなるため、単一hostの jdbc:mysql://host:port/db に直してください: "
                     + violations);
         }
@@ -80,7 +86,8 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
 
     /**
      * 違反した property 名（複数 host の違反は {@code 名前(multiHost)}、Connector/J が解析できない URL は
-     * {@code 名前(unparsable)}、data-source-properties の接続の型・接続先を変える key は {@code 名前(connectionTopology)}）。
+     * {@code 名前(unparsable)}、data-source-properties の接続の型・接続先を変える key は {@code 名前(connectionTopology)}、
+     * driver の展開後の属性の違反は URL の {@code 名前(effectiveAutoReconnect)}・{@code 名前(connectionTopology)}）。
      * 値は返さない。
      */
     static List<String> violations(Environment environment) {
@@ -101,18 +108,31 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                 environment.getProperty("spring.datasource.username")));
         addIfAbsent(driverInfo, "password", firstNonNull(environment.getProperty("spring.datasource.hikari.password"),
                 environment.getProperty("spring.datasource.password")));
+        // data-source-properties に直接置いた key は下の key 検査で違反にするため、展開後の属性の検査では重ねて出さない。
+        java.util.Set<String> directDataSourceKeys = new java.util.HashSet<>();
+        boolean dataSourceAutoReconnect = false;
+        for (Map.Entry<String, String> property : dataSourceProperties.entrySet()) {
+            if (property.getKey() == null) continue;
+            String name = property.getKey().toLowerCase(Locale.ROOT);
+            directDataSourceKeys.add(name);
+            if (enablesAutoReconnect(name, property.getValue())) dataSourceAutoReconnect = true;
+        }
         for (String key : URL_PROPERTIES) {
             String url = environment.getProperty(key);
             if (url == null) continue;
-            if (autoReconnect(url)) violations.add(key);
+            boolean urlAutoReconnect = autoReconnect(url);
+            if (urlAutoReconnect) violations.add(key);
             String target = connectionTargetViolation(url, driverInfo);
-            if (target != null) violations.add(key + "(" + target + ")");
+            if (target != null) {
+                violations.add(key + "(" + target + ")");
+            } else {
+                violations.addAll(effectivePropertyViolations(key, url, driverInfo, directDataSourceKeys,
+                        urlAutoReconnect || dataSourceAutoReconnect));
+            }
         }
         for (Map.Entry<String, String> property : dataSourceProperties.entrySet()) {
             String name = property.getKey() == null ? "" : property.getKey().toLowerCase(Locale.ROOT);
-            String value = property.getValue() == null ? "" : property.getValue().trim().toLowerCase(Locale.ROOT);
-            if (("autoreconnect".equals(name) || "autoreconnectforpools".equals(name))
-                    && ("true".equals(value) || "yes".equals(value))) {
+            if (enablesAutoReconnect(name, property.getValue())) {
                 violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
             }
             // 接続の型・接続先・切替えを変える key は、値に関係なく拒否する（大文字小文字を問わない。D-P3-1）。
@@ -121,16 +141,62 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
             }
             // data source の url property（MysqlDataSource#setUrl）も JDBC URL と同じ規則で検査する（review P3-1）。
             if ("url".equals(name) && property.getValue() != null) {
-                if (autoReconnect(property.getValue())) {
+                boolean urlAutoReconnect = autoReconnect(property.getValue());
+                if (urlAutoReconnect) {
                     violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey());
                 }
                 String target = connectionTargetViolation(property.getValue(), driverInfo);
                 if (target != null) {
                     violations.add(DATA_SOURCE_PROPERTIES + "." + property.getKey() + "(" + target + ")");
+                } else {
+                    violations.addAll(effectivePropertyViolations(DATA_SOURCE_PROPERTIES + "." + property.getKey(),
+                            property.getValue(), driverInfo, directDataSourceKeys,
+                            urlAutoReconnect || dataSourceAutoReconnect));
                 }
             }
         }
         return List.copyOf(violations);
+    }
+
+    /** autoReconnect 系の key（小文字）が有効な値か。Connector/J の boolean は true/yes を有効とする（前後の空白と大文字小文字は問わない）。 */
+    private static boolean enablesAutoReconnect(String lowerCaseName, String value) {
+        if (!"autoreconnect".equals(lowerCaseName) && !"autoreconnectforpools".equals(lowerCaseName)) return false;
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return "true".equals(normalized) || "yes".equals(normalized);
+    }
+
+    /** driver の展開後の属性で autoReconnect 系が有効になる違反の印（URL・data-source-properties の文字列には現れない場合）。 */
+    static final String EFFECTIVE_AUTO_RECONNECT = "effectiveAutoReconnect";
+
+    /**
+     * 接続先の検査を通った URL について、Connector/J が解析時に展開した後の有効な属性（main host の
+     * {@code getHostProperties()}。接続はこの属性で初期化される）を検査する（RB-NF05 delta review E-P3-1）。
+     * {@code useConfigs}・{@code propertiesTransform} は解析の中で属性を足し・書き換えるため、展開前の文字列では見えない。
+     * <ul>
+     *   <li>autoReconnect 系が有効なら {@code 名前(effectiveAutoReconnect)}。URL の query・data-source-properties に直接書いた
+     *       有効な指定は既に別の違反として出しているため重ねない（{@code autoReconnectReported}）。</li>
+     *   <li>{@link #CONNECTION_TOPOLOGY_KEYS} の key があれば {@code 名前(connectionTopology)}（値に関係なく）。
+     *       data-source-properties に直接置いた key は key 検査で出すため除く。URL の query に書いた key と、展開で足された
+     *       key（{@code clusterBase} の {@code failOverReadOnly} 等）はここで拒否する。</li>
+     *   <li>Connector/J の URL でなければ（H2・MariaDB driver 用）対象外。属性を確かめられなければ {@code 名前(unparsable)}。</li>
+     * </ul>
+     */
+    static List<String> effectivePropertyViolations(String key, String url, java.util.Properties driverInfo,
+            java.util.Set<String> directDataSourceKeys, boolean autoReconnectReported) {
+        ConnectorJUrl.Effective effective = ConnectorJUrl.effectiveProperties(url, driverInfo);
+        if (!effective.connectorJ()) return List.of();
+        if (effective.properties() == null) return List.of(key + "(" + UNPARSABLE + ")");
+        boolean reconnect = false;
+        boolean topology = false;
+        for (Map.Entry<String, String> property : effective.properties().entrySet()) {
+            String name = property.getKey() == null ? "" : property.getKey().toLowerCase(Locale.ROOT);
+            if (enablesAutoReconnect(name, property.getValue())) reconnect = true;
+            if (CONNECTION_TOPOLOGY_KEYS.contains(name) && !directDataSourceKeys.contains(name)) topology = true;
+        }
+        List<String> violations = new ArrayList<>();
+        if (reconnect && !autoReconnectReported) violations.add(key + "(" + EFFECTIVE_AUTO_RECONNECT + ")");
+        if (topology) violations.add(key + "(" + CONNECTION_TOPOLOGY + ")");
+        return violations;
     }
 
     private static void addIfAbsent(java.util.Properties info, String name, String value) {
@@ -159,6 +225,8 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
      *   <li>{@code PropertyKey} ではないが接続先を決める {@code MysqlDataSource} の bean property: {@code serverName}・
      *       {@code portNumber}（{@code data-source-class-name} で MysqlDataSource を使うと setter で設定され、JDBC URL の代わりに
      *       接続先になる）。</li>
+     *   <li>属性そのものを書き換える: {@code propertiesTransform}（classpath の {@code ConnectionPropertiesTransform} 実装が解析時に
+     *       任意の属性・host を書き換える。RB-NF05 delta review E-P3-1）。</li>
      * </ul>
      * 接続先は検査した JDBC URL の host:port だけで決め、Properties で上書きさせない（8.3.0 では {@code host}・{@code port} は
      * URL の host 部が空の時に使われる）。照合して拒否の対象から外した key: {@code localSocketAddress}（ローカル側の bind address）、
@@ -180,7 +248,7 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
             "loadbalancesqlexceptionsubclassfailover", "loadbalancesqlstatefailover",
             "loadbalancevalidateconnectiononswapserver",
             "replicationconnectiongroup", "serveraffinityorder", "maxreconnects", "reconnectattxend",
-            "servername", "portnumber");
+            "servername", "portnumber", "propertiestransform");
 
     /** URL の query に autoReconnect が有効な指定があるか。Connector/J は値を百分率符号化から戻して読むため、戻した形でも見る。 */
     static boolean autoReconnect(String url) {
@@ -293,6 +361,42 @@ public class ImportJdbcReconnectGuard implements InitializingBean {
                 return PARSE_FAILED;
             } catch (ReflectiveOperationException | RuntimeException | LinkageError unverifiable) {
                 return PARSE_FAILED;
+            }
+        }
+
+        /**
+         * 展開後の有効な属性。{@code connectorJ=false} は Connector/J の URL ではない（検査の対象外）。{@code properties=null} は
+         * Connector/J の URL なのに属性を確かめられなかった（fail-closed で拒否する）。
+         */
+        record Effective(boolean connectorJ, Map<String, String> properties) {
+        }
+
+        /**
+         * Connector/J に URL と info を解析させ、main host の有効な属性（{@code HostInfo#getHostProperties}。{@code useConfigs}
+         * の同梱設定と {@code propertiesTransform} の変換を反映した後のもの）を返す。{@link #inspect} が単一接続と判定した URL
+         * にだけ使う（host 一覧の取得で DNS の照会をしない）。
+         */
+        static Effective effectiveProperties(String url, java.util.Properties driverInfo) {
+            Class<?> connectionUrl;
+            try {
+                connectionUrl = Class.forName(CONNECTION_URL_CLASS, false, ImportJdbcReconnectGuard.class.getClassLoader());
+            } catch (ClassNotFoundException | LinkageError unavailable) {
+                return MYSQL_LIKE.matcher(url).matches() ? new Effective(true, null) : new Effective(false, null);
+            }
+            try {
+                Object accepted = connectionUrl.getMethod("acceptsUrl", String.class).invoke(null, url);
+                if (!Boolean.TRUE.equals(accepted)) return new Effective(false, null);
+                Object parsed = connectionUrl.getMethod("getConnectionUrlInstance", String.class,
+                        java.util.Properties.class).invoke(null, url, copyOf(driverInfo));
+                Object mainHost = connectionUrl.getMethod("getMainHost").invoke(parsed);
+                Object properties = mainHost.getClass().getMethod("getHostProperties").invoke(mainHost);
+                if (!(properties instanceof Map<?, ?> map)) return new Effective(true, null);
+                Map<String, String> copy = new java.util.LinkedHashMap<>();
+                map.forEach((name, value) -> copy.put(String.valueOf(name), value == null ? null : String.valueOf(value)));
+                return new Effective(true, copy);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError unverifiable) {
+                // 例外の message は URL（認証情報を含み得る）を含むため使わない。
+                return new Effective(true, null);
             }
         }
 

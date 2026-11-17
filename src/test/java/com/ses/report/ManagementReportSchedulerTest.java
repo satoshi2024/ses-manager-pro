@@ -267,8 +267,13 @@ class ManagementReportSchedulerTest {
 
         scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
+        // last_error_message は例外の message（"source unavailable"）ではなく、引き継ぎ停止と同じ形式の同梱bundleのkey
+        // （review RB-NF10 P3-D2。以前は既定分岐の日本語固定文言だった）。
         verify(mapper).markFailure(eq("default"), eq(5L), anyString(), any(), any(), eq(scheduledAt),
-                eq("SCHEDULE_GENERATION_FAILED"), anyString());
+                eq("SCHEDULE_GENERATION_FAILED"), eq(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY));
+        org.junit.jupiter.api.Assertions.assertEquals(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY,
+                com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED",
+                        ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY), "同梱bundleにあるkeyだけが通る");
         verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
         verifyNoInteractions(deliveryService);
     }
@@ -1010,8 +1015,9 @@ class ManagementReportSchedulerTest {
         verify(mapper).markTakeoverExhausted(eq("default"), eq(5L), eq(SEPT), isNull(), eq(STALE_CLAIMED_AT),
                 eq(SEPT), eq(STALE_TOKEN), eq(SEPT), eq(11), eq(SEPT), eq(FIXED_NOW.plusMinutes(60)),
                 eq(FIXED_NOW.minusMinutes(30)), eq(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY));
+        // 生成失敗の message も key になった（P3-D2）。両者は別の key で区別する。
         assertThat(ManagementReportScheduler.TAKEOVER_EXHAUSTED_MESSAGE_KEY)
-                .isNotEqualTo(com.ses.common.exception.SafeErrorPolicy.safeJobMessage("SCHEDULE_GENERATION_FAILED", null));
+                .isNotEqualTo(ManagementReportScheduler.GENERATION_FAILED_MESSAGE_KEY);
         verify(mapper, never()).selectForTenant(any(), any());
         verify(mapper, never()).claimDue(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
                 anyInt(), any(), anyString(), any(), any());
