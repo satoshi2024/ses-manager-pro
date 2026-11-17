@@ -140,7 +140,7 @@ public record HoldReleaseBinding(String tenantId, String subjectRef, String hold
         target.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
     }
 
-    private static String sha256(byte[] bytes) {
+    static String sha256(byte[] bytes) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (NoSuchAlgorithmException e) {

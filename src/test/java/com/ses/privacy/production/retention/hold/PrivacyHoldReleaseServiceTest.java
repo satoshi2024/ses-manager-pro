@@ -671,14 +671,96 @@ class PrivacyHoldReleaseServiceTest {
         assertNotOpen(fixture.releaseService(phaseOne, ConfiguredHoldReleaseTrustRegistry.empty()), started.holdId(),
                 request);
 
-        // trust anchor が登録されても（NF07-TRUST の前に誤って登録された場合）、失効状態が UNKNOWN の間は拒否する
+        // trust anchor が登録されても（D-03 の方式の adapter の前に誤って登録された場合）、失効状態が UNKNOWN の間は入口を
+        // 開かない（以前は「開放済み」で要求ごとに403だった。REL review P3-9）。verifier も単独で REVOCATION_UNKNOWN を返す
         HoldReleaseVerifier unknownRevocation = ProductionPrivacyComponents.holdReleaseVerifier(prod,
                 authorities.registry(), new com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider(),
                 fixture.clock);
-        assertBusiness(() -> fixture.releaseService(unknownRevocation, authorities.registry())
-                .release(started.holdId(), request), 403, "error.privacy.holdReleaseProofRejected");
-        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("reason=REVOCATION_UNKNOWN"));
+        assertNotOpen(fixture.releaseService(unknownRevocation, authorities.registry()), started.holdId(), request);
+        HoldReleaseBinding binding = bindingOf(request);
+        assertThatThrownBy(() -> unknownRevocation.verify(binding, binding, "SUBJECT", fixture.decisions.releaseRules(),
+                claimOf(request.issuer(), HoldReleaseAuthorityClaim.Role.ISSUER),
+                claimOf(request.approver(), HoldReleaseAuthorityClaim.Role.APPROVER)))
+                .isInstanceOfSatisfying(com.ses.privacy.foundation.HoldReleaseRejectedException.class,
+                        e -> assertThat(e.reason()).isEqualTo(
+                                com.ses.privacy.foundation.HoldReleaseRejection.REVOCATION_UNKNOWN));
         assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7066")).isEqualTo(1);
+    }
+
+    @Test
+    void 失効providerが発行者と承認者のanchorをACTIVEと答えるまで解除は開かない() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7093");
+        PrivacyHoldReleaseRequest request = request(started.holdId(), newCommandId(), REASON);
+        MockEnvironment prod = new MockEnvironment();
+        prod.setActiveProfiles("prod");
+        java.util.concurrent.atomic.AtomicReference<RevocationStatus> approverStatus =
+                new java.util.concurrent.atomic.AtomicReference<>(RevocationStatus.UNKNOWN);
+        HoldReleaseVerifier partial = ProductionPrivacyComponents.holdReleaseVerifier(prod, authorities.registry(),
+                ref -> ref.startsWith(APPROVER) ? approverStatus.get() : RevocationStatus.ACTIVE, fixture.clock);
+        PrivacyHoldReleaseService service = fixture.releaseService(partial, authorities.registry());
+        int appends = fixture.journal.appendCalls.get();
+
+        assertNotOpen(service, started.holdId(), request);
+        approverStatus.set(RevocationStatus.REVOKED);
+        assertNotOpen(service, started.holdId(), request);
+        assertThat(fixture.journal.appendCalls.get()).isEqualTo(appends);
+
+        approverStatus.set(RevocationStatus.ACTIVE);
+        assertThat(service.isOpen()).isTrue();
+        assertThat(service.release(started.holdId(), request).status()).isEqualTo("RELEASED");
+    }
+
+    // --- Journal に残す claim（REL review P3-6）・reconciler の partition の一致（P3-10） ---
+
+    @Test
+    void 解除のeventは両claimのdigestを持ち監査に両claimを残しclaimを署名し直した再送は409() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7094");
+        String command = newCommandId();
+        PrivacyHoldReleaseRequest request = request(started.holdId(), command, REASON);
+        HoldReleaseAuthorityClaim issuer = claimOf(request.issuer(), HoldReleaseAuthorityClaim.Role.ISSUER);
+        HoldReleaseAuthorityClaim approver = claimOf(request.approver(), HoldReleaseAuthorityClaim.Role.APPROVER);
+        String claims = HoldReleaseAuthorityClaim.claimsDigest(issuer, approver);
+
+        release.release(started.holdId(), request);
+
+        com.ses.privacy.foundation.PrivacyJournalPort.JournalEvent event = fixture.journal
+                .events(new JournalPartition(TENANT, "ENGINEER:7094")).get(1);
+        assertThat(event.actionId()).isEqualTo(claims);
+        assertThat(event.requestHash()).isEqualTo(bindingOf(request).digest());
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#RELEASE_REQUESTED?")
+                && uri.contains("claims=" + claims.substring(0, 16)));
+        for (HoldReleaseAuthorityClaim claim : List.of(issuer, approver)) {
+            assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("#RELEASE_CLAIM?hold=" + started.holdId())
+                    && uri.contains("role=" + claim.role().name()) && uri.contains("signature=" + claim.signatureHex()));
+        }
+        assertThat(fixture.auditUris).noneMatch(uri -> uri.contains("ENGINEER%3A7094") || uri.contains("ENGINEER:7094"));
+
+        // 同じ束縛・同じ command でも claim を署名し直した要求は同じ command の再送ではない
+        fixture.clock.advance(Duration.ofSeconds(1));
+        PrivacyHoldReleaseRequest resigned = signedRequest(bindingOf(request), REASON);
+        assertThat(resigned.issuer().signature()).isNotEqualTo(request.issuer().signature());
+        assertBusiness(() -> release.release(started.holdId(), resigned), 409, "error.privacy.holdReleaseConflict");
+        assertThat(release.release(started.holdId(), request).replayed()).isTrue();
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7094")).isEqualTo(2);
+    }
+
+    @Test
+    void Journalの解除とpartitionが違うprojectionの行はreconcilerが解除しない() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7095");
+        PrivacyHoldReleaseRequest request = request(started.holdId(), newCommandId(), REASON);
+        HoldReleaseBinding binding = bindingOf(request);
+        fixture.journal.appendHoldRelease(verifier.verify(binding, binding, "SUBJECT", fixture.decisions.releaseRules(),
+                claimOf(request.issuer(), HoldReleaseAuthorityClaim.Role.ISSUER),
+                claimOf(request.approver(), HoldReleaseAuthorityClaim.Role.APPROVER)));
+        // projection の行だけを別の subject の partition に書き換える（Journal と食い違う projection）
+        fixture.jdbc.update("UPDATE t_legal_hold SET subject_ref = ? WHERE hold_id = ?", "ENGINEER:7096",
+                started.holdId());
+
+        Map<PrivacyHoldProjectionReconciler.Outcome, Integer> outcomes = fixture.reconciler.reconcileAll();
+
+        assertThat(outcomes).containsKey(PrivacyHoldProjectionReconciler.Outcome.UNRECOGNIZED);
+        assertThat(fixture.store.hold(TENANT, started.holdId()).orElseThrow().status()).isEqualTo("ACTIVE");
+        assertThat(fixture.gate.evaluate(TENANT).state()).isEqualTo(PrivacyHoldGate.State.UNAVAILABLE);
     }
 
     @Test

@@ -165,6 +165,10 @@ class PrivacyHoldReleaseMySqlTest {
         assertThat(releasedAt.atZone(ZoneId.of("Asia/Tokyo")).toInstant())
                 .isEqualTo(production.events(partition).get(1).createdAt());
         assertThat(journalTime).isNotNull();
+        // 解除の event は両 claim の digest を action_id に持ち、event の hash に含まれる（REL review P3-6）
+        String actionId = journalRoot.queryForObject("SELECT action_id FROM pj_event WHERE tenant_id = ? "
+                + "AND event_type = 'HOLD_RELEASED'", String.class, components.tenantId);
+        assertThat(actionId).matches("[0-9a-f]{64}").isEqualTo(production.events(partition).get(1).actionId());
         PrivacyHoldGate.Decision decision = components.gate.evaluate(components.tenantId);
         assertThat(decision.state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
         assertThat(decision.heldSubjects()).isEmpty();

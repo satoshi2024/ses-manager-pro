@@ -91,7 +91,9 @@ public final class ProductionJournalChainVerification {
                     activeHoldId = event.caseId();
                 }
                 case HOLD_RELEASED -> {
-                    if (!held || !event.caseId().equals(activeHoldId) || !isHash(event.requestHash())) {
+                    // 解除は claim の digest（action_id）を持つ（REL review P3-6。claim の無い解除 event は正規の adapter では書けない）
+                    if (!held || !event.caseId().equals(activeHoldId) || !isHash(event.requestHash())
+                            || !isHash(event.actionId())) {
                         return false;
                     }
                     held = false;

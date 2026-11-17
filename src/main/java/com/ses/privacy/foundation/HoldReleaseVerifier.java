@@ -20,4 +20,11 @@ public interface HoldReleaseVerifier {
     VerifiedHoldRelease verify(HoldReleaseBinding presented, HoldReleaseBinding expected, String targetType,
                                HoldReleaseRules rules, HoldReleaseAuthorityClaim issuer,
                                HoldReleaseAuthorityClaim approver);
+
+    /**
+     * 解除を受け付けられる trust の状態か（開放の gate。NF07-REL review P3-9）。trust anchor が登録され、失効 provider が
+     * 発行者と承認者に要る2件以上の anchor を {@link RevocationStatus#ACTIVE} と答えること。失効 provider が UNKNOWN を返す・
+     * 例外・未設定なら false（第1期は registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。
+     */
+    boolean trustReady();
 }

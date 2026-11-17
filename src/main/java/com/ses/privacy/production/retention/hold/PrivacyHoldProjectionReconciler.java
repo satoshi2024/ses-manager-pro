@@ -293,7 +293,8 @@ public class PrivacyHoldProjectionReconciler {
 
     /**
      * Journal の HOLD_RELEASED から projection の解除を書く（NF07-REL）。event は chain を検証したものだけを使う。解除する hold の
-     * projection がまだ無ければ（開始の追い付きが同じ回で失敗した等）保留し、次の回に任せる。
+     * projection がまだ無ければ（開始の追い付きが同じ回で失敗した等）保留し、次の回に任せる。projection の行の partition が解除
+     * event の partition と違えば書かない（別の partition の解除で hold を解除しない。REL review P3-10。gate は UNAVAILABLE のまま）。
      */
     private Outcome projectReleaseFromJournal(String tenantId, String partitionRef, String commandId,
                                               String clearCommandId, String auditEvent, Outcome success, String reason) {
@@ -307,8 +308,12 @@ public class PrivacyHoldProjectionReconciler {
             return hold(Outcome.UNRECOGNIZED, "eventNotHoldRelease");
         }
         String holdId = event.caseId();
-        if (store.hold(tenantId, holdId).isEmpty()) {
+        Optional<PrivacyHoldProjectionStore.HoldRow> row = store.hold(tenantId, holdId);
+        if (row.isEmpty()) {
             return hold(Outcome.PENDING_KEPT, "releaseBeforeStartProjection");
+        }
+        if (!partitionRef.equals(row.get().partitionRef())) {
+            return hold(Outcome.UNRECOGNIZED, "releasePartitionMismatch");
         }
         projector.projectRelease(tenantId, holdId, event.createdAt(), clearCommandId, SYSTEM_ACTOR, auditEvent,
                 PrivacyHoldAudit.fields("hold", holdId, "target", target.get().type().name(),

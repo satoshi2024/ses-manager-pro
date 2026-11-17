@@ -3,6 +3,7 @@ package com.ses.privacy.foundation;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.Objects;
 
 /**
@@ -17,6 +18,8 @@ public record HoldReleaseAuthorityClaim(Role role, String authorityId, String ke
                                         Instant expiresAt, byte[] signature) {
 
     static final String DOMAIN = "NF07-HOLD-RELEASE-AUTHORITY-V1";
+    /** claim の digest（{@link #claimsDigest}）の domain。 */
+    public static final String CLAIMS_DOMAIN = "NF07-HOLD-RELEASE-CLAIMS-V1";
 
     /** claim の役割。 */
     public enum Role {
@@ -66,6 +69,37 @@ public record HoldReleaseAuthorityClaim(Role role, String authorityId, String ke
         HoldReleaseBinding.field(canonical, expiresAt.toString());
         HoldReleaseBinding.field(canonical, binding.digest());
         return canonical.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 解除の発行者・承認者の claim の digest（NF07-REL review P3-6）。HOLD_RELEASED の command の {@code action_id} に入り、event の
+     * hash に含まれる（Journal が「どの claim で解除したか」を持つ。claim 自体は required 監査 {@code RELEASE_CLAIM} に残り、この
+     * digest と照合できる）。正規形は束縛と同じ長さ付き field（UTF-8 の byte 長と {@code :} と値）を区切り無しで連結したもので、
+     * domain {@value #CLAIMS_DOMAIN} に続けて発行者・承認者の順に、役割・authority ID・key ID・発行日時・期限
+     * （{@code Instant.toString()}）・署名（小文字 hex）。SHA-256 の小文字 hex。
+     *
+     * @throws IllegalArgumentException どちらかが無い
+     */
+    public static String claimsDigest(HoldReleaseAuthorityClaim issuer, HoldReleaseAuthorityClaim approver) {
+        if (issuer == null || approver == null) {
+            throw new IllegalArgumentException("解除の claim が不足しています");
+        }
+        StringBuilder canonical = new StringBuilder();
+        HoldReleaseBinding.field(canonical, CLAIMS_DOMAIN);
+        for (HoldReleaseAuthorityClaim claim : new HoldReleaseAuthorityClaim[]{issuer, approver}) {
+            HoldReleaseBinding.field(canonical, claim.role.name());
+            HoldReleaseBinding.field(canonical, claim.authorityId);
+            HoldReleaseBinding.field(canonical, claim.keyId);
+            HoldReleaseBinding.field(canonical, claim.issuedAt.toString());
+            HoldReleaseBinding.field(canonical, claim.expiresAt.toString());
+            HoldReleaseBinding.field(canonical, HexFormat.of().formatHex(claim.signature));
+        }
+        return HoldReleaseBinding.sha256(canonical.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 署名の小文字 hex（監査 {@code RELEASE_CLAIM} に残す値）。 */
+    public String signatureHex() {
+        return HexFormat.of().formatHex(signature);
     }
 
     /** trust anchor の key（{@code authorityId + ":" + keyId}）。 */

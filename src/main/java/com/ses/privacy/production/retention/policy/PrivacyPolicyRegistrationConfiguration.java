@@ -7,6 +7,7 @@ import com.ses.privacy.foundation.PolicyRegistrationVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
 import com.ses.service.AuditLogService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
@@ -22,8 +23,8 @@ import java.util.Arrays;
 /**
  * NF07 policy の登録・有効化（NF07-REG）の Spring 登録。
  *
- * <p>verifier は prod profile でだけ生成する（{@code ProductionPrivacyComponents.policyRegistrationVerifier}）。trust anchor は
- * 第1期は空（{@link ConfiguredPolicyTrustRegistry#empty()}）、失効状態は常に UNKNOWN（{@link UnknownRevocationStatusProvider}）で、
+ * <p>verifier は prod profile でだけ生成する（{@code ProductionPrivacyComponents.policyRegistrationVerifier}）。trust anchor と
+ * 失効状態は {@link PrivacyTrustSource}（第1期は anchor 0件・失効状態は常に UNKNOWN）から取り、
  * 説明照会（{@code PrivacyProductionConfiguration}）と同じ値を使う。prod 以外・D-01・D-02・D-03 の署名前・trust anchor の
  * 未登録・失効状態を確認できない間は、登録・有効化の入口は存在しない URL と同じ404になる
  * （{@link PrivacyPolicyRegistrationService#isOpen()}）。登録は profile と機能スイッチに依存しない（入口は
@@ -42,13 +43,14 @@ public class PrivacyPolicyRegistrationConfiguration {
             AuditLogService auditLogService,
             PlatformTransactionManager transactionManager,
             ObjectProvider<Clock> clock,
-            Environment environment) {
+            Environment environment,
+            PrivacyTrustSource privacyTrustSource) {
         Clock resolvedClock = clock.getIfAvailable(Clock::systemDefaultZone);
         // foundation の guard と同じく active profile だけで判定する（default profile の prod では生成しない）
         boolean activeProd = Arrays.asList(environment.getActiveProfiles()).contains("prod");
         PolicyRegistrationVerifier verifier = activeProd
                 ? ProductionPrivacyComponents.policyRegistrationVerifier(environment,
-                ConfiguredPolicyTrustRegistry.empty(), new UnknownRevocationStatusProvider(), resolvedClock)
+                privacyTrustSource.policyAnchors(), privacyTrustSource.revocations(), resolvedClock)
                 : null;
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
