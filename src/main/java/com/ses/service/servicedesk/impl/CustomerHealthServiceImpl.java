@@ -146,7 +146,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Map<Long, String> customerNameMap = customers.stream()
                 .collect(Collectors.toMap(Customer::getId, Customer::getCompanyName, (a, b) -> a));
 
-        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime now = tenantNow();
         LocalDateTime thirtyDaysAgo = now.minusDays(30);
         LocalDateTime ninetyDaysAgo = now.minusDays(90);
         LocalDate sixtyDaysAgoDate = now.toLocalDate().minusDays(60);
@@ -340,6 +340,14 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         return resultMap;
     }
 
+    /**
+     * tenantのtimezoneでの現在時刻。SLA clockの超過時刻・CSATの回答時刻はtenantのtimezoneのローカル日時で保存される
+     * ため、30日・90日の窓、延滞判定の日付、対象月も同じtimezoneで決める（JVMのtimezoneとずれない。P3-N2-5）。
+     */
+    private LocalDateTime tenantNow() {
+        return LocalDateTime.now(clock.withZone(com.ses.service.accounting.AccountingTenantContextHolder.getZoneId()));
+    }
+
     private boolean inWindow(LocalDateTime value, LocalDateTime from, LocalDateTime to) {
         return value != null && !value.isBefore(from) && !value.isAfter(to);
     }
@@ -374,7 +382,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // targetMonth 解決 & フォーマット検証
         String effectiveMonth = targetMonth;
         if (effectiveMonth == null || effectiveMonth.isBlank()) {
-            effectiveMonth = YearMonth.now(clock.getZone()).toString();
+            effectiveMonth = YearMonth.from(tenantNow()).toString();
         }
 
         if (!MONTH_PATTERN.matcher(effectiveMonth).matches()) {
@@ -390,7 +398,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
 
         // 現行の算定器は現在時点のデータを読むため、過去月を現在値で上書きしない。
         // as-of 算定を導入するまでは、対象月を現在月だけに限定する。
-        if (!YearMonth.now(clock.getZone()).equals(YearMonth.from(snapshotDate))) {
+        if (!YearMonth.from(tenantNow()).equals(YearMonth.from(snapshotDate))) {
             throw BusinessException.of(400, "過去または未来の対象月はas-of算定が未提供のため指定できません");
         }
 

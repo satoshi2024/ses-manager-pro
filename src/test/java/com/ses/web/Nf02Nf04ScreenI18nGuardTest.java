@@ -47,7 +47,13 @@ class Nf02Nf04ScreenI18nGuardTest {
             "static/js/modules/service-desk.js",
             "static/js/modules/customer-health.js",
             "static/js/modules/certification-learning-skill-gap.js",
-            "static/js/modules/my-certification-learning-skill-gap.js");
+            "static/js/modules/my-certification-learning-skill-gap.js",
+            "static/portal/js/portal-service-desk.js");
+
+    /** 顧客ポータル画面のうち、NF-02の子スイッチで出し分ける部分（問い合わせタブ・モーダル・文言・script）。 */
+    private static final String PORTAL_CUSTOMER_TEMPLATE = "templates/portal/customer/index.html";
+    private static final String NF02_PORTAL_SWITCH = "contains('nf02-customer-portal')";
+    private static final Pattern PORTAL_MESSAGE_ENTRY = Pattern.compile("'([A-Za-z0-9_.]+)': \\[\\[#\\{([A-Za-z0-9_.]+)}]]");
 
     private static final Pattern JAPANESE = Pattern.compile("[\\u3040-\\u30ff\\u3400-\\u9fff\\uff01-\\uff5e]");
     private static final Pattern KANA = Pattern.compile("[\\u3040-\\u30ff]");
@@ -61,7 +67,7 @@ class Nf02Nf04ScreenI18nGuardTest {
             "onclick", "onsubmit", "onchange", "type", "href", "src", "accept");
     /** 画面で使う message key の候補（JSの文字列リテラル）。 */
     private static final Pattern KEY_LITERAL = Pattern.compile(
-            "'((?:servicedesk|customerSuccess|certGap|myCertGap|pwa|common|error|enum)\\.[A-Za-z0-9_.]*[A-Za-z0-9_])'");
+            "'((?:servicedesk|customerSuccess|certGap|myCertGap|pwa|portal\\.serviceDesk|common|error|enum)\\.[A-Za-z0-9_.]*[A-Za-z0-9_])'");
     private static final Pattern UI_TEXT_CALL = Pattern.compile(
             "\\b(?:uiText|uiError|T)\\(\\s*'([A-Za-z0-9_.]+)'\\s*,\\s*'([^']*)'");
     private static final Pattern DATA_PWA_TEXT = Pattern.compile("data-pwa-text=\"([A-Za-z0-9_.]+)\">([^<]*)<");
@@ -73,6 +79,38 @@ class Nf02Nf04ScreenI18nGuardTest {
             violations.addAll(templateViolations(template, read(template)));
         }
         assertThat(violations).as("th:text等の無い日本語の固定文言").isEmpty();
+    }
+
+    /**
+     * P3-N2-9・P3-N2-8: 顧客ポータルの問い合わせ部分は日本語の固定文言を持たず、詳細・返信は専用page routeの無いモーダルで開く。
+     * portal画面は /js/i18n.js を読まないため、portal-service-desk.js が引くkeyは全て画面がserver側で解決して渡す。
+     */
+    @Test
+    void 顧客ポータルの問い合わせ部分は固定文言を持たずscriptのkeyを全て画面から渡す() throws IOException {
+        String html = read(PORTAL_CUSTOMER_TEMPLATE);
+        List<String> blocks = nf02PortalBlocks(html);
+        assertThat(blocks).as("子スイッチで出し分ける要素").hasSizeGreaterThanOrEqualTo(6);
+        List<String> violations = new ArrayList<>();
+        for (String block : blocks) {
+            violations.addAll(templateViolations(PORTAL_CUSTOMER_TEMPLATE, block));
+        }
+        assertThat(violations).isEmpty();
+
+        Map<String, String> passed = new LinkedHashMap<>();
+        Matcher entry = PORTAL_MESSAGE_ENTRY.matcher(html);
+        while (entry.find()) {
+            assertThat(entry.group(2)).as("渡すkeyと解決するkeyは同じ").isEqualTo(entry.group(1));
+            passed.put(entry.group(1), entry.group(2));
+        }
+        Set<String> used = usedKeys(stripJsComments(read("static/portal/js/portal-service-desk.js")));
+        assertThat(used).isNotEmpty();
+        assertThat(passed.keySet()).as("portal-service-desk.js が引くkeyを画面が全て渡す").containsAll(used);
+        // 専用のpage routeが無い詳細画面へのリンクを作らない（以前は「詳細・返信」が404になっていた）。
+        // APIの /api/portal/customer/service-desk/requests/... は使う。画面のURL（/apiの付かないもの）だけを禁じる。
+        assertThat(read("static/portal/js/portal-service-desk.js"))
+                .doesNotContainPattern("(?<!/api)/portal/customer/service-desk/requests/")
+                .contains("/api/portal/customer/service-desk/requests/");
+        assertThat(Files.exists(RESOURCES.resolve("templates/portal/customer/service-desk"))).isFalse();
     }
 
     @Test
@@ -131,6 +169,9 @@ class Nf02Nf04ScreenI18nGuardTest {
         Set<String> keys = new TreeSet<>();
         for (String file : concat(TEMPLATES, SCRIPTS, List.of("static/js/pwa-queue.js", "static/offline.html"))) {
             keys.addAll(usedKeys(read(file)));
+        }
+        for (String block : nf02PortalBlocks(read(PORTAL_CUSTOMER_TEMPLATE))) {
+            keys.addAll(usedKeys(block));
         }
         bundles.get("ja").stringPropertyNames().stream()
                 .filter(key -> key.startsWith("enum.engineerStatus.") || key.startsWith("error.http.")
@@ -216,6 +257,38 @@ class Nf02Nf04ScreenI18nGuardTest {
             }
         }
         return violations;
+    }
+
+    /** 子スイッチ（nf02-customer-portal）の th:unless を持つ要素を、対応する閉じtagまで切り出す。 */
+    private static List<String> nf02PortalBlocks(String html) {
+        List<String> blocks = new ArrayList<>();
+        int from = 0;
+        while (true) {
+            int marker = html.indexOf(NF02_PORTAL_SWITCH, from);
+            if (marker < 0) {
+                return blocks;
+            }
+            int start = html.lastIndexOf('<', marker);
+            Matcher name = Pattern.compile("<([a-zA-Z][a-zA-Z0-9-]*)").matcher(html);
+            if (start < 0 || !name.find(start) || name.start() != start) {
+                from = marker + 1;
+                continue;
+            }
+            String tag = name.group(1);
+            Matcher tags = Pattern.compile("<(/?)" + tag + "\\b[^>]*>").matcher(html);
+            int depth = 0;
+            int end = html.length();
+            tags.region(start, html.length());
+            while (tags.find()) {
+                depth += "/".equals(tags.group(1)) ? -1 : 1;
+                if (depth == 0) {
+                    end = tags.end();
+                    break;
+                }
+            }
+            blocks.add(html.substring(start, end));
+            from = end;
+        }
     }
 
     private static List<String> missingKeys(String file, String code, Map<String, Properties> bundles) {

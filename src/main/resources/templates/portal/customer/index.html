@@ -28,7 +28,8 @@
     <button type="button" class="portal-tab" data-tab="sales-orders"
             th:text="#{portal.customer.tab.salesOrders}">注文請</button>
     <!-- NF-02の子スイッチ nf02-customer-portal がOFF（NF-02本体OFFを含む）の間は問い合わせタブ・画面・モーダル・scriptを出さない（APIも404） -->
-    <button th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" type="button" class="portal-tab" data-tab="service-desk" id="tabBtnServiceDesk">問い合わせ</button>
+    <button th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" type="button" class="portal-tab" data-tab="service-desk" id="tabBtnServiceDesk"
+            th:text="#{portal.serviceDesk.tab}">問い合わせ</button>
 </nav>
 
 <main class="portal-container" role="main">
@@ -70,15 +71,15 @@
     <section th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" id="tab-service-desk" class="portal-tab-panel d-none">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
-                <h2>問い合わせ・サポート</h2>
-                <p class="portal-muted mb-0">サポート窓口への問い合わせ起票・進捗確認・返信を行えます。</p>
+                <h2 th:text="#{portal.serviceDesk.title}">問い合わせ・サポート</h2>
+                <p class="portal-muted mb-0" th:text="#{portal.serviceDesk.guide}">サポート窓口への問い合わせ起票・進捗確認・返信を行えます。</p>
             </div>
             <button type="button" class="btn btn-primary btn-sm" id="btnOpenNewRequestModal" data-bs-toggle="modal" data-bs-target="#portalNewRequestModal">
-                ＋ 新規問い合わせ起票
+                + <span th:text="#{portal.serviceDesk.newRequestButton}">新規問い合わせ起票</span>
             </button>
         </div>
         <div class="portal-list" id="serviceDeskList">
-            <div class="text-muted small py-3">読み込み中...</div>
+            <div class="text-muted small py-3" th:text="#{common.loading}">読み込み中...</div>
         </div>
     </section>
 </main>
@@ -153,46 +154,90 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">新規問い合わせ起票</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title" th:text="#{portal.serviceDesk.newRequestTitle}">新規問い合わせ起票</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{portal.close}" aria-label="Close"></button>
             </div>
             <form id="portalNewRequestForm">
                 <div class="modal-body">
                     <div class="alert alert-danger d-none" id="portalReqModalError" role="alert"></div>
                     <div class="mb-3">
-                        <label class="form-label required">カテゴリ <span class="text-danger">*</span></label>
+                        <label class="form-label required" for="portalNewCategory"><span th:text="#{portal.serviceDesk.category}">カテゴリ</span> <span class="text-danger">*</span></label>
                         <select class="form-select" id="portalNewCategory" required>
-                            <option value="CONTRACT">契約関連</option>
-                            <option value="BILLING">請求関連</option>
-                            <option value="ATTENDANCE">勤怠関連</option>
-                            <option value="QUALITY">品質・成果物</option>
-                            <option value="SYSTEM">システム障害</option>
-                            <option value="OTHER" selected>その他</option>
+                            <option value="CONTRACT" th:text="#{servicedesk.category.contract}">契約関連</option>
+                            <option value="BILLING" th:text="#{servicedesk.category.billing}">請求関連</option>
+                            <option value="ATTENDANCE" th:text="#{servicedesk.category.attendance}">勤怠関連</option>
+                            <option value="QUALITY" th:text="#{servicedesk.category.quality}">品質・成果物</option>
+                            <option value="SYSTEM" th:text="#{servicedesk.category.system}">システム障害</option>
+                            <option value="OTHER" selected th:text="#{servicedesk.category.other}">その他</option>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label required">優先度 <span class="text-danger">*</span></label>
+                        <label class="form-label required" for="portalNewPriority"><span th:text="#{portal.serviceDesk.priority}">優先度</span> <span class="text-danger">*</span></label>
                         <select class="form-select" id="portalNewPriority" required>
-                            <option value="P0">緊急 (P0: 業務停止・重大障害)</option>
-                            <option value="P1">高 (P1: 重要業務への影響)</option>
-                            <option value="P2" selected>中 (P2: 通常のお問い合わせ)</option>
-                            <option value="P3">低 (P3: 軽微なご相談)</option>
+                            <option value="P0" th:text="#{portal.serviceDesk.priority.p0}">緊急 (P0: 業務停止・重大障害)</option>
+                            <option value="P1" th:text="#{portal.serviceDesk.priority.p1}">高 (P1: 重要業務への影響)</option>
+                            <option value="P2" selected th:text="#{portal.serviceDesk.priority.p2}">中 (P2: 通常のお問い合わせ)</option>
+                            <option value="P3" th:text="#{portal.serviceDesk.priority.p3}">低 (P3: 軽微なご相談)</option>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label required">件名 <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="portalNewSubject" placeholder="お問い合わせ件名" required>
+                        <label class="form-label required" for="portalNewSubject"><span th:text="#{portal.serviceDesk.subject}">件名</span> <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="portalNewSubject" th:placeholder="#{portal.serviceDesk.subjectPlaceholder}" placeholder="お問い合わせ件名" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label required">詳細内容 <span class="text-danger">*</span></label>
-                        <textarea class="form-control" id="portalNewDescription" rows="4" placeholder="詳細な内容やご要望を入力してください" required></textarea>
+                        <label class="form-label required" for="portalNewDescription"><span th:text="#{portal.serviceDesk.description}">詳細内容</span> <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="portalNewDescription" rows="4" th:placeholder="#{portal.serviceDesk.descriptionPlaceholder}" placeholder="詳細な内容やご要望を入力してください" required></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="submit" class="btn btn-primary" id="btnSubmitPortalReq">起票する</button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    <button type="submit" class="btn btn-primary" id="btnSubmitPortalReq" th:text="#{portal.serviceDesk.submit}">起票する</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{portal.close}">閉じる</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- 問い合わせ詳細・返信モーダル。一覧の「詳細・返信」から開き、内容は詳細APIから描画する（page routeは持たない。P3-N2-9） -->
+<div th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" class="modal fade" id="portalRequestDetailModal" tabindex="-1" aria-hidden="true" aria-labelledby="portalRequestDetailTitle">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="portalRequestDetailTitle" th:text="#{portal.serviceDesk.detail.title}">問い合わせ詳細</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{portal.close}" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="portalRequestDetailError" role="alert" aria-live="polite"></div>
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <strong class="text-primary" id="portalRequestDetailNo"></strong>
+                    <span id="portalRequestDetailStatus"></span>
+                </div>
+                <h6 class="fw-bold mb-1" id="portalRequestDetailSubject"></h6>
+                <div class="text-muted small mb-2">
+                    <span class="me-3" id="portalRequestDetailCategory"></span>
+                    <span id="portalRequestDetailCreatedAt"></span>
+                </div>
+                <div class="p-3 bg-light rounded border mb-3" id="portalRequestDetailDescription" style="white-space: pre-wrap;"></div>
+                <div class="d-none mb-3" id="portalRequestDetailCsat">
+                    <div class="fw-bold mb-1" th:text="#{portal.serviceDesk.detail.csat}">サポート満足度評価</div>
+                    <div class="text-warning" id="portalRequestDetailCsatStars"></div>
+                    <div class="text-muted small" id="portalRequestDetailCsatComment"></div>
+                </div>
+                <div class="fw-bold mb-2" th:text="#{portal.serviceDesk.detail.comments}">やりとり・返信履歴</div>
+                <div id="portalRequestDetailComments" class="mb-3"></div>
+                <form id="portalReplyForm">
+                    <input type="hidden" id="portalReplyRequestId">
+                    <label class="form-label fw-bold" for="portalReplyText" th:text="#{portal.serviceDesk.detail.reply}">返信メッセージを送信</label>
+                    <div class="alert alert-danger d-none" id="portalReplyError" role="alert" aria-live="polite"></div>
+                    <textarea class="form-control mb-2" id="portalReplyText" rows="3" th:placeholder="#{portal.serviceDesk.detail.replyPlaceholder}" placeholder="ご返信内容を入力してください..." required></textarea>
+                    <div class="text-end">
+                        <button type="submit" class="btn btn-primary" id="btnSubmitPortalReply" th:text="#{portal.serviceDesk.detail.replySubmit}">返信する</button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{portal.close}">閉じる</button>
+            </div>
         </div>
     </div>
 </div>
@@ -202,40 +247,40 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">サポート満足度アンケート</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title" th:text="#{portal.serviceDesk.csat.title}">サポート満足度アンケート</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{portal.close}" aria-label="Close"></button>
             </div>
             <form id="portalCsatForm">
                 <input type="hidden" id="csatRequestId">
                 <div class="modal-body">
                     <div class="alert alert-danger d-none" id="portalCsatModalError" role="alert"></div>
                     <div class="mb-3 text-center">
-                        <label class="form-label fw-bold d-block mb-2">対応はいかがでしたか？</label>
+                        <label class="form-label fw-bold d-block mb-2" th:text="#{portal.serviceDesk.csat.question}">対応はいかがでしたか？</label>
                         <div class="btn-group" role="group" aria-label="CSAT rating">
                             <input type="radio" class="btn-check" name="csatScore" id="score1" value="1" autocomplete="off">
-                            <label class="btn btn-outline-danger" for="score1">1 不満</label>
+                            <label class="btn btn-outline-danger" for="score1" th:text="#{portal.serviceDesk.csat.score1}">1 不満</label>
 
                             <input type="radio" class="btn-check" name="csatScore" id="score2" value="2" autocomplete="off">
-                            <label class="btn btn-outline-warning" for="score2">2 やや不満</label>
+                            <label class="btn btn-outline-warning" for="score2" th:text="#{portal.serviceDesk.csat.score2}">2 やや不満</label>
 
                             <input type="radio" class="btn-check" name="csatScore" id="score3" value="3" autocomplete="off">
-                            <label class="btn btn-outline-secondary" for="score3">3 普通</label>
+                            <label class="btn btn-outline-secondary" for="score3" th:text="#{portal.serviceDesk.csat.score3}">3 普通</label>
 
                             <input type="radio" class="btn-check" name="csatScore" id="score4" value="4" autocomplete="off">
-                            <label class="btn btn-outline-info" for="score4">4 満足</label>
+                            <label class="btn btn-outline-info" for="score4" th:text="#{portal.serviceDesk.csat.score4}">4 満足</label>
 
                             <input type="radio" class="btn-check" name="csatScore" id="score5" value="5" autocomplete="off" checked>
-                            <label class="btn btn-outline-success" for="score5">5 大変満足</label>
+                            <label class="btn btn-outline-success" for="score5" th:text="#{portal.serviceDesk.csat.score5}">5 大変満足</label>
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">フィードバック・ご意見 (任意)</label>
-                        <textarea class="form-control" id="csatCommentInput" rows="3" placeholder="対応へのご意見や感謝のメッセージ等があればご記入ください"></textarea>
+                        <label class="form-label" for="csatCommentInput" th:text="#{portal.serviceDesk.csat.feedback}">フィードバック・ご意見 (任意)</label>
+                        <textarea class="form-control" id="csatCommentInput" rows="3" th:placeholder="#{portal.serviceDesk.csat.feedbackPlaceholder}" placeholder="対応へのご意見や感謝のメッセージ等があればご記入ください"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="submit" class="btn btn-success" id="btnSubmitCsat">回答を送信する</button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    <button type="submit" class="btn btn-success" id="btnSubmitCsat" th:text="#{portal.serviceDesk.csat.submit}">回答を送信する</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{portal.close}">閉じる</button>
                 </div>
             </form>
         </div>
@@ -245,6 +290,43 @@
 <script th:src="@{/lib/jquery/jquery.min.js}"></script>
 <script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
 <script th:src="@{/portal/js/portal.js}"></script>
+<!--/*
+  顧客ポータルの問い合わせscriptが使う文言。portal画面は /js/i18n.js（内部画面の全文言）を読み込まないため、
+  このscriptで使うkeyだけをserver側のlocaleで解決して渡す（RB-I18N P3-N2-8）。
+*/-->
+<script th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" th:inline="javascript">
+    window.PORTAL_SERVICE_DESK_MESSAGES = {
+        'common.loading': [[#{common.loading}]],
+        'portal.serviceDesk.loadFailed': [[#{portal.serviceDesk.loadFailed}]],
+        'portal.serviceDesk.networkError': [[#{portal.serviceDesk.networkError}]],
+        'portal.serviceDesk.empty': [[#{portal.serviceDesk.empty}]],
+        'portal.serviceDesk.createdAt': [[#{portal.serviceDesk.createdAt}]],
+        'portal.serviceDesk.detailReply': [[#{portal.serviceDesk.detailReply}]],
+        'portal.serviceDesk.createFailed': [[#{portal.serviceDesk.createFailed}]],
+        'portal.serviceDesk.createError': [[#{portal.serviceDesk.createError}]],
+        'portal.serviceDesk.status.received': [[#{portal.serviceDesk.status.received}]],
+        'portal.serviceDesk.status.inProgress': [[#{portal.serviceDesk.status.inProgress}]],
+        'portal.serviceDesk.status.waitingCustomer': [[#{portal.serviceDesk.status.waitingCustomer}]],
+        'portal.serviceDesk.status.resolved': [[#{portal.serviceDesk.status.resolved}]],
+        'portal.serviceDesk.status.closed': [[#{portal.serviceDesk.status.closed}]],
+        'portal.serviceDesk.csat.answer': [[#{portal.serviceDesk.csat.answer}]],
+        'portal.serviceDesk.csat.rated': [[#{portal.serviceDesk.csat.rated}]],
+        'portal.serviceDesk.csat.sendFailed': [[#{portal.serviceDesk.csat.sendFailed}]],
+        'portal.serviceDesk.detail.category': [[#{portal.serviceDesk.detail.category}]],
+        'portal.serviceDesk.detail.loadFailed': [[#{portal.serviceDesk.detail.loadFailed}]],
+        'portal.serviceDesk.detail.noComments': [[#{portal.serviceDesk.detail.noComments}]],
+        'portal.serviceDesk.detail.authorCustomer': [[#{portal.serviceDesk.detail.authorCustomer}]],
+        'portal.serviceDesk.detail.authorSupport': [[#{portal.serviceDesk.detail.authorSupport}]],
+        'portal.serviceDesk.detail.noCsatComment': [[#{portal.serviceDesk.detail.noCsatComment}]],
+        'portal.serviceDesk.detail.replyFailed': [[#{portal.serviceDesk.detail.replyFailed}]],
+        'servicedesk.category.contract': [[#{servicedesk.category.contract}]],
+        'servicedesk.category.billing': [[#{servicedesk.category.billing}]],
+        'servicedesk.category.attendance': [[#{servicedesk.category.attendance}]],
+        'servicedesk.category.quality': [[#{servicedesk.category.quality}]],
+        'servicedesk.category.system': [[#{servicedesk.category.system}]],
+        'servicedesk.category.other': [[#{servicedesk.category.other}]]
+    };
+</script>
 <script th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02-customer-portal')}" th:src="@{/portal/js/portal-service-desk.js}"></script>
 <script>
     PortalAuth.initCustomerPage();

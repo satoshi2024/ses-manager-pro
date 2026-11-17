@@ -136,8 +136,9 @@ public final class ImportRawBodyTransportGuardFilter extends OncePerRequestFilte
     }
 
     /**
-     * 許可済みkeyを利用者向け文言へ解決する。405/415はSafeErrorPolicyの許可statusに無いため、文言の
-     * fallbackだけを業務エラー（400）の固定文言にする（HTTP statusは変えない）。
+     * 許可済みkeyを利用者向け文言へ解決する。405はSafeErrorPolicyの許可statusに無いため、文言のfallbackだけを
+     * 業務エラー（400）の文言にする（HTTP statusは405のまま）。415は許可status（NF-02 P3-N2-1）で、key を解決
+     * できない場合のfallbackは400と同じ文言になる。fallbackの文言も利用者のlocaleで返す（RB-I18N）。
      */
     private String safeMessage(HttpServletRequest request, int status, String messageKey) {
         int fallbackCode = SafeErrorPolicy.safeHttpCode(status) == status ? status : 400;
