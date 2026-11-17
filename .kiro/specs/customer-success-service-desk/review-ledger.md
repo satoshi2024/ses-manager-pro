@@ -81,6 +81,9 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 | `P3-4`（W2 NF06 hardening） | P3 | 空ファイルが「上限超過」の413になっていた。400 `error.file.empty` へ分け、`error.file.sizeExceeded` の文言から「空」を外した（4言語）。 | `ServiceRequestAttachmentServiceTest`、`ServiceRequestApiControllerTest`（RB-NF02） |
 | `P3-1`（W2 scope gating r2） | P3 | portal添付downloadの多重防御。`FileScopeValidationService.assertPortalServiceRequestDownloadAllowed` もuploadと同じ `PortalServiceRequestVisibilityPolicy` で判定し、範囲外は文書版を引く前に404にする（未注入はportal起票のみ）。 | `FileScopeValidationServiceTest`（RB-NF02、2件） |
 | `P3-5`（W2 scope gating r2） | P3 | 内部画面の一覧・詳細に「顧客公開対象／社内限定」のバッジを表示（`ServiceRequestDto.portalVisible`、portalと同じpolicy。4言語）。 | `PortalServiceRequestVisibilityIntegrationTest`、`PortalServiceRequestVisibleSinceIntegrationTest`（RB-NF02） |
+| `P3-4`（RB-NF02 review） | P3 | 初回応答期限の超過後に初回応答を記録しても「初回応答超過継続」が30分ごとに解決まで送られていた。超過継続の発行条件に初回応答未記録を加え、RESPONSE/CONTINUING の再送待ちも初回応答の記録後は `CANCELLED` で閉じる。解決目標の超過継続は従来どおり。 | `ServiceSlaSchedulerTest`（RB-NF02 review、2件） |
+| `P3-2`（RB-NF02 review） | P3 | api controller の `@RequestBody` が受け付けないContent-Type（Springの `HttpMediaTypeNotSupportedException`）が汎用handlerで500になっていた。`GlobalExceptionHandler` で415（業務例外415と同じ固定文言、Accept header付き）にする。 | `GlobalExceptionHandlerTest`、`ServiceRequestApiControllerTest`（RB-NF02 review） |
+| `P3-5`（RB-NF02 review） | P3 | CSVを上限（1000件）で打ち切った時、CSV末尾に注記行（出力件数・該当件数・条件を絞る案内。利用者のlocaleで4言語）を出す。ダウンロードは画面遷移のため画面のJSは応答headerを読めず、ファイル自体に残す方式を採った。打ち切りが無ければ出さない。 | `ServiceRequestExportServiceImplTest`（RB-NF02 review、2件） |
 
 ---
 

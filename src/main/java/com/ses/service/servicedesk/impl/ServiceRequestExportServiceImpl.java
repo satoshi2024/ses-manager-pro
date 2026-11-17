@@ -8,6 +8,8 @@ import com.ses.service.servicedesk.ServiceRequestExportService;
 import com.ses.service.servicedesk.ServiceRequestService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedWriter;
@@ -21,7 +23,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ServiceRequestExportServiceImpl implements ServiceRequestExportService {
 
+    /** 上限で打ち切った時にCSV末尾へ出す注記の文言key（{0}=出力件数、{1}=該当件数）。 */
+    static final String TRUNCATED_NOTE_KEY = "servicedesk.export.truncated";
+
     private final ServiceRequestService serviceRequestService;
+    private final MessageSource messageSource;
 
     @Override
     public void exportRequestsToCsv(OutputStream outputStream, String keyword, String status, String priority, String category, Long customerId) {
@@ -42,7 +48,8 @@ public class ServiceRequestExportServiceImpl implements ServiceRequestExportServ
             Page<ServiceRequestDto> page = serviceRequestService.searchInternalRequests(1,
                     (int) com.ses.common.util.PageUtils.MAX_PAGE_SIZE, keyword, status, priority, category, customerId);
             List<ServiceRequestDto> records = page.getRecords();
-            if (page.getTotal() > records.size()) {
+            boolean truncated = page.getTotal() > records.size();
+            if (truncated) {
                 // 件数だけを記録する（検索条件・顧客名等は出さない）。
                 log.warn("サービスデスクCSV出力を上限件数で打ち切りました: total={} exported={}",
                         page.getTotal(), records.size());
@@ -70,6 +77,16 @@ public class ServiceRequestExportServiceImpl implements ServiceRequestExportServ
 
                 writer.write(String.format("%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
                         reqNo, custName, cat, prio, st, sub, respDead, firstResp, respBreached, resDead, resolvedAt, resBreached, csat, createdAt));
+                writer.newLine();
+            }
+
+            if (truncated) {
+                // 打ち切りを利用者へ示す注記行（RB-NF02 review P3-5）。CSVはブラウザの画面遷移でダウンロードされ、
+                // 画面のJSは応答headerを読めないため、ファイル自体に残す（受け取った人にも伝わる）。打ち切った時だけ出す。
+                String note = messageSource.getMessage(TRUNCATED_NOTE_KEY,
+                        new Object[]{String.valueOf(records.size()), String.valueOf(page.getTotal())},
+                        LocaleContextHolder.getLocale());
+                writer.write(escapeCsv(CsvUtils.sanitizeForSpreadsheet(note)));
                 writer.newLine();
             }
 

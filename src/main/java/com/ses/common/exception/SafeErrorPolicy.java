@@ -95,6 +95,11 @@ public final class SafeErrorPolicy {
     private SafeErrorPolicy() {
     }
 
+    /** 許可済みstatusの固定文言（keyを使わない応答用）。許可外のstatusは500の文言。 */
+    public static String statusMessage(int code) {
+        return STATUS_MESSAGES.getOrDefault(safeHttpCode(code), DEFAULT_SYSTEM_MESSAGE);
+    }
+
     public static boolean isAllowedMessageKey(String key) {
         return key != null && MESSAGE_KEY.matcher(key).matches() && ALLOWED_MESSAGE_KEYS.contains(key);
     }

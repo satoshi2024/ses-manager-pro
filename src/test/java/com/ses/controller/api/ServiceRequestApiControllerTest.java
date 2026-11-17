@@ -139,7 +139,7 @@ public class ServiceRequestApiControllerTest {
     }
 
     /**
-     * P3-N2-1・W2 r2 P3-4: 添付できないファイル形式は500（システムエラー）ではなく415と専用文言、
+     * P3-N2-1・W2 NF06 hardening P3-4: 添付できないファイル形式は500（システムエラー）ではなく415と専用文言、
      * 空ファイルは「上限超過」の413ではなく400と空であることを示す文言で返す。
      */
     @Test
@@ -163,6 +163,19 @@ public class ServiceRequestApiControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("ファイルが空です"));
+    }
+
+    /** RB-NF02 review P3-2: {@code @RequestBody} が受け付けないContent-Typeは500ではなく415で返す。 */
+    @Test
+    @DisplayName("POST /api/service-desk/requests - 受け付けないContent-Typeは500ではなく415を返すこと")
+    void unsupportedContentTypeIsRejectedWith415() throws Exception {
+        mockMvc.perform(post("/api/service-desk/requests")
+                        .with(csrf())
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("subject=plain"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value(415))
+                .andExpect(jsonPath("$.message").value("入力内容を確認してください。"));
     }
 
     @Test

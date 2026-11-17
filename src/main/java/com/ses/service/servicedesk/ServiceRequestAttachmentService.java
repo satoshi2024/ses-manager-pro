@@ -215,7 +215,7 @@ public class ServiceRequestAttachmentService {
     }
 
     private void validateFile(MultipartFile file) {
-        // 空ファイル（0 byte・未指定）は上限超過ではなく入力誤りとして400で返す（W2 r2 P3-4）。
+        // 空ファイル（0 byte・未指定）は上限超過ではなく入力誤りとして400で返す（W2 NF06 hardening P3-4）。
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
             throw BusinessException.of(400, "error.file.empty");
         }

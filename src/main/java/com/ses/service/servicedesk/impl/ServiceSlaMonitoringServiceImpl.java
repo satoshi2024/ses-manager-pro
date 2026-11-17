@@ -101,8 +101,9 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 breachedCount++;
                 notices.add(new SlaNotice("RESPONSE", "FIRST", "SLA初回応答期限超過",
                         String.format("リクエスト %s [%s] の初回応答期限を超過しました", req.getRequestNo(), req.getSubject())));
-            } else if (responseWasBreached && !responseFirstRetryPending
+            } else if (responseWasBreached && clk.getFirstRespondedAt() == null && !responseFirstRetryPending
                     && shouldContinue(clk.getLastResponseAlertAt(), now)) {
+                // 超過後に初回応答を記録した依頼は「超過が継続」していないため送らない（RB-NF02 review P3-4）。
                 notices.add(new SlaNotice("RESPONSE", "CONTINUING", "SLA初回応答超過継続",
                         String.format("リクエスト %s [%s] の初回応答期限超過が継続しています", req.getRequestNo(), req.getSubject())));
                 clockUpdated = true;
@@ -144,9 +145,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             // 受信者なし・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
             // 期限前のwarningは、初回応答の記録（RESPONSE）・解決（RESOLVE）・期限超過（超過通知が引き継ぐ）で
             // 意味を失う。その再送は送らず台帳をCANCELLEDで閉じ、同じwarningを応答後・超過後に出さない（HYG1 P3-5）。
+            // 初回応答の超過継続も、超過後に初回応答を記録すれば同様に閉じる（RB-NF02 review P3-4）。
             List<ServiceSlaEscalation> obsoleteRetries = new java.util.ArrayList<>();
             for (ServiceSlaEscalation retry : retryRows) {
-                if (isObsoleteWarningRetry(retry, clk)) {
+                if (isObsoleteRetry(retry, clk)) {
                     obsoleteRetries.add(retry);
                     continue;
                 }
@@ -287,10 +289,18 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     }
 
     /**
-     * 再送してはならないwarningか。warningは期限前の予告なので、対象の期限について初回応答・解決が記録された後、
-     * または期限超過が判定された後（同じ実行で判定した場合を含む）は送らない。超過・継続の再送は対象外（従来どおり）。
+     * 再送してはならない通知か。
+     * <ul>
+     *   <li>warningは期限前の予告なので、対象の期限について初回応答・解決が記録された後、または期限超過が判定された後
+     *       （同じ実行で判定した場合を含む）は送らない。</li>
+     *   <li>初回応答の超過継続（RESPONSE/CONTINUING）は、超過後に初回応答が記録されれば継続していないため送らない。</li>
+     * </ul>
+     * 超過の初回通知（FIRST）と解決目標の超過継続の再送は対象外（従来どおり）。
      */
-    private boolean isObsoleteWarningRetry(ServiceSlaEscalation retry, ServiceSlaClock clk) {
+    private boolean isObsoleteRetry(ServiceSlaEscalation retry, ServiceSlaClock clk) {
+        if ("CONTINUING".equals(retry.getStage())) {
+            return "RESPONSE".equals(retry.getBreachType()) && clk.getFirstRespondedAt() != null;
+        }
         if (!"WARNING".equals(retry.getStage())) {
             return false;
         }
@@ -313,8 +323,8 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         .set(ServiceSlaEscalation::getNextRetryAt, null)
                         .set(ServiceSlaEscalation::getUpdatedAt, now));
         if (affected == 1) {
-            log.info("SLA warningの再送を取消しました（初回応答・解決・期限超過の後のため）: escalationId={} breachType={}",
-                    retry.getId(), retry.getBreachType());
+            log.info("SLA通知の再送を取消しました（初回応答・解決・期限超過の後のため）: escalationId={} breachType={} stage={}",
+                    retry.getId(), retry.getBreachType(), retry.getStage());
         }
     }
 

@@ -186,7 +186,7 @@ class ServiceRequestAttachmentServiceTest {
         verify(documentService, never()).registerReceived(any(), any());
     }
 
-    /** W2 r2 P3-4: 空ファイルは「上限超過」の413ではなく入力誤りの400で、空であることを示す文言にする。 */
+    /** W2 NF06 hardening P3-4: 空ファイルは「上限超過」の413ではなく入力誤りの400で、空であることを示す文言にする。 */
     @Test
     void 空ファイルは400のerror_file_emptyで文書登録前に拒否する() {
         for (String endpoint : java.util.List.of("internal", "portal")) {

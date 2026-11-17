@@ -568,6 +568,111 @@ class ServiceSlaSchedulerTest {
                 fixture.dedupeKey(), fixture.tenantId()).getStatus());
     }
 
+    // ---------------------------------------------------------------- RB-NF02 review P3-4: 応答後の超過継続
+
+    @Test
+    @DisplayName("初回応答期限の超過後に初回応答した依頼には初回応答の超過継続を送らず解決目標の超過継続は従来どおり送る")
+    void respondedAfterBreachStopsResponseContinuingButKeepsResolveContinuing() {
+        Customer customer = Customer.builder().companyName("超過後応答顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
+        customerMapper.insert(customer);
+        SysUser owner = activeUser("cont_owner");
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("continuing test").description("continuing")
+                .ownerUserId(owner.getId()).build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.plusMinutes(20)).resolveDeadline(base.plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        // 初回応答期限の超過（初回通知）
+        monitoringService.checkSlaBreaches(base.plusMinutes(21));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        // 超過の後に「対応着手」で初回応答を記録した
+        recordFirstResponse(clock, base.plusMinutes(25));
+
+        // 30分経過しても、応答済みなので初回応答の超過継続は送らない（修正前はここで1回送っていた）
+        monitoringService.checkSlaBreaches(base.plusMinutes(52));
+        verify(notificationService, never()).publishToUser(eq(owner.getId()), eq("SLA_BREACH_CONTINUING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+
+        // 解決目標の超過と超過継続は従来どおり（同じownerへ届く。上のnever()が空の断言でないことの確認）
+        monitoringService.checkSlaBreaches(base.plusMinutes(121));
+        verify(notificationService, times(2)).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        monitoringService.checkSlaBreaches(base.plusMinutes(152));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH_CONTINUING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals(0, countEscalations(req.getId(), "RESPONSE", "CONTINUING"));
+        assertEquals(1, countEscalations(req.getId(), "RESOLVE", "CONTINUING"));
+    }
+
+    @Test
+    @DisplayName("宛先不在でRETRYになった初回応答の超過継続は超過後の初回応答の記録後に再送せずCANCELLEDで閉じる")
+    void responseContinuingRetryIsCancelledAfterFirstResponse() {
+        String tenantId = "nf02-continuing-retry-" + UUID.randomUUID();
+        AccountingTenantContextHolder.setTenantId(tenantId);
+        Customer customer = Customer.builder().companyName("継続再送顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId(tenantId);
+        customerMapper.insert(customer);
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .tenantId(tenantId).customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("continuing retry").description("retry").build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.plusMinutes(20)).resolveDeadline(base.plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+        SysUser admin = activeAdmin("cont_admin", tenantId);
+
+        // 超過の初回通知は管理者へ届く
+        monitoringService.checkSlaBreaches(base.plusMinutes(21));
+        verify(notificationService, times(1)).publishToUser(eq(admin.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        // 超過継続の時点では宛先がいない（管理者を一時的に無効化）→ RETRY台帳になる
+        admin.setStatus(0);
+        userMapper.updateById(admin);
+        monitoringService.checkSlaBreaches(base.plusMinutes(52));
+        com.ses.entity.ServiceSlaEscalation pending = escalationMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                        .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())
+                        .eq(com.ses.entity.ServiceSlaEscalation::getBreachType, "RESPONSE")
+                        .eq(com.ses.entity.ServiceSlaEscalation::getStage, "CONTINUING"));
+        assertNotNull(pending);
+        assertEquals("RETRY", pending.getStatus());
+
+        // 初回応答を記録し、宛先を戻す。再送時刻（+5分）を過ぎても超過継続の再送は出さず台帳を閉じる
+        recordFirstResponse(clock, base.plusMinutes(55));
+        admin.setStatus(1);
+        userMapper.updateById(admin);
+        monitoringService.checkSlaBreaches(base.plusMinutes(58));
+        verify(notificationService, never()).publishToUser(eq(admin.getId()), eq("SLA_BREACH_CONTINUING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals("CANCELLED", escalationMapper.selectById(pending.getId()).getStatus());
+    }
+
+    private void recordFirstResponse(ServiceSlaClock clock, LocalDateTime respondedAt) {
+        clockMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ServiceSlaClock>()
+                .eq(ServiceSlaClock::getId, clock.getId())
+                .set(ServiceSlaClock::getFirstRespondedAt, respondedAt));
+    }
+
+    private long countEscalations(Long requestId, String breachType, String stage) {
+        return escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, requestId)
+                .eq(com.ses.entity.ServiceSlaEscalation::getBreachType, breachType)
+                .eq(com.ses.entity.ServiceSlaEscalation::getStage, stage));
+    }
+
     private record WarningRetryFixture(String tenantId, ServiceSlaClock clock, String dedupeKey, LocalDateTime base) {
     }
 

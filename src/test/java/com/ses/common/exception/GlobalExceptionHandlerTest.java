@@ -67,6 +67,27 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    /** RB-NF02 review P3-2: SpringのContent-Type不一致は500（SYSTEM）ではなく415と業務例外415と同じ文言で返す。 */
+    @Test
+    void 受け付けないContentTypeは415で業務分類の固定文言とAcceptを返す() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        try {
+            var response = handler.handleUnsupportedMediaType(new org.springframework.web.HttpMediaTypeNotSupportedException(
+                    org.springframework.http.MediaType.TEXT_PLAIN,
+                    java.util.List.of(org.springframework.http.MediaType.APPLICATION_JSON)));
+
+            assertEquals(415, response.getStatusCode().value());
+            assertEquals(415, response.getBody().getCode());
+            assertEquals(SafeErrorPolicy.statusMessage(415), response.getBody().getMessage());
+            assertEquals("入力内容を確認してください。", response.getBody().getMessage());
+            assertEquals("application/json", response.getHeaders().getFirst(org.springframework.http.HttpHeaders.ACCEPT));
+            assertEquals("BUSINESS", CorrelationContext.get(CorrelationContext.ERROR_CATEGORY));
+            assertEquals("UNSUPPORTED_MEDIA_TYPE", CorrelationContext.get(CorrelationContext.ERROR_CODE));
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
     @Test
     void 許可外の業務例外codeは従来どおり500へ丸め413と415だけを追加で許可する() {
         assertEquals(413, SafeErrorPolicy.safeHttpCode(413));
