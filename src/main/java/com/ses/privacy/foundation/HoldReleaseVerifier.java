@@ -22,9 +22,10 @@ public interface HoldReleaseVerifier {
                                HoldReleaseAuthorityClaim approver);
 
     /**
-     * 解除を受け付けられる trust の状態か（開放の gate。NF07-REL review P3-9）。trust anchor が登録され、失効 provider が
-     * 発行者と承認者に要る2件以上の anchor を {@link RevocationStatus#ACTIVE} と答えること。失効 provider が UNKNOWN を返す・
-     * 例外・未設定なら false（第1期は registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。
+     * 解除を受け付けられる trust の状態か（開放の gate。NF07-REL review P3-9）。ISSUER の役割の anchor と APPROVER の役割の
+     * anchor が、authority・主体・鍵を共有せずに1組以上登録され、失効 provider がその両方を {@link RevocationStatus#ACTIVE} と
+     * 答えること（同じ authority の2つの鍵では開かない。RB-NF07-REG review P3-1）。失効 provider が UNKNOWN を返す・例外・
+     * 未設定なら false（第1期は registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。
      */
     boolean trustReady();
 }

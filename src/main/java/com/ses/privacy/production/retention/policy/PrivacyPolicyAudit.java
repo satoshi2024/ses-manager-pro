@@ -29,6 +29,8 @@ final class PrivacyPolicyAudit {
     static final String ACTIVATED = "ACTIVATED";
     /** 有効化で旧 current を SUPERSEDED にした。 */
     static final String SUPERSEDED = "SUPERSEDED";
+    /** 有効化されたことの無い CANDIDATE を取り下げた（REVOKED。activated_by は NULL のまま）。 */
+    static final String WITHDRAWN = "WITHDRAWN";
     /** 検証・職務分離・状態の拒否（理由は固定 code）。 */
     static final String REJECTED = "REJECTED";
 

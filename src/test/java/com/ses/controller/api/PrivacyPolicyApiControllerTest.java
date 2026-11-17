@@ -73,6 +73,16 @@ class PrivacyPolicyApiControllerTest {
                 .andExpect(jsonPath("$.message").value(FeatureSwitchFilter.NOT_FOUND_MESSAGE))
                 .andExpect(jsonPath("$.data").doesNotExist());
         verify(registrationService).activate(8L, new PrivacyPolicyActivationRequest(7L));
+
+        when(registrationService.withdraw(9L)).thenReturn(new PrivacyPolicyRegistrationResult(9L, "policy-1", "r2",
+                "REVOKED", "b".repeat(64), null, false));
+        when(registrationService.withdraw(10L)).thenThrow(new PrivacyAccessGuard.PrivacyEntryNotFoundException());
+        mockMvc.perform(post("/api/privacy/policies/9/withdraw").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.registrationStatus").value("REVOKED"));
+        mockMvc.perform(post("/api/privacy/policies/10/withdraw").with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(FeatureSwitchFilter.NOT_FOUND_MESSAGE));
     }
 
     @Test

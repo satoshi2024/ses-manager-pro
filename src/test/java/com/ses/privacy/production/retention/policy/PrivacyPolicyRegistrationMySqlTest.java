@@ -55,6 +55,8 @@ import static org.mockito.Mockito.mock;
  *       （{@code policyCurrentChanged}）になる。current は1件だけ。</li>
  *   <li>current がある key で、2人が別の CANDIDATE を同じ current を確認して同時に有効化する: 先だけが旧 current を SUPERSEDED に
  *       して切り替わり、後は 409。確認していない policy を SUPERSEDED にしない。</li>
+ *   <li>同じ key に別の policy ID を2人が同時に登録する: 後の登録は先の未 commit の行の lock を待ち、先の commit 後に409
+ *       （catalog の「policy ID が1種類」を並行でも保つ。RB-NF07-REG review P3-4）。行は1件。</li>
  *   <li>DB の制約: 生成列 {@code current_key} の UNIQUE が2件目の CURRENT を、{@code chk_retention_policy_activation} が登録者と
  *       同じ有効化者を拒否する。</li>
  * </ul>
@@ -174,6 +176,27 @@ class PrivacyPolicyRegistrationMySqlTest {
         assertThat(status(r2)).isEqualTo("CANDIDATE");
     }
 
+    @Test
+    void 同じkeyに別のpolicy_IDを同時に登録すると後の登録は先の行のlockを待ち409となり行は1件() throws Exception {
+        PolicyEnvelopeTestSigner.Signed first = signer.sign("policy-a", "r1");
+        PolicyEnvelopeTestSigner.Signed second = signer.sign("policy-b", "r1");
+
+        Outcome outcome = race(() -> service(REGISTRANT).register(first.request()),
+                () -> service(ACTIVATOR_B).register(second.request()));
+
+        assertThat(outcome.first()).isNull();
+        // 先の commit 後に後の登録は同じ key の別 policy ID を見て409（InnoDB が deadlock として後を戻した場合も409）
+        assertThat(outcome.second()).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getCode()).isEqualTo(409);
+            assertThat(e.getMessageKey()).isIn("error.privacy.policyKeyConflict", "error.privacy.policyConcurrentUpdate");
+        });
+        Long rows = jdbc.queryForObject("SELECT COUNT(*) FROM m_retention_policy WHERE tenant_id = ?", Long.class,
+                tenant);
+        assertThat(rows).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("SELECT policy_id FROM m_retention_policy WHERE tenant_id = ?", String.class,
+                tenant)).isEqualTo("policy-a");
+    }
+
     // --- helpers ---
 
     private PrivacyPolicyRegistrationService service(long userId) {
@@ -212,7 +235,7 @@ class PrivacyPolicyRegistrationMySqlTest {
                         firstApplied.countDown();
                         await(releaseFirst);
                     })));
-            assertTrue(firstApplied.await(20, TimeUnit.SECONDS), "先の有効化が commit 前の状態に届く");
+            assertTrue(firstApplied.await(20, TimeUnit.SECONDS), "先の操作が commit 前の状態に届く");
             Future<Throwable> second = pool.submit(() -> capture(secondOperation::get));
             awaitWaitOn(blocker.get());
             releaseFirst.countDown();
@@ -231,7 +254,7 @@ class PrivacyPolicyRegistrationMySqlTest {
             }
             Thread.sleep(50);
         }
-        throw new AssertionError("後の有効化が m_retention_policy の行の lock を待っていない: "
+        throw new AssertionError("後の操作が m_retention_policy の行の lock を待っていない: "
                 + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, blockerConnectionId));
     }
 

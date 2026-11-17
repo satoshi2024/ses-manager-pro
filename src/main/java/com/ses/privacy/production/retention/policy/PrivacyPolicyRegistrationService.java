@@ -56,10 +56,18 @@ import java.util.regex.Pattern;
  *       {@code chk_retention_policy_activation} も同じ規則）。保存した envelope を同じ規則で検証し直し、key の行を lock して
  *       要求の {@code expectedCurrentId} と実際の current を比べ（CAS）、旧 current を {@code SUPERSEDED}、対象を {@code CURRENT}
  *       にする（同じ transaction。行ごとに status・row_version の CAS）。current の一意性は生成列 {@code current_key} の
- *       UNIQUE が DB で保証する。</li>
+ *       UNIQUE が DB で保証する。current があるとき、対象の envelope の発行日時（署名の範囲内）が current の発行日時より後で
+ *       なければ409（{@code policyRevisionRollback}。古い revision へ戻す有効化を拒否し、戻すには内容を新しい revision として
+ *       署名し直して登録する。revision の文字列は比較しない）。</li>
+ *   <li>取下げ（{@code POST /api/privacy/policies/{id}/withdraw}）: {@code CANDIDATE} だけを {@code REVOKED} にする（有効化された
+ *       ことの無い行。{@code activated_by} は NULL のまま）。登録者本人と別の privacy-admin のどちらも行える（状態を減らす操作で、
+ *       何も有効にしないため）。{@code CURRENT}・{@code SUPERSEDED} は取り下げられない（current を止めるのは失効 provider の
+ *       {@code REVOKED}）。誤って登録した CANDIDATE が同じ key の別 policy ID の登録を409で止め続けないようにする。取り下げた
+ *       revision は再利用できない（新しい revision で登録し直す）。</li>
  * </ol>
- * {@code REVOKED} への遷移は本 batch に無い（失効は失効 provider が判定し、照会は {@code POLICY_REVOKED} を返す）。
- * policy が使えるかどうかは説明照会だけで決まり、本 service は実行認可を付与しない。
+ * 有効化された行の {@code REVOKED} への遷移は本 batch に無い（失効は失効 provider が判定し、照会は {@code POLICY_REVOKED} を返す）。
+ * policy が使えるかどうかは説明照会だけで決まり、本 service は実行認可を付与しない。{@code APPROVED_ACTIVE} は処分の承認ではない
+ * （D-04 は B1 の処分の入口が確かめる）。
  */
 public class PrivacyPolicyRegistrationService {
 
@@ -204,6 +212,68 @@ public class PrivacyPolicyRegistrationService {
         }
     }
 
+    /**
+     * 有効化されたことの無い CANDIDATE を取り下げる（{@code REVOKED}。登録者本人・別の privacy-admin のどちらも可）。同じ行の
+     * 再送（既に取り下げた行）は状態を変えずに元の結果を返す。
+     */
+    public PrivacyPolicyRegistrationResult withdraw(long id) {
+        accessGuard.requireAllowed(PrivacyAccessGuard.Capability.RETENTION, MANAGE_ACTION);
+        Actor actor = requireActor();
+        requireOpen();
+        if (id <= 0) {
+            throw invalid();
+        }
+        try {
+            return transaction.execute(status -> withdrawLocked(actor, id));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (DataIntegrityViolationException | ConcurrencyFailureException e) {
+            throw BusinessException.of(409, "error.privacy.policyConcurrentUpdate");
+        } catch (RuntimeException e) {
+            log.warn("[privacy-policy] policyを取り下げられません: exceptionClass={}", e.getClass().getSimpleName());
+            throw BusinessException.of(503, "error.privacy.sourceUnavailable");
+        }
+    }
+
+    private PrivacyPolicyRegistrationResult withdrawLocked(Actor actor, long id) {
+        String tenantId = actor.tenantId();
+        // 有効化と同じ順で key の行を lock する（取下げと有効化が並行しても、後の操作は先の結果を見て409になる）
+        RetentionPolicy probe = policyMapper.selectOne(keyColumns()
+                .eq(RetentionPolicy::getTenantId, tenantId)
+                .eq(RetentionPolicy::getId, id));
+        if (probe == null || probe.getLegalEntityId() != null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        List<RetentionPolicy> keyRows = lockKeyRows(tenantId, probe.getModuleCode(), probe.getDataElementId(),
+                probe.getTargetAction(), probe.getTargetProvider());
+        RetentionPolicy target = keyRows.stream().filter(row -> Objects.equals(row.getId(), id)).findFirst()
+                .orElseThrow(() -> BusinessException.of(409, "error.privacy.policyConcurrentUpdate"));
+        if (STATUS_REVOKED.equals(target.getStatus()) && target.getActivatedBy() == null) {
+            return result(target, null, true);
+        }
+        if (!STATUS_CANDIDATE.equals(target.getStatus())) {
+            throw BusinessException.of(409, "error.privacy.policyNotCandidate");
+        }
+        int withdrawn = policyMapper.update(null, new LambdaUpdateWrapper<RetentionPolicy>()
+                .set(RetentionPolicy::getStatus, STATUS_REVOKED)
+                .setSql("row_version = row_version + 1")
+                .eq(RetentionPolicy::getTenantId, tenantId)
+                .eq(RetentionPolicy::getId, id)
+                .eq(RetentionPolicy::getStatus, STATUS_CANDIDATE)
+                .isNull(RetentionPolicy::getActivatedBy)
+                .eq(RetentionPolicy::getRowVersion, target.getRowVersion()));
+        if (withdrawn != 1) {
+            throw BusinessException.of(409, "error.privacy.policyConcurrentUpdate");
+        }
+        audit.record(actor.username(), PrivacyPolicyAudit.WITHDRAWN, PrivacyPolicyAudit.fields(
+                "id", Long.toString(id), "policy", target.getPolicyId(), "revision", target.getPolicyRevision(),
+                "digest", target.getEnvelopeDigest() == null ? null : target.getEnvelopeDigest().substring(0, 16),
+                "by", actor.userId().equals(target.getRegisteredBy()) ? "REGISTRANT" : "OTHER_PRIVACY_ADMIN"),
+                200, true);
+        target.setStatus(STATUS_REVOKED);
+        return result(target, null, false);
+    }
+
     private PrivacyPolicyRegistrationResult registerVerified(Actor actor, VerifiedPolicyRegistration verified) {
         String tenantId = actor.tenantId();
         requireDataElement(tenantId, verified.dataElementId());
@@ -253,8 +323,8 @@ public class PrivacyPolicyRegistrationService {
 
     private PrivacyPolicyRegistrationResult activateLocked(Actor actor, long id, Long expectedCurrentId) {
         String tenantId = actor.tenantId();
-        // key を知るための非 lock の読取り。lock は key の行全体へ index 順に1回で取る（対象の行を先に lock すると、同じ key の
-        // 2件を並行に有効化したときに互いの行を待って deadlock する）
+        // key を知るための非 lock の読取り。lock は key の行全体へ key の index の走査順に1回で取る（対象の行を先に lock すると、
+        // 同じ key の2件を並行に有効化したときに互いの行を待って deadlock する）
         RetentionPolicy probe = policyMapper.selectOne(keyColumns()
                 .eq(RetentionPolicy::getTenantId, tenantId)
                 .eq(RetentionPolicy::getId, id));
@@ -305,6 +375,9 @@ public class PrivacyPolicyRegistrationService {
             throw BusinessException.of(409, "error.privacy.policyCurrentChanged");
         }
         if (current != null) {
+            requireSignedAfterCurrent(tenantId, current, verified);
+        }
+        if (current != null) {
             int superseded = policyMapper.update(null, new LambdaUpdateWrapper<RetentionPolicy>()
                     .set(RetentionPolicy::getStatus, STATUS_SUPERSEDED)
                     .setSql("row_version = row_version + 1")
@@ -342,7 +415,37 @@ public class PrivacyPolicyRegistrationService {
         return result(target, actualCurrentId, false);
     }
 
-    /** key（tenant・module・tenant-wide・data element・action・provider）の全ての行を id 順に lock する。 */
+    /**
+     * 対象の envelope が current より後に署名されたこと（発行日時の比較。同じ時刻も拒否する）。revision の文字列は順序を持たない
+     * ため比較しない。current の envelope は復号だけを行い、trust（鍵の失効・rotation）は見ない（置き換えを止めないため）。
+     * 古い revision へ戻す有効化は409（RB-NF07-REG review P3-6。戻すなら内容を新しい revision として署名し直して登録する。
+     * D-02 owner が別の運用を望む場合は再検討する）。current を復号できなければ行の食い違いとして拒否する。
+     */
+    private void requireSignedAfterCurrent(String tenantId, RetentionPolicy current, VerifiedPolicyRegistration verified) {
+        RetentionPolicy currentRow = policyMapper.selectOne(new LambdaQueryWrapper<RetentionPolicy>()
+                .select(RetentionPolicy::getId, RetentionPolicy::getEnvelopeCanonical,
+                        RetentionPolicy::getEnvelopeSignature)
+                .eq(RetentionPolicy::getTenantId, tenantId)
+                .eq(RetentionPolicy::getId, current.getId()));
+        java.time.Instant currentIssuedAt;
+        try {
+            currentIssuedAt = currentRow == null ? null
+                    : verifier.signedIssuedAt(currentRow.getEnvelopeCanonical(), currentRow.getEnvelopeSignature());
+        } catch (PolicyRegistrationRejectedException e) {
+            currentIssuedAt = null;
+        }
+        if (currentIssuedAt == null) {
+            throw new Rejected("CURRENT_UNREADABLE", BusinessException.of(403, "error.privacy.policyEnvelopeRejected"));
+        }
+        if (!verified.issuedAt().isAfter(currentIssuedAt)) {
+            throw new Rejected("REVISION_ROLLBACK", BusinessException.of(409, "error.privacy.policyRevisionRollback"));
+        }
+    }
+
+    /**
+     * key（tenant・module・tenant-wide・data element・action・provider）の全ての行を lock する。lock は key の index の走査順に
+     * 1回で取る（結果は id 順に並べる。同じ形の照会だけを使うため、操作どうしの lock の順序は一致する）。
+     */
     private List<RetentionPolicy> lockKeyRows(String tenantId, String moduleCode, String dataElementId,
                                               String targetAction, String targetProvider) {
         return policyMapper.selectList(keyColumns()

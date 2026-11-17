@@ -116,12 +116,12 @@ public class PrivacyHoldConfiguration {
     }
 
     /**
-     * hold 解除 authority の trust anchor（NF07-REL）。{@link PrivacyTrustSource} から取る（第1期は空。D-03 の方式の adapter は
+     * hold 解除 authority の trust anchor（NF07-REL）。参照のたびに {@link PrivacyTrustSource} から取る（第1期は空。D-03 の方式の adapter は
      * {@code PrivacyTrustSource} の Bean を差し替える）。
      */
     @Bean
     public HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry(PrivacyTrustSource privacyTrustSource) {
-        return privacyTrustSource.holdReleaseAnchors();
+        return PrivacyTrustSource.holdReleaseAnchorsOf(privacyTrustSource);
     }
 
     /**
@@ -151,7 +151,7 @@ public class PrivacyHoldConfiguration {
         boolean activeProd = java.util.Arrays.asList(environment.getActiveProfiles()).contains("prod");
         HoldReleaseVerifier verifier = activeProd
                 ? ProductionPrivacyComponents.holdReleaseVerifier(environment, privacyHoldReleaseTrustRegistry,
-                privacyTrustSource.revocations(), resolvedClock)
+                PrivacyTrustSource.revocationsOf(privacyTrustSource), resolvedClock)
                 : null;
         return new PrivacyHoldReleaseService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
                 privacyHoldJournal, store, holdSubjectResolver,

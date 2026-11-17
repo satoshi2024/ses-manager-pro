@@ -24,7 +24,7 @@ import java.util.Arrays;
  * NF07 policy の登録・有効化（NF07-REG）の Spring 登録。
  *
  * <p>verifier は prod profile でだけ生成する（{@code ProductionPrivacyComponents.policyRegistrationVerifier}）。trust anchor と
- * 失効状態は {@link PrivacyTrustSource}（第1期は anchor 0件・失効状態は常に UNKNOWN）から取り、
+ * 失効状態は検証のたびに {@link PrivacyTrustSource}（第1期は anchor 0件・失効状態は常に UNKNOWN）から取り、
  * 説明照会（{@code PrivacyProductionConfiguration}）と同じ値を使う。prod 以外・D-01・D-02・D-03 の署名前・trust anchor の
  * 未登録・失効状態を確認できない間は、登録・有効化の入口は存在しない URL と同じ404になる
  * （{@link PrivacyPolicyRegistrationService#isOpen()}）。登録は profile と機能スイッチに依存しない（入口は
@@ -50,7 +50,8 @@ public class PrivacyPolicyRegistrationConfiguration {
         boolean activeProd = Arrays.asList(environment.getActiveProfiles()).contains("prod");
         PolicyRegistrationVerifier verifier = activeProd
                 ? ProductionPrivacyComponents.policyRegistrationVerifier(environment,
-                privacyTrustSource.policyAnchors(), privacyTrustSource.revocations(), resolvedClock)
+                PrivacyTrustSource.policyAnchorsOf(privacyTrustSource),
+                PrivacyTrustSource.revocationsOf(privacyTrustSource), resolvedClock)
                 : null;
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);

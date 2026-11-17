@@ -27,6 +27,7 @@ class PrivacyActionPermissionResolverTest {
             "GET,/api/privacy/policies/1,privacy.policy.view",
             "POST,/api/privacy/policies,privacy.policy.manage",
             "POST,/api/privacy/policies/1/activate,privacy.policy.manage",
+            "POST,/api/privacy/policies/1/withdraw,privacy.policy.manage",
             "PUT,/api/privacy/policies/1,privacy.policy.manage",
             "PATCH,/api/privacy/policies/1,privacy.policy.manage",
             "DELETE,/api/privacy/policies/1,privacy.policy.manage",

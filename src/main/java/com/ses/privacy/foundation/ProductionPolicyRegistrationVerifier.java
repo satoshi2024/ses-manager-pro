@@ -51,10 +51,20 @@ final class ProductionPolicyRegistrationVerifier implements PolicyRegistrationVe
     }
 
     @Override
+    public java.time.Instant signedIssuedAt(byte[] canonical, byte[] signature) {
+        environmentGuard.requireProductionProfile();
+        try {
+            return ProductionPolicyEnvelopeDecoder.decode(canonical, signature).metadata().issuedAt();
+        } catch (PolicySecurityException rejected) {
+            throw new PolicyRegistrationRejectedException(rejected.reason());
+        }
+    }
+
+    @Override
     public boolean trustReady() {
         try {
             Map<String, TrustedAuthority> anchors = registry == null ? null : registry.anchors();
-            return anchors != null && PrivacyTrustReadiness.activeAnchors(anchors.keySet(), revocations, 1) >= 1;
+            return anchors != null && PrivacyTrustReadiness.activePolicyAnchors(anchors, revocations, 1) >= 1;
         } catch (RuntimeException e) {
             return false;
         }

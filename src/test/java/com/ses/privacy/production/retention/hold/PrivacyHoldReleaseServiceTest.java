@@ -710,6 +710,35 @@ class PrivacyHoldReleaseServiceTest {
         assertThat(service.release(started.holdId(), request).status()).isEqualTo("RELEASED");
     }
 
+    @Test
+    void 開放の後も要求が使うanchorの失効状態がUNKNOWNなら403で監査に理由を残す() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7097");
+        authorities.register("approver-c", "sys_user:40", TENANT);
+        MockEnvironment prod = new MockEnvironment();
+        prod.setActiveProfiles("prod");
+        HoldReleaseVerifier thirdUnknown = ProductionPrivacyComponents.holdReleaseVerifier(prod, authorities.registry(),
+                ref -> ref.startsWith("approver-c") ? RevocationStatus.UNKNOWN : RevocationStatus.ACTIVE, fixture.clock);
+        PrivacyHoldReleaseService service = fixture.releaseService(thirdUnknown, authorities.registry());
+        assertThat(service.isOpen()).as("issuer-a と approver-b の組で開く").isTrue();
+
+        HoldReleaseBinding binding = bindingOf(request(started.holdId(), newCommandId(), REASON));
+        Instant now = fixture.clock.instant();
+        HoldReleaseAuthorityClaim issuer = authorities.sign(ISSUER, HoldReleaseAuthorityClaim.Role.ISSUER, binding,
+                now.minusSeconds(60), now.plus(Duration.ofMinutes(30)));
+        HoldReleaseAuthorityClaim approver = authorities.sign("approver-c", HoldReleaseAuthorityClaim.Role.APPROVER,
+                binding, now.minusSeconds(60), now.plus(Duration.ofMinutes(30)));
+        PrivacyHoldReleaseRequest request = new PrivacyHoldReleaseRequest(REASON_CODE, REASON, TICKET,
+                new PrivacyHoldReleaseRequest.Binding(binding.tenantId(), binding.subjectRef(), binding.holdId(),
+                        binding.expectedHoldRevision(), binding.reasonHash(), binding.commandId(),
+                        binding.expectedJournalRevision(), binding.expectedJournalHash(), binding.requesterRef(),
+                        binding.holdStarterRef()),
+                claim(issuer), claim(approver));
+
+        assertBusiness(() -> service.release(started.holdId(), request), 403, "error.privacy.holdReleaseProofRejected");
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("reason=REVOCATION_UNKNOWN"));
+        assertThat(fixture.journal.eventCount(TENANT, "ENGINEER:7097")).isEqualTo(1);
+    }
+
     // --- Journal に残す claim（REL review P3-6）・reconciler の partition の一致（P3-10） ---
 
     @Test
