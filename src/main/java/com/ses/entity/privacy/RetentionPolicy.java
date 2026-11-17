@@ -12,8 +12,9 @@ import java.time.LocalDateTime;
 /**
  * NF07 retention policy（{@code m_retention_policy}、V190）。署名 envelope と current pointer を持つ。
  *
- * <p>論理削除・更新日時を持たない（policy は revision を積み、状態だけを遷移させる）。第1期の application は
- * 本表を読むだけで、書き込みは署名後の NF07-REG が行う。法的な値は envelope の canonical bytes にだけ入る。
+ * <p>論理削除・更新日時を持たない（policy は revision を積み、状態だけを遷移させる）。書き込みは NF07-REG の
+ * {@code PrivacyPolicyRegistrationService} だけが行う（登録は CANDIDATE、有効化で CURRENT・旧 current は SUPERSEDED。開放は署名後）。
+ * 法的な値は envelope の canonical bytes にだけ入る。
  */
 @Data
 @TableName("m_retention_policy")

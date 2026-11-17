@@ -34,11 +34,18 @@ class PrivacyFoundationIsolationTest {
     /**
      * public な factory と解除の入口は、どの registry・失効 provider・proof を渡すかを呼出し側が決められるため、呼出し元を
      * Spring 登録（registry は空・失効は常に UNKNOWN）と解除の service に限る（NF07-REL review P3-3）。呼出し元を増やす変更は
-     * ここに理由と一緒に足し、review を通す。
+     * ここに理由と一緒に足し、review を通す。policy 登録の verifier（NF07-REG）も同じ理由で Spring 登録だけに限る。
      */
     @Test
     void 解除のproofとJournalの本番部品の呼出し元はSpring登録と解除のserviceに限る() throws Exception {
         java.util.Map<String, java.util.Set<String>> allowed = java.util.Map.of(
+                "policyRegistrationVerifier(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPrivacyComponents.java",
+                        "com/ses/privacy/production/retention/policy/PrivacyPolicyRegistrationConfiguration.java"),
+                "new ProductionPolicyRegistrationVerifier(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPrivacyComponents.java"),
+                "new VerifiedPolicyRegistration(", java.util.Set.of(
+                        "com/ses/privacy/foundation/ProductionPolicyRegistrationVerifier.java"),
                 "holdReleaseVerifier(", java.util.Set.of("com/ses/privacy/foundation/ProductionPrivacyComponents.java",
                         "com/ses/privacy/production/retention/hold/PrivacyHoldConfiguration.java"),
                 "appendHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseJournalPort.java",
@@ -51,7 +58,7 @@ class PrivacyFoundationIsolationTest {
                 "new VerifiedHoldRelease(", java.util.Set.of("com/ses/privacy/foundation/HoldReleaseProofVerifier.java"));
         // 方法参照（{@code ::appendHoldRelease} 等）は呼出しの "(" を含まないため、どこにも書かせない（delta review P3-6）
         java.util.List<String> forbiddenReferences = java.util.List.of("::holdReleaseVerifier", "::appendHoldRelease",
-                "::productionPrivacyJournal");
+                "::productionPrivacyJournal", "::policyRegistrationVerifier");
         Path root = Path.of("src/main/java");
         java.util.List<String> violations = new java.util.ArrayList<>();
         java.util.Map<String, java.util.Set<String>> found = new java.util.HashMap<>();
@@ -84,13 +91,17 @@ class PrivacyFoundationIsolationTest {
         for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,
                 ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
                 ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class,
-                ProductionPrivacyJournalAdapter.class, HoldReleaseProofVerifier.class)) {
+                ProductionPrivacyJournalAdapter.class, HoldReleaseProofVerifier.class,
+                ProductionPolicyRegistrationVerifier.class, PrivacyTrustReadiness.class)) {
             assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
             for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
                 assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),
                         type.getSimpleName() + " のconstructorはpublicにしない");
             }
         }
+        // NF07-REG: 検証済みの envelope は verifier だけが作り、public constructor を持たない
+        assertEquals(0, VerifiedPolicyRegistration.class.getConstructors().length);
+        assertEquals(0, PolicyRegistrationRejectedException.class.getConstructors().length);
         assertTrue(java.lang.reflect.Modifier.isPublic(ProductionPrivacyComponents.class.getModifiers()));
         assertTrue(java.lang.reflect.Modifier.isFinal(ProductionPrivacyComponents.class.getModifiers()));
         for (java.lang.reflect.Constructor<?> constructor : ProductionPrivacyComponents.class.getDeclaredConstructors()) {

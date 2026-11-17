@@ -779,6 +779,17 @@ A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway j
 - 依存の扱い（fail-closed、D-05 owner の受理事項）: 帰属できない element（catalog で ATTRIBUTABLE でない）の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除しない（どの SUBJECT hold が `DATA_ELEMENT_HOLD` を選んだかは projection に無く、Journal の request hash と監査にしか無いため）。
 - 根拠の test: fast は `HoldReleaseProofVerifierTest`（§11.1 の拒否条件、append 時の判定、解除を含む chain）、`PrivacyHoldReleaseServiceTest`（解除・再送・CAS・pending・開放の gate・D1〜D10 の再開・reconciler）、`PrivacyHoldApiControllerTest`。MySQL は `PrivacyHoldReleaseMySqlTest`（shard-2。本番 adapter の head・hold revision の CAS、同じ command の元の ACK、ACK 不明の後の再送と reconciler、開始との直列化）。
 
+**NF07-REG 実装記録（2026-11-17、RB-NF07-REG。DDL なし（F1 の `m_retention_policy` を使う）。実装のみで開放は D-01・D-02・D-03 の署名と NF07-TRUST の後）**:
+
+- 入口: `POST /api/privacy/policies`（署名済み envelope の登録）と `POST /api/privacy/policies/{id}/activate`（current の切替）。action は予約済みの `privacy.policy.manage`（`ActionPermissionResolver` は変更なし。`privacy-admin` の `privacy.*` 許可と他の group の `privacy.*` deny の baseline + deny のままで、seed・migration は不要）。`PrivacyAccessGuard`（OFF は404、権限が無ければ403）→ 呼出し元の tenant（権限評価の設定 tenant と一致、user ID あり）→ 開放の gate の順に判定する。
+- 開放の gate（`PrivacyPolicyRegistrationService.isOpen`。要求ごとに評価し、存在しない URL と同じ404）: (1) D-01・D-02・D-03 の決定ID が `PrivacyDecisionBinding.evaluateStandalone` で有効（D-02 を `Decision.D02`・`privacy.approval.d02.*` として追加。D-03・D-05 と同じく capability の承認 digest には入れない）、(2) verifier がある（`ProductionPrivacyComponents.policyRegistrationVerifier` は prod profile でしか生成できない。呼出し元は `PrivacyFoundationIsolationTest` が `PrivacyPolicyRegistrationConfiguration` に限る）、(3) trust anchor が1件以上登録され、失効 provider がそのうち1件以上を ACTIVE と答える（`PolicyRegistrationVerifier.trustReady`。UNKNOWN・例外・provider 無しは閉じる）。第1期は registry が空・失効 provider が常に UNKNOWN のため、決定ID を設定しても開かない。起動を止める案は REL と同じ理由で採らない。
+- verify-then-store: 要求は canonical bytes（`ApprovalEnvelopeCanonicalizer` の v1 形式）と署名の base64 だけで、行の key（policy ID・revision（envelope の metadata の revision）・module（envelope の scope）・data element・action・provider、法人は tenant-wide）は検証した envelope から取る。検証は照会と同じ部品（`ProductionPolicyEnvelopeDecoder` の厳格な復号と再 encoding の一致、`ProductionApprovalEnvelopeVerifier.verifyForRegistration`: audience `PRODUCTION`・tenant の一致・schema・trust anchor・範囲・時刻・anchor と envelope の失効状態・Ed25519 署名・envelope の申請者≠承認者）で、照会の `verifyCurrentCandidate` と同じ private の検証を共有する。拒否は固定 code（`PolicyRegistrationRejectedException`）で、監査 `NF07_POLICY_REJECTED` に理由 code だけを残し 403。署名済みでも列の長さ・照会と監査で扱える文字種（policy ID・revision・authority・key は `[A-Za-z0-9._-]`、key の各項目は照会と同じ）に収まらなければ 400。W3-14 review P3-3（64KB を超える envelope）は登録側で拒否する（base64 の長さと decoder の上限）。
+- 状態の遷移: 登録で `CANDIDATE`（検証した bytes・署名・digest・authority・key・登録者）→ 有効化で `CURRENT`（`activated_by`・`activated_at`）、旧 current は同じ transaction で `SUPERSEDED`。`REVOKED` への遷移は本 batch に無い（失効は失効 provider が判定し、照会が `POLICY_REVOKED` を返す）。説明照会は current の行を読むだけで、`APPROVED_ACTIVE` は照会の検証が通った場合だけ（NF08 への接続は NF07-NF08-LINK）。
+- 有効化の規則: 登録者と別の privacy-admin（403 `policyActivationSeparation`。DB の `chk_retention_policy_activation` も同じ）。保存した envelope を同じ規則で検証し直し、行の列（key・revision・digest・authority・key・schema）が envelope と一致しなければ拒否する（`STORED_ROW_MISMATCH`）。current の切替は CAS: 要求の `expectedCurrentId`（有効化者が確認した current の行 ID、無ければ null）と、key の行を `FOR UPDATE` で lock した後の実際の current が違えば 409 `policyCurrentChanged`。旧 current・対象の更新はそれぞれ status と `row_version` の CAS。lock は対象の行を先に取らず、key の全ての行を index 順に1回で取る（同じ key の2件を並行に有効化しても deadlock せず、後が先を待つ）。current の一意性は生成列 `current_key` の UNIQUE が DB で保証する。同じ有効化者の再送は状態を変えずに元の結果。
+- 登録の規則: data element が catalog に1件登録されていること（409 `policyDataElementUnknown`）。同じ key に REVOKED 以外で別の policy ID の行があれば409 `policyKeyConflict`（`DbProductionPolicyCatalog` の「policy ID が1種類」を保つ）。同じ policy・revision は同じ内容（digest・署名・key）の再送だけ元の行を返し（`replayed`）、違えば409 `policyRevisionConflict`。
+- D-04（処分を含む policy）: REG は D-04 を見ない。§5.2 の処分（B1）の行のとおり、処分の入口が D-04 を確かめる（総括の確認事項として報告）。
+- 根拠の test: fast は `PrivacyPolicyRegistrationServiceTest`（H2。改竄・末尾の余分な bytes・偽造署名、未知の anchor と未登録の鍵、失効 UNKNOWN（入口が開かない・envelope だけ UNKNOWN／REVOKED）、登録者≠有効化者と envelope の SoD、二重 current の CAS と UNIQUE、再送と競合、catalog、開放の gate、400・403・404、Demo の説明照会 `APPROVED_ACTIVE`）、`PrivacyPolicyApiControllerTest`、`PrivacyFoundationIsolationTest`、`PrivacyActionPermissionResolverTest`。MySQL は `PrivacyPolicyRegistrationMySqlTest`（shard-2。current の並行切替: 後の有効化が key の行の lock を待ち先の commit 後に409、DB の UNIQUE と CHECK）。鍵は全て test-only（実行のたびに memory 上で生成）。
+
 B1 の DDL 草案（番号なし）:
 
 ```sql
@@ -828,7 +839,7 @@ CREATE TABLE t_disposition_item (
 | capability | 必要な決定・設定 | 欠けたときの結果 |
 |---|---|---|
 | policy の説明照会 | 無し（flag ON） | 値が無ければ `POLICY_UNKNOWN`（`POLICY_NOT_FOUND`、`REVOCATION_STATUS_UNKNOWN` など既存理由） |
-| policy の登録・有効化（REG） | D-01、D-02、D-03 の anchor | 登録拒否（`UNKNOWN_TRUST_ANCHOR` 等） |
+| policy の登録・有効化（REG） | D-01、D-02、D-03 の anchor | 決定ID・verifier・trust anchor（失効状態 ACTIVE を1件以上）が揃うまで入口 404。揃った後の検証の失敗は登録拒否 403（`UNKNOWN_TRUST_ANCHOR` 等。§4 の NF07-REG 実装記録） |
 | hold 開始（A1H） | D-01、D-05（`allowed-target-types` を含む）、journal | `DECISION_UNKNOWN`（409）／`JOURNAL_UNAVAILABLE`（503）／`holdStartInProgress`（409） |
 | hold 解除（REL） | D-05、D-03、解除 proof | 第1期（A1H）は endpoint 自体が無い。REL マージ後も署名まで拒否 |
 | DSAR の本人確認記録以降（A2a） | D-01、D-06 | `DECISION_UNKNOWN`（409） |

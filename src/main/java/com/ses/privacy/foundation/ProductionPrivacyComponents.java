@@ -93,6 +93,27 @@ public final class ProductionPrivacyComponents {
         return new HoldReleaseProofVerifier(registry, revocations, guard, clock);
     }
 
+    /**
+     * policy envelope の登録・有効化の verifier を生成する（NF07-REG、W-2）。
+     *
+     * <p>生成した verifier だけが {@link VerifiedPolicyRegistration} を発行する。prod profile 以外では生成を拒否する（登録の経路を
+     * dev・test profile の実行時に開かない）。生成時に registry・失効 provider へ触れない（検証のたびに読む）。
+     *
+     * @param environment 起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param registry    policy envelope の署名 anchor（D-03 の署名前は空）
+     * @param revocations 失効状態（第1期は常に UNKNOWN）
+     * @param clock       検証の時計
+     */
+    public static PolicyRegistrationVerifier policyRegistrationVerifier(Environment environment,
+                                                                        ProductionPolicyTrustRegistry registry,
+                                                                        RevocationStatusProvider revocations,
+                                                                        Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        return new ProductionPolicyRegistrationVerifier(registry, revocations, guard, clock);
+    }
+
     /** 本番 Journal の append・照会の transaction 上限（{@code privacy.journal.pending-timeout} の下限）。 */
     public static Duration journalAppendTimeout() {
         return ProductionPrivacyJournalAdapter.APPEND_TRANSACTION_TIMEOUT;

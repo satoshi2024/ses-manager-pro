@@ -5,7 +5,10 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 
-/** production向けpolicy候補だけを検証するpackage内wrapper。Spring Beanには登録しない。 */
+/**
+ * production向けpolicy候補（照会の current 候補と、NF07-REG の登録・有効化の対象）だけを検証するpackage内wrapper。
+ * Spring Beanには登録しない。
+ */
 final class ProductionApprovalEnvelopeVerifier {
     private final Map<String, TrustedAuthority> productionTrustAnchors;
     private final RevocationStatusProvider productionRevocations;
@@ -70,7 +73,35 @@ final class ProductionApprovalEnvelopeVerifier {
         if (!canonicalDigest.equals(lookup.currentDigest())) {
             throw failure(PolicyFailureReason.DIGEST_MISMATCH, "policy digestが一致しません");
         }
+        return verifySigned(candidate, caller.tenantId(), expectedScope, expectedDataElementId, expectedAction,
+                expectedProvider);
+    }
 
+    /**
+     * policy 登録（NF07-REG）の検証。保存する前の envelope を、照会と同じ trust anchor・失効状態・時刻・署名・SoD の規則で
+     * 確かめる（verify-then-store）。束縛（scope・data element・action・provider）は envelope 自身の値で、登録する行の key になる。
+     * audience が {@code PRODUCTION} でなければ {@code SCOPE_MISMATCH}、tenant が登録者の tenant と違えば {@code TENANT_MISMATCH}。
+     */
+    VerifiedPolicyMetadata verifyForRegistration(String expectedTenant, PolicyApprovalEnvelope candidate) {
+        environmentGuard.requireProductionProfile();
+        if (candidate == null) {
+            throw failure(PolicyFailureReason.POLICY_NOT_FOUND, "登録するpolicyがありません");
+        }
+        if (!ProductionEnvironmentGuard.PRODUCTION_AUDIENCE.equals(candidate.metadata().audience())) {
+            throw failure(PolicyFailureReason.SCOPE_MISMATCH, "production policy audienceが一致しません");
+        }
+        if (expectedTenant == null || expectedTenant.isBlank()
+                || !expectedTenant.equals(candidate.metadata().tenantId())) {
+            throw failure(PolicyFailureReason.TENANT_MISMATCH, "登録者とpolicyのtenantが一致しません");
+        }
+        return verifySigned(candidate, expectedTenant, candidate.metadata().scope(), candidate.dataElementId(),
+                candidate.action(), candidate.providerId());
+    }
+
+    /** schema・trust anchor・範囲・時刻・失効状態・署名・SoD・束縛の検証（照会と登録で同じ順序）。 */
+    private VerifiedPolicyMetadata verifySigned(PolicyApprovalEnvelope candidate, String expectedTenant,
+                                                String expectedScope, String expectedDataElementId,
+                                                String expectedAction, String expectedProvider) {
         Instant now = trustedClock.instant();
         PurePolicyVerificationKernel.verifySchemaVersion(candidate.metadata());
         String anchorId = candidate.metadata().authorityId() + ":" + candidate.metadata().keyId();
@@ -99,7 +130,7 @@ final class ProductionApprovalEnvelopeVerifier {
         PurePolicyVerificationKernel.verifySignature(anchor,
                 ApprovalEnvelopeCanonicalizer.canonicalBytes(candidate), candidate.signature());
         PurePolicyVerificationKernel.verifyPolicySoD(candidate.metadata());
-        PurePolicyVerificationKernel.verifyPolicyBindings(candidate, caller.tenantId(), expectedScope,
+        PurePolicyVerificationKernel.verifyPolicyBindings(candidate, expectedTenant, expectedScope,
                 expectedDataElementId, expectedAction, expectedProvider);
 
         String verifiedDigest = ApprovalEnvelopeCanonicalizer.digest(

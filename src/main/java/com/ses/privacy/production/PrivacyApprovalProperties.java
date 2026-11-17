@@ -16,7 +16,7 @@ import java.util.List;
  * 決定IDは「人が署名した」ことを system に伝える入力であって承認の証明ではない。値は署名後に人が設定し、
  * AI・実装者は設定しない。値は起動時に一度だけ bind され、実行中に変わらない。
  *
- * <p>D-02〜D-05・D-07・D-08 は、それを前提にする capability を追加する batch（REG・A1H・B1・B2 等）で足す。
+ * <p>D-02（REG）・D-03（REL・REG）・D-05（A1H）は追加済み。D-04・D-07・D-08 は、それを前提にする batch（B1・B2 等）で足す。
  */
 @Data
 @Component
@@ -36,8 +36,15 @@ public class PrivacyApprovalProperties {
     private DecisionReference d01 = new DecisionReference();
 
     /**
-     * D-03 署名鍵（Trust Anchor・KMS の方式と鍵）。hold 解除（NF07-REL）の開放の前提で、capability の承認 digest には含めない
-     * （{@link PrivacyDecisionBinding#evaluateStandalone} が解除の入口で D-05 と合わせて検査する）。
+     * D-02 保持期間・起算 trigger・法的根拠（DG-07 の核心）。policy envelope の登録・有効化（NF07-REG）の開放の前提で、
+     * capability の承認 digest には含めない（{@link PrivacyDecisionBinding#evaluateStandalone} が登録・有効化の入口で D-01・D-03 と
+     * 合わせて検査する）。
+     */
+    private DecisionReference d02 = new DecisionReference();
+
+    /**
+     * D-03 署名鍵（Trust Anchor・KMS の方式と鍵）。hold 解除（NF07-REL）と policy envelope の登録・有効化（NF07-REG）の開放の前提で、
+     * capability の承認 digest には含めない（{@link PrivacyDecisionBinding#evaluateStandalone} がそれぞれの入口で検査する）。
      */
     private DecisionReference d03 = new DecisionReference();
 
@@ -66,6 +73,7 @@ public class PrivacyApprovalProperties {
         }
         return switch (decision) {
             case D01 -> d01;
+            case D02 -> d02;
             case D03 -> d03;
             case D05 -> d05;
             case D06 -> d06;
