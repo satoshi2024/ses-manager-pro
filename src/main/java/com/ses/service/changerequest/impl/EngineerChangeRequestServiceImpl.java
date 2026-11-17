@@ -41,7 +41,10 @@ import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.skillsheet.SkillSheetGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -99,6 +102,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private final Clock clock;
     /** スキルシート確認の付帯情報をlinkへ記録する（link書込みの集約先。NF01 F3）。 */
     private final DocumentLinkCommandService documentLinkCommandService;
+    /** スキルシート確定で、文書のcommit後にlinkのtransactionを始めるために使う（RB-PRERUN 1）。 */
+    private final PlatformTransactionManager transactionManager;
 
     // ----------------------------------------------------------------
     // 本人
@@ -406,11 +411,23 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 fingerprint.equals(confirmedVersion));
     }
 
+    /**
+     * スキルシートを確定する。
+     *
+     * <p>このmethod自体はtransactionを持たない（NOT_SUPPORTED）。{@code registerGenerated}（NOT_SUPPORTED）は文書行を
+     * 別の接続でcommitするため、その前に外側のtransactionで1件でも読むと、REPEATABLE READのread viewが文書のcommitより前に
+     * 作られ、続く {@code DocumentService.link} の文書存在確認（非lock読み）が新しい文書を見られず、初回の確定だけが
+     * 404 {@code error.document.notFound} になる（2回目は冪等登録が既存文書を返すため成功していた。RB-PRERUN 1）。
+     * そのためpreviewは読取専用の短いtransactionで読み、ENGINEER linkの挿入と確認日時の記録は、文書のcommit後に始める
+     * 別のtransactionで一緒に行う。PDF生成・scan・storageの間はDB接続を保持しない。</p>
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public SkillSheetConfirmResult confirmSkillSheet(Long engineerId, String fingerprint) {
-        SkillSheetPreview preview = skillSheetPreview(engineerId);
-        if (fingerprint == null || !fingerprint.equals(preview.fingerprint())) {
+        TransactionTemplate readTransaction = new TransactionTemplate(transactionManager);
+        readTransaction.setReadOnly(true);
+        SkillSheetPreview preview = readTransaction.execute(status -> skillSheetPreview(engineerId));
+        if (preview == null || fingerprint == null || !fingerprint.equals(preview.fingerprint())) {
             throw BusinessException.of(409, "error.changeRequest.skillSheetStale");
         }
         byte[] pdf = skillSheetGenerator.generatePdf(engineerId);
@@ -429,12 +446,17 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                         .contentType("application/pdf")
                         .build(), new java.io.ByteArrayInputStream(pdf));
         // PDF生成・scan・storage・commitNew（registerGeneratedはNOT_SUPPORTED）をlockなしで終えてから、
-        // 文書行のX lock → ENGINEER link挿入 → 証跡利用可否epochの増分を行う（NF01 F3。lock順 15 → 17）。
-        documentService.link(document.getId(), "ENGINEER", engineerId);
-        // 確認時点をt_document_linkへ記録する（design §6.1: 確認ごとに更新）。付帯情報は利用可否を変えないため増分しない。
-        documentLinkCommandService.recordSkillSheetConfirmation(document.getTenantId(), document.getId(), engineerId,
-                LocalDateTime.now(clock), fingerprint);
-        return new SkillSheetConfirmResult(fingerprint, LocalDateTime.now(clock));
+        // 文書のcommit後に始めるtransactionで、文書行のX lock → ENGINEER link挿入 → 証跡利用可否epochの増分を行う
+        // （NF01 F3。lock順 15 → 17）。文書の存在確認・tenant照合は DocumentService.link のものをそのまま使う。
+        LocalDateTime confirmedAt = LocalDateTime.now(clock);
+        TransactionTemplate writeTransaction = new TransactionTemplate(transactionManager);
+        writeTransaction.executeWithoutResult(status -> {
+            documentService.link(document.getId(), "ENGINEER", engineerId);
+            // 確認時点をt_document_linkへ記録する（design §6.1: 確認ごとに更新）。付帯情報は利用可否を変えないため増分しない。
+            documentLinkCommandService.recordSkillSheetConfirmation(document.getTenantId(), document.getId(), engineerId,
+                    confirmedAt, fingerprint);
+        });
+        return new SkillSheetConfirmResult(fingerprint, confirmedAt);
     }
 
     @Override

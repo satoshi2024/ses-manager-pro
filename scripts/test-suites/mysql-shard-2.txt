@@ -38,3 +38,4 @@ DualConfirmationRaceMySqlTest
 DualConfirmationCoordinatorRetryMySqlTest
 PrivacyHoldReleaseMySqlTest
 PrivacyPolicyRegistrationMySqlTest
+SkillSheetConfirmFirstAttemptMySqlTest
