@@ -154,7 +154,7 @@
   - 既定（未設定）では、**初回リリース中に社内で登録した問い合わせとその返信・添付は、ON後も顧客へ出ない**。件名・本文は返信と異なり公開範囲を個別に指定できないため、この時刻による区切りが件名・本文を守る唯一の手段である。
   - 公開開始時刻を設定すると、その時刻以降に社内で登録した問い合わせは件名・本文・`PORTAL_VISIBLE` の返信・公開添付が顧客に見える（顧客portal利用者は招待時に `service-desk.view` を自動付与される）。設定する場合は、その時刻以降に社内で登録する問い合わせの件名・本文に顧客へ見せない内容を書かない運用とすること。
   - 内部サービスデスク（`/service-desk`、`/api/service-desk/**`）の一覧・詳細・返信・状態変更・添付は、この範囲の影響を受けない。
-- **ON前の確認（第二段階）**: (1) `visible-since` を設定するかと、その値をCS Ownerが決める。(2) 設定する場合は、その時刻以降に作成された社内登録分の件名・本文・`PORTAL_VISIBLE` 返信・公開添付を棚卸しする。(3) portalの問い合わせ詳細画面への画面リンク（`portal-service-desk.js` の「詳細・返信」が指す `/portal/customer/service-desk/requests/{id}`）には対応するpage controllerが無く404になる既存の不具合があるため、第二段階のON前に修正する。
+- **ON前の確認（第二段階）**: (1) `visible-since` を設定するかと、その値をCS Ownerが決める。(2) 設定する場合は、その時刻以降に作成された社内登録分の件名・本文・`PORTAL_VISIBLE` 返信・公開添付を棚卸しする（内部画面の一覧・詳細は、問い合わせごとに「顧客公開対象」か「社内限定」かをportalと同じ判定で表示する。RB-NF02）。(3) portalの問い合わせ詳細画面への画面リンク（`portal-service-desk.js` の「詳細・返信」が指す `/portal/customer/service-desk/requests/{id}`）には対応するpage controllerが無く404になる既存の不具合があるため、第二段階のON前に修正する。
 - ONにするには `FEATURE_NF02_ENABLED=true` と `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED=true` の両方が必要。portal側の権限（`service-desk.view` / `service-desk.create`）・招待・規約は既存portalの正本に従う。
 
 ### 4.4 NF-04

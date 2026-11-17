@@ -584,4 +584,96 @@ class FileScopeValidationServiceTest {
         assertThrows(BusinessException.class, () -> service.assertCertificationEvidenceDownloadAllowed(
                 "cert-evidence-tenant.pdf", 200L, 9100L, 100L, "abc123"));
     }
+
+    // ---------------------------------------------------------------- NF-02: portal添付downloadの公開範囲（W2 r2 P3-1）
+
+    @Mock private com.ses.mapper.ServiceRequestMapper serviceRequestMapper;
+    @Mock private com.ses.service.impl.ServiceRequestFileReferenceProvider serviceRequestFileReferenceProvider;
+
+    /**
+     * controller（{@code getPortalDetail}）を経ない呼出しでも、uploadと同じpolicyで公開範囲外の問い合わせを
+     * 他社と同じ404にする。文書版（scan中の403等）を引く前に止め、範囲外の添付の有無・状態を示さない。
+     */
+    @Test
+    void portal添付downloadは公開範囲外の問い合わせを文書版を引く前に404にする() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestMapper", serviceRequestMapper);
+        com.ses.entity.ServiceRequest internal = serviceRequest("INTERNAL", null,
+                java.time.LocalDateTime.of(2026, 3, 31, 23, 59));
+        when(serviceRequestMapper.selectOne(any())).thenReturn(internal);
+
+        // policy未注入はportal起票のみ（fail-closed。uploadと同じ既定）
+        BusinessException withoutPolicy = assertThrows(BusinessException.class,
+                () -> service.assertPortalServiceRequestDownloadAllowed("sr-key", 10L, 20L, 30L, portalLink()));
+        assertEquals(404, withoutPolicy.getCode());
+        assertEquals("error.notFound", withoutPolicy.getMessageKey());
+
+        // 公開開始時刻より前に社内で登録した問い合わせも範囲外
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalServiceRequestVisibilityPolicy",
+                new com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy(
+                        java.time.OffsetDateTime.parse("2026-04-01T00:00:00+09:00")));
+        BusinessException beforeSince = assertThrows(BusinessException.class,
+                () -> service.assertPortalServiceRequestDownloadAllowed("sr-key", 10L, 20L, 30L, portalLink()));
+        assertEquals(404, beforeSince.getCode());
+        assertEquals("error.notFound", beforeSince.getMessageKey());
+
+        verify(documentVersionMapper, never()).selectOne(any());
+        verify(documentMapper, never()).selectOne(any());
+    }
+
+    /** 上の拒否がpolicyによるものであること（範囲内の問い合わせは同じ入力で最後まで通る）。 */
+    @Test
+    void portal添付downloadは公開範囲内の問い合わせなら残りの検証を通過する() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestMapper", serviceRequestMapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestFileReferenceProvider",
+                serviceRequestFileReferenceProvider);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalServiceRequestVisibilityPolicy",
+                new com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy(
+                        java.time.OffsetDateTime.parse("2026-04-01T00:00:00+09:00")));
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(30L);
+        version.setTenantId("default");
+        version.setStorageKey("sr-key");
+        version.setScanStatus("CLEAN");
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
+        Document document = new Document();
+        document.setId(30L);
+        document.setTenantId("default");
+        document.setDocumentType("SERVICE_REQUEST_ATTACHMENT");
+        document.setLegalHoldFlag(0);
+        when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        DocumentLink typedLink = new DocumentLink();
+        typedLink.setDocumentId(30L);
+        typedLink.setTargetType("SERVICE_REQUEST");
+        typedLink.setTargetId(10L);
+        typedLink.setDeletedFlag(0);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(typedLink));
+        when(serviceRequestFileReferenceProvider.referencedFileNames()).thenReturn(java.util.Set.of("sr-key"));
+
+        // 公開開始時刻以降に社内で登録した問い合わせ、およびportal起票の問い合わせ（時刻に関係なく対象）
+        for (com.ses.entity.ServiceRequest visible : List.of(
+                serviceRequest("INTERNAL", null, java.time.LocalDateTime.of(2026, 4, 1, 0, 0)),
+                serviceRequest("PORTAL", 200L, java.time.LocalDateTime.of(2026, 1, 5, 9, 0)))) {
+            when(serviceRequestMapper.selectOne(any())).thenReturn(visible);
+            assertDoesNotThrow(() -> service.assertPortalServiceRequestDownloadAllowed(
+                    "sr-key", 10L, 20L, 30L, portalLink()), visible.getChannel());
+        }
+    }
+
+    private com.ses.entity.ServiceRequest serviceRequest(String channel, Long portalUserId,
+                                                         java.time.LocalDateTime createdAt) {
+        com.ses.entity.ServiceRequest request = new com.ses.entity.ServiceRequest();
+        request.setId(10L);
+        request.setTenantId("default");
+        request.setCustomerId(20L);
+        request.setChannel(channel);
+        request.setPortalUserId(portalUserId);
+        request.setCreatedAt(createdAt);
+        return request;
+    }
+
+    private com.ses.entity.ServiceAttachmentLink portalLink() {
+        return com.ses.entity.ServiceAttachmentLink.builder()
+                .serviceRequestId(10L).documentId(30L).visibility("PORTAL_VISIBLE").build();
+    }
 }

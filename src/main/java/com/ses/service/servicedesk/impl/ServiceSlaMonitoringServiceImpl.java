@@ -142,7 +142,14 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             }
 
             // 受信者なし・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
+            // 期限前のwarningは、初回応答の記録（RESPONSE）・解決（RESOLVE）・期限超過（超過通知が引き継ぐ）で
+            // 意味を失う。その再送は送らず台帳をCANCELLEDで閉じ、同じwarningを応答後・超過後に出さない（HYG1 P3-5）。
+            List<ServiceSlaEscalation> obsoleteRetries = new java.util.ArrayList<>();
             for (ServiceSlaEscalation retry : retryRows) {
+                if (isObsoleteWarningRetry(retry, clk)) {
+                    obsoleteRetries.add(retry);
+                    continue;
+                }
                 if (retry.getNextRetryAt() != null && retry.getNextRetryAt().isAfter(now)) {
                     continue;
                 }
@@ -175,6 +182,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                     continue;
                 }
                 clk.setVersion(version + 1);
+            }
+
+            // clockを更新する実行では、CASに負けたstaleなworkerは上でcontinueし閉じない（次回実行で再判定する）。
+            // 判定に使う初回応答・解決・超過の記録は戻らないため、clockを更新しない実行で閉じても結論は変わらない。
+            for (ServiceSlaEscalation obsolete : obsoleteRetries) {
+                cancelObsoleteRetry(obsolete, now);
             }
 
             boolean responseAlertSent = false;
@@ -271,6 +284,38 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private boolean shouldContinue(LocalDateTime lastAlertAt, LocalDateTime now) {
         return lastAlertAt == null || Duration.between(lastAlertAt, now).toMinutes() >= 30;
+    }
+
+    /**
+     * 再送してはならないwarningか。warningは期限前の予告なので、対象の期限について初回応答・解決が記録された後、
+     * または期限超過が判定された後（同じ実行で判定した場合を含む）は送らない。超過・継続の再送は対象外（従来どおり）。
+     */
+    private boolean isObsoleteWarningRetry(ServiceSlaEscalation retry, ServiceSlaClock clk) {
+        if (!"WARNING".equals(retry.getStage())) {
+            return false;
+        }
+        if ("RESPONSE".equals(retry.getBreachType())) {
+            return clk.getFirstRespondedAt() != null || Boolean.TRUE.equals(clk.getResponseBreached());
+        }
+        if ("RESOLVE".equals(retry.getBreachType())) {
+            return clk.getResolvedAt() != null || Boolean.TRUE.equals(clk.getResolveBreached());
+        }
+        return false;
+    }
+
+    /** 再送待ちの台帳だけをCANCELLEDにする（別workerが先にSENTへ確定した行は変えない）。 */
+    private void cancelObsoleteRetry(ServiceSlaEscalation retry, LocalDateTime now) {
+        int affected = escalationMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ServiceSlaEscalation>()
+                        .eq(ServiceSlaEscalation::getId, retry.getId())
+                        .eq(ServiceSlaEscalation::getStatus, "RETRY")
+                        .set(ServiceSlaEscalation::getStatus, "CANCELLED")
+                        .set(ServiceSlaEscalation::getNextRetryAt, null)
+                        .set(ServiceSlaEscalation::getUpdatedAt, now));
+        if (affected == 1) {
+            log.info("SLA warningの再送を取消しました（初回応答・解決・期限超過の後のため）: escalationId={} breachType={}",
+                    retry.getId(), retry.getBreachType());
+        }
     }
 
     private boolean hasRetry(List<ServiceSlaEscalation> rows, String breachType, String stage) {

@@ -37,9 +37,16 @@ public class ServiceRequestExportServiceImpl implements ServiceRequestExportServ
             writer.write("リクエスト番号,顧客名,カテゴリ,優先度,ステータス,件名,初回応答期限,初回応答日時,SLA応答超過,解決期限,解決日時,SLA解決超過,CSATスコア,起票日時");
             writer.newLine();
 
-            // 最大 2000 件取得
-            Page<ServiceRequestDto> page = serviceRequestService.searchInternalRequests(1, 2000, keyword, status, priority, category, customerId);
+            // 最大 1000 件取得。PaginationInnerInterceptor の maxLimit（PageUtils.MAX_PAGE_SIZE）を超える指定は
+            // 丸められるため、以前の「2000件」は実際には1000件だった（P3-N2-3）。上限は実際の値で指定し、超過分は出力しない。
+            Page<ServiceRequestDto> page = serviceRequestService.searchInternalRequests(1,
+                    (int) com.ses.common.util.PageUtils.MAX_PAGE_SIZE, keyword, status, priority, category, customerId);
             List<ServiceRequestDto> records = page.getRecords();
+            if (page.getTotal() > records.size()) {
+                // 件数だけを記録する（検索条件・顧客名等は出さない）。
+                log.warn("サービスデスクCSV出力を上限件数で打ち切りました: total={} exported={}",
+                        page.getTotal(), records.size());
+            }
 
             for (ServiceRequestDto r : records) {
                 String reqNo = escapeCsv(CsvUtils.sanitizeForSpreadsheet(r.getRequestNo()));

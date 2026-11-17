@@ -509,6 +509,115 @@ class ServiceSlaSchedulerTest {
         assertTrue(monitoringServiceImpl.resolveNotificationRecipients(request).isEmpty());
     }
 
+    // ---------------------------------------------------------------- HYG1 P3-5: warning再送の冪等性
+
+    @Test
+    @DisplayName("宛先不在でRETRYになった初回応答warningは初回応答の記録後に再送せずCANCELLEDで閉じる")
+    void responseWarningRetryIsCancelledAfterFirstResponse() {
+        WarningRetryFixture fixture = responseWarningRetryWithoutRecipient();
+        // 「対応着手」で初回応答を記録し、宛先になれる管理者を用意する
+        clockMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ServiceSlaClock>()
+                .eq(ServiceSlaClock::getId, fixture.clock().getId())
+                .set(ServiceSlaClock::getFirstRespondedAt, fixture.base().plusMinutes(3)));
+        SysUser admin = activeAdmin("warn_admin", fixture.tenantId());
+
+        // 再送時刻（+5分）を過ぎても、応答済みなので初回応答warningの再送を出さない
+        monitoringService.checkSlaBreaches(fixture.base().plusMinutes(6));
+        verify(notificationService, never()).publishToUser(eq(admin.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        com.ses.entity.ServiceSlaEscalation closed =
+                escalationMapper.selectByDedupeKeyAndTenant(fixture.dedupeKey(), fixture.tenantId());
+        assertEquals("CANCELLED", closed.getStatus());
+        org.junit.jupiter.api.Assertions.assertNull(closed.getNextRetryAt());
+
+        // 同じ管理者は有効な宛先である（解決期限のwarningは1回だけ届く）。上のnever()が空の断言でないことの確認
+        monitoringService.checkSlaBreaches(fixture.base().plusMinutes(95));
+        verify(notificationService, times(1)).publishToUser(eq(admin.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals("CANCELLED", escalationMapper.selectByDedupeKeyAndTenant(
+                fixture.dedupeKey(), fixture.tenantId()).getStatus());
+    }
+
+    @Test
+    @DisplayName("宛先不在でRETRYになった初回応答warningは期限超過後は再送せず超過通知だけを送る")
+    void responseWarningRetryIsSupersededByBreach() {
+        WarningRetryFixture fixture = responseWarningRetryWithoutRecipient();
+        SysUser admin = activeAdmin("breach_admin", fixture.tenantId());
+
+        // 未応答のまま初回応答期限（+20分）を過ぎた: 超過の初回通知だけを送り、期限前の予告は送らない
+        monitoringService.checkSlaBreaches(fixture.base().plusMinutes(21));
+        verify(notificationService, times(1)).publishToUser(eq(admin.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(notificationService, never()).publishToUser(eq(admin.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals("CANCELLED", escalationMapper.selectByDedupeKeyAndTenant(
+                fixture.dedupeKey(), fixture.tenantId()).getStatus());
+    }
+
+    @Test
+    @DisplayName("未応答で期限前の初回応答warningのRETRYは従来どおり宛先の出現後に1回だけ再送する")
+    void pendingResponseWarningRetryIsStillResentOnce() {
+        WarningRetryFixture fixture = responseWarningRetryWithoutRecipient();
+        SysUser admin = activeAdmin("resend_admin", fixture.tenantId());
+
+        monitoringService.checkSlaBreaches(fixture.base().plusMinutes(6));
+        monitoringService.checkSlaBreaches(fixture.base().plusMinutes(12));
+        verify(notificationService, times(1)).publishToUser(eq(admin.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), eq("service-desk"));
+        assertEquals("SENT", escalationMapper.selectByDedupeKeyAndTenant(
+                fixture.dedupeKey(), fixture.tenantId()).getStatus());
+    }
+
+    private record WarningRetryFixture(String tenantId, ServiceSlaClock clock, String dedupeKey, LocalDateTime base) {
+    }
+
+    /**
+     * 専用tenant（管理者なし＝宛先不在）で、初回応答期限まで20分の問い合わせを1回監視し、
+     * 初回応答warningをRETRY台帳（recipientCount=0）にした状態を作る。
+     */
+    private WarningRetryFixture responseWarningRetryWithoutRecipient() {
+        String tenantId = "nf02-warning-retry-" + UUID.randomUUID();
+        AccountingTenantContextHolder.setTenantId(tenantId);
+        Customer customer = Customer.builder().companyName("warning再送顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId(tenantId);
+        customerMapper.insert(customer);
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .tenantId(tenantId).customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("warning retry").description("retry").build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.plusMinutes(20)).resolveDeadline(base.plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        monitoringService.checkSlaBreaches(base);
+
+        String dedupeKey = "SLA_WARNING:" + req.getId() + ":1:RESPONSE:WARNING";
+        com.ses.entity.ServiceSlaEscalation pending = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, tenantId);
+        assertNotNull(pending);
+        assertEquals("RETRY", pending.getStatus());
+        assertEquals(0, pending.getRecipientCount());
+        verify(notificationService, never()).publishToUser(any(), startsWith("SLA_"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        return new WarningRetryFixture(tenantId, clock, dedupeKey, base);
+    }
+
+    private SysUser activeAdmin(String prefix, String tenantId) {
+        // username = prefix + "_" + UUID(36文字) は sys_user.username VARCHAR(50) に収める（prefixは13文字以下）
+        SysUser user = new SysUser();
+        user.setTenantId(tenantId);
+        user.setUsername(prefix + "_" + UUID.randomUUID());
+        user.setPassword("pass123");
+        user.setRealName(prefix);
+        user.setRole("管理者");
+        user.setStatus(1);
+        userMapper.insert(user);
+        return user;
+    }
+
     private SysUser activeUser(String prefix) {
         SysUser user = new SysUser();
         user.setUsername(prefix + "_" + UUID.randomUUID());

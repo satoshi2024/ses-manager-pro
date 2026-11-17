@@ -40,13 +40,41 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    /**
+     * NF-02 P3-N2-1: 添付できないファイル形式（415）は500（SYSTEM）へ丸めず、status行・本文とも415と
+     * 設定済みkeyの文言で返す。keyを解決できない場合は業務エラーの固定文言（400と同じ）にする。
+     */
     @Test
-    void 許可外の業務例外codeは従来どおり500へ丸め413だけを追加で許可する() {
+    void 業務例外415はstatus行と本文の両方で415として返却され設定済みkeyの文言を使う() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        StaticMessageSource source = new StaticMessageSource();
+        source.addMessage("error.file.typeNotAllowed", java.util.Locale.getDefault(), "添付できないファイル形式です");
+        org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", source);
+        try {
+            var response = handler.handleBusinessException(BusinessException.of(415, "error.file.typeNotAllowed"));
+
+            assertEquals(415, response.getStatusCode().value());
+            assertEquals(415, response.getBody().getCode());
+            assertEquals("添付できないファイル形式です", response.getBody().getMessage());
+            assertEquals("BUSINESS", CorrelationContext.get(CorrelationContext.ERROR_CATEGORY));
+
+            org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", null);
+            var withoutSource = handler.handleBusinessException(BusinessException.of(415, "error.file.typeNotAllowed"));
+            assertEquals(415, withoutSource.getStatusCode().value());
+            assertEquals("入力内容を確認してください。", withoutSource.getBody().getMessage());
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void 許可外の業務例外codeは従来どおり500へ丸め413と415だけを追加で許可する() {
         assertEquals(413, SafeErrorPolicy.safeHttpCode(413));
+        assertEquals(415, SafeErrorPolicy.safeHttpCode(415));
         for (int code : new int[]{400, 401, 403, 404, 409, 429, 500, 502, 503}) {
             assertEquals(code, SafeErrorPolicy.safeHttpCode(code));
         }
-        for (int code : new int[]{405, 408, 410, 415, 422, 504, 0, -1}) {
+        for (int code : new int[]{405, 408, 410, 422, 504, 0, -1}) {
             assertEquals(500, SafeErrorPolicy.safeHttpCode(code), "code=" + code);
         }
     }

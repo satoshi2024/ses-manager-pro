@@ -102,6 +102,26 @@ class PortalServiceRequestVisibleSinceIntegrationTest {
         assertThat(accepted.organizationId()).isNull();
     }
 
+    /** W2 r2 P3-5: 内部の一覧・単票は、portalの一覧と同じ判定で「顧客公開対象／社内限定」を示す。 */
+    @Test
+    void 内部の一覧と単票はportalと同じ判定で顧客公開対象かを示す() {
+        ServiceRequest before = request(customer, false, SINCE.minusSeconds(1));
+        ServiceRequest boundary = request(customer, false, SINCE);
+        ServiceRequest portal = request(customer, true, SINCE.minusYears(1));
+
+        var internal = service.searchInternalRequests(1, 50, null, null, null, null, customer.getId());
+        assertThat(internal.getRecords())
+                .extracting(com.ses.dto.servicedesk.ServiceRequestDto::getId,
+                        com.ses.dto.servicedesk.ServiceRequestDto::getPortalVisible)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.api.Assertions.tuple(before.getId(), false),
+                        org.assertj.core.api.Assertions.tuple(boundary.getId(), true),
+                        org.assertj.core.api.Assertions.tuple(portal.getId(), true));
+        assertThat(service.getInternalDetail(before.getId()).getPortalVisible()).isFalse();
+        assertThat(service.getInternalDetail(boundary.getId()).getPortalVisible()).isTrue();
+        assertThat(service.getInternalDetail(portal.getId()).getPortalVisible()).isTrue();
+    }
+
     @Test
     void 公開開始前の社内起票は解決済みでもCSAT不可で開始後は回答できる() {
         ServiceRequest before = request(customer, false, SINCE.minusSeconds(1));

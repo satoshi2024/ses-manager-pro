@@ -300,7 +300,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public Page<ServiceRequestDto> searchInternalRequests(int page, int size, String keyword, String status,
                                                           String priority, String category, Long customerId) {
-        Page<ServiceRequest> mpPage = new Page<>(page, size);
+        // 負・0のsizeによる全件取得を防ぎ、上限を全体のmaxLimitにそろえる（P3-N2-3）。
+        Page<ServiceRequest> mpPage = com.ses.common.util.PageUtils.safePage(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceRequest::getTenantId, currentTenant());
 
@@ -313,7 +314,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 // all件可視
             } else {
                 if (allowed.isEmpty()) {
-                    return new Page<>(page, size, 0);
+                    return new Page<>(mpPage.getCurrent(), mpPage.getSize(), 0);
                 }
                 wrapper.in(ServiceRequest::getCustomerId, allowed);
             }
@@ -353,7 +354,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "顧客組織情報が必要です");
         }
 
-        Page<ServiceRequest> mpPage = new Page<>(page, size);
+        Page<ServiceRequest> mpPage = com.ses.common.util.PageUtils.safePage(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceRequest::getTenantId, currentTenant());
         wrapper.eq(ServiceRequest::getCustomerId, customerId);
@@ -1135,6 +1136,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .reopenedAt(req.getReopenedAt())
                 .reopenCount(req.getReopenCount())
                 .portalUserId(req.getPortalUserId())
+                // 内部画面で「顧客公開対象／社内限定」を示す。portal経路と同じpolicyで判定する（W2 r2 P3-5）。
+                .portalVisible(isPortalVisible(req))
                 .createdBy(req.getCreatedBy())
                 .createdByName(creatorUser != null ? creatorUser.getRealName() : null)
                 .version(req.getVersion())

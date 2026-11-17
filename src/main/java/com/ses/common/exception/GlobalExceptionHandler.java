@@ -190,6 +190,8 @@ public class GlobalExceptionHandler {
             case 409 -> HttpStatus.CONFLICT;
             // SafeErrorPolicy.safeHttpCodeが許可する413（上限超過）をstatus行でも413として返す。
             case 413 -> HttpStatus.PAYLOAD_TOO_LARGE;
+            // 同じく許可済みの415（添付できないファイル形式。NF-02 P3-N2-1）。
+            case 415 -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
             case 502 -> HttpStatus.BAD_GATEWAY;
             case 503 -> HttpStatus.SERVICE_UNAVAILABLE;

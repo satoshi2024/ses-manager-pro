@@ -69,6 +69,13 @@ public class ServiceRequestDto {
 
     private Long portalUserId;
 
+    /**
+     * 顧客ポータルへ出す範囲の問い合わせか（{@code PortalServiceRequestVisibilityPolicy} と同じ判定。portal起票、
+     * または公開開始時刻以降の作成）。内部画面の「顧客公開対象／社内限定」表示に使う。
+     * 顧客ポータルの子スイッチがOFFの間は、trueでも顧客には表示されない。
+     */
+    private Boolean portalVisible;
+
     private Long createdBy;
 
     private String createdByName;
