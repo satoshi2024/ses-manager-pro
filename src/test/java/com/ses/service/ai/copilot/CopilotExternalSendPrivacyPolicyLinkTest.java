@@ -254,8 +254,8 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
     private AiExecutionGatewayImpl gateway(CopilotBoundedAiTextService adapter, PolicyEnforcementPort nf07) {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock,
-                new AiExternalSendPrivacyPolicyCheck(() -> nf07, () -> meters));
+        AiProductionApprovalGate gate = AiExternalSendApprovalFixtures.gate(config, clock,
+                AiExternalSendApprovalFixtures.privacyPolicyCheck(nf07, meters));
         return new AiExecutionGatewayImpl(adapter, config, probe, new ObjectMapper(),
                 mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
                 mock(PlatformTransactionManager.class), clock, gate, new CopilotFeatureGate(config, gate),

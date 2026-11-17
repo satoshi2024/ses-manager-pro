@@ -374,16 +374,28 @@ class ProductionPolicyEnforcementServiceTest {
         }
     }
 
+    /** RB-NF08-LINK review P3-1: 許可は foundation の中だけで作り、拒否の入口から許可を作れない。 */
     @Test
-    void 判定結果は可否と理由コードの組を矛盾させない() {
-        assertThrows(IllegalArgumentException.class, () -> new PolicyEnforcementDecision(true,
-                PolicyEnforcementReason.POLICY_UNKNOWN, PolicyFailureReason.NONE));
-        assertThrows(IllegalArgumentException.class, () -> new PolicyEnforcementDecision(false,
-                PolicyEnforcementReason.PERMITTED, PolicyFailureReason.NONE));
-        assertThrows(IllegalArgumentException.class, () -> new PolicyEnforcementDecision(true,
-                PolicyEnforcementReason.PERMITTED, PolicyFailureReason.SIGNATURE_INVALID));
-        assertEquals(PolicyFailureReason.NONE,
-                PolicyEnforcementDecision.deny(PolicyEnforcementReason.POLICY_DRIFT, null).detail());
+    void 判定結果は拒否の入口から許可を作れずpublicなconstructorを持たない() {
+        assertThrows(IllegalArgumentException.class,
+                () -> PolicyEnforcementDecision.deny(PolicyEnforcementReason.PERMITTED, PolicyFailureReason.NONE));
+        assertThrows(NullPointerException.class, () -> PolicyEnforcementDecision.deny(null, PolicyFailureReason.NONE));
+        PolicyEnforcementDecision denied = PolicyEnforcementDecision.deny(PolicyEnforcementReason.POLICY_DRIFT, null);
+        assertFalse(denied.permitted());
+        assertEquals(PolicyFailureReason.NONE, denied.detail());
+        PolicyEnforcementDecision permitted = PolicyEnforcementDecision.permit();
+        assertTrue(permitted.permitted());
+        assertEquals(PolicyEnforcementReason.PERMITTED, permitted.reason());
+        assertEquals(PolicyFailureReason.NONE, permitted.detail());
+
+        assertEquals(0, PolicyEnforcementDecision.class.getConstructors().length, "public constructorを持たない");
+        for (java.lang.reflect.Method method : PolicyEnforcementDecision.class.getDeclaredMethods()) {
+            if (method.getReturnType() == PolicyEnforcementDecision.class
+                    && java.lang.reflect.Modifier.isPublic(method.getModifiers())) {
+                assertEquals("deny", method.getName(), "publicに作れるのは拒否だけ: " + method.getName());
+            }
+        }
+        assertFalse(PolicyEnforcementDecision.class.isRecord(), "recordは公開のconstructorを持つため使わない");
     }
 
     // ---------------------------------------------------------------- helper

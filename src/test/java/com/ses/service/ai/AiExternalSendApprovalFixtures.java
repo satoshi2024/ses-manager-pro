@@ -91,11 +91,25 @@ public final class AiExternalSendApprovalFixtures {
                         && "gemini-adapter".equals(request.providerId())
                         && request.tenantId() != null && !request.tenantId().isBlank()
                         && request.approvalSignedBefore() != null
-                        ? com.ses.privacy.foundation.PolicyEnforcementDecision.permit()
+                        ? com.ses.privacy.foundation.PolicyEnforcementTestDecisions.permit()
                         : com.ses.privacy.foundation.PolicyEnforcementDecision.deny(
                                 com.ses.privacy.foundation.PolicyEnforcementReason.POLICY_ID_MISMATCH,
                                 com.ses.privacy.foundation.PolicyFailureReason.NONE);
-        return new AiExternalSendPrivacyPolicyCheck(() -> port, () -> null);
+        return privacyPolicyCheck(port, null);
+    }
+
+    /**
+     * test-only の port で NF07-NF08-LINK の check を作る（main では check の constructor が package-private で、作れるのは
+     * {@link AiProductionApprovalGate} だけ。RB-NF08-LINK review P3-1）。
+     */
+    public static AiExternalSendPrivacyPolicyCheck privacyPolicyCheck(com.ses.privacy.foundation.PolicyEnforcementPort port,
+                                                                      io.micrometer.core.instrument.MeterRegistry registry) {
+        return new AiExternalSendPrivacyPolicyCheck(() -> port, () -> registry);
+    }
+
+    /** check を指定した gate（main では package-private の constructor。test-only の check だけを渡す）。 */
+    public static AiProductionApprovalGate gate(AiConfig config, Clock clock, AiExternalSendPrivacyPolicyCheck check) {
+        return new AiProductionApprovalGate(config, clock, check);
     }
 
     public static void enableChecklist(AiConfig.ProductionGates gates) {

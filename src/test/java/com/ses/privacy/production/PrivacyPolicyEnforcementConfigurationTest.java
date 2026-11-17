@@ -26,7 +26,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class PrivacyPolicyEnforcementConfigurationTest {
 
     private static final PolicyEnforcementRequest REQUEST = new PolicyEnforcementRequest("tenant-a",
-            "NF08_AI_SUMMARY", "AI_PROMPT_LOG", "EXTERNAL_DISPATCH", "gemini-adapter", "NF07-POL-2026-0007",
+            "NF08_AI_SUMMARY", "AI_EXTERNAL_PROVIDER_COPY", "EXTERNAL_DISPATCH", "gemini-adapter", "NF07-POL-2026-0007",
             Instant.parse("2026-11-17T15:00:00Z"));
 
     @Test
@@ -113,7 +113,7 @@ class PrivacyPolicyEnforcementConfigurationTest {
                 flags, dataElements, policies, windowProvider, trust, Clock.fixed(now, ZoneOffset.UTC));
         assertThat(trust.anchorReads.get() + trust.revocationReads.get()).as("構築時に trust source を読まない").isZero();
         com.ses.service.ai.AiExternalSendPrivacyPolicyCheck check =
-                new com.ses.service.ai.AiExternalSendPrivacyPolicyCheck(() -> port, () -> null);
+                com.ses.service.ai.AiExternalSendApprovalFixtures.privacyPolicyCheck(port, null);
         java.util.function.Supplier<PolicyEnforcementReason> send = () -> check.evaluate("tenant-a",
                 approval, com.ses.service.ai.AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY);
 
@@ -179,7 +179,7 @@ class PrivacyPolicyEnforcementConfigurationTest {
                 "1", "policy-issuer-test", "k1", "tenant-a", "NF08_AI_SUMMARY", "PRODUCTION", "r1", "requester-test",
                 "approver-test", REVOCATION_REF, issuedAt, issuedAt, now.plus(java.time.Duration.ofDays(30)));
         com.ses.privacy.foundation.PolicyApprovalEnvelope unsigned = new com.ses.privacy.foundation.PolicyApprovalEnvelope(
-                metadata, "NF07-POL-2026-0007", "v1", "AI_PROMPT_LOG", "EXTERNAL_DISPATCH", "gemini-adapter",
+                metadata, "NF07-POL-2026-0007", "v1", "AI_EXTERNAL_PROVIDER_COPY", "EXTERNAL_DISPATCH", "gemini-adapter",
                 "TEST_PURPOSE", "TEST_TRIGGER", "TEST_ONLY_RULE", "TEST_ONLY_DISPOSITION", new byte[]{0});
         byte[] canonical = com.ses.privacy.foundation.ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
         java.security.Signature signer = java.security.Signature.getInstance("Ed25519");
@@ -187,7 +187,7 @@ class PrivacyPolicyEnforcementConfigurationTest {
         signer.update(canonical);
         com.ses.privacy.foundation.TrustedAuthority anchor = new com.ses.privacy.foundation.TrustedAuthority(
                 "policy-issuer-test", "k1", keyPair.getPublic(), java.util.Set.of("tenant-a"),
-                java.util.Set.of("NF08_AI_SUMMARY"), java.util.Set.of("AI_PROMPT_LOG"), java.util.Set.of("POLICY"),
+                java.util.Set.of("NF08_AI_SUMMARY"), java.util.Set.of("AI_EXTERNAL_PROVIDER_COPY"), java.util.Set.of("POLICY"),
                 java.util.Set.of("PRODUCTION"), java.util.Set.of("EXTERNAL_DISPATCH"), java.util.Set.of("gemini-adapter"),
                 now.minus(java.time.Duration.ofDays(7)), now.plus(java.time.Duration.ofDays(365)));
         com.ses.entity.privacy.RetentionPolicy row = new com.ses.entity.privacy.RetentionPolicy();

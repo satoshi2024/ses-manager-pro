@@ -11,7 +11,6 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiExternalSendApprovalFixtures;
 import com.ses.service.ai.AiExternalSendPrivacyPolicyCheck;
-import com.ses.service.ai.AiProductionApprovalGate;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
 import com.ses.service.ai.copilot.summary.ApprovedExternalSendCostPolicy;
@@ -179,7 +178,7 @@ class GeminiCopilotInvocationBoundaryTest {
             RestTemplate legacy = mock(RestTemplate.class);
             // NF07-NF08-LINK の判定は fixture の policy だけを許可する test-only の check（NF07 側の拒否は下の別 test）。
             GeminiTextServiceImpl adapter = new GeminiTextServiceImpl(config, legacy, new ObjectMapper(), guard, transport,
-                    new AiProductionApprovalGate(config, Clock.systemUTC(),
+                    AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(),
                             AiExternalSendApprovalFixtures.permittingPrivacyPolicy()), Clock.systemUTC());
             CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
             AiExternalSendApproval.Snapshot approval = AiExternalSendApproval.evaluate(
@@ -238,16 +237,16 @@ class GeminiCopilotInvocationBoundaryTest {
             config.setApiKey("synthetic-key");
             OutboundUrlGuard guard = mock(OutboundUrlGuard.class);
             AtomicInteger nf07Calls = new AtomicInteger();
-            AiExternalSendPrivacyPolicyCheck denying = new AiExternalSendPrivacyPolicyCheck(() -> request -> {
+            AiExternalSendPrivacyPolicyCheck denying = AiExternalSendApprovalFixtures.privacyPolicyCheck(request -> {
                 nf07Calls.incrementAndGet();
                 return PolicyEnforcementDecision.deny(PolicyEnforcementReason.POLICY_REVOKED,
                         PolicyFailureReason.ENVELOPE_REVOKED);
-            }, () -> null);
+            }, null);
             AiExternalSendApproval.Snapshot approval = AiExternalSendApproval.evaluate(
                     config, AiExternalSendApprovalFixtures.today()).snapshot();
             for (GeminiTextServiceImpl adapter : List.of(
                     new GeminiTextServiceImpl(config, mock(RestTemplate.class), new ObjectMapper(), guard, transport,
-                            new AiProductionApprovalGate(config, Clock.systemUTC(), denying), Clock.systemUTC()),
+                            AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(), denying), Clock.systemUTC()),
                     // 共有gateを持たない手動構築は NF07 を確認できないため送信しない
                     new GeminiTextServiceImpl(config, mock(RestTemplate.class), new ObjectMapper(), guard, transport))) {
                 CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
@@ -261,7 +260,7 @@ class GeminiCopilotInvocationBoundaryTest {
 
             // 実行tenantが無ければ、許可するcheckでもNF07へ問い合わせずに拒否する
             GeminiTextServiceImpl linked = new GeminiTextServiceImpl(config, mock(RestTemplate.class),
-                    new ObjectMapper(), guard, transport, new AiProductionApprovalGate(config, Clock.systemUTC(),
+                    new ObjectMapper(), guard, transport, AiExternalSendApprovalFixtures.gate(config, Clock.systemUTC(),
                             AiExternalSendApprovalFixtures.permittingPrivacyPolicy()), Clock.systemUTC());
             CopilotConfigSnapshot linkedSnapshot = CopilotConfigSnapshot.capture(config, linked);
             PreflightCostEvidence linkedEvidence = new ApprovedExternalSendCostPolicy(approval)

@@ -48,7 +48,10 @@ public class AiProductionApprovalGate {
         this(aiConfig, clock, AiExternalSendPrivacyPolicyCheck.unavailable());
     }
 
-    /** 本番DI。NF07 の内部判定 port は送信のたびに取得し、取得できなければ拒否する。 */
+    /**
+     * 本番DI。NF07 の内部判定 port は送信のたびに取得し、取得できなければ拒否する。main で {@link PolicyEnforcementPort} を
+     * 参照・実装できる class は {@code PolicyEnforcementCallSiteTest} が固定するため、偽の port をこの入口へ渡す経路は作れない。
+     */
     @Autowired
     public AiProductionApprovalGate(AiConfig aiConfig, Clock clock,
                                     ObjectProvider<PolicyEnforcementPort> policyEnforcementProvider,
@@ -58,9 +61,11 @@ public class AiProductionApprovalGate {
                 meterRegistryProvider == null ? () -> null : meterRegistryProvider::getIfAvailable));
     }
 
-    /** NF07 policy の判定を指定する構築（テストでは test-only の port を渡す）。 */
-    public AiProductionApprovalGate(AiConfig aiConfig, Clock clock,
-                                    AiExternalSendPrivacyPolicyCheck privacyPolicyCheck) {
+    /**
+     * NF07 policy の判定を指定する構築。判定に使う check を決める入口のため package-private にする（test は
+     * {@code AiExternalSendApprovalFixtures} 経由で test-only の port を渡す。RB-NF08-LINK review P3-1）。
+     */
+    AiProductionApprovalGate(AiConfig aiConfig, Clock clock, AiExternalSendPrivacyPolicyCheck privacyPolicyCheck) {
         this.aiConfig = aiConfig;
         this.clock = clock == null ? Clock.system(AiExternalSendApproval.BUSINESS_ZONE) : clock;
         this.privacyPolicyCheck = privacyPolicyCheck == null

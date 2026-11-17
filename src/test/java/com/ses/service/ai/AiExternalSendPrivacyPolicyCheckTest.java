@@ -10,6 +10,7 @@ import com.ses.privacy.foundation.PolicyEnforcementDecision;
 import com.ses.privacy.foundation.PolicyEnforcementPort;
 import com.ses.privacy.foundation.PolicyEnforcementReason;
 import com.ses.privacy.foundation.PolicyEnforcementRequest;
+import com.ses.privacy.foundation.PolicyEnforcementTestDecisions;
 import com.ses.privacy.foundation.PolicyFailureReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -62,12 +63,12 @@ class AiExternalSendPrivacyPolicyCheckTest {
 
     @Test
     void NF08の定数のkeyと承認設定のpolicyIdと実行tenantでNF07へ問い合わせる() {
-        AiExternalSendPrivacyPolicyCheck check = check(answering(PolicyEnforcementDecision.permit()));
+        AiExternalSendPrivacyPolicyCheck check = check(answering(PolicyEnforcementTestDecisions.permit()));
 
         assertTrue(check.permits(TENANT, approval(), AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
 
         // 承認の署名日（fixture は TODAY の前日 2026-11-12）の翌日0時 JST を上限として渡す（W3-03 P3-2）
-        assertEquals(List.of(new PolicyEnforcementRequest(TENANT, "NF08_AI_SUMMARY", "AI_PROMPT_LOG",
+        assertEquals(List.of(new PolicyEnforcementRequest(TENANT, "NF08_AI_SUMMARY", "AI_EXTERNAL_PROVIDER_COPY",
                 "EXTERNAL_DISPATCH", "gemini-adapter", AiExternalSendApprovalFixtures.NF07_POLICY_ID,
                 Instant.parse("2026-11-12T15:00:00Z"))), requests);
         assertTrue(appender.list.isEmpty(), "許可はlogを出さない");
@@ -123,7 +124,7 @@ class AiExternalSendPrivacyPolicyCheckTest {
         AtomicInteger calls = new AtomicInteger();
         AiExternalSendPrivacyPolicyCheck check = check(request -> {
             calls.incrementAndGet();
-            return PolicyEnforcementDecision.permit();
+            return PolicyEnforcementTestDecisions.permit();
         });
         AiExternalSendApproval.Snapshot approval = approval();
         AiExternalSendApproval.Snapshot otherProvider = new AiExternalSendApproval.Snapshot(approval.decisionId(),
@@ -166,7 +167,7 @@ class AiExternalSendPrivacyPolicyCheckTest {
         }
 
         AiProductionApprovalGate linked = new AiProductionApprovalGate(config, clock,
-                check(answering(PolicyEnforcementDecision.permit())));
+                check(answering(PolicyEnforcementTestDecisions.permit())));
         assertTrue(linked.externalSendPrivacyPolicyPermits(TENANT, approval,
                 AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY));
         linked.assertExternalSendPrivacyPolicy(TENANT, approval, AiExternalSendPrivacyPolicyCheck.Stage.GATEWAY);

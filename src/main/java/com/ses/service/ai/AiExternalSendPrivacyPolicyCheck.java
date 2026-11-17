@@ -30,8 +30,13 @@ public final class AiExternalSendPrivacyPolicyCheck {
 
     /** NF07 policy key の module（計画 §8 の手順2）。 */
     public static final String MODULE_CODE = "NF08_AI_SUMMARY";
-    /** NF07 policy key の data element（計画 §8 の手順2。本番の正式な値は F2/REG で確定する）。 */
-    public static final String DATA_ELEMENT_ID = "AI_PROMPT_LOG";
+    /**
+     * NF07 policy key の data element。本番の data element catalog（V196）にある、Gemini への送信で生じる外部 provider 側の写し
+     * （{@code AI_PAYLOAD}・storage {@code gemini-adapter.request}・{@code pii-inventory.md#3}）。外部送信 policy は「送信して
+     * provider に写しを持たせる」ことを管理するため、この element に束縛する（RB-NF08-LINK review P3-2、主控決定。DDL なし）。
+     * Privacy Owner がこの束縛を確認する（未取得）。
+     */
+    public static final String DATA_ELEMENT_ID = "AI_EXTERNAL_PROVIDER_COPY";
     /** NF07 policy key の action。 */
     public static final String ACTION = "EXTERNAL_DISPATCH";
     /** NF08 の provider 名（承認設定の provider、小文字）から NF07 policy key の provider ID への対応。 */
@@ -57,10 +62,13 @@ public final class AiExternalSendPrivacyPolicyCheck {
     private final Supplier<MeterRegistry> registry;
 
     /**
+     * 判定に使う port を決める入口のため package-private にする（main で作るのは {@link AiProductionApprovalGate} だけ。
+     * {@code PolicyEnforcementCallSiteTest} が source の走査で固定する。RB-NF08-LINK review P3-1）。
+     *
      * @param port     NF07 の内部判定 port。取得できなければ（null・例外）拒否する
      * @param registry metric の登録先。取得できなければ metric を出さない（判定には影響しない）
      */
-    public AiExternalSendPrivacyPolicyCheck(Supplier<PolicyEnforcementPort> port, Supplier<MeterRegistry> registry) {
+    AiExternalSendPrivacyPolicyCheck(Supplier<PolicyEnforcementPort> port, Supplier<MeterRegistry> registry) {
         this.port = port == null ? () -> null : port;
         this.registry = registry == null ? () -> null : registry;
     }
