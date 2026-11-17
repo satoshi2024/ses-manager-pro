@@ -66,9 +66,14 @@ import java.util.function.Function;
  *       （fail-closed）。運用者が設定したdrain確認時刻より前に取得されたleaseだけ期限後の引き継ぎを許可し、
  *       確認時刻または本instance起動時刻以降に取得されたleaseは稼働中の旧版schedulerとみなして止める。</li>
  *   <li>retry上限: 連続失敗が {@link ReportScheduleMapper#MAX_CONSECUTIVE_FAILURES} 回に達したfailure completionで
- *       scheduleを停止し、停止理由を保存する（管理者の再有効化で再開）。</li>
+ *       scheduleを停止し、停止理由を保存する（管理者の再有効化で再開）。completionに至らずlease期限を超えた実行
+ *       （poison pill等）も引き継ぎ時に連続失敗1回として数え、上限に達する引き継ぎはせずに停止する（review P3-6）。</li>
  *   <li>確定的なclaim SQL失敗は当該行だけを見送り、同tenantの残り候補は続行する。見送った行は連続回数に応じた
  *       待機（5分×回数、上限60分）の間due一覧から除外し、LIMIT枠を占有させない。</li>
+ *   <li>tenant単位の隔離: 1 tenantのdue処理が例外で中断しても、ERRORとmetricを残して残りのtenantを続行する
+ *       （review P3-12）。全tenant共通の起動guardだけは従来どおりfail-closedで全tenantを止める。</li>
+ *   <li>時計の差の観測: processing leaseは本nodeの時計、ShedLockはDBの時計で判定するため、claimを始めるpollごとに
+ *       両者の差を測ってgaugeへ出し、閾値を超えたらWARNする（review P2-2）。判定や挙動は変えない。</li>
  * </ul>
  */
 @Slf4j
@@ -84,6 +89,10 @@ public class ManagementReportScheduler {
     private static final int MAX_BACKED_OFF_SCHEDULES = 500;
     /** 待機が終わってからこの時間選ばれなかった記録は捨てる（削除・無効化された行の記録を残さない）。 */
     private static final int REJECTED_CLAIM_FORGET_HOURS = 24;
+    /** 時計の差のWARNを繰り返さない間隔（差が続く間、毎pollのWARN反復を避ける）。gaugeは測るたびに更新する。 */
+    private static final int CLOCK_SKEW_WARN_INTERVAL_MINUTES = 60;
+    /** DBの {@code UNIX_TIMESTAMP()} は秒の切捨てのため、DB時刻の推定値は返却秒の中央（+500ms）とし、同じ幅を誤差に含める。 */
+    private static final long DB_SECOND_TRUNCATION_MILLIS = 500L;
 
     private final ReportScheduleMapper scheduleMapper;
     private final ReportScheduleClaimService claimService;
@@ -112,6 +121,15 @@ public class ManagementReportScheduler {
      */
     @Value("${management-report.legacy-lease-drain-confirmed-before:}")
     private String legacyLeaseDrainConfirmedBefore;
+    /**
+     * 本nodeの時計とDBの時計の差をWARNする閾値（秒。測定誤差を差し引いた差がこれを超えたらWARN）。
+     * 既定の5秒は、測定誤差（DB側の秒切捨てと往復時間）を十分に超える最小限の値として置いた実装上の既定値であり、
+     * 運用上の許容値の決定ではない（許容値とalert閾値はSREが決める。scheduler-claim-fence-plan.md §11 P2-2）。
+     */
+    @Value("${management-report.clock-skew-warn-seconds:5}")
+    private long clockSkewWarnSeconds = 5L;
+    /** 直近に時計の差をWARNした時刻（instance内。再起動で消える）。 */
+    private volatile Instant lastClockSkewWarnAt;
     /**
      * 確定的なclaim SQL失敗で見送ったscheduleの再試行待ち（instance内メモリ。再起動で消える）。
      * 毎pollのERROR反復と、失敗行がdue一覧のLIMIT枠を占有し続けることを防ぐ（review P3-8）。
@@ -160,9 +178,69 @@ public class ManagementReportScheduler {
             if (!legacyLeaseGuardAllowsClaims()) {
                 return null;
             }
-            tenantAwareBatchRunner.run(this::dispatchDueForTenant);
+            // claimを始めるpollだけで測る（guardで止めたpollではleaseの時刻を使わない）。
+            observeClockSkew();
+            tenantAwareBatchRunner.run(this::dispatchDueForTenantIsolated);
             return null;
         });
+    }
+
+    /**
+     * 本nodeの時計とDBサーバーの時計の差を測り、gaugeへ出す（review P2-2、診断のみ）。processing leaseの取得・期限判定は
+     * 本nodeの時計、ShedLock（{@code usingDbTime}）はDBの時計で行うため、差sの分だけ実効leaseが30−s分になる。
+     * 判定の時刻源は変えない（変えない理由はscheduler-claim-fence-plan.md §11）。測定の失敗はpollを止めない。
+     */
+    private void observeClockSkew() {
+        Instant before = clock.instant();
+        Long dbEpochSecond;
+        try {
+            dbEpochSecond = scheduleMapper.selectDbEpochSecond();
+        } catch (RuntimeException failure) {
+            log.debug("[定期管理レポート] DB時刻を取得できないため、時計の差の測定を見送りました: exceptionType={}",
+                    LogRedaction.exceptionType(failure));
+            return;
+        }
+        Instant after = clock.instant();
+        if (dbEpochSecond == null) {
+            return;
+        }
+        long halfRoundTripMillis = Math.max(0L, Duration.between(before, after).toMillis()) / 2;
+        long nodeMillis = before.toEpochMilli() + halfRoundTripMillis;
+        long dbMillis = dbEpochSecond * 1000L + DB_SECOND_TRUNCATION_MILLIS;
+        long skewMillis = nodeMillis - dbMillis;
+        recordClockSkew(skewMillis);
+        long beyondUncertaintyMillis = Math.abs(skewMillis) - halfRoundTripMillis - DB_SECOND_TRUNCATION_MILLIS;
+        if (beyondUncertaintyMillis <= clockSkewWarnSeconds * 1000L) {
+            return;
+        }
+        Instant lastWarned = lastClockSkewWarnAt;
+        if (lastWarned != null && after.isBefore(lastWarned.plus(Duration.ofMinutes(CLOCK_SKEW_WARN_INTERVAL_MINUTES)))) {
+            return;
+        }
+        lastClockSkewWarnAt = after;
+        log.warn("[定期管理レポート] 本nodeの時計とDBサーバーの時計の差が閾値を超えています。processing leaseの実効期限は"
+                        + "30分からこの差の分だけずれます（ShedLockはDB時刻）。NTP同期を確認してください: "
+                        + "errorCode=SCHEDULE_CLOCK_SKEW_DETECTED skewMillis={} thresholdSeconds={}",
+                skewMillis, clockSkewWarnSeconds);
+    }
+
+    /**
+     * 1 tenantのdue処理を他tenantから隔離する（review P3-12）。例外はERRORとmetricに残して当該tenantの今回pollだけを
+     * 中断し、残りのtenantは続行する。各行のclaim/completionの失敗はdispatchOne内で処理済みのため、ここへ届くのは
+     * due一覧の取得失敗など行に紐付かない失敗である。tenant inventory未設定など全体の失敗はrunner側で伝播する。
+     */
+    private void dispatchDueForTenantIsolated(String tenantId) {
+        try {
+            dispatchDueForTenant(tenantId);
+        } catch (RuntimeException tenantFailure) {
+            boolean deterministic = isDeterministicClaimFailure(tenantFailure);
+            String errorCode = deterministic ? "SCHEDULE_TENANT_DISPATCH_REJECTED" : "SCHEDULE_TENANT_DISPATCH_FAILED";
+            log.error("[定期管理レポート] tenantのdue処理が失敗しました。当該tenantの今回pollを中断し、残りのtenantは続行します: "
+                            + "tenantId={} errorCode={} exceptionType={} diagnosticId={}",
+                    tenantId, errorCode, LogRedaction.exceptionType(tenantFailure), UUID.randomUUID());
+            recordEvent(deterministic ? ReportScheduleMetrics.Event.TENANT_DISPATCH_REJECTED
+                    : ReportScheduleMetrics.Event.TENANT_DISPATCH_FAILED);
+        }
     }
 
     /**
@@ -317,30 +395,16 @@ public class ManagementReportScheduler {
         if (logicalRunAt == null) {
             return;
         }
+        if (ReportScheduleClaimService.takeoverReachesRetryLimit(schedule)) {
+            // completionに至らずlease期限を超えた実行が続き、引き継げば連続失敗が上限に達する。生成/配布を再開せず停止する。
+            stopTakeoverAtRetryLimit(tenantId, schedule, logicalRunAt, claimedAt, staleBefore);
+            return;
+        }
         ReportScheduleClaimService.Claim claim;
         try {
             claim = claimService.claim(schedule, logicalRunAt, claimedAt, staleBefore);
         } catch (RuntimeException claimFailure) {
-            if (isDeterministicClaimFailure(claimFailure)) {
-                // SQL文法・列不一致・型・制約・mapper bindingなど、再試行しても結果が変わらない失敗。
-                // claimは成立していないため生成/配布は開始しない。行に依存する失敗で同tenantの後続scheduleが
-                // 毎poll止まる（head-of-line blocking）のを避けるため、当該行だけを見送り、待機時間の間はdue一覧から
-                // 除外する（行へは失敗を記録できないためinstance内で保持する）。token列など起動guardの検出SQLが
-                // 参照する列の欠落だけは、guardが先に失敗してclaim自体を止める。
-                long retryAfterMinutes = backOffRejectedClaim(tenantId, schedule.getId());
-                log.error("[定期管理レポート] claim SQLが確定的に失敗しました。当該scheduleだけを見送り、同tenantの残り候補は続行します。"
-                                + "schema/mapper不整合またはデータ起因の制約違反を確認してください: "
-                                + "scheduleId={} errorCode=SCHEDULE_CLAIM_SQL_REJECTED retryAfterMinutes={} exceptionType={} "
-                                + "diagnosticId={}",
-                        schedule.getId(), retryAfterMinutes, LogRedaction.exceptionType(claimFailure), UUID.randomUUID());
-                recordEvent(ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED);
-                return;
-            }
-            // claim transactionのcommit結果が不明なら、生成/配布を開始しない。補償clearや別tokenでの再claimもしない。
-            // leaseが残った場合はexpiry後の通常CAS takeoverに委ねる。
-            log.error("[定期管理レポート] claim状態を確認できません: scheduleId={} exceptionType={} diagnosticId={}",
-                    schedule.getId(), LogRedaction.exceptionType(claimFailure), UUID.randomUUID());
-            recordEvent(ReportScheduleMetrics.Event.CLAIM_UNCERTAIN);
+            handleClaimFailure(tenantId, schedule, claimFailure);
             return;
         }
         // claim SQL自体は実行できたため、確定的失敗の待機記録は不要になった。
@@ -361,13 +425,72 @@ public class ManagementReportScheduler {
         completeSuccess(tenantId, zone, schedule, claim, nextRunAt, logicalRunAt);
     }
 
+    /**
+     * claim（または上限到達の停止）のSQLが例外で終わった場合の扱い。行に依存する確定的失敗は当該行を待機させ、
+     * 結果不明は見送るだけにする。どちらも生成/配布は開始しない。
+     */
+    private void handleClaimFailure(String tenantId, ReportSchedule schedule, RuntimeException claimFailure) {
+        if (isDeterministicClaimFailure(claimFailure)) {
+            // SQL文法・列不一致・型・制約・mapper bindingなど、再試行しても結果が変わらない失敗。
+            // claimは成立していないため生成/配布は開始しない。行に依存する失敗で同tenantの後続scheduleが
+            // 毎poll止まる（head-of-line blocking）のを避けるため、当該行だけを見送り、待機時間の間はdue一覧から
+            // 除外する（行へは失敗を記録できないためinstance内で保持する）。token列など起動guardの検出SQLが
+            // 参照する列の欠落だけは、guardが先に失敗してclaim自体を止める。
+            long retryAfterMinutes = backOffRejectedClaim(tenantId, schedule.getId());
+            log.error("[定期管理レポート] claim SQLが確定的に失敗しました。当該scheduleだけを見送り、同tenantの残り候補は続行します。"
+                            + "schema/mapper不整合またはデータ起因の制約違反を確認してください: "
+                            + "scheduleId={} errorCode=SCHEDULE_CLAIM_SQL_REJECTED retryAfterMinutes={} exceptionType={} "
+                            + "diagnosticId={}",
+                    schedule.getId(), retryAfterMinutes, LogRedaction.exceptionType(claimFailure), UUID.randomUUID());
+            recordEvent(ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED);
+            return;
+        }
+        // claim transactionのcommit結果が不明なら、生成/配布を開始しない。補償clearや別tokenでの再claimもしない。
+        // leaseが残った場合はexpiry後の通常CAS takeoverに委ねる。
+        log.error("[定期管理レポート] claim状態を確認できません: scheduleId={} exceptionType={} diagnosticId={}",
+                schedule.getId(), LogRedaction.exceptionType(claimFailure), UUID.randomUUID());
+        recordEvent(ReportScheduleMetrics.Event.CLAIM_UNCERTAIN);
+    }
+
+    /**
+     * 引き継げば連続失敗が上限に達する期限切れleaseを停止する（review P3-6）。completion前にprocessが落ちる実行
+     * （OOM等のpoison pill）やcompletion結果不明が続くと、failure completionが無いため従来は上限で止まらず、
+     * 30分ごとの引き継ぎが無限に続いた。引き継ぎを失敗1回として数え、上限ではfailure completionの上限到達と同じ
+     * 状態・通知（ERROR＋{@code RETRY_EXHAUSTED_DISABLED}）で止める。管理者の有効化で同一論理runから再開する。
+     */
+    private void stopTakeoverAtRetryLimit(String tenantId, ReportSchedule schedule, LocalDateTime logicalRunAt,
+                                          LocalDateTime stoppedAt, LocalDateTime staleBefore) {
+        int failuresBefore = currentFailureCount(schedule);
+        LocalDateTime retryAt = stoppedAt.plusMinutes(retryDelayMinutes(failuresBefore));
+        boolean stopped;
+        try {
+            stopped = claimService.stopAtRetryLimit(schedule, logicalRunAt, staleBefore, retryAt, safeMessage(null));
+        } catch (RuntimeException stopFailure) {
+            handleClaimFailure(tenantId, schedule, stopFailure);
+            return;
+        }
+        rejectedClaims.remove(new RejectedClaimKey(tenantId, schedule.getId()));
+        if (!stopped) {
+            // 他workerが先に引き継いだ・停止した等でsnapshotが古い。行は変更していない。
+            return;
+        }
+        log.error("[定期管理レポート] completionに至らずprocessing lease期限を超えた実行を連続失敗として数え、連続失敗が上限（{}回）に"
+                        + "達したため、引き継がずにscheduleを自動停止しました。completion前にprocessが停止する原因（poison pill）を"
+                        + "解消後、管理者が有効化すると連続失敗回数を0に戻し、保持中のretryから同一論理runを再開します: "
+                        + "scheduleId={} failureCount={} errorCode={} cause=STALE_LEASE logicalRunAt={} retryAt={}",
+                ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES, schedule.getId(), failuresBefore + 1,
+                ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE, logicalRunAt, retryAt);
+        recordEvent(ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED);
+    }
+
     /** claim前のsnapshotが他workerの状態を引き継いだ場合だけ記録する（tokenは出力しない）。 */
     private void logReplacedClaimState(ReportSchedule previous, ReportScheduleClaimService.Claim claim) {
         if (previous.getProcessingClaimedAt() != null) {
             log.warn("[定期管理レポート] 期限切れprocessing leaseを引き継ぎました。旧workerとの重複副作用はrun_key・delivery dedupeで"
-                            + "収束させます: scheduleId={} leaseAgeMinutes={} legacyLease={}",
+                            + "収束させます。completionに至らなかった前の実行を連続失敗1回として数えました: "
+                            + "scheduleId={} leaseAgeMinutes={} legacyLease={} failureCount={}",
                     previous.getId(), Duration.between(previous.getProcessingClaimedAt(), claim.claimedAt()).toMinutes(),
-                    previous.getProcessingClaimToken() == null);
+                    previous.getProcessingClaimToken() == null, claim.failureCount());
             recordEvent(ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER);
         } else if (previous.getProcessingClaimToken() != null) {
             // V185以前の旧版completionがprocessing_claimed_atだけをclearした孤児token。新旧version混在稼働の痕跡。
@@ -381,7 +504,11 @@ public class ManagementReportScheduler {
                                  ReportScheduleClaimService.Claim claim, LocalDateTime logicalRunAt, Exception ex) {
         // retry基点はpoll時刻やclaim時刻ではなく、失敗を検知した実時刻とする。
         LocalDateTime failureAt = now(zone);
-        LocalDateTime retryAt = failureAt.plusMinutes(retryDelayMinutes(schedule));
+        // claim CASがfailure_countの一致を条件にしており、claim後にfailure_countを変える経路は所有者のcompletionだけ
+        // （引き継ぎの加算はclaimと同じUPDATE、管理者再開の0戻しは停止中=未claimの行だけが対象）のため、
+        // claim成立後の値+1がDBの加算後の値と一致する。停止自体はmarkFailureの同一UPDATEがDB値で判定する。
+        int failuresAfter = claim.failureCount() + 1;
+        LocalDateTime retryAt = failureAt.plusMinutes(retryDelayMinutes(claim.failureCount()));
         try {
             int changed = scheduleMapper.markFailure(tenantId, schedule.getId(), claim.token(),
                     claim.claimedAt(), retryAt, logicalRunAt,
@@ -392,17 +519,8 @@ public class ManagementReportScheduler {
                 recordEvent(ReportScheduleMetrics.Event.OWNERSHIP_LOST);
             } else {
                 recordEvent(ReportScheduleMetrics.Event.RUN_FAILED);
-                // claim CASがfailure_countの一致を条件にしており、claim後にfailure_countを変える経路は所有者の
-                // completionだけ（管理者再開の0戻しは停止中=未claimの行だけが対象）のため、snapshot値+1がDBの加算後の値と
-                // 一致する。停止自体はmarkFailureの同一UPDATEがDB値で判定済みで、ここは通知だけを行う。
-                int failuresAfter = currentFailureCount(schedule) + 1;
                 if (failuresAfter >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES) {
-                    log.error("[定期管理レポート] 連続失敗が上限（{}回）に達したためscheduleを自動停止しました。原因を解消後、"
-                                    + "管理者が有効化すると連続失敗回数を0に戻し、保持中のretryから同一論理runを再開します: "
-                                    + "scheduleId={} failureCount={} errorCode={} logicalRunAt={} retryAt={}",
-                            ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES, schedule.getId(), failuresAfter,
-                            ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE, logicalRunAt, retryAt);
-                    recordEvent(ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED);
+                    notifyRetryExhausted(schedule, failuresAfter, logicalRunAt, retryAt);
                 }
             }
         } catch (RuntimeException completionFailure) {
@@ -410,11 +528,64 @@ public class ManagementReportScheduler {
             log.error("[定期管理レポート] failure completionを確認できません: scheduleId={} exceptionType={} diagnosticId={}",
                     schedule.getId(), LogRedaction.exceptionType(completionFailure), UUID.randomUUID());
             recordEvent(ReportScheduleMetrics.Event.COMPLETION_UNCERTAIN);
+            if (failuresAfter >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES) {
+                confirmStopAfterUncertainCompletion(tenantId, schedule, claim, failureAt, failuresAfter,
+                        logicalRunAt, retryAt);
+            }
             return;
         }
         log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={} exceptionType={} diagnosticId={} detail={}",
                 schedule.getId(), retryAt, LogRedaction.exceptionType(ex),
                 UUID.randomUUID(), LogRedaction.safeThrowableSummary(ex));
+    }
+
+    private void notifyRetryExhausted(ReportSchedule schedule, int failuresAfter, LocalDateTime logicalRunAt,
+                                      LocalDateTime retryAt) {
+        log.error("[定期管理レポート] 連続失敗が上限（{}回）に達したためscheduleを自動停止しました。原因を解消後、"
+                        + "管理者が有効化すると連続失敗回数を0に戻し、保持中のretryから同一論理runを再開します: "
+                        + "scheduleId={} failureCount={} errorCode={} logicalRunAt={} retryAt={}",
+                ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES, schedule.getId(), failuresAfter,
+                ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE, logicalRunAt, retryAt);
+        recordEvent(ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED);
+    }
+
+    /**
+     * 上限到達のfailure completionが例外で終わった場合に、自動停止がcommitされたかを読み直して確かめる（review P3-6）。
+     * commit済みなら停止の通知（ERROR＋{@code RETRY_EXHAUSTED_DISABLED}）を出す。commitされていなければleaseが残り、
+     * lease期限後の引き継ぎが同じ失敗を数えて停止・通知する（{@link #stopTakeoverAtRetryLimit}）。
+     *
+     * <p>停止状態は自分のmarkFailureだけが作れる組（無効・停止理由code・lease無し・同じ論理run・上限以上の回数）で判定する。
+     * lease期限を過ぎていれば他workerが先に引き継ぎ・停止した可能性があり、自分の停止と区別できないため判定しない
+     * （その場合の停止は他worker側が通知する）。読み直しの失敗は通知せず、COMPLETION_UNCERTAINの監視とQ4に委ねる。
+     */
+    private void confirmStopAfterUncertainCompletion(String tenantId, ReportSchedule schedule,
+                                                     ReportScheduleClaimService.Claim claim, LocalDateTime failureAt,
+                                                     int failuresAfter, LocalDateTime logicalRunAt,
+                                                     LocalDateTime retryAt) {
+        if (!failureAt.isBefore(claim.claimedAt().plusMinutes(PROCESSING_LEASE_MINUTES))) {
+            log.warn("[定期管理レポート] 上限到達のfailure completionの結果を確認できず、lease期限も過ぎているため自動停止の有無を"
+                    + "判定しません。§10.3 Q4で確認してください: scheduleId={}", schedule.getId());
+            return;
+        }
+        ReportSchedule current;
+        try {
+            current = scheduleMapper.selectForTenant(tenantId, schedule.getId());
+        } catch (RuntimeException readFailure) {
+            log.warn("[定期管理レポート] 上限到達のfailure completionの結果を読み直せないため、自動停止の有無を確認できません。"
+                            + "§10.3 Q4で確認してください: scheduleId={} exceptionType={}",
+                    schedule.getId(), LogRedaction.exceptionType(readFailure));
+            return;
+        }
+        boolean stoppedByThisCompletion = current != null
+                && Integer.valueOf(0).equals(current.getEnabled())
+                && ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE.equals(current.getLastErrorCode())
+                && current.getProcessingClaimedAt() == null
+                && logicalRunAt.equals(current.getLastRunAt())
+                && current.getFailureCount() != null
+                && current.getFailureCount() >= ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES;
+        if (stoppedByThisCompletion) {
+            notifyRetryExhausted(schedule, failuresAfter, logicalRunAt, retryAt);
+        }
     }
 
     private void completeSuccess(String tenantId, ZoneId zone, ReportSchedule schedule,
@@ -455,6 +626,18 @@ public class ManagementReportScheduler {
         } catch (RuntimeException metricFailure) {
             log.warn("[定期管理レポート] 監視metricの記録に失敗しました: event={} exceptionType={}",
                     event, LogRedaction.exceptionType(metricFailure));
+        }
+    }
+
+    private void recordClockSkew(long skewMillis) {
+        if (scheduleMetrics == null) {
+            return;
+        }
+        try {
+            scheduleMetrics.clockSkew(skewMillis);
+        } catch (RuntimeException metricFailure) {
+            log.warn("[定期管理レポート] 時計の差metricの記録に失敗しました: exceptionType={}",
+                    LogRedaction.exceptionType(metricFailure));
         }
     }
 
@@ -593,8 +776,9 @@ public class ManagementReportScheduler {
         }
     }
 
-    private long retryDelayMinutes(ReportSchedule schedule) {
-        return Math.min(60L, 5L * Math.max(1, currentFailureCount(schedule) + 1));
+    /** retry待機（5分×今回の失敗を含む連続失敗回数、上限60分）。{@code failuresBefore} は今回の失敗を含まない回数。 */
+    private static long retryDelayMinutes(int failuresBefore) {
+        return Math.min(60L, 5L * Math.max(1, failuresBefore + 1));
     }
 
     private int currentFailureCount(ReportSchedule schedule) {

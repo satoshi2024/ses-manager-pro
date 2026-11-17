@@ -12,6 +12,7 @@ import com.ses.entity.ReportRun;
 import com.ses.entity.ReportSchedule;
 import com.ses.mapper.ReportScheduleMapper;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingTenantInventoryProperties;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportRecipientPreviewService;
@@ -21,10 +22,12 @@ import com.ses.service.scheduler.ManagementReportScheduler;
 import com.ses.service.scheduler.ReportScheduleClaimService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionSystemException;
@@ -37,7 +40,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.ToIntFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +59,11 @@ class ManagementReportSchedulerTest {
     private static final LocalDateTime SEPT = LocalDateTime.of(2026, 9, 1, 0, 0);
     private static final LocalDateTime OCT = LocalDateTime.of(2026, 10, 1, 0, 0);
     private static final String ORPHAN_TOKEN = "00000000-0000-4000-8000-0000000000aa";
+    private static final String STALE_TOKEN = "00000000-0000-4000-8000-0000000000bb";
+    /** FIXED_CLOCKの時刻（秒精度）。claim・失敗検知・停止の時刻になる。 */
+    private static final LocalDateTime FIXED_NOW = LocalDateTime.of(2026, 9, 1, 0, 0, 30);
+    /** FIXED_NOWから40分30秒前に取得され、lease期限（30分）を過ぎたprocessing lease。 */
+    private static final LocalDateTime STALE_CLAIMED_AT = SEPT.minusMinutes(40);
 
     private ReportSchedule schedule(LocalDateTime nextRunAt) {
         ReportSchedule schedule = new ReportSchedule();
@@ -806,11 +816,15 @@ class ManagementReportSchedulerTest {
                 && message.contains("failureCount=12")
                 && message.contains("errorCode=" + ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE));
         assertThat(errors).noneMatch(message -> tokens.stream().anyMatch(message::contains));
-        // metricのtagは有限のevent種別だけで、tenant/schedule ID・tokenを載せない。
+        // metricのtagは有限のevent種別とその固定の結果区分だけで、tenant/schedule ID・tokenを載せない。
         assertThat(registry.find(ReportScheduleMetrics.EVENTS_METRIC).counters()).isNotEmpty()
                 .allSatisfy(counter -> assertThat(counter.getId().getTags())
                         .extracting(io.micrometer.core.instrument.Tag::getKey)
-                        .containsExactly(ReportScheduleMetrics.EVENT_TAG));
+                        .containsExactlyInAnyOrder(ReportScheduleMetrics.EVENT_TAG, ReportScheduleMetrics.OUTCOME_TAG));
+        assertThat(registry.find(ReportScheduleMetrics.EVENTS_METRIC)
+                .tag(ReportScheduleMetrics.EVENT_TAG, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED.name())
+                .counter().getId().getTag(ReportScheduleMetrics.OUTCOME_TAG))
+                .isEqualTo(ReportScheduleMetrics.Outcome.DETERMINISTIC.name());
     }
 
     @Test
@@ -892,6 +906,392 @@ class ManagementReportSchedulerTest {
         assertThat(lost).isNull();
         verify(mapper, times(3)).claimDue(eq("default"), eq(5L), eq(SEPT), isNull(), isNull(), isNull(), isNull(),
                 isNull(), eq(0), eq(SEPT), anyString(), eq(normalized), eq(normalized.minusMinutes(30)));
+    }
+
+    // =========================================================================
+    // RB-NF10: 引き継ぎを含むretry上限（review P3-6）
+    // =========================================================================
+
+    /** 前の実行がcompletionに至らずlease期限を過ぎた（他workerが引き継ぐ対象の）行。 */
+    private ReportSchedule staleLease(int failuresBefore) {
+        ReportSchedule stale = schedule(SEPT);
+        stale.setProcessingLogicalRunAt(SEPT);
+        stale.setLastRunAt(SEPT);
+        stale.setProcessingClaimedAt(STALE_CLAIMED_AT);
+        stale.setProcessingClaimToken(STALE_TOKEN);
+        stale.setFailureCount(failuresBefore);
+        return stale;
+    }
+
+    private void stubTakeoverExhausted(ReportScheduleMapper mapper, int changed) {
+        when(mapper.markTakeoverExhausted(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), any(), any(), anyString())).thenReturn(changed);
+    }
+
+    private void verifyNoTakeoverStop(ReportScheduleMapper mapper) {
+        verify(mapper, never()).markTakeoverExhausted(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 期限切れleaseの引き継ぎは前の実行を連続失敗1回として数えretry待機と上限判定に含める() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        List<String> errors = new java.util.ArrayList<>();
+        List<String> warnings = new java.util.ArrayList<>();
+        for (int failuresBefore : new int[]{0, 10}) {
+            ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+            ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+            ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+            when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(staleLease(failuresBefore)));
+            stubClaimDue(mapper, 1);
+            when(mapper.markFailure(anyString(), anyLong(), anyString(), any(), any(), any(), anyString(), anyString()))
+                    .thenReturn(1);
+            when(snapshotService.generate(any())).thenThrow(new IllegalStateException("source unavailable"));
+            ManagementReportScheduler scheduler = scheduler(mapper, tenantRunner(), snapshotService, deliveryService,
+                    registry);
+            ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+            try {
+                scheduler.dispatchDue();
+            } finally {
+                detachSchedulerLog(logs);
+            }
+
+            // 引き継ぎclaimは期限切れleaseのsnapshot全列を期待値にする（回数の加算はclaimと同じUPDATEのSQLが行う）。
+            verify(mapper).claimDue(eq("default"), eq(5L), eq(SEPT), isNull(), eq(STALE_CLAIMED_AT), eq(SEPT),
+                    eq(STALE_TOKEN), eq(SEPT), eq(failuresBefore), eq(SEPT), anyString(), eq(FIXED_NOW),
+                    eq(FIXED_NOW.minusMinutes(30)));
+            verifyNoTakeoverStop(mapper);
+            // retry待機は引き継ぎで数えた1回を含めた回数で決まる: 5×(引き継ぎ後の回数＋今回の失敗)、上限60分。
+            long expectedDelayMinutes = Math.min(60L, 5L * (failuresBefore + 2));
+            verify(mapper).markFailure(eq("default"), eq(5L), anyString(), eq(FIXED_NOW),
+                    eq(FIXED_NOW.plusMinutes(expectedDelayMinutes)), eq(SEPT), eq("SCHEDULE_GENERATION_FAILED"),
+                    anyString());
+            if (failuresBefore == 0) {
+                assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED))
+                        .as("引き継ぎ1回＋失敗1回では停止しない").isZero();
+            }
+            errors.addAll(messages(logs, Level.ERROR));
+            warnings.addAll(messages(logs, Level.WARN));
+        }
+
+        assertThat(events(registry, ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER)).isEqualTo(2.0);
+        assertThat(events(registry, ReportScheduleMetrics.Event.RUN_FAILED)).isEqualTo(2.0);
+        // 10回失敗済みの行は、引き継ぎで11回、その後の失敗が12回目となり自動停止の通知が出る。
+        assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).isEqualTo(1.0);
+        assertThat(errors).anyMatch(message -> message.contains("連続失敗が上限（12回）")
+                && message.contains("failureCount=12"));
+        assertThat(warnings).anyMatch(message -> message.contains("連続失敗1回として数えました")
+                && message.contains("failureCount=1"));
+        assertThat(warnings).anyMatch(message -> message.contains("連続失敗1回として数えました")
+                && message.contains("failureCount=11"));
+        assertThat(errors).noneMatch(message -> message.contains(STALE_TOKEN));
+        assertThat(warnings).noneMatch(message -> message.contains(STALE_TOKEN));
+    }
+
+    @Test
+    void 引き継げば連続失敗が上限に達する期限切れleaseは生成せずに停止しERRORとmetricで通知する() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(staleLease(11)));
+        stubTakeoverExhausted(mapper, 1);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, tenantRunner(), snapshotService, deliveryService,
+                registry);
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        try {
+            assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        // 停止は引き継ぎと同じsnapshot CASで行い、retry予定（5×12＝60分後）と同一論理runを保持する。
+        verify(mapper).markTakeoverExhausted(eq("default"), eq(5L), eq(SEPT), isNull(), eq(STALE_CLAIMED_AT),
+                eq(SEPT), eq(STALE_TOKEN), eq(SEPT), eq(11), eq(SEPT), eq(FIXED_NOW.plusMinutes(60)),
+                eq(FIXED_NOW.minusMinutes(30)), anyString());
+        verify(mapper, never()).claimDue(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any());
+        verify(mapper, never()).markFailure(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(mapper, never()).markSuccess(any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(snapshotService, deliveryService);
+        assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).isEqualTo(1.0);
+        assertThat(events(registry, ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER)).isZero();
+        assertThat(events(registry, ReportScheduleMetrics.Event.RUN_FAILED)).isZero();
+        assertThat(messages(logs, Level.ERROR)).anyMatch(message -> message.contains("cause=STALE_LEASE")
+                && message.contains("scheduleId=5") && message.contains("failureCount=12")
+                && message.contains("errorCode=" + ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE));
+        assertThat(messages(logs, Level.ERROR)).noneMatch(message -> message.contains(STALE_TOKEN));
+    }
+
+    @Test
+    void 上限到達の停止CASが0件または例外なら通知も生成もしない() {
+        for (boolean throwOnStop : new boolean[]{false, true}) {
+            ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+            ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+            ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+            when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(staleLease(11)));
+            if (throwOnStop) {
+                when(mapper.markTakeoverExhausted(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
+                        anyInt(), any(), any(), any(), anyString())).thenThrow(new BadSqlGrammarException("stop",
+                        "UPDATE m_report_schedule", new SQLException("row-specific rejection")));
+            } else {
+                stubTakeoverExhausted(mapper, 0);
+            }
+            SimpleMeterRegistry registry = new SimpleMeterRegistry();
+            ManagementReportScheduler scheduler = scheduler(mapper, tenantRunner(), snapshotService, deliveryService,
+                    registry);
+
+            assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+
+            verifyNoInteractions(snapshotService, deliveryService);
+            verify(mapper, never()).claimDue(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
+                    anyInt(), any(), anyString(), any(), any());
+            assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).isZero();
+            assertThat(events(registry, ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED))
+                    .as("停止SQLの確定的失敗はclaimと同じ分類").isEqualTo(throwOnStop ? 1.0 : 0.0);
+        }
+    }
+
+    @Test
+    void 上限到達のfailure_completionが結果不明なら読み直して自動停止を確かめた時だけ通知する() {
+        for (String observed : List.of("STOPPED", "STILL_LEASED", "READ_FAILED", "BELOW_LIMIT")) {
+            ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+            ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+            ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+            ReportSchedule failing = schedule(SEPT);
+            failing.setFailureCount("BELOW_LIMIT".equals(observed) ? 5 : 11);
+            when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(failing));
+            stubClaimDue(mapper, 1);
+            when(mapper.markFailure(anyString(), anyLong(), anyString(), any(), any(), any(), anyString(), anyString()))
+                    .thenThrow(new TransactionSystemException("commit result unknown"));
+            when(snapshotService.generate(any())).thenThrow(new IllegalStateException("source unavailable"));
+            ReportSchedule current = schedule(SEPT);
+            current.setLastRunAt(SEPT);
+            current.setProcessingLogicalRunAt(SEPT);
+            if ("STOPPED".equals(observed)) {
+                // 自分のmarkFailureだけが作れる停止状態（commit済み）。
+                current.setEnabled(0);
+                current.setLastErrorCode(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+                current.setFailureCount(12);
+                current.setRetryScheduledAt(FIXED_NOW.plusMinutes(60));
+            } else {
+                // commitされず、leaseと回数が残っている（lease期限後の引き継ぎが停止・通知する）。
+                current.setEnabled(1);
+                current.setLastErrorCode("SCHEDULE_GENERATION_FAILED");
+                current.setFailureCount(11);
+                current.setProcessingClaimedAt(FIXED_NOW);
+            }
+            if ("READ_FAILED".equals(observed)) {
+                when(mapper.selectForTenant("default", 5L)).thenThrow(new QueryTimeoutException("read timeout"));
+            } else {
+                when(mapper.selectForTenant("default", 5L)).thenReturn(current);
+            }
+            SimpleMeterRegistry registry = new SimpleMeterRegistry();
+            ManagementReportScheduler scheduler = scheduler(mapper, tenantRunner(), snapshotService, deliveryService,
+                    registry);
+
+            assertThatCode(scheduler::dispatchDue).as(observed).doesNotThrowAnyException();
+
+            assertThat(events(registry, ReportScheduleMetrics.Event.COMPLETION_UNCERTAIN)).as(observed).isEqualTo(1.0);
+            assertThat(events(registry, ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED)).as(observed)
+                    .isEqualTo("STOPPED".equals(observed) ? 1.0 : 0.0);
+            if ("BELOW_LIMIT".equals(observed)) {
+                verify(mapper, never()).selectForTenant(any(), any());
+            } else {
+                verify(mapper).selectForTenant("default", 5L);
+            }
+            verify(mapper, times(1)).markFailure(anyString(), anyLong(), anyString(), any(), any(), any(),
+                    anyString(), anyString());
+        }
+    }
+
+    // =========================================================================
+    // RB-NF10: tenant単位の隔離（review P3-12）
+    // =========================================================================
+
+    @Test
+    void あるtenantのdue処理の失敗はERRORとmetricに残し残りのtenantを続行する() {
+        for (RuntimeException failure : List.<RuntimeException>of(
+                new BadSqlGrammarException("due", "SELECT * FROM m_report_schedule", new SQLException("schema mismatch")),
+                new QueryTimeoutException("due query timeout"))) {
+            boolean deterministic = failure instanceof BadSqlGrammarException;
+            ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+            ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+            ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+            AccountingTimezoneResolver resolver = mock(AccountingTimezoneResolver.class);
+            when(resolver.resolve(anyString())).thenReturn(TOKYO);
+            // 実runnerで、先に処理されるtenantの失敗が後続tenantを止めないことを確かめる。
+            AccountingTenantInventoryProperties inventory = new AccountingTenantInventoryProperties();
+            inventory.setIds(new LinkedHashSet<>(List.of("broken", "default")));
+            TenantAwareBatchRunner runner = new TenantAwareBatchRunner(inventory, resolver);
+            when(mapper.selectDue(eq("broken"), any(), any(), anyInt())).thenThrow(failure);
+            when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT)));
+            stubClaimDue(mapper, 1);
+            when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any())).thenReturn(1);
+            when(snapshotService.generate(any())).thenReturn(succeeded(99L));
+            ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper,
+                    new ReportScheduleClaimService(mapper), FIXED_CLOCK, snapshotService, deliveryService,
+                    mock(MonthlyClosingService.class), resolver, runner, recipientPreviewService(), new ObjectMapper());
+            SimpleMeterRegistry registry = new SimpleMeterRegistry();
+            ReflectionTestUtils.setField(scheduler, "scheduleMetrics", new ReportScheduleMetrics(registry));
+            ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+            try {
+                assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+            } finally {
+                detachSchedulerLog(logs);
+            }
+
+            verify(mapper).selectDue(eq("broken"), any(), any(), anyInt());
+            verify(snapshotService, times(1)).generate(argThat(command -> command.scheduleId().equals(5L)));
+            verify(deliveryService).deliverScheduled(99L, ReportScheduledDeliveryContext.of(5L, 1L));
+            verify(mapper).markSuccess(eq("default"), eq(5L), anyString(), any(), eq(OCT), eq(SEPT));
+            assertThat(events(registry, ReportScheduleMetrics.Event.RUN_SUCCEEDED)).isEqualTo(1.0);
+            assertThat(events(registry, ReportScheduleMetrics.Event.TENANT_DISPATCH_REJECTED))
+                    .isEqualTo(deterministic ? 1.0 : 0.0);
+            assertThat(events(registry, ReportScheduleMetrics.Event.TENANT_DISPATCH_FAILED))
+                    .isEqualTo(deterministic ? 0.0 : 1.0);
+            String errorCode = deterministic ? "SCHEDULE_TENANT_DISPATCH_REJECTED" : "SCHEDULE_TENANT_DISPATCH_FAILED";
+            assertThat(messages(logs, Level.ERROR)).anyMatch(message -> message.contains("tenantId=broken")
+                    && message.contains("errorCode=" + errorCode));
+        }
+    }
+
+    // =========================================================================
+    // RB-NF10: 時計の差の観測（review P2-2）と結果区分のtag（review P2-8）
+    // =========================================================================
+
+    @Test
+    void 本nodeとDBの時計の差をgaugeへ出し閾値を超えた時だけ間隔を空けてWARNする() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-31T15:00:30Z"));
+        AtomicLong dbBehindSeconds = new AtomicLong(120L);
+        when(mapper.selectDbEpochSecond()).thenAnswer(invocation ->
+                clock.instant().getEpochSecond() - dbBehindSeconds.get());
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, clock, tenantRunner(), snapshotService,
+                deliveryService, registry);
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        List<String> skewWarnings;
+        double withinThresholdGauge;
+        try {
+            // DBが120秒遅れている（本nodeが進んでいる）。DB値は秒切捨てのため推定は返却秒の中央（+0.5秒）とする。
+            scheduler.dispatchDue();
+            assertThat(clockSkewGauge(registry)).isEqualTo(119.5);
+            clock.advance(Duration.ofMinutes(1));
+            scheduler.dispatchDue();
+            assertThat(skewWarnings(logs)).as("差が続いても60分はWARNを繰り返さない").hasSize(1);
+            clock.advance(Duration.ofMinutes(60));
+            scheduler.dispatchDue();
+            assertThat(skewWarnings(logs)).hasSize(2);
+
+            // 同じ秒（差は推定誤差の範囲）はWARNしない。
+            dbBehindSeconds.set(0L);
+            clock.advance(Duration.ofMinutes(61));
+            scheduler.dispatchDue();
+            withinThresholdGauge = clockSkewGauge(registry);
+            // 閾値5秒: 誤差（秒切捨て0.5秒）を差し引いて5秒以内ならWARNせず、超えたらWARNする。
+            dbBehindSeconds.set(6L);
+            clock.advance(Duration.ofMinutes(61));
+            scheduler.dispatchDue();
+            assertThat(skewWarnings(logs)).as("差し引き5.0秒は閾値以内").hasSize(2);
+            dbBehindSeconds.set(7L);
+            scheduler.dispatchDue();
+            skewWarnings = skewWarnings(logs);
+
+            // DB時刻の取得失敗は測定を見送るだけで、pollは続ける。
+            when(mapper.selectDbEpochSecond()).thenThrow(new QueryTimeoutException("db time unavailable"));
+            assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        assertThat(withinThresholdGauge).isEqualTo(-0.5);
+        assertThat(skewWarnings).hasSize(3);
+        assertThat(skewWarnings.get(0)).contains("skewMillis=119500").contains("thresholdSeconds=5");
+        verify(mapper, times(7)).selectDue(eq("default"), any(), any(), eq(50));
+        verifyNoInteractions(snapshotService, deliveryService);
+    }
+
+    private double clockSkewGauge(SimpleMeterRegistry registry) {
+        Gauge gauge = registry.find(ReportScheduleMetrics.CLOCK_SKEW_METRIC).gauge();
+        assertThat(gauge).as("clock skew gauge").isNotNull();
+        return gauge.value();
+    }
+
+    private List<String> skewWarnings(ListAppender<ILoggingEvent> logs) {
+        return messages(logs, Level.WARN).stream()
+                .filter(message -> message.contains("errorCode=SCHEDULE_CLOCK_SKEW_DETECTED"))
+                .toList();
+    }
+
+    @Test
+    void eventの結果区分は確定的失敗と結果不明を区別しeventごとに固定である() {
+        assertThat(ReportScheduleMetrics.Event.values()).allSatisfy(event -> assertThat(event.outcome()).isNotNull());
+        assertThat(List.of(ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED,
+                ReportScheduleMetrics.Event.TENANT_DISPATCH_REJECTED,
+                ReportScheduleMetrics.Event.RETRY_EXHAUSTED_DISABLED))
+                .allSatisfy(event -> assertThat(event.outcome()).isEqualTo(ReportScheduleMetrics.Outcome.DETERMINISTIC));
+        assertThat(List.of(ReportScheduleMetrics.Event.CLAIM_UNCERTAIN, ReportScheduleMetrics.Event.COMPLETION_UNCERTAIN,
+                ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER, ReportScheduleMetrics.Event.LEASE_OVERRUN,
+                ReportScheduleMetrics.Event.OWNERSHIP_LOST))
+                .allSatisfy(event -> assertThat(event.outcome()).isEqualTo(ReportScheduleMetrics.Outcome.UNCERTAIN));
+        assertThat(List.of(ReportScheduleMetrics.Event.RUN_FAILED, ReportScheduleMetrics.Event.TENANT_DISPATCH_FAILED))
+                .allSatisfy(event -> assertThat(event.outcome()).isEqualTo(ReportScheduleMetrics.Outcome.RETRYABLE));
+        assertThat(List.of(ReportScheduleMetrics.Event.LEGACY_LEASE_BLOCKED,
+                ReportScheduleMetrics.Event.LEGACY_LEASE_ACTIVE_BLOCKED,
+                ReportScheduleMetrics.Event.LEGACY_LEASE_GUARD_FAILED,
+                ReportScheduleMetrics.Event.ORPHAN_TOKEN_REPLACED))
+                .allSatisfy(event -> assertThat(event.outcome()).isEqualTo(ReportScheduleMetrics.Outcome.GUARD));
+
+        // outcomeはeventから一意に決まるため、系列数はevent数を超えない。
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ReportScheduleMetrics metrics = new ReportScheduleMetrics(registry);
+        for (ReportScheduleMetrics.Event event : ReportScheduleMetrics.Event.values()) {
+            metrics.record(event);
+            metrics.record(event);
+        }
+        assertThat(registry.find(ReportScheduleMetrics.EVENTS_METRIC).counters())
+                .hasSize(ReportScheduleMetrics.Event.values().length)
+                .allSatisfy(counter -> assertThat(counter.count()).isEqualTo(2.0));
+    }
+
+    @Test
+    void claim_serviceは期限切れleaseの引き継ぎだけを連続失敗1回として数え上限到達のsnapshotだけを停止する() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportScheduleClaimService service = new ReportScheduleClaimService(mapper);
+        LocalDateTime staleBefore = FIXED_NOW.minusMinutes(30);
+        stubClaimDue(mapper, 1);
+        ReportSchedule fresh = schedule(SEPT);
+        fresh.setFailureCount(3);
+
+        assertThat(service.claim(fresh, SEPT, FIXED_NOW, staleBefore).failureCount())
+                .as("通常のclaimは回数を変えない").isEqualTo(3);
+        assertThat(service.claim(staleLease(3), SEPT, FIXED_NOW, staleBefore).failureCount())
+                .as("引き継ぎは前の実行を1回として数える").isEqualTo(4);
+        assertThat(ReportScheduleClaimService.takeoverReachesRetryLimit(staleLease(10))).isFalse();
+        assertThat(ReportScheduleClaimService.takeoverReachesRetryLimit(staleLease(11))).isTrue();
+        ReportSchedule unoccupiedAtLimit = schedule(SEPT);
+        unoccupiedAtLimit.setFailureCount(11);
+        assertThat(ReportScheduleClaimService.takeoverReachesRetryLimit(unoccupiedAtLimit))
+                .as("未占有の行は引き継ぎではない").isFalse();
+
+        LocalDateTime retryAt = FIXED_NOW.plusMinutes(60).plusNanos(900_000_000L);
+        assertThat(service.stopAtRetryLimit(staleLease(10), SEPT, staleBefore, retryAt, "m")).isFalse();
+        assertThat(service.stopAtRetryLimit(unoccupiedAtLimit, SEPT, staleBefore, retryAt, "m")).isFalse();
+        assertThat(service.stopAtRetryLimit(null, SEPT, staleBefore, retryAt, "m")).isFalse();
+        assertThat(service.stopAtRetryLimit(staleLease(11), null, staleBefore, retryAt, "m")).isFalse();
+        assertThat(service.stopAtRetryLimit(staleLease(11), SEPT, null, retryAt, "m")).isFalse();
+        assertThat(service.stopAtRetryLimit(staleLease(11), SEPT, staleBefore, null, "m")).isFalse();
+        verifyNoTakeoverStop(mapper);
+
+        stubTakeoverExhausted(mapper, 1);
+        assertThat(service.stopAtRetryLimit(staleLease(11), SEPT, staleBefore.plusNanos(400_000_000L), retryAt, "m"))
+                .isTrue();
+        verify(mapper).markTakeoverExhausted(eq("default"), eq(5L), eq(SEPT), isNull(), eq(STALE_CLAIMED_AT),
+                eq(SEPT), eq(STALE_TOKEN), eq(SEPT), eq(11), eq(SEPT), eq(FIXED_NOW.plusMinutes(60)),
+                eq(staleBefore), eq("m"));
     }
 
     /** schedulerの処理中に進められる可変時計。 */
