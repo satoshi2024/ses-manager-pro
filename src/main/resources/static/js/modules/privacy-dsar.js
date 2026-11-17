@@ -440,11 +440,26 @@
         var confirmText = selectedResolutionConflictsWithHold()
             ? t('privacyDsar.resolution.holdWarning') + ' ' + t('privacyDsar.confirm.resolution')
             : t('privacyDsar.confirm.resolution');
-        mutate('POST', '/resolution', {
+        var payload = {
             rowVersion: section.rowVersion,
             resolutionCode: $('#dsar-resolution-code').val(),
             evidenceRef: evidence
-        }, confirmText);
+        };
+        confirmThen(confirmText, function () {
+            send('POST', '/api/privacy/dsar/' + encodeURIComponent(requestId()) + '/resolution', payload).then(function (data) {
+                // 記録の応答が本人の hold との矛盾の印を返したら、成功の代わりに警告で知らせる（判定は server。記録は済んでいる。
+                // HYG-FINAL P3-F の残り）
+                if (data && data.holdConflict) {
+                    SES.toast.warning(t('privacyDsar.resolution.recordedHoldWarning'));
+                } else {
+                    SES.toast.success(t('privacyDsar.toast.saved'));
+                }
+            }).catch(function (message) {
+                SES.toast.error(message);
+            }).then(function () {
+                loadDetail();
+            });
+        });
     }
 
     function submitApprove() {

@@ -68,6 +68,7 @@
 | I-7 | migration は新規だけ。番号は merged 状態で総括が採番する。V185 は NF10 が使用済み、最新は V186（[`status-alignment.md`](status-alignment.md) C-21） |
 | I-8 | 各 batch は wave3 の共通規則に従う: worker は mvn を実行せず 1 commit を渡す → 総括が diff・BOM・LF・method 名の空白を確認 → Runner が test-compile → SHA に束縛した独立 Review → Runner が対象限定テスト（共通 guard を含む）→ `--no-ff` マージ |
 | I-9 | hold を守る方向と、期限超過の保持を避ける方向の両方を守る。hold に帰属できない行は SUBJECT hold で止めない（§3.4.3） |
+| I-10 | DSAR の承認者（草案の作成者以外の privacy-admin）は、承認の前に草案 package の全内容を取得できる（承認者による承認前の確認 `GET /api/privacy/dsar/{id}/approve/preview` は内容をそのまま返す。応答の `Cache-Control: no-store`・inline 表示と画面の「保存されません」は表示上の扱いで、承認者の端末に届いた内容の保持を system は防げない）。したがって開示の内容を見る者の範囲は「作成者」と「承認する privacy-admin」の両方で、承認されなかった草案の内容も承認者には届いている。この範囲を Privacy が書面で受理する（**未取得**。deploy-runbook §1.7 NF07 本人請求の (b)。A2b review §2.5、FINAL §6.3 L-9。RB-NF07-HOLD で計画に記載） |
 
 ---
 
@@ -754,7 +755,8 @@ A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway j
   - 承認者による承認前の確認（review P2-3）: `GET /{id}/approve/preview?packageId=`（`privacy.dsar.approve`。内容 hash は `X-Content-Sha256` header で渡し URL に置かない。query は ALB・proxy の access log に残るため。HYG-FINAL P3-C）。最新の DRAFT・hash・期限・実体の hash を照合し、監査 `DRAFT_REVIEWED` を必須記録する。草案の作成者（`prepared_by`・package の `created_by`）は確認できない: 承認の前に値を見られる者を独立の承認者に限り、作成者は承認後に専用ダウンロードで取得する（作成者が値を見て作り直しを重ねることも防ぐ）。
   - 汎用 file 経路の遮断: `FileScopeValidationService` の先頭で package の行（PURGED を含む。全 tenant）と照会者の tenant の `PRIVACY_EXPORT` の file metadata（論理削除済みを含む。tenant に絞るのは `uk_file_security_stored_name` を使うため。他 tenant の metadata だけの名前は保存層の tenant 照合が拒否する。HYG-FINAL P3-D）の両方を照合して拒否（download・rescan）。保存層でも汎用の `load`・`rescan` は server 生成の種別を開かず、package 専用の `loadServerGenerated` だけが読む。server 生成の種別は scan 失敗時に quarantine に残さず metadata を論理削除し、package の行を持たない `PRIVACY_EXPORT` の file は削除の回に1時間の猶予の後に消す（猶予は `created_at` を書いた application の時計で数え、DB の時計とは比べない。review P2-1・P3-8、HYG-FINAL P3-A）。
   - 取得の後の作り直しの禁止（review P3-4）: 専用ダウンロードで取得した承認 package は `DSAR-DOWNLOAD:` の行で印を付け、期限切れでも作り直さず（409）その package の hash で交付を記録させる。取得していない期限切れの承認 package を作り直すときは外れた承認を `DSAR-SUPERSEDED:` の行に残す。交付の記録は取得の印を要し、取得の前は 409 `error.privacy.dsarDeliveryNotDownloaded`・画面は記録の操作を出さない（HYG-FINAL P3-B）。
-  - 手動対応の完了と hold（HYG-FINAL P3-F）: 本人が HELD のとき、結果が削除（DELETED）・利用停止（RESTRICTED）なら記録は止めず、区画の API（`holdConflictResolutions`・`manualResolution.holdConflict`）と画面（確認の文・警告の表示）で警告する。system は処分しないため、hold の対象の記録に対応が及んでいないかは人が確かめる。
+  - 手動対応の完了と hold（HYG-FINAL P3-F）: 本人が HELD のとき、結果が削除（DELETED）・利用停止（RESTRICTED）なら記録は止めず、区画の API（`holdConflictResolutions`・`manualResolution.holdConflict`）と画面（確認の文・警告の表示）で警告する。system は処分しないため、hold の対象の記録に対応が及んでいないかは人が確かめる。記録の応答（`POST /{id}/resolution`）そのものも、記録した直後の本人の hold の状態（`holdState`）と警告の印（`holdConflict`。区画の `manualResolution.holdConflict` と同じ判定）を返し、画面は成功の代わりに警告の toast（`privacyDsar.resolution.recordedHoldWarning`）を出す（RB-NF07-HOLD）。記録は commit 済みのため、hold の状態を読めなくても応答は失敗にせず `UNKNOWN`・印なしにする（失敗にすると再送して 409 になる）。応答の型は他の遷移と共用の `Transition` を変えず、専用の `ResolutionRecorded` にした。
+  - 承認者が承認の前に全内容を取得できること（review §2.5）は §1 の I-10 に不変条件として書いた（Privacy の受理は未取得）。
   - prod の起動時検査は §5.1 のとおり実検査に置換。D14（package の削除）は hold の gate に接続しない（§3.4.1）。
   - 案（review P3-6、未実装）: `due-days`・`package-max-age` を決定ID束縛に入れるなら、`PrivacyDecisionBinding` の正規形を `nf07-privacy-decision-binding-v2` とし、capability に dsar を含むときだけ `dsar.due-days=<整数>`・`dsar.package-max-age=<ISO-8601 期間>` の2行を足す。digest の計算に `PrivacyFeatureProperties` を渡すため validator・`PrivacyDecisionWindowMonitor`・決定書の digest の手順（feature-switches.md 4.7）を同時に変える。DDL は不要。それまでは起動時の INFO log と決定書を人が照合する。
 

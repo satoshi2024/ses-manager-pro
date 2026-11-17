@@ -154,6 +154,18 @@ public final class PrivacyDsarViews {
     }
 
     /**
+     * 手動対応の完了の記録（{@code POST /api/privacy/dsar/{id}/resolution}）の応答。{@link Transition} の4項目に、記録した直後の
+     * 本人の hold の状態と警告の印を足す（記録は止めない。HYG-FINAL P3-F の残り、RB-NF07-HOLD）。
+     *
+     * @param holdState    本人の保全 hold の状態（{@code NONE} / {@code HELD} / {@code NOT_HELD} / {@code UNKNOWN} / {@code NOT_SCOPED}。
+     *                     区画の {@code hold.state} と同じ値）
+     * @param holdConflict 記録した結果が削除・利用停止で、本人が HELD か（区画の {@code manualResolution.holdConflict} と同じ判定）
+     */
+    public record ResolutionRecorded(long requestId, String requestNo, String status, long rowVersion, String holdState,
+                                     boolean holdConflict) {
+    }
+
+    /**
      * 要手動確認の1項目（記録の値は含めない）。
      *
      * @param providerId    provider（未登録なら catalog の値または null）

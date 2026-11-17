@@ -842,6 +842,47 @@ class PrivacyExportPackageServiceTest {
         assertThat(service.section(restriction).holdConflictResolutions()).isEmpty();
     }
 
+    /**
+     * HYG-FINAL P3-F の残り（RB-NF07-HOLD）: {@code POST /{id}/resolution} の応答そのものが、記録した直後の hold の状態と警告の印を
+     * 返す（区画の {@code manualResolution.holdConflict} と同じ判定）。記録は止めない。hold の状態を読めなくても記録済みの応答を
+     * 失敗にせず、{@code UNKNOWN}・印なしにする（再送させて 409 にしない）。
+     */
+    @Test
+    void 手動対応の記録の応答は本人がHELDのとき削除と利用停止に警告の印を付け状態を読めなくても失敗にしない() {
+        PrivacyHoldGate gate = mock(PrivacyHoldGate.class);
+        holdGate.set(gate);
+        when(gate.inspect(TENANT)).thenReturn(new PrivacyHoldGate.Decision(PrivacyHoldGate.State.VERIFIED, null,
+                Set.of("ENGINEER:101"), Set.of(), Map.of()));
+        long deletion = scopedRequest("T-RESP-DELETION", "DELETION");
+        long restriction = scopedRequest("T-RESP-RESTRICTION", "RESTRICTION");
+        long refused = scopedRequest("T-RESP-REFUSED", "DELETION");
+
+        PrivacyDsarViews.Transition deleted = requestService.recordManualResolution(deletion,
+                new PrivacyDsarCommands.ManualResolution(4L, "DELETED", "DEL-2026-0002"));
+        PrivacyDsarViews.ResolutionRecorded response = service.resolutionRecorded(deleted);
+        assertThat(response.status()).as("警告は記録を止めない").isEqualTo("CONFIRMED");
+        assertThat(response.requestId()).isEqualTo(deletion);
+        assertThat(response.rowVersion()).isEqualTo(deleted.rowVersion());
+        assertThat(response.holdState()).isEqualTo("HELD");
+        assertThat(response.holdConflict()).isTrue();
+
+        PrivacyDsarViews.ResolutionRecorded notConflicting = service.resolutionRecorded(requestService
+                .recordManualResolution(refused, new PrivacyDsarCommands.ManualResolution(4L,
+                        "DELETION_REFUSED_RETENTION", "REF-2026-0001")));
+        assertThat(notConflicting.holdState()).isEqualTo("HELD");
+        assertThat(notConflicting.holdConflict()).as("削除しなかった結果は警告しない").isFalse();
+
+        // hold の状態を読めない（gate の例外）: 記録は commit 済みなので応答は成功のまま UNKNOWN・印なし
+        when(gate.inspect(TENANT)).thenThrow(new IllegalStateException("journal unreachable"));
+        PrivacyDsarViews.ResolutionRecorded unknown = service.resolutionRecorded(requestService
+                .recordManualResolution(restriction, new PrivacyDsarCommands.ManualResolution(4L, "RESTRICTED",
+                        "RES-2026-0001")));
+        assertThat(unknown.status()).isEqualTo("CONFIRMED");
+        assertThat(unknown.holdState()).isEqualTo("UNKNOWN");
+        assertThat(unknown.holdConflict()).isFalse();
+        assertThat(requestMapper.selectById(restriction).getStatus()).isEqualTo("CONFIRMED");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private PrivacyRequestService requestService() {

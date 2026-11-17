@@ -110,6 +110,47 @@ class PrivacyJournalStartupVerifierTest {
                 .as("scheme と parameter 名の大文字小文字は区別しない").isEmpty();
     }
 
+    /**
+     * RB-NF07-HOLD（RB-NF05 review からの転送）: 複数 host へ切り替える URL の各形を NF06（{@code ImportJdbcReconnectGuard}）と
+     * 同じ範囲で拒否する。scheme の形は scheme の違反、{@code jdbc:mysql://} の host 部の形は host の違反になる。host 部は
+     * {@code ;} で終わらないため、NF06 で取りこぼした {@code h1;x,h2} も {@code ,} で拒否する。
+     */
+    @Test
+    void 複数hostへ切り替えるURLはfailover_loadbalance_replication_SRVの全ての形を拒否する() {
+        String tail = "/privacy_journal?sslMode=VERIFY_IDENTITY";
+        for (String scheme : List.of("jdbc:mysql:loadbalance://a:3306,b:3306", "jdbc:mysql:replication://a:3306,b:3306",
+                "jdbc:mysql:loadbalance://a:3306", "jdbc:mysql:replication://a:3306", "jdbc:mysql+srv://_mysql._tcp.journal",
+                "jdbc:mysql:loadbalance+srv://_mysql._tcp.journal", "jdbc:mysql:replication+srv://_mysql._tcp.journal",
+                "jdbc:mysqlx://a:33060", "JDBC:MYSQL:LOADBALANCE://a:3306", "jdbc:mariadb://a:3306",
+                "jdbc:mariadb:failover://a:3306,b:3306", "jdbc:mariadb:sequential://a:3306,b:3306",
+                "jdbc:mariadb:loadbalance://a:3306,b:3306", "jdbc:mariadb:replication://a:3306,b:3306",
+                "jdbc:mariadb:aurora://a:3306")) {
+            assertUrlViolation(scheme + tail, "datasource.url.scheme");
+        }
+        for (String hosts : List.of("a:3306,b:3306", "a,b", "a:3306, b:3306", "a:3306,", ",a:3306", "[a:3306,b:3306]",
+                "address=(host=a)(port=3306),address=(host=b)(port=3306)", "address=(host=a)(port=3306)",
+                "(host=a,port=3306),(host=b,port=3306)", "(host=a,port=3306)", "a;x,b", "a:3306;b:3306,c:3306",
+                "a;failOverReadOnly=false,b")) {
+            assertUrlViolation("jdbc:mysql://" + hosts + tail, "datasource.url.host");
+        }
+        assertThat(violations(p -> p.getDatasource().setUrl(VALID_URL))).as("単一 host の host:port は通る").isEmpty();
+    }
+
+    /**
+     * RB-NF07-HOLD: driver（Connector/J）は {@code #} 以降を fragment として捨てる。本検査は {@code #} を区切りにしないため、
+     * {@code #} の後ろに置いた {@code sslMode} を検査だけが読み、driver は既定の TLS 設定で接続し得る。{@code #} は位置に関係なく拒否する。
+     */
+    @Test
+    void URLのfragmentは位置に関係なく拒否しfragmentの後ろのsslModeで検査を通さない() {
+        assertUrlViolation("jdbc:mysql://journal.internal:3306/privacy_journal#?sslMode=VERIFY_IDENTITY",
+                "datasource.url.fragment");
+        assertUrlViolation(VALID_URL + "#x", "datasource.url.fragment");
+        assertUrlViolation("jdbc:mysql://journal.internal#x:3306/privacy_journal?sslMode=VERIFY_IDENTITY",
+                "datasource.url.fragment");
+        assertThat(violations(p -> p.getDatasource().setUrl("jdbc:mysql://a#,b/privacy_journal?sslMode=VERIFY_IDENTITY")))
+                .as("fragment の前後に分けた複数 host も拒否する").contains("datasource.url.host", "datasource.url.fragment");
+    }
+
     @Test
     void URLの符号化_認証情報_重複_timeout上書きで検査を迂回させない() {
         // driver は key・値を percent-decode するため、符号化した sslMode・autoReconnect は検査を迂回し得る（Review P3-4）
