@@ -348,7 +348,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 - 署名の参照を `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（設定キー `app.features.nf01-dual-confirmation.privacy-sign-off-ref`）へ設定する。値は英数字で始まる4〜128文字（英数字と `._:/#-`）で**英字と数字の両方を含む**review文書ID・ticket番号等（例: `PRIV-REVIEW-2026-11-20`）。placeholderとみなす値は受け付けない: `todo`・`tbd`・`xxx`・`placeholder`・`changeme`（`change-me`・`change_me`）・`dummy`・`fixme`・`sample`・`example`・`unsigned`・`replace`・`your-` を一部にでも含む値、`test`・`pending`・`tmp`・`temp`・`none`・`null`・`n/a`・`dev`・`local` で始まる値（大文字小文字を区別しない。例: `TODO-1`・`TBD2026`・`test-ref-1` は不可）。
 - prod profileでは `LifecycleDualConfirmationReleaseGate` が、子スイッチの実効値がONなのに参照が無い・形式不正・placeholderの場合に起動を止める（固定コード `NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING`）。参照値は秘密情報ではないため、起動ログ `[二者確認] Privacy署名の参照を確認して公開します: privacySignOffRef=...` に出す（監査で署名と配備を突き合わせる）。
 - gateは「署名を記録したこと」を強制するだけで、署名の内容は検証しない。参照の値は署名者（Privacy）が発行したものを配備担当が転記する。
-- ONの前に、NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録（V196 に無く、実装が要る）と、browser の手動確認9項目（`deploy-runbook.md` §1.7.1）を済ませる。ONの前提の一覧は同 §1.7。
+- NF07 の PII inventory・data element catalog への B0 の7表と comment 2列の登録は V198 で登録済み（`m_pii_data_element` の `LIFECYCLE_DUAL_*` 9件と `privacy-retention-dsar/pii-inventory.md` の DB-141〜DB-147。provider は未登録、分類・owner・inventory 状態は UNKNOWN で、保持期間は持たない）。保存期間等の値は D-02 の署名で確定する（署名は未取得）。ONの前に browser の手動確認9項目（`deploy-runbook.md` §1.7.1）を済ませる。ONの前提の一覧は同 §1.7。
 
 #### 4.9.3 ONにする手順
 
