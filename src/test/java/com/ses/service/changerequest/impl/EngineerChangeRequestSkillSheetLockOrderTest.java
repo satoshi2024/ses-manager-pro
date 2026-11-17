@@ -75,6 +75,9 @@ import static org.mockito.Mockito.when;
  * 404になる（実MySQLでの再現は {@code SkillSheetConfirmFirstAttemptMySqlTest}）。H2はこのread viewを再現しないため、
  * ここでは「registerGeneratedの時点で開いているtransactionが無く、linkと確認日時の記録はその後に始まるtransactionの中で
  * 行う」ことを、transaction managerの呼出し順で固定する。</p>
+ *
+ * <p>RB-PRERUN 追加 P3-1: PDFはpreviewと同じ読取専用transaction（同じread view）で生成し、登録する文書と確認版
+ * （fingerprint）を同じ時点のデータから作る。</p>
  */
 class EngineerChangeRequestSkillSheetLockOrderTest {
 
@@ -164,12 +167,18 @@ class EngineerChangeRequestSkillSheetLockOrderTest {
                     assertEquals(1, openTransactions(), "確認日時の記録はlinkと同じtransactionで行う");
                     return 1;
                 });
+        when(generator.generatePdf(ENGINEER_ID)).thenAnswer(invocation -> {
+            // previewと同じ読取専用transaction（同じread view）の中でPDFを作る（RB-PRERUN 追加 P3-1）
+            assertEquals(1, openTransactions(), "PDFはpreviewと同じtransactionの中で生成する");
+            return new byte[]{1, 2, 3};
+        });
 
         service.confirmSkillSheet(ENGINEER_ID, FINGERPRINT);
 
-        InOrder order = inOrder(transactionManager, service, documentService, linkCommand);
+        InOrder order = inOrder(transactionManager, service, generator, documentService, linkCommand);
         order.verify(transactionManager).getTransaction(argThat(TransactionDefinition::isReadOnly));
         order.verify(service).skillSheetPreview(ENGINEER_ID);
+        order.verify(generator).generatePdf(ENGINEER_ID);
         order.verify(transactionManager).commit(any());
         order.verify(documentService).registerGenerated(any(DocumentRegisterRequest.class), any(InputStream.class));
         order.verify(transactionManager).getTransaction(argThat(definition -> !definition.isReadOnly()
@@ -201,6 +210,8 @@ class EngineerChangeRequestSkillSheetLockOrderTest {
         verifyNoInteractions(generator, documentService, linkCommand);
         verify(transactionManager, times(1)).getTransaction(any());
         verify(transactionManager).getTransaction(argThat(TransactionDefinition::isReadOnly));
+        verify(transactionManager).rollback(any());
+        verify(transactionManager, never()).commit(any());
     }
 
     private Document registeredDocument() {

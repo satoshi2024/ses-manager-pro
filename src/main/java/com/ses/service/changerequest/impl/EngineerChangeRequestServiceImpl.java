@@ -418,19 +418,28 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
      * 別の接続でcommitするため、その前に外側のtransactionで1件でも読むと、REPEATABLE READのread viewが文書のcommitより前に
      * 作られ、続く {@code DocumentService.link} の文書存在確認（非lock読み）が新しい文書を見られず、初回の確定だけが
      * 404 {@code error.document.notFound} になる（2回目は冪等登録が既存文書を返すため成功していた。RB-PRERUN 1）。
-     * そのためpreviewは読取専用の短いtransactionで読み、ENGINEER linkの挿入と確認日時の記録は、文書のcommit後に始める
-     * 別のtransactionで一緒に行う。PDF生成・scan・storageの間はDB接続を保持しない。</p>
+     * そのためpreviewとPDFは読取専用の1つのtransaction（同じread view）で読んで登録の前に閉じ、ENGINEER linkの挿入と
+     * 確認日時の記録は、文書のcommit後に始める別のtransactionで一緒に行う。登録する文書（PDF）と確認版（fingerprint）は
+     * 同じ時点のデータから作る（並行の変更がpreviewとPDFの間に入ると、新しいデータのPDFに古い確認版が付くため。
+     * RB-PRERUN 追加 P3-1）。</p>
      */
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public SkillSheetConfirmResult confirmSkillSheet(Long engineerId, String fingerprint) {
         TransactionTemplate readTransaction = new TransactionTemplate(transactionManager);
         readTransaction.setReadOnly(true);
-        SkillSheetPreview preview = readTransaction.execute(status -> skillSheetPreview(engineerId));
-        if (preview == null || fingerprint == null || !fingerprint.equals(preview.fingerprint())) {
+        SkillSheetSnapshot snapshot = readTransaction.execute(status -> {
+            SkillSheetPreview current = skillSheetPreview(engineerId);
+            if (current == null || fingerprint == null || !fingerprint.equals(current.fingerprint())) {
+                throw BusinessException.of(409, "error.changeRequest.skillSheetStale");
+            }
+            return new SkillSheetSnapshot(current, skillSheetGenerator.generatePdf(engineerId));
+        });
+        if (snapshot == null) {
             throw BusinessException.of(409, "error.changeRequest.skillSheetStale");
         }
-        byte[] pdf = skillSheetGenerator.generatePdf(engineerId);
+        SkillSheetPreview preview = snapshot.preview();
+        byte[] pdf = snapshot.pdf();
         String businessKey = "SKILL_SHEET:" + engineerId;
         com.ses.entity.Document document = documentService.registerGenerated(
                 com.ses.dto.document.DocumentRegisterRequest.builder()
@@ -445,7 +454,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                         .originalName("skill-sheet-" + engineerId + ".pdf")
                         .contentType("application/pdf")
                         .build(), new java.io.ByteArrayInputStream(pdf));
-        // PDF生成・scan・storage・commitNew（registerGeneratedはNOT_SUPPORTED）をlockなしで終えてから、
+        // scan・storage・commitNew（registerGeneratedはNOT_SUPPORTED）を文書行のlockなしで終えてから、
         // 文書のcommit後に始めるtransactionで、文書行のX lock → ENGINEER link挿入 → 証跡利用可否epochの増分を行う
         // （NF01 F3。lock順 15 → 17）。文書の存在確認・tenant照合は DocumentService.link のものをそのまま使う。
         LocalDateTime confirmedAt = LocalDateTime.now(clock);
@@ -458,6 +467,9 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         });
         return new SkillSheetConfirmResult(fingerprint, confirmedAt);
     }
+
+    /** 同じread viewで読んだpreviewとPDF。 */
+    private record SkillSheetSnapshot(SkillSheetPreview preview, byte[] pdf) { }
 
     @Override
     @Transactional(readOnly = true)
