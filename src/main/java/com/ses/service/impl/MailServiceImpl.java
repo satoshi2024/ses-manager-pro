@@ -40,9 +40,14 @@ public class MailServiceImpl implements MailService {
     @Autowired(required = false)
     private EmailProviderAdapter emailProviderAdapter;
 
+    /**
+     * 自分自身のproxy（{@code executeSend} の {@code @Async} を効かせるため）。{@code @EnableAsync} 既定のinterface proxyでは
+     * beanはJDK proxyになり {@code MailServiceImpl} 型へ解決できないため、interface型で取得する（RB-PRERUN 2。
+     * 実装class型の {@code @Lazy} 自己注入は初回送信時に {@code BeanNotOfRequiredTypeException} になり、配信がQUEUEDのまま残った）。
+     * Springを使わない単体テストでは注入されずnullのまま。
+     */
     @Autowired
-    @org.springframework.context.annotation.Lazy
-    private MailServiceImpl self;
+    private ObjectProvider<MailService> selfProvider;
 
     @Autowired
     public MailServiceImpl(EmailTemplateService emailTemplateService,
@@ -119,10 +124,12 @@ public class MailServiceImpl implements MailService {
         if (mailDeliveryMapper != null) {
             mailDeliveryMapper.insert(delivery);
         }
+        // thisで直接呼ぶと@Asyncのproxyを通らず、呼出元のthreadでSMTP送信まで行ってしまう。
+        MailService self = selfProvider == null ? null : selfProvider.getIfAvailable();
         if (self != null) {
             self.executeSend(delivery, tenantId);
         } else {
-            executeSend(delivery, tenantId); // fallback for tests
+            executeSend(delivery, tenantId); // Springを使わない単体テスト向け（同期実行）
         }
         return new MailDispatchResult(delivery.getId(), delivery.getStatus());
     }
@@ -133,6 +140,7 @@ public class MailServiceImpl implements MailService {
         executeSend(delivery, AccountingTenantContextHolder.requireTenantContext());
     }
 
+    @Override
     @Async
     public void executeSend(MailDelivery delivery, String tenantId) {
         if (tenantId == null || tenantId.isBlank()) {

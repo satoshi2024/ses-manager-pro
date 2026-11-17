@@ -2,6 +2,7 @@ package com.ses.service;
 
 import java.util.Map;
 import com.ses.dto.mail.MailDispatchResult;
+import com.ses.entity.MailDelivery;
 
 /**
  * メール送信サービス。
@@ -42,4 +43,15 @@ public interface MailService {
     default MailDispatchResult send(String to, String subject, String body) {
         return send(to, subject, body, null);
     }
+
+    /**
+     * {@link #send} が作成した配信履歴（QUEUED）を送信し、結果（SENT・FAILED・DRY_RUN）で更新する。実装は {@code @Async}。
+     *
+     * <p>業務コードから直接呼ばない。{@code send} がSpringのproxy経由で非同期実行するための入口で、interfaceに置くのは
+     * {@code @EnableAsync} 既定のinterface proxy（JDK proxy）でも呼べるようにするため（RB-PRERUN 2）。</p>
+     *
+     * @param delivery {@code send} が保存した配信履歴
+     * @param tenantId 呼出元の明示tenant（非同期threadへ引数で渡す）
+     */
+    void executeSend(MailDelivery delivery, String tenantId);
 }
