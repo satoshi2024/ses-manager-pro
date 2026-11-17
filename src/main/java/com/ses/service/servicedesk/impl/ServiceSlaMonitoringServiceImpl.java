@@ -19,6 +19,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import com.ses.service.security.CustomerScopeResolver;
 import com.ses.service.security.ReportScopeContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -267,14 +268,22 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 sent = true;
             } catch (Exception e) {
                 allRecipientsSent = false;
-                error = e.getMessage() != null && !e.getMessage().isBlank()
-                        ? e.getMessage() : "SLAアラート通知送信失敗";
-                log.error("SLAアラート通知送信失敗: recipientId={}, dedupeKey={}", recipientId, dedupeKey, e);
+                // 例外のmessage（宛先・本文・SQL等を含み得る）は台帳にもログにも出さず、型と件数だけの要約にする（RB-I18N）。
+                error = safeErrorSummary(e);
+                log.error("SLAアラート通知送信失敗: recipientId={}, dedupeKey={} {}", recipientId, dedupeKey, error);
             }
         }
         persistEscalation(req, clk, notice, dedupeKey, recipients.size(), error, now);
         return sent && allRecipientsSent;
     }
+
+    /** escalationの {@code last_error}（VARCHAR(1000)）へ入れる安全な例外要約。 */
+    private static String safeErrorSummary(Throwable failure) {
+        String summary = LogRedaction.safeThrowableSummary(failure);
+        return summary.length() <= LAST_ERROR_MAX_LENGTH ? summary : summary.substring(0, LAST_ERROR_MAX_LENGTH);
+    }
+
+    private static final int LAST_ERROR_MAX_LENGTH = 1000;
 
     private String newDedupeKey(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice, LocalDateTime now) {
         String bucket = "CONTINUING".equals(notice.stage())

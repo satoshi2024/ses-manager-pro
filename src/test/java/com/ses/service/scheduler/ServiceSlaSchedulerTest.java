@@ -738,6 +738,32 @@ class ServiceSlaSchedulerTest {
         assertEquals(2, countContinuing(clock.getId()));
     }
 
+    /** 通知の送信例外のmessage（宛先・応答本文を含み得る）は、escalationの last_error へ保存しない（型と件数だけの要約）。 */
+    @Test
+    @DisplayName("通知送信の例外messageはescalationのlast_errorへ保存せず安全な要約だけを残す")
+    void notificationFailureMessageIsNotPersistedInLastError() {
+        String tenantId = "nf02-last-error-" + UUID.randomUUID();
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = respondedClockWithResolveDeadline(tenantId, "last error", base.plusMinutes(20), false);
+        SysUser admin = activeAdmin("err_admin", tenantId);
+        org.mockito.Mockito.doThrow(new IllegalStateException("宛先 secret.user@example.com へのSMTP応答 550 mailbox"))
+                .when(notificationService).publishToUser(eq(admin.getId()), eq("SLA_BREACH"),
+                        anyString(), anyString(), anyString(), anyString(), anyString());
+
+        monitoringService.checkSlaBreaches(base.plusMinutes(21));
+
+        com.ses.entity.ServiceSlaEscalation failed = escalationMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                        .eq(com.ses.entity.ServiceSlaEscalation::getSlaClockId, clock.getId())
+                        .eq(com.ses.entity.ServiceSlaEscalation::getStage, "FIRST"));
+        assertNotNull(failed);
+        assertEquals("RETRY", failed.getStatus());
+        assertTrue(failed.getLastError().startsWith("exceptionType=java.lang.IllegalStateException"), failed.getLastError());
+        assertFalse(failed.getLastError().contains("secret.user@example.com"), failed.getLastError());
+        assertFalse(failed.getLastError().contains("550"), failed.getLastError());
+        assertTrue(failed.getLastError().length() <= 1000);
+    }
+
     /** 専用tenantに、初回応答を記録済みで解決期限だけを持つ問い合わせとclockを作る。 */
     private ServiceSlaClock respondedClockWithResolveDeadline(String tenantId, String subject,
                                                               LocalDateTime resolveDeadline, boolean alreadyBreached) {
