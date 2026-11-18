@@ -114,16 +114,26 @@ fi
 # 0. 固定値の検査（ダウンロード・apt より前。占位値のままなら失敗する）
 # ------------------------------------------------------------
 [[ "${BASE_IMAGE:-}" == *@sha256:* ]] || die "BASE_IMAGE が digest で固定されていません（現在値: ${BASE_IMAGE:-未設定}）"
-# RB-W 8.4 対応: production の MySQL は 8.4 LTS だけ。client は 8.4.x、repo の component は mysql-8.4-lts だけを
-# 受け付ける（8.0 の client・component、innovation 系の component は受け付けない）。
-[[ "${MYSQL_CLIENT_VERSION:-}" =~ ^8\.4\.[0-9]{1,3}$ ]] \
-  || die "MYSQL_CLIENT_VERSION が MySQL 8.4 LTS（8.4.x）ではありません（現在値: ${MYSQL_CLIENT_VERSION:-未設定}）"
+# RB-W 8.4 対応: production の MySQL は 8.4 LTS だけ。client の版と repo の component は下に列挙した値だけを
+# 受け付ける（任意の 8.4.x・8.0・8.5 以降・innovation 系・空は受け付けない）。patch を上げるときは、repo.mysql.com の
+# mysql-8.4-lts の Packages で mysql-community-client と mysql-community-server-core の版を確かめ、Dockerfile の
+# ARG と同じ変更でここへ足す（tool-image-test の静的な契約が Dockerfile の値がここにあることを確かめる）。
+ALLOWED_MYSQL_CLIENT_VERSIONS=(8.4.13)
+ALLOWED_MYSQL_APT_COMPONENTS=(mysql-8.4-lts)
+is_listed() { # <value> <許可する値...>
+  local value=$1 allowed
+  shift
+  for allowed in "$@"; do
+    [[ "$value" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+is_listed "${MYSQL_CLIENT_VERSION:-}" "${ALLOWED_MYSQL_CLIENT_VERSIONS[@]}" \
+  || die "MYSQL_CLIENT_VERSION は MySQL 8.4 LTS の列挙した版（${ALLOWED_MYSQL_CLIENT_VERSIONS[*]}）だけを受け付けます（現在値: ${MYSQL_CLIENT_VERSION:-未設定}）"
 [[ "${MYSQL_DEB_REVISION:-}" =~ ^[0-9]+debian[0-9]+$ ]] || die "MYSQL_DEB_REVISION が不正です（現在値: ${MYSQL_DEB_REVISION:-未設定}）"
 [[ "${MYSQL_APT_SUITE:-}" =~ ^[a-z]+$ ]] || die "MYSQL_APT_SUITE が不正です"
-case "${MYSQL_APT_COMPONENT:-}" in
-  mysql-8.4-lts) ;;
-  *) die "MYSQL_APT_COMPONENT は mysql-8.4-lts だけを受け付けます（現在値: ${MYSQL_APT_COMPONENT:-未設定}）" ;;
-esac
+is_listed "${MYSQL_APT_COMPONENT:-}" "${ALLOWED_MYSQL_APT_COMPONENTS[@]}" \
+  || die "MYSQL_APT_COMPONENT は ${ALLOWED_MYSQL_APT_COMPONENTS[*]} だけを受け付けます（現在値: ${MYSQL_APT_COMPONENT:-未設定}）"
 [[ "${MYSQL_REPO_KEY_URL:-}" =~ ^https://repo\.mysql\.com/[A-Za-z0-9._-]+$ ]] || die "MYSQL_REPO_KEY_URL が不正です（https://repo.mysql.com/ 直下に限る）"
 require_sha256 MYSQL_REPO_KEY_SHA256 "${MYSQL_REPO_KEY_SHA256:-}"
 require_fingerprint MYSQL_REPO_KEY_FINGERPRINT "${MYSQL_REPO_KEY_FINGERPRINT:-}"
