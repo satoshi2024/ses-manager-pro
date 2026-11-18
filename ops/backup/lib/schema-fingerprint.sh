@@ -99,26 +99,31 @@ schema_fingerprint::sql() {
 #   sha256=<16 進 64 桁>
 #   section=<区分> count=<件数> sha256=<16 進 64 桁>   （SCHEMA_FINGERPRINT_SECTIONS の順）
 # 想定外の行・table 0 件・読めない routine / view 定義は失敗（1）。
+# 呼び出し側は set -o pipefail で動くため、途中で読むのをやめる command（grep -q・head・早期 exit の awk）を
+# パイプの後段に置かない（RB-W P1-1）。前段が SIGPIPE（141）で終わると、pipefail でパイプ全体が失敗に見え、
+# 例えば table 行の後に 64 KiB を超える行があると「table が 1 つも見えない」と誤判定していた。
+# 判定はすべて here-string（パイプではない）で入力を渡し、読み終えてから結果を返す。
 schema_fingerprint::digest() {
   local sorted bad section count sum part
   sorted=$(sed '/^$/d' | LC_ALL=C sort) || return 1
   # 区分名 + tab で始まらない行（区分の無い行・未知の区分）は想定外の出力として失敗させる
-  bad=$(printf '%s\n' "$sorted" | awk -F'\t' -v known="${SCHEMA_FINGERPRINT_SECTIONS[*]}" '
+  bad=$(awk -F'\t' -v known="${SCHEMA_FINGERPRINT_SECTIONS[*]}" '
     BEGIN { n = split(known, names, " "); for (i = 1; i <= n; i++) ok[names[i]] = 1 }
-    NF > 0 && (NF < 2 || !($1 in ok)) { print substr($1, 1, 32); exit }')
+    bad == "" && NF > 0 && (NF < 2 || !($1 in ok)) { bad = substr($1, 1, 32) }
+    END { if (bad != "") print bad }' <<< "$sorted")
   if [[ -n "$bad" ]]; then
     echo "schema-fingerprint: 想定外の行があります（区分: $bad）" >&2
     return 1
   fi
-  if ! printf '%s\n' "$sorted" | grep -q $'^table\t'; then
+  if ! awk -F'\t' '$1 == "table" { found = 1 } END { exit found ? 0 : 1 }' <<< "$sorted"; then
     echo "schema-fingerprint: table が 1 つも見えません（DB 名と、利用者の SELECT 権限を確認してください）" >&2
     return 1
   fi
-  if printf '%s\n' "$sorted" | awk -F'\t' '$1 == "routine" && $4 == "NULL" { found = 1 } END { exit found ? 0 : 1 }'; then
+  if awk -F'\t' '$1 == "routine" && $4 == "NULL" { found = 1 } END { exit found ? 0 : 1 }' <<< "$sorted"; then
     echo "schema-fingerprint: routine の本体を読めません（照会する利用者に SHOW_ROUTINE 権限が必要です）" >&2
     return 1
   fi
-  if printf '%s\n' "$sorted" | awk -F'\t' -v empty="''" '$1 == "view" && ($3 == empty || $3 == "NULL") { found = 1 } END { exit found ? 0 : 1 }'; then
+  if awk -F'\t' -v empty="''" '$1 == "view" && ($3 == empty || $3 == "NULL") { found = 1 } END { exit found ? 0 : 1 }' <<< "$sorted"; then
     echo "schema-fingerprint: view の定義を読めません（照会する利用者に対象 DB の SHOW VIEW 権限が必要です）" >&2
     return 1
   fi
@@ -127,11 +132,11 @@ schema_fingerprint::digest() {
   [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || { echo "schema-fingerprint: SHA-256 を計算できません" >&2; return 1; }
   printf 'sha256=%s\n' "$sum"
   for section in "${SCHEMA_FINGERPRINT_SECTIONS[@]}"; do
-    part=$(printf '%s\n' "$sorted" | grep "^$section"$'\t' || true)
+    part=$(grep "^$section"$'\t' <<< "$sorted" || true)
     if [[ -n "$part" ]]; then
-      count=$(printf '%s\n' "$part" | wc -l)
+      count=$(wc -l <<< "$part")
       count=${count//[[:space:]]/}
-      sum=$(printf '%s\n' "$part" | sha256sum)
+      sum=$(sha256sum <<< "$part")
     else
       count=0
       sum=$(printf '' | sha256sum)

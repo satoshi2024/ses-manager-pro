@@ -218,7 +218,8 @@ runtime_session() {
   sysdir=$(cygpath -u "${SYSTEMROOT:-${WINDIR:-}}" 2>/dev/null) || return 1
   sysdir="$sysdir/System32"
   [[ -x "$sysdir/tasklist.exe" && -x "$sysdir/whoami.exe" ]] || return 1
-  line=$("$sysdir/tasklist.exe" /FI "PID eq $winpid" /FO CSV /NH 2>/dev/null | tr -d '\r' | head -n 1) || return 1
+  # 先頭行だけを使う。sed -n 1p は入力を読み終えてから終わるため、pipefail 下でも前段が SIGPIPE にならない
+  line=$("$sysdir/tasklist.exe" /FI "PID eq $winpid" /FO CSV /NH 2>/dev/null | tr -d '\r' | sed -n 1p) || return 1
   sess=$(printf '%s\n' "$line" | awk -F'","' 'NF >= 5 { print $4 }')
   [[ "$sess" =~ ^[0-9]{1,10}$ ]] || return 1
   priv=$("$sysdir/whoami.exe" /priv /FO CSV /NH 2>/dev/null | tr -d '\r') || return 1
@@ -1132,7 +1133,8 @@ append_diagnostic_line() {
   current=${current//[[:space:]]/}
   room=$((DIAG_MAX_BYTES - current))
   (( room > 0 )) || return 0
-  printf '%s\n' "$line" | head -c "$room" >> "$DIAG_FILE"
+  # here-string で渡す（パイプにしない。行が残り容量より長いと、pipefail 下で printf の SIGPIPE が失敗に見えるため）
+  head -c "$room" <<< "$line" >> "$DIAG_FILE"
 }
 
 append_diagnostic_section() {

@@ -123,7 +123,7 @@ case_schema_fp_sql_rule() {
       check_clause action_statement action_order action_timing event_manipulation sql_mode definer \
       routine_definition dtd_identifier is_deterministic sql_data_access security_type parameter_mode \
       view_definition check_option engine table_collation create_options; do
-    if printf '%s\n' "$sql" | grep -qw "$word"; then
+    if grep -qw "$word" <<< "$sql"; then
       test_assert "取得する: $word"
     else
       test_fail "取得する: $word" "SQL に $word がありません"
@@ -132,7 +132,7 @@ case_schema_fp_sql_rule() {
   for word in column_comment table_comment index_comment routine_comment comment auto_increment table_rows \
       data_length index_length avg_row_length cardinality create_time update_time check_time created \
       last_altered privileges column_key row_format database_collation; do
-    if printf '%s\n' "$sql" | grep -qiw "$word"; then
+    if grep -qiw "$word" <<< "$sql"; then
       test_fail "取得しない: $word" "SQL に $word があります"
     else
       test_assert "取得しない: $word"
@@ -146,8 +146,35 @@ case_schema_fp_sql_rule() {
   assert_contains "$sql" "QUOTE(\`collation\`)" "keyword と同じ列名は \` で囲む"
 }
 
+# RB-W P1-1: 呼び出し側（backup-full / create-checkpoint / validate-restore）は set -o pipefail で動く。table 行の後に
+# pipe の容量（Linux 64 KiB）を超える行があっても「table が 1 つも見えない」と誤判定しない（修正前は grep -q が先に
+# 終わり、前段の printf が SIGPIPE になってパイプ全体が失敗に見えていた）。ここでは 1 MiB を超える入力で確かめる。
+case_schema_fp_large_input_under_pipefail() {
+  local rows n
+  set -o pipefail
+  rows=$( {
+    seq -f $'table\t\'t_%06g\'\t\'BASE TABLE\'\t\'InnoDB\'\t\'utf8mb4_unicode_ci\'\t\'\'' 1 12000
+    seq -f $'trigger\t\'trg_%06g\'\t\'t_000001\'\t\'INSERT\'\t\'BEFORE\'\t\'1\'\t\'SET NEW.name = TRIM(NEW.name)\'\t\'STRICT_TRANS_TABLES\'\t\'app@%%\'\t\'utf8mb4\'\t\'utf8mb4_0900_ai_ci\'' 1 3000
+  } )
+  n=${#rows}
+  if (( n > 1048576 )); then
+    test_assert "table 行の後に 1 MiB を超える入力を用意した（前提: ${n} bytes）"
+  else
+    test_fail "table 行の後に 1 MiB を超える入力を用意した（前提）" "${n} bytes"
+  fi
+  DIGEST_OUT=$(schema_fingerprint::digest <<< "$rows" 2>&1)
+  DIGEST_RC=$?
+  assert_zero "$DIGEST_RC" "pipefail 下で 1 MiB を超える入力でも計算できる（SIGPIPE で誤判定しない）"
+  assert_not_contains "$DIGEST_OUT" "table が 1 つも見えません" "table 0 件と誤判定しない"
+  assert_contains "$(section_of "$DIGEST_OUT" table)" "count=12000" "table の件数を数え切る"
+  assert_contains "$(section_of "$DIGEST_OUT" trigger)" "count=3000" "trigger の件数を数え切る"
+  # 静的: 判定を「パイプの後段で途中で読むのをやめる command」に渡さない
+  assert_eq "" "$(sed -n '/^schema_fingerprint::digest() {/,/^}/p' "$LIB/schema-fingerprint.sh" | grep -E '\| *(grep -[a-zA-Z]*q|head)' || true)" \
+    "digest の中で | grep -q・| head を使わない"
+}
+
 case_schema_fp_compute_and_verify() {
-  local t recorded rc out
+  local t recorded rc out saved_tmpdir=${TMPDIR:-}
   t=$(mktemp -d)
   export TMPDIR="$t"
   MYSQL_CLIENT_BIN="$FIXTURES/mysql"
@@ -179,6 +206,8 @@ case_schema_fp_compute_and_verify() {
   assert_nonzero "$?" "mysql の失敗は compute の失敗"
   assert_contains "$out" "information_schema を取得できません" "取得失敗を通知"
   unset FAKE_SCHEMA_RC FAKE_SCHEMA_ROWS FAKE_ARGV_LOG
+  # 削除する一時ディレクトリを TMPDIR に残さない（RB-W P3-8）
+  if [[ -n "$saved_tmpdir" ]]; then export TMPDIR="$saved_tmpdir"; else unset TMPDIR; fi
   rm -rf "$t"
 }
 
@@ -186,6 +215,7 @@ run_case case_schema_fp_golden_and_row_order
 run_case case_schema_fp_column_order_and_null_default
 run_case case_schema_fp_rejects_unexpected_output
 run_case case_schema_fp_sql_rule
+run_case case_schema_fp_large_input_under_pipefail
 run_case case_schema_fp_compute_and_verify
 
 test_summary "G-04 schema fingerprint"
