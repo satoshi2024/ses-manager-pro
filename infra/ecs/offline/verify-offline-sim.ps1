@@ -16,6 +16,8 @@ $ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $SeedSql = Join-Path $PSScriptRoot 'seed-breakglass-mfa.sql'
 $LockPath = Join-Path $PSScriptRoot '..\image-lock.json'
 $ImageTag = 'ses-manager-pro:local'
+# docker-compose.yml の mysql image と同じ解決（既定は MySQL 8.4 LTS の固定tag）。
+$MySqlImage = if ($env:SES_OFFLINE_MYSQL_IMAGE) { $env:SES_OFFLINE_MYSQL_IMAGE } else { 'mysql:8.4.13' }
 $FreezeBaseline = 'ad829cc2e5c249c4cc273ba7b87441da163a48f3'
 
 function Add-Cmd([string]$line) {
@@ -134,7 +136,7 @@ try {
   # Pre-create uploads volume owned by 10001 (REV-ECS-P1-002)
   docker volume create offline_ses-offline-uploads 2>$null | Out-Null
   Add-Cmd 'chown uploads volume to 10001 (sim dir only)'
-  docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
+  docker run --rm -v offline_ses-offline-uploads:/data $MySqlImage `
     sh -c 'rm -rf /data/lost+found /data/* /data/.[!.]* 2>/dev/null; mkdir -p /data/sim && chown -R 10001:10001 /data'
 
   Add-Cmd 'compose up mysql'

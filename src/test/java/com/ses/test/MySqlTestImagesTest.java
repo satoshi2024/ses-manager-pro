@@ -92,6 +92,19 @@ class MySqlTestImagesTest {
     }
 
     @Test
+    void offline_simulationも同じ既定imageを使い8_4で削除された起動optionを渡さない() throws IOException {
+        String compose = Files.readString(Path.of("infra/ecs/offline/docker-compose.yml"), StandardCharsets.UTF_8);
+        assertTrue(compose.contains("image: ${SES_OFFLINE_MYSQL_IMAGE:-" + MySqlTestImages.DEFAULT_IMAGE + "}"),
+                "offline simulationのMySQL既定imageがtestの既定値と食い違っています");
+        assertFalse(Pattern.compile("(?m)^\\s*-\\s*--default[-_]authentication[-_]plugin").matcher(compose).find(),
+                "--default-authentication-plugin は MySQL 8.4 で削除されたため指定できません");
+
+        String simulation = Files.readString(Path.of("infra/ecs/offline/verify-offline-sim.ps1"), StandardCharsets.UTF_8);
+        assertTrue(simulation.contains("'" + MySqlTestImages.DEFAULT_IMAGE + "'"),
+                "verify-offline-sim.ps1 の補助imageがcomposeの既定値と食い違っています");
+    }
+
+    @Test
     void 指定が無ければ既定imageを使う() {
         assertEquals(MySqlTestImages.DEFAULT_IMAGE, MySqlTestImages.resolve(name -> null, name -> null));
         assertEquals(MySqlTestImages.DEFAULT_IMAGE, MySqlTestImages.resolveFreshInstall(name -> null, name -> null));
