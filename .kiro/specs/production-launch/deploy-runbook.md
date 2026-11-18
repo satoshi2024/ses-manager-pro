@@ -167,7 +167,7 @@
 
 ### 1.1 DBサーバー（DBA）
 
-- MySQL 8.0系（版はDBAが確定する。testは `mysql:8.0.36`。確定後は `-Dses.flyway.fresh-install.mysql-image` で同じ版を検証する）。
+- MySQL 8.0系（版はDBAが確定する。要決定（§1.6 の3・DBA-4）。testは `mysql:8.0.36`。確定後は `-Dses.flyway.fresh-install.mysql-image` で同じ版を検証する）。
 - **serverタイムゾーン `+09:00`**（ユーザー決定）。my.cnf / parameter groupで `default_time_zone = '+09:00'` を設定し、次で確認する。
   ```sql
   SELECT @@global.time_zone, @@session.time_zone, NOW(), UTC_TIMESTAMP();
@@ -200,7 +200,7 @@ migrator（job専用）とアプリ用を分ける。
   - **全 instance が同じアプリ account（同じ user 名）を使う**。Secrets Manager の alternating-users 方式（2つの user を交互に切り替える rotation）は使わない。password だけを替える single-user の rotation は使える（RB-NF05 review P3-2）。
     - 理由: NF06 の取込 stage 照合（`ImportStageReconciler`）は、結果不明の COMMIT を送った接続がまだ文を実行しているかを `information_schema.PROCESSLIST` で確かめる。PROCESS 権限の無い account には**同じ user 名の thread だけ**が見えるため、別の user で張った接続は見えず、照合は黙って時間だけの判定へ戻る（`feature-switches.md` 4.8.2 #10、a1a §6）。
     - PROCESS 権限は渡さない（同じ user なら不要。`ImportCsvIngestionRealMySqlTest` が業務権限だけの専用 user で確かめる）。`SHOW GLOBAL STATUS`（server の起動時刻）と `@@server_uuid` も権限なしで読める。
-    - DBA が配備前に確認する（§1.7 NF06 行。未取得）。
+    - DBA が配備前に確認する（§1.7 NF06 行。未取得）。rotation の方式は要決定（§1.6 の9）。
 
 ### 1.3 secretの注入（Security / SRE）
 
@@ -229,7 +229,7 @@ job実行環境へ渡す値は環境変数の次の4つだけ。POM・Maven prop
 
 ### 1.4 artifactとjobの一致（SRE）
 
-- jobはsource checkoutで `compile` したclass/resourceを使う。**jobのcommit SHAと、配備するimage（docker save/load、digest記録。決定XB-10）のSHAを一致させる**。
+- jobはsource checkoutで `compile` したclass/resourceを使う。**jobのcommit SHAと、配備するimageのSHAを一致させる**。imageの配布経路（registry と digest の記録）は要決定（§1.6 の5）。docker save/load と digest の記録（決定XB-10）は backup tool image の決定で、アプリ image には決まっていない。
   ```bash
   git rev-parse HEAD   # imageの記録SHAと一致すること
   git status --porcelain   # 空であること
@@ -251,9 +251,15 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 ### 1.6 未決事項（配備前に決定が必要）
 
 1. **初回起動のbootstrap**: **決定済み（方式A: 期限付きbootstrap mode。完了後の再開は承認ticket必須。管理者5名）**。空DBにはadmin 1件だけでMFA・IdP・外部identityも無く、通常のprod設定では最初の1人がログインできない（`ProductionSecurityConfigurationValidator` もbreak-glass管理者2件・MFA登録済みを起動条件にしている）。期限付きで初期adminのlocal loginだけを開け、bootstrapに必要な入口だけを使わせる（§4・§5）。管理者の人数と役割は§5.0、完了後の再開は§5.7。
-2. §1.2のmigrator権限・trigger/binlog・DEFINERの扱い（DBA）。
-3. MySQLの版・collation・parameter group（DBA）。
-4. job実行環境（Maven・JDK・依存取得経路。§1.5のlocal repositoryの準備方法）（SRE）。
+2. §1.2のmigrator権限・trigger/binlog・DEFINERの扱い（DBA。§1.7 の DBA-1）。
+3. MySQLの版・collation・parameter group（DBA。DBA-4）。版を test の `mysql:8.0.36` 以外にする場合は、`-Dses.flyway.fresh-install.mysql-image` でその版を指定して MySQL の試験を再検証する（§1.1）。
+4. job実行環境（Maven・JDK・依存取得経路。§1.5のlocal repositoryの準備方法）（SRE。SRE-11）。
+5. **アプリ image の配布経路**（SRE）。docker save/load と digest の記録（決定 XB-10）は backup tool image（`ops/backup/README.md`「ツールイメージの build・配布」）についての決定である。Fargate の task はアプリ image を registry から pull し、`infra/ecs/task-definition.prod.json` は ECR の registry digest を前提にしている（ECR は未構築）。どの registry から、どの digest で配るかを決める（§1.4）。
+6. **ClamAV の置き方**（SRE）。同じ task の sidecar か、外部の service か。これで `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`（§1.0）の値と task definition の形が決まる。ClamAV に届かないと upload を公開できない。
+7. **Prometheus の scrape 経路**（SRE。SRE-7 の(4)・SRE-9）。ALB 経由の HTTPS か、同じ task の sidecar か（`forwarded-header-sanitize-notes.md` §3.6。sidecar 経路の扱いは未決）。
+8. **`LOCK_CONFLICT` の alert の閾値と通知先**（SRE。SRE-8）。
+9. **アプリ account の password rotation の方式**（DBA。§1.2）。同じ user 名のまま password だけを替える方式に限られる（alternating-users 方式は使わない）。方式と周期、全 instance へ反映する（task を再起動する）までの扱いを決める。
+10. **RPO 15分・RTO 4時間の署名**（DBA-5）。値は決定済み（2026-11-13）で、要るのは DBA Lead と Operations の署名である。
 
 ### 1.7 配備前提と、機能スイッチをONにする前の署名（一覧。X3-4）
 
@@ -269,22 +275,24 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
 | SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
-| SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
-| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
-| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
+| SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）。経路は要決定（§1.6 の7） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
+| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。alertの閾値と通知先は要決定（§1.6 の8）。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
+| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。scrape経路は要決定（§1.6 の7） | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
 | SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。task definitionの雛形とも照合する（`infra/ecs/offline/validate-task-definition.ps1` が名前の有無を検査する） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
+| SRE-11 | **job実行環境（Maven・JDK・依存の取得経路）を決め、local repositoryを揃える** | 別の機械・別の `.m2` で job を動かすと、片方にだけ無い artifact で job が止まる。推奨は build と同じ機械・同じ `.m2`。要決定（§1.6 の4） | 本書 §1.5・§1.6 の4 |
 
-**DBA の前提**
-- migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
-- serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
-- **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
+**DBA の前提**（番号は署名一覧の DBA-1〜DBA-6 と同じ）
+- **DBA-1**: migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
+- **DBA-2**: serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
+- **DBA-3**: **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
   - 対象: 退社完了の `LifecycleCaseServiceImpl.completeCase`、ポータル紐付け登録の `PortalEngineerLinkServiceImpl.register` 等。一覧は `WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS`。
   - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
   - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
   - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
+- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1、要決定（§1.6 の3））。
 - **Backup・PITR**:
-  - RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**。
-  - prodの `.env.backup` に `CONTENT_HASH_TABLES` を設定する（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+  - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**（署名事項。§1.6 の10）。
+  - **DBA-6**: prodの `.env.backup` に `CONTENT_HASH_TABLES` を設定する（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
   - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`CONTENT_HASH_TABLES` の形式）。
 
 **初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
