@@ -22,13 +22,17 @@
 - 配備では全ての placeholder を置き換える。置き換え忘れがあると、アプリの起動時検査か ECS の secret 取得で止まる。
 - `validate-task-definition.ps1` は次を検査する。
   - §1.0 の1〜26の名前が environment か secrets に全てあること。`FREEE_ENABLED=true` のときは27〜30も。
-  - secret を environment に置いていないこと。
-  - §1.0 の運用設定（`FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`、`METRICS_SCRAPER_*`）の名前があり、§1.0 で禁止した値が無いこと。
-  - 初回起動の設定（runbook §4・§4.2）: `APP_SCHEDULING_ENABLED=false`、`SECURITY_BOOTSTRAP_ENABLED=true`、`SECURITY_BOOTSTRAP_EXPIRES_AT`、空の `BREAK_GLASS_USERNAMES`、機能スイッチの環境変数が無いこと。
-- 検査の mode は2つある。証跡は既定で OS の一時 directory の下に新しく作り、repository には書かない（`-EvidenceRoot` で変えられる。証跡には設定の名前だけを書き、値は書かない）。
+  - secret を environment に置いていないこと。同じ設定を2回（environment と secrets の両方、または Spring が同じ property に結び付ける別の綴り）書いていないこと。
+  - §1.0 の運用設定と 2026-11-18 の決定（runbook §1.6 の5〜7・11）: `FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`（ClamAV の sidecar）、`METRICS_SCRAPER_ENABLED=true` と `METRICS_SCRAPER_*`、`PRIVACY_TRUST_KMS_ANCHOR_FILE` の名前。§1.0 で禁止した値が無いこと。
+  - `JAVA_TOOL_OPTIONS`・`JDK_JAVA_OPTIONS`・`_JAVA_OPTIONS` に `-Duser.timezone` 以外の `-D` が無いこと、environment の `SPRING_APPLICATION_JSON` が検査対象の設定（scheduler・bootstrap・security・Flyway・機能スイッチ・NF07 等）を上書きしないこと（secret store から渡す `SPRING_APPLICATION_JSON` の中身は見ない）。
+  - task の形: container は app（`ses-manager`）と ClamAV の sidecar（`clamav`）の2つだけ。task は 2048 CPU / 6144 MiB、app は 1024 / 2048 の hard limit（JVM の heap が task 全体を基準にしないため）、`clamav` は essential にせず（停止中の upload は quarantine に留まる）、自前の health check を持ち、uploads・privacy-trust を mount しない。volume は uploads（読書き）と NF07 の trust 文書（`privacy-trust`、読取り専用・uploads と別の access point）の EFS で、どちらも transit encryption。
+  - 初回起動の設定（runbook §4・§4.2）: `APP_SCHEDULING_ENABLED=false`、`SECURITY_BOOTSTRAP_ENABLED=true`、`SECURITY_BOOTSTRAP_EXPIRES_AT`、空の `BREAK_GLASS_USERNAMES`、空の `PRIVACY_TRUST_KMS_ANCHOR_FILE`、機能スイッチの環境変数（NF05 の公開API・外部送信を含む）が無いこと。
+- 検査の mode は2つある。証跡は既定で OS の一時 directory の下に新しく作り、repository には書かない（`-EvidenceRoot` で変えられる）。証跡には設定の名前と期待した状態を書き、設定の値（ID・host・ARN 等）は書き写さない。
   - `-Mode Template`（既定）: repository の雛形（placeholder のまま）を検査する。
-  - `-Mode Actual -TaskDefinitionPath <file>`: 実値を入れた定義（登録する JSON、または `aws ecs describe-task-definition` の出力）を検査する。placeholder が残っていないこと、image が registry digest（`@sha256:<64桁>`）で固定されていること、EFS の ID が実在の形式であること、scraper 口座が `admin`・break-glass 名でないことも見る。`-Phase Initial`（既定）は初回起動、`-Phase Steady` は runbook §5.5 以後（bootstrap の設定を外し、`BREAK_GLASS_USERNAMES` がちょうど2名）。§5.7 の bootstrap 再開は対象外。
-  - PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する（7.0〜7.4 の `ConvertFrom-Json` は ISO-8601 の文字列を日時に変えて offset を落とすため、`SECURITY_BOOTSTRAP_EXPIRES_AT` の検査で止まる）。
+  - `-Mode Actual -TaskDefinitionPath <file>`: 実値を入れた定義（登録する JSON、または `aws ecs describe-task-definition` の出力）を検査する。placeholder が残っていないこと、2つの image が registry digest（`@sha256:<64桁>`）で固定されていること、EFS の ID が実在の形式であること、scraper 口座が `admin`・break-glass 名でないこと、`_offlineAcceptanceNotes` を消してあること（ECS は未知の field を拒否する）も見る。
+    - `-Phase Initial`（既定）: 初回起動。期限は offset 付きで、現在から24時間以内の未来（越えると FAIL。起動の直前に設定して照合する）。
+    - `-Phase Steady -Scheduler Enabled|Disabled`: runbook §5.5 以後（bootstrap の設定を外し、`BREAK_GLASS_USERNAMES` がちょうど2名、`PRIVACY_TRUST_KMS_ANCHOR_FILE` は空か読取り専用の mount の下の file）。`-Scheduler` は必須で、`APP_SCHEDULING_ENABLED` の期待値を指定する: scheduler の署名（runbook §4）の前と、release の drain 用 revision（runbook §2 の2）は `Disabled`（`false` だけを通す）、署名後の常態へ戻す revision は `Enabled`（`true` か未設定を通す）。§5.7 の bootstrap 再開は対象外。
+  - PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する（7.0〜7.4 の `ConvertFrom-Json` は ISO-8601 の文字列を日時に変えて offset を落とすため、`SECURITY_BOOTSTRAP_EXPIRES_AT` の検査で止まる）。内蔵の負例自己検査は、実行中と同じ PowerShell で子 process を起こすため、pwsh の無い 5.1 だけの環境でもそのまま動く（`-SkipInlineNegativeSelfTest` で省ける）。
 - 次の点に注意する。
   - reviewer fingerprint の鍵（§1.0 の23〜25）を OS 環境変数で渡すときは、tenant一覧 `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS` も要る。環境変数の名前からは tenant を列挙できないためである。
   - `BREAK_GLASS_USERNAMES` は、bootstrap の初回起動では空にする。runbook §5.5 でちょうど2名にする。
@@ -36,8 +40,10 @@
   - `TZ=Asia/Tokyo` は必須である（runbook §1.0・§4）。image も `TZ` と `-Duser.timezone=Asia/Tokyo` を持つ。`JAVA_TOOL_OPTIONS` を上書きするときは `-Duser.timezone=Asia/Tokyo` を残す。validator はどちらが欠けても Fail する。
   - `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false` は、V197 の署名を得るまでの値である。署名後に `true` にする（runbook §4.3）。
   - 雛形は初回起動の値である（`APP_SCHEDULING_ENABLED=false`、`SECURITY_BOOTSTRAP_ENABLED=true`、期限は placeholder）。`SchedulingConfig` は `APP_SCHEDULING_ENABLED` が無いと scheduler を動かすため、消さない。runbook §5.5 で bootstrap の2項目を外して break-glass 2名を入れ、scheduler は §4 の署名後に `true` にする。
-  - ClamAV の置き方（同じ task の sidecar か外部の service か）と Prometheus の scrape 経路は未決である（runbook §1.6 の6・7）。sidecar を足しても validator は app の container を名前（`ses-manager`）で探す。
-  - アプリ image の配布経路は未決である（runbook §1.6 の5）。docker save/load の決定 XB-10 は backup tool image の決定で、Fargate は registry から pull する。
+  - アプリ image は ECR の private repository から registry digest で配る（2026-11-18 決定。runbook §1.4・§1.6 の5）。docker save/load の決定 XB-10 は backup tool image だけの決定である。ClamAV の image も ECR へ写して digest で固定する。
+  - ClamAV は同じ task の sidecar で動かす（2026-11-18 決定。runbook §1.6 の6）。task の大きさは初期値で、clamd の memory は SRE が実測して見直す。signature の更新経路・health の command 等の SRE 確認項は runbook §1.6 の6 にある。
+  - NF07 の trust 文書は EFS に置き、app は `/app/privacy-trust` に読取り専用で mount する（2026-11-18 決定。runbook §1.6 の11）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のままにする。
+  - 登録する前に `_offlineAcceptanceNotes` を消す（ECS は未知の field を拒否し、実値の mode も FAIL にする）。
 
 ## Probe 規約
 
@@ -52,7 +58,10 @@ pwsh infra/ecs/offline/verify-offline-sim.ps1
 pwsh infra/ecs/offline/validate-task-definition.ps1
 # 実値を入れた定義（runbook §4・§5.5）
 pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <file> -EvidenceRoot <repository外のdirectory>
-pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -TaskDefinitionPath <file> -EvidenceRoot <repository外のdirectory>
+pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -Scheduler Disabled -TaskDefinitionPath <file> -EvidenceRoot <repository外のdirectory>   # scheduler の署名前・drain 用
+pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -Scheduler Enabled -TaskDefinitionPath <file> -EvidenceRoot <repository外のdirectory>    # 署名後の常態
+# pwsh の無い Windows PowerShell 5.1 だけの環境
+powershell -NoProfile -ExecutionPolicy Bypass -File infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <file> -EvidenceRoot <repository外のdirectory>
 ```
 
 ## OUT-OF-SCOPE / DEFERRED

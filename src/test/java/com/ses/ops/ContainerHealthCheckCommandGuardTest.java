@@ -28,14 +28,43 @@ class ContainerHealthCheckCommandGuardTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern COMPARES_200 = Pattern.compile("(?:=|-eq)\\s*\"?200\"?(?![0-9])|grep\\s+-qx\\s+200");
+    private static final String APP_CONTAINER = "ses-manager";
 
     @Test
     void 本番task定義のhealthCheckは200だけを成功にする() throws IOException {
         JsonNode taskDefinition = readJson(Path.of("infra", "ecs", "task-definition.prod.json"));
-
+        List<JsonNode> apps = new ArrayList<>();
         for (JsonNode container : taskDefinition.path("containerDefinitions")) {
-            assertStrict200(command(container), "task-definition.prod.json");
+            if (APP_CONTAINER.equals(container.path("name").asText())) {
+                apps.add(container);
+            }
         }
+
+        assertThat(apps).as("app の container（%s）はちょうど1つ", APP_CONTAINER).hasSize(1);
+        assertStrict200(command(apps.get(0)), "task-definition.prod.json");
+    }
+
+    /**
+     * app 以外の container（ClamAV の sidecar。deploy-runbook §1.6 の6）は app の actuator を見ない自前の health check を持ち、
+     * essential にしない。essential にすると clamd の停止で task ごと止まるが、upload は scanner に届かなければ quarantine に
+     * 留まる（fail-closed）ため、app を止める理由が無い。
+     */
+    @Test
+    void 本番task定義のsidecarは自前のhealthCheckを持ちessentialにしない() throws IOException {
+        JsonNode taskDefinition = readJson(Path.of("infra", "ecs", "task-definition.prod.json"));
+        List<String> sidecars = new ArrayList<>();
+        for (JsonNode container : taskDefinition.path("containerDefinitions")) {
+            String name = container.path("name").asText();
+            if (APP_CONTAINER.equals(name)) {
+                continue;
+            }
+            sidecars.add(name);
+            assertThat(container.path("essential").isBoolean() && !container.path("essential").asBoolean())
+                    .as("%s は essential=false を明示する（ECS は省略を true とみなす）", name).isTrue();
+            assertThat(command(container)).as("%s の health check は app の actuator を使わない", name)
+                    .doesNotContain("/actuator/").doesNotContain("X-Forwarded");
+        }
+        assertThat(sidecars).as("task の sidecar は ClamAV だけ（validate-task-definition.ps1 と同じ）").containsExactly("clamav");
     }
 
     @Test

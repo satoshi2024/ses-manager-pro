@@ -2,8 +2,8 @@
   "family": "ses-manager-prod",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
-  "cpu": "1024",
-  "memory": "2048",
+  "cpu": "2048",
+  "memory": "6144",
   "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
   "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
   "containerDefinitions": [
@@ -11,6 +11,8 @@
       "name": "ses-manager",
       "image": "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/ses-manager-pro@sha256:IMAGE_DIGEST",
       "essential": true,
+      "cpu": 1024,
+      "memory": 2048,
       "readonlyRootFilesystem": true,
       "linuxParameters": {
         "initProcessEnabled": true
@@ -49,10 +51,11 @@
         { "name": "APP_SCHEDULING_ENABLED", "value": "false" },
         { "name": "SECURITY_BOOTSTRAP_ENABLED", "value": "true" },
         { "name": "SECURITY_BOOTSTRAP_EXPIRES_AT", "value": "SECURITY_BOOTSTRAP_EXPIRES_AT_PLACEHOLDER" },
-        { "name": "FILE_SCANNER_HOST", "value": "FILE_SCANNER_HOST_PLACEHOLDER" },
+        { "name": "FILE_SCANNER_HOST", "value": "127.0.0.1" },
         { "name": "FILE_SCANNER_PORT", "value": "3310" },
         { "name": "METRICS_SCRAPER_ENABLED", "value": "true" },
-        { "name": "METRICS_SCRAPER_USERNAME", "value": "METRICS_SCRAPER_USERNAME_PLACEHOLDER" }
+        { "name": "METRICS_SCRAPER_USERNAME", "value": "METRICS_SCRAPER_USERNAME_PLACEHOLDER" },
+        { "name": "PRIVACY_TRUST_KMS_ANCHOR_FILE", "value": "" }
       ],
       "secrets": [
         {
@@ -122,6 +125,11 @@
           "sourceVolume": "uploads",
           "containerPath": "/app/uploads",
           "readOnly": false
+        },
+        {
+          "sourceVolume": "privacy-trust",
+          "containerPath": "/app/privacy-trust",
+          "readOnly": true
         }
       ],
       "logConfiguration": {
@@ -143,6 +151,33 @@
         "retries": 3,
         "startPeriod": 180
       }
+    },
+    {
+      "name": "clamav",
+      "image": "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/ses-clamav@sha256:CLAMAV_IMAGE_DIGEST",
+      "essential": false,
+      "cpu": 1024,
+      "memory": 4096,
+      "readonlyRootFilesystem": false,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ses-manager-prod",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "clamav",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "clamdcheck.sh || exit 1"
+        ],
+        "interval": 60,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 600
+      }
     }
   ],
   "volumes": [
@@ -159,21 +194,34 @@
           "iam": "ENABLED"
         }
       }
+    },
+    {
+      "name": "privacy-trust",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-PLACEHOLDER",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-TRUST_PLACEHOLDER",
+          "iam": "ENABLED"
+        }
+      }
     }
   ],
   "_offlineAcceptanceNotes": {
-    "IMAGE_DIGEST": "PLACEHOLDER — replace with ECR registry digest after push; never use LOCAL_IMAGE_ID here. How the app image reaches the registry is still open (deploy-runbook section 1.6 item 5): the docker save/load decision XB-10 covers the backup tool image only, and Fargate pulls the app image from a registry",
+    "IMAGE_DIGEST": "PLACEHOLDER - replace with ECR registry digest after push; never use LOCAL_IMAGE_ID here. Decided 2026-11-18 (deploy-runbook section 1.6 item 5): the app image goes to a private ECR repository and is deployed by its registry digest; the docker save/load decision XB-10 covers the backup tool image only. Record the git SHA, the ECR tag and the digest together (runbook section 1.4)",
+    "CLAMAV_IMAGE_DIGEST": "PLACEHOLDER - the ClamAV sidecar image mirrored into ECR and pinned by its registry digest (runbook section 1.6 item 6)",
     "ACCOUNT_ID": "PLACEHOLDER",
-    "executionRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
-    "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
-    "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
-    "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "executionRoleArn": "PLACEHOLDER - OUT-OF-SCOPE until real IAM",
+    "taskRoleArn": "PLACEHOLDER - OUT-OF-SCOPE until real IAM",
+    "awslogs": "PLACEHOLDER - CloudWatch NOT verified offline",
+    "secrets": "PLACEHOLDER ARNs - no plaintext DB/OIDC secrets in environment",
     "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start. TZ=Asia/Tokyo is required (runbook sections 1.0 and 4; the image also sets it and -Duser.timezone): without it the JVM runs in UTC, a 30-minute account lock lasts about 9.5 hours and timestamps shift by 9 hours. If you override JAVA_TOOL_OPTIONS, keep -Duser.timezone=Asia/Tokyo. RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false until the Privacy owner and document owner sign the V197 copy-disposal policy (runbook section 4.3); switch it to true after the signature.",
     "initialStart": "This template is the FIRST start (runbook sections 4 and 4.2): APP_SCHEDULING_ENABLED=false (one task, scheduler off; SchedulingConfig treats a missing value as true, so the scheduler would run without it), SECURITY_BOOTSTRAP_ENABLED=true, SECURITY_BOOTSTRAP_EXPIRES_AT replaced by an offset ISO-8601 time no more than 24 hours after the start (left unreplaced, the app refuses to start), BREAK_GLASS_USERNAMES empty, SECURITY_BOOTSTRAP_REOPEN_TICKET and LOCAL_LOGIN_ENABLED absent, and no feature switch variables. At runbook section 5.5 remove SECURITY_BOOTSTRAP_ENABLED and SECURITY_BOOTSTRAP_EXPIRES_AT and set BREAK_GLASS_USERNAMES to exactly two names. Set APP_SCHEDULING_ENABLED=true only after the sign-offs in runbook section 4.",
-    "FILE_SCANNER": "ClamAV (clamd INSTREAM). Where it runs, a sidecar in this task or an external service, is still open (runbook section 1.6 item 6); FILE_SCANNER_HOST is the sidecar's localhost or the service host, FILE_SCANNER_PORT is clamd's port (3310). If the scanner cannot be reached, uploads stay in quarantine and cannot be published.",
-    "METRICS_SCRAPER": "Prometheus scrapes with this machine account only (runbook SRE-9). METRICS_SCRAPER_USERNAME must not be admin or a break-glass name (always 401). METRICS_SCRAPER_PASSWORD comes from the secret store. The scrape route, ALB HTTPS or a sidecar, is still open (runbook section 1.6 item 7).",
-    "validation": "pwsh infra/ecs/offline/validate-task-definition.ps1 checks this template. Check the definition with real values with -Mode Actual -TaskDefinitionPath <file> (-Phase Initial for the first start, -Phase Steady from runbook section 5.5); evidence goes outside the repository unless -EvidenceRoot says otherwise (runbook section 4).",
-    "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
+    "FILE_SCANNER": "ClamAV (clamd INSTREAM) runs as the clamav sidecar of this task (decided 2026-11-18, runbook section 1.6 item 6), so FILE_SCANNER_HOST=127.0.0.1 and FILE_SCANNER_PORT=3310 (the task shares one network namespace). The sidecar is not essential: if clamd is down the app keeps serving and uploads stay in quarantine (fail closed) until it is back. Task size 2048 CPU / 6144 MiB = app 1024 / 2048 (hard limit, so the JVM heap stays at 75% of 2048) + clamav 1024 / 4096 (clamd keeps all signatures in memory and a reload may hold two copies); measure and adjust. clamdcheck.sh is the health command of the official clamav image; confirm it exists in the mirrored image. Signature updates need egress or a mirror; see runbook section 1.6 item 6 for what SRE still has to confirm.",
+    "METRICS_SCRAPER": "Prometheus scrapes through the ALB over HTTPS with this machine account only (decided 2026-11-18, runbook section 1.6 item 7 and SRE-9), so METRICS_SCRAPER_ENABLED=true. METRICS_SCRAPER_USERNAME must not be admin or a break-glass name (always 401). METRICS_SCRAPER_PASSWORD comes from the secret store. The ALB listener rule / WAF restricts /actuator/prometheus to the scraper source.",
+    "PRIVACY_TRUST": "NF07 trust documents live on EFS and the app mounts them read only at /app/privacy-trust (decided 2026-11-18, runbook section 1.6 item 11). Use an access point other than the uploads one; the D-03 owner writes the file through a separate writable path (write a temporary file, then rename). PRIVACY_TRUST_KMS_ANCHOR_FILE stays empty for the first release (trust as in phase 1). When NF07 trust is opened, set it to the absolute path of the file under /app/privacy-trust/ (the NF07-TRUST section of the runbook).",
+    "validation": "pwsh infra/ecs/offline/validate-task-definition.ps1 checks this template. Check the definition with real values with -Mode Actual -TaskDefinitionPath <file> (-Phase Initial for the first start; -Phase Steady -Scheduler Enabled|Disabled from runbook section 5.5); evidence goes outside the repository unless -EvidenceRoot says otherwise (runbook section 4). Remove this _offlineAcceptanceNotes block before registering: ECS rejects unknown fields and the Actual mode fails on it.",
+    "TRUSTED_PROXIES": "PLACEHOLDER - replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",
       "matcher": "200",
@@ -186,7 +234,7 @@
     },
     "efsUploads": {
       "status": "EFS-ACTUAL=DEFERRED until real AWS",
-      "accessPointRootPath": "/ses-manager/uploads — set on EFS Access Point (fsap-PLACEHOLDER), NOT in task efsVolumeConfiguration.rootDirectory when accessPointId is present",
+      "accessPointRootPath": "/ses-manager/uploads - set on EFS Access Point (fsap-PLACEHOLDER), NOT in task efsVolumeConfiguration.rootDirectory when accessPointId is present",
       "taskRootDirectory": "omit or \"/\" only when accessPointId is set (ECS API rule)"
     },
     "deferredExternalIac": [
@@ -195,7 +243,8 @@
       "deployment circuit breaker (service-level)",
       "autoscaling",
       "ECR repository + digest pin deploy",
-      "EFS file system + access point (uploads)"
+      "EFS file system + access points (uploads, privacy-trust)",
+      "ECR repository for the ClamAV sidecar image"
     ]
   }
 }

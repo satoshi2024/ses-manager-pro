@@ -62,13 +62,64 @@ class ProductionTaskDefinitionTemplateTest {
     void 雛形はClamAVとmetrics_scraperの設定を持ちpasswordはsecretだけに置く() throws IOException {
         JsonNode app = appContainer();
 
-        assertThat(environment(app, "FILE_SCANNER_HOST")).as("ClamAV の host（置き方は §1.6 の6）").isNotBlank();
+        assertThat(environment(app, "FILE_SCANNER_HOST")).as("ClamAV は同じ task の sidecar（§1.6 の6。2026-11-18 決定）")
+                .isEqualTo("127.0.0.1");
         assertThat(environment(app, "FILE_SCANNER_PORT")).isEqualTo("3310");
-        assertThat(environment(app, "METRICS_SCRAPER_ENABLED")).isNotBlank();
+        assertThat(environment(app, "METRICS_SCRAPER_ENABLED")).as("ALB 経由の HTTPS で scrape する（§1.6 の7。2026-11-18 決定）")
+                .isEqualTo("true");
         assertThat(environment(app, "METRICS_SCRAPER_USERNAME")).as("scraper 口座（SRE-9）").isNotBlank()
                 .isNotEqualToIgnoringCase("admin");
         assertThat(names(app.path("secrets"))).contains("METRICS_SCRAPER_PASSWORD");
         assertThat(names(app.path("environment"))).doesNotContain("METRICS_SCRAPER_PASSWORD");
+    }
+
+    /**
+     * ClamAV の sidecar を足しても app の JVM の大きさが変わらないこと。app に container の hard limit が無いと、JVM
+     * （MaxRAMPercentage=75）は task 全体の memory を基準にし、clamd の分まで heap に取る。
+     */
+    @Test
+    void 雛形のtaskはappとClamAVの分の大きさを持ちappにhard_limitを置く() throws IOException {
+        JsonNode taskDefinition = taskDefinition();
+        JsonNode app = appContainer();
+        JsonNode scanner = container("clamav");
+
+        assertThat(taskDefinition.path("cpu").asText()).isEqualTo("2048");
+        assertThat(taskDefinition.path("memory").asText()).isEqualTo("6144");
+        assertThat(app.path("cpu").asInt()).isEqualTo(1024);
+        assertThat(app.path("memory").asInt()).as("app の hard limit（従来の task と同じ 2048）").isEqualTo(2048);
+        assertThat(scanner.path("memory").asInt()).isPositive();
+        assertThat(app.path("memory").asInt() + scanner.path("memory").asInt())
+                .as("container の memory の合計は task の memory 以内").isLessThanOrEqualTo(taskDefinition.path("memory").asInt());
+        assertThat(scanner.path("image").asText()).as("ClamAV の image も registry digest で固定する").endsWith("@sha256:CLAMAV_IMAGE_DIGEST");
+    }
+
+    /** NF07 の trust 文書は EFS に置き、app は読取りだけで mount する（§1.6 の11。2026-11-18 決定）。第1期は file を指さない。 */
+    @Test
+    void 雛形はNF07_trust文書のEFSを読取り専用でmountし第1期はfileを指さない() throws IOException {
+        JsonNode taskDefinition = taskDefinition();
+        JsonNode app = appContainer();
+        JsonNode trustMount = null;
+        for (JsonNode mount : app.path("mountPoints")) {
+            if ("privacy-trust".equals(mount.path("sourceVolume").asText())) {
+                trustMount = mount;
+            }
+        }
+        String uploadsAccessPoint = null;
+        String trustAccessPoint = null;
+        for (JsonNode volume : taskDefinition.path("volumes")) {
+            String accessPoint = volume.path("efsVolumeConfiguration").path("authorizationConfig").path("accessPointId").asText();
+            if ("uploads".equals(volume.path("name").asText())) {
+                uploadsAccessPoint = accessPoint;
+            } else if ("privacy-trust".equals(volume.path("name").asText())) {
+                trustAccessPoint = accessPoint;
+                assertThat(volume.path("efsVolumeConfiguration").path("transitEncryption").asText()).isEqualTo("ENABLED");
+            }
+        }
+
+        assertThat(trustMount).as("privacy-trust の mount").isNotNull();
+        assertThat(trustMount.path("readOnly").asBoolean()).as("app は trust 文書を書かない").isTrue();
+        assertThat(trustAccessPoint).as("uploads とは別の access point").isNotBlank().isNotEqualTo(uploadsAccessPoint);
+        assertThat(environment(app, "PRIVACY_TRUST_KMS_ANCHOR_FILE")).as("第1期は空（trust は anchor 0件のまま）").isEmpty();
     }
 
     @Test
@@ -86,22 +137,32 @@ class ProductionTaskDefinitionTemplateTest {
 
         for (String name : List.of("APP_SCHEDULING_ENABLED", "SECURITY_BOOTSTRAP_ENABLED", "SECURITY_BOOTSTRAP_EXPIRES_AT",
                 "SECURITY_BOOTSTRAP_REOPEN_TICKET", "FILE_SCANNER_HOST", "FILE_SCANNER_PORT", "METRICS_SCRAPER_ENABLED",
-                "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD")) {
+                "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "clamav",
+                "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
-        // 実値を入れた定義の検査と、repository の外への証跡出力（RB-DEPLOY、配備日確認表の #9）
+        // 実値を入れた定義の検査と、repository の外への証跡出力（RB-DEPLOY、配備日確認表の #9）。
+        // §5.5 以後は scheduler の期待値を必ず指定させる（RB-DEPLOY 復審 P2-1）
         assertThat(validator).contains("ValidateSet('Template', 'Actual')").contains("ValidateSet('Initial', 'Steady')")
+                .contains("ValidateSet('Enabled', 'Disabled')").contains("-Phase Steady needs -Scheduler")
                 .contains("GetTempPath()").doesNotContain(".kiro\\reviews\\production-acceptance");
     }
 
+    private static JsonNode taskDefinition() throws IOException {
+        return JSON.readTree(Files.readString(TEMPLATE, StandardCharsets.UTF_8));
+    }
+
     private static JsonNode appContainer() throws IOException {
-        JsonNode taskDefinition = JSON.readTree(Files.readString(TEMPLATE, StandardCharsets.UTF_8));
-        for (JsonNode container : taskDefinition.path("containerDefinitions")) {
-            if ("ses-manager".equals(container.path("name").asText())) {
+        return container("ses-manager");
+    }
+
+    private static JsonNode container(String name) throws IOException {
+        for (JsonNode container : taskDefinition().path("containerDefinitions")) {
+            if (name.equals(container.path("name").asText())) {
                 return container;
             }
         }
-        throw new AssertionError("container ses-manager が task definition に無い");
+        throw new AssertionError("container " + name + " が task definition に無い");
     }
 
     private static String environment(JsonNode container, String name) {
