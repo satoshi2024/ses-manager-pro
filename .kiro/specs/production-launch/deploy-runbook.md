@@ -325,11 +325,22 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 11. **NF07 の trust 文書の置き方**（SRE・D-03 owner）: **決定済み（2026-11-18）**。EFS の volume に置き、app は `/app/privacy-trust` に読取り専用で mount する（task definition の `privacy-trust`。uploads と別の access point）。file は D-03 owner が更新する（app からは書かない）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のまま配備する。開ける時は、その mount の下の file の絶対 path を設定する（NF07-TRUST の手順と設定の正本は NF07-TRUST の節）。mount の path（`/app/privacy-trust`）と uploads と別の access point にすることは RB-DEPLOY の初期設計である。
    - **SRE と D-03 owner が確かめること（未取得）**: D-03 owner が書くための別の経路（書込みのできる access point と、そこへ届く管理用の端末）、書くときは一時 file に書いてから rename で置き換えること、EFS の backup の扱い。Fargate の EFS volume で NFS の mount option（`soft`・`timeo` 等）を指定できるかを確かめ、指定できない場合は、EFS の障害時に trust 文書と uploads の読取りが止まり得ることと `PRIVACY_TRUST_KMS_RELOAD_INTERVAL` の扱いを評価する（NF07-TRUST の節の mount option の確認項と合わせる）。
    - **Security が確かめること（未取得）**: app の読取り専用の mount は app の container だけの制約で、IAM の境界ではない。ECS は task role の credential を task の中の全 container（信頼できない upload を扱う clamav の sidecar を含む）へ渡し、trust 文書は EFS に書ける者が anchor を足せる。一方で、backup tool は uploads を読み、同じ file system に staging を書き、restore は uploads へ書き戻す。そのため次を確かめる。
-     - (a) EFS の file system policy で、`elasticfilesystem:AccessPointArn` を条件に access point ごとに許す。`ClientWrite` は task role（uploads の access point）、backup の role（backup の staging 用の access point）、restore の主体（uploads の access point。この file system へ書き戻すときだけ）、D-03 owner の書込み用 role（trust の書込み用の access point）に限る。trust の読取り用の access point と file system の root（access point を通らない mount）への `ClientWrite` は誰にも与えない。task role には trust の access point へ `ClientMount` だけを与える。identity policy 側にも file system 全体への `ClientWrite` を付けない（同じ account では identity policy 側の Allow でも通り得るため、両方を見る。下の例は明示の Deny でも塞ぐ）。access point を作れる権限（`elasticfilesystem:CreateAccessPoint`）を持つ主体も確かめる（trust の directory を root にする access point を新しく作られると、access point ごとの条件では止まらない）。
-     - (b) access point（uploads、trust、backup の staging）の root directory が互いを含まない（例: `/ses-manager/uploads`、`/ses-manager/privacy-trust`、`/ses-manager/backup-staging`）。trust の書込み用の access point は、読取り用と同じ root directory にする。
+     - (a) EFS の file system policy で、`elasticfilesystem:AccessPointArn` を条件に access point ごとに許す。`ClientWrite` は task role（uploads の access point）、backup の role（backup の access point。(d)）、restore の主体（uploads の access point。この file system へ書き戻すときだけ。(f)）、D-03 owner の書込み用 role（trust の書込み用の access point）に限る。trust の読取り用の access point と file system の root（access point を通らない mount）への `ClientWrite` は誰にも与えず、trust の書込み用の access point への `ClientWrite` は D-03 owner の role だけに与える。task role には trust の access point へ `ClientMount` だけを与える。identity policy 側にも file system 全体への `ClientWrite` を付けない（同じ account では identity policy 側の Allow でも通り得るため、両方を見る。下の例は明示の Deny でも塞ぐ）。access point を作れる権限（`elasticfilesystem:CreateAccessPoint`）と、file system policy を書き換え・消せる権限（`elasticfilesystem:PutFileSystemPolicy`・`elasticfilesystem:DeleteFileSystemPolicy`）を持つ主体も確かめる（trust の directory を root にする access point を新しく作られる、または policy そのものを変えられると、下の条件では止まらない）。
+     - (b) trust の access point（読取り用・書込み用。どちらも root は `/ses-manager/privacy-trust`）の root は、他のどの access point の root とも包含関係に無い。uploads と backup の access point の root は互いを含んでよい（例: backup は `/ses-manager/files`、uploads は `/ses-manager/files/uploads`。(d)）。
      - (c) task role は最小の権限にする（app は AWS の API を呼ばない。上の EFS の権限の他に要るものは、使う場合の ECS Exec 等に限る）。
-     - (d) backup・restore の経路（HFP-03-PROD-003・005 と一緒に決める。§1.7 の「Backup 開始の前提」）: backup tool は uploads を読取り専用で mount し（`ops/backup/docker-compose.yml` の `uploads:/app/uploads:ro`）、書込み静止の間に uploads と同じ file system の staging（`UPLOADS_STAGING_PARENT`）へ `cp -a` で写す。backup の host は uploads の access point（`ClientMount` だけ）と staging 用の access point（`ClientMount`・`ClientWrite`）をそれぞれ IAM で mount する（例: efs-utils の `tls,iam,accesspoint=<fsap-...>`）。2つの access point で mount した staging を、uploads provider の「同一 filesystem」の判定が受け付けるかは SRE が確かめる。access point は、通した要求を全て自分の POSIX user（uid・gid）で行うため、`cp -a` が所有者と mode を保てるかも SRE が確かめる（uploads と staging の access point の POSIX user を揃えるのが簡単である）。backup の role と restore の主体は別の role にする（同じ role にすると、下の例の `DenyBackupWriteOutsideStaging` が restore の uploads への書込みも止める）。restore の書き戻し先が別の file system（recovery target 側）なら、restore の主体の許可はその file system の policy に置く。
-     - (e) 設計の選択肢（SRE・Security が確かめる。未決）: trust 文書を uploads と別の EFS file system に置く。backup・restore の主体が trust の file system に一切触れず、policy も単純になる。その場合 trust の file system の backup は別に決める（EFS の backup か、D-03 owner の手元の正本から書き直す）。選ぶ場合は task definition の `privacy-trust` の `fileSystemId` を別の file system にする（validator の実値の mode はそのまま通る。雛形は両方が `fs-PLACEHOLDER` のため、選んだときに placeholder を分ける）。
+     - (d) backup の経路（HFP-03-PROD-003 と一緒に決める。§1.7 の「Backup 開始の前提」）:
+       - backup tool は書込み静止の間に uploads を staging（`UPLOADS_STAGING_PARENT`）へ `cp -a` で写す（`ops/backup/backup-full.sh:180`。15分ごとの checkpoint も同じ。`create-checkpoint.sh:165`）。uploads と staging は同じ filesystem でなければならない（`backup-full.sh:102`）。RB-W の合入後は、この判定を2つの path の device 番号（`stat -L -c %d`）の一致で行う。同じ EFS でも access point を別々に mount すると mount ごとに device 番号が分かれる見込みで（Linux の NFS client と efs-utils の挙動からの推定。実測は未取得）、uploads と staging を別の mount から渡すと初回 backup が FAIL する。そのため uploads と staging は**同じ mount** から backup の container へ渡す。
+       - backup は access point を1つだけ使う。例: backup の access point の root を `/ses-manager/files` とし、その下に `uploads/`（app の uploads の access point の root）と `backup-staging/` を置く。trust（`/ses-manager/privacy-trust`）はこの下に置かない（(b)）。backup の host はこの access point を1回だけ IAM で mount し（例: efs-utils の `tls,iam,accesspoint=<fsap-backup-files>`）、compose の uploads（読取り専用）と staging には、その mount の下の2つの directory を bind で渡す（同じ mount の下なら device 番号は同じ）。現行の `ops/backup/docker-compose.yml` は uploads を、host 側で何を mount するかが決まっていない named volume（`uploads: {}`）で `:ro` に渡し、staging 用の volume を持たない。compose をこの形に合わせるのは RB-W の合入時の統合項である（本書は要求だけを書く）。
+       - backup の access point の root は uploads を含むため、backup が uploads へ書けないことは IAM では止まらず、access point が要求に付ける POSIX user（uid・gid）と directory の権限で決まる。例: uploads の access point の POSIX user は app の uid（例: 10001）と backup と共有する gid（例: 20000）、backup の access point の POSIX user は app と違う uid（例: 20001）と同じ共有 gid。`/ses-manager/files` は app・backup のどちらでもない owner（例: root）で mode 0755（backup が `uploads` を rename したり作り直したりできないように）、`uploads/` は owner = app の uid・group = 共有 gid・mode 0750、`backup-staging/` は owner = backup の uid・mode 0700。app は file の mode を設定せず、container の umask（既定 022 の見込み）に従うため、app が作る file・directory は group に書込みを許さない。この境界は IAM より弱い（mode・umask・uid を変えられる者がいれば崩れる）ため、Security が確かめる。
+       - staging へ写した file の所有者は backup の uid になる（access point が uid を固定するため、`cp -a` は所有者を保てない）。backup の inventory は path・size・SHA-256 だけを記録する（`ops/backup/providers/uploads-local.sh:88-101`）。
+       - **SRE が staging で確かめること（未取得）**: compose で渡した uploads と staging の device 番号が一致すること（`stat -L -c %d <uploads> <staging>`。別の access point を別々に mount すると一致しないことも記録する）、`cp -a` が所有者を保てないときに失敗を返さないこと、backup が uploads を読めて書けないこと、container の umask。
+     - (e) 設計の選択肢（SRE・Security が確かめる。未決）: trust 文書を uploads と別の EFS file system に置く。backup・restore の主体が trust の file system に一切触れず、backup は uploads を含む上の directory の access point を mount しても trust に届かないため、policy も単純になる。その場合 trust の file system の backup は別に決める（EFS の backup か、D-03 owner の手元の正本から書き直す）。選ぶ場合は task definition の `privacy-trust` の `fileSystemId` を別の file system にする。validator の実値の mode はそのまま通るが、雛形（`infra/ecs/task-definition.prod.json`）は2つの volume が同じ `fs-PLACEHOLDER` で、validator の Template mode もそれを求める（`validate-task-definition.ps1:269`）ため、雛形の placeholder と validator を一緒に変える。
+     - (f) restore の書き戻し（DBA・SRE が HFP-03-PROD-003 と一緒に決める。未決）:
+       - 正本の要求: uploads は本番の path と同じ filesystem の versioned な staging に戻し、停止中に `current` の symlink・rename で切り替え、mount root を直接上書きしない（`database-backup-recovery/requirements.md:130,133`、`design.md:272`）。`restore.sh` は本番の path に触れず、作業 directory に `uploads-ready` を作るだけで（`restore.sh:222-225`）、本番の file system へ置くことと切替えは cutover の手順で行う（`ops/backup/runbooks/restore-cutover.md` には uploads の切替えの手順が無い）。
+       - 事実: app の upload path は `app.upload.base-path`（`UPLOAD_BASE_PATH`。既定 `./uploads`。`application.yml:296`）で、image の作業 directory は `/app`（`Dockerfile:17`）、雛形は `UPLOAD_BASE_PATH` を設定しない。つまり app は uploads の access point の root（mount root）を直接使い、切り替える pointer が無い。
+       - 選択肢: (1) 初回の配備から `UPLOAD_BASE_PATH=/app/uploads/current` にし、`current` を uploads の access point の root の下の version directory への symlink にする。restore の主体は uploads の access point から新しい version directory を書き、停止中に `current` を rename で差し替える（policy の例のまま）。backup の provider は uploads の中の symlink を拒否する（`uploads-local.sh:26-32`）ため、backup の uploads にはその時の version directory の実 path を渡し、切替えのたびに直す。(2) access point を pointer にする: 復元した directory を root にする uploads の access point を作り、task definition の `uploads` の access point を差し替えた revision で起動する。restore の主体が書く先は uploads の access point の外になるため、policy の例の restore の行を変える。後から (1) に移ると既存の file の移動が要るため、初回の配備の前に決める（validator は `UPLOAD_BASE_PATH` を見ない）。
+       - app の掃除との関係（事実）: 孤児 file の掃除（`FileCleanupServiceImpl.cleanupOrphanFiles`、`:53-91`）は upload path の直下・`quarantine`・`published` の regular file だけを再帰せずに見て消し、旧 upload の移行（`LegacyUploadMigrationService.migrate`、`:84`）も直下だけを見る。(1) では version directory は upload path の外（`current` の兄弟）にあり、走査されない。現行のまま mount root の下に version directory を置いても、directory の中は走査されず消されない。ただし app が使う directory 名（`quarantine`・`published`・`documents`・`contracts` 等）を version directory に使わない。mount root の下に置いた version directory は backup にも入る。
+       - backup の role と restore の主体は別の role にする（同じ role にすると、下の例の `DenyBackupWriteOutsideFiles` と `DenyRestoreWriteOutsideUploads` が全ての書込みを止める）。restore の書き戻し先が別の file system（recovery target 側）なら、restore の主体の許可はその file system の policy に置く。
      - file system policy の例（uploads と trust を同じ file system に置く場合。ARN・ID は placeholder。各 role は別に決める。実 AWS では検証していないため、Security が確かめる）。否定の条件（`StringNotEquals`）は条件 key が無い要求（access point を通らない mount）にも当たるため、主体ごとの Deny は root への直接の mount の書込みも止める。例に無い主体（identity policy で書込みを許された role 等）の root への書込みは `DenyWriteWithoutAccessPoint` が止める。
        ```json
        {
@@ -399,35 +410,35 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
              }
            },
            {
-             "Sid": "BackupReadsUploads",
-             "Effect": "Allow",
-             "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<backup role>" },
-             "Action": "elasticfilesystem:ClientMount",
+             "Sid": "DenyTrustWriterAccessPointToOthers",
+             "Effect": "Deny",
+             "Principal": { "AWS": "*" },
+             "Action": "elasticfilesystem:ClientWrite",
              "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
              "Condition": {
-               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-uploads>" },
-               "Bool": { "aws:SecureTransport": "true" }
+               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-privacy-trust-writer>" },
+               "ArnNotEquals": { "aws:PrincipalArn": "arn:aws:iam::<ACCOUNT_ID>:role/<D-03 owner の書込み用 role>" }
              }
            },
            {
-             "Sid": "BackupWritesStaging",
+             "Sid": "BackupMountsFiles",
              "Effect": "Allow",
              "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<backup role>" },
              "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
              "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
              "Condition": {
-               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-backup-staging>" },
+               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-backup-files>" },
                "Bool": { "aws:SecureTransport": "true" }
              }
            },
            {
-             "Sid": "DenyBackupWriteOutsideStaging",
+             "Sid": "DenyBackupWriteOutsideFiles",
              "Effect": "Deny",
              "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<backup role>" },
              "Action": "elasticfilesystem:ClientWrite",
              "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
              "Condition": {
-               "StringNotEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-backup-staging>" }
+               "StringNotEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-backup-files>" }
              }
            },
            {
@@ -454,7 +465,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
          ]
        }
        ```
-     - `ClientWrite` は task role と restore の主体（uploads の access point）、backup の role（staging 用の access point）、D-03 owner の書込み用 role（trust の書込み用の access point）だけに与える。trust の読取り用の access point と file system の root へは誰にも与えない（`DenyWriteThroughTrustReader`・`DenyWriteWithoutAccessPoint`）。task role・backup の role・restore の主体は自分の access point の外へ書けない（`DenyTaskWriteOutsideUploads`・`DenyBackupWriteOutsideStaging`・`DenyRestoreWriteOutsideUploads`）。そのため task role（clamav を含む）は trust を読むだけ、backup の role は uploads を読むだけで、どちらも書けない。
+     - `ClientWrite` は task role と restore の主体（uploads の access point）、backup の role（backup の access point）、D-03 owner の書込み用 role（trust の書込み用の access point）だけに与える。trust の読取り用の access point と file system の root へは誰にも与えず（`DenyWriteThroughTrustReader`・`DenyWriteWithoutAccessPoint`）、trust の書込み用の access point へは D-03 owner の role 以外に与えない（`DenyTrustWriterAccessPointToOthers`）。task role・backup の role・restore の主体は自分の access point の外へ書けない（`DenyTaskWriteOutsideUploads`・`DenyBackupWriteOutsideFiles`・`DenyRestoreWriteOutsideUploads`）。そのため task role（clamav を含む）は trust を読むだけで書けない。backup の access point の root は uploads を含むため、backup が uploads を読むだけで書けないことは IAM ではなく POSIX の権限で決まる（(d)）。
 
 ### 1.7 配備前提と、機能スイッチをONにする前の署名（一覧。X3-4）
 
@@ -500,7 +511,8 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
   - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER`。password は `secrets/` の 0600 の file（MySQL と restic）、CA は hashed CA の directory（`secrets/mysql-capath/`）。
 - 確定する時点と owner（baseline §4 の「確定に必要な証跡」の欄）:
-  - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。production owner）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否、backup の host が uploads を読み staging へ書く access point と主体。§1.6 の11 の (d)。storage owner）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5。deployment owner）、005（S3 互換 backend・IAM（backup・restore の role と EFS の file system policy を含む。§1.6 の11）・versioning/immutability・容量と throughput。infra owner）と、上の `.env.backup`。
+  - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。production owner）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否、backup の host が uploads と staging を同じ mount で使う access point と POSIX の権限、restore の書き戻し先と pointer。§1.6 の11 の (d)・(f)。storage owner）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5。deployment owner）、005（S3 互換 backend とその IAM・versioning/immutability・容量と throughput。baseline §4 のとおり。infra owner）と、上の `.env.backup`。
+  - EFS の file system policy・access point・task role の権限（§1.6 の11 の (a)〜(f)）は 003・005 には含めず、Security が確かめる（**未取得**）。backup の host はその access point が無いと uploads と staging を同じ mount で使えず、policy を後から当てると mount の可否が変わるため、初回 backup の前に揃える。
   - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner。運用組織）。
   - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み。security owner）、007（代表 profile。RTO の実測に使う。production owner）。
 - 初回 backup の前の手順（`ops/backup/README.md`「ツールイメージの build・配布」と「実行」）: backup tool image の content ID（v2。RB-W）で compose の pin をし直し、配布先で `tool-image.sh load` → `tool-image.sh check` が一致し、`tool-image.sh compose run --rm preflight` が 0 で終わること。
