@@ -404,6 +404,59 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                 .andExpect(jsonPath("$.code").value(400));
     }
 
+    /**
+     * RB-POSTLAUNCH review P2-1: 存在しない要員IDと、他社（顧客B）の契約に就いている要員IDは、同じ HTTP status・code・
+     * 文言で拒否する。区別すると社外の利用者が連番のIDで社内の要員IDの存在を確かめられる（契約・案件・担当者と同じ秘匿）。
+     */
+    @Test
+    @DisplayName("存在しない要員IDと他社契約の要員IDは同じstatus・code・文言で拒否され要員の存在を判別できないこと")
+    void testCreateRequest_engineerExistenceIsNotDistinguishable() throws Exception {
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) "
+                + "VALUES (?, '正社員', '稼動中', 'default')", "他社契約要員-" + unique());
+        long otherCompanyEngineerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
+        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
+                "他社案件-" + unique(), customerBOrg.getCustomerId());
+        long otherCompanyProjectId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
+        jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
+                "SD-OTHER-" + unique(), otherCompanyEngineerId, otherCompanyProjectId, customerBOrg.getCustomerId());
+        long missingEngineerId = otherCompanyEngineerId + 1_000_000L;
+
+        org.springframework.test.web.servlet.MvcResult missing = createWithEngineer(missingEngineerId);
+        org.springframework.test.web.servlet.MvcResult otherCompany = createWithEngineer(otherCompanyEngineerId);
+
+        org.junit.jupiter.api.Assertions.assertEquals(400, missing.getResponse().getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(missing.getResponse().getStatus(),
+                otherCompany.getResponse().getStatus());
+        com.fasterxml.jackson.databind.JsonNode missingBody = objectMapper.readTree(
+                missing.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        com.fasterxml.jackson.databind.JsonNode otherBody = objectMapper.readTree(
+                otherCompany.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+        org.junit.jupiter.api.Assertions.assertEquals(missingBody.get("code"), otherBody.get("code"));
+        org.junit.jupiter.api.Assertions.assertEquals(missingBody.get("message"), otherBody.get("message"));
+        org.junit.jupiter.api.Assertions.assertEquals(missingBody, otherBody, "応答の本文全体が同じ");
+        org.junit.jupiter.api.Assertions.assertEquals("指定された要員は自社の契約に紐付いていません",
+                missingBody.get("message").asText(), "汎用文言ではなく具体的な理由を同じ文言で返す");
+    }
+
+    private org.springframework.test.web.servlet.MvcResult createWithEngineer(long engineerId) throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+        PortalServiceRequestCreateRequest request = PortalServiceRequestCreateRequest.builder()
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("要員の稼働について")
+                .description("問い合わせ内容")
+                .engineerId(engineerId)
+                .build();
+        return mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andReturn();
+    }
+
     @Test
     @DisplayName("ポータル添付はDocumentServiceとCLEAN検証を通過した場合だけダウンロードできること")
     void testAttachmentDownload_requiresCleanDocumentVersion() throws Exception {

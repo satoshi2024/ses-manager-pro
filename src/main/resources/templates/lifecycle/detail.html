@@ -228,8 +228,11 @@
                     <div class="modal-body">
                         <input type="hidden" id="reassignTaskId">
                         <div class="mb-3">
-                            <label class="form-label text-light required">新担当ユーザーID <span class="text-danger">*</span></label>
-                            <input type="number" class="form-control bg-dark border-secondary text-light" id="reassignUserId" required placeholder="ユーザーIDを入力">
+                            <!-- 担当者は候補から選ばせる（RB-POSTLAUNCH B-2。以前は利用者IDの数値を直接入力させていた） -->
+                            <label class="form-label text-light required" for="reassignUserId"><span th:text="#{lifecycle.reassign.assignee}">新しい担当者</span> <span class="text-danger">*</span></label>
+                            <select class="form-select bg-dark border-secondary text-light" id="reassignUserId" required>
+                                <option value="" th:text="#{lifecycle.reassign.placeholder}">担当者を選択してください</option>
+                            </select>
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-light">変更理由</label>

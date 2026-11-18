@@ -244,7 +244,7 @@ class LifecycleDualConfirmationAttemptServiceTest {
         assertThat(submission.getValue().getEvidenceCanonicalJson()).doesNotContain("提出します");
         verify(projectionMapper).insert(any(LifecycleDualProjection.class));
         verify(idempotencyMapper).insert(any(LifecycleDualIdempotency.class));
-        verify(notifier).submittedAfterCommit(context.task(), context.lcCase(), SUBMISSION);
+        verify(notifier).submittedAfterCommit(context.task(), context.lcCase(), SUBMISSION, SUBMITTER);
         verify(taskMapper, never()).updateById(any(LifecycleTask.class));
     }
 

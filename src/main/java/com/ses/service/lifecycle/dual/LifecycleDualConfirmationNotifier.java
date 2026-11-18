@@ -33,9 +33,10 @@ public class LifecycleDualConfirmationNotifier {
         this.transactionManager = transactionManager;
     }
 
-    /** 確認待ちの通知を登録する。 */
-    public void submittedAfterCommit(LifecycleTask task, LifecycleCase lcCase, long submissionId) {
-        afterCommit("提出", submissionId, service -> service.notifyDualConfirmationSubmitted(task, lcCase, submissionId));
+    /** 確認待ちの通知を登録する（提出者本人は宛先から除く）。 */
+    public void submittedAfterCommit(LifecycleTask task, LifecycleCase lcCase, long submissionId, long submitterUserId) {
+        afterCommit("提出", submissionId, service -> service.notifyDualConfirmationSubmitted(task, lcCase, submissionId,
+                submitterUserId));
     }
 
     /** 確認・差戻しの結果の通知を登録する。 */
