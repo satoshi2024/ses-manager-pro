@@ -174,6 +174,11 @@ main() {
       | jq -e '.checks.flyway_history_required == true and .checks.flyway == "PASS"' > /dev/null 2>&1; then
     drill::fail "validate の Flyway 照合（checks.flyway_history_required=true かつ checks.flyway=PASS）を確認できません"
   fi
+  # G-04（RB-W P3-3）: schema fingerprint の照合に PASS したことも drill の成功条件にする
+  if ! sed -n '/^{/,$p' "$validate_log" 2>/dev/null \
+      | jq -e '.checks.schema_fingerprint == "PASS"' > /dev/null 2>&1; then
+    drill::fail "validate の schema fingerprint 照合（checks.schema_fingerprint=PASS）を確認できません"
+  fi
   drill::require_evidence "$validate_log" "validate"
   drill::segment_end validate
 

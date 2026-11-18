@@ -279,7 +279,8 @@ v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない�
   いずれも原因を直してから再検証する（照合を省略する設定は無い）。
 
 `cutover.sh` と `restore-drill.sh` も validate の report を `jq` で検査し、`state == READY_FOR_CUTOVER` に加えて
-`checks.flyway_history_required == true` かつ `checks.flyway == "PASS"` でなければ cutover / drill を失敗させる。
+`checks.flyway_history_required == true` かつ `checks.flyway == "PASS"`、および `checks.schema_fingerprint == "PASS"`
+（RB-W P3-3）でなければ cutover / drill を失敗させる。
 
 **禁止:** 稼働中 DB への in-place import、`CONFIRM_RESTORE=YES` 固定文字列での実行、
 `--target` 表示のみの検証完了扱い、復元先 MySQL の時刻帯を確認しないままの cutover。
@@ -309,8 +310,15 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   Dockerfile の固定値が仮置きの値のままだと build で失敗する）
 - integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合、
   最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合、schema fingerprint 照合と
-  その正規化規則（コメントだけの変更・列の並び順・索引・既定値）の実 MySQL での確認。CI の `backup-integration` job と同一）
+  その正規化規則（コメントだけの変更・列の並び順・索引・既定値・trigger の本体・view の定義・外部キーの `ON DELETE`・
+  DB の既定の照合順序）の実 MySQL での確認、migrator 相当の利用者が作った trigger・view・routine・外部キー・CHECK を
+  restore role の権限だけで DEFINER ごと復元できること。CI の `backup-integration` job と同一）
 - ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`
+- unit の fake の限界（RB-W P3-4・P3-7）: fake の mysql は schema fingerprint の SQL を解釈せず、fake の docker は
+  content ID の template を解釈しない。そのため「SQL から列（例: `column_default`）を消す」「template から項目
+  （例: `.Config.Volumes`）を消す」変更は、unit では静的な検査（`case_schema_fp_sql_rule`・`case_static_image_contract`）
+  だけが検出する。実際の挙動は integration の step 13（実 MySQL）と、実 Docker で VOLUME・EXPOSE・HEALTHCHECK・
+  STOPSIGNAL だけを足した派生 image の content ID が変わることの確認（Runner。手動）で確かめる。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 

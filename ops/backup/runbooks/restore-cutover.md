@@ -13,8 +13,9 @@
     二者承認者が確認する。
   - `checks.content_hash` が `PASS`（production では `.env.backup` の `CONTENT_HASH_TABLES` を設定して backup と
     復元検証を行う。設定時は記録が無い・欠けている checkpoint を validate が FAIL にする）
-  - `checks.schema_fingerprint` が `PASS`（G-04。設定によらず常に必須。`FAIL` のときは validate のログの
-    「差異のある区分」を確認する。README「schema fingerprint（G-04）」の fail-closed になる場合を参照）
+  - `checks.schema_fingerprint` が `PASS`（G-04。設定によらず常に必須。`cutover.sh` も `jq` で検査し、満たさない report
+    では cutover しない。`FAIL` のときは validate のログの「差異のある区分」と、記録時・現在の server の版・DB の既定値を
+    確認する。README「schema fingerprint（G-04）」の fail-closed になる場合と「restore target role の権限」を参照）
 - 復元先（recovery target）の MySQL サーバの時刻帯が production と同じ `+09:00` であること
   （`SELECT @@global.time_zone;`。2026-11-13 決定により DBA が設定する）
 - 目標は RPO 15 分 / RTO 4 時間（2026-11-13 決定。DBA Lead / Operations の署名は PENDING）。

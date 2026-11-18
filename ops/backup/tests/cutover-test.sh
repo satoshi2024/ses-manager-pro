@@ -36,9 +36,11 @@ setup_cutover() {
   plan::write "$content" "$PLANS_DIR" > /dev/null
   export PLAN_ID
   PLAN_ID=$(jq -r '.plan_id' "$PLANS_DIR"/*.json)
-  # validation report（validate-restore.sh と同じく、history を必須として Flyway 照合に PASS した結果）
+  # validation report（validate-restore.sh と同じく、history を必須として Flyway 照合に PASS し、schema fingerprint も
+  # PASS した結果）
   jq -n --arg p "$PLAN_ID" \
-    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS"}}' > "$T/validation.json"
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS", schema_fingerprint:"PASS"}}' \
+    > "$T/validation.json"
   # smoke fixtures
   cat > "$T/smoke-ok.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -187,6 +189,29 @@ case_cutover_requires_flyway_history_check() {
   done
 }
 
+# G-04（RB-W P3-3）: state が READY_FOR_CUTOVER で Flyway 照合が PASS でも、schema fingerprint の照合が PASS でない
+# report では cutover しない（validate の state だけに頼らない多重の防御）。
+case_cutover_requires_schema_fingerprint_pass() {
+  local report
+  for report in \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS", schema_fingerprint:"FAIL"}}' \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS", schema_fingerprint:"NOT_RECORDED"}}' \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS"}}'; do
+    setup_cutover
+    make_claims
+    jq -n --arg p "$PLAN_ID" "$report" > "$T/validation.json"
+    export SMOKE_RC=0 WRITE_RC=0
+    run_cutover
+    assert_nonzero "$RC" "schema fingerprint の PASS を確認できない report では cutover しない: $report"
+    assert_contains "$OUT" "schema fingerprint の照合" "理由を表示: $report"
+    if [[ -f "$T/state.json" ]] && [[ "$(state_now)" == write-enabled ]]; then
+      test_fail "schema fingerprint の PASS を確認できない report では write-enable しない: $report" "state=write-enabled"
+    else
+      test_assert "schema fingerprint の PASS を確認できない report では write-enable しない: $report"
+    fi
+  done
+}
+
 case_cutover_approval_missing() {
   setup_cutover
   make_claims
@@ -275,6 +300,7 @@ run_case case_cutover_mysql_pwd_rejected
 run_case case_cutover_smoke_fail_rollback
 run_case case_cutover_validation_not_ready
 run_case case_cutover_requires_flyway_history_check
+run_case case_cutover_requires_schema_fingerprint_pass
 run_case case_cutover_approval_missing
 run_case case_cutover_write_enable_fail
 run_case case_cutover_already_write_enabled

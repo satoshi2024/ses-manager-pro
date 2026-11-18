@@ -76,6 +76,9 @@ main() {
   # （history の無い DB を Flyway 有効なアプリへ渡すと baseline-on-migrate で誤って baseline されるため）
   jq -e '.checks.flyway_history_required == true and .checks.flyway == "PASS"' "$VALIDATION_STATE_FILE" > /dev/null 2>&1 \
     || cutover::fail "validation report で Flyway の照合（checks.flyway_history_required=true かつ checks.flyway=PASS）を確認できません"
+  # G-04（RB-W P3-3）: schema fingerprint の照合に PASS した report だけを受け付ける（state だけに頼らない多重の防御）
+  jq -e '.checks.schema_fingerprint == "PASS"' "$VALIDATION_STATE_FILE" > /dev/null 2>&1 \
+    || cutover::fail "validation report で schema fingerprint の照合（checks.schema_fingerprint=PASS）を確認できません"
 
   # 状態遷移（initial/staged から開始）
   local cu
