@@ -163,7 +163,8 @@ final class ProductionApprovalEnvelopeVerifier {
                     "production失効確認providerを利用できません", unavailable);
         }
         PurePolicyVerificationKernel.verifyRevocationStatus(keyStatus, envelopeStatus);
-        PurePolicyVerificationKernel.verifySignature(anchor,
+        // 本番は canonical bytes の digest 声明への署名も受け付ける（KMS の RAW は 4096 bytes まで。NF07-TRUST）
+        PurePolicyVerificationKernel.verifyProductionPolicySignature(anchor,
                 ApprovalEnvelopeCanonicalizer.canonicalBytes(candidate), candidate.signature());
         PurePolicyVerificationKernel.verifyPolicySoD(candidate.metadata());
         PurePolicyVerificationKernel.verifyPolicyBindings(candidate, expectedTenant, expectedScope,

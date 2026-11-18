@@ -87,6 +87,35 @@ final class PurePolicyVerificationKernel {
         }
     }
 
+    /**
+     * 本番の policy envelope の署名（NF07-TRUST。D-03 = AWS KMS）。canonical bytes の digest 声明
+     * （{@link PolicyEnvelopeSigningStatement}。KMS の RAW の上限 4096 bytes を超える envelope でも署名できる固定長の形）か、
+     * canonical bytes そのもののどちらかへの純粋な Ed25519 署名なら受け付ける。2つの形は先頭で区別でき、一方への署名が他方として
+     * 読まれることはない。Ed25519ph（prehash）の署名はどちらの形でも検証に通らない。どちらにも通らなければ {@code SIGNATURE_INVALID}。
+     */
+    static void verifyProductionPolicySignature(TrustedAuthority anchor, byte[] canonical, byte[] signature)
+            throws PolicySecurityException {
+        if (canonical == null || canonical.length == 0 || signature == null || signature.length == 0) {
+            throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名の対象または署名がありません");
+        }
+        if (ed25519Verifies(anchor, PolicyEnvelopeSigningStatement.of(canonical), signature)
+                || ed25519Verifies(anchor, canonical, signature)) {
+            return;
+        }
+        throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名が正しくありません");
+    }
+
+    private static boolean ed25519Verifies(TrustedAuthority anchor, byte[] payload, byte[] signature) {
+        try {
+            Signature verifier = Signature.getInstance("Ed25519");
+            verifier.initVerify(anchor.publicKey());
+            verifier.update(payload);
+            return verifier.verify(signature);
+        } catch (GeneralSecurityException | RuntimeException exception) {
+            return false;
+        }
+    }
+
     // --- Policy-only 専用ヘルパー ---
     static void verifyPolicySoD(ApprovalEnvelopeMetadata metadata) throws PolicySecurityException {
         if (metadata.requesterId().equals(metadata.approverId())) {
