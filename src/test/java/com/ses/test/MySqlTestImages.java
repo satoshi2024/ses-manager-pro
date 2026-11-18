@@ -25,7 +25,15 @@ import java.util.function.UnaryOperator;
  *
  * <p>8.0系へ戻して得た結果は8.0での回帰確認にすぎず、8.4上での証拠にはならない。8.4の証拠はCIの既定値runで取る。
  *
- * <p>{@code src/test/java} にimage名のliteralを直接書かないこと（{@code MySqlTestImagesTest} が検出する）。
+ * <p>上書きする値も、repository名が {@code mysql} のimage（tagだけ違うもの）にすること。Testcontainers 1.20.6 の
+ * {@code MySQLContainer(String)} は起動前に {@code assertCompatibleWith("mysql")} を行うため、registry付きのmirror名
+ * （例: {@code registry.local/mysql:8.4.13}）は互換性検査で拒否される。mirrorが必要になったら、この class に
+ * {@code DockerImageName.parse(...).asCompatibleSubstituteFor("mysql")} を返すAPIを足して全testをそこへ寄せる
+ * （test側で {@code asCompatibleSubstituteFor} を使うことは {@code MySqlTestImagesTest} が禁じている）。
+ *
+ * <p>containerは {@code new MySQLContainer<>(MySqlTestImages.image())}（または本classの戻り値だけを代入した変数）で作ること。
+ * image名のliteral・連結・{@code DockerImageName}・無引数constructor（1.20.6 では {@code mysql:5.7.34}）は
+ * {@code MySqlTestImagesTest} が {@code src/test/java} の構造検査で検出する。
  */
 public final class MySqlTestImages {
 

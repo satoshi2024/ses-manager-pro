@@ -9,7 +9,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,89 +21,137 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 実MySQL testのimageが {@link MySqlTestImages} だけで決まることを、Docker無しで検証する。
  *
- * <p>image名が各test classへ直書きされていると、本番の版（MySQL 8.4 LTS）へ切り替えたときに一部のclassだけが
- * 旧版のまま残り、CIが「8.4で通った」と誤って示す。そのためliteralの再混入をここで止める。
+ * <p>image名が各test classで決まっていると、本番の版（MySQL 8.4 LTS）へ切り替えたときに一部のclassだけが
+ * 旧版のまま残り、CIが「8.4で通った」と誤って示す。そのため、test source（{@link MySqlImageSourceScanner} の構造検査）、
+ * CIのworkflow・script・pom（上書きと既定以外のimage）、offline simulation の3か所で再混入を止める。
  */
 class MySqlTestImagesTest {
 
     private static final Path TEST_SOURCE_ROOT = Path.of("src/test/java");
     private static final Path IMAGES_SOURCE = TEST_SOURCE_ROOT.resolve("com/ses/test/MySqlTestImages.java");
+    private static final Path CI_WORKFLOW = Path.of(".github/workflows/ci.yml");
+    private static final String EVIDENCE_STEP = "Verify MySQL tests ran on the default image";
 
-    /** 引用符で始まるMySQL imageのtag付きliteral（版番号・浮動tag）。 */
-    private static final Pattern IMAGE_LITERAL = Pattern.compile("\"mysql:(?:\\d|latest\\b|lts\\b|innovation\\b)");
-    /** container constructorへの文字列literal直渡し。 */
-    private static final Pattern CONSTRUCTOR_LITERAL = Pattern.compile("MySQLContainer<>\\(\\s*\"");
+    /**
+     * CIのjobが使うfileのうち、既定以外のMySQL imageを使ってよいもの（key: path、value: 理由）。
+     * ここに無いfileで既定以外のimageを使うと失敗する。例外が不要になったら（既定imageだけになったら）消す。
+     */
+    private static final Map<String, String> NON_DEFAULT_IMAGE_EXCEPTIONS = Map.of(
+            "ops/backup/tests/docker-compose.integration.yml",
+            "CI backup-integration の source/target。backup tool（MySQL 8.0.46 client）を 8.4 へ対応させる第2段階までは"
+                    + " 8.0.36 で PITR を検証する。このjobのgreenは 8.4 の証拠ではない");
+
+    /** workflow・script・pom で MySQL image の上書きとみなす書き方。 */
+    private static final List<Pattern> OVERRIDES = List.of(
+            Pattern.compile(Pattern.quote(MySqlTestImages.IMAGE_PROPERTY)),
+            Pattern.compile(Pattern.quote(MySqlTestImages.FRESH_INSTALL_IMAGE_PROPERTY)),
+            Pattern.compile("(?m)^\\s*(?:-\\s*)?" + MySqlTestImages.IMAGE_ENV + "\\s*:"),
+            Pattern.compile("(?:(?<!\\$)\\{|,)\\s*" + MySqlTestImages.IMAGE_ENV + "\\s*:"),
+            Pattern.compile(MySqlTestImages.IMAGE_ENV + "\\s*="),
+            Pattern.compile("SetEnvironmentVariable\\s*\\(\\s*[\"']" + MySqlTestImages.IMAGE_ENV));
+
+    /** workflow・script内のMySQL image参照（{@code jdbc:mysql:} などは対象外）。group 1 がtag。 */
+    private static final Pattern IMAGE_IN_TEXT =
+            Pattern.compile("(?<![\\w./:@-])(?:docker\\.io/)?(?:library/)?mysql:([0-9A-Za-z][\\w.-]*)");
+    private static final Pattern REMOVED_OPTION = Pattern.compile("--default[-_]authentication[-_]plugin");
+
+    // ---- test source の構造検査 ----
 
     @Test
-    void test_sourceにMySQL_imageのliteralを直書きしない() throws IOException {
+    void test_sourceはMySQL_imageをMySqlTestImages以外から決めない() throws IOException {
         List<String> offenders = new ArrayList<>();
         int scanned = 0;
-        int usages = 0;
+        int constructors = 0;
         try (Stream<Path> paths = Files.walk(TEST_SOURCE_ROOT)) {
             for (Path source : paths.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
                 if (source.normalize().equals(IMAGES_SOURCE.normalize())) {
                     continue;
                 }
+                String text = Files.readString(source, StandardCharsets.UTF_8);
                 scanned++;
-                List<String> lines = Files.readAllLines(source, StandardCharsets.UTF_8);
-                for (int i = 0; i < lines.size(); i++) {
-                    String line = lines.get(i);
-                    if (isHardcodedImage(line)) {
-                        offenders.add(source + ":" + (i + 1) + ": " + line.trim());
-                    }
-                    if (line.contains("MySqlTestImages.image()") || line.contains("MySqlTestImages.freshInstallImage()")) {
-                        usages++;
-                    }
+                constructors += MySqlImageSourceScanner.constructorCount(text);
+                for (String violation : MySqlImageSourceScanner.violations(text)) {
+                    offenders.add(source + ":" + violation);
                 }
             }
         }
         assertTrue(scanned > 100, "test sourceを走査できていません: " + scanned + "件");
-        assertTrue(usages > 0, "MySqlTestImages の利用箇所が1件も見つかりません（走査対象の誤り）");
+        assertTrue(constructors > 100, "MySQLContainer の constructor を検出できていません（走査規則の誤り）: " + constructors + "件");
         assertTrue(offenders.isEmpty(),
                 "MySQL imageは MySqlTestImages.image()（本番fresh-installは freshInstallImage()）から取得してください: "
                         + offenders);
     }
 
     @Test
-    void 検出規則はliteral直書きを拾い集中定義の呼出しは拾わない() {
-        // 本class自身が検出されないよう、検出対象の並びは連結で組み立てる。
-        String quote = "\"";
-        String ctor = "MySQLContainer<>" + "(";
-        assertTrue(isHardcodedImage("new " + ctor + quote + "mysql" + ":8.0" + quote + ")"));
-        assertTrue(isHardcodedImage("new com.ses.test." + ctor + quote + "mysql" + ":8.4.13" + quote + ")"));
-        assertTrue(isHardcodedImage("String image = " + quote + "mysql" + ":latest" + quote + ";"));
-        assertTrue(isHardcodedImage("new " + ctor + " " + quote + "registry.invalid/db:1" + quote + ")"));
-        assertFalse(isHardcodedImage("new " + ctor + "MySqlTestImages.image())"));
-        assertFalse(isHardcodedImage("new " + ctor + "MYSQL_IMAGE)"));
-        assertFalse(isHardcodedImage(" * {@code mysql" + ":8.0.36} はローカルでの上書き例"));
+    void 構造検査はconstructorにMySqlTestImages以外を渡す各書き方を検出する() {
+        assertDetected("class A { Object c = new MySQLContainer<>(`mysql:8.0`); }");
+        assertDetected("class A { Object c = new MySQLContainer<>(\n        `mysql:8.0`)\n        .withDatabaseName(`x`); }");
+        assertDetected("class A { Object c = new MySQLContainer(`registry.invalid/db:1`); }");
+        assertDetected("class A { Object c = new MySQLContainer<?>(IMAGE); }");
+        assertDetected("class A { Object c = new org.testcontainers.containers.MySQLContainer<>(name()); }");
+        assertDetected("class A { Object c = new com.ses.test.MySQLContainer<>(DockerImageName.parse(MySqlTestImages.image())); }");
     }
 
     @Test
-    void 既定imageは本番と同じMySQL_8_4系の固定tagである() {
+    void 構造検査は無引数constructorを検出する() {
+        assertDetected("class A { Object c = new MySQLContainer<>(); }");
+        assertDetected("class A { Object c = new org.testcontainers.containers.MySQLContainer(\n    ); }");
+    }
+
+    @Test
+    void 構造検査は同じfile内でMySqlTestImagesだけを代入した変数に限り許す() {
+        assertClean("class A { static final String IMG = MySqlTestImages.freshInstallImage();"
+                + " Object c = new MySQLContainer<>(IMG); }");
+        assertDetected("class A { static final String IMG = System.getProperty(`x`); Object c = new MySQLContainer<>(IMG); }");
+        assertDetected("class A { static String IMG = MySqlTestImages.image(); static { IMG = other(); }"
+                + " Object c = new MySQLContainer<>(IMG); }");
+    }
+
+    @Test
+    void 構造検査はimage文字列の各書き方を検出する() {
+        assertDetected("class A { String s = `mysql:8.0`; }");
+        assertDetected("class A { String s = `docker.io/library/mysql:8.0`; }");
+        assertDetected("class A { String s = `library/mysql:8.0`; }");
+        assertDetected("class A { String s = `mysql@sha256:0123`; }");
+        assertDetected("class A { String s = `mysql:` + version; }");
+        assertDetected("class A { String s = `mysql` + `:8.0`; }");
+        assertDetected("class A { String s = `docker.io/library/` + `mysql`; }");
+        assertDetected("class A { String s = String.format(`mysql:%s`, v); }");
+        assertDetected("class A { String s = String.format(`%s:%s`, `mysql`, v); }");
+        assertDetected("class A { String s = `%s:%s`.formatted(`mysql`, v); }");
+        assertDetected("class A { String s = ```\n        mysql:8.0\n        ```; }");
+    }
+
+    @Test
+    void 構造検査はDockerImageNameとimage定数とsubstituteを検出する() {
+        assertDetected("class A { Object n = DockerImageName.parse(`mysql`).withTag(`8.0`); }");
+        assertDetected("class A { Object n = DockerImageName.parse(`mysql/mysql-server:8.0`); }");
+        assertDetected("class A { String s = MySQLContainer.NAME + `:` + MySQLContainer.DEFAULT_TAG; }");
+        assertDetected("class A { Object n = DockerImageName.parse(x).asCompatibleSubstituteFor(`mysql`); }");
+    }
+
+    @Test
+    void 構造検査は集中定義の呼出しとmysqlを含むだけの文字列やcommentを検出しない() {
+        assertClean("class A { Object c = new MySQLContainer<>(MySqlTestImages.image()); }");
+        assertClean("class A { Object c = new com.ses.test.MySQLContainer<>(\n        com.ses.test.MySqlTestImages.image())\n"
+                + "        .withCommand(`--skip-log-bin`); }");
+        assertClean("@Tag(`mysql`) class A { String u = `jdbc:mysql://host/db`; String t = `mysql-tests`; }");
+        assertClean("class A { // new MySQLContainer<>(`mysql:8.0`)\n  /** {@code new MySQLContainer<>()} */\n"
+                + "  String s = `new MySQLContainer<>(x)`; char q = '`'; String t = ```\n    SELECT 1\n    ```; }");
+    }
+
+    // ---- 既定値と解決順 ----
+
+    @Test
+    void 既定imageは本番と同じMySQL_8_4系の固定tagである() throws IOException {
         assertTrue(MySqlTestImages.DEFAULT_IMAGE.matches("^mysql:8\\.4\\.\\d+$"),
                 "既定imageは 8.4 LTS のpatch版まで固定したtagにしてください: " + MySqlTestImages.DEFAULT_IMAGE);
-    }
-
-    @Test
-    void CIのMySQL_jobは既定imageで走りその証拠を残す() throws IOException {
-        String ci = Files.readString(Path.of(".github/workflows/ci.yml"), StandardCharsets.UTF_8);
-        assertTrue(ci.contains("src/test/java/com/ses/test/MySqlTestImages.java"),
-                "CIのMySQL jobは既定imageを MySqlTestImages から読んで実行証拠を残すこと");
-        assertFalse(ci.contains("-D" + MySqlTestImages.IMAGE_PROPERTY) || ci.contains(MySqlTestImages.IMAGE_ENV + "="),
-                "CIではMySQL imageを上書きしない（8.4の証拠にならなくなる）");
-    }
-
-    @Test
-    void offline_simulationも同じ既定imageを使い8_4で削除された起動optionを渡さない() throws IOException {
-        String compose = Files.readString(Path.of("infra/ecs/offline/docker-compose.yml"), StandardCharsets.UTF_8);
-        assertTrue(compose.contains("image: ${SES_OFFLINE_MYSQL_IMAGE:-" + MySqlTestImages.DEFAULT_IMAGE + "}"),
-                "offline simulationのMySQL既定imageがtestの既定値と食い違っています");
-        assertFalse(Pattern.compile("(?m)^\\s*-\\s*--default[-_]authentication[-_]plugin").matcher(compose).find(),
-                "--default-authentication-plugin は MySQL 8.4 で削除されたため指定できません");
-
-        String simulation = Files.readString(Path.of("infra/ecs/offline/verify-offline-sim.ps1"), StandardCharsets.UTF_8);
-        assertTrue(simulation.contains("'" + MySqlTestImages.DEFAULT_IMAGE + "'"),
-                "verify-offline-sim.ps1 の補助imageがcomposeの既定値と食い違っています");
+        // CIの証拠stepは sed でこの1行を読む。
+        List<String> definitions = Files.readAllLines(IMAGES_SOURCE, StandardCharsets.UTF_8).stream()
+                .filter(line -> line.contains("DEFAULT_IMAGE = \""))
+                .toList();
+        assertEquals(1, definitions.size(), "DEFAULT_IMAGE の定義行はちょうど1行にしてください: " + definitions);
+        assertTrue(definitions.get(0).contains("\"" + MySqlTestImages.DEFAULT_IMAGE + "\""), definitions.get(0));
     }
 
     @Test
@@ -149,7 +199,164 @@ class MySqlTestImagesTest {
         assertFalse(MySqlTestImages.image().isBlank());
     }
 
-    private static boolean isHardcodedImage(String line) {
-        return IMAGE_LITERAL.matcher(line).find() || CONSTRUCTOR_LITERAL.matcher(line).find();
+    // ---- CI ----
+
+    @Test
+    void CIの証拠stepは既定imageを読み既定以外のMySQL_imageがあれば失敗する() throws IOException {
+        String ci = read(CI_WORKFLOW);
+        int start = ci.indexOf("- name: " + EVIDENCE_STEP);
+        assertTrue(start >= 0, "CIのMySQL jobに証拠step（" + EVIDENCE_STEP + "）がありません");
+        int next = ci.indexOf("- name:", start + 1);
+        String step = ci.substring(start, next < 0 ? ci.length() : next);
+        assertTrue(step.contains(IMAGES_SOURCE.toString().replace('\\', '/')),
+                "証拠stepは既定imageを MySqlTestImages から読むこと");
+        assertTrue(step.contains("docker image inspect"), "証拠stepは既定imageのdigestを記録すること");
+        assertTrue(step.contains("exit 1"), "証拠stepは既定以外のimageがあれば失敗すること");
+        assertFalse(step.contains("|| true"), "証拠stepは失敗を握りつぶさないこと");
+    }
+
+    @Test
+    void workflowとscriptとpomはMySQL_imageを上書きしない() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        for (Path file : ciFiles()) {
+            String text = read(file);
+            for (Pattern override : OVERRIDES) {
+                Matcher matcher = override.matcher(text);
+                while (matcher.find()) {
+                    offenders.add(file + ":" + line(text, matcher.start()) + ": " + matcher.group().strip());
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(), "CIではMySQL imageを上書きしない（8.4の証拠にならなくなる）: " + offenders);
+    }
+
+    @Test
+    void 上書き検出はproperty_YAML_key_flow_shell_PowerShellの各書き方を拾い既定値展開は拾わない() {
+        assertTrue(overridden("mvn -B test -Pmysql-tests -Dses.test.mysql.image=mysql:8.0"));
+        assertTrue(overridden("mvn -B test -Dses.flyway.fresh-install.mysql-image=mysql:8.0.36"));
+        assertTrue(overridden("    env:\n      SES_TEST_MYSQL_IMAGE: mysql:8.0\n"));
+        assertTrue(overridden("    env: { SES_TEST_MYSQL_IMAGE: mysql:8.0 }\n"));
+        assertTrue(overridden("export SES_TEST_MYSQL_IMAGE=mysql:8.0\n"));
+        assertTrue(overridden("echo \"SES_TEST_MYSQL_IMAGE=mysql:8.0\" >> \"$GITHUB_ENV\"\n"));
+        assertTrue(overridden("$env:SES_TEST_MYSQL_IMAGE = 'mysql:8.0'\n"));
+        assertTrue(overridden("[Environment]::SetEnvironmentVariable('SES_TEST_MYSQL_IMAGE', 'mysql:8.0')\n"));
+        assertFalse(overridden("          if [ -n \"${SES_TEST_MYSQL_IMAGE:-}\" ]; then\n"));
+        assertFalse(overridden("            echo \"（${SES_TEST_MYSQL_IMAGE}）\"\n"));
+    }
+
+    @Test
+    void CIが使うfileは例外として挙げたもの以外で既定以外のMySQL_imageを使わない() throws IOException {
+        String defaultTag = defaultTag();
+        List<String> offenders = new ArrayList<>();
+        for (Path file : ciFiles()) {
+            String text = read(file);
+            Matcher matcher = IMAGE_IN_TEXT.matcher(text);
+            while (matcher.find()) {
+                if (!matcher.group(1).equals(defaultTag)) {
+                    offenders.add(file + ":" + line(text, matcher.start()) + ": " + matcher.group());
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(), "CIのworkflow・scriptで既定以外のMySQL imageを使っています: " + offenders);
+
+        for (Map.Entry<String, String> exception : NON_DEFAULT_IMAGE_EXCEPTIONS.entrySet()) {
+            Path file = Path.of(exception.getKey());
+            assertTrue(Files.isRegularFile(file), "例外に挙げたfileがありません: " + file);
+            boolean stillNeeded = IMAGE_IN_TEXT.matcher(read(file)).results()
+                    .map(result -> result.group(1))
+                    .anyMatch(tag -> !tag.equals(defaultTag));
+            assertTrue(stillNeeded, file + " は既定imageだけになったので NON_DEFAULT_IMAGE_EXCEPTIONS から外してください（理由: "
+                    + exception.getValue() + "）");
+        }
+    }
+
+    @Test
+    void image参照の検出はjdbc_URLと既定tagを除く() {
+        assertEquals(List.of("8.0.36"), tags("    image: mysql:8.0.36@sha256:0123\n"));
+        assertEquals(List.of("8.0"), tags("docker pull docker.io/library/mysql:8.0\n"));
+        assertEquals(List.of(), tags("- `NF01_PREFLIGHT_JDBC_URL`: an explicit `jdbc:mysql:` URL\n"));
+        assertEquals(List.of(), tags("grep -E '^(docker\\.io/)?(library/)?mysql:' images.txt\n"));
+    }
+
+    // ---- offline simulation ----
+
+    @Test
+    void offline_simulationも同じ既定imageを使い8_4で削除された起動optionを渡さない() throws IOException {
+        String compose = read(Path.of("infra/ecs/offline/docker-compose.yml"));
+        assertTrue(compose.contains("image: ${SES_OFFLINE_MYSQL_IMAGE:-" + MySqlTestImages.DEFAULT_IMAGE + "}"),
+                "offline simulationのMySQL既定imageがtestの既定値と食い違っています");
+        assertFalse(passesRemovedOption(compose),
+                "--default-authentication-plugin は MySQL 8.4 で削除されたため指定できません");
+
+        String simulation = read(Path.of("infra/ecs/offline/verify-offline-sim.ps1"));
+        assertTrue(simulation.contains("'" + MySqlTestImages.DEFAULT_IMAGE + "'"),
+                "verify-offline-sim.ps1 の補助imageがcomposeの既定値と食い違っています");
+    }
+
+    @Test
+    void 削除済みoptionの検査はblock_flow_文字列の各書き方を拾いcommentは除く() {
+        assertTrue(passesRemovedOption("    command:\n      - --default-authentication-plugin=caching_sha2_password\n"));
+        assertTrue(passesRemovedOption("    command: [\"--character-set-server=utf8mb4\", \"--default_authentication_plugin=x\"]\n"));
+        assertTrue(passesRemovedOption("    command: --default-authentication-plugin=x --log-bin-trust-function-creators=1\n"));
+        assertFalse(passesRemovedOption("    # --default-authentication-plugin は 8.4 で削除\n"
+                + "    command:\n      - --log-bin-trust-function-creators=1  # 理由: --default-authentication-plugin\n"));
+    }
+
+    // ---- helpers ----
+
+    /** sampleでは {@code `} を {@code "} として書く（本classの文字列literalが検査対象にならないようにするため）。 */
+    private static String java(String sample) {
+        return sample.replace('`', '"');
+    }
+
+    private static void assertDetected(String sample) {
+        assertFalse(MySqlImageSourceScanner.violations(java(sample)).isEmpty(), "検出されるべき書き方: " + java(sample));
+    }
+
+    private static void assertClean(String sample) {
+        assertEquals(List.of(), MySqlImageSourceScanner.violations(java(sample)), "検出されるべきでない書き方: " + java(sample));
+    }
+
+    private static boolean overridden(String text) {
+        return OVERRIDES.stream().anyMatch(pattern -> pattern.matcher(text).find());
+    }
+
+    private static List<String> tags(String text) {
+        String defaultTag = defaultTag();
+        return IMAGE_IN_TEXT.matcher(text).results()
+                .map(result -> result.group(1))
+                .filter(tag -> !tag.equals(defaultTag))
+                .toList();
+    }
+
+    private static boolean passesRemovedOption(String yaml) {
+        String withoutComments = yaml.lines()
+                .map(line -> line.replaceFirst("(^|\\s)#.*$", ""))
+                .collect(Collectors.joining("\n"));
+        return REMOVED_OPTION.matcher(withoutComments).find();
+    }
+
+    private static String defaultTag() {
+        return MySqlTestImages.DEFAULT_IMAGE.substring(MySqlTestImages.DEFAULT_IMAGE.indexOf(':') + 1);
+    }
+
+    /** CIが実行するworkflow・script・pom。 */
+    private static List<Path> ciFiles() throws IOException {
+        List<Path> files = new ArrayList<>();
+        for (Path root : List.of(CI_WORKFLOW.getParent(), Path.of("scripts"))) {
+            try (Stream<Path> paths = Files.walk(root)) {
+                paths.filter(Files::isRegularFile).sorted().forEach(files::add);
+            }
+        }
+        files.add(Path.of("pom.xml"));
+        return files;
+    }
+
+    private static String read(Path file) throws IOException {
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    }
+
+    private static int line(String text, int position) {
+        return (int) text.substring(0, position).chars().filter(ch -> ch == '\n').count() + 1;
     }
 }

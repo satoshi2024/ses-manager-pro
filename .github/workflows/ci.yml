@@ -80,8 +80,9 @@ jobs:
           tests=$(paste -sd, "scripts/test-suites/mysql-shard-${{ matrix.shard }}.txt")
           mvn -B clean test -Pmysql-tests -Dtest="$tests"
 
-      # 本番と同じ MySQL 8.4 LTS で走ったことの証拠。既定image（MySqlTestImages.DEFAULT_IMAGE）を
-      # sourceから読み、実際にpullされている（=testが使った）ことと、そのdigestを記録する。CIでは上書きしない。
+      # 本番と同じ MySQL 8.4 LTS で走ったことの証拠。既定image（MySqlTestImages.DEFAULT_IMAGE）をsourceから読み、
+      # pull済みであること（少なくとも1つのtestが使ったこと）とそのdigestを記録する。GitHubのrunnerは毎回新しいので、
+      # 既定以外のMySQL imageが1つでもあれば、どこかのtestが別のimageで走ったとみなして失敗させる。CIでは上書きしない。
       - name: Verify MySQL tests ran on the default image
         run: |
           image=$(sed -n 's/.*DEFAULT_IMAGE = "\([^"]*\)".*/\1/p' src/test/java/com/ses/test/MySqlTestImages.java)
@@ -95,7 +96,14 @@ jobs:
           fi
           echo "default MySQL image: $image"
           docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "$image"
-          docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep '^mysql:' || true
+          images=$(docker image ls --format '{{.Repository}}:{{.Tag}}')
+          echo "$images"
+          others=$(printf '%s\n' "$images" | awk -v keep="$image" '$0 ~ /^(docker\.io\/)?(library\/)?mysql(:|$)/ && $0 != keep')
+          if [ -n "$others" ]; then
+            echo "Error: 既定以外の MySQL image があります（既定を使わずに走った test があります）:"
+            echo "$others"
+            exit 1
+          fi
 
       # 「skipされたテストが1件も無いこと」がCIの契約。
       # Docker/Node/フォント等の環境差でテストが静かに消えるのを防ぐ。
