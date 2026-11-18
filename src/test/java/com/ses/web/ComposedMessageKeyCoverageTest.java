@@ -154,6 +154,9 @@ class ComposedMessageKeyCoverageTest {
                 "t_legal_hold.status の CHECK（V190）"));
         registry.put("privacy-holds.js|privacyHold.choice.", Entry.domain(
                 jsConstants("privacy-holds.js", "CHOICE_ADD", "CHOICE_ACCEPT"), "privacy-holds.js の CHOICE_ADD / CHOICE_ACCEPT"));
+        registry.put("lifecycle.js|lifecycle.evidenceType.", Entry.domain(lifecycleEvidenceTypes(),
+                "LifecycleTemplateServiceImpl.EVIDENCE_TYPES（テンプレートの保存で許す証跡種別。タスクはテンプレートから写す。"
+                        + "RB-POSTLAUNCH B-1）"));
 
         // ---- 値域を台帳で持たない箇所（第2引数で値そのものへfallbackする。keyが欠けると訳されない値が出るが、key名は出ない）
         String statusFallback = "DBの状態名（日本語の値）へfallbackする。状態名の訳の網羅は本testの範囲外";
@@ -341,6 +344,15 @@ class ComposedMessageKeyCoverageTest {
         }
         codes.add("journal");
         return codes;
+    }
+
+    /** ライフサイクルの証跡種別の許可値（{@code LifecycleTemplateServiceImpl.EVIDENCE_TYPES}、package private）。 */
+    @SuppressWarnings("unchecked")
+    private static Set<String> lifecycleEvidenceTypes() throws ReflectiveOperationException {
+        Field declared = Class.forName("com.ses.service.lifecycle.impl.LifecycleTemplateServiceImpl")
+                .getDeclaredField("EVIDENCE_TYPES");
+        declared.setAccessible(true);
+        return new TreeSet<>((Set<String>) declared.get(null));
     }
 
     private static Set<String> enumNames(Enum<?>[] values) {

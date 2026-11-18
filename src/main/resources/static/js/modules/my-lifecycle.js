@@ -60,8 +60,11 @@ SES.myLifecycle = {
         cases.forEach(c => {
             const t = typeMap[c.lifecycleType] || { label: c.lifecycleType, class: 'bg-secondary' };
             const s = statusMap[c.status] || { label: c.status, class: 'bg-secondary' };
-            const total = c.tasks ? c.tasks.length : 0;
-            const completed = c.tasks ? c.tasks.filter(tk => tk.status === 'COMPLETED' || tk.status === 'WAIVED').length : 0;
+            // 一覧のAPIはタスクを載せず件数だけを返す（RB-POSTLAUNCH B-3。tasks から数えていたため全件 0/0 になっていた）
+            const total = Array.isArray(c.tasks) ? c.tasks.length : Number(c.totalTasks || 0);
+            const completed = Array.isArray(c.tasks)
+                ? c.tasks.filter(tk => tk.status === 'COMPLETED' || tk.status === 'WAIVED').length
+                : Number(c.completedTasks || 0);
             const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
             html += `
@@ -117,8 +120,10 @@ SES.myLifecycle = {
 
         let html = '';
         tasks.forEach(tk => {
-            // 二者確認タスクは完了APIでは完了できない（409）。提出は案件詳細の二者確認モーダルで行う
-            const action = tk.evidenceType === 'DUAL_CONFIRMATION'
+            // 二者確認タスクは完了APIでは完了できない（409）。提出は案件詳細の二者確認モーダルで行う。
+            // 未着手（先行タスク待ち）は完了APIが400で拒否するため、提出の操作を出さない（RB-POSTLAUNCH B-4）
+            const action = tk.status === 'PENDING' ? this.waitingPredecessorLabel()
+                : tk.evidenceType === 'DUAL_CONFIRMATION'
                 ? `<a href="/my/lifecycle/${encodeURIComponent(tk.caseId)}" class="btn btn-sm btn-outline-info"><i class="bi bi-people me-1"></i>${SES.escapeHtml(SES.i18n.t('lifecycle.dual.button.openDetail'))}</a>`
                 : `<button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openCompleteModal(this)" data-task-id="${tk.id}" data-task-name="${SES.escapeHtml(tk.taskName || '')}" data-task-description="${SES.escapeHtml(tk.description || '')}" data-evidence-type="${SES.escapeHtml(tk.evidenceType || 'NONE')}" title="タスクを提出" aria-label="タスクを提出">
                             <i class="bi bi-check2 me-1"></i>提出・完了
@@ -322,7 +327,10 @@ SES.myLifecycle = {
             if (t.evidenceType === 'DUAL_CONFIRMATION') {
                 // 二者確認タスク: 進行中は提出（確認・差戻しの操作は本人画面に出さない）、完了後は確認記録の閲覧だけ
                 actionBtn = this.dualConfirmationAction(t, caseStatus);
-            } else if (caseStatus === 'ACTIVE' && (t.status === 'IN_PROGRESS' || t.status === 'PENDING')) {
+            } else if (caseStatus === 'ACTIVE' && t.status === 'PENDING') {
+                // 未着手（先行タスク待ち）は完了できない（完了APIは着手中だけを受け付ける）。操作を出さず理由を示す（B-4）
+                actionBtn = this.waitingPredecessorLabel();
+            } else if (caseStatus === 'ACTIVE' && t.status === 'IN_PROGRESS') {
                 actionBtn = `<button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openDetailCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了・提出</button>`;
             }
 
@@ -344,6 +352,11 @@ SES.myLifecycle = {
     },
 
     /** 二者確認タスクの操作。子スイッチOFFでモーダルが無ければ無効の表示だけ。 */
+    /** 未着手タスクの操作欄（先行タスクの完了後に自動で着手可能になる）。 */
+    waitingPredecessorLabel: function() {
+        return `<span class="text-muted small">${SES.escapeHtml(SES.i18n.t('lifecycle.my.waitingPredecessor'))}</span>`;
+    },
+
     dualConfirmationAction: function(task, caseStatus) {
         const inProgress = caseStatus === 'ACTIVE' && task.status === 'IN_PROGRESS';
         if (!inProgress && task.status !== 'COMPLETED') {

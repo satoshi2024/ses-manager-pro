@@ -642,13 +642,35 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                                 .filter(Objects::nonNull).distinct().collect(Collectors.toList())))
                 .stream().collect(Collectors.toMap(Engineer::getId, e -> e));
 
-        return list.stream()
+        List<LifecycleCase> visibleCases = list.stream()
                 .filter(c -> {
                     Engineer eng = engineerMap.get(c.getEngineerId());
                     return eng != null && scopeService.canViewCase(currentUser, c, eng);
                 })
+                .collect(Collectors.toList());
+        if (visibleCases.isEmpty()) {
+            return Collections.emptyList();
+        }
+        // 一覧の進捗（完了数/総数）。詳細と同じく照会者に見えるタスクだけを数える（要員本人は本人公開タスクだけ）。
+        // 以前は一覧のDTOにタスクを載せず、画面が tasks から数えていたため全件 0/0 と表示されていた（RB-POSTLAUNCH B-3）。
+        Map<Long, int[]> progressByCaseId = new HashMap<>();
+        taskMapper.selectList(new LambdaQueryWrapper<LifecycleTask>()
+                        .in(LifecycleTask::getCaseId, visibleCases.stream().map(LifecycleCase::getId)
+                                .collect(Collectors.toList())))
+                .stream()
+                .filter(task -> scopeService.isTaskVisibleToUser(currentUser, task))
+                .forEach(task -> {
+                    int[] counts = progressByCaseId.computeIfAbsent(task.getCaseId(), id -> new int[2]);
+                    counts[0]++;
+                    if ("COMPLETED".equals(task.getStatus()) || "WAIVED".equals(task.getStatus())) {
+                        counts[1]++;
+                    }
+                });
+
+        return visibleCases.stream()
                 .map(c -> {
                     Engineer eng = engineerMap.get(c.getEngineerId());
+                    int[] counts = progressByCaseId.getOrDefault(c.getId(), new int[2]);
                     return LifecycleCaseDto.builder()
                             .id(c.getId())
                             .caseNo(c.getCaseNo())
@@ -662,6 +684,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                             .templateVersion(c.getTemplateVersion())
                             .createdAt(c.getCreatedAt())
                             .updatedAt(c.getUpdatedAt())
+                            .totalTasks(counts[0])
+                            .completedTasks(counts[1])
+                            .progressPercent(counts[0] > 0 ? (int) Math.round(((double) counts[1] / counts[0]) * 100) : 0)
                             .build();
                 })
                 .collect(Collectors.toList());

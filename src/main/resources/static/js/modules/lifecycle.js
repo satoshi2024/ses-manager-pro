@@ -73,8 +73,9 @@ SES.lifecycle = {
         cases.forEach(c => {
             const t = typeMap[c.lifecycleType] || { label: c.lifecycleType, class: 'bg-secondary' };
             const s = statusMap[c.status] || { label: c.status, class: 'bg-secondary' };
-            const total = c.tasks ? c.tasks.length : 0;
-            const completed = c.tasks ? c.tasks.filter(tk => tk.status === 'COMPLETED' || tk.status === 'WAIVED').length : 0;
+            const progress = SES.lifecycle.caseProgress(c);
+            const total = progress.total;
+            const completed = progress.completed;
             const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
             html += `
@@ -101,6 +102,26 @@ SES.lifecycle = {
             `;
         });
         tbody.innerHTML = html;
+    },
+
+    /**
+     * 一覧の進捗（完了数/総数）。一覧のAPIはタスクを載せず件数（totalTasks・completedTasks）だけを返す
+     * （RB-POSTLAUNCH B-3。以前は tasks から数えていたため全件 0/0 になっていた）。tasks があればそれを数える。
+     */
+    caseProgress: function(c) {
+        if (c && Array.isArray(c.tasks)) {
+            return {
+                total: c.tasks.length,
+                completed: c.tasks.filter(tk => tk.status === 'COMPLETED' || tk.status === 'WAIVED').length
+            };
+        }
+        return { total: Number((c && c.totalTasks) || 0), completed: Number((c && c.completedTasks) || 0) };
+    },
+
+    /** 証跡種別の表示名（RB-POSTLAUNCH B-1。codeをそのまま出さない。未知のcodeはcodeへfallbackする）。 */
+    evidenceTypeLabel: function(evidenceType) {
+        const code = evidenceType || 'NONE';
+        return SES.i18n.t('lifecycle.evidenceType.' + code, code);
     },
 
     // ==========================================
@@ -369,7 +390,7 @@ SES.lifecycle = {
                     <td>${assignee}</td>
                     <td class="text-muted small">${SES.escapeHtml(t.dueDate || '-')}</td>
                     <td>${deps}</td>
-                    <td><span class="badge bg-tertiary border border-theme text-theme">${SES.escapeHtml(t.evidenceType || 'NONE')}</span></td>
+                    <td><span class="badge bg-tertiary border border-theme text-theme" title="${SES.escapeHtml(t.evidenceType || 'NONE')}">${SES.escapeHtml(this.evidenceTypeLabel(t.evidenceType))}</span></td>
                     <td>
                         <span class="badge ${sClass}">${sLabel}</span>
                         ${isBlocking}
@@ -626,9 +647,48 @@ SES.lifecycle = {
 
     openReassignModal: function(taskId) {
         document.getElementById('reassignTaskId').value = taskId;
-        document.getElementById('reassignUserId').value = '';
         document.getElementById('reassignReason').value = '';
+        this.loadReassignCandidates();
         new bootstrap.Modal(document.getElementById('reassignTaskModal')).show();
+    },
+
+    /**
+     * 担当変更の候補（RB-POSTLAUNCH B-2。以前は利用者IDの数値を直接入力させていた）。
+     * 候補は組織管理の所属登録と同じ /api/autocomplete/assignable-users（自tenantの有効な利用者を照会者の組織scopeで
+     * 絞ったもの。氏名・username・roleだけを返す）。受付の可否はサーバーが従来どおり判定する。
+     */
+    loadReassignCandidates: async function() {
+        const select = document.getElementById('reassignUserId');
+        select.disabled = true;
+        select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('common.loading'))}</option>`;
+        let users = [];
+        try {
+            users = (await SES.api.get('/api/autocomplete/assignable-users')) || [];
+        } catch (e) {
+            console.error(e);
+            select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('lifecycle.reassign.loadFailed'))}</option>`;
+            return;
+        }
+        this.renderReassignCandidates(select, users);
+    },
+
+    renderReassignCandidates: function(select, users) {
+        const usable = (users || []).filter(u => u && u.id);
+        if (usable.length === 0) {
+            select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('lifecycle.reassign.empty'))}</option>`;
+            select.disabled = true;
+            return;
+        }
+        let html = `<option value="">${SES.escapeHtml(SES.i18n.t('lifecycle.reassign.placeholder'))}</option>`;
+        usable.forEach(u => {
+            const name = u.realName || u.username || String(u.id);
+            // 氏名があれば username も添えて同姓同名を見分ける。氏名が無ければ名前の位置に username を出す
+            const detail = [u.realName ? u.username : null, u.role].filter(Boolean).join(' / ');
+            const label = detail ? `${name} (${detail})` : name;
+            html += `<option value="${SES.escapeHtml(String(u.id))}">${SES.escapeHtml(label)}</option>`;
+        });
+        select.innerHTML = html;
+        select.disabled = false;
     },
 
     submitReassignTask: async function() {
@@ -637,7 +697,7 @@ SES.lifecycle = {
         const reason = document.getElementById('reassignReason').value;
 
         if (!userId) {
-            SES.toast.warning('担当ユーザーIDを入力してください');
+            SES.toast.warning(SES.i18n.t('lifecycle.reassign.placeholder'));
             return;
         }
 
