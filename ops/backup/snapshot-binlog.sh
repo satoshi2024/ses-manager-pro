@@ -76,7 +76,7 @@ main() {
   while IFS= read -r -d '' raw_file; do
     rel=$(basename "$raw_file")
     [[ "$rel" != "$last_file" ]] || continue
-    size=$(printf '%s\n' "$src_logs" | awk -v f="$rel" '$1 == f {print $2; exit}')
+    size=$(binlog::size_from_logs "$src_logs" "$rel")
     if [[ -z "$size" ]]; then
       echo "snapshot-binlog: source に無い file（別 lineage?）: $rel" >&2
       continue

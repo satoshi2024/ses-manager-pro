@@ -77,7 +77,9 @@ validate_db::check_tables() { # "t1 t2 ..."
     local out
     out=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
       --execute "CHECK TABLE \`$t\`;" 2>/dev/null)
-    if ! printf '%s\n' "$out" | grep -qiE 'ok$|status: OK'; then
+    # here-string で渡す（パイプ + grep -q にしない。出力が pipe の容量を超えると、一致の後に前段の printf が
+    # SIGPIPE になり、pipefail で「OK が無い」と誤判定するため。RB-W P1-1）
+    if ! grep -qiE 'ok$|status: OK' <<< "$out"; then
       validate_db::fail "CHECK TABLE 失敗: $t（$(printf '%s' "$out" | tail -1)）"
       return 1
     fi

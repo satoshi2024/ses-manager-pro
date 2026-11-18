@@ -114,7 +114,8 @@ image_content_render() { # <image ID>
   out=$("$DOCKER_BIN" image inspect --format "$CONTENT_ID_TEMPLATE" "$1" 2>/dev/null) || return 1
   # 行末の CR（Windows の docker.exe 経由の出力に付くことがある）だけを除き、それ以外は正規形として扱う
   out=$(printf '%s\n' "$out" | tr -d '\r') || return 1
-  printf '%s\n' "$out" | awk '
+  # 想定外の行で exit する awk には here-string で渡す（パイプにしない。RB-W P1-1）
+  awk '
     /^(os|arch|workdir|user|stopsignal|healthcheck)=/ { split($0, kv, "="); single[kv[1]]++; next }
     /^layer=sha256:[0-9a-f]+$/ && length($0) == 77 { layers++; next }
     /^(env|entrypoint|cmd|shell|onbuild|volume|port)="/ { next }
@@ -124,7 +125,7 @@ image_content_render() { # <image ID>
       if (bad || layers == 0) exit 1
       n = split("os arch workdir user stopsignal healthcheck", names, " ")
       for (i = 1; i <= n; i++) if (single[names[i]] != 1) exit 1
-    }' || return 1
+    }' <<< "$out" || return 1
   printf '%s\n' "$out"
 }
 

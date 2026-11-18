@@ -59,9 +59,11 @@ checkpoint::source_logs() {
     --execute "SHOW BINARY LOGS;" "$MYSQL_DATABASE" 2>/dev/null
 }
 
-# 指定 file の source 側 size（SHOW BINARY LOGS から）
+# 指定 file の source 側 size（SHOW BINARY LOGS から。一覧はパイプで渡さない。RB-W P1-1、lib/binlog.sh 参照）
 checkpoint::source_size() { # file
-  checkpoint::source_logs | awk -v f="$1" '$1 == f {print $2; exit}'
+  local logs
+  logs=$(checkpoint::source_logs) || return 1
+  binlog::size_from_logs "$logs" "$1"
 }
 
 # archiver の追従を bounded wait（closed file が source size に達するまで）

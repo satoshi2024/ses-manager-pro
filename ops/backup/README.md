@@ -331,6 +331,11 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   （例: `.Config.Volumes`）を消す」変更は、unit では静的な検査（`case_schema_fp_sql_rule`・`case_static_image_contract`）
   だけが検出する。実際の挙動は integration の step 13（実 MySQL）と、実 Docker で VOLUME・EXPOSE・HEALTHCHECK・
   STOPSIGNAL だけを足した派生 image の content ID が変わることの確認（Runner。手動）で確かめる。
+- script を書くときの規則（`tests/script-contract-test.sh` が本番の script・lib・providers・image を走査する。RB-W P1-1）:
+  本番 script は `set -Eeuo pipefail` で動くため、パイプの後段に途中で読むのをやめ得る command（`grep -q`・`grep -m`・
+  `head`・`exit` を含む awk・sed の `q`・`read`・`cmp`）を置かない。入力が pipe の容量（Linux 64 KiB）を超えると前段が
+  SIGPIPE で終わり、パイプ全体が失敗に見える（例: binlog の一覧が長いと archive / checkpoint が止まる）。入力は
+  here-string（`<<< "$x"`）で渡すか、読み切る command（`jq` の `first`、`tail` 等）を使う。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 

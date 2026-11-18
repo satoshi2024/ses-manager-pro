@@ -102,7 +102,9 @@ selector::resolve_binlogs() { # binlog_index start_file end_file
   fi
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    entry=$(jq -c --arg f "$f" '.[] | select(.file == $f) | {file, snapshot_id, sha256, size}' "$index" 2>/dev/null | head -n1)
+    # 最初の 1 件は jq の first で取る（| head にしない。pipefail 下で jq の SIGPIPE を失敗と見ないように。RB-W P1-1）
+    entry=$(jq -c --arg f "$f" 'first(.[] | select(.file == $f) | {file, snapshot_id, sha256, size}) // empty' "$index" 2>/dev/null) \
+      || entry=""
     if [[ -z "$entry" ]]; then
       echo "plan: 必要 binlog が repository にありません: $f" >&2
       return 1

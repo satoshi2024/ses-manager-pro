@@ -101,6 +101,14 @@ binlog::files_continuous() { # dir start_file end_file
   return 0
 }
 
+# SHOW BINARY LOGS の出力（「file 名 File_size …」の行）から指定 file の File_size を出力する（無ければ何も出さない）。
+# 一覧は here-string で渡す（パイプにしない。RB-W P1-1）。checkpoint ごとの FLUSH BINARY LOGS で、binlog の保持期間内の
+# 一覧は pipe の容量（Linux 64 KiB）を超え得る。パイプの後段の awk が該当行で exit すると、残りを書く前段の printf が
+# SIGPIPE（141）で終わり、呼び出し側（set -Eeuo pipefail）の archive / snapshot / checkpoint が止まっていた。
+binlog::size_from_logs() { # <SHOW BINARY LOGS の出力> <file>
+  awk -v f="$2" '$1 == f { print $2; exit }' <<< "$1"
+}
+
 # truncation 検査: local file の size が期待値以上（source File_size）であること
 binlog::size_ok() { # file expected_size
   local f=$1 expected=$2
