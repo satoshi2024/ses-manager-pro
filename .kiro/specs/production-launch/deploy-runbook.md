@@ -155,8 +155,8 @@
   - image（`Dockerfile`）も `TZ` と `JAVA_TOOL_OPTIONS` の `-Duser.timezone=Asia/Tokyo` を持つ。task definition でも `TZ` を設定する。
   - `validate-task-definition.ps1` は、`TZ` が無い場合と、`JAVA_TOOL_OPTIONS` を上書きして `-Duser.timezone` を落とした場合に Fail する。
 - **`RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false`（初回配備の雛形の値）**: V197 の署名まで、副本の保存期限を縮めず、廃棄候補を毎日作り直さない。署名後に `true` にする（§4.3）。
-- `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。
-- `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。
+- `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。雛形は host が placeholder、port が `3310`。ClamAV の置き方（同じ task の sidecar か外部の service か）は要決定（§1.6 の6）。
+- `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。雛形は `METRICS_SCRAPER_ENABLED=true`、username が placeholder、password が secret。scrape 経路は要決定（§1.6 の7）。
 - `SMTP_HOST` 等: 通知メール。
 
 **環境変数ではないが起動時に検査されるDBの状態**: 次は §5 の手順で揃える。bootstrap中は、break-glass管理者とOIDC管理者の人数の検査を省略する（§4.2）。
@@ -278,7 +278,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）。経路は要決定（§1.6 の7） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
 | SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。alertの閾値と通知先は要決定（§1.6 の8）。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
 | SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。scrape経路は要決定（§1.6 の7） | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
-| SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。task definitionの雛形とも照合する（`infra/ecs/offline/validate-task-definition.ps1` が名前の有無を検査する） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
+| SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。登録する task definition を起動の前に `infra/ecs/offline/validate-task-definition.ps1` の実値の mode で照合する（呼出し方と検査の範囲は §4） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
 | SRE-11 | **job実行環境（Maven・JDK・依存の取得経路）を決め、local repositoryを揃える** | 別の機械・別の `.m2` で job を動かすと、片方にだけ無い artifact で job が止まる。推奨は build と同じ機械・同じ `.m2`。要決定（§1.6 の4） | 本書 §1.5・§1.6 の4 |
 
 **DBA の前提**（番号は署名一覧の DBA-1〜DBA-6 と同じ）
@@ -556,7 +556,17 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - `JAVA_TOOL_OPTIONS` を task definition で上書きする場合は、image の既定（`-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Duser.timezone=Asia/Tokyo`）を全て書く。
   - 起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
-- 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
+- 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する（task definition の雛形の値。`SchedulingConfig` は未設定を有効とみなすため、外すと scheduler が動く）。
+- **起動の前に、登録する task definition を照合する（SRE-10）**。`infra/ecs/offline/validate-task-definition.ps1` を実値の mode で実行し、0 で終わることを確かめる。証跡は既定で OS の一時 directory の下に作り、repository には書かない（設定の名前だけを書き、値は書かない）。`-EvidenceRoot` で配備記録の保管場所を指定する。PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する。
+  ```powershell
+  # 初回起動（§4.2 の bootstrap 設定）
+  pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
+  # §5.5 の bootstrap を終える起動と、以後の起動
+  pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
+  # 雛形（repository の infra/ecs/task-definition.prod.json）だけを検査する場合は引数なし（-Mode Template）
+  ```
+  - 実値の mode が見るもの: §1.0 の1〜26（freee を使うなら27〜30）と運用設定（`FILE_SCANNER_*`・`METRICS_SCRAPER_*`）の名前、secret を environment に置いていないこと、§1.0 で禁止した値が無いこと、placeholder が残っていないこと、image が registry digest で固定されていること、EFS の ID、`TZ`、scraper 口座が `admin`・break-glass 名でないこと。`-Phase Initial` は加えて `APP_SCHEDULING_ENABLED=false`・`SECURITY_BOOTSTRAP_ENABLED=true`・期限（offset 付き ISO-8601 で未来）・空の `BREAK_GLASS_USERNAMES`・機能スイッチの環境変数が無いこと、`-Phase Steady` は bootstrap の設定が外れ `BREAK_GLASS_USERNAMES` がちょうど2名であること。
+  - 見ないもの: secret の値（起動時の validator が見る）、ALB・security group、service の desired count と deployment の設定（SRE-5）。§5.7 の bootstrap 再開は対象外。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
   - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
@@ -587,6 +597,8 @@ OIDCの固定metadata・client credential、MFA鍵、session hash key等のprod�
 | `SECURITY_BOOTSTRAP_REOPEN_TICKET`（`app.security.bootstrap.reopen-ticket`） | **初回は設定しない**。完了後に承認を得てbootstrapを再開する時だけ設定する（§5.7） |
 | `BREAK_GLASS_USERNAMES` | **設定しない（空）**。bootstrap中に設定すると起動しない（§5.5で設定する） |
 | `LOCAL_LOGIN_ENABLED` | 設定しない（既定false）。bootstrap中も `true` は起動しない |
+
+- `infra/ecs/task-definition.prod.json` の雛形はこの表の値を持つ。期限は `SECURITY_BOOTSTRAP_EXPIRES_AT_PLACEHOLDER` で、置き換えないと起動しない（offset付きISO-8601として読めない）。§5.5 で `SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT` を外し、`BREAK_GLASS_USERNAMES` に2名を入れる。
 
 - **LB/ingressでアクセス元を作業端末に限定する（必須）**。bootstrap中は `admin` のlocal password loginが開いているため、次の危険がある（D1 review P3-k）。起動前にSREが制限を入れ、作業端末以外から `/login` に到達できないことを確認してから§5.1へ進む。bootstrapの再開（§5.7）でも同じ。
   - 初期パスワードの総当たり。
@@ -907,7 +919,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
    SELECT username, role, status FROM sys_user
     WHERE username COLLATE utf8mb4_bin IN ('admin', 'bg-second') AND deleted_flag = 0;
    ```
-2. **bootstrapを無効にして再起動する**。`SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT`（設定していれば `SECURITY_BOOTSTRAP_REOPEN_TICKET` も）を外し、`BREAK_GLASS_USERNAMES=admin,bg-second` を設定して再起動する。**`OIDC_TENANT_ID` は外さない**（§4.1）。LBのアクセス元制限は、この起動を確認してから通常の設定へ戻す。
+2. **bootstrapを無効にして再起動する**。`SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT`（設定していれば `SECURITY_BOOTSTRAP_REOPEN_TICKET` も）を外し、`BREAK_GLASS_USERNAMES=admin,bg-second` を設定して再起動する。**`OIDC_TENANT_ID` は外さない**（§4.1）。再起動の前に、新しい task definition を `-Mode Actual -Phase Steady` で照合する（§4）。LBのアクセス元制限は、この起動を確認してから通常の設定へ戻す。
 3. **完全な起動検査が通ることを確認する**。`[bootstrap] 期限付きbootstrap modeが有効です` のWARN logが出ず、`ProductionSecurityConfigurationValidator` の例外（`本番security configurationが安全な既定値を満たしません`）で停止しないこと。readinessがUPになり、C〜EがOIDCでログインできること。完全な検査が見るbootstrap関連の条件は次のとおり。
    - break-glass usernameがちょうど2件で、どちらも有効な管理者かつMFA登録済み（未登録なら `break-glass usernameはMFA enrollment完了済みでなければなりません`）。
    - 設定tenant・issuerの有効なOIDC providerが登録済み（無ければ `設定tenant・issuerの有効なOIDC providerが登録されていません`）。
