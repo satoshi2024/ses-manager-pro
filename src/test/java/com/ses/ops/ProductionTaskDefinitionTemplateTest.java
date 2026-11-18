@@ -160,6 +160,25 @@ class ProductionTaskDefinitionTemplateTest {
         assertThat(environment(app, "PRIVACY_TRUST_KMS_ANCHOR_FILE")).as("第1期は空（trust は anchor 0件のまま）").isEmpty();
     }
 
+    /**
+     * upload root は uploads の mount の下の相対 symlink {@code current} にする（§1.6 の11 (f)。2026-11-18 決定 A）。
+     * restore の後、停止中に1回の rename で版を切り替えるため。値が無いと app は mount root を直接使い、pointer が無くなる。
+     */
+    @Test
+    void 雛形はupload_rootをuploadsのmountの下のcurrent_symlinkにする() throws IOException {
+        JsonNode app = appContainer();
+        String uploadsPath = null;
+        for (JsonNode mount : app.path("mountPoints")) {
+            if ("uploads".equals(mount.path("sourceVolume").asText())) {
+                uploadsPath = mount.path("containerPath").asText();
+            }
+        }
+
+        assertThat(environment(app, "UPLOAD_BASE_PATH")).isEqualTo("/app/uploads/current");
+        assertThat(uploadsPath).as("uploads の mount").isEqualTo("/app/uploads");
+        assertThat(names(app.path("secrets"))).doesNotContain("UPLOAD_BASE_PATH");
+    }
+
     @Test
     void APP_SCHEDULING_ENABLEDはschedulerの条件propertyへ束縛される() {
         SystemEnvironmentPropertySource env = new SystemEnvironmentPropertySource("env",
@@ -177,7 +196,7 @@ class ProductionTaskDefinitionTemplateTest {
                 "SECURITY_BOOTSTRAP_REOPEN_TICKET", "FILE_SCANNER_HOST", "FILE_SCANNER_PORT", "METRICS_SCRAPER_ENABLED",
                 "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "clamav",
                 "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE", "entryPoint",
-                "management")) {
+                "management", "UPLOAD_BASE_PATH", "/app/uploads/current")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
         // 実値を入れた定義の検査と、repository の外への証跡出力（RB-DEPLOY、配備日確認表の #9）。

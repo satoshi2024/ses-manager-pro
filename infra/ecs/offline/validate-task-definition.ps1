@@ -14,7 +14,8 @@
 #   The bootstrap reopen of deploy-runbook section 5.7 is not covered.
 #
 # The task holds exactly two containers, the app (ses-manager) and the ClamAV sidecar (clamav), and the app
-# mounts the uploads volume read-write and the NF07 trust volume (privacy-trust) read-only.
+# mounts the uploads volume read-write and the NF07 trust volume (privacy-trust) read-only. The app writes under
+# UPLOAD_BASE_PATH=/app/uploads/current, a symlink on the uploads volume (checked here by value only).
 #
 # Evidence goes to -EvidenceRoot, by default a new directory under the system temp directory (never inside the
 # repository). The evidence names settings and states what was expected; it never copies a setting's value.
@@ -324,7 +325,7 @@ $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY
   'SECURITY_BOOTSTRAP_REOPEN_TICKET', 'BREAK_GLASS_USERNAMES', 'TRUSTED_PROXIES', 'TZ', 'FILE_SCANNER_HOST', 'FILE_SCANNER_PORT',
   'METRICS_SCRAPER_ENABLED', 'METRICS_SCRAPER_USERNAME', 'PRIVACY_TRUST_KMS_ANCHOR_FILE', 'FREEE_ENABLED', 'CLOUDSIGN_ENABLED',
   'LOCAL_LOGIN_ENABLED', 'OIDC_ENABLED', 'BREAK_GLASS_LOGIN_ENABLED', 'OIDC_REQUIRE_MFA_ASSURANCE', 'MFA_ENABLED',
-  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED')
+  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED', 'UPLOAD_BASE_PATH')
 $visibleKeys = @($mustBeVisible | ForEach-Object { NameKey $_ })
 $hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' })
 if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
@@ -344,8 +345,9 @@ Ok 'SPRING_PROFILES_ACTIVE=prod alone; value-checked settings in environment; no
 # Canonical property names bind just like the short names declared in application*.yml and win over the yml
 # defaults (APP_SECURITY_BOOTSTRAP_ENABLED reaches the property behind SECURITY_BOOTSTRAP_ENABLED, MANAGEMENT_* opens
 # actuator endpoints). Under these property trees only the declared short names are allowed, so every such setting is
-# one this validator reads. integration.hub is not among them: opening NF05 sets approval lists and the provider mode
-# that have no short name (DG-05 draft section 4), and its two switches are caught above in any spelling.
+# one this validator reads (APP_UPLOAD_BASE_PATH would move the upload root off the current symlink). integration.hub is
+# not among them: opening NF05 sets approval lists and the provider mode that have no short name (DG-05 draft
+# section 4), and its two switches are caught above in any spelling.
 $declared = New-Object System.Collections.Generic.HashSet[string]
 foreach ($yml in @('application.yml', 'application-prod.yml')) {
   $ymlPath = Join-Path $RepoRoot "src\main\resources\$yml"
@@ -353,14 +355,14 @@ foreach ($yml in @('application.yml', 'application-prod.yml')) {
   foreach ($m in [regex]::Matches((Get-Content $ymlPath -Raw), '\$\{([A-Z][A-Z0-9_]*)')) { $null = $declared.Add($m.Groups[1].Value) }
 }
 $null = $declared.Add('APP_SCHEDULING_ENABLED')
-$guardedTrees = @('APPFEATURES', 'APPSECURITY', 'APPSCHEDULING', 'MANAGEMENT', 'SPRINGMAIN', 'SERVERFORWARDHEADERSSTRATEGY')
+$guardedTrees = @('APPFEATURES', 'APPSECURITY', 'APPSCHEDULING', 'APPUPLOAD', 'MANAGEMENT', 'SPRINGMAIN', 'SERVERFORWARDHEADERSSTRATEGY')
 $canonical = @($allNames | Where-Object {
     $n = $_
     $k = NameKey $n
     @($guardedTrees | Where-Object { $k.StartsWith($_) }).Count -gt 0 -and -not $declared.Contains($n)
   })
 if ($canonical.Count -gt 0) { Fail ('settings under guarded property trees must use the short names declared in application.yml: ' + ($canonical -join ',')) }
-Ok 'no canonical-name override of feature switches, security, scheduling, management or forwarded-header settings'
+Ok 'no canonical-name override of feature switches, security, scheduling, upload, management or forwarded-header settings'
 
 # Secrets and the property each one binds to (application*.yml), so that the canonical spelling of the property
 # (SPRING_DATASOURCE_PASSWORD, APP_BATCH_TOKEN_SECRET, ...) is caught in environment as well.
@@ -378,6 +380,14 @@ $secretOnly = [ordered]@{
 $secretKeys = @(foreach ($name in $secretOnly.Keys) { NameKey $name; NameKey $secretOnly[$name] })
 $exposed = @($envNames | Where-Object { $secretKeys -contains (NameKey $_) })
 if ($exposed.Count -gt 0) { Fail ('secrets in environment (use the secret store): ' + ($exposed -join ',')) }
+# Names that look like secrets must not be in environment either, also when the table above does not list them
+# (IMPORT_ROW_REFERENCE_HMAC_KEY, CERTIFICATION_NUMBER_CRYPTO_KEYS_V2, SMTP_PASSWORD, ...). Allowed: key versions.
+$secretLikeAllowed = @('^[A-Z0-9_]*_CURRENT_KEY_VERSION$')
+$secretLike = @($envNames | Where-Object {
+    $u = ($_.ToUpperInvariant() -replace '[.-]', '_')
+    ($u -match '(_SECRET|_PASSWORD|_KEY|_KEYS|_PEPPER)$' -or $u -match '_KEYS_') -and @($secretLikeAllowed | Where-Object { $u -match $_ }).Count -eq 0
+  })
+if ($secretLike.Count -gt 0) { Fail ('names that look like secrets must come from the secret store, not environment: ' + ($secretLike -join ',')) }
 Ok 'no secrets in environment[] (Secrets Manager/SSM placeholders only)'
 
 # deploy-runbook.md section 1.0: rows 1-26 are always required; rows 27-30 (freee) only with FREEE_ENABLED=true.
@@ -407,13 +417,19 @@ function EnvValues([string]$name) {
 }
 
 # deploy-runbook.md section 1.0 operational settings and the 2026-11-18 decisions (section 1.6 items 6, 7, 11).
-$requiredOperational = @('FILE_SCANNER_HOST','FILE_SCANNER_PORT','METRICS_SCRAPER_ENABLED','METRICS_SCRAPER_USERNAME','METRICS_SCRAPER_PASSWORD','PRIVACY_TRUST_KMS_ANCHOR_FILE')
+$requiredOperational = @('FILE_SCANNER_HOST','FILE_SCANNER_PORT','METRICS_SCRAPER_ENABLED','METRICS_SCRAPER_USERNAME','METRICS_SCRAPER_PASSWORD','PRIVACY_TRUST_KMS_ANCHOR_FILE','UPLOAD_BASE_PATH')
 $missingOperational = @($requiredOperational | Where-Object { $allNames -notcontains $_ })
 if ($missingOperational.Count -gt 0) { Fail ("operational settings missing (deploy-runbook 1.0): " + ($missingOperational -join ',')) }
 if (-not ((@(EnvValues 'FILE_SCANNER_HOST') | Where-Object { $_ -eq '127.0.0.1' -or $_ -eq 'localhost' }))) { Fail 'FILE_SCANNER_HOST must be the sidecar on the loopback (127.0.0.1)' }
 if (-not ((@(EnvValues 'FILE_SCANNER_PORT')) -contains '3310')) { Fail 'FILE_SCANNER_PORT must be clamd 3310' }
 if (-not ((@(EnvValues 'METRICS_SCRAPER_ENABLED') | ForEach-Object { $_.ToLowerInvariant() }) -contains 'true')) { Fail 'METRICS_SCRAPER_ENABLED=true missing: metrics are scraped through the ALB with the scraper account (deploy-runbook 1.6 item 7)' }
-Ok 'ClamAV sidecar on 127.0.0.1:3310, metrics scraper on, PRIVACY_TRUST_KMS_ANCHOR_FILE present'
+# Decided 2026-11-18 (deploy-runbook 1.6 item 11 (f)): the app writes under the relative symlink current, so that a
+# restore switches versions with one rename. Both modes, exact name and value (no trimming, case-sensitive).
+$uploadBase = @($c.environment | Where-Object { [string]$_.name -ceq 'UPLOAD_BASE_PATH' } | ForEach-Object { [string]$_.value })
+if ($uploadBase.Count -ne 1 -or $uploadBase[0] -cne '/app/uploads/current') {
+  Fail 'UPLOAD_BASE_PATH must be exactly /app/uploads/current (the current symlink under the uploads mount; deploy-runbook 1.6 item 11 (f))'
+}
+Ok 'ClamAV sidecar on 127.0.0.1:3310, metrics scraper on, PRIVACY_TRUST_KMS_ANCHOR_FILE present, UPLOAD_BASE_PATH=/app/uploads/current'
 
 # deploy-runbook.md section 1.0 "values that must not be set": each of these stops the prod start.
 $forbidden = [ordered]@{
@@ -452,7 +468,7 @@ if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
 }
 $guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
   'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main',
-  'compliance')
+  'compliance', 'app.upload')
 function Get-JsonKeys([object]$node, [string]$prefix) {
   if ($node -is [System.Management.Automation.PSCustomObject]) {
     foreach ($p in $node.PSObject.Properties) {

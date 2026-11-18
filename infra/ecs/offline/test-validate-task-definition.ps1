@@ -154,6 +154,10 @@ try {
     $td }
   Case 'actual, SPRING_APPLICATION_JSON in environment without checked settings' $Initial 'PASS' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"logging":{"level":{"root":"INFO"}}}'; $td }
+  Case 'actual, secret-like names in secrets and key versions in environment' $SteadyOn 'PASS' {
+    $td = New-Steady 'true'; $app = App $td
+    Add-Secret $app 'IMPORT_ROW_REFERENCE_HMAC_KEY'; Add-Secret $app 'CERTIFICATION_NUMBER_CRYPTO_KEYS_V2'; Add-Secret $app 'SMTP_PASSWORD'
+    Set-Env $app 'MFA_CURRENT_KEY_VERSION' 'v1'; Set-Env $app 'INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION' 'v1'; $td }
   Case 'actual, privacy-trust on its own EFS file system (deploy-runbook 1.6 item 11 (e))' $Initial 'PASS' {
     $td = New-Initial; (Vol $td 'privacy-trust').efsVolumeConfiguration.fileSystemId = 'fs-0fedcba9876543210'; $td }
   Case 'actual, JAVA_TOOL_OPTIONS with the time zone and a heap option' $Initial 'PASS' {
@@ -225,6 +229,36 @@ try {
   Case 'DB_PASSWORD in environment' $Initial 'secrets in environment \(use the secret store\)' {
     $td = New-Initial; Set-Env (App $td) 'DB_PASSWORD' 'plain-text'; $app = App $td
     Set-Prop $app 'secrets' @($app.secrets | Where-Object { $_.name -ne 'DB_PASSWORD' }); $td }
+
+  # ---- negative cases added for the a232cc12 review (UPLOAD_BASE_PATH of decision A, P3-6)
+  Case 'UPLOAD_BASE_PATH missing' $Initial 'operational settings missing \(deploy-runbook 1.0\): UPLOAD_BASE_PATH' {
+    $td = New-Initial; Remove-Env (App $td) 'UPLOAD_BASE_PATH'; $td }
+  Case 'UPLOAD_BASE_PATH missing in the template' @() 'operational settings missing \(deploy-runbook 1.0\): UPLOAD_BASE_PATH' {
+    $td = Read-Template; Remove-Env (App $td) 'UPLOAD_BASE_PATH'; $td }
+  Case 'UPLOAD_BASE_PATH is the mount root' $SteadyOn 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'UPLOAD_BASE_PATH' '/app/uploads'; $td }
+  Case 'UPLOAD_BASE_PATH in another case' $Initial 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = New-Initial; Set-Env (App $td) 'UPLOAD_BASE_PATH' '/app/uploads/Current'; $td }
+  Case 'UPLOAD_BASE_PATH with a trailing slash' $Initial 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = New-Initial; Set-Env (App $td) 'UPLOAD_BASE_PATH' '/app/uploads/current/'; $td }
+  Case 'UPLOAD_BASE_PATH with a trailing space' $Initial 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = New-Initial; Set-Env (App $td) 'UPLOAD_BASE_PATH' '/app/uploads/current '; $td }
+  Case 'UPLOAD_BASE_PATH in the template with another value' @() 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = Read-Template; Set-Env (App $td) 'UPLOAD_BASE_PATH' './uploads'; $td }
+  Case 'upload_base_path in lower case' $Initial 'UPLOAD_BASE_PATH must be exactly /app/uploads/current' {
+    $td = New-Initial; Remove-Env (App $td) 'UPLOAD_BASE_PATH'; Set-Env (App $td) 'upload_base_path' '/app/uploads/current'; $td }
+  Case 'UPLOAD_BASE_PATH from the secret store' $Initial 'settings checked by value must be in environment' {
+    $td = New-Initial; Remove-Env (App $td) 'UPLOAD_BASE_PATH'; Add-Secret (App $td) 'UPLOAD_BASE_PATH'; $td }
+  Case 'APP_UPLOAD_BASE_PATH overrides the upload root' $Initial 'guarded property trees must use the short names' {
+    $td = New-Initial; Set-Env (App $td) 'APP_UPLOAD_BASE_PATH' '/app/uploads'; $td }
+  Case 'app.upload.base-path in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"upload":{"base-path":"/app/uploads"}}}'; $td }
+  Case 'IMPORT_ROW_REFERENCE_HMAC_KEY in environment' $Initial 'names that look like secrets must come from the secret store' {
+    $td = New-Initial; Set-Env (App $td) 'IMPORT_ROW_REFERENCE_HMAC_KEY' 'plain-text'; $td }
+  Case 'CERTIFICATION_NUMBER_CRYPTO_KEYS_V2 in environment' $SteadyOn 'names that look like secrets must come from the secret store' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'CERTIFICATION_NUMBER_CRYPTO_KEYS_V2' 'plain-text'; $td }
+  Case 'SMTP_PASSWORD in environment' $Initial 'names that look like secrets must come from the secret store' {
+    $td = New-Initial; Set-Env (App $td) 'SMTP_PASSWORD' 'plain-text'; $td }
 
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
