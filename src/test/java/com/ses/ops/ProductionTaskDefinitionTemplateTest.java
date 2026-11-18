@@ -193,6 +193,24 @@ class ProductionTaskDefinitionTemplateTest {
         assertThat(Files.readString(SELF_TEST, StandardCharsets.UTF_8)).contains(VALIDATOR.getFileName().toString());
     }
 
+    /**
+     * validator と self-test は Windows PowerShell 5.1 でも動かす。5.1 は BOM の無い file を ANSI の code page で読むため、
+     * 日本語を書くと出力と証跡が文字化けする。2つの script は ASCII だけで書く（{@code infra/ecs/offline/README.md}）。
+     */
+    @Test
+    void validatorとself_testはASCIIだけで書く() throws IOException {
+        for (Path script : List.of(VALIDATOR, SELF_TEST)) {
+            byte[] bytes = Files.readAllBytes(script);
+            List<Integer> nonAscii = new ArrayList<>();
+            for (int i = 0; i < bytes.length && nonAscii.size() < 5; i++) {
+                if ((bytes[i] & 0x80) != 0) {
+                    nonAscii.add(i);
+                }
+            }
+            assertThat(nonAscii).as("%s の ASCII でない byte の位置", script).isEmpty();
+        }
+    }
+
     private static JsonNode taskDefinition() throws IOException {
         return JSON.readTree(Files.readString(TEMPLATE, StandardCharsets.UTF_8));
     }

@@ -21,6 +21,18 @@ $Utf8 = New-Object System.Text.UTF8Encoding $false
 $Work = Join-Path ([System.IO.Path]::GetTempPath()) ('ses-td-selftest-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 
+# Start-Process joins an argument array with spaces without quoting it, so a path with a space would be split.
+# Quote each argument by the Windows command-line rules and pass one string instead (same as the validator).
+function ConvertTo-CommandLine([string[]]$arguments) {
+  $quoted = foreach ($a in $arguments) {
+    if ($a -ne '' -and $a -notmatch '[\s"]') { $a; continue }
+    $s = [regex]::Replace($a, '(\\*)"', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) ($m.Groups[1].Value * 2) + '\"' })
+    $s = [regex]::Replace($s, '(\\+)$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value * 2 })
+    '"' + $s + '"'
+  }
+  $quoted -join ' '
+}
+
 function Read-Template {
   $raw = [System.IO.File]::ReadAllText($TemplatePath)
   if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { return ($raw | ConvertFrom-Json -DateKind String) }
@@ -105,7 +117,7 @@ function Case([string]$Name, [string[]]$ValidatorArgs, [string]$Expect, [scriptb
   $arguments += @('-File', $Validator) + $ValidatorArgs + @('-TaskDefinitionPath', $file, '-EvidenceRoot', $evidence, '-SkipInlineNegativeSelfTest')
   $out = Join-Path $dir 'out.txt'
   $err = Join-Path $dir 'err.txt'
-  $p = Start-Process -FilePath $Self -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  $p = Start-Process -FilePath $Self -ArgumentList (ConvertTo-CommandLine $arguments) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
   $stdout = if (Test-Path $out) { [System.IO.File]::ReadAllText($out) } else { '' }
   $evidenceFile = Join-Path $evidence 'task-definition-validation.txt'
   $failLines = @(if (Test-Path $evidenceFile) { [System.IO.File]::ReadAllLines($evidenceFile) | Where-Object { $_.StartsWith('FAIL ') } })
@@ -200,6 +212,19 @@ try {
     $td = New-Initial; (Vol $td 'uploads').efsVolumeConfiguration.authorizationConfig.iam = 'DISABLED'; $td }
   Case 'privacy-trust EFS without the iam field' $Initial 'authorizationConfig.iam must be ENABLED' {
     $td = New-Initial; $null = (Vol $td 'privacy-trust').efsVolumeConfiguration.authorizationConfig.PSObject.Properties.Remove('iam'); $td }
+
+  # ---- negative cases added for the 12365645 review (P3-3, P3-4)
+  Case 'bracket form app.features[nf01].enabled' $Initial 'setting names must consist of letters, digits' {
+    $td = New-Initial; Set-Env (App $td) 'app.features[nf01].enabled' 'true'; $td }
+  Case 'bracket form in a secret name' $SteadyOn 'setting names must consist of letters, digits' {
+    $td = New-Steady 'true'; Add-Secret (App $td) 'MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE[0]'; $td }
+  Case 'SPRING_DATASOURCE_PASSWORD in environment' $Initial 'secrets in environment \(use the secret store\)' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_DATASOURCE_PASSWORD' 'plain-text'; $td }
+  Case 'APP_BATCH_TOKEN_SECRET in environment' $Initial 'secrets in environment \(use the secret store\)' {
+    $td = New-Initial; Set-Env (App $td) 'APP_BATCH_TOKEN_SECRET' 'plain-text'; $td }
+  Case 'DB_PASSWORD in environment' $Initial 'secrets in environment \(use the secret store\)' {
+    $td = New-Initial; Set-Env (App $td) 'DB_PASSWORD' 'plain-text'; $app = App $td
+    Set-Prop $app 'secrets' @($app.secrets | Where-Object { $_.name -ne 'DB_PASSWORD' }); $td }
 
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {

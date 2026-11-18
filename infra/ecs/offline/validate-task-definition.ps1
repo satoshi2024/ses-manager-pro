@@ -65,6 +65,18 @@ function Read-Json([string]$path) {
   return ($raw | ConvertFrom-Json)
 }
 
+# Start-Process joins an argument array with spaces without quoting it, so a path with a space would be split.
+# Quote each argument by the Windows command-line rules and pass one string instead.
+function ConvertTo-CommandLine([string[]]$arguments) {
+  $quoted = foreach ($a in $arguments) {
+    if ($a -ne '' -and $a -notmatch '[\s"]') { $a; continue }
+    $s = [regex]::Replace($a, '(\\*)"', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) ($m.Groups[1].Value * 2) + '\"' })
+    $s = [regex]::Replace($s, '(\\+)$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value * 2 })
+    '"' + $s + '"'
+  }
+  $quoted -join ' '
+}
+
 function Assert-EfsRootDirectoryRule([string]$volumeName, [object]$efsCfg) {
   $lines = New-Object System.Collections.Generic.List[string]
   $ap = $efsCfg.authorizationConfig.accessPointId
@@ -103,7 +115,7 @@ function Invoke-NegativeEfsSelfTest([string]$OutEvidenceRoot) {
     $arguments = @('-NoProfile')
     if ($PSVersionTable.PSEdition -eq 'Desktop') { $arguments += @('-ExecutionPolicy', 'Bypass') }
     $arguments += @('-File', $PSCommandPath, '-TaskDefinitionPath', $tmpTd, '-EvidenceRoot', (Join-Path $tmpDir 'child-ev'), '-SkipInlineNegativeSelfTest')
-    $p = Start-Process -FilePath $self -ArgumentList $arguments -Wait -PassThru -NoNewWindow `
+    $p = Start-Process -FilePath $self -ArgumentList (ConvertTo-CommandLine $arguments) -Wait -PassThru -NoNewWindow `
       -RedirectStandardOutput $outFile -RedirectStandardError $errFile
     $validatorExit = $p.ExitCode
     $childOut = ''
@@ -283,6 +295,10 @@ $allNames = $envNames + $secretNames
 # property, so names are compared by this key: upper case without '.', '_' and '-'.
 function NameKey([string]$name) { ($name.ToUpperInvariant() -replace '[._-]', '') }
 
+# Other characters (app.features[nf01].enabled, ...) could reach a property in a form NameKey does not cover.
+$oddNames = @($allNames | Where-Object { $_ -cnotmatch '^[A-Za-z_][A-Za-z0-9_.-]*$' })
+if ($oddNames.Count -gt 0) { Fail ('setting names must consist of letters, digits, _ . and - only: ' + ($oddNames -join ',')) }
+
 # The same setting twice (also across environment and secrets, or in another spelling Spring binds to the same
 # property) leaves the effective value to ordering; fail instead of guessing.
 $byKey = @{}
@@ -346,14 +362,22 @@ $canonical = @($allNames | Where-Object {
 if ($canonical.Count -gt 0) { Fail ('settings under guarded property trees must use the short names declared in application.yml: ' + ($canonical -join ',')) }
 Ok 'no canonical-name override of feature switches, security, scheduling, management or forwarded-header settings'
 
-$secretOnly = @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET',
-  'SESSION_HASH_KEY','MFA_ENCRYPTION_KEY','PWA_CONTEXT_SECRET','BP_BANK_ACCOUNT_ENCRYPTION_KEY',
-  'CERTIFICATION_NUMBER_CRYPTO_KEYS_V1','COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1',
-  'COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1','FREEE_CLIENT_SECRET','FREEE_TOKEN_ENCRYPTION_KEY',
-  'METRICS_SCRAPER_PASSWORD')
-foreach ($f in $secretOnly) {
-  if ($envNames -contains $f) { Fail "$f in environment" }
+# Secrets and the property each one binds to (application*.yml), so that the canonical spelling of the property
+# (SPRING_DATASOURCE_PASSWORD, APP_BATCH_TOKEN_SECRET, ...) is caught in environment as well.
+$secretOnly = [ordered]@{
+  'DB_PASSWORD' = 'spring.datasource.password'; 'DB_USERNAME' = 'spring.datasource.username'; 'DB_URL' = 'spring.datasource.url';
+  'OIDC_CLIENT_SECRET' = 'app.security.oidc.client-secret'; 'BATCH_TOKEN_SECRET' = 'app.batch.token-secret';
+  'SESSION_HASH_KEY' = 'app.security.session.hash-key'; 'MFA_ENCRYPTION_KEY' = 'app.security.mfa.encryption-key';
+  'PWA_CONTEXT_SECRET' = 'app.pwa.context-secret'; 'BP_BANK_ACCOUNT_ENCRYPTION_KEY' = 'bp.bank-account-encryption-key';
+  'CERTIFICATION_NUMBER_CRYPTO_KEYS_V1' = 'certification.number-crypto.keys.v1';
+  'COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1' = 'compliance.gate.credential-crypto.keys.v1';
+  'COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1' = 'compliance.gate.fingerprint-keys.default.keys.v1';
+  'FREEE_CLIENT_SECRET' = 'freee.client-secret'; 'FREEE_TOKEN_ENCRYPTION_KEY' = 'freee.token-encryption-key';
+  'METRICS_SCRAPER_PASSWORD' = 'app.metrics.scraper.password'
 }
+$secretKeys = @(foreach ($name in $secretOnly.Keys) { NameKey $name; NameKey $secretOnly[$name] })
+$exposed = @($envNames | Where-Object { $secretKeys -contains (NameKey $_) })
+if ($exposed.Count -gt 0) { Fail ('secrets in environment (use the secret store): ' + ($exposed -join ',')) }
 Ok 'no secrets in environment[] (Secrets Manager/SSM placeholders only)'
 
 # deploy-runbook.md section 1.0: rows 1-26 are always required; rows 27-30 (freee) only with FREEE_ENABLED=true.
