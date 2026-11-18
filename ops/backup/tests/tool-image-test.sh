@@ -30,7 +30,12 @@ hex64() { printf "${1}%.0s" $(seq 1 64); }
 ID_CLASSIC="sha256:$(hex64 a)"
 ID_CONTAINERD="sha256:$(hex64 b)"
 LAYERS_DEFAULT="sha256:$(hex64 1)\nsha256:$(hex64 2)\n"
-CONFIG_DEFAULT='["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"] null ["bash"] "/var/lib/ses-backup" "" null'
+# content ID の描画（tool-image.sh の CONTENT_ID_TEMPLATE を docker が描画した結果）のうち Config の部分（printf %b 形式）
+config_render() { # <user> <stopsignal> <healthcheck>（いずれも描画後の値）
+  printf 'env="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\\ncmd="bash"\\nworkdir="/var/lib/ses-backup"\\nuser=%s\\nstopsignal=%s\\nhealthcheck=%s\\n' \
+    "$1" "$2" "$3"
+}
+CONFIG_DEFAULT=$(config_render '""' '""' 'null')
 STATUS_CLASSIC='[["Backing Filesystem","extfs"],["Supports d_type","true"]]'
 STATUS_CONTAINERD='[["driver-type","io.containerd.snapshotter.v1"]]'
 
@@ -66,8 +71,14 @@ case "${1:-} ${2:-}" in
       fi
     fi
     case "$*" in
-      *".RootFS.Layers"*) printf '%b' "$layers" ;;
-      *".Config.Env"*) printf '%s\n' "$FAKE_CONFIG" ;;
+      *".RootFS.Layers"*)
+        # content ID の描画: os / arch、layer、Config の順（FAKE_RENDER_RC で描画の失敗、FAKE_RENDER_CRLF で CRLF を再現）
+        if [[ -n "${FAKE_RENDER_RC:-}" ]]; then
+          echo "template: :1:2: executing \"\" at <.Config.Healthcheck>: can't evaluate field Healthcheck" >&2
+          exit "$FAKE_RENDER_RC"
+        fi
+        rendered=$( { printf '%b' "${FAKE_OS_ARCH:-os=\"linux\"\narch=\"amd64\"\n}"; printf '%b' "$layers" | sed '/^$/d; s/^/layer=/'; printf '%b' "$FAKE_CONFIG"; } )
+        if [[ -n "${FAKE_RENDER_CRLF:-}" ]]; then printf '%s\n' "$rendered" | sed 's/$/\r/'; else printf '%s\n' "$rendered"; fi ;;
       *"{{.Id}}"*) printf '%s\n' "$id" ;;
       *) exit 9 ;;
     esac
@@ -105,7 +116,8 @@ MOCK
   export DOCKER_BIN="$T/bin/docker"
   export FAKE_IMAGE_ID="$ID_CLASSIC" FAKE_LAYERS="$LAYERS_DEFAULT" FAKE_CONFIG="$CONFIG_DEFAULT"
   export FAKE_DRIVER_STATUS="$STATUS_CLASSIC" FAKE_STORAGE_DRIVER=overlay2
-  unset FAKE_RETAG_ID FAKE_RETAG_LAYERS FAKE_RETAG_DONE FAKE_MANIFEST_BAD_SHA FAKE_DPKG_RUN FAKE_DPKG_RUN_RC
+  unset FAKE_RETAG_ID FAKE_RETAG_LAYERS FAKE_RETAG_DONE FAKE_MANIFEST_BAD_SHA FAKE_DPKG_RUN FAKE_DPKG_RUN_RC \
+    FAKE_OS_ARCH FAKE_RENDER_RC FAKE_RENDER_CRLF
 }
 
 # 現行の production compose を複製し、pin 値を差し替えたものを作る
@@ -186,13 +198,79 @@ case_check_rejects_changed_content() {
   run_tool check --compose "$T/compose.yml"
   assert_nonzero "$TOOL_RC" "layer が違えば image ID が同じでも拒否"
   assert_contains "$TOOL_OUT" "一致しません" "不一致を通知"
-  export FAKE_LAYERS="$LAYERS_DEFAULT" FAKE_CONFIG='["PATH=/usr/bin","RESTIC_BIN=/bin/true"] null ["bash"] "/var/lib/ses-backup" "" null'
+  export FAKE_LAYERS="$LAYERS_DEFAULT" FAKE_CONFIG="${CONFIG_DEFAULT}"'env="RESTIC_BIN=/bin/true"\n'
   run_tool check --compose "$T/compose.yml"
   assert_nonzero "$TOOL_RC" "config（Env）が違えば拒否"
+  assert_contains "$TOOL_OUT" "一致しません" "Env の違いを content ID の不一致として通知"
   unset FAKE_IMAGE_ID
   run_tool check --compose "$T/compose.yml"
   assert_nonzero "$TOOL_RC" "ローカルに image が無ければ拒否"
   assert_contains "$TOOL_OUT" "image ID を取得できません" "image 不在を通知"
+}
+
+# RB-W W-7: content ID は Volumes・ExposedPorts・Shell・StopSignal・Healthcheck・OnBuild・Labels・os / arch も覆う
+# （r2 は Env / Entrypoint / Cmd / WorkingDir / User / Labels だけで、VOLUME・EXPOSE・STOPSIGNAL・HEALTHCHECK 等を
+# 変えた image を同じ content ID として受理していた）。Docker の出力の CRLF は正規化し、描画できない・想定外の行・
+# 単一項目の重複・layer なしは fail-closed にする。
+case_content_id_covers_runtime_config() {
+  setup_fake_docker
+  local base variant changed
+  base=$(current_content_id)
+  if [[ "$base" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    test_assert "既定の描画から content ID を計算できる（前提）"
+  else
+    test_fail "既定の描画から content ID を計算できる（前提）" "[$base]"
+  fi
+  for variant in 'volume="/var/lib/ses-backup"' 'port="3306/tcp"' 'shell="/bin/sh"' 'onbuild="RUN true"' \
+      'label="org.opencontainers.image.version"="8.0.46"' 'entrypoint="/bin/true"'; do
+    export FAKE_CONFIG="${CONFIG_DEFAULT}${variant}\n"
+    changed=$(current_content_id)
+    if [[ "$changed" =~ ^sha256:[0-9a-f]{64}$ && "$changed" != "$base" ]]; then
+      test_assert "content ID が変わる: ${variant%%=*}"
+    else
+      test_fail "content ID が変わる: ${variant%%=*}" "base=[$base] changed=[$changed]"
+    fi
+  done
+  for variant in 'stopsignal' 'healthcheck' 'user'; do
+    case "$variant" in
+      stopsignal) FAKE_CONFIG=$(config_render '""' '"SIGKILL"' 'null') ;;
+      healthcheck) FAKE_CONFIG=$(config_render '""' '""' '{"Test":["CMD","true"],"Interval":30000000000}') ;;
+      user) FAKE_CONFIG=$(config_render '"root"' '""' 'null') ;;
+    esac
+    export FAKE_CONFIG
+    changed=$(current_content_id)
+    if [[ "$changed" =~ ^sha256:[0-9a-f]{64}$ && "$changed" != "$base" ]]; then
+      test_assert "content ID が変わる: $variant"
+    else
+      test_fail "content ID が変わる: $variant" "base=[$base] changed=[$changed] config=[$FAKE_CONFIG]"
+    fi
+  done
+  export FAKE_CONFIG="$CONFIG_DEFAULT" FAKE_OS_ARCH='os="linux"\narch="arm64"\n'
+  changed=$(current_content_id)
+  if [[ "$changed" =~ ^sha256:[0-9a-f]{64}$ && "$changed" != "$base" ]]; then
+    test_assert "content ID が変わる: arch"
+  else
+    test_fail "content ID が変わる: arch" "base=[$base] changed=[$changed]"
+  fi
+  unset FAKE_OS_ARCH
+  export FAKE_RENDER_CRLF=1
+  assert_eq "$base" "$(current_content_id)" "docker の出力の CRLF は正規化して同じ content ID"
+  unset FAKE_RENDER_CRLF
+
+  export FAKE_RENDER_RC=1
+  run_tool inspect
+  assert_nonzero "$TOOL_RC" "Docker の版で描画できない項目があれば失敗（fail-closed）"
+  assert_contains "$TOOL_OUT" "content ID を計算できません" "描画できないことを通知"
+  unset FAKE_RENDER_RC
+  for variant in "${CONFIG_DEFAULT}"'hostname="builder-01"\n' "${CONFIG_DEFAULT}"'stopsignal="SIGTERM"\n' \
+      '\n'"${CONFIG_DEFAULT}"; do
+    export FAKE_CONFIG="$variant"
+    run_tool inspect
+    assert_nonzero "$TOOL_RC" "想定外の行・単一項目の重複・途中の空行は失敗: [${variant:0:40}…]"
+  done
+  export FAKE_CONFIG="$CONFIG_DEFAULT" FAKE_LAYERS=""
+  run_tool inspect
+  assert_nonzero "$TOOL_RC" "layer の無い描画は失敗"
 }
 
 case_check_rejects_build_and_pull() {
@@ -753,6 +831,17 @@ case_static_image_contract() {
     "$(grep '^RUN ' "$BACKUP_ROOT/Dockerfile" | tail -n 1)" "Dockerfile の最後の RUN で dpkg の版を照合する"
   assert_eq "" "$(grep -E 'base image の版のまま|base image の版を使う' "$BACKUP_ROOT/Dockerfile" "$INSTALL_TOOLCHAIN" || true)" \
     "Essential が base image の版を保つという記述をしない（依存解決で更新され得る）"
+  # RB-W W-7: content ID は実行に関わる Config の項目を要素ごとに覆い、store・Docker の版で変わる項目を使わない
+  local tool field
+  tool=$(cat "$TOOL_IMAGE")
+  for field in .Os .Architecture .RootFS.Layers .Config.Env .Config.Entrypoint .Config.Cmd .Config.Shell .Config.OnBuild \
+      .Config.WorkingDir .Config.User .Config.StopSignal .Config.Volumes .Config.ExposedPorts .Config.Labels .Config.Healthcheck; do
+    assert_contains "$tool" "$field" "content ID に含める: $field"
+  done
+  for field in '{{json .Config}}' .Created .RepoTags .RepoDigests .GraphDriver .Metadata .DockerVersion .Config.Hostname .Config.Domainname; do
+    assert_not_contains "$tool" "$field" "content ID に使わない: $field"
+  done
+  assert_contains "$tool" "CONTENT_ID_SCHEME=ses-backup-tool-content-id-v2" "算出方式を v2 にする（v1 の pin は一致しない = fail-closed）"
   # RB-W W-5: 注入できる system path の既定値は実際の path のままで、Dockerfile は接頭辞を設定しない
   local installer path
   installer=$(cat "$INSTALL_TOOLCHAIN")
@@ -788,6 +877,7 @@ run_case case_check_rejects_placeholder_pin
 run_case case_check_rejects_committed_compose_until_pinned
 run_case case_check_is_store_independent
 run_case case_check_rejects_changed_content
+run_case case_content_id_covers_runtime_config
 run_case case_check_rejects_build_and_pull
 run_case case_record_writes_store_and_refuses_overwrite
 run_case case_record_verifies_image_dpkg_against_manifest

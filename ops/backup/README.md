@@ -109,9 +109,19 @@ ops/backup/image/tool-image.sh compose run --rm check --json
   image index / manifest の digest になり、store の異なるホスト間で `docker save` / `docker load` すると一致しない。
   そのため image ID と image store の種類（`docker info` の `DriverStatus` に `io.containerd.snapshotter` があれば
   containerd、無ければ classic）は**記録だけ**に使う。
-- **pin と照合には content ID を使う。** RootFS の layer diff ID 列（非圧縮 layer の digest）と image config の
-  実行に関わる項目（Env / Entrypoint / Cmd / WorkingDir / User / Labels）から計算した SHA-256 で、image store に
-  依存しない。build 機と配布先の image store が異なっても照合できる（`load` は違いを通知したうえで content ID で照合する）。
+- **pin と照合には content ID を使う。** os / arch、RootFS の layer diff ID 列（非圧縮 layer の digest）と image config の
+  実行に関わる項目（Env / Entrypoint / Cmd / Shell / OnBuild / WorkingDir / User / StopSignal / Volumes / ExposedPorts /
+  Labels / Healthcheck。RB-W W-7）から計算した SHA-256 で、image store に依存しない。build 機と配布先の image store が
+  異なっても照合できる（`load` は違いを通知したうえで content ID で照合する）。算出方式は `ses-backup-tool-content-id-v2`。
+- content ID の正規化: 1 回の `docker image inspect` で項目を 1 行ずつ描画する。文字列は要素ごとに `{{json}}`
+  （Go の encoding/json で改行等を escape し、Docker の版で変わらない）、list は要素を順序どおり、map（Volumes・
+  ExposedPorts・Labels）は Go template が key の昇順で回す。`null` と空の list / map は同じ（行を出さない）。
+  Config 全体を 1 つの json にする出力は使わない（Docker の版で Hostname などの項目が増減するため）。Id・Created・
+  RepoTags・RepoDigests・GraphDriver・Metadata・DockerVersion など、内容に関わらず store や版で変わる項目も使わない。
+  描画結果の CR（Windows の docker.exe）は除く。
+- なお fail-closed になる場合: Docker の版が古く（または新しく）上の項目のどれかを描画できない、描画に想定外の行・
+  単一項目の重複・途中の空行がある、layer が無い。いずれも content ID を計算できず `check` / `load` / `record` が失敗する。
+  v1（r2 まで）の content ID で pin した値は v2 と一致しないため、pin し直す（production の compose は未 pin）。
 
 ### 手順
 

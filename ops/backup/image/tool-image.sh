@@ -12,9 +12,10 @@
 #     classic（graphdriver）store では image config の digest、containerd image store（containerd
 #     snapshotter）では image index / manifest の digest で、store の異なるホスト間で docker save / load
 #     すると一致しない。そのため image ID と image store の種類は記録だけに使う。
-#   - content ID は store に依存しない識別子で、pin と照合に使う。RootFS の layer diff ID 列
-#     （非圧縮 layer の digest）と、image config の実行に関わる項目（Env / Entrypoint / Cmd / WorkingDir /
-#     User / Labels）から SHA-256 を計算する（形式: sha256:<16 進 64 桁>）。
+#   - content ID は store に依存しない識別子で、pin と照合に使う。os / arch、RootFS の layer diff ID 列
+#     （非圧縮 layer の digest）と、image config の実行に関わる項目（Env / Entrypoint / Cmd / Shell / OnBuild /
+#     WorkingDir / User / StopSignal / Volumes / ExposedPorts / Labels / Healthcheck。RB-W W-7）を項目ごとに
+#     正規化した形から SHA-256 を計算する（形式: sha256:<16 進 64 桁>。算出方式 ses-backup-tool-content-id-v2）。
 #
 # usage:
 #   tool-image.sh build-record --out DIR [--tag TAG]
@@ -53,7 +54,7 @@ DEFAULT_TAG=ses-backup-tool:8.0.46
 PROD_COMPOSE="$BACKUP_ROOT/docker-compose.yml"
 MANIFEST_IN_IMAGE=/usr/local/share/ses-backup/image-manifest
 PIN_KEY=x-ses-backup-tool-content-id
-CONTENT_ID_SCHEME=ses-backup-tool-content-id-v1
+CONTENT_ID_SCHEME=ses-backup-tool-content-id-v2
 COMPOSE_SERVICES=(preflight backup binlog checkpoint snapshot-binlog check retention)
 DOCKER_BIN=${DOCKER_BIN:-docker}
 
@@ -86,21 +87,52 @@ image_id_of() { # <ref> -> sha256:<64 桁>（image store 依存。記録用）
   printf '%s\n' "$id"
 }
 
-# image store に依存しない content ID（RootFS の layer diff ID 列 + 実行に関わる config 項目の SHA-256）
-image_content_id() { # <ref> -> sha256:<64 桁>
-  local layers config line count=0 sum
-  layers=$("$DOCKER_BIN" image inspect --format '{{range .RootFS.Layers}}{{println .}}{{end}}' "$1" 2>/dev/null) || return 1
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    valid_digest "$line" || return 1
-    count=$((count + 1))
-  done <<< "$layers"
-  (( count > 0 )) || return 1
-  config=$("$DOCKER_BIN" image inspect \
-    --format '{{json .Config.Env}} {{json .Config.Entrypoint}} {{json .Config.Cmd}} {{json .Config.WorkingDir}} {{json .Config.User}} {{json .Config.Labels}}' \
-    "$1" 2>/dev/null) || return 1
-  [[ -n "$config" && "$config" != *$'\n'* ]] || return 1
-  sum=$(printf '%s\nrootfs:\n%s\nconfig:%s\n' "$CONTENT_ID_SCHEME" "$(printf '%s\n' "$layers" | sed '/^$/d')" "$config" | sha256sum)
+# content ID の対象（RB-W W-7。1 回の docker image inspect で、1 行 1 項目の正規形に描画する）:
+#   os / arch、RootFS の layer diff ID（順序どおり）、Config の Env・Entrypoint・Cmd・Shell・OnBuild（各要素を順序どおり）、
+#   WorkingDir・User・StopSignal、Volumes・ExposedPorts・Labels（map は Go template が key の昇順で回す）、Healthcheck。
+# 正規化: 文字列は要素ごとに {{json}}（Go の encoding/json。改行等を escape し Docker の版で変わらない）で 1 行にし、
+# list と map は Config 全体を 1 つの json にする出力（Docker の版で項目が増減する）ではなく要素を range で並べる。null と空の list / map は
+# どちらも行を出さず同じになる。Id・Created・RepoTags・RepoDigests・GraphDriver・Metadata・DockerVersion・
+# Config の Hostname / Domainname など、内容に関わらず store や Docker の版で変わる項目は使わない。
+CONTENT_ID_TEMPLATE='os={{json .Os}}{{println}}arch={{json .Architecture}}{{println}}'\
+'{{range .RootFS.Layers}}layer={{.}}{{println}}{{end}}'\
+'{{range .Config.Env}}env={{json .}}{{println}}{{end}}'\
+'{{range .Config.Entrypoint}}entrypoint={{json .}}{{println}}{{end}}'\
+'{{range .Config.Cmd}}cmd={{json .}}{{println}}{{end}}'\
+'{{range .Config.Shell}}shell={{json .}}{{println}}{{end}}'\
+'{{range .Config.OnBuild}}onbuild={{json .}}{{println}}{{end}}'\
+'workdir={{json .Config.WorkingDir}}{{println}}user={{json .Config.User}}{{println}}stopsignal={{json .Config.StopSignal}}{{println}}'\
+'{{range $k, $v := .Config.Volumes}}volume={{json $k}}{{println}}{{end}}'\
+'{{range $k, $v := .Config.ExposedPorts}}port={{json $k}}{{println}}{{end}}'\
+'{{range $k, $v := .Config.Labels}}label={{json $k}}={{json $v}}{{println}}{{end}}'\
+'healthcheck={{json .Config.Healthcheck}}{{println}}'
+
+# content ID の正規形（image_content_id が SHA-256 にかける本体）を出力する。描画できない（Docker の版でいずれかの
+# 項目が無い等）・想定外の行・layer が無い・単一項目の数が違う場合は失敗する（fail-closed）。
+image_content_render() { # <image ID>
+  local out
+  out=$("$DOCKER_BIN" image inspect --format "$CONTENT_ID_TEMPLATE" "$1" 2>/dev/null) || return 1
+  # 行末の CR（Windows の docker.exe 経由の出力に付くことがある）だけを除き、それ以外は正規形として扱う
+  out=$(printf '%s\n' "$out" | tr -d '\r') || return 1
+  printf '%s\n' "$out" | awk '
+    /^(os|arch|workdir|user|stopsignal|healthcheck)=/ { split($0, kv, "="); single[kv[1]]++; next }
+    /^layer=sha256:[0-9a-f]+$/ && length($0) == 77 { layers++; next }
+    /^(env|entrypoint|cmd|shell|onbuild|volume|port)="/ { next }
+    /^label="/ { next }
+    { bad = 1; exit }
+    END {
+      if (bad || layers == 0) exit 1
+      n = split("os arch workdir user stopsignal healthcheck", names, " ")
+      for (i = 1; i <= n; i++) if (single[names[i]] != 1) exit 1
+    }' || return 1
+  printf '%s\n' "$out"
+}
+
+# image store に依存しない content ID（上の正規形の SHA-256。先頭に算出方式名を置く）
+image_content_id() { # <image ID> -> sha256:<64 桁>
+  local render sum
+  render=$(image_content_render "$1") || return 1
+  sum=$(printf '%s\n%s\n' "$CONTENT_ID_SCHEME" "$render" | sha256sum)
   sum=${sum%% *}
   [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || return 1
   printf 'sha256:%s\n' "$sum"
