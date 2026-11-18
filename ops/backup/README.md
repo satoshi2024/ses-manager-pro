@@ -260,5 +260,8 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   （表示される復旧手順に従って手動で退避する）。**W1-B1 より前の harness が残した既定 WORK は旧形式のため、
   更新後の最初の実行で 1 回だけ手動の退避が必要になる。**
 - 固定名のコンテナ（`ses-bkup-int-*`）が残っている場合は、WORK を判定・変更する前に失敗する。
+- 所有マーカー・終了記録・合成 secret は、事前検査をせず `dd` の `conv=excl`（1 回の `open(O_CREAT|O_EXCL)`）で
+  排他作成する。名前に何か（通常ファイル・symlink・FIFO・device・directory）があれば辿らず・止まらずに失敗するため、
+  検査と作成の間の窓は無い（RB-W W-2）。`conv=excl` と `iflag=nonblock` を持つ `dd`（GNU coreutils）が無い環境では BLOCKED（2）。
 - 失敗診断（`evidence/failure-diagnostics.txt`）を含まない退避分は直近 3 件を残して自動削除し、削除したディレクトリを表示する。
   失敗診断を含む退避分と、本 harness のマーカーを持たないディレクトリ（`.integration-work.manual-*` など）は自動削除しない。

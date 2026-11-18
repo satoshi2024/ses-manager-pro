@@ -20,6 +20,7 @@ umask 077
 # 実行環境の前提。満たさない環境では途中で誤動作させず、Docker 不在と同じく BLOCKED として終了する。
 #   - bash 4.4 以上: set -u 下での空配列展開（"${arr[@]}"）、mapfile、local -a を使う。
 #   - coreutils（GNU または uutils）の mv: 既定 WORK の退避に mv -T（退避先へ入り込まない改名）を使う。
+#   - dd の conv=excl と iflag=nonblock: 所有マーカー・合成 secret の排他作成（write_exclusive_file）に使う。
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
   echo "BLOCKED: bash 4.4 以上が必要です（現在: ${BASH_VERSION}）。" >&2
   exit 2
@@ -31,6 +32,19 @@ case "$(mv --version 2>/dev/null < /dev/null)" in
     exit 2
     ;;
 esac
+# dd が O_EXCL で作成し（2 回目は失敗する）、O_NONBLOCK で読めることを私有の一時ディレクトリで確かめる
+DD_PROBE_DIR=$(mktemp -d 2>/dev/null) || DD_PROBE_DIR=""
+if [[ -z "$DD_PROBE_DIR" ]] \
+    || ! printf 'a' | dd of="$DD_PROBE_DIR/probe" conv=excl status=none 2>/dev/null \
+    || printf 'b' | dd of="$DD_PROBE_DIR/probe" conv=excl status=none 2>/dev/null \
+    || [[ "$(dd if="$DD_PROBE_DIR/probe" iflag=nonblock status=none 2>/dev/null)" != a ]]; then
+  [[ -n "$DD_PROBE_DIR" ]] && { rm -f -- "$DD_PROBE_DIR/probe"; rmdir -- "$DD_PROBE_DIR"; } 2>/dev/null
+  echo "BLOCKED: dd の conv=excl と iflag=nonblock が必要です（所有マーカー等の排他作成に使用。GNU coreutils の dd を使ってください）。" >&2
+  exit 2
+fi
+rm -f -- "$DD_PROBE_DIR/probe" 2>/dev/null
+rmdir -- "$DD_PROBE_DIR" 2>/dev/null
+unset DD_PROBE_DIR
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 COMPOSE_FILE=$(cygpath -w "$HERE/docker-compose.integration.yml" 2>/dev/null || echo "$HERE/docker-compose.integration.yml")
@@ -127,17 +141,20 @@ reject_work_path() {
 # ------------------------------------------------------------
 # 排他作成・実行環境の識別（P3-S1 / P3-N2）
 # ------------------------------------------------------------
-# <path> を新規作成して <content> を書く。排他性は noclobber の > で担保する: bash は宛先が存在しなければ
-# O_CREAT|O_EXCL で開くため、宛先の無い symlink も辿らずに失敗し、通常ファイル（symlink の先を含む）が
-# 既にあれば開かずに失敗する。noclobber が開いてしまう「通常ファイル以外」（FIFO・デバイス・ディレクトリ、
-# およびそれらを指す symlink）だけは事前に拒否する（FIFO で止まらないため）。作成後は通常ファイル
-# （symlink でない）で内容が一致することを確認する。
+# <path> を新規作成して <content> を書く（RB-W W-2）。作成は dd の conv=excl、つまり 1 回の
+# open(O_WRONLY|O_CREAT|O_EXCL) だけで行い、事前検査はしない。O_EXCL の open は宛先の名前に何かがあれば種類を
+# 問わず（通常ファイル・宛先の有無を問わない symlink・FIFO・device・directory）EEXIST で失敗し、symlink も辿らない。
+# 「無いことの確認」と「作成」が同じ system call の中で原子的に行われるため、検査と open の間の窓は存在しない。
+# （従来の noclobber は bash 自身が stat した結果で O_EXCL を付けるかを決めるため、事前検査・stat と open の間に
+# FIFO や device を指す symlink を置かれると O_EXCL なしで開き、FIFO では止まり、device へは書き込み得た。）
+# 作成後の確認（symlink でない通常ファイルで内容が一致すること）は O_NONBLOCK の読み取り（iflag=nonblock。
+# Git for Windows の dd は nofollow を持たない）で上限 1 MiB まで読み、作成後に名前を FIFO・device やそれを指す
+# symlink へ差し替えられても止まらず・際限なく読まずに不一致として失敗する（作成そのものは既に O_EXCL で済んでいる）。
 write_exclusive_file() { # <path> <content>
   local path=$1 content=$2 actual
-  if [[ -e "$path" && ! -f "$path" ]]; then return 1; fi
-  ( set -o noclobber; printf '%s' "$content" > "$path" ) 2>/dev/null || return 1
+  printf '%s' "$content" | dd of="$path" conv=excl status=none 2>/dev/null || return 1
   [[ -f "$path" && ! -L "$path" ]] || return 1
-  actual=$(cat -- "$path" 2>/dev/null; printf x) || return 1
+  actual=$(dd if="$path" iflag=nonblock bs=65536 count=16 status=none 2>/dev/null; printf x) || return 1
   [[ "$actual" == "${content}x" ]]
 }
 

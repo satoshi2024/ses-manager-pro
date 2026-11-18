@@ -22,6 +22,7 @@
 #     退避分の剪除方針（削除を表示・失敗診断と本 harness 以外のディレクトリは残す）、PID 再利用の扱い
 #   - 固定名の事前確認を WORK 判定より前に行うこと（P3-N1）、別の PID 名前空間の前回 run は終了記録が
 #     無ければ退避しないこと（P3-N2）、所有マーカーの排他作成（P3-S1）
+#   - 排他作成に事前検査と open の間の窓が無いこと（RB-W W-2。dd の conv=excl = O_CREAT|O_EXCL の 1 回の open）
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
 # 実行方式: case 1〜3 は fresh な bash -c 子プロセスで実行する（source 済み関数は子 bash へ継承されないため、
@@ -1473,8 +1474,8 @@ case_integration_default_work_foreign_namespace_requires_end_record() {
 
 # 35) 所有マーカーは排他作成する（P3-S1）。既存ディレクトリを引き継ぐ場合（controller）に、準備段階の
 #     空確認の後で .ses-pitr-run-owner の名前へ symlink が置かれても、追従して書かずに拒否する。
-#     W1-B1 r2: write_exclusive_file の事前確認は「通常ファイル以外」だけを拒否するため、通常ファイルを指す
-#     symlink と宛先の無い symlink は noclobber（O_EXCL）そのものが拒否する。set -o noclobber を外すと
+#     RB-W W-2: write_exclusive_file は事前検査をせず dd の conv=excl（O_CREAT|O_EXCL）だけで作成するため、
+#     通常ファイルを指す symlink と宛先の無い symlink は O_EXCL そのものが拒否する。conv=excl を外すと
 #     (a) では victim が上書きされ、(b) では宛先のファイルが作られてこの case が失敗する。
 run_owner_marker_plant_case() { # <temp> <name> <plant_target> → RUNNER_* と PLANT_WORK を設定
   local temp=$1 name=$2 target=$3 parent
@@ -1533,6 +1534,74 @@ MOCK
   rm -rf "$temp"
 }
 
+# 36) RB-W W-2: write_exclusive_file は事前検査をせず、dd の conv=excl（1 回の open(O_CREAT|O_EXCL)）で作成する。
+#     宛先の名前に FIFO・FIFO を指す symlink・device を指す symlink・通常ファイルを指す symlink・宛先の無い
+#     symlink・directory・通常ファイルがあれば、止まらずに（timeout 内に）失敗し、何も書き換えない。
+#     conv=excl を外す（O_EXCL なしで開く）と FIFO で止まり、symlink の先を書き換えてこの case が失敗する。
+WEX_FN=""
+WEX_RC=0
+wex() { # <path> <content> → WEX_RC（124 = timeout まで止まった）
+  timeout 10 bash -c '. "$1"; write_exclusive_file "$2" "$3"' _ "$WEX_FN" "$1" "$2" > /dev/null 2>&1
+  WEX_RC=$?
+}
+
+wex_link() { # <target> <link>（Git for Windows でも実体の symlink を作る）
+  MSYS=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null
+  if [[ -L "$2" ]]; then
+    test_assert "symlink fixture を作成（前提: ${2##*/}）"
+  else
+    test_fail "symlink fixture を作成（前提: ${2##*/}）" "この環境では symlink を作成できません"
+  fi
+}
+
+case_integration_exclusive_create_has_no_check_open_window() {
+  local temp
+  temp=$(mktemp -d)
+  WEX_FN="$temp/write-exclusive.sh"
+  sed -n '/^write_exclusive_file() {/,/^}/p' "$RUNNER" > "$WEX_FN"
+  if grep -q 'dd of="$path" conv=excl' "$WEX_FN" && grep -q 'iflag=nonblock' "$WEX_FN" \
+      && ! grep -q 'noclobber' "$WEX_FN" && ! grep -qE '\[\[ -e ' "$WEX_FN"; then
+    test_assert "作成は conv=excl の 1 回の open だけで行い、事前検査・noclobber を使わない（静的）"
+  else
+    test_fail "作成は conv=excl の 1 回の open だけで行い、事前検査・noclobber を使わない（静的）" "$(cat "$WEX_FN")"
+  fi
+
+  wex "$temp/new.txt" "owner-content"
+  assert_zero "$WEX_RC" "存在しない名前には作成できる"
+  assert_eq "owner-content" "$(cat "$temp/new.txt" 2>/dev/null)" "内容を書く"
+  wex "$temp/empty.pem" ""
+  assert_zero "$WEX_RC" "空の内容でも作成できる"
+  assert_file "$temp/empty.pem" "空のファイルを作成"
+  wex "$temp/new.txt" "overwrite"
+  assert_nonzero "$WEX_RC" "既存の通常ファイルには書かない"
+  assert_eq "owner-content" "$(cat "$temp/new.txt" 2>/dev/null)" "既存の通常ファイルを上書きしない"
+
+  mkfifo "$temp/fifo"
+  wex "$temp/fifo" "x"
+  assert_nonzero "$WEX_RC" "FIFO の名前には作成しない"
+  assert_eq "no-block" "$( (( WEX_RC == 124 )) && echo blocked || echo no-block)" "FIFO で止まらない"
+  wex_link "$temp/fifo" "$temp/link-fifo"
+  wex "$temp/link-fifo" "x"
+  assert_nonzero "$WEX_RC" "FIFO を指す symlink の名前には作成しない"
+  assert_eq "no-block" "$( (( WEX_RC == 124 )) && echo blocked || echo no-block)" "FIFO を指す symlink で止まらない"
+  wex_link /dev/null "$temp/link-device"
+  wex "$temp/link-device" "x"
+  assert_nonzero "$WEX_RC" "device を指す symlink の名前には作成しない"
+  printf 'victim original\n' > "$temp/victim.txt"
+  wex_link "$temp/victim.txt" "$temp/link-victim"
+  wex "$temp/link-victim" "x"
+  assert_nonzero "$WEX_RC" "通常ファイルを指す symlink の名前には作成しない"
+  assert_eq "victim original" "$(cat "$temp/victim.txt" 2>/dev/null)" "symlink の先を書き換えない"
+  wex_link "$temp/dangling-target.txt" "$temp/link-dangling"
+  wex "$temp/link-dangling" "x"
+  assert_nonzero "$WEX_RC" "宛先の無い symlink の名前には作成しない"
+  assert_no_file "$temp/dangling-target.txt" "宛先の無い symlink を辿って作成しない"
+  mkdir "$temp/dir"
+  wex "$temp/dir" "x"
+  assert_nonzero "$WEX_RC" "directory の名前には作成しない"
+  rm -rf "$temp"
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1568,5 +1637,6 @@ run_case case_integration_runner_blocks_without_coreutils_mv
 run_case case_integration_fixed_name_checked_before_work_judgement
 run_case case_integration_default_work_foreign_namespace_requires_end_record
 run_case case_integration_owner_marker_exclusive_create
+run_case case_integration_exclusive_create_has_no_check_open_window
 
 test_summary "ACC-OPS-P2 harness self-tests"
