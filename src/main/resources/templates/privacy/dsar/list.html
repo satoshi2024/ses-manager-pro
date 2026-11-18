@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{menu.privacyDsar}">本人請求（DSAR）</title>
+</head>
+<body>
+<div layout:fragment="content" id="privacy-dsar-list">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-file-person me-2 text-primary"></i><th:block th:text="#{privacyDsar.title}">本人請求（DSAR）</th:block></h2>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="privacy-dsar-reload">
+            <i class="bi bi-arrow-clockwise me-1"></i><th:block th:text="#{privacyDsar.reload}">再読み込み</th:block>
+        </button>
+    </div>
+
+    <!-- 本人確認以降の前提（D-01・D-06）と期限規則 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.readiness.heading}">前提</div>
+        <div class="card-body small text-light">
+            <dl class="row mb-0">
+                <dt class="col-12 col-sm-5" th:text="#{privacyDsar.readiness.identity}">本人確認以降の決定</dt>
+                <dd class="col-12 col-sm-7" id="privacy-dsar-readiness-identity">…</dd>
+                <dt class="col-12 col-sm-5" th:text="#{privacyDsar.readiness.dueRule}">期限規則</dt>
+                <dd class="col-12 col-sm-7 mb-0" id="privacy-dsar-readiness-due">…</dd>
+            </dl>
+        </div>
+    </div>
+
+    <!-- 絞込み（共通の filter panel の構造） -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-body">
+            <form id="searchForm" class="row g-2 align-items-end" novalidate>
+                <div class="col-12 col-sm-6 col-md-4">
+                    <label class="form-label small text-light" for="dsar-filter-status" th:text="#{privacyDsar.filter.status}">状態</label>
+                    <select id="dsar-filter-status" name="status" class="form-select bg-dark border-secondary text-light">
+                        <option value="" th:text="#{privacyDsar.filter.all}">すべて</option>
+                        <option value="REQUESTED" th:text="#{privacyDsar.status.REQUESTED}">受付済み</option>
+                        <option value="IDENTITY_VERIFIED" th:text="#{privacyDsar.status.IDENTITY_VERIFIED}">本人確認済み</option>
+                        <option value="SCOPED" th:text="#{privacyDsar.status.SCOPED}">範囲確定</option>
+                        <option value="PREVIEWED" th:text="#{privacyDsar.status.PREVIEWED}">草案作成済み（承認待ち）</option>
+                        <option value="APPROVED" th:text="#{privacyDsar.status.APPROVED}">承認済み</option>
+                        <option value="CONFIRMED" th:text="#{privacyDsar.status.CONFIRMED}">交付記録済み</option>
+                        <option value="UNKNOWN" th:text="#{privacyDsar.status.UNKNOWN}">状態不明</option>
+                        <option value="BLOCKED" th:text="#{privacyDsar.status.BLOCKED}">進行不可</option>
+                        <option value="CANCELLED" th:text="#{privacyDsar.status.CANCELLED}">取下げ</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 受付一覧（subject 参照は表示しない） -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.list.heading}">受付一覧</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small mb-2">
+                    <thead>
+                    <tr>
+                        <th th:text="#{privacyDsar.col.requestNo}">受付番号</th>
+                        <th th:text="#{privacyDsar.col.requestType}">種別</th>
+                        <th th:text="#{privacyDsar.col.status}">状態</th>
+                        <th th:text="#{privacyDsar.col.channel}">受付経路</th>
+                        <th th:text="#{privacyDsar.col.receivedAt}">受付日時</th>
+                        <th th:text="#{privacyDsar.col.dueDate}">期限日</th>
+                    </tr>
+                    </thead>
+                    <tbody id="privacy-dsar-body"></tbody>
+                </table>
+            </div>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small text-secondary">
+                <span id="privacy-dsar-pager-summary"></span>
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-secondary" id="privacy-dsar-prev" th:text="#{privacyDsar.pager.prev}">前へ</button>
+                    <button type="button" class="btn btn-outline-secondary" id="privacy-dsar-next" th:text="#{privacyDsar.pager.next}">次へ</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 受付の記録（依頼者の連絡先は入力しない） -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.intake.heading}">受付を記録</div>
+        <div class="card-body text-light">
+            <form id="privacy-dsar-intake-form" novalidate>
+                <div class="row g-2">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="dsar-request-type" th:text="#{privacyDsar.intake.requestType}">請求の種別</label>
+                        <select id="dsar-request-type" class="form-select bg-dark border-secondary text-light">
+                            <option value="ACCESS" th:text="#{privacyDsar.type.ACCESS}">開示</option>
+                            <option value="CORRECTION" th:text="#{privacyDsar.type.CORRECTION}">訂正</option>
+                            <option value="DELETION" th:text="#{privacyDsar.type.DELETION}">削除</option>
+                            <option value="RESTRICTION" th:text="#{privacyDsar.type.RESTRICTION}">利用停止</option>
+                            <option value="OBJECTION" th:text="#{privacyDsar.type.OBJECTION}">異議</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="dsar-channel" th:text="#{privacyDsar.intake.channel}">受付経路</label>
+                        <select id="dsar-channel" class="form-select bg-dark border-secondary text-light">
+                            <option value="EMAIL" th:text="#{privacyDsar.channel.EMAIL}">メール</option>
+                            <option value="POSTAL" th:text="#{privacyDsar.channel.POSTAL}">郵送</option>
+                            <option value="WEB_FORM" th:text="#{privacyDsar.channel.WEB_FORM}">Web フォーム</option>
+                            <option value="PHONE" th:text="#{privacyDsar.channel.PHONE}">電話</option>
+                            <option value="IN_PERSON" th:text="#{privacyDsar.channel.IN_PERSON}">窓口</option>
+                            <option value="OTHER" th:text="#{privacyDsar.channel.OTHER}">その他</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="dsar-received-at" th:text="#{privacyDsar.intake.receivedAt}">受付日時</label>
+                        <input type="datetime-local" id="dsar-received-at" class="form-control bg-dark border-secondary text-light">
+                        <div class="form-text text-secondary" th:text="#{privacyDsar.intake.receivedAtHint}">空欄なら現在時刻</div>
+                    </div>
+                    <div class="col-12 col-md-8">
+                        <label class="form-label small" for="dsar-ticket-ref" th:text="#{privacyDsar.intake.ticketRef}">受付 ticket の参照</label>
+                        <input type="text" id="dsar-ticket-ref" class="form-control bg-dark border-secondary text-light" maxlength="128" autocomplete="off">
+                        <div class="form-text text-secondary" th:text="#{privacyDsar.intake.ticketRefHint}">外部の受付記録の ID だけを入力</div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="dsar-reopen-of" th:text="#{privacyDsar.intake.reopenOf}">再申立の元 case</label>
+                        <input type="text" inputmode="numeric" id="dsar-reopen-of" class="form-control bg-dark border-secondary text-light" autocomplete="off">
+                    </div>
+                </div>
+                <div class="mt-3 d-grid d-sm-flex justify-content-sm-end">
+                    <button type="submit" class="btn btn-primary" id="dsar-intake-submit">
+                        <i class="bi bi-inbox me-1"></i><th:block th:text="#{privacyDsar.intake.submit}">受付を記録</th:block>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 注意事項 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyDsar.notes.heading}">注意事項</div>
+        <div class="card-body small text-light">
+            <ul class="mb-0 ps-3">
+                <li th:text="#{privacyDsar.notes.noPii}">連絡先・本人確認書類は保存しない</li>
+                <li th:text="#{privacyDsar.notes.manual}">本人確認と名寄せは担当者が行う</li>
+                <li th:text="#{privacyDsar.notes.noDelivery}">開示資料の作成・交付はまだ行えない</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/privacy-dsar.js" th:src="@{/js/modules/privacy-dsar.js}"></script>
+</th:block>
+</body>
+</html>

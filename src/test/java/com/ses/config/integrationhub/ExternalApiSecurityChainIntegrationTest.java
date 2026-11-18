@@ -1,5 +1,7 @@
 package com.ses.config.integrationhub;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -33,23 +35,32 @@ class ExternalApiSecurityChainIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
+    /** N5-P2-1: 無効時は監査tableへ書かず、metricだけを増やす（保存期限の無いtableを外部から増やさない）。 */
     @Test
-    void disabledApprovedPathReturnsStableNotFoundJson() throws Exception {
+    void disabledApprovedPathReturnsStableNotFoundJsonWithoutAuditRows() throws Exception {
+        int auditBefore = auditCount();
+        double suppressedBefore = suppressedDisabledCount();
         mockMvc.perform(get("/external-api/v1/projects"))
                 .andExpect(status().isNotFound())
                 .andExpect(header().exists("X-Correlation-ID"))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").value("Resource not found"));
-        assertEquals(1, auditCount());
+        assertEquals(auditBefore, auditCount());
         mockMvc.perform(get("/external-api/v1"))
                 .andExpect(status().isNotFound())
                 .andExpect(header().exists("X-Correlation-ID"))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-        assertEquals(2, auditCount());
+        assertEquals(auditBefore, auditCount());
+        assertEquals(suppressedBefore + 2.0, suppressedDisabledCount());
     }
 
     @Test
     void disabledCommandAndUnknownPathCannotFallThroughToInternalChain() throws Exception {
+        int auditBefore = auditCount();
+        double suppressedBefore = suppressedDisabledCount();
         mockMvc.perform(post("/external-api/v1/projects"))
                 .andExpect(status().isNotFound())
                 .andExpect(header().exists("X-Correlation-ID"))
@@ -58,7 +69,14 @@ class ExternalApiSecurityChainIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(header().exists("X-Correlation-ID"))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-        assertEquals(2, auditCount());
+        assertEquals(auditBefore, auditCount());
+        assertEquals(suppressedBefore + 2.0, suppressedDisabledCount());
+    }
+
+    private double suppressedDisabledCount() {
+        Counter counter = meterRegistry.find("integration_hub_external_api_audit_suppressed_total")
+                .tag("reason", "PUBLIC_API_DISABLED").counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     @Test

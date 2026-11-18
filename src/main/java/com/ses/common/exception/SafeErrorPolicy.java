@@ -76,18 +76,58 @@ public final class SafeErrorPolicy {
             "REASON_CLIENT_CANCEL", "REASON_AMOUNT_CORRECTION", "REASON_DUPLICATE",
             "REASON_DISPUTE", "REASON_OTHER");
 
-    private static final Map<Integer, String> STATUS_MESSAGES = Map.of(
-            400, DEFAULT_BUSINESS_MESSAGE,
-            401, "認証が必要です。",
-            403, "アクセス権限がありません。",
-            404, "対象が見つかりません。",
-            409, "他の操作と競合しました。再読み込みして再試行してください。",
-            429, "短時間にリクエストが集中しています。時間をおいて再試行してください。",
-            502, "外部サービスとの連携に失敗しました。",
-            503, "外部サービスを利用できません。",
-            500, DEFAULT_SYSTEM_MESSAGE);
+    // Map.of は10組が上限のため ofEntries で列挙する（415 を加えて11組）。
+    private static final Map<Integer, String> STATUS_MESSAGES = Map.ofEntries(
+            Map.entry(400, DEFAULT_BUSINESS_MESSAGE),
+            Map.entry(401, "認証が必要です。"),
+            Map.entry(403, "アクセス権限がありません。"),
+            Map.entry(404, "対象が見つかりません。"),
+            Map.entry(409, "他の操作と競合しました。再読み込みして再試行してください。"),
+            Map.entry(413, "送信データのサイズが上限を超えています。"),
+            // 415は入力側の誤り（業務エラー）であり、keyを解決できない場合の文言は400と同じ固定文言にする。
+            // NF-06の取込filterは415のfallbackを従来から400の固定文言にしており、その応答を変えない。
+            Map.entry(415, DEFAULT_BUSINESS_MESSAGE),
+            Map.entry(429, "短時間にリクエストが集中しています。時間をおいて再試行してください。"),
+            Map.entry(502, "外部サービスとの連携に失敗しました。"),
+            Map.entry(503, "外部サービスを利用できません。"),
+            Map.entry(500, DEFAULT_SYSTEM_MESSAGE));
 
     private SafeErrorPolicy() {
+    }
+
+    /** 許可済みstatusの固定文言（keyを使わない応答用）。許可外のstatusは500の文言。 */
+    public static String statusMessage(int code) {
+        return STATUS_MESSAGES.getOrDefault(safeHttpCode(code), DEFAULT_SYSTEM_MESSAGE);
+    }
+
+    /**
+     * 許可済みstatusの文言を利用者のlocaleで返す（bundleの {@code error.http.<status>}）。MessageSourceが無い・keyを
+     * 解決できない場合は {@link #statusMessage(int)} の日本語の固定文言にする（RB-I18N P3-N2-2、RB-NF02 review R-1）。
+     */
+    public static String statusMessage(int code,
+                                       org.springframework.context.MessageSource source,
+                                       java.util.Locale locale) {
+        int safeCode = safeHttpCode(code);
+        return localizedMessage("error.http." + safeCode, statusMessage(safeCode), source, locale);
+    }
+
+    /**
+     * 固定文言のkeyを利用者のlocaleで解決する。keyが同梱カタログに無い・解決できない場合は {@code fallback}
+     * （日本語の固定文言）を返し、raw keyや例外の内容は返さない。
+     */
+    public static String localizedMessage(String key, String fallback,
+                                          org.springframework.context.MessageSource source,
+                                          java.util.Locale locale) {
+        if (!isConfiguredMessageKey(key, source, locale)) {
+            return fallback;
+        }
+        try {
+            String resolved = source.getMessage(key, null, null,
+                    locale == null ? java.util.Locale.getDefault() : locale);
+            return resolved == null || resolved.isBlank() ? fallback : LogRedaction.redact(resolved);
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
     }
 
     public static boolean isAllowedMessageKey(String key) {
@@ -111,9 +151,16 @@ public final class SafeErrorPolicy {
                 || "STALE_LEASE".equals(safeCode) || "TIMEOUT".equals(safeCode) ? "SYSTEM" : "BUSINESS";
     }
 
+    /**
+     * 業務例外のcodeを外部へ返せるHTTP statusへ丸める。許可外のcodeは500（SYSTEM）とする。
+     * 413は上限超過を利用者・監視の双方で障害と区別するため許可する（NF-06 B-NF06-4。chunked転送で
+     * filterのContent-Length検査を通過した取込bodyの超過もHTTP 413で返す）。
+     * 415は添付できないファイル形式の拒否を500（SYSTEM）にしないため許可する（NF-02 P3-N2-1。
+     * サービスデスク添付の {@code error.file.typeNotAllowed}）。
+     */
     public static int safeHttpCode(int code) {
         return switch (code) {
-            case 400, 401, 403, 404, 409, 429, 500, 502, 503 -> code;
+            case 400, 401, 403, 404, 409, 413, 415, 429, 500, 502, 503 -> code;
             default -> 500;
         };
     }
@@ -165,7 +212,8 @@ public final class SafeErrorPolicy {
         if (exception != null && isAllowedFixedMessage(exception.getMessage())) {
             return exception.getMessage();
         }
-        return STATUS_MESSAGES.getOrDefault(code, DEFAULT_SYSTEM_MESSAGE);
+        // keyを解決できない業務例外（日本語の生文言を含む）はstatus別の文言にする。利用者のlocaleで返す。
+        return statusMessage(code, source, locale);
     }
 
     /** メッセージ本文を直接許可せず、設定済みリソースのキーだけを応答へ使う。 */
@@ -187,16 +235,16 @@ public final class SafeErrorPolicy {
     public static String resolveMessageKey(String key,
                                            org.springframework.context.MessageSource source,
                                            java.util.Locale locale) {
+        String forbidden = statusMessage(403, source, locale);
         if (!isAllowedMessageKey(key) || source == null) {
-            return STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。");
+            return forbidden;
         }
         try {
             String resolved = source.getMessage(key, null, null,
                     locale == null ? java.util.Locale.getDefault() : locale);
-            return resolved == null || resolved.isBlank() ? STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。")
-                    : LogRedaction.redact(resolved);
+            return resolved == null || resolved.isBlank() ? forbidden : LogRedaction.redact(resolved);
         } catch (RuntimeException ignored) {
-            return STATUS_MESSAGES.getOrDefault(403, "アクセス権限がありません。");
+            return forbidden;
         }
     }
 

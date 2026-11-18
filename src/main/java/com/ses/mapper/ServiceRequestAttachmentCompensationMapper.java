@@ -12,9 +12,11 @@ import java.util.List;
 public interface ServiceRequestAttachmentCompensationMapper
         extends BaseMapper<ServiceRequestAttachmentCompensation> {
 
+    /** 再試行時刻を過ぎた補償台帳。基準時刻は呼出し側のClockで渡す（DBの時刻とアプリのClockをずらさない。P3-N2-6）。 */
     @Select("SELECT * FROM t_service_attachment_compensation "
-            + "WHERE status = 'RETRY' AND next_retry_at <= CURRENT_TIMESTAMP ORDER BY id LIMIT #{limit}")
-    List<ServiceRequestAttachmentCompensation> selectDue(@Param("limit") int limit);
+            + "WHERE status = 'RETRY' AND next_retry_at <= #{now} ORDER BY id LIMIT #{limit}")
+    List<ServiceRequestAttachmentCompensation> selectDue(@Param("now") java.time.LocalDateTime now,
+                                                         @Param("limit") int limit);
 
     @Select("SELECT * FROM t_service_attachment_compensation WHERE tenant_id = #{tenantId} "
             + "AND business_key = #{businessKey} AND status = 'RETRY' LIMIT 1")

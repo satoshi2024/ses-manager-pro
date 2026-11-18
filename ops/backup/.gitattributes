@@ -1,0 +1,5 @@
+# リポジトリ直下の .gitattributes が拡張子で拾わない ops/backup のファイルも LF に固定する
+# （Windows checkout で CRLF になると、image build 時の lock 照合などが一致しなくなるため）
+.gitattributes text eol=lf
+.dockerignore text eol=lf
+image/apt-packages.lock text eol=lf

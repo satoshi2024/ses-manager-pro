@@ -1,5 +1,6 @@
 package com.ses.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Document;
@@ -11,14 +12,25 @@ import com.ses.mapper.DocumentHashClaimMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.storage.DocumentStorage;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 
-/** CLEAN済みStorageを短い新規transactionで文書台帳へ確定する。 */
+/**
+ * CLEAN済みStorageを短い新規transactionで文書台帳へ確定する。
+ *
+ * <p>NF01 F3: 新規文書（{@link #commitNew}・{@link #commitImportDocument}）は証跡利用可否epochがDEFAULT 0で、
+ * commit前に読む者がいないため増分しない。初期linkの挿入も同じ理由で増分しない。版追加（{@link #commitVersion}）は
+ * 利用可否を変えないため増分しないが、文書行を先にX lockしてから版を挿入する（lock順 15 DOCUMENT → 16 DOCUMENT_VERSION）。</p>
+ */
 @Service
 public class DocumentMetadataCommitService {
 
@@ -30,17 +42,23 @@ public class DocumentMetadataCommitService {
     private final DocumentLinkMapper documentLinkMapper;
     private final DocumentAccessLogMapper documentAccessLogMapper;
     private final DocumentHashClaimMapper documentHashClaimMapper;
+    private final DocumentStorage documentStorage;
+    private final AuthorizationEpochFence fence;
 
     public DocumentMetadataCommitService(DocumentMapper documentMapper,
                                          DocumentVersionMapper documentVersionMapper,
                                          DocumentLinkMapper documentLinkMapper,
                                          DocumentAccessLogMapper documentAccessLogMapper,
-                                         DocumentHashClaimMapper documentHashClaimMapper) {
+                                         DocumentHashClaimMapper documentHashClaimMapper,
+                                         DocumentStorage documentStorage,
+                                         AuthorizationEpochFence fence) {
         this.documentMapper = documentMapper;
         this.documentVersionMapper = documentVersionMapper;
         this.documentLinkMapper = documentLinkMapper;
         this.documentAccessLogMapper = documentAccessLogMapper;
         this.documentHashClaimMapper = documentHashClaimMapper;
+        this.documentStorage = documentStorage;
+        this.fence = fence;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -60,8 +78,63 @@ public class DocumentMetadataCommitService {
         return document;
     }
 
+    /** raw importだけに使用するsame-transaction metadata insert。一般文書登録経路は変更しない。 */
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public Document commitImportDocument(StagedImportDocument staged) {
+        if (staged == null || staged.document() == null || staged.version() == null
+                || staged.storageKey() == null || !staged.storageKey().equals(staged.version().getStorageKey())
+                || staged.operationId() == null || staged.operationId().isBlank()
+                || !"IMPORT".equals(staged.document().getDocumentType())
+                || !"CLEAN".equals(staged.version().getScanStatus())
+                || staged.document().getId() != null || staged.version().getId() != null
+                || staged.version().getSizeBytes() == null || staged.version().getSizeBytes() > 64L * 1024 * 1024
+                || staged.version().getSha256() == null || !staged.version().getSha256().matches("[0-9a-f]{64}")) {
+            throw BusinessException.of(400, "error.import.invalidStagedDocument");
+        }
+        registerImportStorageRollback(staged.storageKey(), staged.operationId());
+        documentMapper.insert(staged.document());
+        staged.version().setDocumentId(staged.document().getId());
+        documentVersionMapper.insert(staged.version());
+        recordAccess(staged.document().getId(), staged.version().getId(), "REGISTER");
+        return staged.document();
+    }
+
+    private void registerImportStorageRollback(String storageKey, String operationId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("import metadata commitにはtransaction同期が必要です");
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    try {
+                        documentStorage.delete(storageKey);
+                    } catch (Exception failure) {
+                        org.slf4j.LoggerFactory.getLogger(DocumentMetadataCommitService.class)
+                                .error("[文書台帳] import rollback補償削除失敗: operationId={} storageKey={} exceptionClass={}",
+                                        operationId, storageKey, failure.getClass().getSimpleName());
+                    }
+                }
+            }
+        });
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public DocumentVersion commitVersion(Document document, DocumentVersion version) {
+        // 版追加・AMENDEDは利用可否を変えないためepochを進めないが、文書行を先にX lockして証跡readerのS lockと直列化する。
+        fence.lockForUpdate(AuthorizationEpochAnchor.document(document.getTenantId(), document.getId()));
+        // lock後に最新の行を読み、廃棄済み・削除済みの文書へ版を足さない（廃棄執行がlock後に読んだ版一覧から漏れ、
+        // そのstorageが残るのを防ぐ）。
+        Document current = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, document.getId())
+                .eq(Document::getTenantId, document.getTenantId())
+                .last("FOR UPDATE"));
+        if (current == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        if ("DISPOSED".equals(current.getStatus())) {
+            throw BusinessException.of(409, "error.document.disposed");
+        }
         documentVersionMapper.insert(version);
         if ("CONFIRMED".equals(document.getStatus())) {
             int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()

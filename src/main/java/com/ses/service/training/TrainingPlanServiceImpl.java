@@ -327,7 +327,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         if (PLAN_APPROVED.equals(plan.getStatus())) {
             casPlan(plan, PLAN_IN_PROGRESS, plan.getExpenseRequestId(), plan.getApprovalRequestId(), actorUserId);
         }
-        appendEvent(plan, "ENROLLMENT_STARTED", actorUserId, null, enrollment.getPlannedCostSnapshot());
+        appendEnrollmentEvent(plan, enrollment, "ENROLLMENT_STARTED", actorUserId, null);
         return enrollment;
     }
 
@@ -336,7 +336,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     public TrainingEnrollment completeEnrollment(Long enrollmentId, Integer expectedVersion, LocalDate completedOn,
                                                  BigDecimal score, Long actorUserId) {
         TrainingEnrollment enrollment = lockEnrollment(enrollmentId, expectedVersion);
-        LearningPlan plan = requirePlan(enrollment.getPlanId());
+        // 同一plan内のcompletion/cancelを直列化し、全enrollment状態の判定を一貫させる。
+        LearningPlan plan = lockPlanForEnrollmentTransition(enrollment.getPlanId());
         if (!PLAN_IN_PROGRESS.equals(plan.getStatus()) && !PLAN_APPROVED.equals(plan.getStatus())) {
             throw BusinessException.of(400, "training.plan.approvalRequired");
         }
@@ -348,8 +349,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         }
         validateEnrollmentExpenses(enrollment, plan, actorUserId);
         updateEnrollment(enrollment, ENROLLMENT_COMPLETED, completedOn, score, actorUserId);
-        casPlan(plan, PLAN_COMPLETED, plan.getExpenseRequestId(), plan.getApprovalRequestId(), actorUserId);
-        appendEvent(plan, "ENROLLMENT_COMPLETED", actorUserId, null, enrollment.getPlannedCostSnapshot());
+        completePlanIfAllActiveEnrollmentsAreComplete(plan, actorUserId);
+        appendEnrollmentEvent(plan, enrollment, "ENROLLMENT_COMPLETED", actorUserId, null);
         return enrollment;
     }
 
@@ -363,9 +364,11 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
                 || ENROLLMENT_CANCELLED.equals(enrollment.getStatus())) {
             throw BusinessException.of(400, "training.enrollment.invalidTransition");
         }
+        LearningPlan plan = lockPlanForEnrollmentTransition(enrollment.getPlanId());
         updateEnrollment(enrollment, ENROLLMENT_CANCELLED, null, null, actorUserId);
-        LearningPlan plan = requirePlan(enrollment.getPlanId());
-        appendEvent(plan, "ENROLLMENT_CANCELLED", actorUserId, reason, enrollment.getPlannedCostSnapshot());
+        // 取消だけでは空planを完了にしない。残る有効courseが全て完了済みの場合だけ終端化する。
+        completePlanIfAllActiveEnrollmentsAreComplete(plan, actorUserId);
+        appendEnrollmentEvent(plan, enrollment, "ENROLLMENT_CANCELLED", actorUserId, reason);
         return enrollment;
     }
 
@@ -442,6 +445,33 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         return plan;
     }
 
+    private LearningPlan lockPlanForEnrollmentTransition(Long id) {
+        String tenantId = tenantContext(null);
+        LearningPlan plan = id == null ? null : planMapper.selectByIdForUpdateWithTenant(id, tenantId);
+        if (plan == null) {
+            throw BusinessException.of(404, "training.plan.notFound");
+        }
+        return plan;
+    }
+
+    private void completePlanIfAllActiveEnrollmentsAreComplete(LearningPlan plan, Long actorUserId) {
+        if (!PLAN_IN_PROGRESS.equals(plan.getStatus()) && !PLAN_APPROVED.equals(plan.getStatus())) {
+            return;
+        }
+        List<String> statuses = enrollmentMapper.selectStatusesByPlanIdAndTenant(
+                plan.getId(), tenantContext(plan.getTenantId()));
+        if (statuses == null || statuses.isEmpty()) {
+            return;
+        }
+        long nonCancelledCount = statuses.stream().filter(status -> !ENROLLMENT_CANCELLED.equals(status)).count();
+        boolean allNonCancelledCompleted = nonCancelledCount > 0
+                && statuses.stream().allMatch(status -> ENROLLMENT_CANCELLED.equals(status)
+                || ENROLLMENT_COMPLETED.equals(status));
+        if (allNonCancelledCompleted) {
+            casPlan(plan, PLAN_COMPLETED, plan.getExpenseRequestId(), plan.getApprovalRequestId(), actorUserId);
+        }
+    }
+
     private void casPlan(LearningPlan plan, String status, Long expenseRequestId, Long approvalRequestId,
                          Long actorUserId) {
         int version = value(plan.getVersion());
@@ -512,6 +542,28 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         event.setOccurredAt(LocalDateTime.now(clock));
         event.setIdempotencyKey(plan.getId() + ":" + eventType + ":" + value(plan.getVersion()));
         event.setCreatedAt(LocalDateTime.now(clock));
+        insertEvent(event);
+    }
+
+    private void appendEnrollmentEvent(LearningPlan plan, TrainingEnrollment enrollment, String eventType,
+                                       Long actorUserId, String reason) {
+        LearningPlanEvent event = new LearningPlanEvent();
+        event.setTenantId(tenantContext(plan.getTenantId()));
+        event.setPlanId(plan.getId());
+        event.setSourceType("ENROLLMENT");
+        event.setSourceId(enrollment.getId());
+        event.setEventType(eventType);
+        event.setAmountSnapshot(enrollment.getPlannedCostSnapshot());
+        event.setActorUserId(actorUserId);
+        event.setReason(reason);
+        event.setOccurredAt(LocalDateTime.now(clock));
+        event.setIdempotencyKey(plan.getId() + ":" + eventType + ":" + enrollment.getId()
+                + ":" + value(enrollment.getVersion()));
+        event.setCreatedAt(LocalDateTime.now(clock));
+        insertEvent(event);
+    }
+
+    private void insertEvent(LearningPlanEvent event) {
         try {
             eventMapper.insertEvent(event);
         } catch (DuplicateKeyException duplicate) {

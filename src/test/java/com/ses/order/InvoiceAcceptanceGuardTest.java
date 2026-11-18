@@ -21,7 +21,7 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T058定向テスト: 請求生成の検収guard（R3.3 / R5）。
+ * T058対象限定テスト: 請求生成の検収guard（R3.3 / R5）。
  * 未検収契約からは請求生成できない。検収不要契約は理由付きで生成できる。
  */
 @SpringBootTest

@@ -23,7 +23,7 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * R09-P1-02定向テスト: 検収書原本（ACCEPTANCE）の文書台帳登録・download（R3.1）。
+ * R09-P1-02対象限定テスト: 検収書原本（ACCEPTANCE）の文書台帳登録・download（R3.1）。
  */
 @SpringBootTest
 @ActiveProfiles("test")

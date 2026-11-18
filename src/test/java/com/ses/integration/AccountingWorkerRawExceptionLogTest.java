@@ -175,12 +175,9 @@ class AccountingWorkerRawExceptionLogTest {
 
         new AccountingIntegrationWorker(
                 dueJobService,
-                mock(com.ses.service.integration.IntegrationConnectionService.class),
-                mock(com.ses.service.accounting.AccountingProviderFactory.class),
                 dueSalesService,
                 duePurchaseService,
                 mock(com.ses.service.DigitalInvoiceService.class),
-                new com.fasterxml.jackson.databind.ObjectMapper(),
                 mock(com.ses.service.accounting.AccountingTimezoneResolver.class)
         ).processDueJobs();
 

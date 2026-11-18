@@ -15,7 +15,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 共通口径サービスの純粋ロジック検証(モック不要)。
+ * 共通集計基準サービスの純粋ロジック検証(モック不要)。
  */
 class MonthlyRevenueCalcServiceTest {
 

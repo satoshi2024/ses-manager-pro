@@ -43,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * T090 A2（本人給与/勤怠導線）のL2定向test。
+ * T090 A2（本人給与/勤怠導線）のL2対象限定test。
  * 本人scope・再認証ゲート・no-store・一覧の金額非露出・未連携・provider障害をMockMvcで固定する。
  * 共有H2（application-test.yml）で動く。@Transactionalでロールバックし他テストと干渉しない。
  */

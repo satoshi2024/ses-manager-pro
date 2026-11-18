@@ -56,7 +56,7 @@
 |---|---|---|
 | 精算計算 | `WorkRecordServiceImpl.saveHours`(内部 saveHoursInternal) | リゾルバ適用済 |
 | 集計フォールバック | `MonthlyRevenueCalcServiceImpl.resolveContractAmount(…,month)` | リゾルバ適用済（calc は resolveBatch で一括解決、実績優先は不変） |
-| 集計呼び出し元 | `DashboardServiceImpl.calc` / `ExportApiController.calc` / `SalesPerformanceServiceImpl`(3-arg へ更新) | 呼び出し口径維持（リゾルバは MonthlyRevenueCalc 内部で任意配線） |
+| 集計呼び出し元 | `DashboardServiceImpl.calc` / `ExportApiController.calc` / `SalesPerformanceServiceImpl`(3-arg へ更新) | 呼び出し基準維持（リゾルバは MonthlyRevenueCalc 内部で任意配線） |
 | 表示・転記 | 契約一覧/編集・Excel出力・ドラフト生成(提案/見積) | 現在単価のまま（想定どおり） |
 | 粗利分析 | `DashboardServiceImpl.getProfitAnalysis` | 現在単価のまま（契約単位の静的分析） |
 

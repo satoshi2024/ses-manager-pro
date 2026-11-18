@@ -4,11 +4,11 @@
 
 | Task | 状態 | 備考 |
 |---|---|---|
-| T048 / F1 | **完了** | DDL/移行/entity/定向testに加え、T050顧客detailで移行contact表示Demo成立 |
-| T049 / F2 | **実装完了** | 状態CAS/楽観ロック、終端更新拒否、受注→案件/見積の冪等変換、forecast排他を実装。定向7件＋H2統合2件PASS。Docker MySQL smokeはM/release gate |
-| T050 / A1 | **完了** | contact CRUD/期間CAS、timeline、請求宛先、退職者除外、PII mask/export、390pxを実装・定向回帰済み |
-| T051 / A2 | **完了** | lead/opportunity UI、冪等転換、D&D rollback、定向回帰PASS |
-| T052 / B1 | **完了** | CRM KPI、scope/funnel/forecast排他、定向回帰PASS |
+| T048 / F1 | **完了** | DDL/移行/entity/対象限定テストに加え、T050顧客detailで移行contact表示Demo成立 |
+| T049 / F2 | **実装完了** | 状態CAS/楽観ロック、終端更新拒否、受注→案件/見積の冪等変換、forecast排他を実装。対象限定7件＋H2統合2件PASS。Docker MySQL smokeはM/release gate |
+| T050 / A1 | **完了** | contact CRUD/期間CAS、timeline、請求宛先、退職者除外、PII mask/export、390pxを実装・対象限定回帰済み |
+| T051 / A2 | **完了** | lead/opportunity UI、冪等転換、D&D rollback、対象限定回帰PASS |
+| T052 / B1 | **完了** | CRM KPI、scope/funnel/forecast排他、対象限定回帰PASS |
 | T053 / M | **完了** | Round3 baseline 2件を修正し、L4全量green、MySQL smoke、desktop/390px browser Demoを確認 |
 
 ---
@@ -32,7 +32,7 @@ Round 1（Base `5bdfb34` → Head `d9a1d02`, branch `feature/crm-contact-opportu
 | **P1-02** | fresh/legacyでFK 9件が乖離 | P0-01の「V73だけが正」により**構造的に発生しえない**。加えて `FlywayLegacyV71MigrationSmokeTest` を新設し、legacy経路でFK 12件・UNIQUE 3件の存在をassertする | CLOSED（Docker実行はCI待ち） |
 | **P1-03** | V73を実行するtestが0系統。ledgerが未実施の検証を実施済みと記載 | (a) 本ledgerのtest欄を実測値へ訂正。(b) `CustomerContactSchemaTest` が **V73ファイル本体から移行INSERTを抽出して実行**（H2用に書き直したコピーではない）。(c) Docker無しで効く静的検査を `MigrationScriptIntegrityTest` へ5件追加（17→22）。(d) fresh smokeへV73 assert群を追加、legacy smokeを新設 | CLOSED |
 | P2-01 | 主担当一意がDB・serviceとも無保護で、testが「2件入る」ことをassertしていた | design §6.1 が許す**部分UNIQUE**をDDLで実装。生成列 `active_primary_customer_id`（VIRTUAL）＋ `uk_customer_contact_active_primary` で「有効中(status=有効/valid_to IS NULL/未削除)の primary は1顧客1件」を担保。testは**制約が2件目を拒否する**assertへ反転。期間を閉じた行同士の重なりはDB制約で表現できないためT049/A1のservice CASに残す | CLOSED（閉区間の重なりはT049へ） |
-| P2-02 | 移行が `valid_from = CURDATE()` で過去asOfが0件になる | `COALESCE(CAST(c.created_at AS DATE), DATE '1900-01-01')` へ変更。`created_at` 欠損の旧行はsentinelへ倒す。sentinel経路も定向testで固定 | CLOSED |
+| P2-02 | 移行が `valid_from = CURDATE()` で過去asOfが0件になる | `COALESCE(CAST(c.created_at AS DATE), DATE '1900-01-01')` へ変更。`created_at` 欠損の旧行はsentinelへ倒す。sentinel経路も対象限定テストで固定 | CLOSED |
 | P2-03 | R1.2「移行後は互換表示だけ・write禁止」が未強制 | **T050(A1)へ持ち越し**。`m_customer.contact_*` の読み取り専用化は画面/API層の変更であり、T048(DDL)の範囲外 | OPEN → T050 |
 | P2-04 | Rollback手順が散文かつ不正確 | 実行可能な手順へ書き直し（下記「Rollback」節）。V1へ列を足していないため `DROP COLUMN` 対象も正しくなった | CLOSED |
 | NOTE-01 | branchがstale main起点 | 現行 `origin/main` (`e8b7da6`) を新Baseに取り直し。`tasks.md` ヘッダは既にV73確定版 | CLOSED |
@@ -71,7 +71,7 @@ api_prefix から再解決して null なら deny() し、この deny は**管�
 | # | 修正 | 無いとどうなるか |
 |---|---|---|
 | 1 | `ActionPermissionResolver.RESOURCE_NAMES` へ `Map.entry("crm", "crm")` を追加 | `resolve()` が null を返し、**管理者を含む全roleが403** |
-| 2 | **V74** で `crm.*` を `t_permission_group_action` へseed（role-sales / role-manager） | V66_1が非管理者groupから全局 `*` を削除し「既知resource wildcardの列挙」へ置換したため、**group割当済みの営業/マネージャーが403** |
+| 2 | **V74** で `crm.*` を `t_permission_group_action` へseed（role-sales / role-manager） | V66_1が非管理者groupからグローバルな `*` を削除し「既知resource wildcardの列挙」へ置換したため、**group割当済みの営業/マネージャーが403** |
 
 Reviewの最小修正は1だけだったが、2が無いと営業/マネージャーは依然403のままで、
 「正しい期待値を書いたtest」を追加できない（実態に合わせた誤ったtestを書くのは Round 1 で
@@ -160,7 +160,7 @@ V74をCRMが使用したため、`latest + 1`・「後発を上へ繰り上げ�
 | `src/test/resources/sql/schema-crm-h2.sql` | 新規: H2方言のDDL（JSON→CLOB、VIRTUAL省略、FKなし） |
 | `src/test/resources/sql/engineer-schema-h2.sql` | 統合H2スキーマ同期: t_project/t_quotation の source列＋UNIQUE、t_sales_activity 3列、CRM 3テーブル |
 | `src/test/resources/application-test.yml` | schema-locations へ schema-crm-h2.sql を追加 |
-| `src/test/java/com/ses/crm/CustomerContactSchemaTest.java` | 定向test 15件（後述） |
+| `src/test/java/com/ses/crm/CustomerContactSchemaTest.java` | 対象限定テスト 15件（後述） |
 | `src/test/java/com/ses/migration/MigrationScriptIntegrityTest.java` | Docker無しの静的検査を5件追加（17→22） |
 | `src/test/java/com/ses/migration/FlywayMigrationSmokeTest.java` | fresh経路のV73 assert群を追加 |
 | `src/test/java/com/ses/migration/FlywayLegacyV71MigrationSmokeTest.java` | 新規: legacy(V71適用済み→V73)経路のsmoke |
@@ -191,7 +191,7 @@ V74をCRMが使用したため、`latest + 1`・「後発を上へ繰り上げ�
 
 T048はL1〜L3が原則だが、本変更は `application-test.yml` の `schema-locations` と
 `engineer-schema-h2.sql` という**全 `@SpringBootTest` が共有するH2スキーマ**を触るため、
-影響範囲がspec内に閉じない。実際、定向testだけでは見えない `engineer-schema-h2.sql` 未更新
+影響範囲がspec内に閉じない。実際、対象限定テストだけでは見えない `engineer-schema-h2.sql` 未更新
 （SELF-01）を全量で検出したので、Base比較つきで1回実施した。
 
 | 対象 | Tests | Failures | Errors | Skipped |
@@ -347,7 +347,7 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 
 | Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
 |---|---|---|---|---|---|
-| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1224 / F0 / E0 / S1**。CRM定向回帰、Flyway fresh/legacy V60/V71、V73部分修復fixture、repair、upgrade smoke、Node/JS、`git diff --check`を実測 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。DB変更はV73/V1を編集せずrepeatable/runbook経路を使用 | `41d87e1` | `WorkRecordServiceImpl`は過去月に現行Engineer/直属組織を履歴代替として使わず、履歴snapshotが無い場合は拒否。rollbackは本レビュー修正commitをrevertし、V73/V1は変更しない |
+| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1224 / F0 / E0 / S1**。CRM対象限定回帰、Flyway fresh/legacy V60/V71、V73部分修復fixture、repair、upgrade smoke、Node/JS、`git diff --check`を実測 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。DB変更はV73/V1を編集せずrepeatable/runbook経路を使用 | `41d87e1` | `WorkRecordServiceImpl`は過去月に現行Engineer/直属組織を履歴代替として使わず、履歴snapshotが無い場合は拒否。rollbackは本レビュー修正commitをrevertし、V73/V1は変更しない |
 
 ## Round 3 独立Review FAIL 対応（2026-08-02）
 
@@ -355,11 +355,11 @@ Base `f582f9e`（CRM既存完了記録）から、Round 3のP0/P1/P2指摘を本
 
 | Review ID / Task | 対応file・内容 | Test / Demo | 状態・risk / rollback |
 |---|---|---|---|
-| CRM-R3-P0-01 / T050-T052 | `CrmScopeService`を新設し、営業・マネージャー・管理者のCRM customer/owner母集団を統一。customer contact/timeline/activity/lead/opportunity/KPIへ同一scopeを適用し、HR/要員を拒否 | `ActionPermissionMatrixTest`、CRM定向回帰、L4全量。営業scope・manager組織scopeは既存scope fixtureで確認 | CLOSED。認可母集団はCRM serviceへ集約。rollbackは本修正commitのscope関連fileをrevert |
+| CRM-R3-P0-01 / T050-T052 | `CrmScopeService`を新設し、営業・マネージャー・管理者のCRM customer/owner母集団を統一。customer contact/timeline/activity/lead/opportunity/KPIへ同一scopeを適用し、HR/要員を拒否 | `ActionPermissionMatrixTest`、CRM対象限定回帰、L4全量。営業scope・manager組織scopeは既存scope fixtureで確認 | CLOSED。認可母集団はCRM serviceへ集約。rollbackは本修正commitのscope関連fileをrevert |
 | CRM-R3-P0-02 / T053 | `WorkRecordServiceImpl`で過去月の現在Engineer/現行直属組織/account-linkを履歴snapshotの代替にしない。履歴なし・未知組織はfail-closed | `WorkRecordServiceImplTest` 43件、L4全量 | CLOSED。過去実績の参照可能性が狭くなるため、履歴snapshot投入が再開条件 |
 | CRM-R3-P0-03 / T048-T053 | `R__crm_contact_reconciliation.sql`をV71以下でno-op、V73後の列/backfillをidempotentに実行。`sql/runbook/v73-crm-partial-repair.sql`は列/index/FK/移行contactを段階復旧し、MySQL fixtureで欠落状態を再現 | `FlywayMigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`FlywayRepairRunbookTest` PASS。V73は未編集 | CLOSED。適用済み履歴はrepairせず、実行前dump・validate・許可リスト確認が必要 |
-| CRM-R3-P1 / T048-T052 | stage/probability/version/primary/null更新、activity relation/assignee、mail provider adapter、lead duplicate normalization、CSV formula injection、bounded list/batch customer load、4言語UIを補強 | CRM定向回帰、schema/entity regression、Node `--check`、L4全量。顧客detail/contact CRUD・lead/opportunity/KPIのDemo確認 | CLOSED。contact非管理者PII maskは編集画面で再送信しない運用確認を残す |
-| CRM-R3-P2 / T051-T053 | opportunityカードのkeyboard操作、一覧上限、stage_changed_at、asOf/履歴・ROI口径を反映 | `CrmUiRegressionTest`、`MobileResponsiveLayoutTest`、L4全量 | CLOSED。実ブラウザでの全role操作、drag/reload/backはrelease前に再確認 |
+| CRM-R3-P1 / T048-T052 | stage/probability/version/primary/null更新、activity relation/assignee、mail provider adapter、lead duplicate normalization、CSV formula injection、bounded list/batch customer load、4言語UIを補強 | CRM対象限定回帰、schema/entity regression、Node `--check`、L4全量。顧客detail/contact CRUD・lead/opportunity/KPIのDemo確認 | CLOSED。contact非管理者PII maskは編集画面で再送信しない運用確認を残す |
+| CRM-R3-P2 / T051-T053 | opportunityカードのkeyboard操作、一覧上限、stage_changed_at、asOf/履歴・ROI基準を反映 | `CrmUiRegressionTest`、`MobileResponsiveLayoutTest`、L4全量 | CLOSED。実ブラウザでの全role操作、drag/reload/backはrelease前に再確認 |
 
 ## Round 4 独立Review FAIL 対応（2026-08-02〜）
 
@@ -371,7 +371,7 @@ Review packet: Base `8e5066a`（P0修正merge後の`origin/main`） / 対応前H
 | CRM-R4-P1-02 | Round 4 packet、現行Head、P0修正証拠、Docker未実施skipを本節と中央台帳へ反映 | `review-ledger.md`、中央`spec-execution-ledger.md` | Docker L4/fresh/legacy/partial/repairはrelease gateとしてOPEN | OPEN（Docker証拠待ち） |
 | CRM-R4-P1-03 | 役割を5値checkboxへ変更し、serviceでJSON配列へ正規化・allow-list検証。MySQL JSON往復fixtureを追加 | contact service/API/template/JS、4言語messages、`FlywayMigrationSmokeTest` | Contact service 3/3、MySQL fixtureはDocker待ち | CLOSED（実MySQL smokeはOPEN） |
 | CRM-R4-P1-04 | PII平文を`customer.pii.view` actionへ移し、画面/CSV共通DTOとlegacy customer出力を同じ認可判定へ統一 | contact/customer service/API、design | 実service経由のmask test 3/3、画面/CSVは同一DTO経路 | CLOSED（browser DemoはOPEN） |
-| CRM-R4-P2-01〜11 | timeline scope、KPI口径/SQL scope、商機→提案導線、顧客select/filter、活動fallback、asOf、重複候補、宛先role、status allow-listを修正 | CRM scope/KPI/contact/activity/lead/opportunity、CRM templates/JS | CRM定向10/10、compile PASS、Node check 3/3 | CLOSED（P2-08のbrowser rollback/390pxはowner: release QA、期限: 2026-08-15でDEFERRED） |
+| CRM-R4-P2-01〜11 | timeline scope、KPI基準/SQL scope、商機→提案導線、顧客select/filter、活動fallback、asOf、重複候補、宛先role、status allow-listを修正 | CRM scope/KPI/contact/activity/lead/opportunity、CRM templates/JS | CRM対象限定10/10、compile PASS、Node check 3/3 | CLOSED（P2-08のbrowser rollback/390pxはowner: release QA、期限: 2026-08-15でDEFERRED） |
 
 Review packet skip list: 本環境はDocker/browser未実施。Testcontainersのfresh/legacy/partial/repair/L4は0 skipped実測が必要。desktop/390px全roleのdrag/reload/back/二重click Demoもrelease前hard gateとしてOPEN。
 
@@ -386,7 +386,7 @@ P0-01 evidence: `4058d9b`（`R__crm_contact_reconciliation.sql`の余分な`END 
 | `t_proposal.source_opportunity_id` | 同上 | `engineer-schema-h2.sql` | `Proposal` | `FlywayMigrationSmokeTest` JSON/CRM blockとproposal生成SELECT |
 | `t_mail_delivery.contact_id` / `opportunity_id` | 同上 | `engineer-schema-h2.sql` | `MailDelivery` | `FlywayMigrationSmokeTest` mail schema assert |
 
-定向実測（対応後）: compile PASS、`MigrationScriptIntegrityTest` 25/25、CRM KPI/Activity/Contact関連 10/0/0、Contact service 3/0/0、customer controller 3/0/0。`git diff --check` PASS。Docker fresh/legacy/partial/repair smoke、L4、browser Demoは未実施（環境不在）。
+対象限定実測（対応後）: compile PASS、`MigrationScriptIntegrityTest` 25/25、CRM KPI/Activity/Contact関連 10/0/0、Contact service 3/0/0、customer controller 3/0/0。`git diff --check` PASS。Docker fresh/legacy/partial/repair smoke、L4、browser Demoは未実施（環境不在）。
 
 Task別変更file: T050 = contact/customer API/service・PII test、T051 = opportunity filter/proposal導線/lead duplicate、T052 = KPI scope/helper、T053 = 本ledger・中央ledger・release gate記録。
 
@@ -406,7 +406,7 @@ Review packet: Base `8e5066a` / 実装Head `eb5adc4` / review時Head `bd3831d`�
 | CRM-R5-P1-09 | raw prefix SQL prefilterを除去し、NFKC/空白/電話記号をJava正規化比較へ到達させる | `LeadServiceIntegrationTest`（100件超 fixture） | CLOSED |
 | CRM-R5-P2-01/02/03 | KPI scopeを実H2 SQL fixtureで検証、初回primary作成前にcustomer親行をロック、rollbackへV74/V74.1/Repeatableと6列を追加 | `CrmKpiScopeIntegrationTest` 1/1、contact integration、migration/runbook/static check | CLOSED（browser rollback確認はrelease gate） |
 
-Round 5の自動検証は、定向回帰77/0/0、MySQL fresh/legacy/partial/repair 4/4、Node 3/3、compile、diff-checkでgreen。
+Round 5の自動検証は、対象限定回帰77/0/0、MySQL fresh/legacy/partial/repair 4/4、Node 3/3、compile、diff-checkでgreen。
 L4全量は20分timeoutで完了前に停止したため、全量greenとは判定しない。desktop/390px全role browser証拠と併せてrelease gateへ残す。
 
 ## Round 6 再Review FAIL 対応（2026-08-02）
@@ -421,7 +421,7 @@ Java全件走査であった。P2-02の有限期間primary同時作成証拠と�
 | CRM-R6-P2-02 | customer親行を`FOR UPDATE`する既存実装へ、2 transactionの有限期間primary作成fixtureを追加 | `CustomerContactPrimaryConcurrencyTest` MySQL 1/1、成功1・競合失敗1・残存contact1 | CLOSED |
 | CRM-R6-P2-03 | rollbackへ`t_proposal.source_opportunity_id`のdropを追加。V74.2の新列/indexと履歴もrollback対象として明記 | review-ledger rollback手順とdesign/tasksのV74.2同期 | CLOSED |
 
-Round 6対応後の実測は、定向/H2 39/0/0、MySQL fresh/legacy/partial/repair/concurrency 各1/1・0 failure/error、
+Round 6対応後の実測は、対象限定/H2 39/0/0、MySQL fresh/legacy/partial/repair/concurrency 各1/1・0 failure/error、
 Node 3/3、`git diff --check` PASS、compile PASS。L4全量とdesktop/390px全role browser Demoは未検証のrelease hard gateとして残す。
 したがってP1は解消したが、S07/次Waveの解放判定はL4/browser証拠取得まで継続する。
 

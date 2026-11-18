@@ -37,7 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.topology.bound-tenant-id=tenant-b2-e2e",
                 "integration.hub.provider.approved-inbound-providers=provider-b2",
                 "integration.hub.crypto.current-key-version=test-key-v1",
-                "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "integration.hub.crypto.credential-hash-pepper=c3ludGhldGljLW5mMDUtdGVzdC1vbmx5LXBlcHBlciE"
         })
 @ActiveProfiles("test")
 @Tag("browser")
@@ -80,7 +81,8 @@ class ExternalApiInboundConnectorE2ETest {
         jdbcTemplate.update("INSERT INTO t_credential_version (id, api_client_id, credential_version, key_id, "
                         + "encrypted_secret, secret_hash, crypto_key_version, cipher_format, status, issued_at, expires_at, version) "
                         + "VALUES (?, ?, 1, ?, ?, ?, 'test-key-v1', 'IHG1', 'ACTIVE', ?, ?, 0)",
-                CREDENTIAL_DB_ID, CLIENT_DB_ID, KEY_ID, encryptedSecret, cryptoService.sha256Hex(CLIENT_SECRET),
+                CREDENTIAL_DB_ID, CLIENT_DB_ID, KEY_ID, encryptedSecret,
+                cryptoService.credentialHash(CLIENT_ID, 1, CLIENT_SECRET),
                 LocalDateTime.ofInstant(now.minusSeconds(60), ZoneOffset.UTC),
                 LocalDateTime.ofInstant(now.plusSeconds(86400), ZoneOffset.UTC));
     }

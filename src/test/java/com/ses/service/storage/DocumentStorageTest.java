@@ -70,6 +70,9 @@ class DocumentStorageTest {
                 mock(ObjectProvider.class),
                 java.time.Clock.systemDefaultZone()
         );
+        // NF07-A2b: DSAR の開示 package の照合（無ければ全て拒否する fail-closed。mock は package でない＝0件を返す）
+        org.springframework.test.util.ReflectionTestUtils.setField(fileScopeValidationService,
+                "privacyExportPackageMapper", mock(com.ses.mapper.privacy.PrivacyExportPackageMapper.class));
     }
 
     @Test

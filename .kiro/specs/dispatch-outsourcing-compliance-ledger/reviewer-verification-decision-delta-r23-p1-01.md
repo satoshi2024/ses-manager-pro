@@ -360,7 +360,7 @@
 10. promoteでもcurrent assignment・approval・external review・verification・exact evidenceを全て再評価する。
 11. gate snapshotとdelivery business keyへadopted external review IDs・verification event IDs・
     全evidence version ID/hashを含める。
-12. verificationの撤销/期限切れ後は新規formal deliveryを拒否するが、過去deliveryのimmutable downloadは維持する。
+12. verificationの取消し/期限切れ後は新規formal deliveryを拒否するが、過去deliveryのimmutable downloadは維持する。
 
 ## 5. API/UI/security（受理後）
 

@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * T057/T058定向テスト: 検収の対象月(asOf) scope（R09-P1-04再OPEN対応）。
+ * T057/T058対象限定テスト: 検収の対象月(asOf) scope（R09-P1-04再OPEN対応）。
  *
  * <p>要員が2026-07は組織A、2026-08から組織Bへ異動する前提で、2026-07の検収を
  * 2026-08に処理する。list/detail/countと同じ asOf 母集団（{@code allowedContractIdsAsOf}）
@@ -369,7 +369,7 @@ class AcceptanceAsOfScopeTest {
     }
 
     @Test
-    @DisplayName("R9-P0-01: 同一合同で7月許可・8月禁止時の composite tuple scope 防漏検証 (list/total/detail/download/empty/dataScope-ON-OFF)")
+    @DisplayName("R9-P0-01: 同一契約で7月許可・8月禁止時の composite tuple scope 漏れ防止の検証 (list/total/detail/download/empty/dataScope-ON-OFF)")
     void monthTupleScope_JulyAllowedAugustRestricted_allEndpointsEnforced() {
         setUpTransferFixture();
 

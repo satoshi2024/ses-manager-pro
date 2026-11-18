@@ -53,7 +53,7 @@ start-conversation は三specの各ファイルを改変せず専任対話のhan
 |---|---|---|---|
 | HFP-D001 | 対象は freee給与、CloudSign、backup/PITR の3件だけ | 2026-08-12 source/spec監査 | 新しい再現証拠と発注者承認 |
 | HFP-D002 | S01〜S17は対象外 | 発注者明示指示 | 発注者の明示変更 |
-| HFP-D003 | freee給与一期は読み取り専用で金額を永続化しない | 既存要件とfreee API能力 | privacy/retentionを定めた別spec |
+| HFP-D003 | freee給与の第1期は読み取り専用で金額を永続化しない | 既存要件とfreee API能力 | privacy/retentionを定めた別spec |
 | HFP-D004 | provider adapterは公式契約とsandbox spikeの後に実装 | 誤endpoint/誤文書送信防止 | 変更不可 |
 | HFP-D005 | 三specは別branch/worktree/主担当、独立Review | shared diffと判定の分離 | coordinatorが理由を記録 |
 | HFP-D006 | Reviewは有限差分方式、P2/NOTEは要件違反でなければ次工程を永久blockしない | 指摘の重複と後付け要件防止 | 変更不可 |

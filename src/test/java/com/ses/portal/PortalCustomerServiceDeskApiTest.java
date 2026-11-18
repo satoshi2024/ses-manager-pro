@@ -181,6 +181,24 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     }
 
     @Test
+    @DisplayName("ポータルの一覧もsizeを一覧の上限へ丸め負のsizeは既定値へ補正すること（P3-N2-3）")
+    void testCustomerListRequests_clampsPageSize() throws Exception {
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests")
+                        .param("size", "5000")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.size").value(ServiceRequestService.LIST_MAX_PAGE_SIZE))
+                .andExpect(jsonPath("$.data.records.length()").value(1));
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests")
+                        .param("current", "0")
+                        .param("size", "-1")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.current").value(1))
+                .andExpect(jsonPath("$.data.size").value(10));
+    }
+
+    @Test
     @DisplayName("自社ポータル詳細で内部メモが除外され公開コメントのみ返却されること (構造的情報漏洩防止)")
     void testCustomerGetRequest_excludesInternalNotes() throws Exception {
         mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId())
@@ -346,6 +364,14 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                         .content(objectMapper.writeValueAsString(csatReq)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
+
+        // 詳細は回答した評価と自由記述を返す（portalの詳細モーダルが表示する。RB-I18N review P3-7）
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId())
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.csatScore").value(5))
+                .andExpect(jsonPath("$.data.csatComment").value("非常に迅速で助かりました"))
+                .andExpect(jsonPath("$.data.csatAnswerable").value(false));
     }
 
     @Test

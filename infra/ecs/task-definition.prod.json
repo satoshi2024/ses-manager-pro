@@ -29,7 +29,23 @@
         { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
         { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
         { "name": "DB_POOL_SIZE", "value": "10" },
-        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" }
+        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" },
+        { "name": "TRUSTED_PROXIES", "value": "ALB_SUBNET_CIDRS_PLACEHOLDER" },
+        { "name": "OIDC_TENANT_ID", "value": "default" },
+        { "name": "OIDC_ISSUER_URI", "value": "OIDC_ISSUER_URI_PLACEHOLDER" },
+        { "name": "OIDC_AUTHORIZATION_URI", "value": "OIDC_AUTHORIZATION_URI_PLACEHOLDER" },
+        { "name": "OIDC_TOKEN_URI", "value": "OIDC_TOKEN_URI_PLACEHOLDER" },
+        { "name": "OIDC_JWK_SET_URI", "value": "OIDC_JWK_SET_URI_PLACEHOLDER" },
+        { "name": "OIDC_USER_INFO_URI", "value": "OIDC_USER_INFO_URI_PLACEHOLDER" },
+        { "name": "BREAK_GLASS_USERNAMES", "value": "" },
+        { "name": "ACCOUNTING_TENANT_IDS", "value": "default" },
+        { "name": "FREEE_ENABLED", "value": "false" },
+        { "name": "CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS", "value": "default" },
+        { "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION", "value": "v1" },
+        { "name": "TZ", "value": "Asia/Tokyo" },
+        { "name": "RESUME_LEDGER_COPY_ALIGNMENT_ENABLED", "value": "false" }
       ],
       "secrets": [
         {
@@ -55,6 +71,34 @@
         {
           "name": "MFA_ENCRYPTION_KEY",
           "valueFrom": "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/ses/prod/MFA_ENCRYPTION_KEY"
+        },
+        {
+          "name": "OIDC_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/oidc:client_id::"
+        },
+        {
+          "name": "OIDC_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/oidc:client_secret::"
+        },
+        {
+          "name": "PWA_CONTEXT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app:PWA_CONTEXT_SECRET::"
+        },
+        {
+          "name": "BP_BANK_ACCOUNT_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app:BP_BANK_ACCOUNT_ENCRYPTION_KEY::"
+        },
+        {
+          "name": "CERTIFICATION_NUMBER_CRYPTO_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:CERTIFICATION_NUMBER_CRYPTO_KEYS_V1::"
+        },
+        {
+          "name": "COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1::"
+        },
+        {
+          "name": "COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/crypto:COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1::"
         }
       ],
       "mountPoints": [
@@ -81,7 +125,7 @@
       "healthCheck": {
         "command": [
           "CMD-SHELL",
-          "curl -fsS -H \"X-Forwarded-Proto: https\" http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"
+          "test \"$(curl -sS -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness)\" = 200 || exit 1"
         ],
         "interval": 30,
         "timeout": 5,
@@ -113,6 +157,8 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start. TZ=Asia/Tokyo is required (runbook sections 1.0 and 4; the image also sets it and -Duser.timezone): without it the JVM runs in UTC, a 30-minute account lock lasts about 9.5 hours and timestamps shift by 9 hours. If you override JAVA_TOOL_OPTIONS, keep -Duser.timezone=Asia/Tokyo. RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false until the Privacy owner and document owner sign the V197 copy-disposal policy (runbook section 4.3); switch it to true after the signature.",
+    "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",
       "matcher": "200",
@@ -120,7 +166,8 @@
     },
     "ecsContainerHealthCheck": {
       "path": "/actuator/health/liveness",
-      "note": "Process liveness only; DB loss must not kill the task"
+      "note": "Process liveness only; DB loss must not kill the task",
+      "strictStatus": "Healthy only on HTTP 200 (curl -w '%{http_code}' compared to 200). curl -f treats 302 as success, and no X-Forwarded-Proto is sent because a loopback peer is never trusted; /actuator/health{,/liveness,/readiness} answer over plain HTTP (FWD-SANITIZE P2-1)"
     },
     "efsUploads": {
       "status": "EFS-ACTUAL=DEFERRED until real AWS",

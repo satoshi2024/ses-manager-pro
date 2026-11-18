@@ -60,7 +60,7 @@ public void addInterceptors(InterceptorRegistry registry) {
 
 ### 決定2: 言語切替UI
 
-- `header.html` の `div.header-tools` 内、テーマ切替ボタンと通知ベルの間に bi-globe2 アイコンのドロップダウン(日本語 / English / 简体中文 / 한국어、現在言語を `active` 強調)
+- `header.html` の `div.header-tools` 内、テーマ切替ボタンと通知ベルの間に bi-globe2 アイコンのドロップダウン(日本語 / English / 中国語（簡体字） / 한국어、現在言語を `active` 強調)
 - `login.html` はカード下部に同構造のリンク行
 - 切替は `<a th:href="${langSwitchBase} + 'en'">` による GET 全画面リロード(JS不要・CSRF問題なし)
 - `langSwitchBase`(現在URI+クエリ、既存 lang を除去し `lang=` で終わる文字列)は `GlobalControllerAdvice` の `@ModelAttribute` で全画面へ供給
@@ -92,7 +92,7 @@ spring:
 
 ### 決定4: フロントJS i18n = 辞書エンドポイント + `SES.i18n`
 
-- 新規 `controller/page/I18nJsController.java`: `GET /js/i18n.js?lang=xx&v=版本` が
+- 新規 `controller/page/I18nJsController.java`: `GET /js/i18n.js?lang=xx&v=<版>` が
   `window.SES_LANG / SES_MESSAGES / SES_ENUMS` を `application/javascript` で配信。
   permitAll 済みの `/js/**` 配下なので SecurityConfig 修正ゼロ、未ログインでも取得可。Cache-Control 24h(lang/v パラメータで言語別・リリース別キャッシュ)
 - 新規 `common/i18n/I18nMessagesLoader.java`: `PropertiesLoaderUtils` でデフォルト包→ロケール包の順にマージ、locale別に `ConcurrentHashMap` キャッシュ、Jackson で JSON 化
@@ -107,7 +107,7 @@ spring:
 - 新規 `common/i18n/EnumMappings.java`: `Map<group, Map<日本語DB値, ASCIIコード>>`。
   `V1__create_tables.sql` の全 ENUM(約15グループ)を網羅:
   engineerStatus(稼動中→active 等) / projectStatus / proposalStatus(6値) / contractStatus / userRole / contractType / gender / employmentType / priority / remoteType / proficiency 等
-- メッセージキーは `enum.engineerStatus.active=稼動中`(ja)/ `Active`(en)/ `在岗`(zh)/ `가동 중`(ko)。**プロパティキーに日本語は使わない**
+- メッセージキーは `enum.engineerStatus.active=稼動中`(ja)/ `Active`(en)/ `\u5728\u5c97`(zh)/ `가동 중`(ko)。**プロパティキーに日本語は使わない**
 - Java/Thymeleaf 側: 新規 `common/i18n/EnumLabelResolver.java`(`@Component("enumLabels")`、MessageSource 注入)
   → `th:text="${@enumLabels.label('engineerStatus', eng.status)}"`
 - JS 側: `SES_ENUMS` は同じ `EnumMappings.GROUPS` から I18nJsController が直列化 → `SES.i18n.e('engineerStatus', eng.status)`
@@ -147,10 +147,10 @@ spring:
 ## テスト設計
 
 1. `MessageBundleConsistencyTest`(純JUnit): 4ファイルのキー集合完全一致 / 同一キーの `{n}` プレースホルダ集合一致 / 空値なし / `EnumMappings.GROUPS` の全 group×code に `enum.*` キーが存在
-2. `EnumMappingsCoverageTest`: `V1__create_tables.sql` から正規表現で全 `ENUM(...)` 値域を抽出し、EnumMappings が網羅していることを断言
+2. `EnumMappingsCoverageTest`: `V1__create_tables.sql` から正規表現で全 `ENUM(...)` 値域を抽出し、EnumMappings が網羅していることを検証
 3. `I18nLocaleSwitchTest`(MockMvc/H2): `?lang=en` で Set-Cookie + 英語描画 / `SES_LOCALE=zh-CN` Cookie で中国語 / Cookieなしで日本語(fallback-to-system-locale=false の検証)
 4. `I18nJsControllerTest`: 未認証で200 / `SES_MESSAGES`・`SES_ENUMS` 含有 / Cache-Control / 不正 lang で500にならない
-5. 既存テスト適応: 日本語メッセージを断言するテストはデフォルト ja のため基本無傷。壊れる場合は MessageSource 経由で期待値取得に変更
+5. 既存テスト適応: 日本語メッセージを検証するテストはデフォルト ja のため基本無傷。壊れる場合は MessageSource 経由で期待値取得に変更
 
 ## リスクと遺留事項
 

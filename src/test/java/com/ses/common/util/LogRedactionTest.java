@@ -109,7 +109,7 @@ class LogRedactionTest {
 
     @Test
     @DisplayName("超長入力と大量のSELECTを短時間で安全に処理する")
-    void 超長Sqlの脱敏は時間内に完了する() {
+    void 超長Sqlの秘匿化は時間内に完了する() {
         String repeatedSelect = "SELECT password FROM t WHERE token='select-secret';".repeat(150);
 
         assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
@@ -185,8 +185,8 @@ class LogRedactionTest {
     }
 
     @Test
-    @DisplayName("SQL脱敏判定: 通常の英単語(update/select/delete)が過度に脱敏されず安全な診断フィールドが残る")
-    void 通常の業務メッセージは過度に脱敏されず診断情報が保持される() {
+    @DisplayName("SQL秘匿化判定: 通常の英単語(update/select/delete)が過度に秘匿化されず安全な診断フィールドが残る")
+    void 通常の業務メッセージは過度に秘匿化されず診断情報が保持される() {
         assertEquals("Provider update failed requestId=req-1",
                 LogRedaction.redact("Provider update failed requestId=req-1"));
         assertEquals("Service select completed recordCount=42 correlationId=corr-99",
@@ -194,7 +194,7 @@ class LogRedactionTest {
         assertEquals("User delete failed reason=not_found userId=u-123",
                 LogRedaction.redact("User delete failed reason=not_found userId=u-123"));
 
-        // 実SQL文が含まれる場合は安全に脱敏され、後続の診断識別子が残る
+        // 実SQL文が含まれる場合は安全に秘匿化され、後続の診断識別子が残る
         assertEquals("SQL error: [REDACTED_SQL]| requestId=req-1",
                 LogRedaction.redact("SQL error: UPDATE t_digital_invoice SET status = 'SENT' WHERE id = 1 | requestId=req-1"));
         assertEquals("SQL error: [REDACTED_SQL]",

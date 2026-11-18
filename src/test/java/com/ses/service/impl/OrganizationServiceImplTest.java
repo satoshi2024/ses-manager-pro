@@ -81,8 +81,9 @@ class OrganizationServiceImplTest {
                 LocalDate.of(2026, 1, 1), null);
         organizationService.save(child);
 
+        // 公開の updateById override は削除した（NF01 §11 F-8）。組織属性の更新入口は updateOrganization だけ。
         parent.setParentId(child.getId());
-        assertThrows(BusinessException.class, () -> organizationService.updateById(parent));
+        assertThrows(BusinessException.class, () -> organizationService.updateOrganization(parent, 0));
 
         OrganizationUnit overlap = organization("ORG-01", "同一コード", null,
                 LocalDate.of(2026, 6, 1), null);
@@ -552,7 +553,7 @@ class OrganizationServiceImplTest {
     }
 
     @Test
-    void 法人不一致的父子组织与統合を拒否する() {
+    void 法人が異なる親子組織と統合を拒否する() {
         OrganizationUnit parent = organization("LEGAL-1-PARENT", "法人一の親", null,
                 LocalDate.of(2026, 1, 1), null);
         parent.setLegalEntityId(1L);

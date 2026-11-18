@@ -34,6 +34,13 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private final java.time.Clock clock;
     private final CertificationContinuityGroupMapper continuityGroupMapper;
 
+    /**
+     * 資格番号（CERTIFICATION_PII）入力の子スイッチ判定に使う。既存のconstructorを保つためfield injectionにする。
+     * Spring管理外で {@code new} した単体テスト対象だけはnullになり、従来どおり資格番号を受け付ける
+     * （アプリ本体では必須Beanとして常に注入される。{@link com.ses.config.feature.FeatureSwitches#allows}）。
+     */
+    @Autowired
+    private com.ses.config.feature.FeatureSwitches featureSwitches;
 
     /** F1互換の直接生成用。Springは下記の@Autowired constructorを使用する。 */
     public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
@@ -79,6 +86,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     public EngineerCertificationViewDto submitApplication(Long engineerId, Long certificationId, LocalDate acquiredOn,
                                                           LocalDate expiresOn, String certificateNumberPlaintext,
                                                           Long actorUserId, boolean canViewFullNumber) {
+        requireCertificateNumberEntryAllowed(certificateNumberPlaintext);
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Engineer engineer = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (engineer == null) {
@@ -152,6 +160,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     @Transactional(rollbackFor = Exception.class)
     public EngineerCertificationViewDto resubmit(Long recordId, Integer expectedVersion, Long actorUserId,
                                                  String certificateNumberPlaintext, boolean canViewFullNumber) {
+        // 元recordを消費する前に拒否する（拒否時は元recordのversion・履歴を変えない）。
+        requireCertificateNumberEntryAllowed(certificateNumberPlaintext);
         EngineerCertification previous = locked(recordId, expectedVersion);
         if (!CertificationRecordStates.CANCELLED.equals(previous.getRecordState())
                 && !CertificationRecordStates.REJECTED.equals(previous.getRecordState())) {
@@ -371,6 +381,21 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private void requireReason(String reason) {
         if (!StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "certification.record.reasonRequired");
+        }
+    }
+
+    /**
+     * 資格番号（retention class CERTIFICATION_PII）の入力可否。DG-07承認まで本番では入力を受け付けない（B-NF03-1）。
+     *
+     * <p>資格番号の入力経路は申請（submitApplication）と再申請（resubmit）だけであり、両方の先頭で
+     * DB・暗号化に触れる前に判定する。空欄は「入力なし」として通す（資格の申請自体は非PII部分として受け付ける）。
+     * 黙って捨てると利用者は保存されたと誤認するため、値がある場合は明示的に400で拒否する。
+     */
+    private void requireCertificateNumberEntryAllowed(String certificateNumberPlaintext) {
+        if (StringUtils.hasText(certificateNumberPlaintext)
+                && !com.ses.config.feature.FeatureSwitches.allows(featureSwitches,
+                com.ses.config.feature.Feature.NF03_CERTIFICATION_PII)) {
+            throw BusinessException.of(400, "certification.record.numberEntryDisabled");
         }
     }
 

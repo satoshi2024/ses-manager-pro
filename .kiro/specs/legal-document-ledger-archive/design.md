@@ -1,6 +1,6 @@
 # Design — 法定文書台帳・電子保存
 
-> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは対象限定・直接回帰、M taskで全量を行う。
 
 ## 1. DDL（予約V67）
 
@@ -58,7 +58,7 @@
 `retention_until IS NULL` と `retention_until <= today` を同一視しない。前者は「起算日未確定」であり
 廃棄候補から**除外**する。§1.1のNULL/不存在区別に該当する。
 
-### 6.2 主体 × 操作 × 可見母集団
+### 6.2 主体 × 操作 × 閲覧可能な母集団
 
 文書の母集団は`t_document_link`が指す業務entityのscopeから導出する。document固有のACLを別に作らない。
 
@@ -79,7 +79,7 @@
 
 ### 6.3 状態機械と競合
 
-| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 | `t_document` 下書き | →確定 | 状態CAS | 同一文書の同時確定 | 下書きへ戻す |
 | 確定 | →訂正済 / →取消 / →廃棄済 | 状態CAS＋`version` | 訂正と廃棄の同時要求 | **物理削除しない。訂正/取消versionで表現** |

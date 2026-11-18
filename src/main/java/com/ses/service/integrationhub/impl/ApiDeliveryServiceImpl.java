@@ -29,6 +29,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
                                String tenantId, String primaryResourceType, Long primaryResourceId,
                                String eventType, String schemaVersion, String correlationId,
                                ExternalDtoSnapshot snapshot, LocalDateTime now) {
+        if (now == null || now.getNano() != 0) throw new IllegalArgumentException("delivery時刻はUTC秒精度で指定してください");
         requireText(eventId, 128, "eventId");
         requireText(clientId, 100, "clientId");
         requireText(scopeCode, 100, "scopeCode");
@@ -135,7 +136,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
             throw new IllegalArgumentException("invalid retry result");
         }
         ApiDelivery row = mapper.selectById(id);
-        if (row == null || row.getAttemptCount() == null || row.getAttemptCount() >= MAX_ATTEMPTS) {
+        if (row == null || row.getAttemptCount() == null || (row.getAttemptCount() - (com.ses.service.integrationhub.IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) ? 1 : 0)) >= MAX_ATTEMPTS) {
             return markTerminal(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, IntegrationHubStates.DELIVERY_DLQ,
                     "MAX_ATTEMPTS", now);
         }

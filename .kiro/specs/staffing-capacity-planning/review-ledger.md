@@ -31,7 +31,7 @@
 | S12-R1-P2-05 | P2 | boardの社内/待機列を閲覧者のscope（allowedEngineerIds）でSQL境界filter | StaffingBoardServiceImpl |
 | S12-R1-P2-06 | P2 | 決定表§5.3のnotification列（マネージャー: 不足/過配賦・営業: 充足/不足・HR: 採用需要）は**未実装のまま明示的にbacklog管理**（handbook §10: P2はbacklog移行可。要件追加が必要なため本specではUI/API完成を優先） | ledger記録 |
 | S12-R1-P2-07 | P2 | D&D失敗時のUI rollbackを実ブラウザで実証（demoにP2列・50%確定配置を追加し、100%カードの過配賦D&D→API拒否→元列へ復帰をCDPで検証） | StaffingBrowserMTest（p1CardsBefore=AfterRollback=2） |
-| S12-R1-NOTE-01/02/03 | NOTE | ledgerへ記録: (1) actual+planで100%超は仕様方針どおり（KPI表示に注意をledgerで管理）。(2) scenario compareの稼働日数は平日ベース（m_work_calendar参照はcapacity口径と別。ledgerの口径主張を訂正）。(3) 過配賦draft保存ごとに新規承認request（上書き）を仕様として記録 | ledger記録 |
+| S12-R1-NOTE-01/02/03 | NOTE | ledgerへ記録: (1) actual+planで100%超は仕様方針どおり（KPI表示に注意をledgerで管理）。(2) scenario compareの稼働日数は平日ベース（m_work_calendar参照はcapacity基準と別。ledgerの基準主張を訂正）。(3) 過配賦draft保存ごとに新規承認request（上書き）を仕様として記録 | ledger記録 |
 
 ## 補足（Round 2 fix deltaの検証）
 
@@ -53,7 +53,7 @@
 
 ## READINESS（着手時）
 
-- handbook v2.0 / test-execution-policy-s03-s17（通常TaskはL1〜L3定向・直接回帰）
+- handbook v2.0 / test-execution-policy-s03-s17（通常TaskはL1〜L3対象限定・直接回帰）
 - base commit: `85dfd7bf`（main merge済み。S10 R10最終Review「T066 technical PASS・S10 PASS・S12 READY」記録merge後）
 - dependency: S11 PASS（R11 T074）、S10 PASS（R10最終Review・PR #77 merge済み。中央台帳row10の反映はS10側の更新待ちとして記録）
 - migration: common latest=V102_3 / 本spec予約=V103（衝突なし）/ 永久欠番 V59・V72・V82・V99 / migration-dev V100はcommon再利用禁止
@@ -164,7 +164,7 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 
 - **task別対応表**: T075 F1 `a691f77e` / T076 F2 `ec880114` / T077 A1 `6e0ddfc9` /
   T078 B1 `0424abd0` / T079 B2 `6ef0108e` / T080 M `22fe7d06`
-- **実行test**: L4全量 364クラス/2029件/0/0/0（各taskの定向・直接回帰含む）。
+- **実行test**: L4全量 364クラス/2029件/0/0/0（各taskの対象限定・直接回帰含む）。
   MySQL smoke: FlywayMigrationSmokeTest他全Flyway系をDocker実MySQLで0-skip PASS
 - **Demo**: 一気通貫（position→配置→契約→需給更新）とdesktop/390px browser evidence
   （evidence/browser-m/・SHA-256付きsummary.json）。p95/heap実測値は本ledgerに記録
@@ -187,7 +187,7 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 
 - **比較**（`StaffingScenarioCompareService`）:
   - シナリオ別・月別（24か月）の供給FTE・稼働率・要員数・粗利を返す
-  - 供給FTE = percent × 対象月内の日数/月内稼働日数（日単位のFTE換算・design §5.2と同一口径）
+  - 供給FTE = percent × 対象月内の日数/月内稼働日数（日単位のFTE換算・design §5.2と同一基準）
   - 稼働率 = 供給FTE / シナリオ内要員数 × 100
   - 粗利 = （position単価下限 − 要員希望単価）× FTE。**HRでmask（null）**（design §5.3）
   - 共有scenarioの閲覧時は**閲覧者のscope（DataScope/組織scope）で要員をfilter**
@@ -248,7 +248,7 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 
 - **集計**（`StaffingHeatmapService`）:
   - 需要FTE = position（required_count × allocation_percent）を月内稼働日数（法人既定=平日）比で按分
-  - 供給FTE = `StaffingCapacityService.supply` と同一口径（actual+plan。社内/待機は案件需給に寄与しない）
+  - 供給FTE = `StaffingCapacityService.supply` と同一基準（actual+plan。社内/待機は案件需給に寄与しない）
   - 不足=max(0, 需要-供給)、余剰=max(0, 供給-需要)、bench cost = (1.0 − 供給FTE) × 希望単価
   - 全社合計はrole次元の内訳合計から構築（各次元は分割性を持つためΣ=全社）
   - 24か月上限・window超過は拒否（design §4/§5.4）
@@ -436,7 +436,7 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 - 更新済契約（CONTINUE）は終了日以降もactual計上、ENDで停止
 - 退場予定は最終契約終了日以降、供給0・稼働可能日数0
 - 承認済休暇2日で稼働可能日数-2、契約FTEは100%のまま
-- 稼働率はUtilizationCalcServiceと同一口径（dashboard KPI一致）
+- 稼働率はUtilizationCalcServiceと同一基準（dashboard KPI一致）
 - 提案のposition_idが契約ドラフトへ引き継がれactualが作られる
 
 ## Demo（T076）

@@ -3,8 +3,14 @@
 # ========================================
 server:
   port: 8080
+  # 転送ヘッダーはframework（ForwardedHeaderFilter）で反映するが、Boot標準のfilterは送信元を確認しないため
+  # com.ses.config.forwarded.ForwardedHeaderSanitizingFilter に置き換えている（FWD-SANITIZE）。
+  #   - X-Forwarded-Prefix / X-Forwarded-Host / X-Forwarded-Ssl / Forwarded は常に削除する。
+  #   - X-Forwarded-For / Proto / Port は TCP peer が app.security.trusted-proxies に含まれるときだけ右端1要素を使う。
+  # native へ変更しないこと（TomcatのRemoteIpValveはclientが送ったX-Forwarded-Hostを反映する。本番はvalidatorで拒否）。
   forward-headers-strategy: framework
-  # ECS/ALB 相当のローリング更新向け。SIGTERM 後に処理中リクエストを排水してから終了する。
+  # SIGTERM 後に処理中リクエストを排水してから終了する。本番は全停止配備でrolling更新は行わない
+  # （手順は .kiro/specs/production-launch/deploy-runbook.md）。
   shutdown: graceful
   # ===== 同時接続の受け口 =====
   # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
@@ -16,6 +22,11 @@ server:
       min-spare: ${TOMCAT_MIN_SPARE_THREADS:10}
     accept-count: ${TOMCAT_ACCEPT_COUNT:100}
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    # 1回のsocket read（request line・header・bodyの途中停止）の上限。取込ingressの120秒soft期限は
+    # 単一のblocking readを中断できないため、この値が最悪超過量の上限になる（NF-06 B-NF06-1）。
+    # keep-alive待機は従来のTomcat既定（connection-timeoutと同じ60秒）を明示して維持し、LB側idle timeoutとの関係を変えない。
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:20s}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:60s}
   servlet:
     encoding:
       charset: UTF-8
@@ -134,8 +145,9 @@ spring:
   # ===== Flyway（DBマイグレーション。旧「001〜009を手動実行」手順を自動化） =====
   # 既存の手動構築済みDBに対して初めて導入する場合は baseline-on-migrate により
   # 「既にV9まで適用済み」とみなして以降のマイグレーションのみ実行する。
-  # prod では application-prod.yml が db/migration-prod を追加ロケーションとして
-  # 差し込み、admin初期パスワードのBCrypt化(Repeatable)のみ prod 限定で適用する。
+  # dev/test 向けの設定。prod は application-prod.yml で enabled=false とし、起動時にmigrateしない。
+  # 本番のmigration（db/migration + db/migration-prod）は専用Flyway job（mvn -Pprod-migrate、
+  # 設定は ops/flyway/flyway-prod.conf）が実行する。
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -188,6 +200,11 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: false
+    # 1次cache（SqlSession単位）をstatement単位にする。cache-enabled: false は2次cacheだけを止めるため、
+    # 既定（SESSION）のままでは同じtransaction内で同じ照会・同じ引数を再実行するとDBを読まずに前回の結果を返す。
+    # lock取得前のdiscoveryとlock取得後の読み直しが同じ照会だと、lock待ちの間に他transactionがcommitした変更を
+    # 見落とし、版の照合が古い値で行われる（W3-16b の M6 で検出）。lock文ごとのflushCacheに頼らず全体で止める。
+    local-cache-scope: statement
   global-config:
     banner: false
     db-config:
@@ -240,7 +257,9 @@ app:
     dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
-    # X-Forwarded-For を読むのは remoteAddr がこのリストに含まれるときだけ（CIDR可。空=常に remoteAddr）
+    # 転送ヘッダー（X-Forwarded-For/Proto/Port）を信頼するTCP peer（ALBのsubnet）。CIDRまたは単一IPのカンマ区切り。
+    # 含まれるときだけ、プロキシが右端に追記した1要素を採用する。空=転送ヘッダーを一切信頼しない（fail-closed）。
+    # 構文不正の要素は起動時に拒否する。本番では未設定・広すぎる範囲も起動時に拒否する（ForwardedHeaderProductionValidator）。
     trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:false}
@@ -283,6 +302,24 @@ app:
     scanner-read-timeout-ms: ${FILE_SCANNER_READ_TIMEOUT_MS:10000}
     legacy-migration-enabled: ${LEGACY_MIGRATION_ENABLED:true}
     contract-backfill-enabled: ${CONTRACT_BACKFILL_ENABLED:true}
+  # ===== NF-06 取込センターの本番admission（Q-5） =====
+  # 値は署名済みData Owner決定書の転記（秘密値を置かない）。既定は全て未設定＝全sourceの取込を拒否する。
+  # NF-06スイッチがONのprodは、時間経過（署名日前・失効）以外の不備があれば起動しない。OFFなら起動を止めない。
+  # 手順・digestの正規形: .kiro/specs/data-migration-import-center/a1a-ingress-operations.md §10
+  import-center:
+    admission:
+      decision-id: ${IMPORT_ADMISSION_DECISION_ID:}
+      tenant-id: ${IMPORT_ADMISSION_TENANT_ID:}
+      signed-on: ${IMPORT_ADMISSION_SIGNED_ON:}
+      expires-on: ${IMPORT_ADMISSION_EXPIRES_ON:}
+      # 承認済みsource code（カンマ区切り。比較は小文字）
+      source-codes: ${IMPORT_ADMISSION_SOURCE_CODES:}
+      # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）
+      approval-digest: ${IMPORT_ADMISSION_APPROVAL_DIGEST:}
+    # preview・error exportへ返す行参照の鍵付きHMAC（W3-12）。Base64で復号後32 byte以上。
+    # 既定値は開発用（prodでは使えない）。本番は IMPORT_ROW_REFERENCE_HMAC_KEY を secret store から注入する。
+    row-reference:
+      hmac-key: ${IMPORT_ROW_REFERENCE_HMAC_KEY:ZGV2LW9ubHktbmYwNi1yb3ctcmVmZXJlbmNlLWtleS1ub3QtZm9yLXByb2Q=}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
@@ -334,13 +371,92 @@ app:
   # ===== スキルシート取込設定 =====
   resume:
     retention-days: 30
+    # 原本の purge（02:00）に合わせて文書台帳の副本（RESUME_INGESTION、V197）の保存期限を当日にする処理。既定 true（従来どおり）。
+    # false は副本の調整だけを止め、原本・抽出本文の purge は続ける。既に合わせた副本は戻さない。
+    # 真偽値として解釈できない値は起動失敗になる。手順: .kiro/specs/production-launch/deploy-runbook.md §4.3
+    ledger-copy-alignment:
+      enabled: ${RESUME_LEDGER_COPY_ALIGNMENT_ENABLED:true}
+  # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
+  # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
+  # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。
+  # 運用手順: .kiro/specs/production-launch/feature-switches.md
+  features:
+    # NF-01 ライフサイクル管理・退社ゲート
+    nf01:
+      enabled: ${FEATURE_NF01_ENABLED:false}
+    # NF-01の子: 二者確認（DUAL_CONFIRMATION）の提出・確認・差戻し。NF-01がOFFなら本値に関係なくOFF。
+    # 業務commentを保存するため、prodではPrivacy署名の参照（privacy-sign-off-ref）が無いとONで起動しない（計画 §10・§12 O-8）
+    nf01-dual-confirmation:
+      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
+      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
+    # NF-02 カスタマーサクセス・サービスデスク（内部画面）
+    nf02:
+      enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT）。NF-02がOFFなら本値に関係なくOFF。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # portalへ出す問い合わせの公開開始時刻（offset付きISO-8601。例: 2027-04-01T00:00:00+09:00）。
+      # 未設定ならportal起票の問い合わせだけを出す（初回リリース中に社内で登録した問い合わせを顧客へ出さない）。
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
+    # NF-03 資格・学習・スキルギャップ
+    nf03:
+      enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子: 資格番号（CERTIFICATION_PII）の入力。NF-03がOFFなら本値に関係なくOFF。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
+    # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
+    nf04:
+      enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06 データ移行・取込センター（画面・API。apply系は含まない）。ONにするprodはimport-center.admissionの
+    # 承認設定と行参照鍵（import-center.row-reference.hmac-key）が必須
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
+    # NF-10 定期管理レポート
+    nf10:
+      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== AI設定（将来のAPI接続用） =====
 ai:
   enabled: true
   provider: mock
   management-copilot-enabled: false
-  external-send-enabled: false
+  # NF08 外部送信。既定false。trueにする場合は下記 external-send-approval が全て揃い、
+  # production-gates（運用者確認チェックリスト）が全てtrueでなければprodは起動しない（fail-fast）。
+  # ただし失効日経過・署名日前だけが理由の場合は起動を止めず、外部送信だけを停止してWARNを出す。
+  external-send-enabled: ${AI_EXTERNAL_SEND_ENABLED:false}
+  # NF08 外部送信の費用上限ledger。persistent（DBの永続ledger。既定）/ memory（プロセス内の計数）。
+  # B2c-1ではprodの起動時検査だけが読む（gatewayは本設定を見ず、B2c-2でledgerの選択に接続する）。
+  # B2c-2でpermit-only送信とgatewayの永続ledger接続が完了するまで、prodは external-send=true 自体を起動拒否する。
+  # 完了後もprodで persistent と完全一致しない値は起動拒否する。
+  external-send-cost-ledger: ${AI_EXTERNAL_SEND_COST_LEDGER:persistent}
+  # NF08 外部送信承認設定。値は署名済み決定書の転記（秘密値を置かない）。既定は全て未設定＝拒否。
+  # 手順・項目一覧: .kiro/specs/ai-management-copilot/external-send-approval-gate.md
+  external-send-approval:
+    decision-id: ${AI_EXTERNAL_SEND_DECISION_ID:}
+    dg08-decision-id: ${AI_EXTERNAL_SEND_DG08_DECISION_ID:}
+    nf07-policy-id: ${AI_EXTERNAL_SEND_NF07_POLICY_ID:}
+    dpa-reference: ${AI_EXTERNAL_SEND_DPA_REFERENCE:}
+    signed-on: ${AI_EXTERNAL_SEND_SIGNED_ON:}
+    expires-on: ${AI_EXTERNAL_SEND_EXPIRES_ON:}
+    provider: ${AI_EXTERNAL_SEND_PROVIDER:}
+    model: ${AI_EXTERNAL_SEND_MODEL:}
+    purposes: ${AI_EXTERNAL_SEND_PURPOSES:}
+    # 送信してよいfield id（catalog.queryId,catalog.catalogVersion,summary.claimKeys の部分集合）
+    data-categories: ${AI_EXTERNAL_SEND_DATA_CATEGORIES:}
+    destination-host: ${AI_EXTERNAL_SEND_DESTINATION_HOST:}
+    # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）。現行設定からの再計算値と一致しなければ拒否
+    approval-digest: ${AI_EXTERNAL_SEND_APPROVAL_DIGEST:}
+    cost-limit:
+      per-request-yen: ${AI_EXTERNAL_SEND_PER_REQUEST_YEN:}
+      daily-yen: ${AI_EXTERNAL_SEND_DAILY_YEN:}
+      monthly-yen: ${AI_EXTERNAL_SEND_MONTHLY_YEN:}
+      input-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_INPUT_YEN_PER_THOUSAND_TOKENS:}
+      output-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_OUTPUT_YEN_PER_THOUSAND_TOKENS:}
+      max-request-bytes: ${AI_EXTERNAL_SEND_MAX_REQUEST_BYTES:}
+      max-thinking-tokens: ${AI_EXTERNAL_SEND_MAX_THINKING_TOKENS:0}
+  # 承認の有効期間監視。失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）
+  external-send-monitor:
+    expiry-warning-days: ${AI_EXTERNAL_SEND_EXPIRY_WARNING_DAYS:30}
   learning-candidate-timeout-ms: 2000
   learning-candidate-ttl-minutes: 60
   retention:
@@ -392,6 +508,9 @@ cloudsign:
 # 秘密値は環境変数からのみ供給する。api-base-url はS11/S15が使う会計API等の共通resource base（意味不変）。
 # OAuthはaccounts host、人事労務APIはhr host へ分離する（HFP-01-R02/R03）。
 freee:
+  # freee連携（給与・会計のOAuth接続）を使うか。dev/testの既定はtrue（従来どおり）。prodの既定はfalse（application-prod.yml）。
+  # falseの間は認可の開始・code交換を行わず（MISCONFIGURED）、prodの起動時にclient設定一式を要求しない。
+  enabled: ${FREEE_ENABLED:true}
   client-id: ${FREEE_CLIENT_ID:}
   client-secret: ${FREEE_CLIENT_SECRET:}
   redirect-uri: ${FREEE_REDIRECT_URI:http://localhost:8080/integrations/freee/callback}
@@ -410,31 +529,49 @@ compliance:
       current-key-version: ${COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION:}
       # 鍵バージョンごとのAES-256鍵（32バイトをunpadded base64urlで指定。'='padding・空白禁止）
       keys:
-        # v1: ${COMPLIANCE_CREDENTIAL_KEY_V1:}
+        # 鍵は環境変数 COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>（例 ..._V1）で渡す。ここには書かない（deploy-runbook §1.0 の22）
 
 # ===== G2 reviewer fingerprint HMAC鍵（§9・R23-P1-01） =====
 # tenant別専用key namespace: compliance.gate.fingerprint-keys.{tenantId}
 # 値はdeployment secret storeから注入すること。prodプロファイルではtenant設定の欠損・不正で起動時にfail-fastする。
 # dev/testプロファイルはtenant未設定時のみテスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
+# OS環境変数で渡すときはtenant一覧も要る（環境変数の名前からtenantを列挙できないため。FINAL-FIX）:
+#   COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS=default
+#   COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION=<version>
+#   COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>=<鍵>
+    fingerprint-key-tenants: ${COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS:}
     fingerprint-keys:
-      # default:
-      #   current-key-version: ${COMPLIANCE_FINGERPRINT_CURRENT_KEY_VERSION:}
-      #   keys:
-      #     v1: ${COMPLIANCE_FINGERPRINT_KEY_V1:}
+      # tenantごとの version と鍵は上の環境変数（COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_*）で渡す。ここには書かない。
+      # 以前ここにあった例の環境変数名は配線されておらず、設定しても読まれなかったため削除した
+      # （正しい名前は deploy-runbook §1.0 の23〜25）。
+      #
 
 # ===== NF-05 Integration Hub F1 secret envelope =====
 # deployment secret storeからのみ注入する。未設定時に開発用secretへfallbackしない。
 integration:
   hub:
     # NF-05 F2はdefault-off。値を省略せず、起動validatorでfail-closedにする。
+    # inbound（public-api）とoutbound（external-transport）は独立に開放する（Q-12）。
+    # productionの承認項目は .kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md。
     public-api:
       enabled: false
+      # outbound payloadのbindingにも使うため、どちらかの方向を開けるときに必須。
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
       cursor-ttl-seconds: 300
       read-snapshot-purge-batch-size: 32
       read-snapshot-purge-fixed-delay-ms: 60000
+      # retention/nonce purgeは両方向で共用する。
       retention-purge-batch-size: 100
       retention-purge-fixed-delay-ms: 60000
+      # inbound webhook処理のlease。outboundのlease-secondsとは独立。
+      inbound-lease-seconds: 60
+      # 有効時に未認証rejectを監査tableへ書く1分あたりの上限（node単位）。超過分はmetricだけに残す。
+      unauthenticated-audit-max-per-minute: 60
+      approval:
+        decision-id: ${INTEGRATION_HUB_INBOUND_DECISION_ID:}
+        allowed-client-cidrs: []
+        # 決定書に記載されたinbound承認内容のSHA-256（正規形はDG-05草案 §1.1）。prodのinbound有効時は必須（b-13）。
+        approval-digest: ${INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST:}
     external-transport:
       enabled: false
       batch-size: 32
@@ -442,10 +579,21 @@ integration:
       fixed-delay-ms: 1000
       connect-timeout-ms: 3000
       read-timeout-ms: 3000
+      dns-timeout-ms: 2000
+      truststore-path: ${INTEGRATION_HUB_TRUSTSTORE_PATH:}
+      truststore-password: ${INTEGRATION_HUB_TRUSTSTORE_PASSWORD:}
+      truststore-type: PKCS12
+      approval:
+        decision-id: ${INTEGRATION_HUB_OUTBOUND_DECISION_ID:}
+        allowed-destinations: []
+        # 決定書に記載されたoutbound承認内容（truststoreの内容を含む）のSHA-256。prodのoutbound有効時は必須（b-13）。
+        approval-digest: ${INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST:}
     provider:
       mode: MOCK
     security:
       trusted-proxies: []
+      # trusted proxyが送信元を追記するheader。ALB（xff_header_processing.mode=append）はX_FORWARDED_FOR。
+      forwarded-header: X_FORWARDED_FOR
       allowed-loopback-ports: []
     topology:
       mode: DEDICATED_DATABASE
@@ -453,3 +601,74 @@ integration:
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}
+      # credential secretの保存用HMACのpepper（32 byte、=無しのbase64url。暗号鍵と別の値）。N5-P3-2。
+      # 未設定ではcredentialを発行できない（fail closed）。prodのNF05有効時は起動時にも検査する。
+      credential-hash-pepper: ${INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER:}
+
+# ===== NF07 プライバシー（保持・DSAR）。production-bridge-phased-plan.md §5.1 =====
+# 既定OFF。真偽値として解釈できない値（例: ture）は起動失敗になる（app.features.* と同じ扱い）。
+# privacy.retention.enabled は機能スイッチ Feature.NF07_RETENTION の設定値でもある（app.features.* に別名は作らない）。
+# OFFの間は登録済みの /api/privacy/policies が404になり（FeatureSwitchFilter と PrivacyAccessGuard）、policy source は
+# 読まずに POLICY_UNKNOWN を返す。登録していない /api/privacy/<x> には handler が無く guard も通らないため、
+# privacy-admin 以外の管理者は403（MenuPermissionFilter）、privacy-admin は Spring の404になる。
+# privacy.dsar.enabled は機能スイッチ Feature.NF07_DSAR の設定値（A2a）。OFFの間は /privacy/dsar・/api/privacy/dsar が404で、
+# 期限通知の scheduler も止まる（開示 package の削除の scheduler は OFF でも止めない。期限を超えて package を残さない）。
+# prodでONにするには、下の決定ID束縛に加えて due-days・package-max-age の設定と F2 provider 1件以上が要る（A2b）。
+# 法的な値（保持期間・期限・本人確認基準等）はここへ書かない（署名後に人が別の設定で与える）。
+# prodで1つでもONにすると PrivacyProductionConfigurationValidator が、下の決定ID束縛（approval）の完全性、
+# privacy-admin の有効な管理者2名以上、privacy-admin 以外のgroupに privacy.* 系の許可行が無いことを検査し、
+# 満たさなければ起動しない（手順: .kiro/specs/production-launch/feature-switches.md 4.7）。
+# ただし決定の署名日前・失効だけが理由の場合は起動を止めず、NF07をOFFとして扱ってWARNを出す（NF06・NF08と同じ）。
+# 実行中に失効日を迎えた場合も、その日（JST）から入口はOFFと同じ404になる。
+privacy:
+  retention:
+    enabled: ${PRIVACY_RETENTION_ENABLED:false}
+  dsar:
+    enabled: ${PRIVACY_DSAR_ENABLED:false}
+    # D-06（DSAR SOP）の期限規則: 受付日（JST）から期限日までの暦日数。法的な値のため既定値を持たない（I-1）。
+    # 未設定・1〜366以外、または D-01・D-06 の決定が無効な間は期限日を計算しない（期限通知も出ない）。
+    due-days: ${PRIVACY_DSAR_DUE_DAYS:}
+    # 期限の何日前から privacy-admin へ通知するか（運用上の値で法的な期限ではない。1〜90に丸める）
+    deadline-warning-days: ${PRIVACY_DSAR_DEADLINE_WARNING_DAYS:7}
+    # D-06 で決める開示 package の最長保存期間（A2b）。法的な値のため既定値を持たない（I-1）。未設定・1時間〜366日以外なら
+    # 草案 package を作らない。単位の無い数値は日数（30 = 30日。PT12H・12h も可）。期限超過・交付記録で package は PURGED になる。
+    package-max-age: ${PRIVACY_DSAR_PACKAGE_MAX_AGE:}
+  # 決定ID束縛（PrivacyDecisionBinding）。値は署名済み決定書の転記で、秘密値を置かない。既定は全て未設定＝ONにできない。
+  # retention は D-01・D-09、dsar は D-01・D-06・D-09 を必要とする。AI・実装者は値を設定しない。
+  # D-02・D-03・D-05 は capability の digest に入れず、それぞれの入口（policy 登録・hold 開始・hold 解除）が要求ごとに検査する。
+  approval:
+    # 承認tenant。OIDC_TENANT_ID（未設定なら default）と完全一致しなければ拒否
+    tenant-id: ${PRIVACY_APPROVAL_TENANT_ID:}
+    # D-09 で開放を承認した capability（retention / dsar のカンマ区切り）
+    capabilities: ${PRIVACY_APPROVAL_CAPABILITIES:}
+    # 決定書（D-09）に記載された束縛内容のSHA-256（小文字hex 64桁）。現行設定からの再計算値と一致しなければ拒否
+    approval-digest: ${PRIVACY_APPROVAL_DIGEST:}
+    d01:
+      decision-id: ${PRIVACY_APPROVAL_D01_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D01_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D01_EXPIRES_ON:}
+    # D-02（保持期間・起算trigger・法的根拠）。policy の登録・有効化（NF07-REG）の開放の前提。digest に含めない
+    d02:
+      decision-id: ${PRIVACY_APPROVAL_D02_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D02_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D02_EXPIRES_ON:}
+    # D-03（署名鍵・Trust Anchor・失効）。hold 解除（NF07-REL）と policy の登録・有効化の開放の前提。digest に含めない
+    d03:
+      decision-id: ${PRIVACY_APPROVAL_D03_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D03_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D03_EXPIRES_ON:}
+    # D-05（hold の種類と権限者）。hold 開始（NF07-A1H）・解除の開放の前提。digest に含めない
+    d05:
+      decision-id: ${PRIVACY_APPROVAL_D05_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D05_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D05_EXPIRES_ON:}
+    d06:
+      decision-id: ${PRIVACY_APPROVAL_D06_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D06_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D06_EXPIRES_ON:}
+    d09:
+      decision-id: ${PRIVACY_APPROVAL_D09_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D09_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D09_EXPIRES_ON:}
+    # 失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）。承認内容ではないためdigestに含めない
+    expiry-warning-days: ${PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS:30}

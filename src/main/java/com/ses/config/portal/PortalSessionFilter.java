@@ -1,5 +1,6 @@
 package com.ses.config.portal;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.service.portal.PortalSessionService;
@@ -44,8 +45,8 @@ public class PortalSessionFilter extends OncePerRequestFilter {
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                    if (user.isTermsPending() && !isTermsAllowedPath(request.getRequestURI())) {
-                        if (request.getRequestURI().startsWith("/api/portal/")) {
+                    if (user.isTermsPending() && !isTermsAllowedPath(RequestPaths.pathWithinApplication(request))) {
+                        if (RequestPaths.pathWithinApplication(request).startsWith("/api/portal/")) {
                             response.setStatus(403);
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                             response.setCharacterEncoding(StandardCharsets.UTF_8.name());

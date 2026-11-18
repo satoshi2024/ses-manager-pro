@@ -16,7 +16,7 @@ public interface SystemConfigService {
 
     BigDecimal getDecimal(String key, BigDecimal defaultValue);
 
-    /** 設定を登録・更新し、キャッシュを更新する。 */
+    /** 設定を登録・更新し、キャッシュを更新する。認可キー（AuthorizationConfigKeys）は拒否する（updateAllだけが書ける）。 */
     void put(String key, String value, String description);
 
     /** 全設定を返す。 */

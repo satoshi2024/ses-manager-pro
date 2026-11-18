@@ -27,7 +27,29 @@ public class ExternalApiMetricsRecorder {
             "/external-api/v1/invoice-statuses/count",
             "/external-api/v1/invoice-statuses/{publicInvoiceId}",
             "/external-api/v1/webhooks/{provider}");
+    /** 監査行を永続化しなかったrequestの集約counter（N5-P2-1）。labelは理由の有限集合だけ。 */
+    static final String AUDIT_SUPPRESSED_METRIC = "integration_hub_external_api_audit_suppressed_total";
     private final ObjectProvider<MeterRegistry> meterRegistryProvider;
+
+    /** 監査行を書かなかった理由。値はmetrics labelにそのまま使う。 */
+    public enum AuditSuppressionReason {
+        /** public-api無効時。DISABLED_DENYはDBへ書かずcounterだけを残す。 */
+        PUBLIC_API_DISABLED,
+        /** 有効時の未認証rejectがnode単位の1分上限を超えた。 */
+        UNAUTHENTICATED_BUDGET
+    }
+
+    public void recordAuditSuppressed(AuditSuppressionReason reason) {
+        MeterRegistry registry = meterRegistryProvider.getIfAvailable();
+        if (registry == null || reason == null) {
+            return;
+        }
+        Counter.builder(AUDIT_SUPPRESSED_METRIC)
+                .description("NF-05 external API requests whose audit row was not persisted")
+                .tag("reason", reason.name())
+                .register(registry)
+                .increment();
+    }
 
     public void record(String routeTemplate, String method, int status, String decision, String clientTier) {
         MeterRegistry registry = meterRegistryProvider.getIfAvailable();
@@ -64,18 +86,31 @@ public class ExternalApiMetricsRecorder {
         return (status / 100) + "xx";
     }
 
-    private String finiteOutcome(String decision) {
+    static String finiteOutcome(String decision) {
         if (decision == null) return "OTHER";
-        if (decision.contains("RATE")) return "RATE_LIMITED";
-        if (decision.contains("SCOPE") || decision.contains("DATA_SCOPE")) return "SCOPE_REJECTED";
-        if (decision.contains("AUTH") || decision.contains("CLIENT") || decision.contains("NONCE")) {
-            return "AUTH_REJECTED";
-        }
-        if (decision.contains("DISABLED")) return "DISABLED";
-        if (decision.contains("INVALID") || decision.contains("UNKNOWN_ROUTE")) return "REQUEST_REJECTED";
-        if (decision.contains("AUTHORIZED") || decision.contains("SUCCESS")) return "SUCCESS";
-        if (decision.contains("INTERNAL")) return "INTERNAL_ERROR";
-        return "OTHER";
+        return switch (decision) {
+            case "AUTHORIZED", "AUTHENTICATED", "SCOPE_ALLOWED", "SUCCESS", "ALLOWED",
+                    "INTERSECTION_ALLOWED", "READ_ALLOWED", "INBOUND_RECEIVE_ALLOWED" -> "SUCCESS";
+            case "RATE_LIMITED" -> "RATE_LIMITED";
+            case "FORBIDDEN_SCOPE", "SCOPE_OR_DATA_SCOPE_DENIED", "DATA_SCOPE_INVALID",
+                    "DATA_SCOPE_INTERSECTION_DENIED", "INTERSECTION_DENIED" -> "SCOPE_REJECTED";
+            case "UNTRUSTED_PROXY", "PROXY_HEADER_MISSING", "UNSUPPORTED_PROXY_CHAIN",
+                    "INVALID_PROXY_HEADER", "DUPLICATE_PROXY_HEADER", "SOURCE_IP_INVALID", "SOURCE_IP_MISSING" -> "SOURCE_REJECTED";
+            case "AUTH_HEADER_DUPLICATE", "AUTH_HEADER_MISSING", "CLIENT_ID_INVALID", "CLIENT_INVALID",
+                    "CLIENT_IP_NOT_ALLOWED", "CREDENTIAL_INVALID", "CREDENTIAL_VERSION_INVALID", "KEY_ID_INVALID",
+                    "NONCE_INVALID", "NONCE_REPLAY", "SIGNATURE_INVALID", "TIMESTAMP_INVALID",
+                    "SESSION_NOT_ALLOWED", "BROWSER_REQUEST_NOT_ALLOWED", "EXTERNAL_PRINCIPAL_MISSING",
+                    "AUTHENTICATION_FAILED" -> "AUTH_REJECTED";
+            case "DISABLED_DENY", "PUBLIC_API_DISABLED" -> "DISABLED";
+            case "INTERNAL_ERROR" -> "INTERNAL_ERROR";
+            case "BODY_LENGTH_INVALID", "BODY_TOO_LARGE", "CONTENT_ENCODING_UNSUPPORTED", "CONTENT_LENGTH_INVALID",
+                    "HEADER_BLOCK_INVALID", "HEADER_BLOCK_TOO_LARGE", "METHOD_INVALID", "REQUEST_INVALID",
+                    "REQUEST_TARGET_INVALID", "REQUEST_TARGET_TOO_LARGE", "RAW_REQUEST_TARGET_UNAVAILABLE",
+                    "QUERY_INVALID", "QUERY_TOO_LARGE", "CORRELATION_ID_INVALID", "CURSOR_INVALID",
+                    "UNKNOWN_ROUTE_OR_METHOD", "EXTERNAL_UNKNOWN_ROUTE", "RESOURCE_NOT_FOUND",
+                    "INBOUND_PAYLOAD_CONFLICT", "HTTP_REJECTED" -> "REQUEST_REJECTED";
+            default -> "OTHER";
+        };
     }
 
     private String finiteTier(String tier) {

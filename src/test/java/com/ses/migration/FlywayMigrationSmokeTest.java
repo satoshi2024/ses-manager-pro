@@ -379,14 +379,14 @@ class FlywayMigrationSmokeTest {
                         "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
             }
             assertColumnExists(st, "t_permission_group_action", "deny_flag");
-            // V66.1: 全局wildcardは管理者だけに限定し、未知actionを既定拒否する。
+            // V66.1: グローバルwildcardは管理者だけに限定し、未知actionを既定拒否する。
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "
                             + "JOIN m_permission_group g ON g.id = a.group_id "
                             + "WHERE g.group_key IN ('role-admin','role-sales','role-hr','role-manager') "
                             + "AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
-                        "全局wildcardは管理者だけにseedされるはず");
+                        "グローバルwildcardは管理者だけにseedされるはず");
             }
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "
@@ -451,6 +451,19 @@ class FlywayMigrationSmokeTest {
                         java.util.List.of("tenant_id", "source_type", "business_key", "version_discriminator"),
                         cols,
                         "uk_document_idempotency は tenant_id を含む4列インデックスでなければならない");
+            }
+
+            // V200（b-14）: 取込 stage 照合の storage key 照会に、storage_key 1列の非一意索引がある（実MySQLで作成できる key 長）
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT column_name, non_unique FROM information_schema.statistics " +
+                    "WHERE table_schema=DATABASE() AND table_name='t_document_version' AND index_name='idx_dv_storage_key' " +
+                    "ORDER BY seq_in_index ASC")) {
+                java.util.List<String> cols = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    cols.add(rs.getString("column_name") + ":" + rs.getInt("non_unique"));
+                }
+                org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("storage_key:1"), cols,
+                        "idx_dv_storage_key は storage_key 1列の非一意索引でなければならない");
             }
 
             // V68: 横断検索・実ToDo・保存ビュー・一括操作 (productivity-search-saved-view)

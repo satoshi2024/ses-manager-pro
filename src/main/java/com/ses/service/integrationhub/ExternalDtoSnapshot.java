@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -75,6 +76,10 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
     private static final Set<String> PUBLIC_ID_FIELDS = Set.of(
             "publicEngineerId", "publicProjectId", "publicCustomerId", "publicContractId", "publicInvoiceId",
             "publicResourceId", "eventId", "providerEventId");
+    /** {@link ExternalApiPublicIdCodec} が発行するopaque資源ID。eventId / providerEventId はcodecの発行物ではない。 */
+    private static final Set<String> CODEC_PUBLIC_ID_FIELDS = Set.of(
+            "publicEngineerId", "publicProjectId", "publicCustomerId", "publicContractId", "publicInvoiceId",
+            "publicResourceId");
     private static final Set<String> DATE_FIELDS = Set.of(
             "availableFrom", "availableTo", "startDate", "endDate", "issueDate", "dueDate");
     private static final Set<String> DATE_TIME_FIELDS = Set.of(
@@ -275,7 +280,12 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             throw new IllegalArgumentException("external DTO snapshot value is too large");
         }
         if (PUBLIC_ID_FIELDS.contains(field)) {
-            requirePattern(field, text, SAFE_TOKEN_PATTERN);
+            // codecのbase64urlは約1/32の値で先頭が「-」「_」になり、SAFE_TOKENの先頭英数字規則に合わない。ここで拒むと
+            // producerのenqueueがその資源の業務更新ごと巻き戻すため、codecの発行形式そのものは通す（追加で通すのはこれだけ）。
+            if (!(CODEC_PUBLIC_ID_FIELDS.contains(field)
+                    && ExternalApiPublicIdCodec.PUBLIC_ID_PATTERN.matcher(text).matches())) {
+                requirePattern(field, text, SAFE_TOKEN_PATTERN);
+            }
         } else if (DATE_FIELDS.contains(field)) {
             try {
                 LocalDate.parse(text);

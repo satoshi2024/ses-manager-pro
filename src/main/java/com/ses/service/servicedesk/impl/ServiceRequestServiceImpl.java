@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.LogRedaction;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.portal.PortalCsatCreateRequest;
 import com.ses.dto.portal.PortalServiceCommentDto;
@@ -82,6 +83,13 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ServiceRequestSequenceMapper requestSequenceMapper;
+
+    /**
+     * 顧客ポータルへ出してよい問い合わせの範囲。portal経路（一覧・詳細・返信・CSAT）だけが使い、内部経路は使わない。
+     * 既存constructorを保つためfield injectionにする。未注入ならportal起票のみ（fail-closed）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalVisibilityPolicy;
 
     private final ServiceRequestMapper serviceRequestMapper;
     private final ServiceRequestSequenceMapper sequenceMapper;
@@ -209,11 +217,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
             LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                     policy.getResponseTimeHours(), policy, executionContext.organizationId(),
-                    executionContext.legalEntityId(), executionContext.zoneId())
+                    executionContext.legalEntityId(), executionContext.zoneId(), serviceRequest.getId())
                     .atZone(executionContext.zoneId()).toLocalDateTime();
             LocalDateTime resolveDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                     policy.getResolveTimeHours(), policy, executionContext.organizationId(),
-                    executionContext.legalEntityId(), executionContext.zoneId())
+                    executionContext.legalEntityId(), executionContext.zoneId(), serviceRequest.getId())
                     .atZone(executionContext.zoneId()).toLocalDateTime();
 
             ServiceSlaClock slaClock = ServiceSlaClock.builder()
@@ -253,16 +261,21 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         } catch (BusinessException be) {
             throw be;
         } catch (DuplicateKeyException dke) {
-            log.warn("サービスリクエスト起票で一意制約違反が発生しました: {}", dke.getMessage());
-            throw BusinessException.of(409, "リクエスト番号が重複しました。再試行してください");
+            // DB例外のmessageは一意制約の値（Duplicate entry '...'）やSQLを含み得るため、型と件数だけの安全な要約を出す
+            // （RB-I18N P3-N2-7）。応答の文言もkeyで返し、例外の内容を含めない。
+            log.warn("サービスリクエスト起票で一意制約違反が発生しました: {}", LogRedaction.safeThrowableSummary(dke));
+            throw BusinessException.of(409, "service.request.numberConflict");
         } catch (TransientDataAccessException tdae) {
-            log.warn("サービスリクエスト起票でトランザクション競合が発生しました: {}", tdae.getMessage());
-            throw BusinessException.of(503, "データベース処理で一時的な競合が発生しました。再試行してください");
+            log.warn("サービスリクエスト起票でトランザクション競合が発生しました: {}", LogRedaction.safeThrowableSummary(tdae));
+            throw BusinessException.of(503, "service.request.temporarilyUnavailable");
         } catch (DataAccessException dae) {
-            log.error("サービスリクエスト起票でDB例外が発生しました: {}", dae.getMessage(), dae);
-            throw BusinessException.of(503, "サービスリクエストの登録に失敗しました: " + dae.getMessage());
+            log.error("サービスリクエスト起票でDB例外が発生しました: {}", LogRedaction.safeThrowableSummary(dae));
+            throw BusinessException.of(503, "service.request.registerFailed");
         }
     }
+
+    /** 理由を入力しなかった状態変更の記録（状態イベントのreason。「新規起票」等と同じく既定の理由は日本語で持つ）。 */
+    static final String DEFAULT_STATUS_CHANGE_REASON = "ステータス更新";
 
     @Override
     @Transactional(readOnly = true)
@@ -280,8 +293,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public PortalServiceRequestDto getPortalDetail(Long id, Long customerId) {
         ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)) {
-            // 他社または存在しない場合は404秘匿
+        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)
+                || !isPortalVisible(req)) {
+            // 他社・存在しない・portalへ出さない範囲（初回リリース中の社内登録分等）は同じ404で秘匿
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
@@ -292,7 +306,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public Page<ServiceRequestDto> searchInternalRequests(int page, int size, String keyword, String status,
                                                           String priority, String category, Long customerId) {
-        Page<ServiceRequest> mpPage = new Page<>(page, size);
+        // 負・0のsizeによる全件取得を防ぎ、上限を全体のmaxLimitにそろえる（P3-N2-3）。
+        Page<ServiceRequest> mpPage = com.ses.common.util.PageUtils.safePage(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceRequest::getTenantId, currentTenant());
 
@@ -305,7 +320,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 // all件可視
             } else {
                 if (allowed.isEmpty()) {
-                    return new Page<>(page, size, 0);
+                    return new Page<>(mpPage.getCurrent(), mpPage.getSize(), 0);
                 }
                 wrapper.in(ServiceRequest::getCustomerId, allowed);
             }
@@ -345,10 +360,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "顧客組織情報が必要です");
         }
 
-        Page<ServiceRequest> mpPage = new Page<>(page, size);
+        Page<ServiceRequest> mpPage = com.ses.common.util.PageUtils.safePage(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceRequest::getTenantId, currentTenant());
         wrapper.eq(ServiceRequest::getCustomerId, customerId);
+        // portalへ出してよい範囲（portal起票、または公開開始時刻以降の作成）だけに絞る。件数もこの範囲で数える。
+        portalVisibility().restrict(wrapper, com.ses.service.accounting.AccountingTenantContextHolder.getZoneId());
 
         if (StringUtils.hasText(status)) {
             wrapper.eq(ServiceRequest::getStatus, status);
@@ -543,11 +560,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     }
                     LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResponseTimeHours(), policy, executionContext.organizationId(),
-                                executionContext.legalEntityId(), executionContext.zoneId())
+                                executionContext.legalEntityId(), executionContext.zoneId(), existing.getId())
                                 .atZone(executionContext.zoneId()).toLocalDateTime();
                         LocalDateTime resolveDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResolveTimeHours(), policy, executionContext.organizationId(),
-                                executionContext.legalEntityId(), executionContext.zoneId())
+                                executionContext.legalEntityId(), executionContext.zoneId(), existing.getId())
                                 .atZone(executionContext.zoneId()).toLocalDateTime();
 
                         ServiceSlaClock newClock = ServiceSlaClock.builder()
@@ -631,7 +648,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .roundNo(currentRound)
                 .fromStatus(fromStatus)
                 .toStatus(toStatus)
-                .reason(req.getReason())
+                // 理由が空の変更は言語に依らない既定の理由で記録する（画面の言語ごとに既定文言が混ざらないようにする）。
+                .reason(StringUtils.hasText(req.getReason()) ? req.getReason().trim() : DEFAULT_STATUS_CHANGE_REASON)
                 .actorType(executionContext.actorType())
                 .actorId(effectiveActorId != null ? effectiveActorId : 0L)
                 .actorName(effectiveActorName)
@@ -654,7 +672,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                         ServiceDeskExecutionContext executionContext) {
         requireExecutionContext(executionContext);
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (existing == null) {
+        if (existing == null || (isPortal && !isPortalVisible(existing))) {
+            // portalからの返信は、portalへ出してよい範囲の問い合わせだけに限る（controllerの自社scope検証に加えた防御）
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
         // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
@@ -758,7 +777,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId) {
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)) {
+        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)
+                || !isPortalVisible(existing)) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
@@ -772,7 +792,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .portalUserId(portalUserId)
                 .score(req.getScore())
                 .feedbackComment(req.getFeedbackComment())
-                .answeredAt(LocalDateTime.now(clock))
+                // 顧客ヘルスの90日の窓（tenantのtimezone）と同じ基準にするため、他の問い合わせの日時と同じくtenantの
+                // timezoneのローカル日時で保存する（P3-N2-5）。
+                .answeredAt(LocalDateTime.now(clock.withZone(com.ses.service.accounting.AccountingTenantContextHolder.getZoneId())))
                 .build();
 
         try {
@@ -900,7 +922,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         ServiceSlaPolicy policy = slaPolicyMapper.selectById(clockRow.getPolicyId());
         int pausedMinutes = slaCalculator.businessMinutesBetween(clockRow.getLastPausedAt(), now,
-                policy, executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId());
+                policy, executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId(), clockRow.getServiceRequestId());
         int total = (clockRow.getTotalPauseMinutes() != null ? clockRow.getTotalPauseMinutes() : 0) + pausedMinutes;
         clockRow.setTotalPauseMinutes(total);
         clockRow.setLastPausedAt(null);
@@ -909,7 +931,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (policy != null && clockRow.getResolveDeadline() != null) {
             LocalDateTime extended = slaCalculator.calculateExtendedDeadline(
                     clockRow.getResolveDeadline(), pausedMinutes, policy,
-                    executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId());
+                    executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId(), clockRow.getServiceRequestId());
             clockRow.setResolveDeadline(extended);
         }
     }
@@ -978,15 +1000,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (ownerUserId == null) {
             return;
         }
-        SysUser user = sysUserMapper.selectById(ownerUserId);
-        if (user == null || Integer.valueOf(1).equals(user.getDeletedFlag())) {
-            throw BusinessException.of(400, "指定された担当ユーザーが存在しません: " + ownerUserId);
-        }
-        if (user.getStatus() == null || user.getStatus() != 1) {
-            throw BusinessException.of(400, "指定された担当ユーザーは無効です: " + user.getRealName());
+        String tenantId = currentTenant();
+        SysUser user = sysUserMapper.selectByIdAndTenant(ownerUserId, tenantId);
+        // 存在/tenant/有効状態は同一のsafe errorにし、別tenantや無効userの識別情報を返さない。
+        if (user == null || !tenantId.equals(user.getTenantId())
+                || !Integer.valueOf(1).equals(user.getStatus())
+                || !Integer.valueOf(0).equals(user.getDeletedFlag())) {
+            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
         }
         if (!Set.of("管理者", "営業", "マネージャー").contains(user.getRole())) {
-            throw BusinessException.of(400, "指定されたユーザーは内部担当者として設定できません（管理者・営業・マネージャーのみ設定可能）: " + user.getRole());
+            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
         }
     }
 
@@ -1122,6 +1145,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .reopenedAt(req.getReopenedAt())
                 .reopenCount(req.getReopenCount())
                 .portalUserId(req.getPortalUserId())
+                // 内部画面で「顧客公開対象／社内限定」を示す。portal経路と同じpolicyで判定する（W2 r2 P3-5）。
+                .portalVisible(isPortalVisible(req))
                 .createdBy(req.getCreatedBy())
                 .createdByName(creatorUser != null ? creatorUser.getRealName() : null)
                 .version(req.getVersion())
@@ -1175,6 +1200,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .createdAt(req.getCreatedAt())
                 .comments(commentDtos)
                 .csatScore(csat != null ? csat.getScore() : null)
+                .csatComment(csat != null ? csat.getFeedbackComment() : null)
                 .csatAnswerable(answerable)
                 .build();
     }
@@ -1199,6 +1225,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (userId == null) return "SYSTEM";
         SysUser u = sysUserMapper.selectByIdAndTenant(userId, currentTenant());
         return u != null && u.getRealName() != null ? u.getRealName() : "ユーザー#" + userId;
+    }
+
+    /** portal経路で扱ってよい問い合わせか（portal起票、または公開開始時刻以降の作成）。 */
+    private boolean isPortalVisible(ServiceRequest request) {
+        return portalVisibility().isVisible(request, com.ses.service.accounting.AccountingTenantContextHolder.getZoneId());
+    }
+
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalVisibility() {
+        return portalVisibilityPolicy != null ? portalVisibilityPolicy
+                : com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY;
     }
 
     private String resolvePortalUserName(Long portalUserId) {

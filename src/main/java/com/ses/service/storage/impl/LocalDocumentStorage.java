@@ -113,6 +113,38 @@ public class LocalDocumentStorage implements DocumentStorage {
         }
     }
 
+    /**
+     * 失敗を握りつぶさない削除（NF-06 N6-2）。quarantine・公開の両方を必ず試み、最初の失敗を投げる。
+     * 削除後に実体が残っていないことも確認する。例外messageにはkeyだけを入れ、絶対pathは原因側にだけ残す。
+     */
+    @Override
+    public void deleteStrict(String key) throws IOException {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("削除対象のkeyが必要です");
+        }
+        Path qFile = resolvePath(key, true);
+        Path pFile = resolvePath(key, false);
+        IOException failure = null;
+        for (Path target : new Path[]{qFile, pFile}) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = new IOException("Storage削除失敗: " + key, e);
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+        if (Files.exists(qFile) || Files.exists(pFile)) {
+            throw new IOException("Storage実体が削除後も残っています: " + key);
+        }
+        log.debug("[LocalDocumentStorage] deleteStrict: key={}", key);
+    }
+
     private Path resolvePath(String key, boolean quarantine) {
         // セキュリティのためディレクトリトラバーサル防止
         String safeKey = key.replace("..", "").replace("\\", "/");

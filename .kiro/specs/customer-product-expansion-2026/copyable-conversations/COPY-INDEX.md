@@ -3,7 +3,7 @@
 各 `.txt` は説明やMarkdown fenceを含まない。そのまま全選択して新しいAI対話へ貼り付ける。
 通常はSxxを実装対話へ渡し、spec完了後に対応するRxxを別のReview対話へ渡す。T001は対象外。
 
-| # | spec | 開工対話 | Review対話 | 残task |
+| # | spec | 着手対話 | Review対話 | 残task |
 |---:|---|---|---|---:|
 | 1 | `multi-company-tenant-isolation` | [S01](S01__multi-company-tenant-isolation__start.txt) | [R01](R01__multi-company-tenant-isolation__review.txt) | 6 |
 | 2 | `organization-management-accounting` | [S02](S02__organization-management-accounting__start.txt) | [R02](R02__organization-management-accounting__review.txt) | 6 |

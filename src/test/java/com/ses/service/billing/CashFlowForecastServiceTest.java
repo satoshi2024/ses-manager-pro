@@ -67,7 +67,7 @@ class CashFlowForecastServiceTest {
     private WorkRecordMapper workRecordMapper;
 
     /**
-     * 口径突合の検証が目的なので、モックのエコーではなく全社KPIの実ロジックを注入する。
+     * 集計基準の突合の検証が目的なので、モックのエコーではなく全社KPIの実ロジックを注入する。
      * 純粋ロジック（単価リゾルバは任意依存）のため no-arg 生成できる。
      */
     @Spy
@@ -273,7 +273,7 @@ class CashFlowForecastServiceTest {
     }
 
     /**
-     * 要件1.4: 起点月の売上口径が全社KPI（MonthlyRevenueCalcService）と突合すること。
+     * 要件1.4: 起点月の売上の集計基準が全社KPI（MonthlyRevenueCalcService）と突合すること。
      * 請求書は確定実績の billing_amount から生成されるため、当月請求分の税抜合計と
      * KPI売上（確定実績優先・準備中除外）は一致し、差分0になる。
      */

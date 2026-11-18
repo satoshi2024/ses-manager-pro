@@ -14,7 +14,7 @@ import java.time.Clock;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "integration.hub.public-api.enabled", havingValue = "true")
+@org.springframework.context.annotation.Conditional(IntegrationHubInboundCondition.class)
 public class ExternalApiReadSnapshotPurgeScheduler {
     private final ExternalApiReadSnapshotPurgeService purgeService;
     private final IntegrationHubExternalApiProperties properties;

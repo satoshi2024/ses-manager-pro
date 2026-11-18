@@ -103,7 +103,7 @@ class AiExecutionGatewayPersistMetadataTest {
     }
 
     @Test
-    void 双tenantは交差せずcontextのtenantとHolder不一致は拒否する() {
+    void 二つのtenantは交差せずcontextのtenantとHolder不一致は拒否する() {
         AccountingTenantContextHolder.setTenantId("tenant-a");
         CopilotExecutionContext foreign = matchingContext("tenant-b", 88L);
         BusinessException ex = assertThrows(BusinessException.class, () ->

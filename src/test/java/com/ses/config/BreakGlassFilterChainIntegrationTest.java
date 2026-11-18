@@ -203,6 +203,31 @@ class BreakGlassFilterChainIntegrationTest {
         verify(incidentMapper, never()).selectByIdAndTenant(any(), any());
     }
 
+    /** D1 review P2-1: 初回パスワード変更が必要なbreak-glass sessionだけ、scope外でも変更画面を開ける。 */
+    @Test
+    void 変更要求のあるbreakGlass_sessionは変更画面を開け要求が無ければscope違反にする() throws Exception {
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(activeIncident());
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+
+        MockHttpSession required = boundSession();
+        required.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        required.setAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+        mockMvc.perform(get("/password/change").session(required).with(breakGlassAuthentication()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"password-change-form\"")));
+        // 変更前の他画面は変更画面へ誘導される（scopeのdashboard.viewは通過した上でPasswordChangeEnforcementFilterが止める）
+        mockMvc.perform(get("/dashboard").session(required).with(breakGlassAuthentication()))
+                .andExpect(status().is3xxRedirection());
+
+        MockHttpSession notRequired = boundSession();
+        notRequired.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        mockMvc.perform(get("/password/change").session(notRequired).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION"));
+
+        verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
+    }
+
     private MockHttpSession boundSession() {
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);

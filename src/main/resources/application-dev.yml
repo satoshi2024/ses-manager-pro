@@ -6,6 +6,19 @@ spring:
   flyway:
     locations: classpath:db/migration,classpath:db/migration-dev
 
+# ローカル開発の単一tenant（V2のadminと権限groupのtenant = default）。環境変数を設定すればそちらが優先される。
+# prod は application-dev.yml を読まないため、従来どおり両方を明示設定しないと起動を拒否する（deploy-runbook §1.0 の5・26）。
+app:
+  accounting:
+    tenants:
+      # 空だと AccountingTenantInventoryStartupValidator がtest以外の全profileで起動を止める。
+      ids: ${ACCOUNTING_TENANT_IDS:default}
+  security:
+    oidc:
+      # local loginのprincipalはこの値をtenantにする（sys_user.tenant_id は使わない）。空だとlogin後の全画面・APIが
+      # 403 TENANT_CONTEXT_REQUIRED（InternalTenantContextFilter）になる。
+      tenant-id: ${OIDC_TENANT_ID:default}
+
 integration:
   hub:
     public-api:

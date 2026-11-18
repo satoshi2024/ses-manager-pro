@@ -203,6 +203,7 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
                         .string(org.hamcrest.Matchers.allOf(
                                 org.hamcrest.Matchers.containsString("actor_type"),
+                                org.hamcrest.Matchers.containsString("api.user@ses-test.jp"),
                                 org.hamcrest.Matchers.containsString("HUMAN"),
                                 org.hamcrest.Matchers.containsString("MANUAL_API"))));
     }

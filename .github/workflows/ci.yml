@@ -171,13 +171,15 @@ jobs:
             exit 1
           fi
 
-      # 証跡はtarget/browser-m-evidence/（.gitignore対象）をexact commitのartifactとして保存する。
+      # 既存browser M証跡とPWA NF04専用の証跡・失敗診断をexact commitのartifactとして保存する。
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: browser-m-evidence
-          path: target/browser-m-evidence/
+          path: |
+            target/browser-m-evidence/
+            target/nf04-browser-evidence/
           retention-days: 30
 
   # HFP-03-011: 実 MySQL（source/target 別コンテナ）での PITR integration suite。

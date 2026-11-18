@@ -16,6 +16,25 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
     @Select("SELECT * FROM t_bp_payment WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     BpPayment selectByIdForUpdate(@Param("id") Long id);
 
+    /** t_bp_paymentはtenant列を持たないため、工数実績→契約→顧客のownershipで現在tenantへ限定する。 */
+    String TENANT_OWNERSHIP_JOIN = " INNER JOIN t_work_record w ON b.work_record_id = w.id"
+            + " INNER JOIN t_contract c ON w.contract_id = c.id"
+            + " AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0"
+            + " INNER JOIN m_customer mc ON mc.id = c.customer_id"
+            + " AND mc.tenant_id IS NOT NULL AND mc.tenant_id = c.tenant_id"
+            + " AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0";
+
+    /** 会計送信（プレビュー・送信・支払実績同期）用: 現在tenantのBP支払だけを1件取得する。 */
+    @Select("SELECT b.* FROM t_bp_payment b" + TENANT_OWNERSHIP_JOIN
+            + " WHERE b.id = #{id} AND b.deleted_flag = 0")
+    BpPayment selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    /** 会計・支払連携の送信候補: 現在tenantの送信可能なBP支払（新しい順）。 */
+    @Select("SELECT b.* FROM t_bp_payment b" + TENANT_OWNERSHIP_JOIN
+            + " WHERE b.deleted_flag = 0 AND b.status IN ('未払', '承認済', 'CONFIRMED', 'APPROVED')"
+            + " ORDER BY b.id DESC LIMIT #{limit}")
+    List<BpPayment> selectSendCandidatesForTenant(@Param("tenantId") String tenantId, @Param("limit") int limit);
+
     /**
      * BP portal用: 自社（bp_company_id）の発注/作業実績一覧（SQL境界。design §6.2）。
      * 自社分の金額のみ。他BPの階層・社内情報は返さない。

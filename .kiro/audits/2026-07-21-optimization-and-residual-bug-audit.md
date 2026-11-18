@@ -13,7 +13,7 @@
 
 ## 監査で「問題なし」を確認した領域（重複調査の防止）
 
-精読の結果、以下は安全と確認した: ファイルアップロード（`FileStorageServiceImpl`：UUID名・拡張子/Content-Type検証・パストラバーサル二重チェック、`FileKind` は SVG/HTML を許可せず配信も安全な拡張子のみ）、CSVエクスポートの数式インジェクション（`CsvUtils.sanitizeForSpreadsheet` で CWE-1236 対策済み）、アカウントロック（`AccountLockServiceImpl`：条件付きDB更新で lost update 防止・ロック期限処理あり）、**孤児ファイル清理**（`FileCleanupServiceImpl`：契約書PDFは `uploads/contracts/{id}/` サブディレクトリ保存で、`Files.list` の非再帰＋`isRegularFile` フィルタにより走査対象外＝誤削除しない）、`RuleMatchingServiceImpl` のスキル突合（スキル・タグを一括ロードしてin-memory照合＝N+1なし）。
+精読の結果、以下は安全と確認した: ファイルアップロード（`FileStorageServiceImpl`：UUID名・拡張子/Content-Type検証・パストラバーサル二重チェック、`FileKind` は SVG/HTML を許可せず配信も安全な拡張子のみ）、CSVエクスポートの数式インジェクション（`CsvUtils.sanitizeForSpreadsheet` で CWE-1236 対策済み）、アカウントロック（`AccountLockServiceImpl`：条件付きDB更新で lost update 防止・ロック期限処理あり）、**孤児ファイル清掃**（`FileCleanupServiceImpl`：契約書PDFは `uploads/contracts/{id}/` サブディレクトリ保存で、`Files.list` の非再帰＋`isRegularFile` フィルタにより走査対象外＝誤削除しない）、`RuleMatchingServiceImpl` のスキル突合（スキル・タグを一括ロードしてin-memory照合＝N+1なし）。
 
 ---
 
@@ -60,7 +60,7 @@
 - 対象:
   - `src/main/java/com/ses/service/impl/DashboardServiceImpl.java:77`（`contractMapper.selectList(new QueryWrapper<>())`＝全契約）・`:171`（全要員）
   - `src/main/java/com/ses/service/impl/SalesPerformanceServiceImpl.java:66`（全契約）
-- 現象・影響: ダッシュボード表示・営業成績表示のたびに、契約テーブル（および要員テーブル）を**全件メモリに載せて**月次集計・稼働率・成績をJavaで計算する。契約が数千件規模になると1リクエストごとのメモリ・GC負荷とレスポンス時間が線形に悪化する。共通口径サービスへ渡す設計自体は妥当だが、母集団の絞り込みがSQL側に無い。
+- 現象・影響: ダッシュボード表示・営業成績表示のたびに、契約テーブル（および要員テーブル）を**全件メモリに載せて**月次集計・稼働率・成績をJavaで計算する。契約が数千件規模になると1リクエストごとのメモリ・GC負荷とレスポンス時間が線形に悪化する。共通の集計基準サービスへ渡す設計自体は妥当だが、母集団の絞り込みがSQL側に無い。
 - 対応方法: 少なくとも対象期間・ステータスで母集団を絞る（例: 集計対象月に重なりうる `status IN ('稼動中','終了','解約')` かつ `start_date <= 期間末` の契約のみ取得）。恒久的には月次売上・粗利をSQL集計（GROUP BY）へ寄せるか、確定済み月のKPIをスナップショット保存して再計算を避ける。
 - 期待効果: 契約件数の増加に対してダッシュボード/営業成績の応答時間とメモリ使用量が概ね一定に近づく。
 

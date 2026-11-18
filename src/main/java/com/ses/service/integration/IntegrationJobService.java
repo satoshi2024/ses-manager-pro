@@ -61,6 +61,23 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
     void cancelJob(Long jobId, String reason);
 
     /**
+     * システムの判断で未完了のジョブ（PENDING / RETRYABLE / RUNNING / FAILED）を取消す。
+     * 呼出側が読んだジョブの状態・バージョンで照合し、その間に状態が変わっていれば取消さない（false）。
+     * 利用者の取消（{@link #cancelJob}）と異なり、種別による拒否も例外もない（取消できたかを戻り値で返す）。
+     *
+     * @return 取消したとき true
+     */
+    boolean cancelBySystem(IntegrationJob job, String errorCode, String safeMessage);
+
+    /**
+     * 成功済みのジョブに要対応の印を付ける（状態は SUCCEEDED のまま。理由をエラーコード・安全メッセージと
+     * 状態遷移イベント ACTION_REQUIRED に残す）。成功済みでなければ何もしない。
+     *
+     * @return 印を付けたとき true
+     */
+    boolean markActionRequired(Long jobId, String errorCode, String safeMessage);
+
+    /**
      * 失敗/再試行可能ジョブを手動で再実行待ち（PENDING）に戻す。
      */
     void resetForManualRetry(Long jobId);

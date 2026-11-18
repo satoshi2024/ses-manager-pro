@@ -29,7 +29,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 /**
- * T056定向テスト: 注文文書（ORDER_RECEIVED/ORDER_ACKNOWLEDGEMENT）のACLは
+ * T056対象限定テスト: 注文文書（ORDER_RECEIVED/ORDER_ACKNOWLEDGEMENT）のACLは
  * 注文一覧と同じscope（顧客DataScope）を通す（design §5.2 / archive spec §6.2）。
  */
 @SpringBootTest

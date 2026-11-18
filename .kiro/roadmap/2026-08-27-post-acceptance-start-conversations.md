@@ -1,9 +1,9 @@
-# 受入後機能候補 — 開工（主実装AI）対話
+# 受入後機能候補 — 着手（主実装AI）対話
 
 > この文書の対話は**実装専用**である。独立Reviewには使用しない。
 > 対象候補が`APPROVED`でない場合、AIはread-only discoveryとspec作成までで停止し、production codeを変更しない。
 > Reviewは必ず別の新規対話で`2026-08-27-post-acceptance-review-conversations.md`を使用する。
-> **全ての開工は専用Codex worktree＋専用remote branchで行う。通常checkout
+> **全ての着手は専用Codex worktree＋専用remote branchで行う。通常checkout
 > `C:\work\ses-manager-pro`を実装作業に使用してはならない。**
 
 ## 1. 使い方
@@ -18,7 +18,7 @@
 8. Reviewは最初に計画（approved scope、requirements、design、tasks、Decision Gate、実装台帳）の完遂性を確認し、
    その後にコード/SQL/test/DemoをReviewする。両方がPASSした後だけPRを作成する。
 
-## 2. 全開工対話に適用する実装契約
+## 2. 全ての着手対話に適用する実装契約
 
 - AGENTS.mdと指定された`.kiro`文書を完全に読む。
 - 実装開始前に`git rev-parse --show-toplevel`、`git worktree list --porcelain`、`git branch --show-current`、
@@ -38,7 +38,7 @@
 - 外部I/Oはtransaction外。outbox/job、timeout、retry/backoff、rate limit、correlation ID、recoveryを持つ。
 - internal entityをportal/external API/AIへ直接公開しない。外部DTOはallow-list testを持つ。
 - 既存message bundle全てを同期し、日本語文言をrepositoryの文体へ合わせる。
-- 通常Taskは定向testと直接回帰、Mで必要な全量gateを実行する。skipを成功扱いにしない。
+- 通常Taskは対象限定テストと直接回帰、Mで必要な全量gateを実行する。skipを成功扱いにしない。
 - Task完了時にreview ledgerへrequirements、変更file、test、Demo、base/head、risk、rollbackを記録する。
 - 実測していないことを「確認済み」と書かない。環境不足は未検証とrelease gateへ明記する。
 - 完了条件を満たした原子Taskごとに、repository規約に従う日本語commit messageで対象変更だけをcommitし、
@@ -55,7 +55,7 @@
 
 ```text
 あなたはSES Manager Proの `engineer-lifecycle-workflow` 専用の主実装AIです。
-これは開工対話です。承認済みscope内のコード、SQL、画面、test、specを変更し、独立Reviewは行いません。
+これは着手対話です。承認済みscope内のコード、SQL、画面、test、specを変更し、独立Reviewは行いません。
 
 【Worktree/Git必須条件】
 - 専用Codex worktreeで実行し、branchは`codex/engineer-lifecycle-workflow`とする。
@@ -115,7 +115,7 @@ release gateを報告してください。成功条件を満たしたTaskだけt
 ## S-NF02 — `customer-success-service-desk`
 
 ```text
-あなたはSES Manager Proの `customer-success-service-desk` 専用の主実装AIです。これは開工対話です。
+あなたはSES Manager Proの `customer-success-service-desk` 専用の主実装AIです。これは着手対話です。
 Approved scope=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。APPROVEDでなければspec作成までで停止してください。
 
 専用Codex worktreeとbranch `codex/customer-success-service-desk`を必須とします。通常checkout
@@ -140,7 +140,7 @@ A1内部service desk→A2 portal起票/返信/CSAT→B1 SLA scheduler/通知→B
 - portal Aからcustomer B、添付download、count/export/notification linkのscope漏えいを拒否する。
 - scheduler二重実行、breach通知dedupe、reopen、二重CSATをtestする。
 
-Taskごとに定向testとDemoを完了し、Mで必要gate、desktop/390px portal Demo、provider/通知障害、
+Taskごとに対象限定テストとDemoを完了し、Mで必要gate、desktop/390px portal Demo、provider/通知障害、
 rollback/runbookを実証してください。完了時はbase/headと独立Review用diffを固定してください。
 ```
 
@@ -179,7 +179,7 @@ A1 HR/manager UI→A2本人申請/学習計画→B1通知/承認/document→B2�
 ## S-NF04 — `mobile-pwa-self-service`
 
 ```text
-あなたは `mobile-pwa-self-service` の主実装AIです。これはコード変更を行う開工対話です。
+あなたは `mobile-pwa-self-service` の主実装AIです。これはコード変更を行う着手対話です。
 Approved scope=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。APPROVED未達ならread-only spikeまでです。
 
 専用Codex worktreeとbranch `codex/mobile-pwa-self-service`を必須とし、通常checkoutを変更しません。
@@ -211,7 +211,7 @@ PWA実装のために勤怠/経費の業務計算を複製・変更しないで�
 ## S-NF05 — `integration-hub-public-api`
 
 ```text
-あなたは `integration-hub-public-api` の主実装AIです。これは高リスクの開工対話です。
+あなたは `integration-hub-public-api` の主実装AIです。これは高リスクの着手対話です。
 Approved resources/commands=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。DG-05、脅威モデル、
 認証方式、契約SLA、公開field inventoryがAPPROVEDでなければproduction変更を開始しません。
 
@@ -245,7 +245,7 @@ Mではsecurity review、負荷、障害訓練、key rotation、secret/PII scan�
 ## S-NF06 — `data-migration-import-center`
 
 ```text
-あなたは `data-migration-import-center` の主実装AIです。これは開工対話です。
+あなたは `data-migration-import-center` の主実装AIです。これは着手対話です。
 Approved entity/schema=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。DG-06未決定ならsample/read-only mapping spikeまでです。
 
 専用Codex worktreeとbranch `codex/data-migration-import-center`を必須とし、通常checkoutを変更しません。
@@ -276,7 +276,7 @@ A1 upload/mapping/preview/error UI→B1 apply/chunk/restart/idempotency→B2 rol
 ## S-NF07 — `privacy-retention-dsar`
 
 ```text
-あなたは `privacy-retention-dsar` の主実装AIです。これは法務/データ破壊リスクの高い開工対話です。
+あなたは `privacy-retention-dsar` の主実装AIです。これは法務/データ破壊リスクの高い着手対話です。
 Approved policy/scope=<APPROVED_SCOPE>、Privacy owner=<OWNER>、Base=<BASE_COMMIT>。
 DG-07と外部専門家/社内責任者gateが未完なら、inventory、dry-run、specまでで停止し、削除/匿名化を実装・実行しません。
 
@@ -309,10 +309,10 @@ A1 privacy dashboard/hold/approval→A2 DSAR case/export/redaction→B1 disposit
 ## S-NF08 — `ai-management-copilot`
 
 > **詳細は spec 正本へ委譲**: `.kiro/specs/ai-management-copilot/start-conversations.md`
-> （S0 総開工 + F1〜M task 別対話）。本節は SNF01〜10 一覧用の要約のみ。
+> （S0 全体着手 + F1〜M task 別対話）。本節は SNF01〜10 一覧用の要約のみ。
 
 ```text
-あなたは `ai-management-copilot` の主実装AIです。開工対話の全文は
+あなたは `ai-management-copilot` の主実装AIです。着手対話の全文は
 `.kiro/specs/ai-management-copilot/start-conversations.md` §2（S0）および §3（F1〜M）を
 新しい実装対話へコピーして使用してください。本節だけでは着手しない。
 
@@ -330,7 +330,7 @@ A1 privacy dashboard/hold/approval→A2 DSAR case/export/redaction→B1 disposit
 
 ```text
 あなたは `asset-account-license-lifecycle` の主実装AIです。Approved scope=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。
-これは開工対話です。DG-09とNF-01 link contractが未決定ならspec/discoveryまでで停止します。
+これは着手対話です。DG-09とNF-01 link contractが未決定ならspec/discoveryまでで停止します。
 
 専用Codex worktreeとbranch `codex/asset-account-license-lifecycle`を必須とし、通常checkoutを変更しません。
 Base branch=<BASE_BRANCH>。開始時にworktree/root/branch/status/remote/baseを検証し、完了Taskごとにcommit/pushします。
@@ -360,7 +360,7 @@ M後に資産件数reconciliation、未返却一覧、secret scan、rollback/run
 
 ```text
 あなたは `scheduled-management-reporting` の主実装AIです。Approved report/recipient=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。
-これは開工対話です。DG-10が未決定なら既存集計inventoryとsample snapshot specまでで停止してください。
+これは着手対話です。DG-10が未決定なら既存集計inventoryとsample snapshot specまでで停止してください。
 
 専用Codex worktreeとbranch `codex/scheduled-management-reporting`を必須とし、通常checkoutを変更しません。
 Base branch=<BASE_BRANCH>。開始時にworktree/root/branch/status/remote/baseを検証し、完了Taskごとにcommit/pushします。
@@ -387,7 +387,7 @@ F2 snapshot orchestration→A1 template/preview/run UI→B1 PDF/XLSX/document→
 Mで月末境界、desktop/390px preview、document restore、配布障害訓練、base/headを証拠化してください。
 ```
 
-## 3. 開工対話の最終報告フォーマット
+## 3. 着手対話の最終報告フォーマット
 
 ```text
 実装結果: COMPLETE / PARTIAL / BLOCKED

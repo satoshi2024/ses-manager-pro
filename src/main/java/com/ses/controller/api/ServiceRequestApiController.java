@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentDto;
@@ -66,7 +67,11 @@ public class ServiceRequestApiController {
             @RequestParam(required = false) String priority,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) Long customerId) {
-        Page<ServiceRequestDto> result = serviceRequestService.searchInternalRequests(current, size, keyword, status, priority, category, customerId);
+        // 一覧は1行ごとに複数のqueryを発行するため、全体上限より小さい一覧専用の上限へ丸める（P3-N2-3）。
+        Page<ServiceRequestDto> paging = PageUtils.safePage(current, size, PageUtils.DEFAULT_PAGE_SIZE,
+                ServiceRequestService.LIST_MAX_PAGE_SIZE);
+        Page<ServiceRequestDto> result = serviceRequestService.searchInternalRequests((int) paging.getCurrent(),
+                (int) paging.getSize(), keyword, status, priority, category, customerId);
         return ApiResult.success(result);
     }
 

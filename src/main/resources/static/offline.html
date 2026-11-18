@@ -12,13 +12,215 @@
         h1 { margin: 0 0 12px; font-size: 1.35rem; }
         p { margin: 0 0 20px; color: #cbd5e1; line-height: 1.7; }
         button { border: 0; border-radius: 8px; padding: 11px 18px; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer; }
+        article { margin-top: 12px; padding: 12px; border: 1px solid #334155; border-radius: 10px; text-align: left; }
+        article dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; text-align: left; }
+        article dt { color: #94a3b8; }
+        article dd { margin: 0; overflow-wrap: anywhere; }
+        #offline-drafts[hidden], #offline-restore-auth[hidden], #offline-restore-unavailable[hidden] { display: none; }
     </style>
 </head>
 <body>
+<!--
+  画面文言: 静的ページのため Thymeleaf も /js/i18n.js（no-store、Service Workerもcacheしない）も使えない。
+  pwa-queue.js がオンラインの画面で端末へ写した pwa.* の文言（利用者が選んだ言語）を SES.pwaQueue.text で引き、
+  無い場合は下の日本語（ja の bundle と同じ文字列）を表示する（RB-I18N P3-N4-6）。
+-->
 <main>
-    <h1>現在オフラインです</h1>
-    <p>通信が回復したら再読み込みしてください。保存対象の下書きは端末内で保護されています。</p>
-    <button type="button" onclick="location.reload()">再読み込み</button>
+    <h1 data-pwa-text="pwa.offline.heading">現在オフラインです</h1>
+    <p data-pwa-text="pwa.offline.lockedNotice">保存済みの下書きはロックされています。通常の再読み込みでは表示・送信されません。通信が回復した後、パスワードを再確認し、復元を明示してください（パスワードでログインしている場合だけ復元できます）。</p>
+    <button type="button" onclick="location.reload()" data-pwa-text="pwa.offline.reload">再読み込み</button>
+    <section id="offline-restore" aria-live="polite">
+        <!-- 復元できるか（serverのsession認証主体で判定）を確認できるまでパスワード欄は使えない。OIDC等では隠す。 -->
+        <div id="offline-restore-auth">
+            <label for="offline-restore-password" data-pwa-text="pwa.offline.password">パスワード</label>
+            <input id="offline-restore-password" type="password" autocomplete="current-password" disabled>
+            <button id="offline-reauth" type="button" disabled data-pwa-text="pwa.offline.reauth">再認証</button>
+        </div>
+        <p id="offline-restore-unavailable" hidden data-pwa-text="pwa.offline.restoreUnavailable">この下書きは復元できません。シングルサインオン（社内の共通ログイン）でログインしている場合は、パスワードによる本人確認を使えないためです。必要な内容は通常の画面で再入力してください。</p>
+        <button id="offline-confirm-restore" type="button" hidden data-pwa-text="pwa.offline.confirmRestore">下書きを復元する</button>
+        <p id="offline-restore-status" role="status"></p>
+    </section>
+    <section id="offline-drafts" aria-live="polite" hidden>
+        <h2 data-pwa-text="pwa.offline.draftsHeading">この端末に保存した下書き</h2>
+        <div id="offline-draft-list"></div>
+    </section>
 </main>
+<script src="/js/pwa-queue.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 文言（key・日本語の既定文言・{0}等）。pwa-queue.jsが読めない場合も既定文言で表示する。
+        const T = function(key, fallback, ...args) {
+            const queue = window.SES && window.SES.pwaQueue;
+            return queue && typeof queue.text === 'function' ? queue.text(key, fallback, ...args) : fallback;
+        };
+        const language = window.SES && window.SES.pwaQueue && typeof window.SES.pwaQueue.language === 'function'
+            ? window.SES.pwaQueue.language() : 'ja';
+        document.documentElement.lang = language;
+        document.title = T('pwa.offline.title', 'オフライン') + ' | SES Manager Pro';
+        document.querySelectorAll('[data-pwa-text]').forEach(function(element) {
+            element.textContent = T(element.getAttribute('data-pwa-text'), element.textContent);
+        });
+        const section = document.getElementById('offline-drafts');
+        const list = document.getElementById('offline-draft-list');
+        const password = document.getElementById('offline-restore-password');
+        const reauth = document.getElementById('offline-reauth');
+        const confirmRestore = document.getElementById('offline-confirm-restore');
+        const status = document.getElementById('offline-restore-status');
+        const screenLabels = {
+            attendance: T('pwa.offline.screen.attendance', '勤怠'),
+            timesheet: T('pwa.offline.screen.timesheet', '作業報告'),
+            expense: T('pwa.offline.screen.expense', '経費'),
+            'change-request': T('pwa.offline.screen.changeRequest', '変更申請')
+        };
+        const statusLabels = {
+            PENDING: T('pwa.offline.status.pending', '未送信'),
+            CONFLICT: T('pwa.offline.status.conflict', '競合確認が必要')
+        };
+        const dateLabel = T('pwa.offline.field.date', '日付');
+        const breakLabel = T('pwa.offline.field.breakMinutes', '休憩（分）');
+        // 表示してよい項目だけを列挙する（payloadの全体やJSONは出さない）。
+        const fieldLabels = {
+            attendance: { workDate: dateLabel, clockIn: T('pwa.offline.field.clockIn', '出勤'), clockOut: T('pwa.offline.field.clockOut', '退勤'),
+                breakMinutes: breakLabel, workType: T('pwa.offline.field.workType', '勤務区分'), workplaceType: T('pwa.offline.field.workplaceType', '勤務場所') },
+            timesheet: { workDate: dateLabel, startTime: T('pwa.offline.field.startTime', '開始'), endTime: T('pwa.offline.field.endTime', '終了'), breakMinutes: breakLabel },
+            expense: { expenseDate: dateLabel, category: T('pwa.offline.field.category', '費目'), amount: T('pwa.offline.field.amount', '金額') }
+        };
+        function formatAmount(value) {
+            let formatted;
+            try { formatted = new Intl.NumberFormat(language).format(Number(value)); }
+            catch (_) { formatted = new Intl.NumberFormat('ja-JP').format(Number(value)); }
+            return T('pwa.offline.amount', '{0}円', formatted);
+        }
+        function clearDrafts() {
+            list.replaceChildren();
+            section.hidden = true;
+            confirmRestore.hidden = true;
+            password.value = '';
+        }
+        function showDrafts(drafts) {
+            clearDrafts();
+            if (!drafts.length) { status.textContent = T('pwa.offline.noDrafts', '復元できる下書きがありません。'); return; }
+            section.hidden = false;
+            drafts.forEach(function(draft) {
+                const article = document.createElement('article');
+                const heading = document.createElement('h3');
+                heading.textContent = `${screenLabels[draft.screen] || T('pwa.offline.screen.draft', '下書き')} / ${statusLabels[draft.status] || T('pwa.offline.status.unknown', '状態確認が必要')}`;
+                article.appendChild(heading);
+                const labels = fieldLabels[draft.screen];
+                if (labels) {
+                    const details = document.createElement('dl');
+                    Object.entries(labels).forEach(function(entry) {
+                        const key = entry[0];
+                        const value = draft.payload && draft.payload[key];
+                        if (value === undefined || value === null || value === '') return;
+                        const term = document.createElement('dt');
+                        term.textContent = entry[1];
+                        const description = document.createElement('dd');
+                        description.textContent = key === 'amount' && Number.isFinite(Number(value))
+                            ? formatAmount(value) : String(value);
+                        details.append(term, description);
+                    });
+                    article.appendChild(details);
+                } else {
+                    const note = document.createElement('p');
+                    note.textContent = T('pwa.offline.changeRequestNote', '申請内容は通信回復後にログインして確認してください。');
+                    article.appendChild(note);
+                }
+                list.appendChild(article);
+            });
+        }
+        const authBox = document.getElementById('offline-restore-auth');
+        const unavailableNote = document.getElementById('offline-restore-unavailable');
+        // serverが返す復元可否（true/false）。null=未確認。OIDC等（false）ではパスワード欄を出さず、パスワードも送らない。
+        let restoreAvailability = null;
+        let checkingAvailability = false;
+        let availabilityRetries = 0;
+        function applyAvailability() {
+            const unavailable = restoreAvailability === false;
+            authBox.hidden = unavailable;
+            unavailableNote.hidden = !unavailable;
+            const enabled = navigator.onLine && restoreAvailability === true;
+            password.disabled = !enabled;
+            reauth.disabled = !enabled;
+        }
+        function updateNetwork() {
+            applyAvailability();
+            if (!navigator.onLine) status.textContent = T('pwa.offline.needNetwork', '再認証には通信が必要です。下書きはロック中です。');
+            else if (restoreAvailability === false) status.textContent = '';
+            else if (restoreAvailability === null && checkingAvailability) status.textContent = T('pwa.offline.checking', '復元できるかを確認しています。');
+        }
+        async function refreshAvailability() {
+            if (!navigator.onLine || restoreAvailability !== null || checkingAvailability) { updateNetwork(); return; }
+            checkingAvailability = true;
+            updateNetwork();
+            let result = null;
+            try {
+                result = await window.SES.pwaQueue.checkRestoreAvailability();
+            } catch (_) {
+                result = null;
+            }
+            checkingAvailability = false;
+            if (result === true || result === false) restoreAvailability = result;
+            updateNetwork();
+            if (restoreAvailability === null && navigator.onLine) {
+                status.textContent = T('pwa.offline.checkFailed', '復元できるかを確認できませんでした。通信を確認して再読み込みしてください。');
+                // 一時的な失敗は数回だけ自動で再確認する（focus・表示復帰でも再確認する。W3-09 P3-7）。
+                if (availabilityRetries < 5) {
+                    availabilityRetries++;
+                    setTimeout(refreshAvailability, 2000);
+                }
+            }
+        }
+        reauth.addEventListener('click', async function() {
+            reauth.disabled = true;
+            status.textContent = T('pwa.offline.reauthChecking', '再認証を確認しています。');
+            const secret = password.value;
+            password.value = '';
+            try {
+                await window.SES.pwaQueue.prepareRestore(secret);
+                confirmRestore.hidden = false;
+                status.textContent = T('pwa.offline.reauthOk', '再認証できました。下書き内容を表示するには「下書きを復元する」を選択してください。');
+            } catch (error) {
+                if (error && error.restoreUnavailable) {
+                    // serverがパスワード再認証に対応しないsessionと判定した（失敗回数には数えられない）。
+                    restoreAvailability = false;
+                    status.textContent = '';
+                } else {
+                    status.textContent = T('pwa.offline.reauthFailed', '再認証できませんでした。オンライン状態とパスワードを確認してください。');
+                }
+            } finally {
+                applyAvailability();
+                password.value = '';
+            }
+        });
+        confirmRestore.addEventListener('click', async function() {
+            confirmRestore.disabled = true;
+            try {
+                await window.SES.pwaQueue.confirmRestore();
+                const drafts = await window.SES.pwaQueue.getOfflineDrafts();
+                showDrafts(drafts);
+                status.textContent = drafts.length
+                    ? T('pwa.offline.restored', '復元した下書きを確認してください。') : T('pwa.offline.noDrafts', '復元できる下書きがありません。');
+            } catch (error) {
+                clearDrafts();
+                if (error && error.restoreUnavailable) {
+                    restoreAvailability = false;
+                    applyAvailability();
+                    status.textContent = '';
+                } else {
+                    status.textContent = T('pwa.offline.restoreFailed', '復元できませんでした。下書きはロックされたままです。再認証からやり直してください。');
+                }
+            } finally { confirmRestore.disabled = false; }
+        });
+        window.addEventListener('online', refreshAvailability);
+        window.addEventListener('focus', refreshAvailability);
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') refreshAvailability();
+        });
+        window.addEventListener('offline', updateNetwork);
+        window.addEventListener('ses:pwa-revoked', clearDrafts);
+        refreshAvailability();
+    });
+</script>
 </body>
 </html>

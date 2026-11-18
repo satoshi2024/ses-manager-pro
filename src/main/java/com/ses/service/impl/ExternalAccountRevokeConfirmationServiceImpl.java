@@ -57,6 +57,12 @@ public class ExternalAccountRevokeConfirmationServiceImpl implements ExternalAcc
                 throw new BusinessException(401, "確認主体のユーザーを解決できないため、失効確認を拒否しました。");
             }
         }
+        // 古いgenerationのprovider結果を新しい要求の確認へ流用しない。手動確認は現物確認として許可する。
+        if (attribution.actorType() != ActorType.HUMAN && current.getIdempotencyKey() != null
+                && current.getIdempotencyKey().startsWith("lifecycle-resign:")
+                && !current.getIdempotencyKey().equals(attribution.idempotencyKey())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
         if ("REVOKED".equals(current.getStatus())) {
             return current;
         }

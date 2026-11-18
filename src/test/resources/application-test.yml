@@ -11,6 +11,7 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations:
+        - classpath:sql/test-schema-import-precleanup-h2.sql
         - classpath:db/migration/V1__create_tables.sql
         - classpath:db/migration/V2__init_master_data.sql
         - classpath:db/migration/V4__create_notification.sql
@@ -31,6 +32,8 @@ spring:
         - classpath:sql/schema-contract-document-h2.sql
         - classpath:sql/schema-freee-payroll-h2.sql
         - classpath:sql/schema-ar-management-h2.sql
+        # V52: 入金消込（FR-09）の銀行入金明細。入金消込のfreee反映をH2統合テストで通すために用意する
+        - classpath:sql/schema-bank-deposit-h2.sql
         - classpath:sql/schema-quotation-h2.sql
         - classpath:sql/schema-self-service-h2.sql
         - classpath:sql/schema-price-history-h2.sql
@@ -59,6 +62,7 @@ spring:
         - classpath:sql/schema-optimistic-lock-core-h2.sql
         - classpath:sql/schema-pwa-selfservice-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
+        - classpath:sql/schema-lifecycle-case-sequence-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
         # NF-09のactor_type/confirmation_sourceと相互制約はV1およびH2統合schemaで同期する。
@@ -69,6 +73,42 @@ spring:
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
         - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
+        - classpath:sql/schema-import-center-f1a-h2.sql
+        # V186: 初回ログイン時のパスワード変更要求（sys_user.password_change_required）
+        - classpath:sql/schema-sys-user-password-change-h2.sql
+        # V187: 同一要員の未終結退社案件を1件に限定する生成列と一意index（tenant_id付与より後）
+        - classpath:sql/schema-lifecycle-resignation-unique-h2.sql
+        # V188: ポータルユーザーと要員の紐付け（schema-portal-h2.sqlがポータル表を作り直した後）
+        - classpath:sql/schema-portal-user-engineer-link-h2.sql
+        # V189: NF01 細粒度認可epoch（全体epoch表・5 anchor列・複合一意key。tenant_id付与と文書表の作り直しより後）
+        - classpath:sql/schema-authorization-epoch-h2.sql
+        # V190/V191: NF07 F1表（catalog / policy / hold projection / DSAR）と W-5 権限seed（privacy-admin・privacy.* deny・menu）
+        - classpath:sql/schema-privacy-f1-h2.sql
+        - classpath:sql/schema-privacy-permission-h2.sql
+        # V192: 外部API監査の保存期限（retention_expires_at・UTC化・purge索引）
+        - classpath:sql/schema-integration-hub-external-audit-retention-h2.sql
+        # V193: NF-06 取込センター画面のmenuと import.metadata.manage（管理者専用groupの明示許可・他groupのdeny）
+        - classpath:sql/schema-import-center-menu-permission-h2.sql
+        # V194: NF08 B2c-1 durable claim列・費用ledger 2表・監査の存在照会索引（t_ai_recommendation_run と t_audit_log の作成より後）
+        - classpath:sql/schema-nf08-dispatch-claim-h2.sql
+        # V195: NF01 B0 二者確認coordinatorの7表（triggerは置かず、不変6表の更新・削除はmapperで拒否する。V189相当の一意keyより後）
+        - classpath:sql/schema-nf01-dual-confirmation-h2.sql
+        # V196: NF07 F2 data element catalog seed（構造行と subject_attribution だけ。H2 でもそのまま実行できる。
+        #       sys_user の tenant と全 m_document_type の作成・seed より後）
+        - classpath:db/migration/V196__nf07_privacy_data_element_catalog_seed.sql
+        # V197: 履歴・スキルシート取込と取込センターCSVの文書種別と catalog 行（H2 でもそのまま実行できる。
+        #       schema-document-archive-h2.sql も同じ2行を持つため NOT EXISTS で重複しない。V196 より後）
+        - classpath:db/migration/V197__resume_ingestion_and_import_document_types.sql
+        # V198: NF01 二者確認（B0）の7表と自由記述2列の catalog 行（構造行だけ。H2 でもそのまま実行できる。
+        #       V195 の表と sys_user の tenant の作成・seed より後）
+        - classpath:db/migration/V198__nf01_dual_confirmation_privacy_catalog.sql
+        # V199 は欠番。
+        # V200: t_document_version.storage_key の索引 idx_dv_storage_key は、上の schema-document-archive-h2.sql が
+        #       作る（@Sql で同表を作り直す試験でも索引を保つため）。V200 の file を重ねて流すと索引名が重複して失敗するため
+        #       ここには置かない。V200 と H2 schema の索引の一致は ImportStageStorageKeyIndexContractTest が固定する。
+        # V201: NF07 F1 の状態・区分の列の CHECK（request の status・channel・delivery_method、hold の hold_kind）。
+        #       context ごとの再実行で重複しないよう H2 変種は IF NOT EXISTS で足す（V190 の H2 変種より後）
+        - classpath:sql/schema-privacy-status-check-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -139,6 +179,10 @@ app:
     token-secret: test-batch-token-hmac-secret
   pwa:
     context-secret: test-pwa-context-hmac-secret
+  # NF-06 preview・error exportの行参照（鍵付きHMAC）。test専用の値（Base64で42 byte）
+  import-center:
+    row-reference:
+      hmac-key: dGVzdC1vbmx5LW5mMDYtcm93LXJlZmVyZW5jZS1obWFjLWtleS0wMDAx
   security:
     webhook:
       allow-loopback: true
@@ -152,6 +196,40 @@ app:
       ids: default
   mail:
     from: test@example.com
+  # 既存テストの意味を保つため、test profileでは段階公開の機能スイッチを全てONにする。
+  # OFF時の遮断・既定値・独立性は com.ses.config.feature の機能スイッチテストで個別に検証する。
+  features:
+    nf01:
+      enabled: true
+    nf01-dual-confirmation:
+      enabled: true
+    nf02:
+      enabled: true
+    nf02-customer-portal:
+      enabled: true
+      # 既存のportalテストは社内起票の問い合わせをfixtureに使うため、全期間をportalの公開範囲にする。
+      # 未設定時（portal起票のみ）の挙動は PortalServiceRequestVisibility*Test で個別に検証する。
+      visible-since: "2000-01-01T00:00:00+09:00"
+    nf03:
+      enabled: true
+    nf03-certification-pii:
+      enabled: true
+    nf04:
+      enabled: true
+    nf06:
+      enabled: true
+    nf10:
+      enabled: true
+
+# NF07: 既存テストの意味を保つため、機能スイッチ（Feature.NF07_RETENTION・NF07_DSAR）と同じく test profile ではONにする。
+# OFF時の404・policy source読取0回は PrivacyAccessGuardTest / ProductionPolicyReadonlyQueryServiceTest で、
+# DSAR の OFF は PrivacyDsarApiControllerTest / PrivacyDsarDeadlineSchedulerTest で検証する。
+# DSAR の期限規則（privacy.dsar.due-days）は法的な値のため test profile でも設定しない（必要な test が個別に与える）。
+privacy:
+  retention:
+    enabled: true
+  dsar:
+    enabled: true
 
 ai:
   enabled: false

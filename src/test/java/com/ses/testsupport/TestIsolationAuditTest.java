@@ -3,6 +3,7 @@ package com.ses.testsupport;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.AnnotationMetadata;
@@ -15,6 +16,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -30,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>実 Chrome（CDP）デモは browser タグ必須（fast suite から除外）</li>
  *   <li>非 mysql / browser / performance の {@code @SpringBootTest} は {@code @Transactional}
  *       （または極小 allowlist: 真に read-only / no-datasource スライスのみ）</li>
+ *   <li>{@code @Transactional} でもテストTXの外でcommitする経路（REQUIRES_NEW / TestTransaction の commit）を
+ *       持つクラスは、専用 H2 DB か、commitした行を削除する明示cleanupを持つ</li>
  * </ul>
  * <p>注: ソースに {@code @Tag}{@code mysql} の連結文字列を置かないこと。
  * {@code MySqlTestShardInventoryTest} は素朴な部分一致で mysql タグ付き test を列挙する。
@@ -42,8 +46,8 @@ class TestIsolationAuditTest {
 
     /**
      * 非 {@code @Transactional} を許容する {@code @SpringBootTest} の極小 allowlist。
-     * 原則空（真に read-only / no-datasource スライスのみ）。
-     * 例外: クラスTXだと潰れる並行commit可視性検証（H2上・明示クリーンアップ前提）。
+     * 原則空（真にread-only / no-datasourceスライスのみ）。
+     * 例外: クラスTXで意味が変わる実TX・Servlet境界の検証（専用DBまたは明示cleanup前提）。
      */
     private static final Map<String, IsolationExceptionMetadata> NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST = Map.ofEntries(
             entry("com.ses.service.impl.SystemConfigCommitOrderingTest", "並行afterCommitの可視性", true, "テスト固有fixtureをdelete", "system-config-commit"),
@@ -63,9 +67,39 @@ class TestIsolationAuditTest {
             entry("com.ses.changerequest.EngineerChangeRequestAttachmentApiTest", "添付公開metadataの可視性", true, "テスト固有attachmentをdelete", "change-request-attachment"),
             entry("com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest", "jdbcTemplate更新後の再読込", true, "テスト固有resource scopeをdelete", "integration-hub-resource-scope"),
             entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx"),
+            entry("com.ses.report.ReportReauthenticationSessionIntegrationTest", "afterCommit grantとsession間境界の実service検証", true, "一意なテストuser/delivery/runをIDで削除", "report-reauth-session"),
             entry("com.ses.service.ai.AiExecutionGatewayPersistMetadataTest", "gateway永続化metadataの実DB再読込", true, "trace_id固定prefixを@AfterEachでdelete", "ai-gateway-persist-metadata"),
-            entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation")
+            entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation"),
+            entry("com.ses.service.pwa.PwaRestoreTransactionIntegrationTest", "REQUIRES_NEWとcommit失敗の実TX境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-transaction"),
+            entry("com.ses.web.PwaRestoreServletBoundaryIntegrationTest", "実Servlet thread/session/listener境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-servlet"),
+            entry("com.ses.config.feature.FeatureSwitchServletContainerIntegrationTest", "機能スイッチOFF時の実Servlet container・Security chain順序・error dispatch（RANDOM_PORTのHTTPはテストTXを共有できない）", true, "専用H2 DBとテスト固有user・session・監査行を@AfterEachでdelete", "feature-switch-servlet"),
+            entry("com.ses.controller.api.ImportRawUploadServletContainerE2ETest", "取込raw uploadの実Tomcat上のContent-Type・chunked転送・413のエンドツーエンド（RANDOM_PORTのHTTPはテストTXを共有できない）", true, "専用H2 DBとテスト固有user・session・監査行を@AfterEachでdelete", "import-raw-upload-servlet"),
+            entry("com.ses.config.forwarded.ForwardedHeaderServletContainerIntegrationTest", "転送ヘッダー清浄化の実Tomcat connector検証（RANDOM_PORTのHTTPはテストTXを共有できない）", false, "DB書込なし（認証不要のecho endpointだけを呼ぶ。起動時の初期化はクラス専用H2 DBに閉じ@DirtiesContextで破棄）", "forwarded-header-servlet"),
+            entry("com.ses.config.forwarded.ForwardedHeaderUntrustedPeerServletContainerIntegrationTest", "信頼しない接続元の転送ヘッダー無視の実Tomcat connector検証（RANDOM_PORTのHTTPはテストTXを共有できない）", false, "DB書込なし（認証不要のecho endpointだけを呼ぶ。起動時の初期化はクラス専用H2 DBに閉じ@DirtiesContextで破棄）", "forwarded-header-untrusted-servlet")
     );
+
+    /** テストTXの外でcommitする経路の目印。これらで確定した行はテストTXのrollbackでは消えない。 */
+    private static final List<String> TEST_TRANSACTION_ESCAPE_MARKERS = List.of(
+            "PROPAGATION_REQUIRES_NEW",
+            "Propagation.REQUIRES_NEW",
+            "TestTransaction.flagForCommit",
+            "@Commit",
+            "@Rollback(false)");
+
+    /**
+     * commit経路を持つが、共有H2へ行を残さないことをコードで確認済みのクラス。
+     * 業務行をcommitするクラスはここへ追加せず、専用DBか明示削除を持たせること。
+     */
+    private static final Map<String, String> TEST_TRANSACTION_ESCAPE_ALLOWLIST = Map.of(
+            "com.ses.migration.IntegrationHubF1RetentionH2Test",
+            "REQUIRES_NEW内で必ず例外を投げてrollbackさせ、commitしない",
+            "com.ses.service.impl.DocumentAccessLogFailureIntegrationTest",
+            "REQUIRES_NEW内で監査ログ失敗を起こして必ずrollbackさせ、commitしない",
+            "com.ses.portal.PortalAdminApiTest",
+            "commitするのはm_system_configの値と全体認可epochの増分だけで、設定値はfinallyで元の値へ戻す"
+                    + "（epochは単調増加で戻さないが、epochを読む試験はすべて差分で比べる）",
+            "com.ses.portal.PortalAuthFlowTest",
+            "commitするのはm_system_configの値だけで、finallyで元の値へ戻す");
 
     private static Map.Entry<String, IsolationExceptionMetadata> entry(String className, String reason,
                                                                         boolean writesDatabase,
@@ -200,6 +234,67 @@ class TestIsolationAuditTest {
                 .isEmpty();
     }
 
+    /**
+     * {@code @Transactional} のクラスでも、REQUIRES_NEW や TestTransaction の commit で確定した行は
+     * rollbackされず共有H2に残る。全tenantを数える {@code LegalEntityReadinessService#assertReady} などは
+     * 他テストの残骸で失敗するため、実行順次第のflakyになる（AllocationPlanServiceTest と
+     * StaffingContractSyncTest が法人NULLの顧客・案件・要員を残し、ExternalApiReadSnapshotIntegrationTest が
+     * LEGAL_ENTITY_BACKFILL_INCOMPLETE で落ちた）。commit経路を持つクラスには、専用H2 DBか、
+     * TX終了後（{@code @AfterTransaction} / {@code @AfterEach}）に行を削除する明示cleanupを要求する。
+     */
+    @Test
+    void テストTX外でcommitするSpringBootTestは専用DBか明示削除を持つ() throws Exception {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        MetadataReaderFactory factory = new CachingMetadataReaderFactory(resolver);
+        Resource[] resources = resolver.getResources("classpath*:com/ses/**/*Test.class");
+
+        Set<String> offenders = new TreeSet<>();
+        for (Resource resource : resources) {
+            if (!resource.isReadable()) {
+                continue;
+            }
+            MetadataReader reader = factory.getMetadataReader(resource);
+            AnnotationMetadata meta = reader.getAnnotationMetadata();
+            String className = meta.getClassName();
+            if (meta.isAbstract()) {
+                continue;
+            }
+            String source = readTestSource(className);
+            if (source == null || TEST_TRANSACTION_ESCAPE_MARKERS.stream().noneMatch(source::contains)) {
+                continue;
+            }
+            if (!isSpringBootTest(meta, className)
+                    || hasTag(meta, className, MYSQL_TAG)
+                    || hasTag(meta, className, BROWSER_TAG)
+                    || hasTag(meta, className, PERFORMANCE_TAG)) {
+                continue;
+            }
+            if (TEST_TRANSACTION_ESCAPE_ALLOWLIST.containsKey(className)) {
+                continue;
+            }
+            if (!hasDedicatedDatabase(source) && !hasPostTransactionDelete(source)) {
+                offenders.add(className);
+            }
+        }
+
+        assertThat(offenders)
+                .as("テストTX外でcommitするSpringBootTestは専用H2 DBか@AfterTransaction/@AfterEachでの削除が必須: %s",
+                        offenders)
+                .isEmpty();
+    }
+
+    @Test
+    void commit経路allowlistは実在する経路だけを載せる() {
+        assertThat(TEST_TRANSACTION_ESCAPE_ALLOWLIST).allSatisfy((className, reason) -> {
+            assertThat(reason).isNotBlank();
+            String source = readTestSource(className);
+            assertThat(source).as("allowlistのクラスが存在しない: %s", className).isNotNull();
+            assertThat(TEST_TRANSACTION_ESCAPE_MARKERS.stream().anyMatch(source::contains))
+                    .as("commit経路が無くなったクラスはallowlistから外すこと: %s", className)
+                    .isTrue();
+        });
+    }
+
     @Test
     void allowlistは理由だけでなく実annotationまたは実cleanupを要求する() {
         assertThat(NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST).isNotEmpty()
@@ -239,6 +334,43 @@ class TestIsolationAuditTest {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private static boolean isSpringBootTest(AnnotationMetadata meta, String className) {
+        if (meta.hasAnnotation(SpringBootTest.class.getName())) {
+            return true;
+        }
+        try {
+            // BaseIntegrationTest 等の親クラスから継承した @SpringBootTest も対象にする
+            Class<?> clazz = Class.forName(className, false, TestIsolationAuditTest.class.getClassLoader());
+            return AnnotatedElementUtils.hasAnnotation(clazz, SpringBootTest.class);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String readTestSource(String className) {
+        String topLevelName = className.contains("$") ? className.substring(0, className.indexOf('$')) : className;
+        Path source = Path.of("src", "test", "java", topLevelName.replace('.', File.separatorChar) + ".java");
+        try {
+            return Files.exists(source) ? Files.readString(source, StandardCharsets.UTF_8) : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /** 共有 testdb ではなくクラス専用の H2 DB へ接続先を差し替えているか。 */
+    private static boolean hasDedicatedDatabase(String source) {
+        return source.contains("jdbc:h2:mem:") && !source.contains("jdbc:h2:mem:testdb");
+    }
+
+    /** テストTX終了後に走る位置で、commitした行を物理削除しているか（論理削除は残骸になる）。 */
+    private static boolean hasPostTransactionDelete(String source) {
+        boolean runsAfterTest = source.contains("@AfterTransaction") || source.contains("@AfterEach");
+        boolean deletesRows = source.contains("DELETE FROM")
+                || source.contains("deleteBy")
+                || source.contains(".delete(");
+        return runsAfterTest && deletesRows;
     }
 
     private static boolean hasTransactional(String className) {

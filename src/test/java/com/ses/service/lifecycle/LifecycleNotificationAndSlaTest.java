@@ -94,6 +94,7 @@ class LifecycleNotificationAndSlaTest {
                 .password("pass")
                 .realName("管理者SLA")
                 .role("管理者")
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(adminUser);
@@ -103,6 +104,7 @@ class LifecycleNotificationAndSlaTest {
                 .password("pass")
                 .realName("人事SLA")
                 .role("HR")
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(hrUser);
@@ -129,6 +131,7 @@ class LifecycleNotificationAndSlaTest {
                 .fullName("要員SLAテスト")
                 .status("稼動中")
                 .employmentType("正社員")
+                .tenantId("default")
                 .build();
         engineer.setOrganizationId(org.getId());
         engineerMapper.insert(engineer);

@@ -27,6 +27,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/quiesce.sh"
 . "$LIB_DIR/manifest.sh"
 . "$LIB_DIR/metadata.sh"
+. "$LIB_DIR/content-hash.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -100,7 +101,7 @@ Usage: backup-full.sh [--help]
 MYSQL_USER, MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR,
 UPLOADS_DIR, UPLOADS_STAGING_PARENT（uploads と同一 filesystem 必須）,
 REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR, APP_COMMIT, FLYWAY_VERSION,
-CRITICAL_TABLES, BACKUP_TOOL_IMAGE_DIGEST
+CRITICAL_TABLES, CONTENT_HASH_TABLES, BACKUP_TOOL_IMAGE_DIGEST
 EOF
 }
 
@@ -204,6 +205,15 @@ main() {
       fi
     done
     METADATA_TABLE_COUNTS_JSON=$counts
+  fi
+
+  # A-NF09-5: 主要 table の順序付き内容ハッシュも静止区間内に採取する。count と違い、指定した table を
+  # 1 つでも計算できなければ full を VALID にしない（内容照合の根拠を黙って欠落させない）。
+  METADATA_CONTENT_HASHES_JSON='{}'
+  if [[ -n "${CONTENT_HASH_TABLES:-}" ]]; then
+    METADATA_CONTENT_HASHES_JSON=$(content_hash::collect "$CONTENT_HASH_TABLES" \
+        "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
+      || common::fail "主要 table の内容ハッシュを計算できません（CONTENT_HASH_TABLES）"
   fi
 
   # 静止解除

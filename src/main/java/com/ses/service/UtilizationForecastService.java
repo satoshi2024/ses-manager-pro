@@ -17,7 +17,7 @@ public interface UtilizationForecastService {
      */
     UtilizationForecastDto getForecast(int months);
 
-    /** 指定月を起点にする既存予測口径。reportは現在月へ暗黙依存しない。 */
+    /** 指定月を起点にする既存の予測の算定基準。reportは現在月へ暗黙依存しない。 */
     default UtilizationForecastDto getForecast(YearMonth from, int months) {
         return getForecast(months);
     }

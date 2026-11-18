@@ -1,12 +1,11 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.constant.AssetStatusPolicy;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetLostIncident;
-import com.ses.entity.DocumentLink;
+import com.ses.entity.Document;
 import com.ses.mapper.AssetLostIncidentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.DocumentLinkMapper;
@@ -16,6 +15,7 @@ import com.ses.service.AssetAlertService;
 import com.ses.service.AssetEventService;
 import com.ses.service.AssetLostIncidentService;
 import com.ses.service.AssetScopeService;
+import com.ses.service.document.DocumentLinkCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -47,6 +49,8 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
     private final AssetEventService assetEventService;
     private final AssetAlertService assetAlertService;
     private final AssetScopeService assetScopeService;
+    /** 関連文書のlink（文書行のX lockと証跡利用可否epoch。NF01 F3）。 */
+    private final DocumentLinkCommandService documentLinkCommandService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -197,25 +201,25 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
         if (documentIds == null) {
             return;
         }
+        // 全件の存在・scopeを先に確かめてからlinkする（途中の拒否で、epochを進めた文書を残さない）。
+        List<Document> documents = new ArrayList<>();
         for (Long documentId : documentIds.stream().filter(java.util.Objects::nonNull).distinct().toList()) {
-            if (documentMapper.selectById(documentId) == null) {
+            Document document = documentMapper.selectById(documentId);
+            if (document == null) {
                 throw new BusinessException(404, "関連文書が見つかりません: " + documentId);
             }
             if (!canLinkDocument(documentId, assetId, actorUserId)) {
                 throw new BusinessException(403,
                         "関連文書が現在の資産・組織スコープ外です。既存の認可済み文書だけを紛失インシデントへ関連付けできます。");
             }
-            DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
-                    .eq(DocumentLink::getDocumentId, documentId)
-                    .eq(DocumentLink::getTargetType, LINK_TARGET_TYPE)
-                    .eq(DocumentLink::getTargetId, incidentId));
-            if (existing == null) {
-                DocumentLink link = new DocumentLink();
-                link.setDocumentId(documentId);
-                link.setTargetType(LINK_TARGET_TYPE);
-                link.setTargetId(incidentId);
-                documentLinkMapper.insert(link);
-            }
+            documents.add(document);
+        }
+        // 任意の既存文書（SKILL_SHEETを含む）を関連付けできるため、文書行をX lockしてからlinkし証跡利用可否epochを進める
+        // （CONFIRMの文書S lockと直列化する。NF01 F3）。複数文書はID昇順でlockする（lock順 §3.5 規則3）。
+        // linkのtenantは文書自身のtenant（F-3）。既存の同じlinkは再作成しない（冪等）。
+        documents.sort(Comparator.comparing(Document::getId));
+        for (Document document : documents) {
+            documentLinkCommandService.link(document.getTenantId(), document.getId(), LINK_TARGET_TYPE, incidentId);
         }
     }
 

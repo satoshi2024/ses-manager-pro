@@ -146,7 +146,7 @@
 ## D-010 [P3] 取込レビュー画面のボタン文言が中国語
 
 - 対象: `resume-ingestion.js` / `project-ingestion.js` / `bp-availability-ingestion.js`
-- 事象: 「删」「経歴删除」が日本語UIに混在。`resume-ingestion.js` は「業為・役割」の
+- 事象: 「`\u5220`」「経歴`\u5220`除」（`\u5220` は簡体字）が日本語UIに混在。`resume-ingestion.js` は「業為・役割」の
   誤字もあった。
 - 修正: 「削除」「経歴削除」「業界・役割」へ統一。
 - 状態: **FIXED**（`rg` で該当文言0件）

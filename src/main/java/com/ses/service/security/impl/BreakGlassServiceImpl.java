@@ -1,7 +1,9 @@
 package com.ses.service.security.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.RequestPaths;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.config.PasswordChangeEnforcementFilter;
 import com.ses.entity.AuditLog;
 import com.ses.entity.BreakGlassIncident;
 import com.ses.entity.SysUser;
@@ -37,6 +39,8 @@ import org.springframework.security.core.Authentication;
 public class BreakGlassServiceImpl implements BreakGlassService {
 
     private static final String ADMIN_ROLE = "管理者";
+    /** NF07 privacy action の接頭辞。break-glass の許可対象にしない。 */
+    private static final String PRIVACY_ACTION_PREFIX = "privacy.";
 
     private final BreakGlassIncidentMapper incidentMapper;
     private final SysUserMapper sysUserMapper;
@@ -62,7 +66,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
             return false;
         }
         try {
-            SysUser user = sysUserMapper.selectByUsername(username);
+            SysUser user = resolveBreakGlassUser(username);
             String tenantId = authenticatedTenant(user);
             return tenantId != null && oidcTenantMatches(tenantId)
                     && incidentMapper.selectActive(tenantId, LocalDateTime.now(clock)) != null;
@@ -143,7 +147,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!properties.isBreakGlassUsername(username)) {
             return true;
         }
-        SysUser user = sysUserMapper.selectByUsername(username);
+        SysUser user = resolveBreakGlassUser(username);
         String tenantId = authenticatedTenant(user);
         if (tenantId == null || !oidcTenantMatches(tenantId)) {
             return false;
@@ -196,11 +200,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
             return BreakGlassDecision.ALLOW;
         }
+        // 初回パスワード変更が必要なsessionだけ、変更画面のGETと変更APIのPUTをincident scope外でも許す。
+        // 変更画面はaction keyを持たずscopeへ入れられないため、ここで許さないと変更を完了できない（review P2-1）。
+        // 要求の無いsessionでは、この2つも通常どおりscopeで判定する。
+        if (PasswordChangeEnforcementFilter.isChangeEndpoint(request.getMethod(), RequestPaths.pathWithinApplication(request))
+                && isPasswordChangeRequired(session, authentication)) {
+            return BreakGlassDecision.ALLOW;
+        }
         String action = (String) request.getAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE);
         if (!StringUtils.hasText(action)) {
-            action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
+            action = ActionPermissionResolver.resolve(request.getMethod(), RequestPaths.pathWithinApplication(request));
         }
-        if (!StringUtils.hasText(action) || !allowedActions(incident).contains(action)) {
+        // 起票時に privacy を拒否していても、DBへ直接書かれたincidentで privacy を開かない（多重防御）。
+        if (!StringUtils.hasText(action) || action.startsWith(PRIVACY_ACTION_PREFIX)
+                || !allowedActions(incident).contains(action)) {
             return BreakGlassDecision.DENY_SCOPE;
         }
         return BreakGlassDecision.ALLOW;
@@ -261,7 +274,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
 
     private boolean isAuthenticationInfrastructure(HttpServletRequest request) {
         return ActionPermissionResolver.isAuthenticationInfrastructure(
-                request.getMethod(), request.getRequestURI());
+                request.getMethod(), RequestPaths.pathWithinApplication(request));
+    }
+
+    /**
+     * sessionの初回パスワード変更要求（{@code PasswordChangeEnforcementFilter}）、または認証主体の
+     * {@code sys_user.password_change_required = 1}（login時点の値。変更成功時に {@code ProfileApiController} が消す）。
+     */
+    private static boolean isPasswordChangeRequired(HttpSession session, Authentication authentication) {
+        if (PasswordChangeEnforcementFilter.isChangeRequired(session)) {
+            return true;
+        }
+        return authentication != null && authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser
+                && loginUser.getSysUser() != null
+                && Integer.valueOf(1).equals(loginUser.getSysUser().getPasswordChangeRequired());
     }
 
     /** incidentを再検証した上で、画面描画に不可欠な静的リソースとERRORディスパッチだけscope対象外とする。 */
@@ -296,7 +322,9 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (normalized.size() != actions.size() || normalized.stream().anyMatch(action ->
                 !ActionPermissionResolver.isKnownAction(action) || action.contains("*")
                         || "permission.manage".equals(action)
-                        || action.startsWith("user."))) {
+                        || action.startsWith("user.")
+                        // NF07: privacy は既知resource（isKnownAction=true）だが、緊急accessの対象にしない（W-5 §6.8）。
+                        || action.startsWith(PRIVACY_ACTION_PREFIX))) {
             throw BusinessException.of(400, "error.breakGlass.invalidRequest");
         }
         return String.join(",", normalized);
@@ -341,6 +369,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
             return null;
         }
         return authenticatedTenant(loginUser.getSysUser());
+    }
+
+    /**
+     * 入力名が解決した {@code sys_user} の行。行の username も設定の break-glass 名と同じ規則で一致する場合だけ返し、
+     * それ以外は {@code null}（DOC-FINAL review P2-1）。照合順序が入力名を設定とは別の口座へ解決した場合に、その口座を
+     * break-glass として扱わないため（{@code OidcSecurityProperties#isBreakGlassUsername} の比較は照合順序と等価ではない）。
+     * 行の username は前後空白を除かずに比べる（先頭の空白に意味がある別の行を設定の口座とみなさない。delta review P3-a）。
+     */
+    private SysUser resolveBreakGlassUser(String username) {
+        SysUser user = sysUserMapper.selectByUsername(username);
+        if (user == null || !properties.isBreakGlassStoredUsername(user.getUsername())) {
+            return null;
+        }
+        return user;
     }
 
     private String authenticatedTenant(SysUser user) {

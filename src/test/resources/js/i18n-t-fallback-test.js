@@ -59,6 +59,25 @@ check('numeric placeholder still works', () => {
     assert.strictEqual(SES.i18n.t('count', 3), '3件');
 });
 
+// RB-I18N review P3-9: 引数（名前等の利用者データ）に含まれる $& や $` 等を String.replace の置換パターンとして解釈しない。
+console.log('SES.i18n.t argument with $ patterns');
+check('positional argument keeps $ patterns literally', () => {
+    const SES = loadSes({ 'title': '{0} - detail' });
+    assert.strictEqual(SES.i18n.t('title', 'A$&B$`C$\'D$$E$1'), 'A$&B$`C$\'D$$E$1 - detail');
+});
+check('multiple positional arguments keep $ patterns literally', () => {
+    const SES = loadSes({ 'line': '{0} / {1}' });
+    assert.strictEqual(SES.i18n.t('line', '$&', 'x$$y'), '$& / x$$y');
+});
+check('named argument keeps $ patterns literally', () => {
+    const SES = loadSes({ 'named': 'Hi {name}' });
+    assert.strictEqual(SES.i18n.t('named', { name: '$&$`' }), 'Hi $&$`');
+});
+check('numeric and null arguments are still stringified', () => {
+    const SES = loadSes({ 'pair': '{0}:{1}' });
+    assert.strictEqual(SES.i18n.t('pair', 0, null), '0:null');
+});
+
 if (failures.length) {
     console.error('\n' + failures.length + ' failure(s)');
     process.exit(1);

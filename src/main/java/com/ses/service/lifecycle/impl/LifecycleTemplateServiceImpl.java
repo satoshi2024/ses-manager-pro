@@ -4,18 +4,24 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.LifecycleTemplate;
 import com.ses.entity.LifecycleTemplateTask;
 import com.ses.entity.LifecycleTemplateTaskDep;
+import com.ses.entity.SysUser;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.mapper.LifecycleTemplateTaskDepMapper;
 import com.ses.mapper.LifecycleTemplateTaskMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.lifecycle.LifecycleDagValidator;
 import com.ses.service.lifecycle.LifecycleTemplateService;
+import com.ses.service.lifecycle.LifecycleType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,10 +38,24 @@ import java.util.stream.Collectors;
 public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateMapper, LifecycleTemplate>
         implements LifecycleTemplateService {
 
+    /** 子スイッチ {@code nf01-dual-confirmation} がONの間だけ新規作成・改定・有効化を受け付ける証跡種別。 */
+    private static final String DUAL_CONFIRMATION = "DUAL_CONFIRMATION";
+
+    /**
+     * 証跡種別の許可値一覧（W3-21b review P2-1）。DDLの列注釈（NONE, SELF_DECLARATION, DUAL_CONFIRMATION,
+     * DOCUMENT_LINK, SYSTEM_CHECK）、開発seed（NONE・SYSTEM_CHECK）、テンプレート画面の選択肢（NONE・COMMENT・
+     * DOCUMENT_LINK、ONならDUAL_CONFIRMATION）で実際に使っている値の和集合。
+     */
+    static final Set<String> EVIDENCE_TYPES = Set.of("NONE", "COMMENT", "SELF_DECLARATION", "DOCUMENT_LINK",
+            "SYSTEM_CHECK", DUAL_CONFIRMATION);
+
     private final LifecycleTemplateMapper templateMapper;
     private final LifecycleTemplateTaskMapper templateTaskMapper;
     private final LifecycleTemplateTaskDepMapper templateTaskDepMapper;
     private final LifecycleDagValidator dagValidator;
+    private final SysUserMapper sysUserMapper;
+    /** 二者確認の子スイッチの判定に使う。取得できなければOFFとして扱う（fail-closed）。 */
+    private final ObjectProvider<FeatureSwitches> featureSwitches;
 
     @Override
     public LifecycleTemplate findActiveByTypeAndDate(String templateType, LocalDate asOf) {
@@ -145,6 +165,13 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto createTemplate(LifecycleTemplateDto dto, Long userId) {
+        requireTemplateManager(userId);
+        // テンプレートの種別も案件と同じ正規の表記だけを受け付ける（W3-02 review P3-3）。揺れた種別のテンプレートは
+        // 案件の起票で種別の不一致として拒否され、使えないまま残るため、作成の時点で拒否する。
+        if (LifecycleType.parseStrict(dto.getTemplateType()).isEmpty()) {
+            throw BusinessException.of(400, "error.lifecycle.invalidLifecycleType", "ライフサイクル種別が不正です");
+        }
+        rejectUnavailableEvidenceTypes(dto.getTasks());
         dagValidator.validateDtoDag(dto.getTasks());
 
         Integer maxVer = templateMapper.selectMaxVersionNo(dto.getTemplateType());
@@ -176,6 +203,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto updateTemplate(Long id, LifecycleTemplateDto dto, Long userId) {
+        requireTemplateManager(userId);
         LifecycleTemplate existing = templateMapper.selectById(id);
         if (existing == null) {
             throw BusinessException.of(404, "error.lifecycle.templateNotFound", "テンプレートが見つかりません");
@@ -186,6 +214,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
             throw BusinessException.of(400, "error.lifecycle.notLatestVersion", "最新版のテンプレートのみ改定可能です");
         }
 
+        rejectUnavailableEvidenceTypes(dto.getTasks());
         dagValidator.validateDtoDag(dto.getTasks());
 
         // 改定時は過去の進行中案件の定義を保護するため、旧バージョンを変更せず新バージョンとして保存
@@ -231,19 +260,118 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void toggleStatus(Long id, String status, Long userId) {
+        requireTemplateManager(userId);
+        if (!"ACTIVE".equals(status) && !"INACTIVE".equals(status)) {
+            throw BusinessException.of(400, "error.lifecycle.invalidTemplateStatus");
+        }
         LifecycleTemplate entity = templateMapper.selectById(id);
         if (entity == null) {
             throw BusinessException.of(404, "error.lifecycle.templateNotFound", "テンプレートが見つかりません");
+        }
+        // 子スイッチOFFの間はDUAL_CONFIRMATIONを含むテンプレートを有効に戻させない（W3-21b review P3-1。
+        // ON→OFF後に無効化したテンプレートが再び新しい案件へDUALタスクを展開しないようにする。無効化はいつでも可）
+        if ("ACTIVE".equals(status)) {
+            List<LifecycleTemplateTask> tasks = templateTaskMapper.selectByTemplateId(id);
+            if (tasks != null && tasks.stream().anyMatch(t -> t != null && storedAsDualConfirmation(t.getEvidenceType()))) {
+                requireDualConfirmationEnabled();
+            }
         }
         entity.setStatus(status);
         entity.setUpdatedBy(userId);
         templateMapper.updateById(entity);
     }
 
+    /**
+     * タスク定義の証跡種別を許可値一覧で検査し（{@link #canonicalEvidenceType(String)}）、二者確認（DUAL_CONFIRMATION）
+     * タスクを持つテンプレートの新規作成・改定は、子スイッチ {@code app.features.nf01-dual-confirmation.enabled} の
+     * 実効値（親NF-01との論理積）がONのときだけ受け付ける（NF01細粒度epoch計画 §5.11、W3-21b。W3-02（決定 B-NF01-3）の
+     * 無条件拒否をスイッチ連動に変更）。OFFでは400 {@code error.lifecycle.dualConfirmationDisabled}。
+     * DUAL_CONFIRMATIONは通常完了経路で完了できず（LifecycleTaskServiceImpl.completeTask は409）、二者確認のAPIも
+     * OFFでは400のため、展開されると免除以外に進めない。スイッチの判定は正規化の後に行う。拒否は1件も書き込む前に行う。
+     */
+    private void rejectUnavailableEvidenceTypes(List<LifecycleTemplateTaskDto> tasks) {
+        if (tasks == null) {
+            return;
+        }
+        boolean hasDual = false;
+        for (LifecycleTemplateTaskDto task : tasks) {
+            if (task != null && DUAL_CONFIRMATION.equals(canonicalEvidenceType(task.getEvidenceType()))) {
+                hasDual = true;
+            }
+        }
+        if (hasDual) {
+            requireDualConfirmationEnabled();
+        }
+    }
+
+    private void requireDualConfirmationEnabled() {
+        if (!dualConfirmationEnabled()) {
+            throw BusinessException.of(400, "error.lifecycle.dualConfirmationDisabled",
+                    "二者確認の機能が無効のため、二者確認タスクを作成・改定・有効化できません");
+        }
+    }
+
+    private boolean dualConfirmationEnabled() {
+        FeatureSwitches switches = featureSwitches == null ? null : featureSwitches.getIfAvailable();
+        return switches != null && switches.isEnabled(Feature.NF01_DUAL_CONFIRMATION);
+    }
+
+    /**
+     * 保存済みのタスク定義がDUAL_CONFIRMATIONか（有効化の判定用）。本serviceを通った行は正規の表記だが、
+     * 許可値一覧より前の行も拾うよう、前後のUnicode空白と大文字小文字を畳んで比べる。
+     */
+    private static boolean storedAsDualConfirmation(String evidenceType) {
+        return evidenceType != null && DUAL_CONFIRMATION.equalsIgnoreCase(evidenceType.strip());
+    }
+
+    /**
+     * 保存する証跡種別の正規の表記（W3-21b review P2-1）。テンプレートのタスク定義は本serviceが唯一の書込み口で、
+     * 案件のタスクはここで保存した値を複写するため、検査はここだけで足りる。
+     * <ul>
+     *   <li>未指定（null）は {@code NONE}。</li>
+     *   <li>前後のUnicode空白を {@link String#strip()} で除き、{@code toUpperCase(Locale.ROOT)} で大文字にそろえる。</li>
+     *   <li>ASCIIの印字可能文字以外（NBSP・ゼロ幅文字・全角文字・制御文字等）を含む値、空文字、許可値一覧
+     *       {@link #EVIDENCE_TYPES} に無い値は400 {@code error.lifecycle.invalidEvidenceType}。</li>
+     * </ul>
+     * 完了経路（DUAL_CONFIRMATIONの409・DOCUMENT_LINKの証跡必須）・二者確認のAPI・画面はいずれも完全一致で判定するため、
+     * 揺れた表記を保存すると見た目は同じ種別のまま判定をすり抜ける。
+     */
+    static String canonicalEvidenceType(String evidenceType) {
+        if (evidenceType == null) {
+            return "NONE";
+        }
+        String value = evidenceType.strip();
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                throw invalidEvidenceType();
+            }
+        }
+        String canonical = value.toUpperCase(Locale.ROOT);
+        if (!EVIDENCE_TYPES.contains(canonical)) {
+            throw invalidEvidenceType();
+        }
+        return canonical;
+    }
+
+    private static BusinessException invalidEvidenceType() {
+        return BusinessException.of(400, "error.lifecycle.invalidEvidenceType", "証跡種別が不正です");
+    }
+
+    private void requireTemplateManager(Long userId) {
+        SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
+        if (user == null || user.getStatus() == null || user.getStatus() != 1
+                || !("管理者".equals(user.getRole()) || "HR".equals(user.getRole()))) {
+            throw BusinessException.of(403, "error.lifecycle.templateMutationDenied");
+        }
+    }
+
     private void saveTasksAndDeps(Long templateId, List<LifecycleTemplateTaskDto> taskDtos) {
         if (taskDtos == null || taskDtos.isEmpty()) {
             return;
         }
+        // 呼出元（作成・改定）は書込み前に検査済み。将来の呼出元が検査を省いても保存しないよう、保存直前にも確認する。
+        rejectUnavailableEvidenceTypes(taskDtos);
 
         int order = 10;
         for (LifecycleTemplateTaskDto tDto : taskDtos) {
@@ -257,7 +385,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
                     .assigneeRuleValue(tDto.getAssigneeRuleValue())
                     .isMandatory(tDto.getIsMandatory() != null ? tDto.getIsMandatory() : 1)
                     .isBlocking(tDto.getIsBlocking() != null ? tDto.getIsBlocking() : 1)
-                    .evidenceType(tDto.getEvidenceType() != null ? tDto.getEvidenceType() : "NONE")
+                    .evidenceType(canonicalEvidenceType(tDto.getEvidenceType()))
                     .isEngineerVisible(tDto.getIsEngineerVisible() != null ? tDto.getIsEngineerVisible() : 1)
                     .targetEmploymentTypes(tDto.getTargetEmploymentTypes())
                     .sortOrder(tDto.getSortOrder() != null ? tDto.getSortOrder() : order)

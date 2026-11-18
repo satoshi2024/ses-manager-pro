@@ -1,6 +1,6 @@
 # Design — 横断検索・実ToDo・保存ビュー・一括操作
 
-> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは対象限定・直接回帰、M taskで全量を行う。
 
 ## 1. DDL（予約V68）
 
@@ -53,7 +53,7 @@
   「所有者未設定」として扱うと共有viewが全員の個人viewに化ける。§1.1のexplicit NULLに該当する。
 - 横断検索はasOf検索を提供しない。過去時点の検索が要るなら別specとする（R1の範囲外）。
 
-### 6.2 主体 × 操作 × 可見母集団
+### 6.2 主体 × 操作 × 閲覧可能な母集団
 
 **横断検索は既存一覧の母集団を再実装しない。** 各`GlobalSearchProvider`は対応する既存mapperの
 scope付きqueryをそのまま呼ぶ。検索用に新しいSQLを書くと母集団が二重定義になる（S02の再発パターン）。
@@ -75,7 +75,7 @@ scope付きqueryをそのまま呼ぶ。検索用に新しいSQLを書くと母�
 
 ### 6.3 状態機械と競合
 
-| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+| 状態 | 許可遷移 | 重複防止手段 | competing writer | rollback |
 |---|---|---|---|---|
 | task 未着手 | →進行中 / →取消 | 状態CAS | 二重click | 未着手へ戻す |
 | 進行中 | →完了 / →取消 | 状態CAS＋`version` | 担当者と依頼者の同時操作 | 進行中へ戻す |

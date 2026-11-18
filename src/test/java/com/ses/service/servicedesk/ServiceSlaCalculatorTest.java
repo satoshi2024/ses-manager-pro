@@ -79,6 +79,7 @@ class ServiceSlaCalculatorTest {
         WorkCalendar legalCal = new WorkCalendar();
         legalCal.setId(100L);
         legalCal.setStatus("有効");
+        legalCal.setValidFrom(LocalDate.of(2026, 1, 1));
 
         WorkCalendarMapper calMapper = mock(WorkCalendarMapper.class);
         when(calMapper.selectList(any())).thenReturn(List.of(legalCal));
@@ -123,11 +124,13 @@ class ServiceSlaCalculatorTest {
         calA.setId(10L);
         calA.setLegalEntityId(1L);
         calA.setStatus("有効");
+        calA.setValidFrom(LocalDate.of(2026, 1, 1));
 
         WorkCalendar calB = new WorkCalendar();
         calB.setId(20L);
         calB.setLegalEntityId(2L);
         calB.setStatus("有効");
+        calB.setValidFrom(LocalDate.of(2026, 1, 1));
 
         WorkCalendarMapper calMapper = mock(WorkCalendarMapper.class);
         when(calMapper.selectList(any())).thenAnswer(inv -> List.of(calB));

@@ -52,26 +52,30 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
     private final EngineerMapper engineerMapper;
     private final SysUserMapper sysUserMapper;
     private final AttendanceScopeMapper attendanceScopeMapper;
+    private final com.ses.service.ExternalAccountRevocationOutbox revocationOutbox;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    private static String maskIdentifier(String id) {
-        if (!StringUtils.hasText(id)) return "***";
-        int atIndex = id.indexOf('@');
-        if (atIndex > 2) {
-            return id.substring(0, 2) + "***" + id.substring(atIndex);
-        } else if (id.length() > 4) {
-            return id.substring(0, 2) + "***" + id.substring(id.length() - 2);
-        }
-        return "***";
+    /** 互換入口もproxy経由でREAD_COMMITTEDを開始し、default methodの自己呼出しを避ける。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public ExternalAccountReference createAccountReference(Long systemId,
+                                                            String accountIdentifier,
+                                                            String assigneeType,
+                                                            Long assigneeId,
+                                                            String permissionLevel,
+                                                            Long actorUserId) {
+        return registerAccountReference(systemId, accountIdentifier, assigneeType, assigneeId, permissionLevel, actorUserId);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public ExternalAccountReference registerAccountReference(Long systemId,
                                                               String accountIdentifier,
                                                               String assigneeType,
                                                               Long assigneeId,
                                                               String permissionLevel,
                                                               Long actorUserId) {
+        assertRegistrationIsolation();
         if (systemId == null) {
             throw new BusinessException("外部システムIDは必須です。");
         }
@@ -104,9 +108,10 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                 .retryCount(0)
                 .build();
         externalAccountReferenceMapper.insert(ref);
+        revocationOutbox.enqueueLateRegistration(ref, actorUserId);
 
         log.info("External account reference registered: id={}, system={}, identifier={}",
-                ref.getId(), system.getSystemCode(), maskIdentifier(accountIdentifier));
+                ref.getId(), system.getSystemCode(), com.ses.service.ExternalAccountRevocationStates.maskIdentifier(accountIdentifier));
         return ref;
     }
 
@@ -122,6 +127,9 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
             throw new BusinessException("指定されたアカウント参照が見つかりません。");
         }
 
+        if (current.getIdempotencyKey() != null) {
+            throw BusinessException.of(409, "error.asset.revocationTargetFrozen");
+        }
         if (StringUtils.hasText(accountIdentifier)) {
             current.setAccountIdentifier(accountIdentifier.trim());
         }
@@ -195,104 +203,36 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
     }
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId) {
         Scope scope = requireCurrentScope();
-        ExternalAccountReference current = selectScoped(id, scope);
-        if (current == null) {
-            throw new BusinessException("指定されたアカウント参照が見つかりません。");
-        }
-        if ("REVOKED".equals(current.getStatus())) {
-            return current;
-        }
+        String key = StringUtils.hasText(idempotencyKey) ? idempotencyKey.trim() : "asset-revoke-" + id;
+        return revocationOutbox.request(id, scope.tenantId(), scope.legalEntityId(), key, actorUserId);
+    }
 
-        String requestKey = StringUtils.hasText(idempotencyKey)
-                ? idempotencyKey.trim()
-                : "asset-revoke-" + id;
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ExternalAccountReference reRequestUnknownRevoke(Long id, Long actorUserId) {
+        Scope scope = requireCurrentScope();
+        return revocationOutbox.reRequestUnknown(id, scope.tenantId(), scope.legalEntityId(), actorUserId);
+    }
 
-        ExternalAccountReference sameKey = externalAccountReferenceMapper.selectByIdempotencyKey(
-                requestKey, scope.tenantId(), scope.legalEntityId());
-        if (sameKey != null && !id.equals(sameKey.getId())) {
-            throw new BusinessException(409, "失効要求の冪等性キーが別のアカウントに割り当て済みです。");
-        }
-        if (StringUtils.hasText(current.getIdempotencyKey())
-                && !requestKey.equals(current.getIdempotencyKey())) {
-            throw new BusinessException(409, "このアカウントには別の失効要求が進行中です。");
-        }
-        // 既に同じkeyで要求済みならproviderへ再送しない。確認処理はpoll jobへ委譲する。
-        if (requestKey.equals(current.getIdempotencyKey())) {
-            return current;
-        }
-
-        LocalDateTime requestedAt = LocalDateTime.now();
-        int claimed;
-        try {
-            claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt, actorUserId,
-                    scope.tenantId(), scope.legalEntityId());
-        } catch (DuplicateKeyException ex) {
-            // 同一keyを別accountが先にclaimした場合はunique制約違反を500へ漏らさず、契約上409で返す。
-            throw new BusinessException(409, "失効要求の冪等性キーが別のアカウントに割り当て済みです。");
-        }
-        if (claimed != 1) {
-            // 同一keyの並行claimは先着だけがproviderを呼ぶ。後着はcommit済み状態を再読する。
-            ExternalAccountReference latest = selectScoped(id, scope);
-            if (latest != null && requestKey.equals(latest.getIdempotencyKey())) {
-                return latest;
-            }
-            throw new BusinessException(409, "失効要求の登録が他の操作と競合しました。再試行してください。");
-        }
-        current = selectScoped(id, scope);
-
-        // プロバイダへ失効リクエスト
-        boolean sent;
-        try {
-            sent = providerClient.requestRevoke(current);
-        } catch (RuntimeException ex) {
-            current.setExternalSyncStatus("SYNC_FAILED");
-            current.setLastErrorMessage("Provider revoke request failed");
-            current.setNextRetryAt(LocalDateTime.now().plusMinutes(5));
-            updateScoped(current, scope);
-            return selectScoped(id, scope);
-        }
-        if (sent) {
-            ExternalAccountProviderClient.RevokeConfirmationStatus conf;
-            try {
-                conf = providerClient.checkRevokeConfirmation(current);
-            } catch (RuntimeException ex) {
-                // 確認APIの通信例外も失効成功にはしない。次回poll用の状態を保存して呼出側へ返す。
-                persistConfirmationFailure(current, LocalDateTime.now());
-                return selectScoped(id, scope);
-            }
-            if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
-                confirmRevokeFromProviderSync(id, "provider-sync:" + id, requestKey);
-            } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN) {
-                current.setStatus("UNKNOWN");
-                current.setLastErrorMessage("Provider revoke response could not be classified");
-                current.setExternalSyncStatus("SYNC_FAILED");
-                updateScoped(current, scope);
-            } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT) {
-                current.setStatus("PENDING_CONFIRMATION");
-                current.setLastErrorMessage("Provider revoke confirmation timed out");
-                current.setExternalSyncStatus("TIMEOUT");
-                // 初回timeoutは直後のpollを許可し、poll側で指数backoffの次回時刻を確定する。
-                current.setNextRetryAt(LocalDateTime.now());
-                updateScoped(current, scope);
-            }
-        } else {
-            current.setStatus("PENDING_CONFIRMATION");
-            current.setLastErrorMessage("Provider revoke request was not accepted");
-            current.setExternalSyncStatus("SYNC_FAILED");
-            current.setNextRetryAt(LocalDateTime.now());
-            updateScoped(current, scope);
-        }
-        return selectScoped(id, scope);
+    @Override
+    public List<ExternalAccountReference> pendingRevocations() {
+        String tenant = AccountingTenantContextHolder.requireTenantContext();
+        return externalAccountReferenceMapper.selectList(new LambdaQueryWrapper<ExternalAccountReference>()
+                .eq(ExternalAccountReference::getTenantId, tenant)
+                .in(ExternalAccountReference::getExternalSyncStatus, List.of("REVOKE_REQUESTED", "REVOKE_SENDING",
+                        "REVOKE_SEND_FAILED", "REVOKE_SEND_UNKNOWN", "REVOKE_SENT"))
+                .ne(ExternalAccountReference::getStatus, "REVOKED")
+                .orderByAsc(ExternalAccountReference::getId).last("LIMIT 100"));
     }
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public int processPendingRevokePollJob() {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = com.ses.service.ExternalAccountRevocationStates.seconds(LocalDateTime.now());
         List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectPendingForTenant(tenantId, now);
 
         int processed = 0;
@@ -302,8 +242,8 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                 continue;
             }
             // 各レコードのclaim時点でleaseを開始する。job開始時刻を使い回すと、長いbatchでleaseが短くなる。
-            LocalDateTime claimNow = LocalDateTime.now();
-            LocalDateTime leaseUntil = claimNow.plus(providerConfirmationLease());
+            LocalDateTime claimNow = com.ses.service.ExternalAccountRevocationStates.seconds(LocalDateTime.now());
+            LocalDateTime leaseUntil = com.ses.service.ExternalAccountRevocationStates.seconds(claimNow.plus(providerConfirmationLease()));
             if (externalAccountReferenceMapper.claimRevokePoll(
                     ref.getId(), ref.getVersion(), claimNow, leaseUntil,
                     tenantId, ref.getLegalEntityId()) != 1) {
@@ -347,7 +287,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                                             LocalDateTime now) {
         // claim後に別worker/手動処理がversionを進めていれば、古いworkerのbackoffで上書きしない。
         int retries = ref.getRetryCount() != null ? ref.getRetryCount() + 1 : 1;
-        long backoffMinutes = Math.min(1440, (long) Math.pow(2, Math.min(retries, 8)) * 5);
+        long backoffMinutes = Math.min(1440, 5L << Math.min(retries, 9));
         String nextStatus;
         String nextSyncStatus;
         String nextErrorMessage;
@@ -364,9 +304,17 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
             nextSyncStatus = "SYNC_PENDING";
             nextErrorMessage = "Provider revoke pending confirmation (retry=" + retries + ")";
         }
-        int updated = externalAccountReferenceMapper.completeRevokePollWithCas(
-                ref.getId(), nextStatus, retries, now.plusMinutes(backoffMinutes),
-                nextSyncStatus, nextErrorMessage, ref.getTenantId(), ref.getLegalEntityId(), ref.getVersion());
+        if (com.ses.service.ExternalAccountRevocationStates.UNKNOWN.equals(ref.getExternalSyncStatus())) {
+            // ACK前の結果不明は確認成功だけで解消する。PENDING/timeout/例外で送信済みと推測しない。
+            nextStatus = "UNKNOWN";
+            nextSyncStatus = com.ses.service.ExternalAccountRevocationStates.UNKNOWN;
+        } else if (ref.getExternalSyncStatus() != null && ref.getExternalSyncStatus().startsWith("REVOKE_")) {
+            nextSyncStatus = "UNKNOWN".equals(nextStatus)
+                    ? com.ses.service.ExternalAccountRevocationStates.UNKNOWN
+                    : com.ses.service.ExternalAccountRevocationStates.SENT;
+        }
+        int updated = revocationOutbox.completePoll(ref, nextStatus, retries, now.plusMinutes(backoffMinutes),
+                nextSyncStatus, nextErrorMessage);
         if (updated != 1) {
             log.debug("Poll result discarded because claim is no longer current: refId={}", ref.getId());
         }
@@ -389,6 +337,9 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         if (current == null) {
             throw new BusinessException("指定されたアカウント参照が見つかりません。");
         }
+        if (current.getExternalSyncStatus() != null && current.getExternalSyncStatus().startsWith("REVOKE_")) {
+            throw BusinessException.of(409, "error.asset.revocationTargetFrozen");
+        }
         current.setStatus(status);
         updateScoped(current, scope);
         return selectScoped(id, scope);
@@ -399,6 +350,14 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         Scope scope = requireCurrentScope();
         return externalAccountReferenceMapper.selectActiveByAssignee(
                 assigneeType, assigneeId, scope.tenantId(), scope.legalEntityId());
+    }
+
+    @Override
+    public List<ExternalAccountReference> getUnrevokedAccountsForEngineer(String tenantId, Long engineerId) {
+        if (!AccountingTenantContextHolder.requireTenantContext().equals(tenantId)) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_MISMATCH");
+        }
+        return externalAccountReferenceMapper.selectUnrevokedForEngineer(tenantId, engineerId);
     }
 
     @Override
@@ -481,6 +440,17 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         return new Scope(tenantId, legalEntityId);
     }
 
+    /** REQUIREDは外側のRRをRCへ変更しない。scopeの読取りより前に既存transactionも検査する。 */
+    private void assertRegistrationIsolation() {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) return;
+        Integer declared = org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        Integer actual = declared != null ? declared : jdbcTemplate.execute(
+                (org.springframework.jdbc.core.ConnectionCallback<Integer>) java.sql.Connection::getTransactionIsolation);
+        if (!Integer.valueOf(java.sql.Connection.TRANSACTION_READ_COMMITTED).equals(actual)) {
+            throw BusinessException.of(409, "error.asset.revocationIsolationRequired");
+        }
+    }
+
     private ExternalAccountReference selectScoped(Long id, Scope scope) {
         return externalAccountReferenceMapper.selectByIdAndScope(id, scope.tenantId(), scope.legalEntityId());
     }
@@ -498,7 +468,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
 
     private void assertAssigneeInScope(String assigneeType, Long assigneeId, Scope scope) {
         if ("ENGINEER".equals(assigneeType)) {
-            Engineer engineer = engineerMapper.selectByIdForTenant(assigneeId, scope.tenantId());
+            Engineer engineer = engineerMapper.selectByIdForUpdateForTenant(assigneeId, scope.tenantId());
             if (engineer == null || !Objects.equals(scope.legalEntityId(), engineer.getLegalEntityId())) {
                 throw BusinessException.of(403, "ASSIGNEE_SCOPE_MISMATCH");
             }

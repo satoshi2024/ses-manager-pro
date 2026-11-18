@@ -14,7 +14,7 @@
 3. specの `design.md`（技術契約）
 4. specの `tasks.md`（実行順・完了条件）
 5. 本書、`shared-standards.md`、dependency/parallel plan
-6. 開工・Review対話の定型文
+6. 着手・Review対話の定型文
 
 下位文書だけで上位要件を狭めてはならない。矛盾は表にして停止し、推測で選択しない。
 
@@ -53,7 +53,7 @@ NOT READY → READY → IN PROGRESS → REVIEW ─┬→ PASS
 CONDITIONAL PASSはP0=0/P1=0で、残件が環境・契約・実機だけに限定され、各残件にowner、期限、手順、
 合格条件、rollback、次spec/block本番の区分がある場合だけ使用する。必須実MySQLやbrowser Demoを静的testで代替しない。
 
-## 4. 開工前Readiness Gate
+## 4. 着手前Readiness Gate
 
 production fileを変える前に次を出力する。
 
@@ -161,7 +161,7 @@ DDL taskは次の5形状を検証する。
 
 ## 7. Test Matrix・証拠・Demo
 
-S03〜S17では `test-execution-policy-s03-s17.md` を併用する。通常Taskは定向testと直接回帰を必須とするが、
+S03〜S17では `test-execution-policy-s03-s17.md` を併用する。通常Taskは対象限定テストと直接回帰を必須とするが、
 全量testはM taskまたは同方針の昇格条件へ集約する。Review AIも同一commitのL4を理由なく再実行しない。
 
 各acceptance IDに最低1行を作る。
@@ -200,7 +200,7 @@ Demoはrole、data、操作、期待、実測、desktop/390px、keyboard、二�
 
 code作成、compile、主要test成功だけでは完了にしない。
 
-ここでいう「必要な全量回帰」は全Task一律ではない。S03〜S17の通常Taskは分層方針のL0〜L3証拠と次のL4 checkpointを
+ここでいう「必要な全量回帰」は全Task一律ではない。S03〜S17の通常Taskは階層別方針のL0〜L3証拠と次のL4 checkpointを
 記録すれば完了できる。M taskまたは昇格条件に該当する変更だけL4を必須とする。
 
 ## 9. Review開始契約

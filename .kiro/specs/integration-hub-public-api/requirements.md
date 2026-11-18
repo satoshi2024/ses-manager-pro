@@ -124,6 +124,9 @@ IH-R1-17. client data scopeとroute data scopeはstrict typed modelへparseし�
 IH-R1-18. external専用auditは専用schema/serviceでsuccess、error、rejectを一request一recordへ収束させる。correlation ID、認証前後principal、
     credential version/key ID、allow-list route template、authentication/scope/dataScope/command/rateの各decision、status/result codeをbounded metadataとして
     保存し、audit service/schema欠落または永続化失敗は公開responseをfail-closed 500へする。raw target/body、IP、secret、PIIを保存・logしない。
+    productionで両方向OFFなら監査行を書かない。ON時のHMAC未検証reject（5xx以外）だけにnode単位の保存予算を適用する。
+    HMAC検証後のCLIENT_IP_NOT_ALLOWED / NONCE_REPLAYを含むrejectと5xxは予算対象外で必ず一行保存する。
+    created_atとretention_expires_atはUTC、一年後を保存期限とし、V192の索引と既存legal hold/checkpointを使って最大1000件ずつpurgeする。
 IH-R1-19. CIDR入力はDNSを一切使わないstrict literal parserで扱い、IPv4は4個のcanonical decimal octet、IPv6は厳密なhex group/`::`とする。
     IPv4-mapped IPv6は`::ffff:0:0/96`を境界としてsource/CIDRの双方を4-byte IPv4へcollapseし、mapped prefix 96〜128はIPv4 prefixへ
     96を減算して比較する。short/integer/leading-zero/zone ID/hostname/bracket/空白表記は拒否する。

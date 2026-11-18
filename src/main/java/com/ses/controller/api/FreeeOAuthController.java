@@ -5,6 +5,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
 import com.ses.service.FreeeIntegrationService;
+import com.ses.service.accounting.FreeeAccountingConnectService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.regex.Pattern;
 
 /**
  * freee OAuth認可・callback・接続解除。
@@ -33,6 +35,12 @@ import java.util.Base64;
  * （成否のみ。company ID・token・codeは記録しない）。</p>
  *
  * <p>接続解除（DELETE）はJSON（ApiResult）を返す。302 opaque redirectでは成否をUIが判定できないため。</p>
+ *
+ * <p>freeeアプリに登録できるredirect URIは1つなので、会計接続（m_integration_connection）の認可も
+ * 同じcallbackで受ける。{@code /authorize?target=accounting&connectionId=N} で開始した場合だけ、
+ * 認可対象をstateと同じsessionへ保存し、callbackで会計接続へ保存する（FREEE_ACCOUNTING_CONNECTで監査）。
+ * 失敗時のredirectには内部のmessage key（{@code error.payroll.*} / {@code error.accounting.*}）だけを
+ * reasonとして載せ、画面で翻訳表示する。provider応答本文は載せない。</p>
  */
 @Controller
 @RequiredArgsConstructor
@@ -42,29 +50,60 @@ public class FreeeOAuthController {
 
     public static final String SESSION_STATE = "freee_oauth_state";
     public static final String SESSION_STATE_ISSUED = "freee_oauth_state_issued";
+    /** 認可対象（会計接続のときだけ "accounting"）。 */
+    public static final String SESSION_TARGET = "freee_oauth_target";
+    /** 会計接続の認可対象connection ID。 */
+    public static final String SESSION_CONNECTION_ID = "freee_oauth_connection_id";
     /** state有効期限（分）。 */
     public static final long STATE_TTL_SECONDS = 10 * 60L;
 
+    public static final String TARGET_ACCOUNTING = "accounting";
+    static final String ACCOUNTING_PAGE = "/accounting/integration";
+    private static final String PAYROLL_PAGE = "/payroll";
+
     private static final String CODE_CONNECT = "FREEE_CONNECT";
+    private static final String CODE_ACCOUNTING_CONNECT = "FREEE_ACCOUNTING_CONNECT";
     private static final String CODE_DISCONNECT = "FREEE_DISCONNECT";
     private static final String URI_CONNECT = "/integrations/freee";
     private static final String URI_DISCONNECT = "/integrations/freee";
+    /** redirectへ載せてよい失敗理由（自システムのmessage keyのみ）。 */
+    private static final Pattern REASON_KEY = Pattern.compile("error\\.(payroll|accounting)\\.[A-Za-z]{1,60}");
 
     private final FreeeIntegrationService service;
+    private final FreeeAccountingConnectService accountingConnectService;
     private final AuditLogService auditLogService;
 
     @GetMapping("/authorize")
-    public RedirectView authorize(HttpSession session, HttpServletResponse response) {
+    public RedirectView authorize(
+            @RequestParam(required = false) String target,
+            @RequestParam(required = false) Long connectionId,
+            HttpSession session,
+            HttpServletResponse response) {
         noStore(response);
+        boolean accounting = TARGET_ACCOUNTING.equals(target);
+        if (accounting) {
+            try {
+                accountingConnectService.requireConnectable(connectionId);
+            } catch (BusinessException e) {
+                return failure(true, "connection", e);
+            }
+        }
         byte[] b = new byte[24];
         new SecureRandom().nextBytes(b);
         String state = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
         session.setAttribute(SESSION_STATE, state);
         session.setAttribute(SESSION_STATE_ISSUED, Instant.now().getEpochSecond());
+        if (accounting) {
+            session.setAttribute(SESSION_TARGET, TARGET_ACCOUNTING);
+            session.setAttribute(SESSION_CONNECTION_ID, connectionId);
+        } else {
+            session.removeAttribute(SESSION_TARGET);
+            session.removeAttribute(SESSION_CONNECTION_ID);
+        }
         try {
             return new RedirectView(service.authorizationUrl(state));
         } catch (BusinessException e) {
-            return new RedirectView("/payroll?error=config");
+            return accounting ? failure(true, "config", e) : new RedirectView(PAYROLL_PAGE + "?error=config");
         }
     }
 
@@ -80,20 +119,25 @@ public class FreeeOAuthController {
         noStore(response);
         Object expected = session.getAttribute(SESSION_STATE);
         Object issuedObj = session.getAttribute(SESSION_STATE_ISSUED);
+        Object targetObj = session.getAttribute(SESSION_TARGET);
+        Object connectionObj = session.getAttribute(SESSION_CONNECTION_ID);
         session.removeAttribute(SESSION_STATE);
         session.removeAttribute(SESSION_STATE_ISSUED);
+        session.removeAttribute(SESSION_TARGET);
+        session.removeAttribute(SESSION_CONNECTION_ID);
+        boolean accounting = TARGET_ACCOUNTING.equals(targetObj);
 
         if (error != null) {
-            return new RedirectView("/payroll?error=denied");
+            return failure(accounting, "denied", null);
         }
         if (expected == null || !constantTimeEquals(expected.toString(), state)) {
-            return new RedirectView("/payroll?error=state");
+            return failure(accounting, "state", null);
         }
         if (issuedObj == null || issuedAtExpired(issuedObj)) {
-            return new RedirectView("/payroll?error=state");
+            return failure(accounting, "state", null);
         }
         if (code == null || code.isBlank()) {
-            return new RedirectView("/payroll?error=oauth");
+            return failure(accounting, "oauth", null);
         }
 
         Long uid = null;
@@ -101,20 +145,26 @@ public class FreeeOAuthController {
             uid = u.getSysUser().getId();
         }
 
+        String auditCode = accounting ? CODE_ACCOUNTING_CONNECT : CODE_CONNECT;
         try {
-            service.handleCallback(code, state, uid);
+            if (accounting) {
+                Long connectionId = connectionObj instanceof Long l ? l : null;
+                accountingConnectService.completeAuthorization(connectionId, code, uid);
+            } else {
+                service.handleCallback(code, state, uid);
+            }
         } catch (BusinessException e) {
             auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 400,
-                    CODE_CONNECT, false);
-            return new RedirectView("/payroll?error=oauth");
+                    auditCode, false);
+            return failure(accounting, "oauth", e);
         } catch (Exception e) {
             auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 500,
-                    CODE_CONNECT, false);
+                    auditCode, false);
             throw e;
         }
         auditLogService.recordRequired(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 302,
-                CODE_CONNECT, true);
-        return new RedirectView("/payroll?connected=1");
+                auditCode, true);
+        return new RedirectView(accounting ? ACCOUNTING_PAGE + "?freee_connected=1" : PAYROLL_PAGE + "?connected=1");
     }
 
     /**
@@ -142,6 +192,22 @@ public class FreeeOAuthController {
                     500, CODE_DISCONNECT, false);
             throw e;
         }
+    }
+
+    /**
+     * 失敗redirect。給与は従来どおり {@code /payroll?error=<kind>}、会計は
+     * {@code /accounting/integration?freee_error=<kind>}。BusinessExceptionのmessage keyが
+     * 自システムのkeyに一致するときだけ {@code &reason=<key>} を付ける。
+     */
+    private RedirectView failure(boolean accounting, String kind, BusinessException cause) {
+        String url = accounting
+                ? ACCOUNTING_PAGE + "?freee_error=" + kind
+                : PAYROLL_PAGE + "?error=" + kind;
+        String reason = cause == null ? null : cause.getMessage();
+        if (reason != null && REASON_KEY.matcher(reason).matches()) {
+            url += "&reason=" + reason;
+        }
+        return new RedirectView(url);
     }
 
     private void noStore(HttpServletResponse response) {

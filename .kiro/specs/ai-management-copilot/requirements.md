@@ -1,6 +1,6 @@
 # AI Management Copilot 要件
 
-## 0. 開工時点の状態と適用範囲
+## 0. 着手時点の状態と適用範囲
 
 | 項目 | 値 |
 |---|---|
@@ -11,7 +11,7 @@
 | branch | `codex/ai-management-copilot` |
 | Base commit | `0c122d33d4c90176601cf6dbdd9507c5c89ce5ee` (`origin/main`) |
 | remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
-| 開工対話 | [start-conversations.md](start-conversations.md) |
+| 着手対話 | [start-conversations.md](start-conversations.md) |
 | Review対話 | [review-conversations.md](review-conversations.md) |
 | Approved query catalog / roles / provider | `<APPROVED_SCOPE>`（未解決。F1はprovisional catalog可） |
 | Owner | `<OWNER>`（未解決） |
@@ -19,7 +19,7 @@
 
 NF-07のPII/retention、既存AI production gate（`GATE-S17-G10-PROD`）、DG-08（provider/DPA/越境/学習利用、catalog owner、role、retention、cost、human escalation）が未完了である。従って、本spec作成時点で許可するproviderはローカルのmock/rule評価だけとし、本番外部AI送信、実データの外部送信、feature flagの有効化を行わない。
 
-**具体AIモデル（Gemini/OpenAI/Claude等）は未決定**である。実装ではモデル名をハードコードせず、deterministic core（catalog→正本service→typed result）を先に構築し、summaryのみ`AiConfig`/`AiTextService`/`AiArtifactVersion.modelVersion`で差し替える。開工・Review手順は`start-conversations.md` / `review-conversations.md`を正とする。
+**具体AIモデル（Gemini/OpenAI/Claude等）は未決定**である。実装ではモデル名をハードコードせず、deterministic core（catalog→正本service→typed result）を先に構築し、summaryのみ`AiConfig`/`AiTextService`/`AiArtifactVersion.modelVersion`で差し替える。着手・Review手順は`start-conversations.md` / `review-conversations.md`を正とする。
 
 本specは、承認前にpipelineと受入条件を固定するためのものである。production code、Flyway migration、画面、設定、外部provider契約は、承認入力が埋まり、Plan ReviewがPASSになるまで変更しない。
 
@@ -38,7 +38,7 @@ NF-07のPII/retention、既存AI production gate（`GATE-S17-G10-PROD`）、DG-0
 2. schema説明、repository構造、migration内容、raw prompt、allowlist外のPIIを外部providerへ送信しない。
 3. typed resultの金額、割合、件数、期間、timezone、freshness、actual/forecast区分はアプリケーションが表示する。LLMのsummaryは説明文とclaim keyだけを返し、数値を生成・再計算しない。
 4. 回答処理から契約、提案、勤怠、ユーザー権限、その他の業務状態を自動更新しない。更新候補を示す場合も、明示的な別APIと人手承認が必要である。
-5. 画面・export・AIで同じ指標を表示する場合、同じ正本service、同じscope、同じ期間境界、同じ円/割合の口径を使い、contract testで一致を検証する。
+5. 画面・export・AIで同じ指標を表示する場合、同じ正本service、同じscope、同じ期間境界、同じ円/割合の集計基準を使い、contract testで一致を検証する。
 6. prompt injectionを業務データまたは質問に含み得る命令として扱い、system/developer方針やcatalogの制約を上書きさせない。
 7. answerからscope外のID、名称、件数差分、PIIを推測できないよう、結果の粒度、件数、エラー、citationもscope後に制限する。
 8. provider 429、timeout、invalid JSON、partial citation、PII canary、巨大result、0、NULL、未確認、forecastをテスト対象にする。

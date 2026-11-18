@@ -12,7 +12,7 @@
 
 **承認状態**: 2026-08-27 時点で traceability は CANDIDATE/DISCOVERY。Owner・Approved scope・DecisionId・DG-02 は未APPROVED。本ブランチの実装はユーザー指示による統合hardeningであり、production releaseの承認を意味しない。
 
-再利用する正本: Customer/Contact、Contract/RenewalCalendar、portal security chain/DTO、`WorkCalendarDay`（法人既定のみ）、`DocumentService`、`NotificationService`。
+再利用する正本: Customer/Contact、Contract/RenewalCalendar、portal security chain/DTO、`WorkCalendarDay`（法人既定 → 全社共通）、`DocumentService`、`NotificationService`。
 所有するもの: service request / comment / SLA clock / CSAT / QBR / health snapshot。
 所有しないもの: 新Customer master、新portal認証、法的自動判定、第二通知/outbox。
 
@@ -32,7 +32,7 @@
 ## CS-R2 SLA
 
 1. THE SLA policy SHALL 優先度別にversionを持ち、初回応答目標時間と解決目標時間、営業開始/終了時刻を保持する。requestの各roundは適用した `policy_id` をsnapshotする。
-2. THE deadline SHALL tenant timezoneの業務日時で計算する。休日は法人既定 `m_work_calendar_day`（engineer/organization未指定）を用い、未設定時は土日除外と missing calendar を記録する。単純な24時間加算、要員個人カレンダー、派遣コンプライアンス暦は使わない。
+2. THE deadline SHALL tenant timezoneの業務日時で計算する。休日は法人既定 `m_work_calendar_day`（engineer/organization未指定）を優先し、無ければ全社共通へfallbackする。他法人の休日を和集合しない。当日行があれば平日・週末ともday_typeを優先し、「休」「祝」を含む値とHOLIDAY/NON_WORKINGは休日、「通常」「所定日」/WORKINGは営業日、それ以外はscheduled_minutesが正の時だけ営業日とする（NULL・0は休日）。当日行が無い時だけ平日営業・土日休業とする。両カレンダーが無い場合は同じ計算で一回だけmissing_calendarのWARNを出し、tenant・法人ID・問い合わせID・HTTP相関IDを記録する（個人情報は含めず、識別子未取得時は明示する）。単純な24時間加算、要員個人カレンダー、派遣コンプライアンス暦は使わない。
 3. WHEN statusが `WAITING_CUSTOMER` になる場合、THE システム SHALL SLA clockを PAUSED にし、pause理由と開始時刻を保持する。再開時は**営業分数**だけ期限を延長する。完了済みroundのbreachフラグと確定時刻は変更しない。
 4. THE scheduler SHALL ShedLockで多重起動を1実行に畳み、期限前warning・初回breach・継続breachを `NotificationService.publishToUser` で通知する。受信者なし/配信失敗はescalation台帳へ保存し、退避後に同一dedupe keyで冪等再試行する。dedupe keyは request×round×種別×段階で一意とし、同一事象の再実行で通知を増やさない。
 5. THE 通知link SHALL `NotificationLinks` に定数登録し、遷移時に内部scopeまたはportal membershipを再認可する。
@@ -69,11 +69,11 @@
 ## CS-R6 非機能（CR-01〜CR-06の適用）
 
 1. THE 更新API SHALL CSRF、menu/action permission、domain scopeを全て通過した場合だけ実行する。
-2. THE 状態変更 SHALL `version` と旧statusを条件にしたCASで防重し、affected rows=0は409とする。CAS失敗後に状態イベントを作成してはならない。
+2. THE 状態変更 SHALL `version` と旧statusを条件にしたCASで重複を防ぎ、affected rows=0は409とする。CAS失敗後に状態イベントを作成してはならない。
 3. THE 外部I/O（通知outbox、file scan）SHALL DB transaction外で実行する。
 4. THE 文言 SHALL 4 bundle（`messages`/`_en`/`_zh_CN`/`_ko`）へ同一keyを追加し、日本語を正として翻訳する。`messages_ja` は作らない。
 5. THE UI SHALL desktopと390pxで起票・返信・CSAT・内部メモ切替を完了できる。二重click抑止はserver冪等の代替にしない。
-6. THE 各acceptance criterion SHALL 定向自動testまたは明示Demoへtraceする。skipを成功としない。snapshot serviceのSecurityContextなし呼出しはデフォルト拒否し、管理者または厳格なSYSTEM schedulerコンテキストだけを許可する。
+6. THE 各acceptance criterion SHALL 対象限定の自動テストまたは明示Demoへtraceする。skipを成功としない。snapshot serviceのSecurityContextなし呼出しはデフォルト拒否し、管理者または厳格なSYSTEM schedulerコンテキストだけを許可する。
 
 ---
 

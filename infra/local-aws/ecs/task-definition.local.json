@@ -24,7 +24,8 @@
         { "name": "CLOUDSIGN_ENABLED", "value": "false" },
         { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
         { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
-        { "name": "DB_POOL_SIZE", "value": "10" }
+        { "name": "DB_POOL_SIZE", "value": "10" },
+        { "name": "TRUSTED_PROXIES", "value": "ALB_SUBNET_CIDRS_PLACEHOLDER" }
       ],
       "secrets": [
         {
@@ -41,7 +42,7 @@
         }
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/liveness || exit 1"],
+        "command": ["CMD-SHELL", "test \"$(curl -sS -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness)\" = 200 || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,

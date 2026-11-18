@@ -16,7 +16,7 @@ public interface CashFlowForecastService {
      */
     CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance);
 
-    /** 保存済み組織scopeを適用した予測。既存callerは従来の全社口径を維持する。 */
+    /** 保存済み組織scopeを適用した予測。既存callerは従来の全社の集計基準を維持する。 */
     default CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
                                          CashFlowForecastScope scope) {
         return forecast(from, months, openingBalance);

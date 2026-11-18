@@ -218,6 +218,65 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
                 asOf == null ? LocalDate.now() : asOf));
     }
 
+    // ===== NF01 明示actor版（細粒度epoch計画 §4.1） =====
+    // SecurityContext・ReportScopeContext（保存済みscope）・request属性のcacheを読まず、DBの現在値から毎回算出する。
+    // 判定規則は上の hasFullAccess / allowedOrganizationIds / allowedDirectUserIds / allowedEngineerIds と同じ。
+
+    @Override
+    public boolean hasFullAccessFor(String role) {
+        if (!organizationScopeEnabled) {
+            return true;
+        }
+        if (ROLE_ADMIN.equals(role)) {
+            return true;
+        }
+        return !ROLE_MANAGER.equals(role);
+    }
+
+    @Override
+    public Set<Long> allowedOrganizationIdsFor(Long userId, String role, LocalDate asOf) {
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        if (hasFullAccessFor(role) || userId == null || role == null) {
+            return Collections.emptySet();
+        }
+        Set<Long> result = new HashSet<>();
+        for (UserOrganization assignment : activeAssignments(userId, date)) {
+            if (assignment.getOrganizationId() != null && Integer.valueOf(1).equals(assignment.getPrimaryFlag())) {
+                result.addAll(organizationServiceProvider.getObject()
+                        .descendantIds(assignment.getOrganizationId(), date));
+            }
+        }
+        return Collections.unmodifiableSet(result);
+    }
+
+    @Override
+    public Set<Long> allowedDirectUserIdsFor(Long userId, String role, LocalDate asOf) {
+        if (!ROLE_MANAGER.equals(role) || userId == null) {
+            return Set.of();
+        }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        return userOrganizationMapper.selectActiveByManagerUserId(userId, date)
+                .stream().map(UserOrganization::getUserId).filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    @Override
+    public Set<Long> allowedEngineerIdsFor(String tenantId, Long userId, String role, LocalDate asOf) {
+        if (hasFullAccessFor(role)) {
+            return Set.of();
+        }
+        if (tenantId == null || tenantId.isBlank()) {
+            // tenantを推測しない（requireTenantContextと同じくfail-closed。空集合 = 該当なし）。
+            return Set.of();
+        }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        return Set.copyOf(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
+                tenantId.trim(),
+                new java.util.ArrayList<>(allowedOrganizationIdsFor(userId, role, date)),
+                new java.util.ArrayList<>(allowedDirectUserIdsFor(userId, role, date)),
+                date));
+    }
+
     @Override
     public Set<Long> allowedContractIds(LocalDate asOf) {
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();

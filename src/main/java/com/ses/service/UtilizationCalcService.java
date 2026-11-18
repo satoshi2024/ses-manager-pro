@@ -9,9 +9,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 稼働率の共通口径サービス(全社共通口径)。
+ * 稼働率の共通集計基準サービス(全社共通の集計基準)。
  *
- * <p>口径: 契約ベース。対象月に有効な契約を持つ要員を「稼働」、持たない要員を「Bench」とみなす。
+ * <p>集計基準: 契約ベース。対象月に有効な契約を持つ要員を「稼働」、持たない要員を「Bench」とみなす。
  * <ul>
  *   <li>対象契約: {@code status} が 稼動中/準備中/終了 のいずれか({@link #targetContractStatuses()})。</li>
  *   <li>有効: {@code startDate ≤ 対象月末} かつ ({@code endDate} が null または {@code endDate ≥ 対象月初})。</li>
@@ -19,7 +19,7 @@ import java.util.Map;
  *       終了日以降も更新継続とみなす(将来月の見込み判定)。</li>
  * </ul>
  * ダッシュボードKPI(当月稼働率)と将来稼働率・Bench予測(FR-07)が本ロジックを共用することで、
- * 当月値が必ず一致することを保証する(A7-09 の口径分裂の再発防止)。
+ * 当月値が必ず一致することを保証する(A7-09 の集計基準の分裂の再発防止)。
  */
 public interface UtilizationCalcService {
 

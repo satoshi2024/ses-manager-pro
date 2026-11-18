@@ -72,6 +72,10 @@ main() {
   local vstate
   vstate=$(jq -r '.state // ""' "$VALIDATION_STATE_FILE")
   [[ "$vstate" == "READY_FOR_CUTOVER" ]] || cutover::fail "validation が READY_FOR_CUTOVER ではありません（state=$vstate）"
+  # G-15 / W1-B1 r2: flyway_schema_history を必須として照合し PASS した report だけを受け付ける
+  # （history の無い DB を Flyway 有効なアプリへ渡すと baseline-on-migrate で誤って baseline されるため）
+  jq -e '.checks.flyway_history_required == true and .checks.flyway == "PASS"' "$VALIDATION_STATE_FILE" > /dev/null 2>&1 \
+    || cutover::fail "validation report で Flyway の照合（checks.flyway_history_required=true かつ checks.flyway=PASS）を確認できません"
 
   # 状態遷移（initial/staged から開始）
   local cu

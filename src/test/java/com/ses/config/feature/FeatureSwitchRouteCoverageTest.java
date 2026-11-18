@@ -1,0 +1,712 @@
+package com.ses.config.feature;
+
+import com.ses.service.security.ActionPermissionResolver;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.core.type.classreading.CachingMetadataReaderFactory;
+import org.springframework.core.type.classreading.MetadataReader;
+import org.springframework.core.type.classreading.MetadataReaderFactory;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 機能スイッチの登録漏れガード（Docker・DB不要）。
+ *
+ * <p>NF配下の入口を「依存するservice package」と「ActionPermissionResolverのresource」の2系統で検出し、
+ * {@link Feature} の遮断表へ登録されているかを確認する。新しいNFのAPI root・画面・schedulerを追加して
+ * 遮断表へ登録し忘れると、このテストが失敗する。意図的に対象外とする入口は理由付きで下の表へ登録する。
+ */
+class FeatureSwitchRouteCoverageTest {
+
+    /**
+     * NF機能のservice package → 所属機能（controller/schedulerの依存型・自身のpackageで判定）。
+     *
+     * <p>NF-07 は1つのresource（{@code privacy}）が保持・保全とDSARの2機能にまたがるため、
+     * {@link #NF_ACTION_RESOURCES} には登録せず package で判定する。privacy の controller は
+     * {@code com.ses.privacy.production.retention.*}（保持・保全）か {@code com.ses.privacy.production.dsar}（DSAR、A2a）の
+     * 型に依存させる（C-1）。両方に依存する controller は所属が2つになり検出される。
+     */
+    private static final Map<String, Feature> NF_SERVICE_PACKAGES = Map.ofEntries(
+            Map.entry("com.ses.service.lifecycle", Feature.NF01),
+            Map.entry("com.ses.service.servicedesk", Feature.NF02),
+            Map.entry("com.ses.service.certificationlearninggap", Feature.NF03),
+            Map.entry("com.ses.service.certification", Feature.NF03),
+            Map.entry("com.ses.service.training", Feature.NF03),
+            Map.entry("com.ses.service.skillgap", Feature.NF03),
+            Map.entry("com.ses.service.pwa", Feature.NF04),
+            Map.entry("com.ses.importcenter", Feature.NF06),
+            Map.entry("com.ses.privacy.production.retention", Feature.NF07_RETENTION),
+            Map.entry("com.ses.privacy.production.dsar", Feature.NF07_DSAR),
+            Map.entry("com.ses.service.report", Feature.NF10));
+
+    /** ActionPermissionResolverのresource名 → 所属機能（API root・画面rootの解決結果で判定）。 */
+    private static final Map<String, Feature> NF_ACTION_RESOURCES = Map.of(
+            "lifecycle", Feature.NF01,
+            "service-desk", Feature.NF02,
+            "customer-health", Feature.NF02,
+            "customer-qbr", Feature.NF02,
+            "certification-learning-gap", Feature.NF03,
+            // NF-06取込センター画面（/import-center → import.metadata.manage）。APIはcom.ses.importcenterへの依存で判定する
+            "import", Feature.NF06,
+            "management-report", Feature.NF10);
+
+    /** NF配下だが意図的に機能スイッチの対象外とする入口（パス区切り前方一致）と理由。 */
+    private static final Map<String, String> UNGATED_ROUTE_PREFIXES = Map.of(
+            "/api/my/pwa/attendance", "既存の要員勤怠画面の通常保存経路（遮断すると日次入力が止まる）",
+            "/api/my/pwa/timesheet", "既存の要員作業報告画面の通常保存経路（遮断すると日次入力が止まる）",
+            "/api/my/pwa/expenses", "既存の要員経費画面の下書き保存経路",
+            "/api/my/pwa/change-requests", "既存の要員プロフィール変更申請の下書き保存経路",
+            "/api/my/session-context", "上記保存経路が使うuser scope bootstrap",
+            "/api/my/pwa/restore", "ロック済み下書きの唯一の復元経路（パスワード再認証必須。止めると未同期の入力がlogoutで失われる）");
+
+    /** NF配下だが意図的に機能スイッチの対象外とする静的ファイル（完全一致）と理由。 */
+    private static final Map<String, String> UNGATED_STATIC_PATHS = Map.of(
+            "/offline.html", "ロック済み下書きの復元画面（日次入力queueの一部。Service Workerが無くても到達できる）",
+            "/js/pwa-queue.js", "既存セルフサービス画面の日次入力queue本体");
+
+    /** 機能スイッチで {@code @Scheduled} 入口を止めるscheduler。 */
+    private static final Map<String, Feature> GATED_SCHEDULERS = Map.of(
+            "com.ses.service.lifecycle.ExternalAccountRevocationScheduler", Feature.NF01,
+            "com.ses.service.scheduler.LifecycleSlaScheduler", Feature.NF01,
+            "com.ses.service.scheduler.CustomerHealthScheduler", Feature.NF02,
+            "com.ses.service.scheduler.ServiceSlaScheduler", Feature.NF02,
+            "com.ses.service.scheduler.ServiceRequestAttachmentCompensationScheduler", Feature.NF02,
+            "com.ses.service.certification.CertificationExpiryNotificationScheduler", Feature.NF03,
+            // NF07-A2a: DSAR の期限通知（OFF なら privacy-admin へ通知しない）
+            "com.ses.privacy.production.dsar.PrivacyDsarDeadlineScheduler", Feature.NF07_DSAR,
+            "com.ses.service.scheduler.ManagementReportScheduler", Feature.NF10);
+
+    /**
+     * 子スイッチ → その遮断表に一致してよいcontroller（simple name）。入口を持たない子は空集合。
+     * 子スイッチの遮断範囲を広げる・狭めるときはここを更新する（意図しない入口の遮断を検出するため）。
+     */
+    private static final Map<Feature, Set<String>> CHILD_FEATURE_CONTROLLERS = Map.of(
+            // 二者確認のAPI（LifecycleDualConfirmationApiController）は親のNF-01の遮断表に属し、子はservice層で判定する
+            Feature.NF01_DUAL_CONFIRMATION, Set.of(),
+            Feature.NF02_CUSTOMER_PORTAL, Set.of("PortalCustomerServiceDeskApiController"),
+            Feature.NF03_CERTIFICATION_PII, Set.of());
+
+    /** NF配下だが意図的に止めないscheduler（理由必須。10件を超えても足せるよう Map.ofEntries にする。A1H-2 review P3-11）。 */
+    private static final Map<String, String> UNGATED_SCHEDULERS = Map.ofEntries(
+            Map.entry("com.ses.service.pwa.PwaClientMutationCleanupScheduler",
+                    "常時有効な保存経路が書くidempotency ledgerの保持期限を守るため、NF-04 OFF中も削除を続ける"),
+            Map.entry("com.ses.importcenter.metadata.ImportStageReconcileScheduler",
+                    "照合台帳に残った取込stage objectの回収は公開可否と無関係に続ける（NF-06 OFFへ切り替えた後も原本objectを残さない）"),
+            Map.entry("com.ses.privacy.production.retention.hold.PrivacyHoldProjectionReconciler",
+                    "掛けたholdはflagをOFFに戻しても守るため、gateと同じくprojectionの追い付きとpendingの解消は公開可否と無関係に続ける"
+                            + "（NF07-A1H §3.4.4。Journalが使えなければ何もしない）"),
+            // NF07-A1H-2: 既存の保持期限の削除経路（D3・D4/D5・D7）。NF07 へ依存するのは保全holdのgateを呼ぶ部分だけで、
+            // gate は flag に依存しない（hold を使っていない tenant では従来どおり消す）。NF07 の flag で止めると既存の purge が止まる
+            Map.entry("com.ses.service.job.DocumentRetentionJob",
+                    "保存期限文書の廃棄候補の抽出は既存の経路で、NF07はhold gateの判定だけに使う（flagで止めると期限超過の保持になる。A1H-2 D3）"),
+            Map.entry("com.ses.service.impl.ResumeRetentionCleanupServiceImpl",
+                    "取込原本・抽出本文の保持期限の清掃は既存の経路で、NF07はhold gateの判定だけに使う（A1H-2 D4・D5）"),
+            Map.entry("com.ses.service.integrationhub.IntegrationHubRetentionPurgeScheduler",
+                    "integration hubのrecord・nonceのpurgeはNF-05の経路で、NF07はrecordのkindのhold gateの判定だけに使う（A1H-2 D7・D8）"),
+            // NF07-A2b: DSAR の開示 package（NF07 自身が作った一時 package）の期限超過・終了 case の削除
+            Map.entry("com.ses.privacy.production.dsar.PrivacyExportPackagePurgeScheduler",
+                    "DSARの開示packageのpurge_after超過・終了したcaseのpackageの削除は公開可否と無関係に続ける"
+                            + "（NF07_DSARをOFFへ戻した後も期限を超えてpackageを残さない。I-9。packageが無ければ照会1回で終わる）"));
+
+    @Test
+    void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {
+        List<Route> routes = controllerRoutes();
+        List<String> violations = new ArrayList<>();
+        Set<Feature> ownedFeatures = EnumSet.noneOf(Feature.class);
+
+        for (Route route : routes) {
+            Set<Feature> owners = owners(route);
+            if (owners.isEmpty()) {
+                continue;
+            }
+            ownedFeatures.addAll(owners);
+            String path = route.normalized();
+            if (isUngated(path)) {
+                continue;
+            }
+            Optional<Feature> gate = Feature.forPath(path);
+            // 子スイッチの入口は親NFに属する（所属は最上位の機能で比較する）。
+            if (owners.size() != 1 || gate.isEmpty() || !owners.contains(gate.get().root())) {
+                violations.add(route.controller().getSimpleName() + " " + route.path()
+                        + " 所属=" + owners + " 遮断=" + gate.map(Enum::name).orElse("なし"));
+            }
+        }
+
+        assertThat(routes).as("controller入口を1件も検出できない").isNotEmpty();
+        assertThat(ownedFeatures).as("全NFの入口を検出できること（検出規則の空振り防止）")
+                .containsExactlyInAnyOrderElementsOf(Feature.topLevel());
+        assertThat(violations)
+                .as("NF配下の入口がFeatureの遮断表に未登録です。Featureへprefixを追加するか、"
+                        + "意図的な対象外なら理由付きでUNGATED_ROUTE_PREFIXESへ登録してください: %s", violations)
+                .isEmpty();
+    }
+
+    /** W3-12: 取込センターの画面・API・menu keyはNF06に属し、apply系のpathを含む全ての {@code /api/import-center} 配下を遮断する。 */
+    @Test
+    void NF06の画面とAPIとmenuKeyは取込センターの機能に属する() throws Exception {
+        List<Route> importRoutes = controllerRoutes().stream()
+                .filter(route -> Feature.matchesSegmentPrefix(route.normalized(), "/import-center")
+                        || Feature.matchesSegmentPrefix(route.normalized(), "/api/import-center"))
+                .toList();
+
+        assertThat(importRoutes).as("取込センターのcontroller入口").isNotEmpty();
+        assertThat(importRoutes).anyMatch(route -> route.normalized().equals("/import-center"));
+        for (Route route : importRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF06);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF06);
+        }
+        assertThat(Feature.NF06.pagePrefixes()).containsExactly("/import-center");
+        assertThat(Feature.NF06.apiPrefixes()).containsExactly("/api/import-center");
+        assertThat(Feature.NF06.menuKeys()).containsExactly("import-center");
+        assertThat(Feature.forPath("/api/import-center/jobs/1/apply")).contains(Feature.NF06);
+        assertThat(Feature.forPath("/import-center-like")).isEmpty();
+    }
+
+    /**
+     * C-1: privacy の入口（W3-14 の policy説明API、F2 の catalog API）は保持・保全の機能に属し、
+     * {@code /privacy}・{@code /api/privacy} 自体は遮断表に登録しない。
+     */
+    @Test
+    void NF07のpolicy説明APIは保持保全の機能に属しprivacyの根は遮断表へ登録しない() throws Exception {
+        List<Route> privacyRoutes = controllerRoutes().stream()
+                .filter(route -> Feature.matchesSegmentPrefix(route.normalized(), "/api/privacy")
+                        || Feature.matchesSegmentPrefix(route.normalized(), "/privacy"))
+                // DSAR（A2a）の入口は別の最上位機能に属する（下の DSAR の test で確かめる）
+                .filter(route -> !isDsarRoute(route))
+                .toList();
+
+        assertThat(privacyRoutes).as("privacyのcontroller入口を検出できること").isNotEmpty();
+        for (Route route : privacyRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF07_RETENTION);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF07_RETENTION);
+        }
+        assertThat(Feature.forPath("/privacy")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy/unknown-sub")).isEmpty();
+        assertThat(privacyRoutes).as("F2 の catalog API").anyMatch(route -> route.normalized().equals("/api/privacy/catalog"));
+        assertThat(Feature.forPath("/api/privacy/catalog")).contains(Feature.NF07_RETENTION);
+        assertThat(Feature.forPath("/api/privacy/catalog-like")).isEmpty();
+        // A1H-1: hold の API と画面。NF07-REL: 解除（release）の handler も hold の prefix の配下なので OFF なら 404 になる
+        assertThat(privacyRoutes).as("A1H の hold API").anyMatch(route -> route.normalized().equals("/api/privacy/holds"));
+        assertThat(privacyRoutes).as("A1H の hold 画面").anyMatch(route -> route.normalized().equals("/privacy/holds"));
+        assertThat(privacyRoutes.stream().filter(route -> route.normalized().contains("/release")).toList())
+                .as("hold の解除の入口は NF07_RETENTION の hold の prefix の配下だけ")
+                .isNotEmpty()
+                .allSatisfy(route -> {
+                    assertThat(route.normalized()).startsWith("/api/privacy/holds/");
+                    assertThat(Feature.forPath(route.normalized())).contains(Feature.NF07_RETENTION);
+                });
+        assertThat(Feature.forPath("/api/privacy/holds/x/release")).contains(Feature.NF07_RETENTION);
+        assertThat(Feature.forPath("/privacy/holds-like")).isEmpty();
+        assertThat(Feature.NF07_RETENTION.apiPrefixes())
+                .containsExactly("/api/privacy/policies", "/api/privacy/catalog", "/api/privacy/holds");
+        assertThat(Feature.NF07_RETENTION.pagePrefixes()).containsExactly("/privacy/holds");
+        assertThat(Feature.NF07_RETENTION.menuKeys()).containsExactly("privacy-retention");
+        assertThat(NF_ACTION_RESOURCES).doesNotContainKey("privacy");
+    }
+
+    /**
+     * NF07-A2a（C-1）: DSAR の画面・API は保持・保全とは別の最上位機能 {@code NF07_DSAR} に属し、
+     * controller は {@code com.ses.privacy.production.dsar} の型にだけ依存する。A2b の承認・package の入口も同じ prefix の配下にあり、
+     * package の入口は専用ダウンロードだけである。
+     */
+    @Test
+    void NF07のDSARの画面とAPIは本人請求の機能に属し保持保全とは分かれる() throws Exception {
+        List<Route> dsarRoutes = controllerRoutes().stream().filter(FeatureSwitchRouteCoverageTest::isDsarRoute).toList();
+
+        assertThat(dsarRoutes).as("DSARのcontroller入口").isNotEmpty();
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/api/privacy/dsar"));
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/privacy/dsar"));
+        assertThat(dsarRoutes).anyMatch(route -> route.normalized().equals("/privacy/dsar/1"));
+        for (Route route : dsarRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF07_DSAR);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF07_DSAR);
+        }
+        assertThat(Feature.NF07_DSAR.isTopLevel()).isTrue();
+        assertThat(Feature.NF07_DSAR.apiPrefixes()).containsExactly("/api/privacy/dsar");
+        assertThat(Feature.NF07_DSAR.pagePrefixes()).containsExactly("/privacy/dsar");
+        assertThat(Feature.NF07_DSAR.exactPaths()).isEmpty();
+        assertThat(Feature.NF07_DSAR.menuKeys()).containsExactly("privacy-dsar");
+        assertThat(Feature.forPath("/api/privacy/dsar/1/package/download")).contains(Feature.NF07_DSAR);
+        assertThat(Feature.forPath("/api/privacy/dsar/1/approve")).contains(Feature.NF07_DSAR);
+        assertThat(Feature.forPath("/privacy/dsar-like")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy/dsar-like")).isEmpty();
+        assertThat(Feature.forPath("/privacy")).isEmpty();
+        // NF07-A2b: 開示資料の区画・草案・承認・専用ダウンロード・交付記録は同じ prefix の配下にあり、NF07_DSAR だけに属する
+        for (String path : List.of("/api/privacy/dsar/1/delivery", "/api/privacy/dsar/1/preview",
+                "/api/privacy/dsar/1/approve", "/api/privacy/dsar/1/package/download")) {
+            assertThat(dsarRoutes).as(path).anyMatch(route -> route.normalized().equals(path));
+        }
+        assertThat(dsarRoutes).as("package の入口は専用ダウンロードだけで、外部へ送る export の入口は持たない")
+                .filteredOn(route -> route.normalized().contains("/package") || route.normalized().contains("/export"))
+                .extracting(Route::normalized)
+                .containsOnly("/api/privacy/dsar/1/package/download");
+    }
+
+    private static boolean isDsarRoute(Route route) {
+        return Feature.matchesSegmentPrefix(route.normalized(), "/api/privacy/dsar")
+                || Feature.matchesSegmentPrefix(route.normalized(), "/privacy/dsar");
+    }
+
+    @Test
+    void 遮断表に一致するcontroller入口は全てその機能に属し非NFの入口を誤遮断しない() throws Exception {
+        List<Route> routes = controllerRoutes();
+        List<String> misBlocked = new ArrayList<>();
+        int gatedRoutes = 0;
+
+        for (Route route : routes) {
+            Optional<Feature> gate = Feature.forPath(route.normalized());
+            if (gate.isEmpty()) {
+                continue;
+            }
+            gatedRoutes++;
+            Set<Feature> owners = owners(route);
+            if (!owners.contains(gate.get().root())) {
+                misBlocked.add(route.controller().getSimpleName() + " " + route.path()
+                        + " 遮断=" + gate.get() + " 所属=" + owners);
+            }
+        }
+
+        assertThat(gatedRoutes).as("遮断対象のcontroller入口を1件も検出できない").isPositive();
+        assertThat(misBlocked)
+                .as("機能スイッチの遮断表がNF外（または別NF）のcontroller入口に一致しています。"
+                        + "OFF時に既存機能が404になるため、prefixを見直してください: %s", misBlocked)
+                .isEmpty();
+    }
+
+    @Test
+    void 子スイッチの遮断表は意図したcontrollerだけに一致し顧客ポータルのNF02入口は全て子スイッチに属する() throws Exception {
+        List<Route> routes = controllerRoutes();
+        Map<Feature, Set<String>> actual = new TreeMap<>();
+        for (Feature feature : Feature.values()) {
+            if (!feature.isTopLevel()) {
+                actual.put(feature, new TreeSet<>());
+            }
+        }
+        List<String> violations = new ArrayList<>();
+
+        for (Route route : routes) {
+            String path = route.normalized();
+            Optional<Feature> gate = Feature.forPath(path);
+            if (gate.isPresent() && !gate.get().isTopLevel()) {
+                actual.get(gate.get()).add(route.controller().getSimpleName());
+            }
+            // 顧客ポータル配下のNF-02入口が親スイッチだけで公開されると、初回リリースで顧客に問い合わせが開く。
+            if (path.startsWith("/api/portal/") && owners(route).contains(Feature.NF02)
+                    && !gate.equals(Optional.of(Feature.NF02_CUSTOMER_PORTAL))) {
+                violations.add(route.controller().getSimpleName() + " " + route.path()
+                        + " 遮断=" + gate.map(Enum::name).orElse("なし"));
+            }
+        }
+
+        assertThat(actual).as("子スイッチが一致するcontroller（意図しない入口を子スイッチで止めていないか）")
+                .isEqualTo(CHILD_FEATURE_CONTROLLERS);
+        assertThat(violations)
+                .as("顧客ポータルのNF-02入口がNF02_CUSTOMER_PORTALで遮断されていません: %s", violations)
+                .isEmpty();
+        for (Feature child : CHILD_FEATURE_CONTROLLERS.keySet()) {
+            assertThat(child.parent()).as("%s の親", child).isPresent();
+            assertThat(child.menuKeys()).as("子スイッチはメニューを持たない: %s", child).isEmpty();
+        }
+    }
+
+    @Test
+    void 遮断表に一致する静的ファイルは意図して登録した完全一致pathだけである() throws IOException {
+        Path staticRoot = Path.of("src/main/resources/static");
+        List<String> misBlocked = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(staticRoot)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                String path = "/" + staticRoot.relativize(file).toString().replace('\\', '/');
+                Optional<Feature> gate = Feature.forPath(path);
+                if (gate.isPresent() && !gate.get().exactPaths().contains(path)) {
+                    misBlocked.add(path + " 遮断=" + gate.get());
+                }
+            }
+        }
+        for (Map.Entry<String, String> ungated : UNGATED_STATIC_PATHS.entrySet()) {
+            assertThat(new ClassPathResource("static" + ungated.getKey()).exists())
+                    .as("対象外の静的ファイル %s が存在しない（古い登録）", ungated.getKey()).isTrue();
+            assertThat(Feature.forPath(ungated.getKey())).as("対象外 %s が遮断表と矛盾", ungated.getKey()).isEmpty();
+        }
+
+        assertThat(misBlocked).as("意図しない静的ファイルが機能スイッチで遮断される: %s", misBlocked).isEmpty();
+    }
+
+    @Test
+    void 遮断表のprefixは実在する入口に対応し機能間で重複しない() throws Exception {
+        Set<String> routePaths = controllerRoutes().stream().map(Route::normalized).collect(Collectors.toSet());
+
+        for (Feature feature : Feature.values()) {
+            for (String prefix : feature.apiPrefixes()) {
+                assertThat(prefix).as(feature + " API prefix").startsWith("/api/");
+                assertThat(routePaths.stream().anyMatch(path -> Feature.matchesSegmentPrefix(path, prefix)))
+                        .as("%s の %s に対応するcontroller入口がない（古い登録）", feature, prefix).isTrue();
+            }
+            for (String prefix : feature.pagePrefixes()) {
+                assertThat(prefix).as(feature + " 画面prefix").doesNotStartWith("/api/");
+                assertThat(routePaths.stream().anyMatch(path -> Feature.matchesSegmentPrefix(path, prefix)))
+                        .as("%s の %s に対応するcontroller入口がない（古い登録）", feature, prefix).isTrue();
+            }
+            for (String exact : feature.exactPaths()) {
+                assertThat(new ClassPathResource("static" + exact).exists())
+                        .as("%s の静的入口 %s が存在しない", feature, exact).isTrue();
+            }
+        }
+        for (Feature left : Feature.values()) {
+            for (Feature right : Feature.values()) {
+                if (left == right) {
+                    continue;
+                }
+                for (String a : entries(left)) {
+                    for (String b : entries(right)) {
+                        assertThat(Feature.matchesSegmentPrefix(a, b) || Feature.matchesSegmentPrefix(b, a))
+                                .as("%s の %s と %s の %s が重複", left, a, right, b).isFalse();
+                    }
+                }
+            }
+        }
+        for (String ungated : UNGATED_ROUTE_PREFIXES.keySet()) {
+            assertThat(Feature.forPath(ungated)).as("対象外 %s が遮断表と矛盾", ungated).isEmpty();
+            assertThat(routePaths.stream().anyMatch(path -> Feature.matchesSegmentPrefix(path, ungated)))
+                    .as("対象外 %s に対応する入口がない（古い登録）", ungated).isTrue();
+        }
+    }
+
+    @Test
+    void NF配下のschedulerは遮断対象か理由付きの対象外として分類されている() throws Exception {
+        Map<String, Set<Feature>> nfSchedulers = new TreeMap<>();
+        for (Class<?> type : scheduledClasses()) {
+            Set<Feature> owners = ownersByDependency(type);
+            if (!owners.isEmpty()) {
+                nfSchedulers.put(type.getName(), owners);
+            }
+        }
+
+        Set<String> unclassified = new TreeSet<>(nfSchedulers.keySet());
+        unclassified.removeAll(GATED_SCHEDULERS.keySet());
+        unclassified.removeAll(UNGATED_SCHEDULERS.keySet());
+        assertThat(unclassified)
+                .as("NF配下の@Scheduledが未分類です。入口でFeatureSwitches.allowsを確認してGATED_SCHEDULERSへ、"
+                        + "止めない場合は理由付きでUNGATED_SCHEDULERSへ登録してください: %s", unclassified)
+                .isEmpty();
+        for (Map.Entry<String, Feature> gated : GATED_SCHEDULERS.entrySet()) {
+            assertThat(nfSchedulers).as("古い登録: %s", gated.getKey()).containsKey(gated.getKey());
+            assertThat(nfSchedulers.get(gated.getKey())).containsExactly(gated.getValue());
+            assertThat(hasFeatureSwitchesField(Class.forName(gated.getKey())))
+                    .as("%s はFeatureSwitchesを注入して入口で判定すること", gated.getKey()).isTrue();
+        }
+        for (String ungated : UNGATED_SCHEDULERS.keySet()) {
+            assertThat(nfSchedulers).as("古い登録: %s", ungated).containsKey(ungated);
+            assertThat(hasFeatureSwitchesField(Class.forName(ungated))).as(ungated).isFalse();
+        }
+    }
+
+    @Test
+    void サイドバーのNF導線はその機能のmenuKeyで表示制御されている() throws IOException {
+        String sidebar = read("src/main/resources/templates/layout/sidebar.html");
+        Pattern hrefPattern = Pattern.compile("th:href=\"@\\{([^}]+)}\"");
+        Pattern keyPattern = Pattern.compile("allowedMenus\\.contains\\('([^']+)'\\)");
+        List<String> violations = new ArrayList<>();
+        Set<Feature> linkedFeatures = EnumSet.noneOf(Feature.class);
+
+        for (String chunk : sidebar.split("<li")) {
+            int end = chunk.indexOf("</li>");
+            String item = end >= 0 ? chunk.substring(0, end) : chunk;
+            Matcher href = hrefPattern.matcher(item);
+            while (href.find()) {
+                Optional<Feature> feature = Feature.forPath(href.group(1));
+                if (feature.isEmpty()) {
+                    continue;
+                }
+                linkedFeatures.add(feature.get());
+                Set<String> keys = new HashSet<>();
+                Matcher key = keyPattern.matcher(item);
+                while (key.find()) {
+                    keys.add(key.group(1));
+                }
+                if (keys.stream().noneMatch(feature.get().menuKeys()::contains)) {
+                    violations.add(href.group(1) + " menuKey=" + keys);
+                }
+            }
+        }
+
+        assertThat(linkedFeatures).containsExactlyInAnyOrder(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF06,
+                Feature.NF07_RETENTION, Feature.NF07_DSAR, Feature.NF10);
+        assertThat(violations).as("NF導線がFeature.menuKeys以外の条件で表示されている: %s", violations).isEmpty();
+    }
+
+    @Test
+    void サイドバー以外の埋込み導線も機能スイッチで表示制御されている() throws IOException {
+        String base = read("src/main/resources/templates/layout/base.html");
+        String portal = read("src/main/resources/templates/portal/customer/index.html");
+        String engineerDetail = read("src/main/resources/templates/engineer/detail.html");
+        String common = read("src/main/resources/static/js/common.js");
+        String myCertification = read("src/main/resources/templates/my/certification-learning-skill-gap.html");
+        String myCertificationJs = read("src/main/resources/static/js/modules/my-certification-learning-skill-gap.js");
+
+        // NF-04: manifestとSW登録フラグだけ。下書き復元リンクはOFFでも出す（ロック済み下書きの復元経路）
+        assertThat(count(base, "disabledFeatures.contains('nf04')")).isEqualTo(2);
+        assertThat(base).contains("name=\"ses-pwa-shell\" content=\"off\"");
+        assertThat(base).contains("<a id=\"pwa-restore-link\" href=\"/offline.html\"");
+        assertThat(common).contains("shellDisabled: function()", "this.unregisterShell();", "'ses-pwa-shell-'");
+        // NF-02の子（顧客ポータルの問い合わせ）: portalの問い合わせタブ・画面・モーダル3件（起票・詳細と返信・CSAT）・
+        // 文言を渡す inline script・script の7件（RB-I18N で詳細と返信を同じ画面のモーダルにし、文言 map を足した）。
+        // 親キー（nf02）だけで判定するとNF-02 ON・子OFFのときに顧客へ問い合わせ導線が出るため、子キーだけで判定する。
+        assertThat(count(portal, "disabledFeatures.contains('nf02-customer-portal')")).isEqualTo(7);
+        assertThat(count(portal, "disabledFeatures.contains('nf02')")).isZero();
+        assertThat(portal).contains("if (typeof PortalServiceDesk !== 'undefined') PortalServiceDesk.init();");
+        // NF-03の子（資格番号の入力）: 本人画面の資格番号入力欄1件。JSは入力欄の有無で申請・再申請の送信値を切り替える
+        assertThat(count(myCertification, "disabledFeatures.contains('nf03-certification-pii')")).isEqualTo(1);
+        assertThat(count(myCertification, "id=\"my-cert-number\"")).isEqualTo(1);
+        assertThat(myCertification).contains("<input th:unless=\"${disabledFeatures != null and "
+                + "disabledFeatures.contains('nf03-certification-pii')}\" id=\"my-cert-number\"");
+        assertThat(myCertificationJs).contains("certificateNumberEntryEnabled() ? certificateNumberInput().value : null",
+                "certificateNumber: withNumber ? result.value : null");
+        assertThat(count(myCertificationJs, "getElementById('my-cert-number')")).isEqualTo(1);
+        // NF-01: 要員詳細のライフサイクル欄
+        assertThat(count(engineerDetail, "disabledFeatures.contains('nf01')")).isEqualTo(1);
+        // NF-01の子（二者確認、W3-21b）: 案件詳細・本人詳細のモーダルとscript、テンプレート画面の選択肢。
+        // 子キーだけで判定する（親がOFFなら子の識別子も disabledFeatures に入る）
+        String lifecycleDetail = read("src/main/resources/templates/lifecycle/detail.html");
+        String myLifecycleDetail = read("src/main/resources/templates/my/lifecycle-detail.html");
+        String lifecycleTemplates = read("src/main/resources/templates/lifecycle/templates.html");
+        assertThat(count(lifecycleDetail, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(2);
+        assertThat(count(myLifecycleDetail, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(2);
+        assertThat(count(lifecycleTemplates, "disabledFeatures.contains('nf01-dual-confirmation')")).isEqualTo(1);
+        assertThat(count(lifecycleDetail + myLifecycleDetail + lifecycleTemplates, "disabledFeatures.contains('nf01')"))
+                .isZero();
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private record Route(Class<?> controller, String path) {
+        String normalized() {
+            return path.replaceAll("\\{[^}]*}", "1");
+        }
+    }
+
+    private static boolean isUngated(String path) {
+        return UNGATED_ROUTE_PREFIXES.keySet().stream().anyMatch(prefix -> Feature.matchesSegmentPrefix(path, prefix));
+    }
+
+    private static List<String> entries(Feature feature) {
+        return Stream.of(feature.pagePrefixes(), feature.apiPrefixes(), feature.exactPaths())
+                .flatMap(List::stream).toList();
+    }
+
+    private static Set<Feature> owners(Route route) {
+        Set<Feature> owners = ownersByDependency(route.controller());
+        Feature byResource = ownerByActionResource(route.normalized());
+        if (byResource != null) {
+            owners.add(byResource);
+        }
+        return owners;
+    }
+
+    /** 自身のpackageと、field・constructor引数の型（generic引数を含む）がNF service packageに属するか。 */
+    private static Set<Feature> ownersByDependency(Class<?> type) {
+        Set<Feature> owners = EnumSet.noneOf(Feature.class);
+        ownerOfPackage(type.getPackageName()).ifPresent(owners::add);
+        for (Field field : type.getDeclaredFields()) {
+            collectOwners(field.getGenericType(), owners);
+        }
+        for (Constructor<?> constructor : type.getDeclaredConstructors()) {
+            for (Type parameter : constructor.getGenericParameterTypes()) {
+                collectOwners(parameter, owners);
+            }
+        }
+        return owners;
+    }
+
+    private static void collectOwners(Type type, Set<Feature> owners) {
+        if (type instanceof Class<?> clazz) {
+            Class<?> component = clazz;
+            while (component.isArray()) {
+                component = component.getComponentType();
+            }
+            if (!component.isPrimitive()) {
+                ownerOfPackage(component.getPackageName()).ifPresent(owners::add);
+            }
+        } else if (type instanceof ParameterizedType parameterized) {
+            collectOwners(parameterized.getRawType(), owners);
+            for (Type argument : parameterized.getActualTypeArguments()) {
+                collectOwners(argument, owners);
+            }
+        }
+    }
+
+    private static Optional<Feature> ownerOfPackage(String packageName) {
+        return NF_SERVICE_PACKAGES.entrySet().stream()
+                .filter(entry -> packageName.equals(entry.getKey()) || packageName.startsWith(entry.getKey() + "."))
+                .map(Map.Entry::getValue)
+                .findFirst();
+    }
+
+    /** API root・画面root（本人向け /my 配下は管理側rootへ読み替え）のaction resourceで所属を判定する。 */
+    private static Feature ownerByActionResource(String path) {
+        for (String candidate : List.of(path, withoutMyPrefix(path))) {
+            String root = rootOf(candidate);
+            if (root == null) {
+                continue;
+            }
+            String action = ActionPermissionResolver.resolve("GET", root);
+            if (action == null) {
+                continue;
+            }
+            int dot = action.indexOf('.');
+            Feature feature = NF_ACTION_RESOURCES.get(dot < 0 ? action : action.substring(0, dot));
+            if (feature != null) {
+                return feature;
+            }
+        }
+        return null;
+    }
+
+    private static String withoutMyPrefix(String path) {
+        if (path.startsWith("/api/my/")) {
+            return "/api/" + path.substring("/api/my/".length());
+        }
+        if (path.startsWith("/my/")) {
+            return "/" + path.substring("/my/".length());
+        }
+        return path;
+    }
+
+    private static String rootOf(String path) {
+        String[] segments = path.split("/");
+        if (path.startsWith("/api/")) {
+            return segments.length > 2 && !segments[2].isEmpty() ? "/api/" + segments[2] : null;
+        }
+        return segments.length > 1 && !segments[1].isEmpty() ? "/" + segments[1] : null;
+    }
+
+    private static List<Route> controllerRoutes() throws Exception {
+        List<Route> routes = new ArrayList<>();
+        for (Class<?> type : mainClasses("classpath*:com/ses/controller/**/*.class")) {
+            if (!AnnotatedElementUtils.hasAnnotation(type, Controller.class)) {
+                continue;
+            }
+            String[] classPaths = paths(AnnotatedElementUtils.findMergedAnnotation(type, RequestMapping.class));
+            for (Method method : type.getDeclaredMethods()) {
+                if (method.isSynthetic() || method.isBridge()) {
+                    continue;
+                }
+                RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
+                if (mapping == null) {
+                    continue;
+                }
+                for (String base : classPaths) {
+                    for (String sub : paths(mapping)) {
+                        routes.add(new Route(type, join(base, sub)));
+                    }
+                }
+            }
+        }
+        return routes;
+    }
+
+    private static String[] paths(RequestMapping mapping) {
+        return mapping == null || mapping.path().length == 0 ? new String[]{""} : mapping.path();
+    }
+
+    private static String join(String base, String sub) {
+        String left = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        if (sub.isEmpty()) {
+            return left.isEmpty() ? "/" : left;
+        }
+        return left + (sub.startsWith("/") ? sub : "/" + sub);
+    }
+
+    /** {@code @Scheduled} メソッドを持つ本番class（ASMで絞り込んでからloadする）。 */
+    private static List<Class<?>> scheduledClasses() throws Exception {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        MetadataReaderFactory factory = new CachingMetadataReaderFactory(resolver);
+        List<Class<?>> classes = new ArrayList<>();
+        for (Resource resource : mainClassResources(resolver, "classpath*:com/ses/**/*.class")) {
+            MetadataReader reader = factory.getMetadataReader(resource);
+            if (reader.getAnnotationMetadata().hasAnnotatedMethods(Scheduled.class.getName())) {
+                classes.add(Class.forName(reader.getClassMetadata().getClassName(), false,
+                        Thread.currentThread().getContextClassLoader()));
+            }
+        }
+        assertThat(classes).as("@Scheduled classを1件も検出できない").isNotEmpty();
+        return classes;
+    }
+
+    private static List<Class<?>> mainClasses(String pattern) throws Exception {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        List<Class<?>> classes = new ArrayList<>();
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        for (Resource resource : mainClassResources(resolver, pattern)) {
+            String url = resource.getURL().toString().replace('\\', '/');
+            String fqn = url.substring(url.indexOf("com/ses/")).replace('/', '.').replace(".class", "");
+            classes.add(Class.forName(fqn, false, classLoader));
+        }
+        return classes;
+    }
+
+    /** test-classes・匿名/内部classを除いた本番classのresource。 */
+    private static List<Resource> mainClassResources(PathMatchingResourcePatternResolver resolver, String pattern)
+            throws IOException {
+        List<Resource> resources = new ArrayList<>();
+        for (Resource resource : resolver.getResources(pattern)) {
+            if (!resource.isReadable()) {
+                continue;
+            }
+            String url = resource.getURL().toString().replace('\\', '/');
+            String filename = resource.getFilename();
+            if (url.contains("/test-classes/") || url.contains("-tests.jar") || !url.contains("com/ses/")
+                    || filename == null || filename.contains("$")) {
+                continue;
+            }
+            resources.add(resource);
+        }
+        return resources;
+    }
+
+    private static boolean hasFeatureSwitchesField(Class<?> type) {
+        return Arrays.stream(type.getDeclaredFields()).anyMatch(field -> field.getType() == FeatureSwitches.class);
+    }
+
+    private static String read(String path) throws IOException {
+        return Files.readString(Path.of(path), StandardCharsets.UTF_8);
+    }
+
+    private static int count(String text, String needle) {
+        int count = 0;
+        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) {
+            count++;
+        }
+        return count;
+    }
+}

@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_task (
     created_by BIGINT NULL,
     updated_by BIGINT NULL,
     deleted_flag INT DEFAULT 0,
-    CONSTRAINT fk_lifecycle_task_case FOREIGN KEY (case_id) REFERENCES t_lifecycle_case(id) ON DELETE CASCADE
+    -- V189: タスク世代（entityへは写像しない。NF01 epoch A）
+    task_generation BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_lifecycle_task_case FOREIGN KEY (case_id) REFERENCES t_lifecycle_case(id) ON DELETE CASCADE,
+    CONSTRAINT ck_lifecycle_task_generation CHECK (task_generation >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS t_lifecycle_task_dep (

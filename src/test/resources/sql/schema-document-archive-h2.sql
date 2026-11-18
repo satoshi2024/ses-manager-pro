@@ -5,6 +5,8 @@ DROP TABLE IF EXISTS t_document_hash_claim CASCADE;
 DROP TABLE IF EXISTS t_document_disposal_request CASCADE;
 DROP TABLE IF EXISTS t_document_access_log CASCADE;
 DROP TABLE IF EXISTS t_document_link CASCADE;
+-- NF-06 schemaを同一H2へ再投入すると、前回起動で作成した参照が残るため先に外す。
+ALTER TABLE IF EXISTS t_import_job DROP CONSTRAINT IF EXISTS fk_import_job_document_version;
 DROP TABLE IF EXISTS t_document_version CASCADE;
 DROP TABLE IF EXISTS t_document CASCADE;
 DROP TABLE IF EXISTS m_document_type CASCADE;
@@ -41,7 +43,10 @@ VALUES
   ('ORDER_ACKNOWLEDGEMENT', '注文請書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('ACCEPTANCE', '検収書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('SERVICE_REQUEST_ATTACHMENT', 'サービス依頼添付', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
-  ('BP_SUBMISSION', 'BP提出物', 'INCOMING', 10, 'TRANSACTION_DATE', 1);
+  ('BP_SUBMISSION', 'BP提出物', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
+  -- V197: 履歴・スキルシート取込と取込センターCSV（両経路とも受領として登録する）
+  ('RESUME_INGESTION', '履歴・スキルシート取込原本', 'INCOMING', 3, 'TRANSACTION_DATE', 1),
+  ('IMPORT', '取込センターCSV原本', 'INCOMING', 3, 'TRANSACTION_DATE', 1);
 
 CREATE TABLE t_document (
   id                         BIGINT        AUTO_INCREMENT PRIMARY KEY,
@@ -69,7 +74,10 @@ CREATE TABLE t_document (
   idempotency_key            VARCHAR(190),
   created_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   updated_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag               TINYINT       NOT NULL DEFAULT 0
+  deleted_flag               TINYINT       NOT NULL DEFAULT 0,
+  -- V189: 証跡利用可否の世代（entityへは写像しない。NF01 epoch A）
+  evidence_eligibility_epoch BIGINT        NOT NULL DEFAULT 0,
+  CONSTRAINT ck_document_evidence_eligibility_epoch CHECK (evidence_eligibility_epoch >= 0)
 );
 
 CREATE TABLE t_document_version (
@@ -100,6 +108,9 @@ CREATE TABLE t_document_version (
   CONSTRAINT uk_document_version_no UNIQUE (document_id, version_no),
   CONSTRAINT uk_document_idempotency UNIQUE (tenant_id, source_type, business_key, version_discriminator)
 );
+-- V200 相当: 取込 stage 照合が storage key ごとに版を数える照会の索引。@Sql で本表を作り直す試験でも同じ索引を持たせるため、
+-- replay（application-test.yml）では V200 の file を流さず、本 file が作る。
+CREATE INDEX IF NOT EXISTS idx_dv_storage_key ON t_document_version (storage_key);
 
 CREATE TABLE t_document_link (
   id                             BIGINT       AUTO_INCREMENT PRIMARY KEY,

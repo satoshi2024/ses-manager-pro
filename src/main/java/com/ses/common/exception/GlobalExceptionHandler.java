@@ -6,6 +6,7 @@ import com.ses.common.util.LogRedaction;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -67,7 +68,27 @@ public class GlobalExceptionHandler {
         log.warn("PWA command競合: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(new ApiResult<>(409, "他の操作と競合しました。再読み込みして再試行してください。", e.getData()));
+                .body(new ApiResult<>(409, SafeErrorPolicy.statusMessage(409, messageSource, LocaleContextHolder.getLocale()),
+                        e.getData()));
+    }
+
+    /**
+     * 行lockの競合（MySQL 1213 deadlock・1205 lock待ちtimeout。Springでは {@link PessimisticLockingFailureException} の
+     * 派生 {@code DeadlockLoserDataAccessException}・{@code CannotAcquireLockException}）。
+     *
+     * <p>transactionはDBまたは宣言的transactionでrollbackされ、業務上の決定でもないため、500ではなく再読み込みして再試行できる
+     * 409として返す（NF01細粒度epoch計画 §9 RR-9、W3-16b）。lock順の不備を監視で見つけられるよう、errorCodeは
+     * {@code LOCK_CONFLICT}・分類はSYSTEMとし、例外の型だけをWARNで記録する（SQLや鍵値は出さない）。</p>
+     */
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ApiResult<Void>> handleLockConflict(PessimisticLockingFailureException e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "LOCK_CONFLICT");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
+        log.warn("行lockの競合により処理を中断しました（再試行可能）: category=SYSTEM exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
+        String message = SafeErrorPolicy.resolveBusinessMessage(
+                BusinessException.of(409, "error.common.optimisticLock"), messageSource, LocaleContextHolder.getLocale());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResult.<Void>error(409, message));
     }
 
     /**
@@ -84,12 +105,14 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("入力バリデーションエラー: fieldCount={} {}",
                 bindingResult == null ? 0 : bindingResult.getErrorCount(), contextFields());
-        String message = bindingResult == null ? "入力内容に誤りがあります。"
+        String invalidInput = SafeErrorPolicy.localizedMessage("error.request.invalidInput", "入力内容に誤りがあります。",
+                messageSource, LocaleContextHolder.getLocale());
+        String message = bindingResult == null ? invalidInput
                 : bindingResult.getAllErrors().stream()
                 .map(org.springframework.validation.ObjectError::getDefaultMessage)
                 .filter(SafeErrorPolicy::isAllowedFixedMessage)
                 .findFirst()
-                .orElse("入力内容に誤りがあります。");
+                .orElse(invalidInput);
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, message));
     }
 
@@ -116,7 +139,29 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
         log.error("システムエラー: category=SYSTEM exceptionClass={} detail={} {}",
                 LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e), contextFields());
-        return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500, SafeErrorPolicy.DEFAULT_SYSTEM_MESSAGE));
+        return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500,
+                SafeErrorPolicy.statusMessage(500, messageSource, LocaleContextHolder.getLocale())));
+    }
+
+    /**
+     * api controller の {@code @RequestBody} 等が受け付けない Content-Type。クライアント側の誤りなので
+     * 汎用 Exception ハンドラ（500・SYSTEM）へ落とさず415で返す（RB-NF02 review P3-2）。文言は業務例外の415
+     * （P3-N2-1）と同じstatus別の文言（利用者のlocale。RB-I18N）にし、受け付ける形式は Accept header で示す。
+     */
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResult<Void>> handleUnsupportedMediaType(
+            org.springframework.web.HttpMediaTypeNotSupportedException e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "UNSUPPORTED_MEDIA_TYPE");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("受け付けないContent-Type: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        if (e.getSupportedMediaTypes() != null && !e.getSupportedMediaTypes().isEmpty()) {
+            response.header(org.springframework.http.HttpHeaders.ACCEPT,
+                    org.springframework.http.MediaType.toString(e.getSupportedMediaTypes()));
+        }
+        return response.body(ApiResult.<Void>error(415,
+                SafeErrorPolicy.statusMessage(415, messageSource, LocaleContextHolder.getLocale())));
     }
 
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class, java.time.format.DateTimeParseException.class})
@@ -125,7 +170,8 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("リクエストパラメータ不正: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
-        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, SafeErrorPolicy.localizedMessage(
+                "error.request.invalidParameter", "リクエストパラメータが不正です", messageSource, LocaleContextHolder.getLocale())));
     }
 
     /**
@@ -141,7 +187,8 @@ public class GlobalExceptionHandler {
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
         log.warn("リクエストボディを解釈できませんでした: category=BUSINESS exceptionClass={} {}",
                 LogRedaction.exceptionType(e), contextFields());
-        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエスト内容が不正です"));
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, SafeErrorPolicy.localizedMessage(
+                "error.request.invalidBody", "リクエスト内容が不正です", messageSource, LocaleContextHolder.getLocale())));
     }
 
     private String contextFields() {
@@ -168,6 +215,10 @@ public class GlobalExceptionHandler {
             case 403 -> HttpStatus.FORBIDDEN;
             case 404 -> HttpStatus.NOT_FOUND;
             case 409 -> HttpStatus.CONFLICT;
+            // SafeErrorPolicy.safeHttpCodeが許可する413（上限超過）をstatus行でも413として返す。
+            case 413 -> HttpStatus.PAYLOAD_TOO_LARGE;
+            // 同じく許可済みの415（添付できないファイル形式。NF-02 P3-N2-1）。
+            case 415 -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
             case 502 -> HttpStatus.BAD_GATEWAY;
             case 503 -> HttpStatus.SERVICE_UNAVAILABLE;

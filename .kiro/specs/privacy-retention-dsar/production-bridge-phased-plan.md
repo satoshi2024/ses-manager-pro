@@ -1,0 +1,1140 @@
+# NF07 production bridge 段階実施計画（W3-04 NF07-P）
+
+状態: **PLAN R2（Plan Review 再提出用）。この文書ではコード・migration・Spring Bean・設定を変更しない。**
+作成日: 2026-11-14（Asia/Tokyo）。基準: `1be03bea`（S-NF 統合候補、branch `codex/snf-w3-nf07p-20261114`）。`com.ses.privacy` 配下のコードは `73aa7000` から無変更（main 68 file、test 24 file、Spring アノテーションなし、package 外からの参照なし）。
+
+改訂記録:
+
+- R1（commit `3d59ffae`）: 初版。独立 Plan Review は REQUEST CHANGES（外部記録の転記）（P1×2、P2×8、P3×12。報告は control repo `ses-claude-control-20261112-r1/reviews/nf07-plan-3d59ffae-review.md`、本repo外）。W-5 の方向と N7-2 は成立と判定された。
+- R2（本版）: 指摘を反映した。対応箇所は下表のとおり。
+
+| 指摘 | 内容 | 本版の対応箇所 |
+|---|---|---|
+| P1-1 | hold が実際の削除点（`DocumentServiceImpl.executeDisposal`）に接続されていない。`legal_hold_flag` との関係が不明。孤児清掃2 scheduler の扱いが不一致 | §3.4.1（破壊的経路の一覧）、§3.4.2（`legal_hold_flag` との関係） |
+| P1-2 | 「subject 不明なら削除しない」＋第1期は解除不可で、最初の SUBJECT hold により多数の purge が恒久停止する | §3.4.3（採用案 (b)+(c)、補助 (a)、比較）、§7 D-05 行、§9 R-15/R-16 |
+| P2-1 | Feature 登録が既存 test の不変条件と衝突。未登録 path が OFF で 404 にならない | §3.1.2、§5.1 |
+| P2-2 | `*` group の privacy 除外が deny 行だけに依存 | §3.1.3、§6.2、§6.6 |
+| P2-3 | `ActionPermissionMatrixTest` の完了条件が自己矛盾 | §3.1 完了条件 3、§6.5 |
+| P2-4 | DSAR の SoD CHECK が DB で成立しない。承認が package に束縛されていない | §3.1 DDL 草案（`t_privacy_request`・`t_privacy_export_package`） |
+| P2-5 | DSAR package が汎用 file 経路から取得できる | §3.5.2、§6.8 |
+| P2-6 | pending 記録の reconciler と並行制御が無い | §3.4.4 |
+| P2-7 | Journal の DataSource を `DataSource` 型で登録すると自動構成と衝突する | §3.3、[`journal-witness-grant-design.md`](journal-witness-grant-design.md) §2.1 |
+| P2-8 | NF08 依存の書き方が不統一 | §0、§2、§4、§8、§9 R-14、§10 |
+| P3-1〜P3-12 | resolver の全 method、tenant 一致、CLAUDE.md、生成列、複合 FK、警告と競合、A1J の配置、列 allow-list、監査・通知、共有 file、用語、privacy-admin の割当 | 各節（§3.1.4 の実装上の注意に集約） |
+
+入力となった依頼者の決定（記録の所在は control repo `ses-claude-control-20261112-r1/reports/launch-decisions-20261113.md`、本repo外）:
+
+| 決定 | 内容 |
+|---|---|
+| B-NF07-1（2026-11-13） | production bridge（W-1〜W-12）を全て接続してから本番公開する |
+| B-NF07-2（2026-11-13） | privacy 管理権限は permission group の action 権限として付与する。baseline + deny に従い、既定は deny、管理者専用 group だけに開く。付与までは fail-closed |
+| Q-1（2026-11-14） | 段階化する。第1期は F1（表・読み取り専用 policy source Bean・flag 既定OFF）、W-5 権限、A1 保全hold、A2 DSAR（半手動）。B1 自動処分と B2 recovery は署名後 |
+| Q-8（2026-11-14） | DG-07 / D-01〜D-09 の署名前でも、値UNKNOWN・flag OFF・未知は一律拒否の形でコードをマージしてよい（tasks.md「F1〜M（DG-07完了まで実装禁止）」の停止条件を上書き。変更記録は tasks.md 同節） |
+| Q-7（2026-11-14） | NF07 F1 の DDL を承認する（新規 migration だけで実装） |
+| hold 正本（2026-11-14） | NF07 hold の正本は独立 Journal。hold は DBA が Journal インスタンスを用意（W-6）してから開放する |
+| privacy-admin（2026-11-14） | privacy 管理者には `privacy-admin` だけを割り当てる（`role-admin` の代わり。`*` を持つので管理権限は減らない）。承認経路で `role-admin` を承認者 group にしている場合に外れる副作用は受け入れる |
+
+本計画は D-01〜D-09、DG-07、G-*、P-* の署名・承認を代行しない。全項目は署名まで「未承認（記入禁止）」のまま（[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) §5）。batch ID は W3-14 だけが総括の採番済みで、他は仮名（総括が採番する）。
+
+関連文書: [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md)（N7-1 で取込）、[`status-alignment.md`](status-alignment.md)（N7-2）、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)（W-6 設定契約・W-12 GRANT 設計案）。
+
+---
+
+## 0. 要約
+
+- **第1期（署名前に実装・マージしてよい。全て flag OFF・値UNKNOWN・未知は拒否）**
+  1. W3-14「F1 + PERM」: F1 表（`V?` 2本、暫定 V192/V193）、`privacy.retention.enabled` / `privacy.dsar.enabled`、決定ID束縛、読み取り専用 policy source Bean、説明API、W-5 権限、prod 起動時の privacy deny 不変条件の検査。総括の判断で W3-14a（F1）→ W3-14b（PERM）に分けてもよい（§3.1 規模）。
+  2. NF07-F2「read-only provider」と NF07-A1J「Journal 本番 adapter・設定契約」（並行可）。
+  3. NF07-A1H「保全hold（開始のみ）と破壊的経路への hold 接続」。
+  4. NF07-A2a「DSAR 受付〜SCOPED」→ NF07-A2b「DSAR 検索〜交付記録」（半手動）。A1H と A2a/A2b は共有 file が重なるので直列にする。
+- **署名前に実装してよいが開放は署名後の batch（Q-8）**: NF07-REG（W-2 policy 登録）、NF07-TRUST（W-3 KMS/CRL/OCSP）、NF07-REL（hold 解除 proof。実装は A1H の直後に前倒し）、NF07-NF08-LINK。**NF07-NF08-LINK は NF08 外部送信を開放する前に必ずマージする（必須の前提）。**
+- **署名後に着手する batch（Q-1）**: B1（W-10 処分）、B2（W-11 recovery）、M（W-13 release）。
+- **NF08 外部送信**: NF07-REG・NF07-TRUST・NF07-NF08-LINK がマージ済みで、`privacy.retention.enabled=true`、対象 policy が `APPROVED_ACTIVE` になるまで、NF08 の実外部送信は必ず拒否される（§8）。
+- **外部で実施**: W-6 の Journal/Witness インスタンス（DBA/SRE）、W-12 の実 GRANT（DBA）。本計画は設定契約と GRANT 設計案だけを書く。
+- **権限（W-5）**: `privacy.*` を `privacy-admin`（管理者専用 group）以外の全 group で deny、`privacy-admin` だけが許可。管理者 role の短絡許可を `privacy.*` に適用しない。group 未割当の legacy fallback は `privacy.*` を常に拒否する。多重防御として、privacy の判定では `*` を許可の候補に数えない。
+
+---
+
+## 1. 前提と不変条件
+
+| # | 不変条件 |
+|---|---|
+| I-1 | 法的な値（保持期間、起算trigger、処分方式、本人確認基準、DSAR期限、hold種類と権限者、unquarantine基準）は署名まで UNKNOWN。コード・migration・設定の既定値に書かない。技術上の現在値（例: `app.resume.retention-days`=30、g10 allow-list の 730日）を法的値へ昇格しない |
+| I-2 | `privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFF。真偽値として解釈できない値は起動失敗（既存 `FeatureSwitchProperties` と同じ扱い）。OFF の入口は 404（`Feature` に登録した path は `FeatureSwitchFilter` と `PrivacyAccessGuard`。未登録の `/api/privacy/<x>` は handler が無く guard を通らないため、privacy-admin 以外の管理者は 403、privacy-admin は Spring の 404。W3-14b で訂正） |
+| I-3 | 未知は capability 単位で拒否する。決定ID欠落、policy UNKNOWN、provider 未登録、journal 不達、trust anchor 不明、失効状態不明は全て拒否（§5.2 の理由コード）。保全方向（hold 開始）は決定と journal が揃えば許可し、解除・処分・交付・外部送信は署名と専用 proof が揃うまで拒否する |
+| I-4 | 第1期は業務データに対する削除・匿名化・restrict の writer、外部 provider の呼出、DSAR 成果物の自動交付を一切持たない（NF07 自身が作った一時 package を交付記録・期限・case の終了で消すこと、保存できなかった package の実体を消すことは対象外。hold との関係は §3.4.1 の D14） |
+| I-5 | NF03 の日常 CRUD 等の既存業務を `POLICY_UNKNOWN` を理由に止めない（prod-wiring §4.1） |
+| I-6 | 合成層（`SyntheticEnvironmentGuard`、test-only capability、`requireTestProfile()`、合成 adapter のコード）は変更しない。本番部品は別 class・別入口とする |
+| I-7 | migration は新規だけ。番号は merged 状態で総括が採番する。V185 は NF10 が使用済み、最新は V186（[`status-alignment.md`](status-alignment.md) C-21） |
+| I-8 | 各 batch は wave3 の共通規則に従う: worker は mvn を実行せず 1 commit を渡す → 総括が diff・BOM・LF・method 名の空白を確認 → Runner が test-compile → SHA に束縛した独立 Review → Runner が対象限定テスト（共通 guard を含む）→ `--no-ff` マージ |
+| I-9 | hold を守る方向と、期限超過の保持を避ける方向の両方を守る。hold に帰属できない行は SUBJECT hold で止めない（§3.4.3） |
+| I-10 | DSAR の承認者（草案の作成者以外の privacy-admin）は、承認の前に草案 package の全内容を取得できる（承認者による承認前の確認 `GET /api/privacy/dsar/{id}/approve/preview` は内容をそのまま返す。応答の `Cache-Control: no-store`・inline 表示と画面の「保存されません」は表示上の扱いで、承認者の端末に届いた内容の保持を system は防げない）。したがって開示の内容を見る者の範囲は「作成者」と「承認する privacy-admin」の両方で、承認されなかった草案の内容も承認者には届いている。この範囲を Privacy が書面で受理する（**未取得**。deploy-runbook §1.7 NF07 本人請求の (b)。A2b review §2.5、FINAL §6.3 L-9。RB-NF07-HOLD で計画に記載） |
+
+---
+
+## 2. W-1〜W-13 と batch の対応
+
+| W | 内容 | batch | 期 | 第1期で作るもの | 本番で開くのに必要な署名・外部作業 |
+|---|---|---|---|---|---|
+| W-1 | F1 catalog/policy/hold/request の本番 DDL | W3-14 | 第1期 | §3.1 の表。disposition job 表は B1 へ移す | D-01、D-02（値）、P-SRC |
+| W-2 | 正式 PolicyApprovalEnvelope の登録、`POLICY_UNKNOWN` の解除 | NF07-REG | 実装は前倒し可、開放は署名後 | なし | D-01、D-02、D-03（D-04 は REG では見ず、B1 の処分の入口が確かめる。`APPROVED_ACTIVE` は処分の承認ではない。RB-NF07-REG で総括が受理） |
+| W-3 | 本番 Trust Anchor / KMS / CRL・OCSP | W3-14（設定駆動 registry、既定は空。失効 provider は常に UNKNOWN）＋ NF07-TRUST | 第1期は空 registry だけ。実 provider は前倒し可、開放は署名後 | 空 registry、常時 UNKNOWN の失効 provider | D-03 |
+| W-4 | `ProductionPolicyReadonlyQueryService` の Spring 登録・API・NF03/NF08 への接続 | W3-14（Bean・説明API）＋ NF07-NF08-LINK | Bean/API は第1期。NF08 への接続（LINK）は前倒し可で、**NF08 外部送信の開放前に必須**。NF03 は日常業務を止めない契約（prod-wiring §4.1）なので、接続先は B1 の処分経路だけ | prod の Bean、`GET /api/privacy/policies/evaluate` | P-SRC、P-LE、P-ACT、P-API、G-ID |
+| W-5 | privacy 権限の付与 | W3-14 | 第1期 | §6 | G-ID（割当規則）、D-01 |
+| W-6 | 本番独立 Journal/Witness インスタンスと設定 | NF07-A1J（Journal adapter と設定契約）。Witness は B2 | code は第1期。インスタンスは外部 | adapter、起動時検査、DDL location、Flyway job | G-DBA、G-BKP |
+| W-7 | 実 DB/file/AI provider、第三者 masking 規則 | NF07-F2 | 第1期（read-only、規則 UNKNOWN） | read-only provider、registry、redaction 枠 | D-06、D-08、AI G10、G-AUD、G-REC、G-EXP |
+| W-8 | DSAR 受付・本人確認・export・交付（A2） | NF07-A2a、NF07-A2b | 第1期（半手動） | 受付〜交付記録 | D-01、D-06、D-09、G-AUD |
+| W-9 | hold 開始/解除の authority 名簿、不可解除型（A1） | NF07-A1H（開始）＋ NF07-REL（解除） | 開始は第1期。解除は実装を A1H の直後に前倒し、開放は署名後 | hold 開始、破壊的経路への接続 | D-05、D-04、D-03（解除 proof） |
+| W-10 | 処分 batch（B1）と flag の本番開放 | B1 | 署名後 | なし | D-02、D-04、D-09、全 gate |
+| W-11 | unquarantine 手続、代表 restore/PITR 演習（B2） | B2 | 署名後 | なし | D-07、G-BKP（HFP-03-PROD-001〜008）、G-INC |
+| W-12 | 本番最小 SQL 権限の実 GRANT | 外部（DBA） | 設計案は本 batch | [`journal-witness-grant-design.md`](journal-witness-grant-design.md) §3 | G-DBA |
+| W-13 | PR・merge・deploy・Go/No-Go | M | 署名後 | なし | 全署名 + 独立 Review + 固定 SHA の全 gate |
+
+依存の順序:
+
+```text
+W3-04 NF07-P（本計画）PASS
+  └─ W3-14「F1 + PERM」（DDL lane: V?×2。分割する場合は W3-14a F1 → W3-14b PERM）
+       ├─ NF07-F2（read-only provider。catalog seed があれば DDL lane）
+       └─ NF07-A1J（Journal adapter・設定契約・Journal 用 Flyway job）
+            └─ NF07-A1H（hold 開始・破壊的経路）
+                 └─ NF07-A2a（DSAR 受付〜SCOPED。F2 も前提）
+                      └─ NF07-A2b（DSAR 検索〜交付記録）
+署名前に実装可・開放は署名後: NF07-REL（A1H の直後）/ NF07-REG / NF07-TRUST / NF07-NF08-LINK（NF08 外部送信の開放前に必須）
+署名後に着手: B1 → B2 → M
+```
+
+A1H・A2a・A2b を直列にする理由: `ActionPermissionMatrixTest`、`FeatureSwitchRouteCoverageTest`、`Feature.java`、`templates/layout/sidebar.html`、messages 4本を共有するため。`ActionPermissionMatrixTest` の所有は W3-14（wave3 §2 の NF07-PERM）から A1H、A2a、A2b の順に引き継ぐ。MySQL shard の新規登録は各 batch で1 class ずつとし、同じ round で同じ shard file を2つの batch が触らない。
+
+---
+
+## 3. 第1期の batch
+
+### 3.1 W3-14「F1 + PERM」
+
+**目的**: F1 表、flag、決定ID束縛、読み取り専用 policy source Bean、説明API、privacy 権限を、値UNKNOWN・flag OFF のままマージする。NF03/NF08 の呼出元、NF08 の class、`application.yml` の `ai.*` は変更しない。
+
+#### 3.1.1 ファイル集合（見込み）
+
+| 区分 | ファイル |
+|---|---|
+| migration（DDL lane） | `src/main/resources/db/migration/V?__nf07_privacy_f1_core.sql`（暫定 V192）、`V?__nf07_privacy_permission_seed.sql`（暫定 V193） |
+| H2 と DDL lane の付随 | `src/test/resources/sql/schema-privacy-f1-h2.sql`（新規）、`src/test/resources/application-test.yml`（schema-locations に追記）、`src/test/resources/sql/permission-group-seed-h2.sql`（`privacy-admin` group、deny 行、test user の所属行）、F1 表を使う test が `@Sql("/sql/engineer-schema-h2.sql")` を使う場合はその schema も同期、`src/test/java/com/ses/migration/LatestMigrationVersion.java`、`src/test/java/com/ses/config/ProductionSchemaVersionGuardTest.java`、`.kiro/specs/production-launch/deploy-runbook.md` の版数・件数行、`scripts/test-suites/mysql-shard-*.txt`（新 MySQL 試験を1回だけ登録） |
+| 設定・flag | `src/main/resources/application.yml`（`privacy.*` 節だけ）、`com.ses.privacy.production.PrivacyFeatureProperties`（`@ConfigurationProperties("privacy")`）、`PrivacyDecisionBinding`（D-01〜D-09 の決定ID）、`PrivacyProductionConfigurationValidator` |
+| 機能スイッチ（§3.1.2） | `com.ses.config.feature.Feature`、`FeatureSwitchProperties`、`src/test/java/com/ses/config/feature/FeatureSwitchRouteCoverageTest.java`、`FeatureSwitchDefaultsTest.java`、`.kiro/specs/production-launch/feature-switches.md` |
+| entity / mapper | `com.ses.entity.privacy.PiiDataElement`、`RetentionPolicy`（`currentKey` は `@TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)`。生成列へ書き込むと MySQL が拒否するため）、`com.ses.mapper.privacy.PiiDataElementMapper`、`RetentionPolicyMapper`（`@MapperScan("com.ses.mapper")` は subpackage を含む）。他の F1 表の entity は利用する batch で追加する |
+| foundation（package-private の追加） | `ProductionPolicyCatalogPort`、`CurrentPolicySource`、`ProductionPolicyTrustRegistry`、`ProductionPolicyReadonlyQueryService`、record `PolicyLookupKey` / `ProductionCatalogBinding` / `CurrentPolicySnapshot`（[`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md) §2 の契約）、公開 factory `ProductionPrivacyComponents`（生成前に `ProductionEnvironmentGuard` を通す）。`SecurityContextCallerContextProvider`（§6.4 の判定変更）。`PolicyFailureReason` に `SOURCE_DISABLED`（`POLICY_UNKNOWN` 群）を追加する案 |
+| Spring 配線（foundation 外） | `com.ses.privacy.production.PrivacyProductionConfiguration`（prod は production service、非 prod は常に `POLICY_UNKNOWN` を返す `UnavailablePolicyReadonlyQueryPort`）、`com.ses.privacy.production.retention.policy.DbProductionPolicyCatalog`、`DbCurrentPolicySource`、`ConfiguredPolicyTrustRegistry`（既定は空）、`UnknownRevocationStatusProvider`（常に UNKNOWN） |
+| API | `com.ses.controller.api.PrivacyPolicyApiController`（`GET /api/privacy/policies/evaluate` だけ）、`com.ses.privacy.production.PrivacyAccessGuard`（service 層で flag と action を両方再判定。`AuthorizationService` が取れなければ拒否） |
+| 権限 | `AuthorizationServiceImpl`、`ActionPermissionResolver`、`PermissionGroupManagementServiceImpl`（割当 guard と監査、§6.7）、`BreakGlassServiceImpl`（`privacy.` 拒否）、`SecurityConfig`（`/privacy/**`・`/api/privacy/**` を `hasRole("管理者")`、`/privacy/**` の許可 method を6つに限定。§6.1）、`ProductionSecurityConfigurationValidator`（§3.1.3） |
+| messages | `messages{,_en,_ko,_zh_CN}.properties`（例: `error.privacy.disabled`、`error.privacy.decisionUnknown`、`error.permission.adminOnlyGroup`、`error.permission.privacyGroupConflict`。各言語で翻訳し、日本語を複写しない） |
+
+foundation package 内には Spring アノテーションを置かない（`PrivacyFoundationIsolationTest` を拡張して固定する）。Spring 登録は `com.ses.privacy.production` 配下に置き、foundation 側は `ProductionPrivacyComponents` だけを public にする。production 側の service package は `com.ses.privacy.production.retention.*`（policy・catalog・hold）と `com.ses.privacy.production.dsar` に分ける（§3.1.2 の route coverage が package で機能を判定するため）。
+
+#### 3.1.2 機能スイッチの登録（P2-1）
+
+既存 test の不変条件（`FeatureSwitchRouteCoverageTest` の prefix と controller の対応・機能間の prefix 重複禁止・完全一致 path は静的 file 専用・sidebar の menu key 判定、`FeatureSwitchDefaultsTest` の環境変数による ON）を満たす形にする。
+
+1. `Feature.NF07_RETENTION`（key `nf07-retention`、menu key `privacy-retention`）と `Feature.NF07_DSAR`（key `nf07-dsar`、menu key `privacy-dsar`）を親子にせず追加する。`/privacy` の根画面は作らず、`/privacy` を前方一致にも完全一致にも登録しない。
+2. prefix は controller を追加する batch で登録する。W3-14 は `NF07_RETENTION` の apiPrefixes に `/api/privacy/policies` だけを入れ、`NF07_DSAR` は全 list を空で始める（`NF03_CERTIFICATION_PII` と同じ）。以後、F2 が `/api/privacy/catalog`、A1H が `/api/privacy/holds` と `/privacy/holds`、A2a が `/api/privacy/dsar` と `/privacy/dsar` を足す。これらは segment 単位で重ならない。
+3. `Feature.propertyName()` / `environmentVariable()` を NF07 の2つだけ上書きし、`privacy.retention.enabled` / `PRIVACY_RETENTION_ENABLED`、`privacy.dsar.enabled` / `PRIVACY_DSAR_ENABLED` を返す。`FeatureSwitchProperties.toggle()` は NF07 の2つについて `PrivacyFeatureProperties` の Toggle を返す。`app.features.*` 側に別名を作らない。
+4. `FeatureSwitchDefaultsTest` の bind 補助を `privacy.*` も bind するよう変える。既存の parameterized test は `feature.environmentVariable()` を使うので、上書き後の名前でそのまま通る。
+5. `FeatureSwitchRouteCoverageTest` の `NF_SERVICE_PACKAGES` に `com.ses.privacy.production.retention` → `NF07_RETENTION`、`com.ses.privacy.production.dsar` → `NF07_DSAR` を足す（`Map.of` の上限10件に達するので `Map.ofEntries` に変える）。`NF_ACTION_RESOURCES` には `privacy` を登録しない（1つの resource が2機能にまたがるため。漏れの検出は package 側で行う）。sidebar の `linkedFeatures` の期待集合は、sidebar に導線を足す batch（A1H、A2a）で更新する。
+6. `PrivacyAccessGuard` は action と flag を両方確認し、flag OFF なら `FeatureSwitchFilter` と同じ本文の 404 を返す。これで、遮断表に登録していない `/api/privacy/<x>` も OFF で拒否される。
+
+#### 3.1.3 prod 起動時の privacy deny 不変条件（P2-2）
+
+`ProductionSecurityConfigurationValidator` に検査を足す（既存の `validateDefaultPermissionGroups` の隣）。prod では flag の状態に関係なく常に行う。
+
+- 設定 tenant の有効な group のうち、`action_key = '*'` かつ `deny_flag = 0` の行を持ち、group key が `privacy-admin` でなく、`privacy.*` の deny 行を持たないものが1件でもあれば起動失敗とする（固定文言、group key だけを出す）。
+- `privacy-admin` group が無効・欠落していても起動は止めない（flag OFF なら使わないため）。flag ON のときの必要条件は §5.1。
+- 多重防御として、§6.2 で privacy の判定時に `*` を許可の候補から外す。これにより、将来 `*` を複製した group が deny を欠いても privacy は開かない。起動時検査はその状態を運用上の誤りとして早期に知らせる役である。
+
+#### 3.1.4 実装上の注意（Plan Review の注意事項を反映）
+
+1. resolver: privacy 分岐は query 除去の直後、`/api/` 判定より前に置き、`/api/privacy/**` と `/privacy/**` を一度に扱う。画面を含め GET / HEAD / POST / PUT / PATCH / DELETE で null でない `privacy.*` を返し、それ以外の method の扱いは §6.1 のとおり。`privacy` を `RESOURCE_NAMES` に入れる commit で、legacy fallback 先頭の拒否と break-glass の拒否も同時に入れる（片方だけだと `isKnownAction` が true になり legacy と break-glass が privacy を通す）。
+2. `AuthorizationServiceImpl`: §6.2 の順序で `startsWith("privacy.")` を判定する。`BUSINESS_ACTIONS` は変えない。
+3. `ActionPermissionMatrixTest`: 既存 assertion のうち変更するのは seed 件数の3行だけ（§6.5）。9008（`privacy-admin` と `role-admin` の両方に所属する管理者 → false）を足す。
+4. Feature 登録は §3.1.2。
+5. 起動時検査は §3.1.3。
+6. DDL: §3.1.5 の SoD と package 束縛、`RetentionPolicy.currentKey` の NEVER、`m_menu.sort_order` は既存の 97 と重複するので未使用値（暫定 260 / 261）を使う。
+7. §6.4: tenant 不一致なら拒否、`AuthorizationService` が取れなければ拒否、既存 `SecurityContextCallerContextProviderTest` の正例を新しい判定に書き換える。
+8. policy source Bean: 構築時に DB へ触れない（lazy に読む）。flag OFF で読取0回を test で固定する。
+9. CLAUDE.md の記述の食い違い（§6.6）は W3-14 では直さず、X3-3 / DOC-FINAL に任せる。
+10. NF08 の class と `application.yml` の `ai.*` は触らない。messages は4言語でそれぞれ翻訳する。
+
+#### 3.1.5 DDL 草案（番号なし。`V?__nf07_privacy_f1_core.sql`）
+
+```sql
+-- NF07 F1: catalog / policy / hold projection / DSAR request。法的な値は一切seedしない。
+-- 処分 job（t_disposition_job / t_disposition_item）は署名後の B1 で別 migration とする。
+
+CREATE TABLE m_pii_data_element (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id        VARCHAR(100) NOT NULL DEFAULT 'default',
+  data_element_id  VARCHAR(128) NOT NULL COMMENT '固定ID（例: AI_PROMPT_LOG）。pii-inventory.md の行と対応',
+  storage_kind     VARCHAR(20)  NOT NULL COMMENT 'DB_COLUMN/FILE_OBJECT/AI_PAYLOAD/LOG_OR_BACKUP',
+  storage_ref      VARCHAR(255) NOT NULL COMMENT 'table.column / provider.object-kind / payload.field',
+  data_class       VARCHAR(50)  NOT NULL DEFAULT 'UNKNOWN',
+  owner_state      VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
+  owner_ref        VARCHAR(100) NULL,
+  provider_id      VARCHAR(100) NULL COMMENT 'F2 の provider。NULL=未登録（検索・処分の対象外として報告する）',
+  subject_attribution VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN' COMMENT 'ATTRIBUTABLE/NOT_ATTRIBUTABLE/NO_PERSONAL_DATA/UNKNOWN（§3.4.3）',
+  third_party_flag TINYINT      NOT NULL DEFAULT 1 COMMENT '第三者情報を含み得る（既定は含む扱い）',
+  inventory_status VARCHAR(30)  NOT NULL DEFAULT 'UNKNOWN' COMMENT 'CONFIRMED_TECHNICAL/PROVISIONAL/UNKNOWN。法的承認ではない',
+  inventory_ref    VARCHAR(255) NULL,
+  created_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_flag     TINYINT      NOT NULL DEFAULT 0,
+  CONSTRAINT uk_pii_data_element UNIQUE (tenant_id, data_element_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='NF07 PII data element catalog（構造のみ）';
+
+-- policy の正本候補。値は署名済み envelope の canonical bytes にだけ入る。
+-- current pointer は生成列 + UNIQUE で (tenant, module, 法人, data element, action, provider) ごとに高々1件にする。
+CREATE TABLE m_retention_policy (
+  id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id               VARCHAR(100) NOT NULL,
+  policy_id               VARCHAR(128) NOT NULL,
+  policy_revision         VARCHAR(64)  NOT NULL,
+  module_code             VARCHAR(50)  NOT NULL,
+  legal_entity_id         BIGINT       NULL COMMENT 'NULL=tenant-wide。P-LE 未決のため法人単位の主張はしない',
+  data_element_id         VARCHAR(128) NOT NULL,
+  target_action           VARCHAR(50)  NOT NULL,
+  target_provider         VARCHAR(100) NOT NULL,
+  status                  VARCHAR(20)  NOT NULL DEFAULT 'CANDIDATE' COMMENT 'CANDIDATE/CURRENT/SUPERSEDED/REVOKED',
+  current_key             VARCHAR(512) GENERATED ALWAYS AS (
+                            CASE WHEN status = 'CURRENT'
+                                 THEN CONCAT_WS('|', tenant_id, module_code, IFNULL(legal_entity_id, 0),
+                                                data_element_id, target_action, target_provider)
+                                 ELSE NULL END) STORED,
+  envelope_schema_version INT          NOT NULL,
+  envelope_canonical      LONGBLOB     NOT NULL COMMENT '署名対象の canonical bytes',
+  envelope_signature      VARBINARY(1024) NOT NULL COMMENT '現行 kernel は Ed25519（64 byte）。D-03 で方式が決まったら長さを見直す',
+  envelope_digest         CHAR(64)     NOT NULL,
+  authority_id            VARCHAR(100) NOT NULL,
+  key_id                  VARCHAR(100) NOT NULL,
+  registered_by           BIGINT       NOT NULL,
+  registered_at           DATETIME(6)  NOT NULL,
+  activated_by            BIGINT       NULL,
+  activated_at            DATETIME(6)  NULL,
+  row_version             BIGINT       NOT NULL DEFAULT 0,
+  CONSTRAINT uk_retention_policy_revision UNIQUE (tenant_id, policy_id, policy_revision),
+  CONSTRAINT uk_retention_policy_current UNIQUE (current_key),
+  CONSTRAINT chk_retention_policy_activation CHECK (status <> 'CURRENT' OR (activated_by IS NOT NULL AND activated_at IS NOT NULL AND activated_by <> registered_by))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='NF07 retention policy（署名envelope + current pointer）';
+
+-- hold は独立 Journal が正本で、本表は projection。理由本文は保存せず、コード・hash・ticket 参照だけを持つ。
+CREATE TABLE t_legal_hold (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100) NOT NULL,
+  hold_id             VARCHAR(64)  NOT NULL COMMENT 'Journal 上の hold 識別子',
+  target_type         VARCHAR(20)  NOT NULL COMMENT 'SUBJECT/DATA_ELEMENT',
+  subject_ref         VARCHAR(128) NULL COMMENT '種別付き opaque 参照（例: ENGINEER:123）',
+  data_element_id     VARCHAR(128) NULL,
+  hold_kind           VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN' COMMENT 'D-05 で確定するまで UNKNOWN',
+  status              VARCHAR(20)  NOT NULL COMMENT 'ACTIVE/RELEASED',
+  reason_code         VARCHAR(50)  NOT NULL,
+  reason_hash         CHAR(64)     NOT NULL,
+  ticket_ref          VARCHAR(100) NOT NULL,
+  requested_by        BIGINT       NOT NULL,
+  requested_at        DATETIME(6)  NOT NULL,
+  journal_revision    BIGINT       NOT NULL,
+  journal_event_hash  CHAR(64)     NOT NULL,
+  released_at         DATETIME(6)  NULL,
+  CONSTRAINT uk_legal_hold UNIQUE (tenant_id, hold_id),
+  CONSTRAINT chk_legal_hold_target CHECK ((target_type = 'SUBJECT' AND subject_ref IS NOT NULL AND data_element_id IS NULL)
+                                       OR (target_type = 'DATA_ELEMENT' AND data_element_id IS NOT NULL AND subject_ref IS NULL)),
+  INDEX idx_legal_hold_subject (tenant_id, subject_ref, status),
+  INDEX idx_legal_hold_element (tenant_id, data_element_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='NF07 hold projection（正本は独立Journal）';
+
+-- 行が1件でもあれば「hold 機構が使われた」とみなし、破壊的経路は Journal との追随確認を必須にする（§3.4.4）。
+-- 最初の Journal append の前に行を作り、append 中の command を pending_command_id に CAS で記録する。
+CREATE TABLE t_privacy_projection_state (
+  tenant_id            VARCHAR(100) NOT NULL,
+  journal_id           VARCHAR(64)  NOT NULL,
+  engaged_at           DATETIME(6)  NOT NULL,
+  last_applied_seq     BIGINT       NOT NULL DEFAULT 0,
+  last_applied_hash    CHAR(64)     NULL,
+  pending_command_id   VARCHAR(64)  NULL COMMENT 'Journal append 前に CAS で記録し、projection 完了か reconciler の判定で NULL に戻す',
+  pending_since        DATETIME(6)  NULL,
+  verified_at          DATETIME(6)  NULL,
+  row_version          BIGINT       NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, journal_id),
+  CONSTRAINT chk_projection_pending CHECK ((pending_command_id IS NULL) = (pending_since IS NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='hold projection の追随位置（A1H の gate が参照）';
+
+-- DSAR。依頼者の連絡先・本人確認書類は保存せず、外部 ticket / 証跡の参照IDだけを持つ（第1期）。
+CREATE TABLE t_privacy_request (
+  id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id                VARCHAR(100) NOT NULL,
+  request_no               VARCHAR(40)  NOT NULL,
+  request_type             VARCHAR(20)  NOT NULL COMMENT 'ACCESS/CORRECTION/DELETION/RESTRICTION/OBJECTION',
+  status                   VARCHAR(30)  NOT NULL COMMENT 'PrivacyCaseState の部分集合',
+  channel                  VARCHAR(20)  NOT NULL,
+  received_at              DATETIME(6)  NOT NULL,
+  due_date                 DATE         NULL COMMENT 'D-06 の期限規則で計算。規則未設定なら NULL',
+  intake_ticket_ref        VARCHAR(128) NOT NULL,
+  identity_state           VARCHAR(20)  NOT NULL DEFAULT 'UNVERIFIED' COMMENT 'UNVERIFIED/AMBIGUOUS/VERIFIED',
+  identity_evidence_ref    VARCHAR(128) NULL,
+  identity_rule_ref        VARCHAR(128) NULL COMMENT '適用した D-06 本人確認基準の決定ID',
+  identity_verified_by     BIGINT       NULL,
+  identity_verified_at     DATETIME(6)  NULL,
+  case_owner_id            BIGINT       NULL,
+  scope_snapshot_hash      CHAR(64)     NULL,
+  prepared_by              BIGINT       NULL,
+  approved_by              BIGINT       NULL,
+  approved_at              DATETIME(6)  NULL,
+  approved_package_id      BIGINT       NULL COMMENT '承認した package。ダウンロード・交付記録時に照合する',
+  approved_content_sha256  CHAR(64)     NULL COMMENT '承認した package の内容 hash',
+  delivered_by             BIGINT       NULL,
+  delivered_at             DATETIME(6)  NULL,
+  delivery_method          VARCHAR(20)  NULL,
+  delivery_evidence_ref    VARCHAR(128) NULL,
+  reopen_of_request_id     BIGINT       NULL,
+  row_version              BIGINT       NOT NULL DEFAULT 0,
+  created_by               BIGINT       NOT NULL,
+  created_at               DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at               DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_flag             TINYINT      NOT NULL DEFAULT 0,
+  CONSTRAINT uk_privacy_request_no UNIQUE (tenant_id, request_no),
+  CONSTRAINT uk_privacy_request_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_privacy_request_sod CHECK (approved_by IS NULL OR (prepared_by IS NOT NULL AND approved_by <> prepared_by)),
+  CONSTRAINT chk_privacy_request_approval_binding CHECK (approved_by IS NULL OR (approved_at IS NOT NULL AND approved_package_id IS NOT NULL AND approved_content_sha256 IS NOT NULL)),
+  CONSTRAINT fk_privacy_request_reopen FOREIGN KEY (tenant_id, reopen_of_request_id) REFERENCES t_privacy_request(tenant_id, id),
+  INDEX idx_privacy_request_status (tenant_id, status, due_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='NF07 DSAR case';
+
+-- 子表の FK は tenant を含む複合 FK とし、DB 層でも tenant をまたぐ関連を作れないようにする。
+CREATE TABLE t_privacy_request_subject_link (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  request_id        BIGINT       NOT NULL,
+  subject_ref       VARCHAR(128) NOT NULL,
+  link_state        VARCHAR(20)  NOT NULL COMMENT 'CANDIDATE/SELECTED/REJECTED',
+  resolved_by       BIGINT       NULL,
+  resolved_at       DATETIME(6)  NULL,
+  resolution_code   VARCHAR(50)  NULL,
+  CONSTRAINT uk_privacy_subject_link UNIQUE (tenant_id, request_id, subject_ref),
+  CONSTRAINT fk_privacy_subject_link_request FOREIGN KEY (tenant_id, request_id) REFERENCES t_privacy_request(tenant_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='DSAR と本人の明示 link（自動結合しない）';
+
+CREATE TABLE t_privacy_action (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  request_id        BIGINT       NOT NULL,
+  action_type       VARCHAR(20)  NOT NULL COMMENT 'SEARCH/EXPORT_DRAFT/MANUAL_ACTION',
+  provider_id       VARCHAR(100) NULL,
+  data_element_id   VARCHAR(128) NULL,
+  status            VARCHAR(20)  NOT NULL COMMENT 'PENDING/CLAIMED/SUCCEEDED/BLOCKED/UNKNOWN/FAILED',
+  idempotency_key   VARCHAR(128) NOT NULL,
+  claim_token       VARCHAR(64)  NULL,
+  lease_until       DATETIME(6)  NULL,
+  result_count      INT          NULL,
+  result_hash       CHAR(64)     NULL,
+  blocked_reason    VARCHAR(50)  NULL,
+  evidence_ref      VARCHAR(128) NULL,
+  row_version       BIGINT       NOT NULL DEFAULT 0,
+  created_at        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_privacy_action_idem UNIQUE (tenant_id, idempotency_key),
+  CONSTRAINT fk_privacy_action_request FOREIGN KEY (tenant_id, request_id) REFERENCES t_privacy_request(tenant_id, id),
+  INDEX idx_privacy_action_request (tenant_id, request_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='DSAR の検索・草案・手動対応の記録';
+
+CREATE TABLE t_privacy_export_package (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id       VARCHAR(100) NOT NULL,
+  request_id      BIGINT       NOT NULL,
+  stored_name     VARCHAR(255) NOT NULL COMMENT 'FileStorageService の保存名（quarantine→published）。汎用 file 経路からは取得させない（§3.5.2）',
+  content_sha256  CHAR(64)     NOT NULL,
+  size_bytes      BIGINT       NOT NULL,
+  status          VARCHAR(20)  NOT NULL COMMENT 'DRAFT/APPROVED/DELIVERED/PURGED',
+  purge_after     DATETIME(6)  NOT NULL,
+  created_by      BIGINT       NOT NULL,
+  created_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  approved_by     BIGINT       NULL,
+  approved_at     DATETIME(6)  NULL,
+  purged_at       DATETIME(6)  NULL,
+  CONSTRAINT uk_privacy_export_package UNIQUE (tenant_id, stored_name),
+  CONSTRAINT uk_privacy_export_package_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_privacy_export_package_sod CHECK (approved_by IS NULL OR approved_by <> created_by),
+  CONSTRAINT chk_privacy_export_package_approval CHECK ((approved_by IS NULL) = (approved_at IS NULL)),
+  CONSTRAINT fk_privacy_export_request FOREIGN KEY (tenant_id, request_id) REFERENCES t_privacy_request(tenant_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='DSAR 開示 package（一時保存）';
+
+-- request と package は相互に参照するため、承認 package の FK は両表の作成後に足す。
+ALTER TABLE t_privacy_request
+  ADD CONSTRAINT fk_privacy_request_approved_package
+  FOREIGN KEY (tenant_id, approved_package_id) REFERENCES t_privacy_export_package(tenant_id, id);
+```
+
+承認の束縛: 承認時に service は同一 tx で、`t_privacy_export_package` の対象行を `status='APPROVED'`・`approved_by`・`approved_at` に CAS 更新し、`t_privacy_request` の `approved_package_id`・`approved_content_sha256` に同じ package の id と hash を書く。ダウンロード（§3.5.2）と交付記録では、package の `content_sha256` と request の `approved_content_sha256` が一致し、package id が `approved_package_id` と一致する場合だけ許可する。承認後に別の package を作っても、承認されていない package は取得も交付記録もできない。
+
+H2 では生成列・CHECK・複合 FK の構文や挙動が異なるため、`schema-privacy-f1-h2.sql` を別に持つ（CLAUDE.md の「MySQL 専用 migration には H2 変種を置く」に従う）。H2 変種との差は MySQL 試験 `FlywayNf07PrivacyF1MigrationTest` が実 MySQL で補う。
+
+**状態の CHECK の追加（V201、2026-11-17、RB-NF07-HOLD。W3-14 review P3-8）**: `t_privacy_request` の `status`（`PrivacyCaseState` の全値）・`channel`（`PrivacyDsarVocabulary.Channel`）・`delivery_method`（`DeliveryMethod`、NULL 可）と、`t_legal_hold.hold_kind`（D-05 で種類が決まるまで `UNKNOWN` だけ）に、コードの enum と同じ値の集合の CHECK を足した。表は `utf8mb4_bin` のため大文字小文字の違う値も拒否する（PAD SPACE のため末尾の空白だけの違いは通る。読む側は enum の名前で厳密に照合するため、その値は解釈できない値として遷移を拒否される）。enum に値を足すときは新しい migration で CHECK も広げる（`PrivacyStatusCheckConstraintTest` が V201 と H2 変種 `schema-privacy-status-check-h2.sql` を enum と照合する）。CHECK を置かない列と理由は V201 の冒頭に書いた: `m_pii_data_element.owner_state`・`data_class` は値の集合を決める enum がまだ無い（writer と同じ batch で足す）、理由・結果のコード列は行の種別ごとに語彙が違う。`request.approved_by = package.approved_by` は DB では保証しない（CHECK は他の表を参照できず、複合 FK に足すと承認の書込み順と二重承認の直列化点を変える）。承認が同じ transaction で両方に同じ承認者を書き、`PrivacyRequestApprovalMySqlTest` が実 MySQL で一致を確かめる。
+
+**DDL 草案（番号なし。`V?__nf07_privacy_permission_seed.sql`）** は §6.3 に置く。
+
+**依存**: W3-04（本計画）の PASS、DDL lane の割当（総括）、`ActionPermissionMatrixTest` の所有（wave3 §2 で NF07-PERM に割当済み）、`application.yml` は `privacy.*` 節だけを変更する。
+
+#### 3.1.6 対象限定テスト
+
+| 種別 | test class | 確認すること |
+|---|---|---|
+| Fast | `ActionPermissionMatrixTest` | §6.5 の変更。既存 assertion のうち変更するのは seed 件数の3行だけ。`BUSINESS_ACTIONS` は編集しない |
+| Fast | `PermissionGroupManagementServiceImplTest` | `privacy-admin` を管理者 role 以外へ割り当てると 400、`privacy.*` deny を持つ group との同時割当は 409、`privacy-admin` の割当・解除は group key 付きの required 監査と既存 privacy-admin への通知を伴う、既存の session 失効は不変 |
+| Fast | `BreakGlassServiceImplTest` | `allowed_actions` に `privacy.` 接頭辞を含む申請は 400 |
+| Fast | `MenuPermissionFilterTest` | `/api/privacy/**` は `privacy-admin` 未所属の管理者でも 403 JSON |
+| Fast | `FeatureSwitchFilterTest`、`FeatureSwitchRouteCoverageTest` | NF07 の入口が OFF で 404、NF 外の入口を誤遮断しない、prefix の重複が無い、package の対応表が NF07 を検出する |
+| Fast | `FeatureSwitchDefaultsTest` | prod の既定で NF07 の2つも OFF、`PRIVACY_RETENTION_ENABLED` / `PRIVACY_DSAR_ENABLED` だけで該当機能が ON |
+| Fast | `PrivacyFeaturePropertiesTest`（新規） | 既定 OFF、`ture` 等で bind 失敗 |
+| Fast | `PrivacyDecisionBindingTest`（新規） | placeholder 断片・重複ID・未来の署名日を拒否。規則は NF08 の `AiExternalSendApproval` と一致（乖離を検出する比較 test を置く） |
+| Fast | `PrivacyProductionConfigurationValidatorTest`（新規） | prod で flag ON かつ D-01 / D-09 の決定ID欠落なら起動失敗（固定文言、値は出さない）。flag OFF では決定ID不要 |
+| Fast | `ProductionSecurityConfigurationValidatorTest` | `*` 許可を持ち `privacy.*` deny を持たない group（`privacy-admin` 以外）があれば prod 起動失敗。現行 seed 相当では成功 |
+| Fast | `ProductionPolicyReadonlyQueryServiceTest`（新規） | policy-source-catalog-wiring-plan.md §4 の (a)〜(e)。flag OFF では source の読取 0 回で `POLICY_UNKNOWN`/`SOURCE_DISABLED`。Bean 構築時の DB 接触 0 回 |
+| Fast（H2） | `DbCurrentPolicySourceTest`（新規） | 0件は `NOT_FOUND`、CANDIDATE/SUPERSEDED/REVOKED は current として返さない、読取は1文の一貫 snapshot、`currentKey` を書かない |
+| Fast | `SecurityContextCallerContextProviderTest` | §6.4 の変更後、`privacy-admin` 所属の管理者だけが通る。GrantedAuthority 文字列だけでは通らない。tenant 不一致と `AuthorizationService` 不在は拒否 |
+| Fast | `PrivacyFoundationIsolationTest` | foundation 内に Spring アノテーションなし。package-private 部品は `ProductionPrivacyComponents` 経由でしか生成できない |
+| Fast | `PrivacyPolicyApiControllerTest`（新規、`@WebMvcTest`） | service 層の再認可で 403、flag OFF なら 404、`ApiResult` 形式 |
+| 共通 guard | `MigrationScriptIntegrityTest`、`MessageBundleConsistencyTest`、`ProductionSchemaVersionGuardTest`、`MySqlTestShardInventoryTest` | 版番号重複なし、4言語の key 一致、最新版数、shard 登録が1回 |
+| MySQL（`@Tag("mysql")`） | `FlywayNf07PrivacyF1MigrationTest`（新規） | 空DBから最新まで適用、F1 表と collation、`current_key` の2件目 CURRENT が Duplicate、`chk_retention_policy_activation`、`chk_privacy_request_sod`（`prepared_by` NULL での承認を拒否）、承認束縛の CHECK、複合 FK が他 tenant の request を参照させない、`privacy-admin` 以外の全 group に `privacy.*` deny、`privacy-admin` に `*` と `privacy.*`（deny 0）、menu `privacy-retention` / `privacy-dsar` は管理者だけ |
+
+#### 3.1.7 完了条件
+
+1. 上記テストが固定 SHA で 0 failure / 0 error / 0 skip（Runner 実行）。
+2. 既定構成（flag OFF）で `Feature` に登録した `/api/privacy/**` の入口が 404 になり（`FeatureSwitchFilter` と `PrivacyAccessGuard`。未登録の path は I-2 のとおり privacy-admin 以外の管理者 403・privacy-admin は Spring の 404。W3-14b で訂正）、policy source の DB 読取が 0 回。
+3. 業務 action の判定を確かめる既存 assertion は1つも変更しない。既存 assertion で変更するのは `ActionPermissionMatrixTest` の seed 件数3行（`permissionGroupSeedの内容そのものを検査する` の営業 deny 8→9、HR deny 7→8、マネージャー deny 8→9）だけで、Runner と Review は diff でこの3行以外の既存 assertion に変更が無いことを機械的に確認する。
+4. 保持期間・処分方式などの法的な値が migration・設定既定値に1件も無い（Review で確認）。
+5. `com.ses.privacy.foundation` の合成層の test（`PrivacyJournalLinearizationMySqlTest` 等）に回帰がない（Runner が既存 shard で確認）。
+6. prod の `ProductionPolicyReadonlyQueryService` の挙動は単体テスト（fake port）でだけ確認する。dev の Demo は `UnavailablePolicyReadonlyQueryPort` を使うので、権限と flag の確認に限られる。
+
+#### 3.1.8 Demo
+
+1. 既定（flag OFF）で起動し、管理者で `GET /api/privacy/policies/evaluate?moduleCode=NF08_AI_SUMMARY&dataElementId=AI_PROMPT_LOG&targetAction=EXTERNAL_DISPATCH&targetProvider=gemini-adapter` を呼ぶ → 404。`GET /api/privacy/unknown-sub` は handler が無いため、`role-admin` だけの管理者は 403（privacy-admin なら Spring の 404。W3-14b で訂正）。
+2. dev で `PRIVACY_RETENTION_ENABLED=true` として再起動し、`role-admin` だけの管理者で同じ API を呼ぶ → 403（`privacy.*` deny）。
+3. 別の管理者が `PUT /api/permission-groups/users/{id}` で対象管理者を `privacy-admin` だけに割り当てる → 対象者の session が失効し、監査に group key が残り、既存の privacy-admin に通知が届く → 再ログインして同じ API を呼ぶ → 200、`decisionStatus=POLICY_UNKNOWN`。
+4. 営業ユーザーに `privacy-admin` を割り当てようとする → 400。`role-admin` と `privacy-admin` の同時割当 → 409。
+5. 起動失敗の確認は `PrivacyProductionConfigurationValidatorTest` と `ProductionSecurityConfigurationValidatorTest` の結果で示す。
+
+**規模**: L〜XL（main 約24 file、test 約16 class、migration 2本 + H2 1本、messages 4本）。総括の判断で、W3-14a「F1」（F1 DDL・flag・Feature・決定ID・policy source Bean・説明API）→ W3-14b「PERM」（V193・権限・割当 guard・起動時検査・break-glass）に分けてよい。分ける場合、PERM の Demo は F1 の API を使うので順序は F1 → PERM で、DDL lane は2回に分かれる。
+
+### 3.2 NF07-F2「read-only provider」
+
+**目的**: DSAR 検索・dry-run・hold の帰属判定の母集団を作る本番の read-only provider と registry、第三者 redaction 規則の枠を用意する。規則・範囲の値は UNKNOWN のまま。外部 provider（Gemini、CloudSign、freee、mailbox、backup/replica）は登録しない＝scope 外として常に呼ばない。
+
+**ファイル集合（見込み）**
+
+- `com.ses.privacy.production.ProductionPrivacyProviderRegistry`（未登録 provider は `PROVIDER_UNREGISTERED`。合成 `PrivacyProviderRegistry` は変更しない）
+- `com.ses.privacy.production.provider.*`: 初期候補 `EngineerProfileProvider`（`t_engineer` 系）、`CandidateProvider`（`t_candidate` 系）、`SysUserProvider`、`DocumentFileProvider`（`t_document` / `t_document_version` / `t_document_link` / `t_file_security_metadata`、`FileReferenceProvider` と `FileScopeValidationService` を経由）、`IngestionTextProvider`（`t_resume_ingestion` / `t_bp_availability_ingestion` / `t_project_ingestion` の `extracted_text`）、`AiLogProvider`（`t_ai_recommendation_run`、legacy `t_ai_log`）。初期集合は Plan Review で確定する
+- 各 provider は読み取る列を明示した allow-list を持ち、`SELECT *` を使わない。`sys_user` の password hash、MFA 秘密、token 類は候補にも草案にも入れない（P3-8）
+- 各 provider は「subject の導出規則」と「論理削除済み行も含めた stored name の解決」を提供する（A1H の hold 帰属判定と `PrivacyHoldFileReferenceProvider` が使う）
+- `com.ses.privacy.production.redaction.ThirdPartyRedactor`（規則は D-06 の決定ID付き設定から読む。未設定なら全 field を「要手動確認」に回し、自動では出さない）
+- `com.ses.privacy.production.PrivacyCoverageReport`（登録済み／未登録の data element と provider の一覧。`m_pii_data_element.provider_id IS NULL` を必ず報告する）
+- `com.ses.privacy.production.retention.catalog.PrivacyCatalogService`、`PrivacyCatalogApiController`（`GET /api/privacy/catalog`、`privacy.catalog.view`）、`Feature.NF07_RETENTION` の apiPrefixes に `/api/privacy/catalog` を追加
+- migration（DDL lane）: `V?__nf07_privacy_data_element_catalog_seed.sql`（初期 provider が扱う data element の構造行と `subject_attribution` だけを seed。owner・保持などは UNKNOWN）
+
+**DDL 草案（番号なし）**
+
+```sql
+-- data element の構造行だけ。inventory_status は UNKNOWN、owner も UNKNOWN。保持期間は持たない。
+-- tenant は sys_user に存在する tenant から取る（権限 group とは結び付けない）。
+INSERT INTO m_pii_data_element (tenant_id, data_element_id, storage_kind, storage_ref, provider_id, subject_attribution, inventory_ref)
+SELECT t.tenant_id, d.data_element_id, d.storage_kind, d.storage_ref, d.provider_id, d.subject_attribution, d.inventory_ref
+FROM (SELECT DISTINCT tenant_id FROM sys_user) t
+JOIN (
+  SELECT 'ENGINEER_PROFILE' AS data_element_id, 'DB_COLUMN' AS storage_kind, 't_engineer.(allow-list)' AS storage_ref,
+         'engineer-profile' AS provider_id, 'ATTRIBUTABLE' AS subject_attribution, 'pii-inventory.md#t_engineer' AS inventory_ref
+  -- UNION ALL ...（初期 provider の対象と、§3.4.1 の破壊的経路の data element。Plan Review で確定）
+) d
+WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenant_id AND e.data_element_id = d.data_element_id);
+```
+
+**依存**: W3-14。DDL lane（seed がある場合）。`FileReferenceProvider` / `FileScopeValidationService` の既存規約。
+
+**対象限定テスト**: `ProductionPrivacyProviderRegistryTest`（未登録・重複・外部 provider 登録の拒否）、provider ごとの H2 test（scope 外の行を返さない、他 tenant の行を返さない、`DataScopeService` と同じ母集団、write 0、allow-list 外の列を読まない、`sys_user` の秘密列が結果に出ない）、`ThirdPartyRedactorTest`（規則未設定で自動出力 0、規則ありでも第三者 field を出さない）、`PrivacyCoverageReportTest`、`PrivacyCatalogApiControllerTest`、`FeatureSwitchRouteCoverageTest`、共通 guard（`MigrationScriptIntegrityTest`、`MessageBundleConsistencyTest`）。MySQL では seed の重複投入なしを `FlywayNf07PrivacyF1MigrationTest` に追加する。
+
+**完了条件**: provider の呼出が全て read-only（mapper の select だけ、write 0 を構造 test で確認）。外部 provider への接続コードが無い。未登録の data element が coverage report に必ず出る。各 provider の列 allow-list が test で固定されている。
+
+**Demo**: privacy-admin で `GET /api/privacy/catalog` → 登録済み provider と未登録 data element（例: audit log、backup）が分かれて表示され、各 element の `subject_attribution` が見える。未登録側の理由が `PROVIDER_UNREGISTERED`。
+
+**規模**: L（provider 6 前後、test 11 class 前後）。
+
+### 3.3 NF07-A1J「Journal 本番 adapter と設定契約」
+
+**目的**: hold の正本となる独立 Journal への本番接続を作る（W-6 の code 側）。合成 `JdbcPrivacyJournalAdapter` とその `requireTestProfile()` は変更しない。Witness / attestor は B2 で扱う。
+
+**ファイル集合（見込み）**
+
+- `com.ses.privacy.foundation.ProductionPrivacyJournalAdapter`（package-private。foundation の既存 package-private な canonical・hash 計算部品をそのまま使い、合成 adapter の class には手を入れない。JDBC 処理は本番用に別に書き、同一入力で合成 adapter と hash chain が一致することを同値性 test で固定する。生成は `ProductionPrivacyComponents` 経由だけ）。I-6 を守るため、合成 adapter からの共通部抽出は行わない（抽出すると合成層のコードが変わるため。重複は同値性 test で乖離を検出する）
+- `com.ses.privacy.production.retention.hold.PrivacyJournalConnections`（専用の holder 型。内部に connection pool を持つが、Spring には `DataSource` 型の Bean として公開しない。application の DataSource 自動構成（`DataSourceAutoConfiguration` の `@ConditionalOnMissingBean(DataSource.class)`）と、単一候補を前提にする `JdbcTemplate`・MyBatis-Plus の自動構成に影響させないため。journal 設定がある場合だけ作り、flag とは独立にする）
+- `PrivacyJournalStartupVerifier`（[`journal-witness-grant-design.md`](journal-witness-grant-design.md) §2.3 の起動時検査）
+- Journal DDL: `src/main/resources/db/privacy-journal/V?__privacy_journal_core.sql`（application DB の `db/migration` とは別 location・別履歴表。test 用 `src/test/resources/privacy-journal/schema-test.sql` を基にする）
+- Journal 用 Flyway job: Maven profile `privacy-journal-migrate`、設定 `ops/flyway/flyway-privacy-journal.conf`（locations は `classpath:db/privacy-journal` だけ、履歴表 `flyway_schema_history_privacy_journal`、application の callback は持たない）。`pom.xml` の変更を含む
+- test: `PrivacyJournalMigrationIntegrityTest`（`MigrationScriptIntegrityTest` と同型）、`PrivacyJournalFlywayJobConfigurationTest`（`ProductionFlywayJobConfigurationTest` と同型。profile・conf・locations・callback なし・secret を含まないこと）
+- deploy 手順: `.kiro/specs/production-launch/deploy-runbook.md` に Journal 用 Flyway job の節を追加
+
+**DDL 草案（番号なし。Journal インスタンス側）**: 表の形は合成の `sf_journal_head` / `sf_journal_event` / `sf_journal_command` / `sf_journal_action` / `sf_journal_lease` を本番名（`pj_head` / `pj_event` / `pj_command` / `pj_action` / `pj_lease`）へ移したものとし、列・制約・collation（identity 列は binary NO PAD）は合成 schema と同一にする。差分は名前だけで、意味の変更は Plan Review を要する。
+
+**依存**: W3-14（flag、決定ID束縛）。G-DBA のインスタンスは開放時に必要で、実装には不要（Testcontainers で検証）。
+
+**対象限定テスト**: `ProductionPrivacyJournalAdapterMySqlTest`（`@Tag("mysql")`、3 container: app DB / journal / 予備。append・CAS・replay・ACK 不明・transaction 中断で head 不変、`HOLD_RELEASED` は本番 adapter でも拒否、合成 adapter との hash chain 同値性）、`PrivacyJournalStartupVerifierMySqlTest`（`innodb_flush_log_at_trx_commit`≠1、`sync_binlog`≠1、binlog 無効、read_only、app DB と同じ `server_uuid`、過剰権限・権限不足・role 付与の principal をそれぞれ与えて起動拒否）、`PrivacyJournalConnectionsContextTest`（journal 設定ありの完全な context で、application の mapper と `JdbcTemplate` が application DB に接続したまま（`SELECT DATABASE()` が application schema）であること、`DataSource` 型の Bean が1つだけであること。journal 設定が無ければ pool 生成 0・接続試行 0）、`PrivacyJournalMigrationIntegrityTest`、`PrivacyJournalFlywayJobConfigurationTest`、既存 `PrivacyJournalLinearizationMySqlTest` の回帰、`MySqlTestShardInventoryTest`。
+
+**完了条件**: journal 設定が無ければ接続試行 0。Journal 設定が app DB を指すと起動失敗（retention flag ON の場合）または警告と gate の `UNAVAILABLE`（flag OFF の場合）。`DataSource` 型の Bean は application の1つだけ。合成 adapter のコードに diff が無い。
+
+**Demo**: Testcontainers の journal に対し、本番 adapter で HOLD_STARTED を append → 同じ command ID の再送が元の ACK を返す → `innodb_flush_log_at_trx_commit=2` の container では起動検査が失敗する、を test 結果で示す。
+
+**規模**: L（main 7 前後、MySQL test 3 class、Fast test 3 class、pom 1）。
+
+### 3.4 NF07-A1H「保全 hold（開始のみ）と破壊的経路への接続」
+
+**目的**: privacy-admin が subject / data element に hold を掛けられるようにし、実際にデータを消す全ての経路が hold を尊重するようにする。同時に、hold に帰属できない行を止めて期限超過の保持を生まないようにする。解除は本 batch では作らない（NF07-REL を A1H の直後に前倒しで実装する。開放は D-05・D-03 の署名後）。
+
+#### 3.4.1 破壊的経路の一覧と接続方法（P1-1）
+
+`DocumentRetentionJob` は処分申請（PENDING）を作るだけで、実際の物理削除は管理者の手動実行 `DocumentServiceImpl.executeDisposal` で起きる。このため接続点は「申請を作る所」ではなく「消す所」を主とする。
+
+| # | 経路 | 起動 | 処理 | subject の導出 | data element | NF07 hold の扱い |
+|---|---|---|---|---|---|---|
+| D1 | `DocumentServiceImpl.executeDisposal`（`POST /api/documents/disposal/{requestId}/execute`） | 管理者の手動（承認済み申請） | 文書を DISPOSED にし、全 version の実体を物理削除 | F2 の `DocumentFileProvider` と同じ規則（和集合。下の「D1〜D3 の本人導出」）。人を指す link（直接・間接）と 1on1 相談メモの逆参照から導出し、どれにも当たらない文書は帰属不能 | `DOCUMENT:<document_type>` | 同一 tx 内、更新の直前に照会する。SUBJECT または DATA_ELEMENT の hold に当たれば 409（`error.privacy.holdActive`）。gate が `UNAVAILABLE` でも 409 |
+| D2 | `DocumentServiceImpl.requestDisposal` | 管理者の手動 | PENDING 申請の作成（非破壊） | D1 と同じ | D1 と同じ | hold に当たれば 409（申請を作らない） |
+| D3 | `DocumentRetentionJob` | 自動（日次） | 期限到来文書の PENDING 申請作成（非破壊） | D1 と同じ | D1 と同じ | 当たる文書は申請を作らず skip し、件数を警告する |
+| D4 | `ResumeRetentionCleanupServiceImpl`（履歴取込） | 自動（日次） | 原本の実体削除と `extracted_text` 消去。続けて、原本を purge 済みのジョブに link した文書台帳の副本（`RESUME_INGESTION`）の保存期限を当日に合わせる（副本は消さない。下の「D4 と文書台帳の副本」） | `converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合（両方ある行はどちらの hold でも止まる。優先順位にすると候補者だけの hold で変換済みの行を消してしまう）。どちらも無ければ帰属不能 | `RESUME_INGESTION_ORIGINAL`、`RESUME_INGESTION_TEXT` | 帰属できる行は SUBJECT hold に当たる行だけ skip。帰属不能な行は DATA_ELEMENT hold があるときだけ止まる |
+| D5 | 同（BP 空き取込） | 自動（日次） | `extracted_text` 消去 | `converted_availability_id` → BP_AVAILABILITY、無ければ帰属不能 | `BP_AVAILABILITY_INGESTION_TEXT` | D4 と同じ |
+| D6 | `AiRecommendationRetentionScheduler`（`ai.retention.scheduler-enabled=true` のときだけ Bean がある） | 自動 | redacted summary の purge | F2 の `AiLogProvider` と同じ規則（summary の本人＝source 要員、無ければ推薦結果の1件目の要員）。案件→要員の run は `rank_no=1` の ENGINEER、要員→案件の run は `use_case=MATCHING` の `parameter_hash` を記録時の規則で再計算して source 要員を照合する。2件目以降の要員は第三者で本人にしない。導出できなければ帰属不能（下の「D6 の残余」） | `AI_REDACTED_SUMMARY` | D4 と同じ。接続は Bean の有無に依存しない service 側（`AiRecommendationRetentionService`）に入れ、Bean が無い構成でも test が成立するようにする |
+| D7 | `IntegrationHubRetentionPurgeScheduler` の record purge（IDEMPOTENCY / DELIVERY / INBOUND / INBOUND_REPLAY / AUDIT / EXTERNAL_AUDIT。EXTERNAL_AUDIT は V192 で追加） | 自動（60秒） | 保持期限切れ record の削除 | 帰属不能（record kind × retention class 単位） | `INTEGRATION_HUB_<KIND>` | DATA_ELEMENT hold があるときだけ、その kind を止める。SUBJECT hold では止めない |
+| D8 | 同 nonce purge（`ApiNonceReplayService.purgeExpired`） | 自動（60秒） | replay 防止用 nonce の削除 | 個人情報を含まない | — | gate に接続しない |
+| D9 | `ExternalApiReadSnapshotPurgeScheduler` | 自動（60秒） | read snapshot の削除 | 帰属不能 | `EXTERNAL_API_READ_SNAPSHOT` | D7 と同じ。F2 の inventory で個人情報を含まないと確認できれば D8 と同じく接続しない |
+| D10 | `FileCleanupService.cleanupOrphanFiles()`（`FileCleanupScheduler` と `DocumentArchiveFileCleanupScheduler` の両方が呼ぶ） | 自動 | どの `FileReferenceProvider` も参照しない実体の削除 | 参照元の行が無いので、この経路自体では導出できない | — | 両 scheduler を同じ扱いにするため、scheduler ではなく `FileReferenceProvider` の側で守る。新規 `PrivacyHoldFileReferenceProvider` が、有効な hold の subject / data element に帰属する stored name（F2 provider が論理削除済みの行も含めて解決）を「参照あり」として返す。gate が `UNAVAILABLE` のときは provider が例外を返し、cleanup をその回は中止させる（既存の cleanup が provider 例外で中止することを A1H で確認し、しない場合は合わせて直す） |
+| D11 | 業務 record の削除で file 参照が外れる経路 | 手動 | 参照が外れた実体は D10 で消える | 各 `FileReferenceProvider` | — | `FileReferenceProvider` ごとに、論理削除行を参照に数えるかを A1H で一覧化する。held subject の実体は D10 の provider で守る。参照元の行が物理削除された実体は帰属できず守れない（残余、§9 R-15）。一覧は A1H-2 で deploy-runbook §4.4 に置いた（既存の8 provider はいずれも論理削除行を数えない。却下した履歴取込の原本・link を消した依頼の添付も外れる） |
+| D12 | upload 失敗時の補償削除（`DocumentServiceImpl` の import・rollback 補償、`DocumentMetadataCommitService`、`ResumeIngestionServiceImpl.createJob`。A1H-2 で同じ種類の `FileStorageServiceImpl.store` の失敗時・`ImportRawTempFileStore`・`ImportStageReconcileScheduler`・CloudSign の一時 file を追加） | 同一要求内 | 業務 record に結び付く前の新規実体の削除 | — | — | 対象外（hold の対象になり得るデータになる前の実体） |
+| D13 | 他 NF の破壊的経路 | — | — | — | — | A1H-2 で deploy-runbook §4.4 に分類した。PWA の再送台帳（`t_pwa_client_mutation`）と freee の従業員対応（`t_freee_employee_link`）の物理削除は catalog に element が無く、接続するか残余とするかを D-05 owner が決める（要判断）。業務上の現在値の編集・資格情報の初期化・初回だけの見本行の削除は理由付きで対象外 |
+| D14 | DSAR の開示 package の削除（NF07-A2b。`PrivacyExportPackagePurgeScheduler` → `PrivacyExportPackageService.purgeDue`、`recordDelivery`、期限切れ草案の作り直し） | 自動（毎時、flag で止めない）・privacy-admin の手動 | `purge_after` 超過・交付記録・終了した case の package の実体を消し、行は PURGED にする（内容 hash・交付記録は残す） | package は F2 provider が読んだ値の交付用の副本で、原本は別に保存され D1〜D11 が守る | — （catalog に無い NF07 自身の作業データ。pii-inventory §6 に除外として記す。実体の metadata は `FILE_SECURITY_METADATA` で、削除で論理削除される） | 対象外（gate に接続しない）。実質の根拠は、原本が別に保存され D1〜D11 が守ること、接続すると hold を使った tenant では UNCLASSIFIED で1件も消せず D-06 の `package-max-age` と「交付記録と同時に PURGED」を超える副本の保持になること（I-9）、交付の証跡（hash・交付記録）が残ること。I-4 は writer の禁止の対象外を定めるだけで hold との関係は本行で決める。scan できず保存できなかった草案・行を書けなかった実体の後始末と孤児の削除も同じ扱い（review P2-1）。本人請求自体が争いになったときの交付内容の保全は D-05・D-06 owner の受理事項（deploy-runbook §4.4 の (8)） |
+
+**D4 と文書台帳の副本（2026-11-16 依頼者決定、NF07-F2 delta review P2-C。Privacy・文書 owner の署名待ち）**
+
+履歴取込の upload は原本と別に文書台帳へ副本（`RESUME_INGESTION`、V197。別の実体 file）を登録する。副本は取引日を持たず保存期限が NULL のままで、D3 の候補にならず無期限に残っていた。依頼者は「取込原本を `app.resume.retention-days` で purge するとき、副本も処分対象にして両者の保存期限を揃える」と決めた。実装は次のとおり（方式 (a)：保存期限を合わせて既存の処分経路に渡す。新しい削除点は作らない）。
+
+- D4 の原本 purge の後に `ResumeIngestionLedgerRetentionService.alignPurgedCopies` を呼ぶ。対象は、原本を purge 済み（`stored_file_name IS NULL`、確定済・却下）のジョブに同じ tenant の link を持つ副本で、DRAFT は `DocumentEligibilityService.confirm` で CONFIRMED・保存期限＝当日にし、CONFIRMED・AMENDED・CANCELLED は状態を変えず保存期限を当日に早める（`DocumentEligibilityService.alignRetention`。保存期限が既に当日以前なら変えない）。
+- 処分は既存の D3（02:30、`registerRetentionDisposalCandidate`。CONFIRMED のみ）→ 管理者の承認 → D1（`executeDisposal`）で行う。AMENDED・CANCELLED は D2（手動の申請）の対象になる。D1〜D3 は lock 後に legal hold を再確認し、NF07 hold の gate（A1H）も D1〜D3 に入るため、本経路は hold を迂回しない。
+- legal hold 中の副本は保存期限も変えず WARN を出す。毎回の実行で未処理の副本を照会し直すので、hold の解除後・一時的な失敗の後の実行で拾い直し、処理済みの副本は照会に出ない（再実行で重ねて変えず、D3 の申請も重複しない）。副本ごとに短い transaction で処理し、失敗しても原本の purge を戻さない。照会は ID の keyset（`d.id > 直前の最後の ID`、500件ずつ）で全件を進めるため、hold 中・失敗し続ける副本が先頭に溜まっても後ろの副本は処理される。
+- 失敗は `DocumentRetentionJob` と同じく件数を ERROR で1件残し、metric `ses.resume.ledger.retention.failures`（tag `stage`=`document`/`batch`）に数える。AMENDED・CANCELLED の期限到来と、合わせられずに残った副本は deploy-runbook §4.3 の定期確認 SQL で拾う。
+- 実 MySQL の根拠は `ResumeIngestionLedgerRetentionMySqlTest`（shard-2）：外側 transaction の無い日次清掃での副本ごとの失敗の隔離（lock 待ちの timeout）、`changeLegalHold` との両順序の直列化、link・ジョブの tenant 境界、清掃 → D3 → 承認 → 執行の端から端まで（保存期限は延ばさない、AMENDED は状態を変えない、epoch は進まない）。
+- NF07 の SUBJECT hold は、副本にも原本と同じ本人導出（D4 と同じ和集合。下の表の `RESUME_INGESTION`）で効く。DATA_ELEMENT hold は element が別（原本は `RESUME_INGESTION_ORIGINAL`、副本は `DOCUMENT:RESUME_INGESTION`）のため、原本の element だけを hold しても副本は D1〜D3 で止まらない。A1H で hold の対象を選ぶ所と runbook に両方を並べ、この扱いを D-05 owner が受理する。
+- 開放前に Privacy owner と文書 owner の書面署名を得る（deploy-runbook の V197 行・署名事項）。署名が得られない場合は `ResumeRetentionCleanupServiceImpl` の副本処理を外す変更を出す。
+
+**D1〜D3 の本人導出（F2 `DocumentFileProvider`、NF07-F2 review P2-4・delta review P2-A で確定）**
+
+文書の link（`t_document_link`、論理削除済みを含む）の target から次の経路で導出し、どれか1つでも当たれば本人の文書とする（和集合。複数の要員を含む請求・注文は含まれる全員の文書になる）。中間の表は tenant で絞らない（文書と link を tenant で絞り、各表の ID は tenant をまたいで一意。tenant 未解決の契約も hold の範囲に入る）。
+
+| link の target | 導出 |
+|---|---|
+| `ENGINEER` | target の要員 |
+| `RESUME_INGESTION` | D4 と同じ（`converted_engineer_id` → ENGINEER と `candidate_id` → CANDIDATE の和集合） |
+| `CERTIFICATION_RECORD` | `t_engineer_certification.engineer_id` |
+| `CONTRACT` | `t_contract.engineer_id` |
+| `WORK_RECORD` | `t_work_record.contract_id` → `t_contract.engineer_id` |
+| `BP_PAYMENT` | `t_bp_payment.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id` |
+| `QUOTATION` | `t_quotation.engineer_id`（NULL の見積は帰属不能） |
+| `INVOICE` | `t_invoice_item.work_record_id` → `t_work_record.contract_id` → `t_contract.engineer_id`（請求の明細の全要員） |
+| `SALES_ORDER` | `t_sales_order_line.engineer_id`（注文の明細の全要員） |
+| （link なし）`PRIVATE_NOTE` | `t_one_on_one_request.private_note_ref`（文書ID）→ `engineer_id` |
+| （link なし）電子請求書 XML（`INVOICE_OUT`） | `t_digital_invoice.xml_document_id`（文書ID）→ `invoice_id` → `INVOICE` と同じ |
+
+文書種別ごとの宣言の正本は `DocumentFileProvider.DOCUMENT_TYPE_RULES` で、全種別を個別の宣言（導出できる種別は ATTRIBUTABLE、残余は NOT_ATTRIBUTABLE）にし、宣言に無い未知の種別だけを除外付きの接頭辞 `DOCUMENT:` で受ける。catalog（V196・V197）の種別ごとの `subject_attribution` はこの宣言と一致させ（一致しない行は coverage report が `ATTRIBUTION_MISMATCH` で登録済みにしない）、migration が `m_document_type` に入れる全種別と宣言が過不足なく一致することを `DocumentFileProviderTest` が classpath の migration を解析して固定する（種別を足す batch は宣言も足す）。このため規則5の「帰属できない data element」は catalog の `subject_attribution` だけを入力にできる。導出できる種別でも、導出に必要な link・列が無い行（要員の無い見積、契約・注文・要員以外へ link した受領請求等）は §3.4.3 規則4の帰属不能行になる。
+
+導出できない文書種別（残余。catalog・provider とも NOT_ATTRIBUTABLE。§3.4.3 規則5の対象）:
+
+| 文書種別 | link | 理由 | A1H の扱い |
+|---|---|---|---|
+| `SERVICE_REQUEST_ATTACHMENT` | SERVICE_REQUEST | 顧客 portal の依頼で、本人種別（要員・候補者・アカウント・BP）に当たらない | SUBJECT hold 開始画面で tenant 内件数を示し、privacy-admin が DATA_ELEMENT hold を追加するか残余として受理するかを選ぶ（既定なし。C-2-4） |
+| `IMPORT` | IMPORT_JOB | 取込CSVは複数人の行を含み、行と本人を対応付けられない | 同上 |
+| `MANAGEMENT_REPORT` | なし | 経営レポートは集計で個人を対象としない | 同上 |
+
+**DSAR の交付区分（hold の帰属とは別の宣言。delta review 第4項）**: 帰属は保全の側に広く取るが、交付は第三者情報を出さない側に倒す。`DocumentFileProvider.DOCUMENT_TYPE_RULES` が種別ごとに `DsarDeliveryClass` を宣言し、`ThirdPartyRedactor` は `MIXED_THIRD_PARTY`（と宣言の無い data element）を D-06 の規則が設定された後も自動 package に入れない（PDF 等の file は項目単位で redact できない。`ThirdPartyRedactorTest` が固定）。
+
+| 区分 | 文書種別 |
+|---|---|
+| `SELF` | WORK_REPORT、RECEIPT、SKILL_SHEET、CHANGE_REQUEST_ATTACHMENT、CERTIFICATION_EVIDENCE、RESUME_INGESTION |
+| `MIXED_THIRD_PARTY` | 契約類8種（CONTRACT、SIGNED_PDF、ESIGN_CERT、ACCEPTANCE、DISPATCH_LEDGER、EMPLOYMENT_CONDITIONS_STATEMENT、DISPATCH_NOTICE、INDIVIDUAL_CONTRACT）、INVOICE_OUT、INVOICE_IN、ORDER_RECEIVED、ORDER_ACKNOWLEDGEMENT、QUOTATION、BP_SUBMISSION、PRIVATE_NOTE、残余3種 |
+
+文書以外の provider の data element は既定で `MIXED_THIRD_PARTY`（本人の項目だけを自動交付する判断は D-06 の決定後に宣言を変える）。catalog の `third_party_flag` は全行既定の 1（含む扱い）のままで、交付区分の正本は provider の宣言とする（catalog への反映は D-06 と合わせて DDL lane で行う）。第1期の DSAR は開示だけで消去請求を持たない。消去を扱う batch では「帰属できる」と「消去してよい」を別に判定し、法定保存のある種別は消去しない。
+
+catalog に行が無い種別（`DOCUMENT:<code>` が無い、または `DOCUMENT:UNRESOLVED`）と、seed 後に作られた tenant（catalog 行が無い。coverage report の `CATALOG_MISSING`）は、UNKNOWN と同じく fail-closed とする（hold 機構を使った tenant では処分を止めて警告する。NF07-F2 review P3-6）。
+
+**D6 の残余**: 次の run は summary の本人を導出できず帰属不能行になる。DSAR（A2b）では tenant 内の件数を示して要手動確認に回し、D6 の purge は §3.4.3 規則4（DATA_ELEMENT hold があるときだけ止める）に従う。現行の記録経路（`AiApiController` の `MATCHING`）はどれにも当たらない。
+
+- `use_case` が `MATCHING` 以外で source 要員を持つ run（source 要員を照合する正規形の use_case を限定しているため）
+- source 要員と source 案件を両方持つ run（要員→案件の照合は source 案件を NULL として再計算する）
+- 記録の規則が変わった後の run。`AiLogProviderTest` は (a) 記録側の `canonicalParameters`・`sha256` との一致と、(b) 実際の `recordMatch`（`AiApiController` と同じ引数）で記録した run の帰属を固定する。検出できるのは test が通る経路の変化だけで、matching 実装が返す DTO の中身（案件の結果に要員・BP の ID も入れる等）や新しい呼出し元の引数が変わった場合は、test に現れないまま不一致になり得る（その run は帰属不能行として残る）
+- 根本の解消は、記録時に summary の本人を列として残すこと（DDL lane。番号は総括が割り当てる。F2 では DDL を足さない）
+
+**AI 推薦の候補（`t_ai_recommendation_item` の score・explanation）**: 2件目以降を含む各候補要員の個人データだが、D6 は summary だけを消し item に触れないため破壊的経路ではない。catalog には `AI_RECOMMENDATION_ITEM`（未登録・UNKNOWN）として載せ、DSAR（A2b）の検索範囲に入れるかは A2b で決める（delta review P3-5）。
+
+#### 3.4.2 NF07 hold と `legal_hold_flag` の関係（P1-1）
+
+- `t_document.legal_hold_flag`（V67）は文書台帳の文書単位の保全で、文書の担当者が `placeLegalHold` で操作する。NF07 hold は subject / data element 単位の保全で、privacy-admin が操作し、正本は Journal。
+- 両者は互いに書き換えない。NF07 hold の開始時に `legal_hold_flag` を立てない（正本が2つになるため）。
+- 判定は独立に両方行い、どちらかに当たれば処分しない（D1〜D3）。`legal_hold_flag` に当たったときの既存の応答（`error.document.legalHoldActive`）は変えず、NF07 hold に当たったときは `error.privacy.holdActive` を返す。
+- 文書画面の legal hold 表示は `legal_hold_flag` のまま。NF07 hold は「privacy hold 中」として別に表示する（A1H では任意。表示する場合も subject 識別子は出さない）。
+
+#### 3.4.3 帰属できない行の扱い（P1-2）
+
+採用案は **(b)+(c)** で、補助として **(a)** を行う。
+
+| 案 | 内容 | 長所 | 短所 | 判断 |
+|---|---|---|---|---|
+| (a) | NF07-REL（解除）を第1期に前倒し | 誤った hold を戻せる | 解除 proof は D-03（署名鍵）と D-05 を要するので、開放が hold より遅れれば第1期の恒久停止は残る。帰属不能行の全停止そのものは解除しない限り続き、根本解決にならない | 補助として採る（実装を A1H の直後に前倒し、開放は署名後） |
+| (b) | 停止範囲を、帰属を確認できる類別に限る | 過剰停止を構造的に無くせる | 帰属不能な類別にある held subject の行は、SUBJECT hold だけでは守れない | 採る（中核） |
+| (c) | purge ごとに「関連し得ない」判定を持つ | 個人情報を含まない purge を完全に外せる | 経路ごとの分類と保守が要る | 採る（(b) の具体化） |
+| 現行（R1） | subject 不明の行は全て止める | 取りこぼしが無い | 最初の SUBJECT hold で多数の purge が恒久停止し、期限超過の保持になる | 採らない |
+
+規則:
+
+1. §3.4.1 の各経路に data element と subject 導出規則を宣言する。`m_pii_data_element.subject_attribution` に ATTRIBUTABLE / NOT_ATTRIBUTABLE / NO_PERSONAL_DATA を持たせる（F2 の seed）。
+2. NO_PERSONAL_DATA の purge（D8 など）は gate に接続しない。
+3. 帰属できる行: SUBJECT hold に当たる行だけを skip し、他の行は従来どおり消す。
+4. 帰属できない行（NOT_ATTRIBUTABLE の element、または ATTRIBUTABLE の element でも導出に必要な列が NULL の行）: SUBJECT hold では止めない。その data element に DATA_ELEMENT hold があるときだけ、その経路のその element を止める。
+5. SUBJECT hold の開始画面には、帰属できない data element と tenant 内の件数（subject ごとではない）を表示する。privacy-admin は必要なら DATA_ELEMENT hold を明示的に追加する。DATA_ELEMENT hold を追加するときは「その element の purge は解除が開放されるまで止まる」ことを確認させ、required 監査に残す。
+6. 許可する hold の種別（SUBJECT / DATA_ELEMENT）は D-05 の決定で設定する（`privacy.hold.allowed-target-types`。未設定なら hold 開始自体を `DECISION_UNKNOWN` で拒否）。「帰属できない element の行は SUBJECT hold で守られない」という残余は、D-05 の署名時に owner が受理する（§7）。
+7. 警告: 経路ごとの「hold で skip した件数」「`UNAVAILABLE` で skip した回数と継続時間」を監視項目にする。閾値と通報先は SRE が決める（UNKNOWN）。
+
+依頼者の新たな判断は不要（残余の受理は D-05 の署名項目として扱う）。
+
+#### 3.4.4 gate・pending・reconciler（P2-6、P3-6）
+
+- `PrivacyHoldGate`（判定は flag に依存させない。flag を OFF に戻しても、既に掛けた hold は守る）
+  - `t_privacy_projection_state` に当該 tenant の行が無い（hold 機構を一度も使っていない）→ 「hold なし」。この判定は Journal の起動時検査の結果より優先する（未使用の tenant では Journal の不達が削除を止めない）。追加の照会はこの1回だけで、既存挙動は変わらない。
+  - 行がある → Journal の head と `last_applied_seq` / `last_applied_hash` が一致し、`pending_command_id` が NULL であることを確認してから hold 集合を返す。一致しない・pending が残る・Journal 不達・journal 設定が無い場合は `UNAVAILABLE`。batch 経路はその回の gate 対象の削除を skip し、手動経路（D1・D2）は 409 を返す。hold 機構を使った後で journal 設定が無くなっている場合は、起動時に警告を出す。
+  - batch 経路の gate は batch 開始時に1回 snapshot を取る。batch の途中で開始された hold はその回に反映されず、次回から効く（最大で1回分の実行時間の窓。既知の残余として受け入れ、hold 開始画面に表示する）。手動経路（D1・D2）は削除・申請作成と同じ tx の中で照会するので、この窓は無い。
+- `com.ses.privacy.production.retention.hold.PrivacyHoldService`（開始の手順）
+  1. 決定 D-05 の ID と `allowed-target-types`、journal の可用性、`privacy.hold.manage` を確認する。
+  2. 独立 tx（`REQUIRES_NEW`）で `t_privacy_projection_state` の行を作る（無ければ）か `SELECT ... FOR UPDATE` で取り、`UPDATE ... SET pending_command_id = ?, pending_since = ? WHERE tenant_id = ? AND journal_id = ? AND pending_command_id IS NULL` の CAS で pending を記録して commit する。CAS が0件なら 409（`error.privacy.holdStartInProgress`。同じ tenant の hold 開始は1件ずつ直列化される）。
+  3. Journal に HOLD_STARTED を append する（command ID は 2. の値）。
+  4. ACK 後、別 tx で `t_legal_hold` へ projection し、`last_applied_*` を進め、`WHERE pending_command_id = ?` の CAS で pending を NULL に戻す。ACK 不明なら pending を残したまま 503 を返し、reconciler に任せる。
+  5. 監査は `recordRequired`（失敗なら操作失敗）。監査本文に subject 識別子は入れず、hold ID・data element・ticket 参照だけを入れる。
+  - 先に書く pending 記録は成功応答ではなく、gate を fail-closed に倒すための印である（SF-04a の「local DB 更新を先に成功応答しない」に反しない）。
+- `PrivacyHoldProjectionReconciler`（新規。起動時と定期実行、`@SchedulerLock` 付き）
+  - Journal の `last_applied_seq` より後の event を projection へ追い付かせる（ACK 後に projection が失敗した hold を補う）。
+  - pending が残る行は command ID で Journal を照会し、ACK 済みなら projection して pending を消す。Journal に command が無く、`pending_since` が `privacy.journal.pending-timeout`（append の在途時間の上限＝`connection-timeout` + 10秒 + 20秒より長い値。運用で決める。journal-witness-grant-design.md §2.1 の「append の timeout」の定義）を過ぎていれば、消す直前にもう一度 command ID で照会して無いことを確かめてから pending を消す。Journal 不達なら pending を残す（gate は `UNAVAILABLE` のまま）。
+  - 状態を変えた判定（projection の追い付き、ACK 済み pending の projection、timeout 後の pending の解消）は required 監査に残す。状態を変えない判定（pending の保留・同じ command ID が複数の partition にある・hold として解釈できない event・照会不能）は状態が続く間毎回出るため監査には残さず、固定 code の WARN と、`outcome`・`reason` の tag を持つ metric（`ses.privacy.hold.reconciler.outcomes`）に出す。`UNAVAILABLE` が続く場合は §3.4.3 の7. の監視に載せる（A1H-1 review P3-3 で訂正）。
+  - gate と同じく flag に依存させないので、`FeatureSwitchRouteCoverageTest` では理由付きで対象外 scheduler に登録する。
+
+#### 3.4.5 ファイル集合（見込み）
+
+- `com.ses.privacy.production.retention.hold.PrivacyHoldService`、`PrivacyHoldGate`、`PrivacyHoldProjectionReconciler`、`PrivacyHoldFileReferenceProvider`、`HoldSubjectResolver`（§3.4.1 の導出規則。F2 provider を使う）
+- `PrivacyHoldApiController`（`GET /api/privacy/holds`、`POST /api/privacy/holds`）、`templates/privacy/holds.html`、`static/js/modules/privacy-holds.js`、`templates/layout/sidebar.html`（`allowedMenus.contains('privacy-retention')` に加えて privacy action の判定結果を見る。§6.8）
+- `Feature.NF07_RETENTION` に `/api/privacy/holds` と `/privacy/holds` を追加、`FeatureSwitchRouteCoverageTest` の sidebar 期待集合に `NF07_RETENTION` を追加、reconciler を対象外 scheduler として登録
+- 接続する既存コード: `DocumentServiceImpl`（D1・D2）、`DocumentRetentionJob`（D3）、`ResumeRetentionCleanupServiceImpl`（D4・D5）、`AiRecommendationRetentionService`（D6）、`ApiRetentionPurgeService` または `IntegrationHubRetentionPurgeScheduler`（D7）、`ExternalApiReadSnapshotPurgeService`（D9）、`FileCleanupService`（D10 の provider 例外時の中止）
+- messages 4本
+
+**DDL**: 無し（W3-14 の `t_legal_hold` / `t_privacy_projection_state` / `m_pii_data_element` を使う）。
+
+**依存**: NF07-A1J、NF07-F2（帰属判定と D10 の stored name 解決）、W3-14。既存 scheduler に触れるため、NF10 の scheduler 方針（test profile では scheduler 無効、対象 test が経路を直接呼ぶ）に従い、`SchedulingDisabledDrainTest`（NF05-C 所有）は変更しない。
+
+**対象限定テスト**:
+
+- `PrivacyHoldServiceTest`（D-05 決定ID・`allowed-target-types` の欠落で `DECISION_UNKNOWN`、journal 不達で 503、ACK 前に projection を書かない、監査失敗で操作失敗、監査本文に subject 識別子が無い）
+- `PrivacyHoldServiceMySqlTest`（`@Tag("mysql")`。ACK 不明時の再送で二重 hold を作らない、同じ tenant の並行開始で後者が 409、pending の CAS）
+- `PrivacyHoldProjectionReconcilerMySqlTest`（`@Tag("mysql")`。pending 残り＋ACK 済み → projection して復旧、pending 残り＋未 append → timeout 後に解除、Journal 不達 → pending を残す、projection 欠落の追い付き）
+- `PrivacyHoldGateTest`（未使用 tenant は照会1回で「hold なし」かつ Journal 不達でも「hold なし」、追随遅れ・pending 残り・不達・journal 設定なしで `UNAVAILABLE`、hold を掛けた後に flag を OFF にしても hold を守る）
+- 経路ごとの test（新規を含む）: `DocumentServiceImplDisposalHoldTest`（D1・D2: NF07 hold と `legal_hold_flag` をそれぞれ単独・両方で検証、`UNAVAILABLE` で 409）、`DocumentRetentionJobTest`（新規、D3）、`ResumeRetentionCleanupServiceImplTest`（新規、D4・D5: 帰属できる held 行だけ残る、帰属できない行は SUBJECT hold では消える、DATA_ELEMENT hold で止まる）、`AiRecommendationRetentionSchedulerTest`（既存に追加、D6。Bean が無い構成も）、`IntegrationHubRetentionPurgeSchedulerTest`（D7・D8: nonce purge は hold に関係なく動く）、`ExternalApiReadSnapshotPurgeSchedulerTest`（新規、D9）、`PrivacyHoldFileReferenceProviderTest` と `DocumentArchiveFileCleanupSchedulerTest`（新規）・`FileCleanupScheduler` の test（D10: 両 scheduler で held subject の実体が残る、provider 例外でその回を中止）
+- `PrivacyHoldApiControllerTest`、`ActionPermissionMatrixTest`（`privacy.hold.*`）、`FeatureSwitchRouteCoverageTest`、`StaticAssetLocalityTest`、`MessageBundleConsistencyTest`
+
+**完了条件**: hold 機構を一度も使っていない間は、接続した経路の挙動が変わらない（増える SQL は gate の照会1回だけ）。hold 開始は Journal の ACK を先に取る。flag の ON/OFF で既存 hold の効力が変わらない。SUBJECT hold があっても、帰属できない行と個人情報を含まない purge は止まらない。D1 で NF07 hold に当たる文書は処分できない。解除の endpoint が存在しない（`POST /api/privacy/holds/{id}/release` は 404）。
+
+**Demo**:
+
+1. dev で retention flag ON、D-05 の試験用決定IDと `allowed-target-types=SUBJECT,DATA_ELEMENT` を設定し、application DB とは別の MySQL instance を dev 用 journal として設定 → privacy-admin が `ENGINEER:<id>` に hold を開始 → 開始画面に帰属できない element と件数が出る → 一覧に ACTIVE で出る。
+2. 対象者に `t_document_link` で結び付いた文書の承認済み処分申請を管理者が実行 → 409（`error.privacy.holdActive`）。`legal_hold_flag` は 0 のまま。
+3. 対象者と他者の取込履歴が保持日数を過ぎた状態で `ResumeRetentionCleanupServiceImpl` を手動実行 → 対象者の分は残り、他者の分と、どの subject にも帰属しない未変換の取込は消える。integration hub の nonce purge は動き続ける。
+4. journal を停止して再実行 → 帰属できる経路はその回を全て skip し警告が出る。D1 は 409。hold を使っていない別 tenant では従来どおり消える。
+5. journal を戻し、retention flag だけを OFF（journal 設定は残す）にして再起動・再実行 → 対象者の分は引き続き残る。
+6. pending を残した状態（append 前に process を止める）で再起動 → reconciler が pending を解消し、gate が復帰する。
+
+**Demo の示し方（総括決定 2026-11-16。A1J 引継ぎ §3.4.6 の4の決着）**: 本番 adapter は prod profile 以外では生成できず（`ProductionEnvironmentGuard`）、dev profile に実行時の経路を開かない。このため上の 1〜6 は「dev で操作する」のではなく、Testcontainers の MySQL test（application DB と Journal の別 container）で示す。本番 adapter は test の中で prod の `MockEnvironment` を渡して `ProductionPrivacyComponents.productionPrivacyJournal` から生成し、`PrivacyHoldJournal` の package-private な constructor（test 用の入口）へ渡す。起動時検査（`PrivacyJournalStartupVerifier`）そのものの適合・不適合は A1J の MySQL test が示しており、hold の test は `startupResult()` の値（`AVAILABLE` / `UNAVAILABLE` / `NOT_CONFIGURED`）を入力として与える。prod profile の検証環境で画面から操作する確認は、開放の手順（§7）で D-05 の署名後に行う。
+
+| Demo | 示す test | batch |
+|---|---|---|
+| 1（開始 → 帰属できない element と件数 → ACTIVE） | `PrivacyHoldServiceMySqlTest`（ACK の後に projection、一覧・帰属できない element、gate が Journal と一致）、`PrivacyHoldServiceTest`（決定の欠落・選択の欠落・監査本文） | A1H-1 |
+| 2（D1 の 409、`legal_hold_flag` は 0） | `DocumentServiceImplDisposalHoldTest`（D1・D2: NF07 hold 単独で 409・`legal_hold_flag` は 0 のまま、`legal_hold_flag` 単独で従来の 400・gate を照会しない、両方で 400、UNAVAILABLE・UNKNOWN・導出失敗で 409）、`PrivacyHoldPathGuardTest`（本物の gate で開始した hold が同じ tx の 409 になる） | A1H-2 |
+| 3（D4・D5 で対象者だけ残る、nonce purge は動く） | `ResumeRetentionCleanupServiceImplTest`（要員・候補者の hold の行だけ残り、他者と未変換の行は消える）、`HoldSubjectResolverPathTest`（和集合の導出を実 provider で）、`IntegrationHubRetentionPurgeSchedulerTest`（nonce は hold に関係なく消す） | A1H-2 |
+| 4（journal 停止で skip・409、未使用 tenant は従来どおり） | gate 部分は `PrivacyHoldServiceMySqlTest`（Journal に届かない索引で UNAVAILABLE、未使用 tenant は「hold なし」）と `PrivacyHoldGateTest`（照会1回）。経路は `PrivacyHoldPathGuardTest`（Journal 不達で batch・全体・D1・D10 が止まり、未使用 tenant は照会1回で ALLOW）と各経路の test の UNAVAILABLE の例 | A1H-1 / A1H-2 |
+| 5（flag OFF でも残る） | gate 部分は `PrivacyHoldGateTest`（入口を閉じても VERIFIED、gate と reconciler が flag・guard に依存しない）。経路は `PrivacyHoldPathGuardTest`（入口の guard を閉じた後も経路の判定は HELD、D10 は保存名を守る） | A1H-1 / A1H-2 |
+| 6（pending の解消） | `PrivacyHoldProjectionReconcilerMySqlTest`（ACK 済み → projection・pending 解消、未 append → timeout 後に解消、Journal 不達 → 残す、projection 欠落の追い付き） | A1H-1 |
+
+**A1H の分割（総括決定 2026-11-16）**: 本節は A1H-1「hold 開始・gate・pending/reconciler・API・画面」（経路に接続しない）と A1H-2「D1〜D13 への gate の接続、`PrivacyHoldFileReferenceProvider`、経路ごとの test」に分ける。解除（NF07-REL）はどちらにも含めない。
+
+**A1H-1 実装記録（2026-11-16）**:
+
+- Journal の partition: SUBJECT hold は本人の partition（`(tenant, <種別>:<ID>)`。SF-W2 の `appendHoldStart` と同じで、本人の partition が held になれば以降の新規 dispatch 認可を Journal 自身が拒否する）、DATA_ELEMENT hold は `DATA_ELEMENT#<data element ID>`。HOLD_STARTED の `case_id` に hold ID（`ph-` + 32桁 hex）を入れ、`request_hash` が対象・理由 hash・ticket・開始者・開始日時・D-05 の決定ID・帰属できない element ごとの選択を束縛する。command ID は同じ乱数の `hs-` + 32桁 hex。
+- `t_privacy_projection_state` の `last_applied_seq` / `last_applied_hash` は tenant の要約とした（hold は対象ごとの partition に入り、partition の head は1つの hold ごとのため）。seq は反映済みの HOLD_STARTED の件数、hash は (partition, revision, event hash, hold ID) の集合の順序に依らない digest。gate は projection 側と Journal 側（索引の HOLD_STARTED と head）の両方から計算して一致を確かめる。
+- 「command ID で Journal を照会する」ため、`PrivacyJournalPort`（foundation。変更しない）とは別に、同じ package の読み取り専用索引（`JdbcPrivacyHoldJournalIndex`。`pj_command`・`pj_event`・`pj_head` を A1J の内部 pool＝方式A の1 principal で読む）を置いた。索引は位置と hash だけを返し、projection へ書く event は port の `events`・`head` と foundation の `JournalProjectionService.verifyChain`（新規の `ProductionJournalChainVerification` 経由。既存の foundation class は変更しない）を通したものだけを使う。
+- 帰属できない element の選択（C-2）: SUBJECT hold の要求は、catalog の NOT_ATTRIBUTABLE の element 全てに `DATA_ELEMENT_HOLD` か `ACCEPT_RISK` を1件ずつ持たなければならない（既定値なし。欠落・未知の値・重複は 400）。`DATA_ELEMENT_HOLD` は開始時点でその element の ACTIVE な DATA_ELEMENT hold を要する（画面は SUBJECT hold の前に DATA_ELEMENT hold を開始する）。選択は command の `request_hash`（Journal 正本）に束縛し、element ごとの required 監査（`CHOICE`）にも残す。
+- reconciler が Journal から復元した行（ACK 後に projection を書けなかった hold）は、Journal に元の値が無いことを印で示す: 理由コード・ticket は `RECONCILED`、理由 hash は 0×64（値を持たない）、開始者は 0（sentinel）、開始日時は Journal の event 時刻。開始時の理由コード・ticket・D-05 の決定ID・選択は、開始要求の監査（`START_REQUESTED`：対象種別・data element・D-05 の決定ID・request hash の先頭・選択の件数、`START_REASON`：理由コード・ticket、`CHOICE`：element ごとの選択）から hold ID で引ける。理由本文と理由 hash は監査にも残さない（短い本文は hash から推測できるため）ので、復元した行の理由 hash と request hash は事後に再計算できない。開始の service が ACK の後に同じ event を projection しに来た場合は、開始者自身の値で `RECONCILED` を置き換える（review P3-1・P3-2）。
+- `privacy.clock.max-skew` は hold 開始の前提（未設定なら `DECISION_UNKNOWN`）で、reconciler は `pending_since` + `privacy.journal.pending-timeout` + max-skew を過ぎるまで「Journal に command が無い」pending を消さない（pending を書いた process と reconciler の process の時計の差の余裕）。
+- pending の在途窓（review P2-1）: `pending_since` は開始の予約 transaction の中で、追随位置の行の lock を取った後・CAS の直前に時計から取る（Journal の head 照会と lock 待ちの時間を含めない。開始時刻 `requestedAt` は request hash と projection にだけ使う）。ACK 不明の後の再送は、直前に `UPDATE … SET pending_since = ? WHERE … AND pending_command_id = ?` の CAS で時刻を進め、0件・失敗なら再送しない（reconciler が既に消していれば、先の append が後から確定しても追い付きと gate の `PROJECTION_LAG` が拾う）。reconciler の消去は、判定に使った `pending_since` のままであることも CAS の条件にする（判定と消去の間に再送の CAS が入れば消さない）。
+- 在途窓の残り（A1H-1 delta review P2-N1、A1H-2 第1 commit で閉じた）: (1) adapter（`PrivacyJournalPort`）は予約の前、head の照会のときに1回だけ取り、append と再送は同じ adapter を使う。append の経路では `PrivacyHoldJournal.availability()` を評価し直さないので、1分ごとの instance の比較（Journal pool の接続取得と2つの `@@server_uuid` 照会）が `pending_since` と append の開始の間に入らない。(2) 予約 transaction の中の順序は「状態行の作成・`FOR UPDATE` → 条件の確認 → required 監査の insert → 時計 → pending の CAS → commit」とし、監査の時間も窓に入れない。(3) 再送の直前の時刻の更新も同じ順序にし、独立 transaction の中で状態行を `FOR UPDATE` で取り、pending が自分の command のままであることを確かめてから時計を読んで CAS で書く（時計を先に読むと、破壊的経路の `evaluateLocked` が tx の終了まで持つ行 lock を待つ時間だけ `pending_since` が古くなる）。
+- 不変条件と余裕: 上の順序で、`pending_since` から append（または再送）の開始までに残るのは、その時刻を書いた application DB の transaction の commit だけになる。したがって「`pending_since` から Journal が最後に確定し得る時刻」は `appendInFlightUpperBound`（U＝`connection-timeout` + 10秒 + 20秒）に commit 1回分の時間 C を足した値に収まり、reconciler が消すのは `pending_since` + `pending-timeout` + `privacy.clock.max-skew` を過ぎた後である。運用の設定は `pending-timeout` ≥ U + 余裕 とし、余裕は C（application DB の commit。通常は数十ミリ秒、fsync の遅い構成でも秒の単位）を十分に上回る値（目安30秒以上）にする。A1J の契約検査（`pending-timeout` > U）はこの余裕までは強制しないため、余裕は deploy-runbook の設定値で持たせる（契約検査に固定の余裕を足すかは A1J の owner が決める）。時計のずれは max-skew の範囲で reconciler の判定に足してあり、max-skew を超えるずれは契約の外（A1J の前提と同じ）。
+- 根拠の test: fast は `PrivacyHoldServiceTest`（instance の比較の間隔が予約と append の間で切れても append の時点の `pending_since` が append の開始時刻と一致する、再送の直前の lock 待ちの時間が `pending_since` に入らない、lock した行の pending が自分の command でなければ時刻を書かず再送しない）。実 lock の待ちは `PrivacyHoldServiceMySqlTest`（shard-1。別の接続が状態行を `FOR UPDATE` で持つ間に時計を進め、解放の後の再送の時点で `pending_since` が解放の時刻以後）。
+- 実行中の誤接続の検出（§3.4.6 の8 の決定、review P3-8）: Journal と application DB の `@@server_uuid` を、reconciler の実行ごとと、各 process で前回から1分を過ぎた最初の利用時に比べ、同じなら gate を `UNAVAILABLE`（`JOURNAL_SAME_INSTANCE`）、hold 開始を 503 にし、固定 code の WARN（`NF07_PRIVACY_JOURNAL_SAME_INSTANCE`）を出す。比べられなければ（どちらかが照会不能）も `UNAVAILABLE` だが、gate の理由は `JOURNAL_UNAVAILABLE`、WARN の code は `NF07_PRIVACY_JOURNAL_INSTANCE_UNVERIFIABLE` になる（`JOURNAL_SAME_INSTANCE` は同じと判った場合だけ。A1H-1 delta review P3-N5 で記述を訂正）。比較は process の中で同時に1つだけ行う（single-flight。A1H-1 delta review P3-N1、RB-NF07-HOLD）: 期限が来たとき、前回の結果がある間は比較中の thread を待たずに前回の結果を使い、Journal pool の接続と application DB の照会を重ねない。前回の結果が無い最初の比較だけは比較中の thread の結果を待つ。reconciler の比べ直しは比較中の thread の終了を待ってから行う。lock を持つ thread が戻らなくならないよう、application 側の照会（`ApplicationServerUuidQuery`）に query timeout 10秒（Journal 側の同じ照会と同じ）と接続の network timeout（socket の読み待ち）15秒を置き、照会の後に元の値へ戻す。application の主 datasource には socket timeout が無く、half-open の TCP では query timeout（server への KILL QUERY）だけでは読み待ちが解けないため。上限を超えた照会は UNVERIFIABLE になり lock を解放する（RB-NF07-HOLD review P3-1）。ただし呼出し元の transaction の中で照会が上限を超えると、Hikari はその transaction に束ねた接続を evict するため、同じ transaction の後続の文と rollback も接続の切断で失敗し、破壊的経路は UNAVAILABLE で飛ばされるのではなく失敗として終わる（batch はその回が失敗。fail-closed で削除はせず、無期限の hang よりは良い。RB-NF07-HOLD delta review D-P3-1、受け入れ）。また `JdbcTemplate` は Spring の transaction の残り時間を文の timeout に設けるが、その後の `setQueryTimeout(10)` が上書きするため、残りが10秒より短い transaction ではこの1文が transaction の期限を超え得る。gate を呼ぶ現在の経路には transaction timeout が無いため影響は無い（作成時点の grep）。timeout を設けた経路から gate を呼ぶようにするときは、照会の timeout を `min(10秒, 残り時間)` へ直す（同 D-P3-2）。hold 機構を使っていない tenant の gate はこの比較に触れない。残余: 権限（GRANT の過不足・role）・耐久設定以外の構成の実行中の変化は再検査しない（権限は起動時検査だけ、耐久設定は adapter が append ごとに検査する）。比較の間隔の間（最長1分）と、process 内の判定結果を保持する間は、DSN の付け替えを検出できない。DBA の GRANT 手順で実行中の権限変更を行わないことを運用の前提とする。
+- D-05 は `privacy.approval.d05.*` に足し、capability の承認 digest（D-09）には含めない（policy 説明・catalog は D-05 無しで開けるため）。hold 開始の入口で `PrivacyDecisionBinding.evaluateStandalone` が capability の決定と同じ規則で検査する。
+- reconciler の tenant ごとの処理が例外で中断したとき（`PENDING_KEPT` / `tenantAborted`）の WARN は、例外の class 名（`exceptionClass`）を出す。同じ tenant が失敗し続ける原因を log から辿るため。message は subject 参照・氏名を含み得るため出さず、metric の tag（`outcome`・`reason`）は固定値のまま（A1H-1 delta review P3-N2、RB-NF07-HOLD）。
+- privacy 管理者の判定の両側の一致（A1H-1 delta review P3-N3・P3-N4、RB-NF07-HOLD）: 起動時の人数の SQL（`UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames`）と実行時の判定（`AuthorizationServiceImpl`）は、無効（`enabled = 0`）・論理削除の group、論理削除の所属行・拒否行を同じく評価せず、action key を同じ照合順序（`utf8mb4_unicode_ci`）で比べるため大文字小文字の違う拒否行（`PRIVACY.*`）も両側で拒否として効く。意図した差は1つで、`privacy.<x>` の一部だけの拒否行を起動時は管理者として数えない（実行時はその action だけを拒否する。少なく数える＝起動を止める側）。固定は `PrivacyAdministratorDeterminationConsistencyTest`（H2）と `PrivacyHoldServiceMySqlTest`（実 MySQL。大文字小文字と許可の側）。
+
+**A1H-2 実装記録（2026-11-16）**:
+
+- 入口は `PrivacyHoldPathGuard`（hold package、Bean は gate と同じく profile・flag に依存しない）。経路の宣言は `PrivacyHoldPath`（D1〜D7・D9・D10。接続点の source と判定する data element）で、`PrivacyHoldPathClassificationTest` が宣言から逆に「接続点の source に経路の定数がある」「data element が seed の catalog で UNKNOWN でも NO_PERSONAL_DATA でもない（provider の宣言と照合した実効の分類）」を固定する（C-2 の分類 test）。
+- 手動経路（D1・D2）: `DocumentServiceImpl` の `executeDisposal`（DISPOSED の早期 return の後）と `requestDisposal`（状態の確認の後）で、`DocumentEligibilityService`（NF01 F3。変更しない）を呼ぶ前に、同じ tx の中で `evaluateLocked` を呼ぶ。`legal_hold_flag` の既存の確認（400）が先で、NF07 は独立の判定（409 `error.privacy.holdActive`。HELD・UNCLASSIFIED・本人の導出失敗で、文言は「対象であるか、確認できない」。D2 は申請者が管理者とは限らず hold の有無を推測させないため UNAVAILABLE も同じ key、管理者だけが実行する D1 の UNAVAILABLE は 409 `error.privacy.holdUnverifiable`（時間をおいて再実行）。A1H-2 review P3-8）。lock の順序（review P3-6）: NF07 の追随位置の行と hold 行は NF01 epoch plan §3.1 の rank 付きの行（文書行 rank 15 等）より前に取る。`evaluateLocked` は rank 付きの lock を持った後に呼ばない（D1・D2 は `DocumentEligibilityService` の文書行の lock より前に呼ぶ）。NF07 の行を取る他の経路（hold 開始の予約・reconciler・projector）は rank 付きの行を取らないため循環しない。`evaluateLocked` は状態行の lock を持ったまま Journal の照会と F2 の導出を行うため、同じ tenant の D1・D2・hold 開始・reconciler はこの間直列化される。
+- batch 経路: tenant ごとの経路（D3〜D6）は回の初めに `evaluate` を1回（D3 は文書の tenant ごとに最初の文書で1回、D4 と D5 は1回を共有）、tenant を持たない経路（D7・D9・D10）は `PrivacyHoldGate.evaluateEngagedTenants`（追随位置の行を持つ tenant の列挙1回＋その tenant ごとの `evaluate`）。D7・D9 は tenant のどれか1つでも ALLOW でなければその kind・その回を全体で止める（record に tenant が無いため。他 tenant の過剰停止は残余として受け入れる）。
+- 本人の導出: `HoldSubjectResolver` の `documentSubjects`（D1〜D3）・`resumeIngestionSubjects`（D4）・`bpAvailabilityIngestionSubjects`（D5）・`aiRecommendationRunSubjects`（D6）は、held な subject ごとに F2 provider の `findBySubject`（論理削除済みを含む）を引き、表の行 ID → 当たった subject を返す（行から本人を逆に導く規則を別に書かない）。SUBJECT hold が無ければ provider を呼ばない。導出に失敗した回は、その回の行を全て UNAVAILABLE として残す。
+- D6 は1文の purge（`AiRecommendationRunMapper.purgeExpiredSummaries`。NF08 の mapper は変更しない）を hold が無いときと、SUBJECT hold があっても当たる run が無いときにそのまま使う。当たる run があれば、MyBatis-Plus の wrapper で held な run を候補の選択の段階で除き（先頭に溜まって batch を埋め続けないため）、ID を指定して消す。
+- D10: `PrivacyHoldFileReferenceProvider`（`FileReferenceProvider` の Bean）が、SUBJECT hold の本人の保存名（`HoldSubjectResolver.resolveStoredNames`、F2 provider の和集合）と DATA_ELEMENT hold の element の保存名（`resolveElementStoredNames`。catalog の `storage_kind` が `FILE_OBJECT` の element のうち文書種別・履歴取込原本・BP 取込原本・要員写真・案件メール取込原本）を、区切りの後の名前と合わせて返す。catalog の `storage_ref` が application の表の列でない（`t_` で始まらない）`FILE_OBJECT`（CloudSign・freee・mailbox の外部側の写し）は upload root に実体が無く、清掃を止めても守れるものが無いため、空として WARN `NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE` と metric `ses.privacy.hold.file.unprotectable` を出し清掃を続ける（A1H-2 review P2-1。hold 開始で 409 にする案は採らない: 外部側の写しへの DATA_ELEMENT hold は Journal の正本として意味があり、外部側の保全の運用を D-05 owner が受理する。開始の入口（A1H-1）も変えずに済む）。gate が UNAVAILABLE・catalog に行の無い element・保存先が表の列なのに解決の規則を持たない element の場合は例外を投げ（中止は WARN と metric `ses.privacy.hold.file.cleanup.aborted`（tag `stage`）に数える）、`FileCleanupServiceImpl` は参照の集約を削除の前に行うためその回は1件も消さない（両 scheduler とも例外をそのまま返すことを `FileCleanupServiceImplTest` で確認。中止の修正は不要だった）。`LegacyUploadMigrationService` も同じ provider 一覧を受け取り、例外ではその回の移行を中止する（既存の挙動）。
+- D11〜D13 の一覧は deploy-runbook §4.4。
+- 「未使用 tenant の挙動は変わらない」の根拠: `PrivacyHoldPathGuardTest`（本物の gate と statement を数える DataSource で、batch の50行・全体の batch・D10・手動経路の照会がどれも1回、provider を呼ばない。Journal の設定が無い prod 相当も同じ）と、経路ごとの test の「hold 機構を使っていない」例（照会1回・従来と同じ mapper 呼出し・resolver を呼ばない）。
+- 残余: (1) D1 は READ_COMMITTED で動くため、追随位置の行が無い tenant の `evaluateLocked` は範囲 lock を取らない。その tenant の最初の hold の開始と同時に走った D1 は、hold の ACK と処分の commit の順序を保証しない（tx 1回分の窓。行ができた後は行 lock で直列化される）。(2) D1・D2 の本人の導出は文書行の lock（NF01 の `DocumentEligibilityService` の中）より前に読むため、その間に commit された link の追加は見えない。(3) D7・D9 の全体停止は hold を使った他 tenant の DATA_ELEMENT hold・UNAVAILABLE でも止まる。(4) hold の画面での原本・副本の element の並列表示（F2 P3-G）は A1H-2 では行っていない（runbook に記載）。(1)〜(3) と D13 の PWA・freee は deploy-runbook §4.4 の「D-05 owner の受理事項」に並べた。
+- A1H-2 review（ece1a59c）の後続 commit: P2-1（外部の `FILE_OBJECT` で清掃を止めない・中止を metric に数える）、P3-1（runbook の `pending-timeout` を U + 30秒以上に）、P3-4（legacy 移行の副作用を runbook に）、P3-5（`TenantAwareBatchRunner` 付きの生成経路でも provider の例外で1件も消さない test）、P3-6（lock の順序を上に記載）、P3-8（D1 の UNAVAILABLE だけ別 key）、P3-9（tenant の無い行の batch は例外でなく UNAVAILABLE）、P3-10（新しい tenant の catalog を runbook に）、P3-11（D5 の実 provider の導出 test、`UNGATED_SCHEDULERS` を `Map.ofEntries` に）。P3-4 の任意案（移行の参照集合から本 provider を除く）は、prod が新規導入で影響が無く、起動時の移行の経路を変える危険の方が大きいため行わない。P3-11 (b)（真の gate・真の tx で D1 を通す fast test）は MySQL の `ResumeIngestionLedgerRetentionMySqlTest` に委ねる。
+
+**規模**: XL（main 12 前後、既存コードの接続 8 か所、test 15 class 前後、画面1）。必要なら「hold 開始・gate・reconciler」と「経路の接続」に分ける（Plan Review で決める）。
+
+#### 3.4.6 NF07-A1J から引き継ぐ事項（A1J 独立 Review `9d7d1b4e` と総括の決定、2026-11-16）
+
+A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway job）で決めたこと・残したことのうち、A1H が前提にする、または A1H で閉じる事項。A1H の任務説明へそのまま写す。
+
+1. **pending と在途時間（Review P2-1）**: A1J は pool の `socketTimeout`（20秒）、起動時検査の query timeout（10秒）、`pending-timeout` の下限（`connection-timeout` + `APPEND_TRANSACTION_TIMEOUT` 10秒 + socket timeout 20秒より長い。満たさなければ契約違反）を入れた。reconciler は上限を過ぎた後も、pending を消す直前に command ID で Journal を照会し、command が無いことを確かめる（server 側の遅れた確定を完全には否定できないため。§3.4.4）。上限は `PrivacyJournalConnections.appendInFlightUpperBound()` で取れる。
+2. **起動時検査の結果の扱い（Review §3.3 の条件）**: 起動を止めるのは prod の retention flag ON だけ（test profile は flag ON のため）。gate と hold 開始は、profile に関係なく `PrivacyJournalStartupVerifier.startupResult()` が `AVAILABLE` でなければ `UNAVAILABLE`（hold 開始は 503 `JOURNAL_UNAVAILABLE`）として扱い、実行時の fail-closed を保つ。flag は決定ID束縛の有効期間を見ない生の値で判定している（Review P3-5。意図的）。
+3. **principal は1つ（方式A、総括決定）**: flag ON は appender（読み取りも同じ接続）、flag OFF は reader または appender。gate・projection の読み取りも同じ接続を使う。reader を分ける方式B にする場合は設計変更として Plan Review に戻す（journal-witness-grant-design.md §2.1）。
+4. **adapter の生成と Bean**: 本番 adapter は `PrivacyJournalConnections.openJournalPort(Environment, Clock)`（内部で `ProductionPrivacyComponents.productionPrivacyJournal`、prod 必須）だけから作る。`DataSource` 型の Bean は作らない。`PrivacyJournalPort` の Bean 化は A1H で gate と一緒に行う。§3.4 Demo 1 の「dev で retention flag ON・dev 用 journal」は、本番 adapter が prod 以外で生成できないため、prod profile の検証環境で行うか、Demo を Testcontainers の結果で示すかを A1H の Plan Review で決める。
+5. **projection の chain 検証（Review P3-7）**: projection は foundation の `JournalProjectionService.verifyChain` を通す。本番 adapter の chain がこれと一致することは `ProductionPrivacyJournalAdapterMySqlTest` で固定した。
+6. **未実装の設定**: `privacy.clock.max-skew`（未設定なら hold 開始を `DECISION_UNKNOWN` で拒否）の bind は A1H。Witness（`privacy.witness.*`）は B2。
+7. **log（Review P3-8）**: Journal の pool は driver の接続失敗を固定文言に置き換えるので、`JournalUnavailableException` の cause を log に出しても principal・接続先は残らない。それでも hold 開始・gate・reconciler の log には固定 code だけを出し、例外 message を出さない。`com.zaxxer.hikari` を DEBUG にしない。
+8. **残余**: routine・proxy の権限は information_schema に現れず起動時検査の対象外（DBA の GRANT 手順で持たせない）。起動時検査は起動時だけで、実行中の耐久設定は append ごとの検査（adapter）で見る。権限・`server_uuid` の実行中の再検査が要るかは A1H で決める。
+9. **D-P3-1 の関連（Review P3-2、別作業）**: break-glass 名の判定は設定名との完全一致で、大文字小文字違いの username は break-glass として扱われない（local login 拒否になり失敗回数にも数えない）。break-glass 名の正規化は A1H の範囲外の別作業とする。NF07 を ON にするのは bootstrap 完了後（D-P3-2）。
+10. **Javadoc**: `PrivacyJournalPort` の「synthetic adapter 以外の実装を提供しない」は A1J の第3 commit で更新済み（Review P3-9）。
+
+### 3.5 NF07-A2「DSAR（半手動）」
+
+**目的**: DSAR の受付から交付記録までを system で追跡する。本人確認・名寄せ・交付は人が行い、system は記録・期限管理・read-only 検索・redaction 済み草案の作成・二者承認を受け持つ。第1期で自動処理するのは開示請求（ACCESS）の草案作成までで、訂正・削除・利用停止・異議は受付・期限管理・手動対応の記録だけを行う（system は処分を実行しない）。規模が XL なので A2a と A2b に分ける。
+
+**状態遷移**（`PrivacyCaseState` の部分集合を DB 値に使う）
+
+| 状態 | 入る条件 | 担当 | batch |
+|---|---|---|---|
+| REQUESTED | 受付（`intake_ticket_ref` 必須。D-06 の期限規則から `due_date` を計算） | privacy-admin | A2a |
+| IDENTITY_VERIFIED | 本人確認の記録（`identity_evidence_ref`、適用した D-06 基準の決定ID）。基準未設定なら `DECISION_UNKNOWN` で進めない | privacy-admin | A2a |
+| SCOPED | 名寄せの人手裁定（候補は F2 provider が提示し、氏名一致だけでは自動結合しない。SELECTED が1件でなければ 409 で状態を変えず、本人を特定できなければ privacy-admin が理由コード付きで BLOCKED を記録する。A2a review §3.3・P3-7）と scope snapshot（provider 一覧・data element・as-of・本人確認時の D-06 決定ID（`identity_rule_ref`）の hash。現在の D-06 が `identity_rule_ref` と違えば 409 で確定しない。A2a review P2-1） | privacy-admin | A2a |
+| PREVIEWED | F2 provider の read-only 検索 → redaction 済み草案 package（未登録 provider・規則未設定の項目は「要手動確認」一覧として添付） | privacy-admin（作成者 = `prepared_by`） | A2b |
+| APPROVAL_PENDING → APPROVED | 作成者以外の privacy-admin が特定の package を承認（DB の CHECK と service の両方で作成者≠承認者。承認した package の id と hash を request に書く。§3.1.5） | 別の privacy-admin | A2b |
+| CONFIRMED | system 外での交付後に交付記録（方法・証跡参照、承認 package の hash 照合）。package は記録と同時に PURGED | privacy-admin | A2b |
+| BLOCKED / UNKNOWN / CANCELLED | 本人不明・複数候補・redaction 不能・provider 障害・取下げ | — | A2a/A2b |
+
+再申立・再開は `reopen_of_request_id` で新 case を作る（元 case は書き換えない）。
+
+#### 3.5.1 NF07-A2a「受付〜SCOPED」
+
+- ファイル集合: `com.ses.privacy.production.dsar.PrivacyRequestService`（受付・本人確認記録・名寄せ裁定・scope snapshot）、`PrivacyDsarDeadlineScheduler`（期限接近を privacy-admin へ通知。feature OFF・test profile では動かない。`FeatureSwitchRouteCoverageTest` に gated scheduler として登録）、`PrivacyDsarApiController`（受付〜SCOPED の endpoint）、`templates/privacy/dsar/*.html`、`static/js/modules/privacy-dsar.js`、`templates/layout/sidebar.html`（`allowedMenus.contains('privacy-dsar')` と privacy action の判定）、`Feature.NF07_DSAR` に `/api/privacy/dsar` と `/privacy/dsar` を追加、sidebar 期待集合に `NF07_DSAR` を追加、`com.ses.entity.privacy.*` / `com.ses.mapper.privacy.*`（request / subject link / action）、messages 4本
+- 通知と監査（P3-9）: 通知の宛先は role ではなく `privacy-admin` group の所属者として解決し、本文に subject 識別子・氏名を入れない（request 番号と期限だけ）。監査本文も request 番号と状態遷移だけにする（`/api/audit-logs` は `privacy-admin` 以外の管理者も見られるため）。
+- 依存: NF07-F2（候補提示）、W3-14、NF07-A1H（共有 file の直列化。機能上は hold の表示だけ）。
+- 対象限定テスト: `PrivacyRequestServiceTest`（各遷移の前提、D-06 決定ID欠落で進めない、同姓同名で自動結合しない、CAS 競合で 409、監査失敗で操作失敗、監査と通知の本文に subject 識別子が無い）、`PrivacyRequestServiceMySqlTest`（`@Tag("mysql")`、並行裁定の競合、複合 FK による tenant 越えの拒否）、`PrivacyDsarDeadlineSchedulerTest`（宛先が group 所属者で、role 管理者全員ではない）、`PrivacyDsarApiControllerTest`、`ActionPermissionMatrixTest`（`privacy.dsar.view` / `privacy.dsar.manage`）、`FeatureSwitchRouteCoverageTest`、`StaticAssetLocalityTest`、`MessageBundleConsistencyTest`
+- 完了条件: 依頼者の連絡先・本人確認書類の本体を保存しない。SELECTED が1件でなければ SCOPED に進まない。
+- Demo: dsar flag ON、D-06 の試験用決定IDと期限規則を dev に設定 → privacy-admin A が ACCESS 請求を受付 → 本人確認を記録 → 候補から本人を選ぶ（同姓の別人は自動で結合されない）→ SCOPED。期限接近の通知が privacy-admin だけに届く。
+- 規模: L（main 8 前後、画面2、test 8 class 前後）。
+
+#### 3.5.2 NF07-A2b「検索〜交付記録」（P2-4、P2-5）
+
+- ファイル集合: `com.ses.privacy.production.dsar.PrivacySearchService`（F2 を呼ぶ）、`PrivacyExportPackageService`（`FileStorageService` で quarantine→published。package の最長保存期間 `privacy.dsar.package-max-age` は D-06 で決める値で、未設定なら草案を作らない。期限超過・交付記録で PURGED）、承認と package の束縛（§3.1.5）、専用ダウンロード `GET /api/privacy/dsar/{id}/package/download`（`PrivacyDsarApiController`）、`PrivacyExportPackageFileReferenceProvider`（`FileReferenceProvider` 登録。登録しないと `FileCleanupScheduler` に消される。ダウンロードの許可には使わない）、`FileScopeValidationService` の変更、`com.ses.entity.privacy.PrivacyExportPackage` / mapper、messages 4本
+- 汎用 file 経路の遮断（P2-5）: `FileScopeValidationService.assertDownloadAllowed` の先頭（既存の `assertImportJobNotAccessibleThroughGenericFilePath` と同じ位置、管理者の通過分岐より前）に `assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName)` を置き、`t_privacy_export_package` の `stored_name` は role・group に関係なく一律拒否する。`POST /api/files/{storedName}/rescan` も同じく拒否する。package を取得できるのは専用ダウンロードだけで、そこで flag、`privacy.dsar.export`、tenant、request の状態（APPROVED）、package id と `approved_package_id` の一致、`content_sha256` と `approved_content_sha256` の一致、file の `PUBLISHED`+`CLEAN` を確認する。
+- 依存: NF07-A2a、NF07-F2。
+- 対象限定テスト: `PrivacySearchServiceTest`（他 tenant 0 件、未登録 provider を報告）、`PrivacyExportPackageServiceTest`（第三者情報 0、規則未設定で自動出力 0、交付記録で PURGED、`purge_after` 超過で削除、承認されていない package は交付記録できない）、`PrivacyRequestApprovalMySqlTest`（`@Tag("mysql")`、二重承認・二重交付記録の競合、`prepared_by` NULL での承認が DB で拒否される、承認後に作った別 package の hash 不一致でダウンロード拒否）、`PrivacyExportPackageFileReferenceProviderTest`、`FileScopeValidationServiceTest`（`GET /api/files/{storedName}` と rescan が営業・要員・管理者・privacy-admin の誰でも拒否、専用経路だけ許可）、`PrivacyDsarApiControllerTest`（専用ダウンロードの各拒否条件）、`ActionPermissionMatrixTest`（`privacy.dsar.approve` / `privacy.dsar.export`）、`MessageBundleConsistencyTest`
+- 完了条件: system から外部への送信経路が無い。第三者情報を含む項目は自動で package に入らない。承認者≠作成者が DB と service の両方で強制される。package は汎用 file 経路から取得できない。
+- Demo: (1) A2a の case を検索 → 草案作成（「要手動確認」一覧に未登録 provider が並ぶ）。(2) A 自身の承認は拒否される → privacy-admin B が承認 → `GET /api/files/{storedName}` は B でも拒否 → A が専用ダウンロードで取得 → 交付を記録 → package が PURGED になる。
+- 規模: L（main 7 前後、test 9 class 前後）。
+- **実装記録（NF07-A2b、2026-11-16。`31d29bee`・`47d2eb83` と review 対応の commit。DDL なし、flag OFF で出荷）**:
+  - 状態: SCOPED → PREVIEWED（草案）→ APPROVED（作成者以外の承認）→ CONFIRMED（system の外の交付の後の記録）。APPROVAL_PENDING は使わず（PREVIEWED が承認待ち）、foundation の `PrivacyCaseStateMachine` は使わない（合成層。I-6）。開示以外の請求（訂正・削除・利用停止・異議）は SCOPED から手動対応の完了（`POST /{id}/resolution`、結果コードと証跡の参照、`DSAR-MANUAL:` の MANUAL_ACTION 行）で CONFIRMED にする。system は処分しない（review P2-2）。
+  - 部品: `PrivacySearchService`（F2 の read-only 検索。照会者の tenant だけ、他 tenant の行は捨てる、未登録 provider を要手動確認に報告）、`PrivacyExportPackageContent`（`ThirdPartyRedactor` を通した JSON。行が1つでも MIXED／未宣言の element に属すれば行全体を自動で出さない。列の無い行は `RECORD_NO_FIELDS` で要手動確認）、`PrivacyExportPackageService`（草案・承認者による承認前の確認・承認・専用ダウンロード・交付記録・削除）、`PrivacyExportPackageFileReferenceProvider`、`PrivacyExportPackagePurgeScheduler`（毎時、flag で止めない）。
+  - 承認者による承認前の確認（review P2-3）: `GET /{id}/approve/preview?packageId=`（`privacy.dsar.approve`。内容 hash は `X-Content-Sha256` header で渡し URL に置かない。query は ALB・proxy の access log に残るため。HYG-FINAL P3-C）。最新の DRAFT・hash・期限・実体の hash を照合し、監査 `DRAFT_REVIEWED` を必須記録する。草案の作成者（`prepared_by`・package の `created_by`）は確認できない: 承認の前に値を見られる者を独立の承認者に限り、作成者は承認後に専用ダウンロードで取得する（作成者が値を見て作り直しを重ねることも防ぐ）。
+  - 汎用 file 経路の遮断: `FileScopeValidationService` の先頭で package の行（PURGED を含む。全 tenant）と照会者の tenant の `PRIVACY_EXPORT` の file metadata（論理削除済みを含む。tenant に絞るのは `uk_file_security_stored_name` を使うため。他 tenant の metadata だけの名前は保存層の tenant 照合が拒否する。HYG-FINAL P3-D）の両方を照合して拒否（download・rescan）。保存層でも汎用の `load`・`rescan` は server 生成の種別を開かず、package 専用の `loadServerGenerated` だけが読む。server 生成の種別は scan 失敗時に quarantine に残さず metadata を論理削除し、package の行を持たない `PRIVACY_EXPORT` の file は削除の回に1時間の猶予の後に消す（猶予は `created_at` を書いた application の時計で数え、DB の時計とは比べない。review P2-1・P3-8、HYG-FINAL P3-A）。
+  - 取得の後の作り直しの禁止（review P3-4）: 専用ダウンロードで取得した承認 package は `DSAR-DOWNLOAD:` の行で印を付け、期限切れでも作り直さず（409）その package の hash で交付を記録させる。取得していない期限切れの承認 package を作り直すときは外れた承認を `DSAR-SUPERSEDED:` の行に残す。交付の記録は取得の印を要し、取得の前は 409 `error.privacy.dsarDeliveryNotDownloaded`・画面は記録の操作を出さない（HYG-FINAL P3-B）。
+  - 手動対応の完了と hold（HYG-FINAL P3-F）: 本人が HELD のとき、結果が削除（DELETED）・利用停止（RESTRICTED）なら記録は止めず、区画の API（`holdConflictResolutions`・`manualResolution.holdConflict`）と画面（確認の文・警告の表示）で警告する。system は処分しないため、hold の対象の記録に対応が及んでいないかは人が確かめる。記録の応答（`POST /{id}/resolution`）そのものも、記録した直後の本人の hold の状態（`holdState`）と警告の印（`holdConflict`。区画の `manualResolution.holdConflict` と同じ判定）を返し、画面は成功の代わりに警告の toast（`privacyDsar.resolution.recordedHoldWarning`）を出す（RB-NF07-HOLD）。`holdState` が `UNKNOWN`（hold の状態を確かめられなかった）ときも成功だけで済ませず、確かめ直すよう警告の toast（`privacyDsar.resolution.recordedHoldUnknown`）を出す（RB-NF07-HOLD review P3-5）。記録は commit 済みのため、hold の状態を読めなくても応答は失敗にせず `UNKNOWN`・印なしにする（失敗にすると再送して 409 になる）。応答の型は他の遷移と共用の `Transition` を変えず、専用の `ResolutionRecorded` にした。
+  - 承認者が承認の前に全内容を取得できること（review §2.5）は §1 の I-10 に不変条件として書いた（Privacy の受理は未取得）。
+  - prod の起動時検査は §5.1 のとおり実検査に置換。D14（package の削除）は hold の gate に接続しない（§3.4.1）。
+  - 案（review P3-6、未実装）: `due-days`・`package-max-age` を決定ID束縛に入れるなら、`PrivacyDecisionBinding` の正規形を `nf07-privacy-decision-binding-v2` とし、capability に dsar を含むときだけ `dsar.due-days=<整数>`・`dsar.package-max-age=<ISO-8601 期間>` の2行を足す。digest の計算に `PrivacyFeatureProperties` を渡すため validator・`PrivacyDecisionWindowMonitor`・決定書の digest の手順（feature-switches.md 4.7）を同時に変える。DDL は不要。それまでは起動時の INFO log と決定書を人が照合する。
+
+---
+
+## 4. 署名前に実装してよいが開放は署名後の batch と、署名後に着手する batch
+
+| batch | 内容 | ファイル集合（見込み） | DDL 草案 | 依存 | 対象限定テスト | 完了条件 / Demo | 規模 |
+|---|---|---|---|---|---|---|---|
+| NF07-REL（W-9。実装は A1H の直後に前倒し、開放は D-05・D-03 の署名後） | hold 解除 proof（`VerifiedHoldRelease`、[`sf-w2-protocol.md`](sf-w2-protocol.md) §11.1）と解除 API | `VerifiedHoldRelease`、verifier、本番 adapter の `HOLD_RELEASED`、`POST /api/privacy/holds/{id}/release`（`privacy.hold.release`） | 無し | NF07-A1H、別 Plan Review、試験は test-only 鍵 | §11.1 の拒否条件全件、MySQL で head/hold revision CAS | 要求者・発行者・承認者の分離。Demo: 二者の署名付き proof で解除 → 同 command の再送は元 ACK | M |
+| NF07-REG（W-2。前倒し可、開放は署名後） | 署名済み envelope の登録（verify-then-store）と、別の privacy-admin による current 切替 | `PrivacyPolicyRegistrationService`、`PrivacyPolicyApiController` に `POST /api/privacy/policies`・`POST /api/privacy/policies/{id}/activate`（`privacy.policy.manage`） | 無し（F1 を使う） | W3-14、試験は test-only 鍵 | `PrivacyPolicyRegistrationServiceTest`（改竄・未知 anchor・失効 UNKNOWN・SoD・二重 current の CAS）、MySQL で current 切替の並行 | 登録者≠有効化者、旧 current は同一 tx で SUPERSEDED。Demo: test 鍵で署名した envelope を登録 → 別人が有効化 → 説明 API が `APPROVED_ACTIVE` | M |
+| NF07-TRUST（W-3。前倒しは D-03 の方式決定後。方式に依存しない部分（接続点 `PrivacyTrustSource`、REL P3-6・P3-8・P3-9・P3-10）は RB-NF07-REG で実装済み。下の実装記録） | KMS/HSM 連携の anchor registry、CRL/OCSP の失効 provider | D-03 で決まる方式に依存（`KmsPolicyTrustRegistry`、`OcspRevocationStatusProvider` 等。`PrivacyTrustSource` の adapter として `PrivacyTrustConfiguration` の Bean を差し替える）。**D-03 で選ぶ方式は Ed25519 の署名鍵を扱えること（必須。verifier は Ed25519 だけを検証する）**。**adapter 実装時の要求（RB-NF07-REG delta review P3-1）**: hold 解除の gate（`PrivacyTrustReadiness.releasePairAvailable`）と policy 側の `activePolicyAnchors` は、verifier の SoD のうち anchor だけで決まる条件（role・authority・主体・公開鍵・Ed25519・key 一致・ACTIVE）は見るが、anchor の有効期間（`validFrom`／`validUntil`。verifier の `requireTimeWindow`）と tenant 範囲（`anchor.tenants()`。`requireScope`）を見ない。唯一の組が期限切れ・tenant 外でも gate は開き、要求は毎回 403 `EXPIRED`／`SCOPE_MISMATCH` になる（fail-closed の残余）。adapter では gate が verifier と同じ clock で有効期間外の anchor を除き、tenant は授権 tenant で絞る（REG 側も同じ）。targetType・要求者・開始者の分離は要求に依存するため verifier に残す | 無し | D-03 の方式 | 鍵 rotation の重複期間、失効伝播、provider 障害で UNKNOWN | 失効が即時に `POLICY_REVOKED` へ反映 | M〜L |
+| NF07-NF08-LINK（前倒し可。**NF08 外部送信の開放前に必須**。RB-NF08-LINK で実装済み（§8 の実装記録）。開放は §8 の (1)〜(4) と NF08 の S-1〜S-8・B2c-2 の後） | NF08 の送信 gate が NF07 policy を参照する（§8） | NF08 側 `AiProductionApprovalGate` / `GeminiTextServiceImpl`（NF08-1 の所有者と調整）、NF07 側 `PolicyEnforcementPort`（説明 DTO を返さない内部判定） | 無し | W3-14、NF08-1 の共有 file 調整 | NF07 の flag OFF・UNKNOWN・REVOKED・EXPIRED・DRIFT・policyId 不一致で送信拒否 | §8 の手順 | S〜M |
+| B1（W-10。署名後に着手） | 処分 batch: item ごとの CAS・冪等・再送・部分失敗・誤対象取消、approved policy の allow-list、緊急停止、子スイッチ `privacy.retention.disposition.enabled`（親は retention） | `DispositionJobService`、worker、outbox（SF-W3）、DB 監査 | 下記 | D-02、D-04、D-09、全 gate、NF07-REG | SF-W3 の Demo 全件、hold との線形化 | flag 既定 OFF、人手承認の無い batch は拒否。D-04 が未署名・無効の間は disposition を実行しない。`APPROVED_ACTIVE` は処分の承認ではない（D-04 は処分入口で検査する。REG は D-04 を見ない） | XL |
+| B2（W-11。署名後に着手） | Witness/attestor の本番化、recovery の本番配線、unquarantine 手続、DB+binary 同時点 restore 演習 | `ProductionLatestWitnessAdapter`、attestor（鍵は D-03）、`PrivacyRecoveryService` の本番入口、unquarantine API（D-07 の承認者） | Witness インスタンス側 DDL（別 location） | D-07、G-BKP、G-INC、W-6 の witness インスタンス | slice-d §7.3 の未完境界の全件 | restore 後は quarantine を自動解除しない | XL |
+| M（W-13） | release 判定 | release 固定 SHA での coverage scan（未分類 0・欠落 0 を確認する）、全 gate、Go/No-Go | 無し | 全署名 | CI 全 job、PITR | Go/No-Go 記録 | M |
+
+**NF07-REL 実装記録（2026-11-16。DDL なし。実装のみで開放は D-05・D-03 の署名後）**:
+
+- 開放の gate: `POST /api/privacy/holds/{holdId}/release` は、D-05 と D-03 の決定ID（`privacy.approval.d03.*` を追加。D-05 と同じく capability の承認 digest には含めず `evaluateStandalone` で検査）がともに有効で、verifier がある（`ProductionPrivacyComponents.holdReleaseVerifier` は prod profile でしか生成できない）、解除 authority の trust anchor が1件以上登録されている、の全てを満たすまで、存在しない URL と同じ 404 を返す（要求ごとに評価）。起動を止める案は採らない: 決定には署名日・失効日があり実行中に期間を出入りするため要求ごとの判定が要り、起動の停止は hold 開始・gate・破壊的経路まで止める（I-5）。第1期の registry は空（`ConfiguredHoldReleaseTrustRegistry.empty()`）、失効 provider は常に UNKNOWN で、決定ID だけを設定しても解除は通らない（3重の遮断。実 registry・失効 provider は NF07-TRUST）。
+- proof（sf-w2-protocol.md §11.1）: `VerifiedHoldRelease`（foundation、public constructor なし）は package-private の `HoldReleaseProofVerifier` だけが発行する。束縛（`HoldReleaseBinding`。この形を最終の署名形式とする）は §11.1 の項目（expected journal head は revision と event hash）に要求者と hold の開始者（`holdStarterRef`。復元行で不明なら `sys_user:0`）を加えたもの。`reasonHash` は理由コード・ticket・理由本文の長さ付き field 列の SHA-256（`HoldReleaseBinding.reasonHash`。hold 開始の request hash と同じ方式で、監査に残る理由コード・ticket も署名の範囲に入る。review P2-1）。発行者・承認者は束縛の digest を含む正規形に Ed25519 で署名し（`HoldReleaseAuthorityClaim`）、主体は trust anchor の登録値だけを使う。主体・要求者・開始者は `sys_user:<id>` の正規形だけを受け付け（anchor・束縛の constructor が検査。review P2-3）、比較は正規形の完全一致だけで行う。正規形の test vector は deploy-runbook §4.5 と `HoldReleaseProofVerifierTest`（Java とは独立に Node.js で計算した値）。拒否は固定 code（`HoldReleaseRejection`）。判定は署名の検証の後に主体の判定を行う（署名の無い要求で主体を探れない。review P3-4）。要求者・発行者・承認者は主体で互いに異なり、発行者と承認者は authority・鍵も共有しない。開始者との分離と開始者が不明の hold の扱いは D-05 の規則（`HoldReleaseRules`、設定 `privacy.hold.release.*`、既定は分離・拒否。review P2-2）。claim の発行日時の未来は `privacy.clock.max-skew` まで許し、期限の側は広げない。public な factory（`holdReleaseVerifier`・`productionPrivacyJournal`）と `appendHoldRelease` の呼出し元は `PrivacyFoundationIsolationTest` が source の走査で固定する（review P3-3）。
+- Journal: 汎用の `append` は HOLD_RELEASED を常に拒否し、本番 adapter の `appendHoldRelease`（`HoldReleaseJournalPort`）だけが append する。同じ transaction の中で head を lock し、command の再送（元の ACK）→ revision CAS → `VerifiedHoldRelease.requireAppendable`（journal head・hold revision・hold ID・期限）の順に確かめる。adapter の chain 検証は解除を「有効な hold に対してだけ、その hold ID で1回」として受け付ける。合成 adapter・`JournalProjectionService` は変更しない（I-6）。projection の前の検証（`ProductionJournalChainVerification`）は、解除を含む chain では最初の解除より前を foundation の検証に通し、全体を同じ正規形で検証する。
+- projection・gate・reconciler: 解除は `t_legal_hold` の `status=RELEASED`・`released_at`（Journal の解除 event の時刻）で表す。追随位置の digest は解除した hold の要素にだけ `RELEASED` と解除日時を足し（ACTIVE だけの tenant の digest は A1H と同じ値）、件数は開始＋解除。gate は ACTIVE な hold を partition ごとに1件まで認め、projection だけが RELEASED・Journal にだけ解除がある場合はどちらも UNAVAILABLE。reconciler は解除の pending（`hr-` の command）と、projection に無い解除の追い付きを扱う。解除した hold は gate の hold 集合に入らないため、D1〜D10 は従来どおり動く。解除の後は同じ対象に新しい hold を開始できる。
+- 直列化: 解除の予約は hold 開始と同じ追随位置の行の pending CAS を使う（A1H-1 review §1.4。開始の予約の後・append の前に DATA_ELEMENT hold が解除されて選択が無効になる窓を閉じる）。同じ command の pending（ACK 不明の後の再送）だけは続行し、`pending_since` を CAS で進める。
+- 再送: 同じ command ID が Journal にあれば、束縛の digest と command の payload hash が一致するときだけ元の ACK を返す（proof の期限の後でも、新しい状態変更を起こさないため）。違えば 409。
+- 依存の扱い（fail-closed、D-05 owner の受理事項）: 帰属できない element（catalog で ATTRIBUTABLE でない）の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除しない（どの SUBJECT hold が `DATA_ELEMENT_HOLD` を選んだかは projection に無く、Journal の request hash と監査にしか無いため）。
+- 根拠の test: fast は `HoldReleaseProofVerifierTest`（§11.1 の拒否条件、append 時の判定、解除を含む chain）、`PrivacyHoldReleaseServiceTest`（解除・再送・CAS・pending・開放の gate・D1〜D10 の再開・reconciler）、`PrivacyHoldApiControllerTest`。MySQL は `PrivacyHoldReleaseMySqlTest`（shard-2。本番 adapter の head・hold revision の CAS、同じ command の元の ACK、ACK 不明の後の再送と reconciler、開始との直列化）。
+
+**NF07-REG 実装記録（2026-11-17、RB-NF07-REG。DDL なし（F1 の `m_retention_policy` を使う）。実装のみで開放は D-01・D-02・D-03 の署名と NF07-TRUST の後）**:
+
+- 入口: `POST /api/privacy/policies`（署名済み envelope の登録）と `POST /api/privacy/policies/{id}/activate`（current の切替）。action は予約済みの `privacy.policy.manage`（`ActionPermissionResolver` は変更なし。`privacy-admin` の `privacy.*` 許可と他の group の `privacy.*` deny の baseline + deny のままで、seed・migration は不要）。`PrivacyAccessGuard`（OFF は404、権限が無ければ403）→ 呼出し元の tenant（権限評価の設定 tenant と一致、user ID あり）→ 開放の gate の順に判定する。
+- 開放の gate（`PrivacyPolicyRegistrationService.isOpen`。要求ごとに評価し、存在しない URL と同じ404）: (1) D-01・D-02・D-03 の決定ID が `PrivacyDecisionBinding.evaluateStandalone` で有効（D-02 を `Decision.D02`・`privacy.approval.d02.*` として追加。D-03・D-05 と同じく capability の承認 digest には入れない）、(2) verifier がある（`ProductionPrivacyComponents.policyRegistrationVerifier` は prod profile でしか生成できない。呼出し元は `PrivacyFoundationIsolationTest` が `PrivacyPolicyRegistrationConfiguration` に限る）、(3) trust anchor が1件以上登録され、失効 provider がそのうち1件以上を ACTIVE と答える（`PolicyRegistrationVerifier.trustReady`。UNKNOWN・例外・provider 無しは閉じる）。第1期は registry が空・失効 provider が常に UNKNOWN のため、決定ID を設定しても開かない。起動を止める案は REL と同じ理由で採らない。
+- verify-then-store: 要求は canonical bytes（`ApprovalEnvelopeCanonicalizer` の v1 形式）と署名の base64 だけで、行の key（policy ID・revision（envelope の metadata の revision）・module（envelope の scope）・data element・action・provider、法人は tenant-wide）は検証した envelope から取る。検証は照会と同じ部品（`ProductionPolicyEnvelopeDecoder` の厳格な復号と再 encoding の一致、`ProductionApprovalEnvelopeVerifier.verifyForRegistration`: audience `PRODUCTION`・tenant の一致・schema・trust anchor・範囲・時刻・anchor と envelope の失効状態・Ed25519 署名・envelope の申請者≠承認者）で、照会の `verifyCurrentCandidate` と同じ private の検証を共有する。拒否は固定 code（`PolicyRegistrationRejectedException`）で、監査 `NF07_POLICY_REJECTED` に理由 code だけを残し 403。署名済みでも列の長さ・照会と監査で扱える文字種（policy ID・revision・authority・key は `[A-Za-z0-9._-]`、key の各項目は照会と同じ）に収まらなければ 400。W3-14 review P3-3（64KB を超える envelope）は登録側で拒否する（base64 の長さと decoder の上限）。
+- 状態の遷移: 登録で `CANDIDATE`（検証した bytes・署名・digest・authority・key・登録者）→ 有効化で `CURRENT`（`activated_by`・`activated_at`）、旧 current は同じ transaction で `SUPERSEDED`。`REVOKED` への遷移は本 batch に無い（失効は失効 provider が判定し、照会が `POLICY_REVOKED` を返す）。説明照会は current の行を読むだけで、`APPROVED_ACTIVE` は照会の検証が通った場合だけ（NF08 への接続は NF07-NF08-LINK）。
+- 有効化の規則: 登録者と別の privacy-admin（403 `policyActivationSeparation`。DB の `chk_retention_policy_activation` も同じ）。保存した envelope を同じ規則で検証し直し、行の列（key・revision・digest・authority・key・schema）が envelope と一致しなければ拒否する（`STORED_ROW_MISMATCH`）。current の切替は CAS: 要求の `expectedCurrentId`（有効化者が確認した current の行 ID、無ければ null）と、key の行を `FOR UPDATE` で lock した後の実際の current が違えば 409 `policyCurrentChanged`。旧 current・対象の更新はそれぞれ status と `row_version` の CAS。lock は対象の行を先に取らず、key の全ての行を index 順に1回で取る（同じ key の2件を並行に有効化しても deadlock せず、後が先を待つ）。current の一意性は生成列 `current_key` の UNIQUE が DB で保証する。同じ有効化者の再送は状態を変えずに元の結果。
+- 登録の規則: data element が catalog に1件登録されていること（409 `policyDataElementUnknown`）。同じ key に REVOKED 以外で別の policy ID の行があれば409 `policyKeyConflict`（`DbProductionPolicyCatalog` の「policy ID が1種類」を保つ）。同じ policy・revision は同じ内容（digest・署名・key）の再送だけ元の行を返し（`replayed`）、違えば409 `policyRevisionConflict`。
+- D-04（処分を含む policy）: REG は D-04 を見ない。§5.2 の処分（B1）の行のとおり、処分の入口が D-04 を確かめる（総括が受理。§2 の W-2 行と B1 の完了条件に同じ規則を書いた）。`APPROVED_ACTIVE` は処分の承認を意味しない。
+- 根拠の test: fast は `PrivacyPolicyRegistrationServiceTest`（H2。改竄・末尾の余分な bytes・偽造署名、未知の anchor と未登録の鍵、失効 UNKNOWN（入口が開かない・envelope だけ UNKNOWN／REVOKED）、登録者≠有効化者と envelope の SoD、二重 current の CAS と UNIQUE、再送と競合、catalog、開放の gate、400・403・404、Demo の説明照会 `APPROVED_ACTIVE`）、`PrivacyPolicyApiControllerTest`、`PrivacyFoundationIsolationTest`、`PrivacyActionPermissionResolverTest`。MySQL は `PrivacyPolicyRegistrationMySqlTest`（shard-2。current の並行切替: 後の有効化が key の行の lock を待ち先の commit 後に409、DB の UNIQUE と CHECK）。鍵は全て test-only（実行のたびに memory 上で生成）。
+- **review（`rb-nf07reg-bb16f787-review.md`）への対応（RB-NF07-REG 第3 commit。DDL なし、V199 は使わない）**:
+  - 取下げ（review P3-7・総括の指示 (b)）: `POST /api/privacy/policies/{id}/withdraw`（`privacy.policy.manage`、開放の gate が閉じていれば404）。`CANDIDATE` だけを `REVOKED` にする（`activated_by` は NULL のまま。有効化された `REVOKED` と区別できる。CHECK の既存の値で足りるため DDL は不要）。key の行を有効化と同じ照会で lock し、status・`row_version`・`activated_by IS NULL` の CAS で更新、監査 `NF07_POLICY_WITHDRAWN`（`by=REGISTRANT` / `OTHER_PRIVACY_ADMIN`）。職務分離: 取下げは何も有効にせず状態を減らすだけなので、登録者本人と別の privacy-admin のどちらも行える。`CURRENT`・`SUPERSEDED` は取り下げられない（409 `policyNotCandidate`。current を止めるのは失効 provider の `REVOKED`）。取り下げた行は catalog の「REVOKED 以外の policy ID が1種類」から外れるため、誤った CANDIDATE が同じ key の別 policy ID の登録を409で止め続けない。取り下げた revision は再利用できない（同じ内容の再送は取り下げた行を返し、別の内容は409。新しい revision で登録し直す）。同じ行の取下げの再送は元の結果。
+  - revision の巻戻しの拒否（review P3-6・総括の指示 (4)）: current があるとき、有効化する envelope の発行日時（`issuedAt`。署名の範囲内）が current の envelope の発行日時より後でなければ409 `policyRevisionRollback`（同じ時刻も拒否、監査の理由 `REVISION_ROLLBACK`）。revision の文字列は順序を持たないため比較しない。current の envelope は復号だけを行い trust は見ない（鍵の失効・rotation 済みの current でも置き換えを止めない。復号できなければ403 `CURRENT_UNREADABLE`）。古い内容に戻すには、内容を新しい revision として署名し直して登録する。**D-02 owner が別の運用を望む場合は再検討する。**
+  - trust の読み方（review P2-1）: 説明照会・登録・解除の Spring 登録は `PrivacyTrustSource.policyAnchorsOf` / `holdReleaseAnchorsOf` / `revocationsOf` で Bean を包んで渡し、anchor と失効 provider を構築時の1回ではなく検証・開放の判定のたびに読む（adapter が anchor を消せば、再起動せずに次の検証で `UNKNOWN_TRUST_ANCHOR`、gate は次の判定で閉じる）。`PrivacyTrustSource` と `Configured*TrustRegistry` の Javadoc を実際の呼出しに合わせた。
+  - gate の数え方（review P3-1・P3-2、総括の指示 (5)）: hold 解除の gate は anchor の件数ではなく、ISSUER の役割と APPROVER の役割の anchor が authority・主体・鍵を共有しない1組があり、両方を失効 provider が ACTIVE と答えることで開く（同じ authority の2つの鍵、ISSUER だけの2件では開かない）。gate（REG・REL）は registry の key が anchor の `authorityId:keyId` と違う anchor と Ed25519 以外の鍵の anchor を数えず、policy の verifier も Ed25519 以外の鍵の anchor を `UNKNOWN_TRUST_ANCHOR` として扱う（adapter が Configured registry を使わなくても fail-closed）。
+  - `application.yml` に `privacy.approval.d02`・`d03`・`d05` を D-01 等と同じ形（既定は空）で明示した（review P3-11）。relaxed binding の名前（例: `PRIVACY_APPROVAL_D05_DECISIONID`）も引き続き bind される（`PrivacyApprovalPropertiesBindingTest`）。
+  - 小さな P3: `lockKeyRows` の説明を「key の index の走査順に1回で lock」に改めた（P3-5）。feature-switches 4.7.6 の有効化者の確認を「D-02 決定書の digest と一覧の digest の照合」と明記した（P3-10）。開放の後に要求が使う anchor の失効状態が UNKNOWN なら403になる service の経路の test を足した（P3-3）。同じ key に別 policy ID を並行に登録する MySQL のケースを足した（P3-4。後の登録は先の行の lock を待ち、409）。P3-12（gate の前の400）は REL と同じく記録だけ。P3-13（MySQL での実監査）は残る。
+  - 根拠の test: `PrivacyPolicyRegistrationServiceTest`（取下げ・巻戻し）、`PrivacyPolicyRegistrationConfigurationTest`（可変の trust の fake で、anchor を消すと再起動せずに gate が閉じ検証が `UNKNOWN_TRUST_ANCHOR`。構築時に trust を読まない）、`PrivacyTrustSourceTest`（hold 解除の同じ確認）、`HoldReleaseProofVerifierTest`（authority の組での gate）、`PrivacyHoldReleaseServiceTest`（開放後の403）、`PrivacyApprovalPropertiesBindingTest`、`PrivacyPolicyApiControllerTest`、`PrivacyActionPermissionResolverTest`。MySQL は `PrivacyPolicyRegistrationMySqlTest`（shard-2）に並行登録のケースを追加。
+
+**NF07-TRUST のうち D-03 の方式に依存しない部分の実装記録（2026-11-17、RB-NF07-REG。DDL なし。Journal の DDL も変更なし）**:
+
+- 接続点 `PrivacyTrustSource`（`com.ses.privacy.production.retention.trust`）: policy envelope の anchor（`policyAnchors`）、hold 解除の anchor（`holdReleaseAnchors`）、失効 provider（`revocations`）を1つの Bean にまとめ、説明照会（`PrivacyProductionConfiguration`）・登録（`PrivacyPolicyRegistrationConfiguration`）・解除（`PrivacyHoldConfiguration`）がこの Bean だけから受け取る。第1期の実装は `UnconfiguredPrivacyTrustSource`（anchor 0件・失効状態は常に UNKNOWN）で、`PrivacyTrustConfiguration` が登録する。**D-03 の方式（KMS / HSM の anchor registry、CRL / OCSP の失効 provider）が決まったら、その adapter を返すよう本 Bean を差し替える**（adapter は本 batch では作らない。interface の Javadoc に adapter の契約を書いた: key は `authorityId:keyId`、鍵は Ed25519、解除 authority の主体は `sys_user:<id>`、rotation は新しい key ID の anchor を足して有効期間を重ねる、失効 provider は確認できたときだけ ACTIVE・障害は UNKNOWN、開放の gate も要求ごとに照会するため外部照会は D-03 で決める鮮度で cache する）。
+- REL P3-6（Journal に claim を残す）: HOLD_RELEASED の command の `action_id` に両 claim の digest（`HoldReleaseAuthorityClaim.claimsDigest`）を入れる。正規形は束縛と同じ長さ付き field で、domain `NF07-HOLD-RELEASE-CLAIMS-V1` に続けて発行者・承認者の順に 役割・authority ID・key ID・発行日時・期限（`Instant.toString()`）・署名（小文字 hex）、SHA-256 の小文字 hex。`action_id` は event の hash に入るため、Journal が「どの claim で解除したか」を持つ。claim 自体は required 監査 `NF07_HOLD_RELEASE_CLAIM`（発行者・承認者ごとに1行: hold ID・役割・anchor・発行日時・期限・署名 hex）に残り、Journal の `action_id` と照合し、束縛の digest（`request_hash`）への署名を anchor の公開鍵で検証し直せる。`RELEASE_REQUESTED` にも claim の digest の先頭を足した。本番 adapter と `ProductionJournalChainVerification` は claim の digest（64桁 hex）を持たない解除 event を chain の不整合として扱う（第1期は解除が開いていないため既存の event は無い）。同じ command の再送は claim も同じ要求に限る（claim を署名し直した要求は別の内容として409。proof の期限の後でも、元の JSON の再送は元の ACK を返す）。Journal の列（`pj_event.action_id` VARCHAR(128)）は変えていない。
+- REL P3-8（anchor の鍵の算法）: `HoldReleaseTrustAnchor` の constructor が Ed25519 以外の公開鍵を拒否する（`Ed25519PublicKeys`。RSA・EC・Ed448 は登録できない）。policy の anchor（`TrustedAuthority` は合成層と共有のため変更しない）は `ConfiguredPolicyTrustRegistry` の constructor が同じ検査と key（`authorityId:keyId`）の一致を検査する。`ConfiguredHoldReleaseTrustRegistry` も key の一致を検査する。
+- REL P3-9（`isOpen` が失効 provider を見る）: `HoldReleaseVerifier.trustReady`（失効 provider が発行者と承認者の組（別 authority・別主体・別鍵）の両方を ACTIVE と答える。第3 commit で anchor の件数から組の判定に変えた）を開放の gate に足した。失効 provider が UNKNOWN・例外・未設定の間は、画面に「開放済み」と出して要求ごとに403にするのではなく、入口を404のまま閉じる。REG の gate（`PolicyRegistrationVerifier.trustReady`、1件以上）と同じ判定部品（`PrivacyTrustReadiness`）を使う。開放の後も要求ごとに verifier が失効状態を確かめる。
+- REL P3-10（partition の一致）: reconciler の `projectReleaseFromJournal` は、projection の行の partition と解除 event の partition が違えば書かない（`UNRECOGNIZED`、reason `releasePartitionMismatch`。gate は UNAVAILABLE のまま）。
+- 第1期の状態: registry は空・失効 provider は常に UNKNOWN のままで、hold 解除と policy の登録・有効化はどちらも404、説明照会は `APPROVED_ACTIVE` にならない。残りは D-03 の方式の adapter（§4 の NF07-TRUST 行の「対象限定テスト」: 鍵 rotation の重複期間、失効の伝播、provider 障害で UNKNOWN、失効が即時に `POLICY_REVOKED` へ反映）で、方式が決まった後に実装する。
+- 根拠の test: fast は `HoldReleaseProofVerifierTest`（claim の digest の正規形・command の `action_id`・claim の無い解除 event の chain 拒否・`trustReady`・Ed25519 以外の鍵の拒否）、`PrivacyHoldReleaseServiceTest`（失効 provider が UNKNOWN・一部だけ ACTIVE の間は404、Journal の `action_id` と監査の claim、署名し直した claim の再送は409、partition の違う projection を reconciler が解除しない）、`PrivacyTrustSourceTest`。MySQL は `PrivacyHoldReleaseMySqlTest`（shard-2。`pj_event.action_id` に claim の digest）。
+
+B1 の DDL 草案（番号なし）:
+
+```sql
+CREATE TABLE t_disposition_job (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, job_key VARCHAR(64) NOT NULL,
+  policy_id VARCHAR(128) NOT NULL, policy_revision VARCHAR(64) NOT NULL, method VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL, requested_by BIGINT NOT NULL, approved_by BIGINT NULL, approved_at DATETIME(6) NULL,
+  emergency_stopped TINYINT NOT NULL DEFAULT 0, row_version BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_disposition_job UNIQUE (tenant_id, job_key),
+  CONSTRAINT uk_disposition_job_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_disposition_job_sod CHECK (approved_by IS NULL OR approved_by <> requested_by)
+);
+CREATE TABLE t_disposition_item (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, job_id BIGINT NOT NULL,
+  data_element_id VARCHAR(128) NOT NULL, target_ref VARCHAR(128) NOT NULL, target_version_hash CHAR(64) NOT NULL,
+  status VARCHAR(20) NOT NULL, idempotency_key VARCHAR(128) NOT NULL, claim_token VARCHAR(64) NULL,
+  lease_until DATETIME(6) NULL, attempt INT NOT NULL DEFAULT 0, result_evidence_ref VARCHAR(128) NULL,
+  row_version BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_disposition_item UNIQUE (tenant_id, idempotency_key),
+  CONSTRAINT fk_disposition_item_job FOREIGN KEY (tenant_id, job_id) REFERENCES t_disposition_job(tenant_id, id)
+);
+```
+
+---
+
+## 5. flag と UNKNOWN の扱い
+
+### 5.1 flag
+
+| key（環境変数） | 既定 | OFF のとき | ON にしたとき追加で要るもの（prod の起動時検査） |
+|---|---|---|---|
+| `privacy.retention.enabled`（`PRIVACY_RETENTION_ENABLED`） | false | `NF07_RETENTION` に登録した `/api/privacy/policies`・`/api/privacy/catalog`・`/api/privacy/holds`・`/privacy/holds` が 404（`FeatureSwitchFilter`・`PrivacyAccessGuard`）。未登録の `/api/privacy/<x>` は handler が無く guard を通らないため、privacy-admin 以外の管理者は 403、privacy-admin は Spring の 404（W3-14b で訂正）。policy source は読まずに `POLICY_UNKNOWN`/`SOURCE_DISABLED`。`PrivacyHoldGate` の判定は flag に依存しない（掛けた hold は OFF でも守る。§3.4.4） | D-01・D-09 の決定ID、`privacy-admin` group が存在し有効な管理者が2名以上所属、hold を使うなら journal 設定 |
+| `privacy.dsar.enabled`（`PRIVACY_DSAR_ENABLED`） | false | `/api/privacy/dsar`・`/privacy/dsar` が 404、期限 scheduler 停止 | D-01・D-06・D-09 の決定ID、`privacy.dsar.due-days` と `privacy.dsar.package-max-age`、privacy-admin 2名以上、F2 provider が1件以上登録済み |
+| `privacy.retention.disposition.enabled`（B1 で追加） | false | 処分 batch の入口と worker 停止 | 親が ON、D-02・D-04 の決定ID、緊急停止の設定 |
+
+`Feature` への登録の仕方は §3.1.2。flag は公開可否であって権限ではないので、ON でも §6 の権限が別に要る。prod では flag の状態に関係なく §3.1.3 の privacy deny 不変条件を検査する。
+
+**W3-14b 実装記録（2026-11-14）**: W3-14 は §3.1 を W3-14a/b に分け、決定ID束縛と ON の起動時検査を W3-14b で実装した（W3-14 review P2-1）。
+
+- `PrivacyDecisionBinding`（純粋評価）と `PrivacyApprovalProperties`（`privacy.approval.*`）。§5.2 の `privacy.approval.dNN.decision-id` / `signed-on` に、NF06・NF08 と同じく `expires-on`、承認 tenant（`tenant-id`）、承認 capability（`capabilities`）、決定書に記載する束縛内容 digest（`approval-digest`、正規形 `nf07-privacy-decision-binding-v1`）を加えた。retention は D-01・D-09、dsar は D-01・D-06・D-09 を要する。D-02〜D-05・D-07・D-08 はそれを前提にする batch で足す。
+- `PrivacyProductionConfigurationValidator`（prod、`SmartInitializingSingleton`）: いずれかの flag が ON なら、束縛の構造的な完全性（tenant 一致・capability 承認・digest 一致等）、`privacy-admin` group が `privacy.*` を許可し privacy の拒否行を持たないこと、有効な管理者2名以上（有効・未削除・管理者 role・OIDC でログインできる・`'*'`/`privacy.` の拒否 group 非所属・break-glass username 以外。アカウントロックは外部から起こせる一時状態なので数え方に含めず、実行時に要求ごとに拒否する。W3-14b review P2-1）、`privacy-admin` 以外の有効な group に `privacy.` 接頭辞の許可行が無いこと（review P3-2）を検査し、欠ければ起動しない。全て OFF なら検査しない。NF06・NF08 と同じく、失効・署名日前（時間要因）だけなら起動を止めず WARN（`NF07_PRIVACY_STOPPED_AT_STARTUP`）を出す（依頼者決定 2026-11-14）。その間は `PrivacyDecisionWindowMonitor` が機能スイッチの実行時条件として NF07 を OFF と同じに扱い（filter・guard の404、policy source を読まない）、JST 業務日ごとに再評価するため実行中に失効日を迎えた日からも閉じる。状態は metric `ses_privacy_decision_binding_state` と WARN（`NF07_PRIVACY_DECISION_STATE`）で知らせる。dsar は A2a まで前提（上表の `privacy.dsar.*`・F2 provider）を検査できないため、ON にすると起動しなかった。NF07-A2b で実検査に置き換えた: `privacy.dsar.due-days` が1〜366（`dsar.dueDaysUnset`）、`privacy.dsar.package-max-age` が1時間〜366日（`dsar.packageMaxAgeUnset`）、F2 provider が1件以上（`dsar.providersUnregistered`）。D-06 の決定ID は上の束縛が DSAR に要求する。2つの値は approval digest に入らないため、起動時の INFO log（`DSARの設定値`）と D-06 の決定書を人が照合する（A2b review P3-6。digest への取込みは下の §3.5.2 の実装記録の案）。
+- 上表の「未登録の `/api/privacy/<x>` も `PrivacyAccessGuard` が 404」は不正確だった（review P3-6、R2-P3-2）。未登録の path には handler が無く guard を通らないため、privacy-admin 以外の管理者は 403（`MenuPermissionFilter`）、privacy-admin は Spring の 404 になる。404 を保証するのは `Feature` に登録し guard を通す入口だけである。I-2、§3.1.7 の2、§3.1.8 の Demo 1（`unknown-sub` は role-admin の管理者で 403）、上表の原文も W3-14b r3 で訂正した（review P3-5）。
+- 運用手順は `.kiro/specs/production-launch/feature-switches.md` 4.7。最初の privacy-admin の割当は既存の privacy-admin がいないため、対象者以外の有効な管理者全員へ通知する（review P3-4）。break-glass username への `privacy-admin` 割当は 400（review P3-11）。
+
+### 5.2 UNKNOWN の理由コード（capability 単位の拒否）
+
+| capability | 必要な決定・設定 | 欠けたときの結果 |
+|---|---|---|
+| policy の説明照会 | 無し（flag ON） | 値が無ければ `POLICY_UNKNOWN`（`POLICY_NOT_FOUND`、`REVOCATION_STATUS_UNKNOWN` など既存理由） |
+| policy の登録・有効化（REG） | D-01、D-02、D-03 の anchor | 決定ID・verifier・trust anchor（失効状態 ACTIVE を1件以上）が揃うまで入口 404。揃った後の検証の失敗は登録拒否 403（`UNKNOWN_TRUST_ANCHOR` 等。§4 の NF07-REG 実装記録） |
+| hold 開始（A1H） | D-01、D-05（`allowed-target-types` を含む）、journal | `DECISION_UNKNOWN`（409）／`JOURNAL_UNAVAILABLE`（503）／`holdStartInProgress`（409） |
+| hold 解除（REL） | D-05、D-03、解除 proof | 第1期（A1H）は endpoint 自体が無い。REL マージ後も署名まで拒否 |
+| DSAR の本人確認記録以降（A2a） | D-01、D-06 | `DECISION_UNKNOWN`（409） |
+| DSAR 草案 package（A2b） | D-06 の redaction 規則と `package-max-age` | 草案を作らない／自動出力 0（要手動確認へ回す） |
+| 処分（B1） | D-02、D-04、D-09、子スイッチ | 入口 404 ／ `POLICY_UNKNOWN` |
+| unquarantine（B2） | D-07 | 隔離を維持 |
+| NF08 外部送信 | NF07-REG・NF07-TRUST・NF07-NF08-LINK のマージ、`privacy.retention.enabled=true`、NF07 policy が `APPROVED_ACTIVE`、NF08 の承認設定 | 送信拒否（§8） |
+
+決定IDは `privacy.approval.d01.decision-id` / `privacy.approval.d01.signed-on` 〜 `d09` の形で設定する（環境変数 `PRIVACY_APPROVAL_D01_DECISION_ID` 等）。検査規則は NF08 の `AiExternalSendApproval`（ID の形式、`UNKNOWN`・`TBD`・`PENDING` 等の placeholder 断片の拒否、項目間の重複拒否、署名日が未来なら拒否）と同じにする。決定IDは「人が署名した」ことを system に伝える入力であって承認の証明ではない。値は署名後に人が設定し、AI・実装者は設定しない。
+
+---
+
+## 6. W-5 権限設計
+
+### 6.1 action key
+
+`ActionPermissionResolver` に `privacy` root を追加し、`/api/privacy/**` と `/privacy/**` を専用の分岐で解決する。この分岐は query を取り除いた直後、`!uri.startsWith("/api/")` の画面判定より前に置き、一度に両方を扱う。画面判定より後に置くと `/privacy/**` が `resolvePageAction` で null になり、`isExportPath` / `isDownloadPath` より後に置くと `/api/privacy/dsar/1/export` が `export.execute`、`.../download`・`.csv`・`.pdf`・`.xlsx` が `file.download` に解決され、営業・要員が持つ action で action 層を通過してしまう。
+
+| action key | 経路 | 第1期 |
+|---|---|---|
+| `privacy.view` / `privacy.create` / `privacy.update` / `privacy.delete` | `/privacy/**`（画面。method に応じて）、`/api/privacy` 直下の未知 subpath（method に応じて） | ○ |
+| `privacy.policy.view` | `GET /api/privacy/policies/**` | ○（W3-14） |
+| `privacy.policy.manage` | `POST`/`PUT /api/privacy/policies/**` | key だけ予約（REG） |
+| `privacy.catalog.view` | `GET /api/privacy/catalog/**` | ○（F2） |
+| `privacy.hold.view` / `privacy.hold.manage` | `GET` / `POST /api/privacy/holds` | ○（A1H） |
+| `privacy.hold.release` | `POST /api/privacy/holds/{id}/release` | key だけ予約（REL） |
+| `privacy.dsar.view` / `privacy.dsar.manage` | `GET` / `POST`・`PUT /api/privacy/dsar/**` | ○（A2a） |
+| `privacy.dsar.approve` | `POST /api/privacy/dsar/{id}/approve` | ○（A2b） |
+| `privacy.dsar.export` | `/api/privacy/dsar/{id}/package/**`（`/package/download` を含む）と `/api/privacy/dsar/{id}/export`（どちらの形も、method に関係なく） | ○（A2b） |
+| `privacy.disposition.*` / `privacy.recovery.*` | B1 / B2 | 署名後 |
+
+GET / HEAD / POST / PUT / PATCH / DELETE は、`/privacy/**` と `/api/privacy/**` のどの subpath でも null を返さない（画面の null は action 判定を素通しにし、`/api/**` の null は全員 403 になるため。privacy 配下に留めれば `privacy.*` の規則がそのまま効く）。それ以外の method（OPTIONS 等）は、`/api/privacy/**` では既存どおり null を返して MenuPermissionFilter に拒否させ、`/privacy/**` では `SecurityConfig` で許可する method を上の6つに限って拒否する（画面の null が素通しになるのを避けるため）。
+
+### 6.2 評価規則（`AuthorizationServiceImpl`）
+
+```java
+// isAllowed の既存分岐へ、管理者の短絡許可より前に1つ足す（既存の one-on-one.confidential 分岐と同型）。
+if ("one-on-one.confidential".equals(actionKey)) {
+    // 既存のまま
+} else if (actionKey.startsWith("privacy.")) {
+    if (!ROLE_ADMIN.equals(role)) {
+        return false;                 // 管理者 role 以外は group に関係なく拒否（誤割当の防御）
+    }
+    // 管理者でも短絡許可しない。以降の group 評価（deny 優先）へ進む。
+} else if (ROLE_ADMIN.equals(role)) {
+    return true;                      // 既存のまま
+}
+// group 評価で privacy key の「許可」候補を作るとき、全体 baseline の '*' を含めない（多重防御、§3.1.3）。
+//   allowCandidates = { actionKey, "privacy.*" }   // privacy 以外は既存どおり { actionKey, "<resource>.*", "*" }
+//   denyCandidates  = { actionKey, "privacy.*", "*" }（拒否側は既存と同じ集合のまま。拒否を弱めない）
+// legacyRoleAllows の先頭:
+if (actionKey.startsWith("privacy.")) {
+    return false;                     // group 未割当のユーザーは privacy 管理者になれない
+}
+```
+
+group 評価は既存どおり「有効な所属 group のどれかに deny があれば拒否、無ければ allow を探す」。privacy key の場合だけ、allow の候補から `*` を外す。deny の照合は既存と同じ候補集合（`*` を含む）で行い、拒否を弱めない。`privacy-admin` は `privacy.*` を明示で持つので影響しない。
+
+### 6.3 seed（`V?__nf07_privacy_permission_seed.sql`、暫定 V193）
+
+```sql
+-- 1. 管理者専用 group。role-admin を持つ全 tenant に作る（新規 install では 'default' のみ）。
+INSERT INTO m_permission_group (tenant_id, group_key, group_name, description, enabled, created_at, updated_at, deleted_flag)
+SELECT g.tenant_id, 'privacy-admin', 'プライバシー管理（管理者専用）',
+       'NF07 privacy.*。管理者roleのユーザーにだけ、role-adminの代わりに割り当てる', 1, NOW(), NOW(), 0
+FROM m_permission_group g
+WHERE g.group_key = 'role-admin'
+  AND NOT EXISTS (SELECT 1 FROM m_permission_group e WHERE e.tenant_id = g.tenant_id AND e.group_key = 'privacy-admin');
+
+-- 2. privacy-admin は role-admin と同じ baseline（'*'）に privacy.* を明示で加える
+--    （privacy の判定では '*' を候補に数えないので、privacy.* の行が許可の根拠になる）。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, created_at, updated_at, deleted_flag)
+SELECT g.tenant_id, g.id, a.action_key, 0, NOW(), NOW(), 0
+FROM m_permission_group g
+JOIN (SELECT '*' AS action_key UNION ALL SELECT 'privacy.*') a
+WHERE g.group_key = 'privacy-admin'
+  AND NOT EXISTS (SELECT 1 FROM t_permission_group_action x
+                  WHERE x.tenant_id = g.tenant_id AND x.group_id = g.id AND x.action_key = a.action_key);
+
+-- 3. privacy-admin 以外の全 group で privacy.* を deny（V110 と同型。tenant・enabled を問わない）。
+UPDATE t_permission_group_action a
+JOIN m_permission_group g ON g.id = a.group_id
+SET a.deny_flag = 1, a.deleted_flag = 0, a.updated_at = NOW()
+WHERE a.action_key = 'privacy.*' AND g.group_key <> 'privacy-admin';
+
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, created_at, updated_at, deleted_flag)
+SELECT g.tenant_id, g.id, 'privacy.*', 1, NOW(), NOW(), 0
+FROM m_permission_group g
+WHERE g.group_key <> 'privacy-admin'
+  AND NOT EXISTS (SELECT 1 FROM t_permission_group_action x
+                  WHERE x.tenant_id = g.tenant_id AND x.group_id = g.id AND x.action_key = 'privacy.*');
+
+-- 4. menu を機能ごとに2つ（Feature の menu key と一致させる）。到達可否は action 層と SecurityConfig が決める。
+--    sort_order は既存の 97 と重複するので未使用値（暫定 260 / 261）。
+INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
+  ('privacy-retention', 'プライバシー保全', '/privacy/holds', '/api/privacy/holds', 260),
+  ('privacy-dsar', '本人請求（DSAR）', '/privacy/dsar', '/api/privacy/dsar', 261);
+INSERT IGNORE INTO t_role_menu (role, menu_id)
+SELECT '管理者', m.id FROM m_menu m WHERE m.menu_key IN ('privacy-retention', 'privacy-dsar');
+```
+
+group 作成・action 編集の API は無い（`PermissionGroupApiController` は一覧と割当だけ）ので、group は migration でしか増えない。今後 group を追加する migration・運用作業は `privacy.*` の deny 行も入れる必要がある。漏れは CI では `FlywayNf07PrivacyF1MigrationTest`、本番では §3.1.3 の起動時検査が検出し、§6.2 の多重防御で privacy は開かない。
+
+### 6.4 caller provider の権限判定
+
+`SecurityContextCallerContextProvider.hasExplicitPrivacyAdminAuthority`（`ROLE_ADMIN` と `PRIVACY_ADMIN_READ` の GrantedAuthority を要求）は、この app では誰にも発行されない authority を前提にしている（role は `ROLE_<role>` だけ）。B-NF07-2 に従い、判定の正本を permission group action に移す。R1 の Plan Review はこの変更を次の条件付きで認めた（外部記録の転記。正式な判定は外部記録で確認する）。
+
+- 永続 `SysUser` を tenant 付きで再読し（既存）、role が `管理者` であることを確認した上で、`AuthorizationService.isAllowed(authentication, "privacy.policy.view")` が true の場合だけ `TrustedActorRole.ROLE_ADMIN` を返す。
+- `AuthorizationService` が取れない、または例外を投げたら `Optional.empty()`。
+- tenant の一致: `AuthorizationServiceImpl` は設定 tenant（`oidcProperties.getTenantId()`、未設定なら `default`）で group を評価し、provider は principal の tenant と再読した `SysUser` を使う。両者が一致しなければ拒否する（別 tenant の group で評価させない）。
+- GrantedAuthority `PRIVACY_ADMIN_READ` は発行しない。login 時に authority を焼き込む方式は、group 変更から再 login までの古い権限が残るため採らない（group 変更時は既存の `revokeAllForUser` で session も失効する）。
+- 既存 `SecurityContextCallerContextProviderTest` の正例（`PRIVACY_ADMIN_READ` で組み立てたもの）は新しい判定に合わせて書き換える。
+
+### 6.5 `ActionPermissionMatrixTest` の変更点
+
+- 既存 assertion のうち変更するのは、`permissionGroupSeedの内容そのものを検査する` の seed 件数3行（営業 deny 8→9、HR deny 7→8、マネージャー deny 8→9）だけ。業務 action の判定を確かめる既存 assertion と `BUSINESS_ACTIONS` は変更しない（privacy key を足さない）。
+- test user を追加: `9005`（管理者、`privacy-admin` だけ所属）、`9006`（営業、`privacy-admin` だけ所属＝誤割当の再現。`replaceAssignments` の guard を通さず直接所属させ、code の role 検査を確かめる）、`9007`（管理者、`role-admin` だけ所属）、`9008`（管理者、`privacy-admin` と `role-admin` の両方に所属）。既存の `9000`（管理者）は現行 seed で group 未割当なので legacy fallback の管理者として使う。
+- 追加 test:
+  - `privacy系actionはprivacy-admin所属の管理者だけに許可される`: `privacy.view`、`privacy.policy.view`、`privacy.hold.manage`、`privacy.dsar.approve`、`privacy.unknown-sub.view` について、9005 は true、9007・9008・9000・9001〜9004・9006 は false。
+  - `privacy-adminとrole-adminの両方に所属すると拒否優先でprivacyは使えない`: 9008 で上記が false、業務 action（`dashboard.view` 等）は true。
+  - `privacy-admin所属の管理者は管理者の既存actionを失わない`: 9005 で `dashboard.view`、`user.view`、`one-on-one.confidential` が true。
+  - `legacy fallbackはprivacy系actionを誰にも許可しない`: 9000・9999 で false。
+  - `全体baselineはprivacyの許可根拠にならない`: test 内で `*` だけを持ち `privacy.*` deny を持たない group を一時的に作り、管理者を所属させても privacy が false。
+  - `privacyのURIはexportとdownloadと画面判定より先にprivacy actionへ解決される`: `GET /api/privacy/dsar/1/package/download` → `privacy.dsar.export`、`POST /api/privacy/dsar/1/export` → `privacy.dsar.export`、`GET /api/privacy/dsar/1/package/x.pdf` → `privacy.dsar.export`、`POST /api/privacy/holds` → `privacy.hold.manage`、`GET /api/privacy/unknown-sub` → `privacy.view`、`GET /privacy/holds` → `privacy.view`、`POST /privacy/holds` → `privacy.create`、`OPTIONS /api/privacy/holds` → null（MenuPermissionFilter が拒否することを `MenuPermissionFilterTest` で確認）。
+- 機密 action の集合に追加: `既知resource許可を持つroleでも機密actionは拒否指定が優先される` と `マネージャーは全権限wildcardを持たず機密actionを実行できない` に `privacy.view`・`privacy.dsar.manage` を加える（新規 assertion の追加であり、既存 assertion の変更ではない）。
+- seed 内容の検査に追加: group 1（`role-admin`）と 5（`role-member`）に `privacy.*` deny が1件、group 6（`privacy-admin`）に `*` 許可1件・`privacy.*` 許可1件・deny 0件、`privacy-admin` 以外で `privacy.*` deny を持たない group が0件。「非管理者 group（2〜5）に `*` 許可が無い」は不変。
+- `permission-group-seed-h2.sql` に group 6 と上記の行、test user 9005〜9008 の `t_user_permission_group` 所属行を足す（DDL lane の所有範囲）。
+
+### 6.6 「allow-list 禁止」との整合
+
+CLAUDE.md の規則は「role ごとに許可 key を列挙すると、URI root から機械生成される未列挙 key が黙って 403 になる」ことを禁じている。本設計は次の理由でこれに当たらない（R1 の Review も同じ判断。外部記録の転記）。
+
+1. 許可は resource wildcard `privacy.*` の1行だけで、`privacy-admin` に与える。privacy 配下に endpoint が増えても列挙の追加は要らない（未知 subpath も `privacy.*` に入る）。
+2. 他の group が privacy を使えないのは deny 行（差し引き）、code の role 検査、`*` を privacy の候補に数えない規則による。列挙から漏れたから拒否されるのではない。
+3. `BUSINESS_ACTIONS` を編集しない。業務 action の判定は変わらない。
+4. legacy fallback は `privacy.*` を無条件に拒否する（admin-only action と同じ扱い）。
+
+なお、CLAUDE.md の「API root を足しても AuthorizationService / legacy fallback の変更は要らない」は V66_1 以降の実装（非管理者 group は既知 resource の wildcard を持ち、未知 root は拒否。新 root には `RESOURCE_NAMES` の登録と seed が要る）と食い違っている。本計画はその記述に依存しない。CLAUDE.md の修正は X3-3 / DOC-FINAL で行い、W3-14 にも本 batch にも含めない。
+
+### 6.7 割当の排他と guard（依頼者決定 2026-11-14）
+
+deny は所属 group 全体で優先されるため、`role-admin`（`privacy.*` deny）と `privacy-admin`（許可）の両方に所属すると privacy は拒否される。依頼者の決定どおり、privacy 管理者には **`role-admin` の代わりに `privacy-admin` だけ**を割り当てる。`privacy-admin` は `*` を持つので、管理者としての既存 action（短絡許可の対象外である `one-on-one.confidential` を含む）は失わない。承認経路で `PERMISSION_GROUP=role-admin` を承認者に指定している場合に privacy 管理者が外れる副作用は受け入れ済み（seed にその経路は無く、運用者が設定した場合だけ起きる）。
+
+`PermissionGroupManagementServiceImpl.replaceAssignments` に次を足す。
+
+- 要求に `privacy-admin` を含み、対象ユーザーの role が `管理者` でなければ 400（`error.permission.adminOnlyGroup`）。`privacy-admin` は `*` を持つので、誤割当を data の deny だけに任せない。
+- 要求に `privacy-admin` と、`privacy.*` deny を持つ他の group が同時に含まれれば 409（`error.permission.privacyGroupConflict`）。判定は group key の固定値ではなく deny 行の有無で行う。
+- G-ID の署名までの暫定規則（P3-12）: `privacy-admin` の割当・解除は、変更前後の group key を含む required 監査（既存の監査は group key を持たない）を同一 tx で書き、既存の `privacy-admin` 所属者へ通知する。監査に失敗したら割当も失敗させる。
+- role 変更時の既定 group への再割当（`SysUserServiceImpl`）は現行どおり全置換なので、管理者から外れたユーザーの `privacy-admin` は自動で外れる（この解除も上の監査・通知の対象にする）。
+
+### 6.8 その他の境界
+
+- `SecurityConfig`: `/privacy/**`、`/api/privacy/**` を `hasRole("管理者")` で静的に制限する（`/user/**` と同じ二重化）。
+- break-glass: `BreakGlassServiceImpl.validateAndSerializeActions` で `privacy.` 接頭辞を拒否する（`privacy` が既知 resource になると `isKnownAction` が true を返し、緊急 access の対象に入れてしまうため）。
+- service 層の再認可: `MenuPermissionFilter` は `AuthorizationService` が取れない slice では素通しになり、`FileScopeValidationService` や `GlobalControllerAdvice` には管理者を一括で通す分岐がある。privacy の各 service は `PrivacyAccessGuard` で flag と action を再判定し、取れなければ拒否する。
+- 汎用 file 経路: DSAR package は `GET /api/files/{storedName}` と rescan から一律拒否し、専用ダウンロードだけで扱う（§3.5.2）。
+- sidebar: `allowedMenus.contains('privacy-retention')` / `contains('privacy-dsar')`（Feature の menu key。OFF の機能は `FeatureSwitches.visibleMenuKeys` で消える）に加えて、privacy action の判定結果（`GlobalControllerAdvice` が model に入れる真偽値）を条件にする。`allowedMenus` は管理者に全 menu を返すので、それだけでは `privacy-admin` 以外の管理者にも出てしまう。
+- 全体検索・通知: 将来 privacy の実体を全体検索に入れる場合は privacy action で判定する。通知の宛先は `privacy-admin` の所属者として解決し、本文に subject 識別子を入れない（§3.5.1）。
+- 監査: privacy 操作の監査本文に subject 識別子・氏名を入れない（`/api/audit-logs` は全管理者が見られるため）。
+
+---
+
+## 7. 署名項目ごとの開放手順
+
+署名が届いた後に人（運用者）が行う。AI・実装者は値を設定しない。各手順の後に再起動し、起動 log の機能スイッチ状態と `PrivacyProductionConfigurationValidator` の結果を記録する。
+
+| 署名項目 | 署名後に変える値 | 開く flag・capability | 前提 batch |
+|---|---|---|---|
+| D-01 正式 Privacy Owner | `PRIVACY_APPROVAL_D01_DECISION_ID` / `_SIGNED_ON`。requirements.md の `<OWNER>` を人が置換 | 単独では開かない（全 flag の前提） | W3-14 |
+| D-02 / DG-07 核心（保持期間・trigger・法的根拠） | data element ごとの policy を issuer が署名した envelope にして登録・有効化（W-2）。`PRIVACY_APPROVAL_D02_*` | 対象 element が `POLICY_UNKNOWN` → `APPROVED_ACTIVE`。NF03 の `FEATURE_NF03_CERTIFICATION_PII_ENABLED`（B-NF03-1）は NF03 の owner がこの結果を確認して判断。NF08 は §8 | W3-14、NF07-REG、NF07-TRUST |
+| D-03 Trust Anchor・KMS・失効 | `privacy.trust.anchors[*]`（authority ID・key ID・公開鍵・有効区間）、失効 provider の接続設定、`PRIVACY_APPROVAL_D03_*`。hold 解除 authority の anchor は主体を `sys_user:<id>` の正規形で登録する（それ以外は constructor が拒否）。署名の手順は deploy-runbook §4.5 の正規形と test vector に従う | policy の検証が通るようになる。hold 解除 proof の署名も可能になる（単独では flag を開かない） | NF07-TRUST |
+| D-04 処分方式 | envelope の許可処分方式、`PRIVACY_APPROVAL_D04_*` | B1 の子スイッチの前提 | B1 |
+| D-05 hold 権限者・SoD・hold 種類 | `PRIVACY_APPROVAL_D05_*`、hold 種類の値（`hold_kind` の許可値）、`privacy.hold.allowed-target-types`、解除の承認者規則（NF07-REL: 要求者・発行者・承認者は常に別の主体。加えて (a) 開始者が分かっている hold で発行者・承認者を開始者と別にするか `privacy.hold.release.starter-separation`＝`REQUIRED`（既定）/`NOT_REQUIRED`、(b) 開始者が不明（reconciler の復元行で開始者の値が戻っていない）の hold を `privacy.hold.release.unknown-starter`＝`REJECT`（既定）/`ACCEPT` のどちらにするか、を署名で決める。運用は deploy-runbook §4.5）。あわせて owner が §3.4.3 の残余（帰属できない element の行は SUBJECT hold で守られない、DATA_ELEMENT hold は解除開放まで止まり続ける）、§3.4.1 で対象外とした経路、NF07-REL の DATA_ELEMENT hold の依存（下記）を受理する | `privacy.retention.enabled` 下の hold 開始。解除は NF07-REL のマージと D-03 の後 | NF07-A1J、NF07-A1H（解除は NF07-REL） |
+| D-06 DSAR SOP | `PRIVACY_APPROVAL_D06_*`、`privacy.dsar.due-days`、`privacy.dsar.package-max-age`、本人確認基準ID、redaction 規則（版付き） | `privacy.dsar.enabled` の前提 | NF07-F2、NF07-A2a、NF07-A2b |
+| D-07 unquarantine | `PRIVACY_APPROVAL_D07_*`、unquarantine の承認者 group | B2 の unquarantine | B2 |
+| D-08 外部 AI・電子契約 DPA | NF08 の `AI_EXTERNAL_SEND_DPA_REFERENCE` 等（NF08 側）。NF07 側は provider を外部登録しない方針を維持 | NF08 の送信 gate（§8） | NF07-NF08-LINK |
+| D-09 本番 flag 開放 | `PRIVACY_APPROVAL_D09_*` を設定し、前提の署名が揃った flag から1つずつ `PRIVACY_RETENTION_ENABLED=true` / `PRIVACY_DSAR_ENABLED=true` にする（順序は問わない） | 両 flag | 各 flag の前提 batch |
+| DG-07 全体 | 上記 D-01〜D-09 のうち DG7-a〜i に当たるもの＋ G-EXP・G-REC・G-AUD。tasks.md 0.4 coverage closure を release SHA の scan で閉じる | B1・M の前提 | M |
+| P-SRC / P-LE / P-ACT / P-API | P-SRC: policy 正本ストアの承認（現行の `m_retention_policy` を正本と認めるか、別ストアへ移すか）。P-LE: 法人単位 policy の要否（要なら envelope schema v2）。P-ACT: Clock/NTP と許容 skew。P-API: 下流呼出の認可責任 | 説明照会の「本番 currentness 証明済み」表示、NF08 への接続 | W3-14、NF07-NF08-LINK |
+| G-DBA / G-BKP | Journal（と B2 で Witness）インスタンスの接続設定 `privacy.journal.*`、GRANT 実行、Journal 用 Flyway job の実行、別 backup | hold 開始（journal 必須） | NF07-A1J |
+| G-ID | `privacy-admin` の割当規則（§6.7 の暫定規則を置き換えるか確認） | privacy 管理者の正式な割当 | W3-14 |
+
+---
+
+## 8. NF08 との関係
+
+LINK の前の状態（基準 `1be03bea`。LINK の実装後は、下の「NF07-NF08-LINK 実装記録」のとおり送信ごとに NF07 policy と照合する）:
+
+- NF08 の外部送信承認設定 `ai.external-send-approval.nf07-policy-id`（環境変数 `AI_EXTERNAL_SEND_NF07_POLICY_ID`、`application.yml:387`）は、`AiExternalSendApproval.evaluate`（`AiExternalSendApproval.java:79-84`）で形式・placeholder・他の決定IDとの重複だけを検査している。NF07 の policy source とは照合していない。
+- 設定値が placeholder（`UNKNOWN`・`TBD` 等の断片を含む）なら complete にならない。ただし形式が正しい任意の ID を設定すれば、NF07 に該当する policy が無くても complete になる（照合が無いため）。
+- 呼出元は起動時の `AiProductionApprovalGate` と送信ごとの `GeminiTextServiceImpl`（`:252`、`:276`）。
+
+依存関係（統一した書き方）:
+
+- **NF07-NF08-LINK は NF08 外部送信を開放する前に必ずマージする。** 代替手段（運用確認だけで開く）は採らない。LINK がマージされるまで NF08 の外部送信は開放しない。
+- NF08 の外部送信が実際に許可されるには、次が全て揃う必要がある: (1) NF07-REG・NF07-TRUST・NF07-NF08-LINK がマージ済み、(2) `privacy.retention.enabled=true`（OFF では policy source が `SOURCE_DISABLED` を返す）、(3) D-02・D-03・D-08 が署名され、対象 policy が登録・有効化されて `APPROVED_ACTIVE`、(4) NF08 自身の承認設定（DG-08 の決定ID・DPA 参照・model・用途・宛先・費用上限、B-NF08-2）。LINK のマージ後は、1つでも欠ければ NF08 の実外部送信は必ず拒否される。
+- このため、B-NF08-1（実 Gemini への接続）の本番公開の経路は NF07 の上記の連鎖に依存する。NF08 の gate 文書（`.kiro/specs/ai-management-copilot/external-send-approval-gate.md`）と wave3 計画の依存関係への登録、NF08-1 所有者への通知は総括が行う（本 spec の範囲外）。
+
+NF07 の policy 値が確定した後の手順:
+
+1. D-02（AI payload の保持・外部送信 policy）と D-08（Gemini の DPA）が署名される。
+2. issuer が D-03 の鍵で envelope に署名する（key: module `NF08_AI_SUMMARY`、data element `AI_EXTERNAL_PROVIDER_COPY`、action `EXTERNAL_DISPATCH`、provider `gemini-adapter`。data element は本番 catalog（V196）にある外部 provider 側の写し（`AI_PAYLOAD`・storage `gemini-adapter.request`）で、合成 catalog の例 `AI_PROMPT_LOG` は本番 catalog に無いため使わない（RB-NF08-LINK review P3-2、統括の決定。DDL なし）。Privacy Owner がこの束縛を確認する（未取得）。D-03 の anchor の data element の範囲にもこの値を入れる）。
+3. privacy-admin A が登録し、別の privacy-admin B が有効化する（NF07-REG）。
+4. privacy-admin が `GET /api/privacy/policies/evaluate` で `APPROVED_ACTIVE` と policyId・revision・digest を確認する（確認手順であり、LINK の代わりにはならない）。
+5. 運用者が NF08 の `AI_EXTERNAL_SEND_NF07_POLICY_ID` にその policyId を設定する（DG-08 の決定ID・DPA 参照など NF08 の他の項目と一緒に）。再起動して `AiProductionApprovalGate` が complete を返すことを確認する。
+6. 送信ごとに LINK の内部判定 port が policyId の一致と `APPROVED_ACTIVE` を確認し、flag OFF・UNKNOWN・EXPIRED・REVOKED・DRIFT・不一致なら送信を拒否する。policy が失効・期限切れになれば、NF08 の設定を変えなくても送信が止まる。再署名後は 3〜5 をやり直す。
+
+注意点:
+
+- `APPROVED_ACTIVE` だけでは送信を許可しない（prod-wiring §4.2）。NF08 自身の承認設定（B-NF08-2）は従来どおり必要。prod-wiring §4.2.3 の `CaseApprovalEnvelope` / `VerifiedDispatchFence` は NF07 自身の外部 dispatch に適用する（[`status-alignment.md`](status-alignment.md) §3 X-1）。
+- 説明照会（W-4）は caller を privacy 管理者に限るので、一般利用者の Copilot 送信から直接は呼べない。NF07-NF08-LINK では tenant だけを束縛し、説明 DTO を返さない内部判定 port（`PolicyEnforcementPort`）を別に設計する（LINK の Plan Review 対象。RB-NF08-LINK で実装、下の実装記録）。
+- `application.yml` の `ai.*` と NF08 の class は NF08-1 の所有（wave3 §2）。NF07-NF08-LINK はその所有者と調整して入れる。
+
+**NF07-NF08-LINK 実装記録（2026-11-17、RB-NF08-LINK。DDL・設定項目の追加なし。実装のみで、開放は上の (1)〜(4) と NF08 の S-1〜S-8（external-send-approval-gate.md §8）・B2c-2 の完了と独立 Review の後）**:
+
+- NF07 側の port: `PolicyEnforcementPort`（`com.ses.privacy.foundation`）。要求 `PolicyEnforcementRequest` は判定対象の tenant・key（module・data element・action・provider）・期待 policy ID・`approvalSignedBefore`（呼出し側の承認が署名された時点の上限。下の W3-03 P3-2）だけを持ち、利用者・役割を持たない。結果 `PolicyEnforcementDecision` は可否・結果コード `PolicyEnforcementReason`（`PERMITTED`・`RETENTION_DISABLED`・`ENFORCEMENT_UNAVAILABLE`・`REQUEST_INVALID`・`POLICY_UNKNOWN`・`POLICY_EXPIRED`・`POLICY_REVOKED`・`POLICY_DRIFT`・`POLICY_ID_MISMATCH`・`APPROVAL_PREDATES_POLICY`）・細かな原因（`PolicyFailureReason`）だけで、説明 DTO（版・digest・有効期間・説明文）を返さない。契約: 呼出しのたびに判定し cache しない、例外を投げない。
+- 許可を作れる場所（RB-NF08-LINK review P3-1）: `PolicyEnforcementDecision` は public な constructor を持たない class で、許可の `permit()` は package-private（foundation の外から作れない）、`deny` に `PERMITTED` は渡せない。foundation の中で `permit()` を呼ぶのは `ProductionPolicyEnforcementService` だけ。main で `PolicyEnforcementPort` を参照・実装できる class、NF08 の `AiExternalSendPrivacyPolicyCheck`（constructor は package-private）と check を受け取る `AiProductionApprovalGate` の constructor（package-private）の呼出し元は、`PolicyEnforcementCallSiteTest` が source の走査で一覧に固定する（reflection は対象外）。
+- 本番実装: `ProductionPolicyEnforcementService`（package-private）。`ProductionPrivacyComponents.productionPolicyEnforcement` だけが生成し（prod profile 必須）、その呼出し元は Spring 登録 `PrivacyPolicyEnforcementConfiguration` に限る（`PrivacyFoundationIsolationTest` が source の走査で固定）。部品は説明照会と同じ（`DbProductionPolicyCatalog`・`DbCurrentPolicySource`・`PrivacyTrustSource` の anchor と失効 provider。後者は `PrivacyTrustSource.policyAnchorsOf`・`revocationsOf` で包み送信の判定のたびに取るため、anchor の削除・失効は再起動せずに次の送信から拒否になる（RB-NF07-REG review P2-1 の契約。main の呼出し元は `PrivacyTrustSourceCallSiteTest` が包みだけに固定）、公開スイッチは `PrivacyProductionConfiguration.retentionSourceEnabled`＝`privacy.retention.enabled` と決定ID束縛の有効期間）。policy source は読むだけ。prod 以外の profile は `UnavailablePolicyEnforcementPort`（何も読まず常に `ENFORCEMENT_UNAVAILABLE`）。
+- 判定順序: 公開スイッチ（OFF・期間外なら何も読まず `RETENTION_DISABLED`）→ prod profile → 要求の検査（`REQUEST_INVALID`）→ catalog で binding を一意に解決し key と照合（DRIFT）→ binding の policy ID と期待 policy ID の完全一致（違えば source を読まず `POLICY_ID_MISMATCH`。NF07 側の不整合の DRIFT と区別する）→ source の current を1回読み policy ID・digest を照合 → 厳格な復号 → `ProductionApprovalEnvelopeVerifier.verifyCurrentForEnforcement`（説明照会の `verifyCurrentCandidate` と同じ private の検証を共有し、呼出し元の役割の代わりに判定対象の tenant に束縛する: audience・tenant・policy ID・revision・digest・schema・trust anchor・範囲・時刻・失効状態・Ed25519 署名・SoD・binding）。失敗理由は説明照会と同じ対応（`mapStatus`）で UNKNOWN・EXPIRED・REVOKED・DRIFT に分類し、想定外の例外は `POLICY_UNKNOWN`。privacy 管理者の権限は要求しない（一般利用者の Copilot 送信から呼ぶため）。key の actor 欄は固定値 `system:policy-enforcement`（第1期は tenant-wide の binding だけで、catalog・source は actor を解決に使わない）。
+- NF08 側: `AiExternalSendPrivacyPolicyCheck`（key はコードの定数: module `NF08_AI_SUMMARY`・data element `AI_EXTERNAL_PROVIDER_COPY`・action `EXTERNAL_DISPATCH`・provider は承認設定の `gemini` を `gemini-adapter` へ対応付け。期待 policy ID は承認設定の `nf07-policy-id`、tenant は送信の実行 tenant）を共有 gate `AiProductionApprovalGate` が持ち、`assertExternalSendPrivacyPolicy` / `externalSendPrivacyPolicyPermits` で呼ぶ。手動構築の gate（port なし）は常に拒否する。gateway は `validateCopilotPreflight` の承認束縛（`assertApprovedExternalSendBinding`）の直後で判定し（execute と読取専用 preflight の両方）、拒否は 503 `AI_EXTERNAL_SEND_PRIVACY_POLICY_NOT_ACTIVE`（execute では DENIED 監査を残す）。adapter（`GeminiTextServiceImpl#allowsApprovedDispatch`）は送信直前に同じ判定を再確認する（gate なし・実行 tenant なし・拒否は送信しない）。起動時の判定（`startupExternalSendStatus`・prod validator）には含めない（policy の状態は実行中に変わるため送信ごとに評価し、policy の失効・期限切れで起動を止めない）。
+- 観測: 拒否は WARN `AI_EXTERNAL_SEND_PRIVACY_POLICY_DENIED`（stage・reason・detail の固定コードだけ）と metric `ses_ai_external_send_privacy_policy_denied_total{stage,reason}`。tenant・policy ID・決定ID・PII は出さない。
+- NF08 承認の再利用への最小の防護（W3-03 P3-2、RB-NF08-LINK の2つ目の commit）: 要求に `approvalSignedBefore`（NF08 の承認の署名日の翌日0時 JST）を足し、検証済みの current envelope の `issuedAt` がそれ以後なら `APPROVAL_PREDATES_POLICY` で拒否する（policy の再発行より前に署名された NF08 承認を、設定へ戻しても使わせない）。NF07 の current は Ed25519 の署名と別々の privacy-admin の有効化で決まり、SUPERSEDED は再び有効化できないため、設定の外の高水位として働く。手順の帰結: 上の手順5の NF08 承認（S-4）は手順2の envelope の発行日（`issuedAt` を JST に換算した日付）以降に署名する。手順6の「再署名後は 3〜5 をやり直す」には NF08 承認の署名し直しが含まれ、D-03 の鍵 rotation・期限の更新による再発行も同じく外部送信を止める。この防護が止めるのは悪意の無い巻戻し（旧設定の復元・task definition の rollback）だけで、意図的な内部者は止めない。残る穴（NF07 を再発行しない NF08 だけの置き換え、鍵の無い digest の偽造、永続的な高水位）と、方式・運用上の帰結を誰が受理するか（全て未取得）は external-send-approval-gate.md §7.4。S-9 の staging 観測が NF07 の連鎖全体に依存することは同 §8。
+- 第1期の状態: trust registry が空・失効 provider が常に UNKNOWN のため、prod で `privacy.retention.enabled=true` にしても判定は `POLICY_DRIFT`（`UNKNOWN_TRUST_ANCHOR`）か `POLICY_UNKNOWN` で拒否する。prod は B2c-2 の完了まで `AI_EXTERNAL_SEND_ENABLED=true` の起動自体を拒否する（変更していない）。
+- key の data element（RB-NF08-LINK review P3-2、統括の決定）: 当初の定数 `AI_PROMPT_LOG` は本番 catalog（V196）に行が無く、REG が `policyDataElementUnknown` で登録できなかったため、V196 にある `AI_EXTERNAL_PROVIDER_COPY`（`AI_PAYLOAD`・storage `gemini-adapter.request`・`pii-inventory.md#3`。外部送信で生じる provider 側の写し）に改めた。DDL なし。REG の登録検査は catalog の行の有無だけを見るため、行の `provider_id` が NULL・分類が UNKNOWN でも登録できる。**Privacy Owner がこの束縛を確認する（未取得）**。`PrivacyPolicyNf08DispatchKeyTest`（H2）が、この key の policy を REG で登録・有効化でき LINK が `PERMITTED` になること、旧 key は REG が拒否することを確かめる。
+- 根拠の test: fast は `ProductionPolicyEnforcementServiceTest`（test-only の鍵で署名した policy で flag OFF・要求不完全・UNKNOWN（catalog・source・失効状態・provider 障害）・REVOKED（envelope・鍵）・EXPIRED（期限切れ・未発行）・DRIFT（trust 空・改竄・digest・policy ID・binding・別 tenant）・policy ID 不一致・承認が policy の発行より前、全て揃ったときだけ許可し呼出し元の認証を要求しない、cache しない）、`PrivacyPolicyEnforcementConfigurationTest`、`AiExternalSendPrivacyPolicyCheckTest`、`CopilotExternalSendPrivacyPolicyLinkTest`（本番の内部判定 port と test-only の policy・fake provider で、各拒否は送信前に止まり全て揃ったときだけ1回送信する）、`GeminiCopilotInvocationBoundaryTest`、`PrivacyFoundationIsolationTest`、`PolicyEnforcementCallSiteTest`、`PrivacyTrustSourceCallSiteTest`、`PrivacyPolicyNf08DispatchKeyTest`（H2）。MySQL の追加 test は無い（DB は読み取りだけで、照会の部品は既存の `DbCurrentPolicySourceTest` 等が扱う）。
+
+---
+
+## 9. 署名前実装のリスクと緩和
+
+| # | リスク | 緩和 |
+|---|---|---|
+| R-1 | 署名前に flag が誤って ON にされる | prod では flag ON に D-01・D-09 等の決定IDが必須（起動失敗）。flag は真偽値として厳格に bind。OFF の入口は 404（登録済みは filter、未登録は guard）。起動 log に状態を出す |
+| R-2 | 署名の内容が想定と違い、作り直しになる（例: hold 開始も二者、法人単位の policy、DSAR 期限の数え方） | 値は envelope・設定で外から与え、code に書かない。未定の列は UNKNOWN/NULL を許す。envelope は schema v1 だけを解釈し、法人 ID を署名対象に入れる v2 は P-LE 後に別 Plan（S-14）。batch ごとに Plan Review |
+| R-3 | UNKNOWN が既定値として扱われる（技術上の現在値が法的値に見える、placeholder が通る） | placeholder 断片の拒否、技術値を `APPROVED_*` として返さない test、seed に期間を入れない Review 項目 |
+| R-4 | 権限の誤割当（非管理者に `privacy-admin`、`role-admin` との併用で黙って拒否） | code の role 検査、割当 guard（400/409）、group key 付き監査と通知、matrix test（9006・9008）、割当変更時の session 失効（既存） |
+| R-5 | 既存の削除経路の挙動が変わる。逆に、flag を OFF に戻したときに既存 hold が効かなくなる | hold 機構を一度も使っていない間は gate の照会1回だけで挙動不変。使った後は flag に関係なく hold を守る。経路ごとに test |
+| R-6 | Journal インスタンスが遅れる／app DB を指してしまう | hold 開始は journal 必須（`JOURNAL_UNAVAILABLE`）。`server_uuid` の相違・耐久設定・権限を起動時に検査する |
+| R-7 | 状態文書がまた食い違う | 状態文には日付・SHA・範囲・証拠を付ける規則（[`status-alignment.md`](status-alignment.md) §1）。verdict は外部記録で確認する |
+| R-8 | 署名前に作った DDL を後で変えたくなる | 新しい migration だけで直す（既存 script は変更しない）。第1期の表は本番で flag ON まで空のまま。disposition 表は B1 まで作らない。SoD・承認束縛・複合 FK は W3-14 の前に草案へ入れた |
+| R-9 | 新しい表・監査・通知に PII が溜まる | 依頼者連絡先・本人確認書類の本体は持たず参照IDだけ。hold 理由は code・hash・ticket。監査と通知に subject 識別子を入れない。package は quarantine→published、交付記録で PURGED、汎用 file 経路から取得不可 |
+| R-10 | NF08 が `APPROVED_ACTIVE` を送信許可と読み違える | NF08 の承認設定は不変。NF07-NF08-LINK は両方を要求する |
+| R-11 | 管理者の短絡許可を外したことで、privacy 以外の判定が変わる | 変更は `privacy.` 接頭辞だけ。業務 action の既存 assertion は無変更で通ること |
+| R-12 | 合成層を本番から呼べてしまう／合成層が変わる | 合成部品の guard とコードは変更しない。本番部品は `ProductionPrivacyComponents` 経由だけ。`PrivacyFoundationIsolationTest` と同値性 test で固定 |
+| R-13 | 署名前に作り込んだ code が開放されないまま古くなる | 開放手順（§7）を batch ごとに test で再現できる形にし、M の前に固定 SHA で再実行する |
+| R-14 | NF08 の `nf07PolicyId` は形式だけの検査なので、NF07 に policy が無くても形式の正しい ID で送信承認が complete になる | NF07-NF08-LINK を NF08 外部送信の開放前に必ずマージする（§8）。代替手段は採らない |
+| R-15 | 帰属できない行（未変換の取込、integration hub の payload、snapshot、参照元が物理削除された実体）にある held subject のデータは SUBJECT hold で守られない | hold 開始画面で該当 element と件数を示し、必要なら DATA_ELEMENT hold を足す。残余は D-05 owner が受理する（§7）。F2 の inventory で帰属を増やす |
+| R-16 | Journal の不達が続くと、hold を使った tenant の帰属可能な削除が止まり続け、期限超過の保持になる | 経路ごとの skip 件数と `UNAVAILABLE` の継続時間を監視し、閾値（SRE が決める）を超えたら通報する。reconciler が pending と projection 欠落を自動で解消する |
+| R-17 | batch の途中で開始された hold がその回に反映されない | 窓は最大1回分の実行時間（既知の残余として受け入れ、hold 開始画面に表示）。手動の文書処分は同一 tx で照会するので窓が無い |
+
+---
+
+## 10. Plan Review（再 Review）で重点的に見てほしい箇所
+
+1. §3.4.1 の破壊的経路の一覧に漏れが無いか（特に D1 の接続位置、D10 を provider で守る方式、D11 の分類方法、D13 の他 NF）。
+2. §3.4.3 の採用案 (b)+(c)（帰属できない行は SUBJECT hold で止めない）と残余 R-15 の扱い。
+3. §3.4.4 の pending の CAS・直列化・reconciler、未使用 tenant の判定優先、batch 途中の hold の窓。
+4. §3.1.2 の Feature 登録が `FeatureSwitchRouteCoverageTest` と `FeatureSwitchDefaultsTest` の不変条件を満たすか。
+5. §3.1.3 / §6.2 の起動時検査と、privacy の判定で `*` を候補に数えない多重防御。
+6. §3.1.5 の SoD CHECK・承認束縛・複合 FK・`ALTER TABLE` で足す相互 FK。
+7. §3.5.2 の汎用 file 経路の遮断位置（管理者の通過分岐より前）。
+8. §3.3 の Journal 接続の holder 型と、合成 adapter に手を入れずに同値性 test で乖離を検出する方式。
+9. §8 の NF08 依存の書き方（LINK は NF08 外部送信の開放前に必須）。
+10. §6.7 の privacy-admin 割当の監査・通知（G-ID 署名までの暫定規則）。
+
+---
+
+## 11. 依頼者の判断が要る未決事項
+
+- R1 で挙げた2件（第1期 hold の正本、privacy-admin の割当の排他）は依頼者が 2026-11-14 に決定済み（本書冒頭の決定表）。
+- R2 の修正（P1-2 の採用案を含む）で、依頼者の新たな判断が要る事項は無い。帰属できない行の残余の受理は D-05 の署名項目として扱う（§7）。
+- NF07-REL（解除）の開放前に D-05 で決める事項（§7 の D-05 行。NF07-REL review の P2-2・第1項の意見）:
+  1. **開始者との分離**: 発行者・承認者を hold の開始者と別の主体にするか（実装の既定は「別にする」）。開始者が不明の hold を拒否するか（実装の既定は「拒否」）。reconciler が Journal から復元した行の開始者は、開始の予約で append より前に書かれる開始要求の監査（`NF07_HOLD_START_REQUESTED`）の username から `sys_user.id` を一意に定めて記録する（`PrivacyHoldStarterLookup`。delta review P2-1）。一意に定まらない行だけが不明（束縛では `sys_user:0`）のまま残り、その解除の運用（監査付きのデータ修正の手続きか、D-05 の規則で `ACCEPT` にするか）は deploy-runbook §4.5。解除の pending がある間は reconciler も開始の service も開始者を書き換えない（delta review P3-3）。残余（D-05 owner の受理事項）: 開始者の値は application DB の projection（と同じ DB の監査）にあり Journal では確かめられないため、DB で `requested_by` や監査の行を書き換えれば開始者との分離は迂回できる（他の projection の値と同じ信頼度。delta review P3-4。要求者・発行者・承認者の分離は署名と trust anchor で守られ、この迂回の影響を受けない）。
+  2. **DATA_ELEMENT hold の依存**: 帰属できない element の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除しない（どの SUBJECT hold が `DATA_ELEMENT_HOLD` を選んだかが projection に無いための fail-closed）。長く続く SUBJECT hold が1件でもあると、誤って開始した DATA_ELEMENT hold を実質解除できず element 全体が保存され続ける（I-9 の後半に反し得る）。開放前に、(a) D-05 owner がこの過剰停止を受理するか、(b) DDL lane で SUBJECT hold の選択を保存する表（例: `t_legal_hold_choice(tenant_id, hold_id, data_element_id, choice)`。開始と同じ transaction で書き、復元行は「不明」として fail-closed）を追加し、「その element に `DATA_ELEMENT_HOLD` を選んだ ACTIVE な SUBJECT hold がある」場合だけ拒否する変更を出すか、を決める。NF07-REL では DDL を足さない。

@@ -12,6 +12,11 @@ public interface IntegrationHubWebhookReplayAuthorizationService {
     ReplayAuthorization authorize(ApiDelivery delivery, String revalidatedScopeDigest,
                                   Authentication authentication, LocalDateTime now);
 
+    /** 実HTTPS送信の直前に、現在のdeliver権限とresourceの所属を再評価する。 */
+    default void assertCurrentSendScope(ApiDelivery delivery, LocalDateTime now) {
+        throw new SecurityException("現在の送信scopeを検証できません");
+    }
+
     record ReplayAuthorization(String operatorRef) {
         public ReplayAuthorization {
             if (operatorRef == null || operatorRef.isBlank()) {

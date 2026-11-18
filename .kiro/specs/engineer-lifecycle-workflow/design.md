@@ -243,7 +243,7 @@ CREATE TABLE t_lifecycle_event (
 
 ---
 
-### 表2: 主体 × 操作 × 可見母集団
+### 表2: 主体 × 操作 × 閲覧可能な母集団
 
 | 主体 | 一覧/詳細/集計 (list/detail/count) | エクスポート/ダウンロード | 通知 (notification) | スケジューラ/バッチ (scheduler) |
 |---|---|---|---|---|
@@ -261,7 +261,7 @@ CREATE TABLE t_lifecycle_event (
 
 ### 表3: 状態機械 と 競合
 
-| 対象 | 状態 | 許可遷移 | 防重・並行制御手段 | competing writer | ロールバック / 補償 |
+| 対象 | 状態 | 許可遷移 | 重複防止・並行制御手段 | competing writer | ロールバック / 補償 |
 |---|---|---|---|---|---|
 | **Case** | `ACTIVE` | → `ON_HOLD`, → `COMPLETED`, → `CANCELLED` | 状態CAS + `version` + 未完了阻害タスク0件チェック | 二重完了click | `ACTIVE` へ戻す |
 | **Case** | `ON_HOLD` | → `ACTIVE`, → `CANCELLED` | 状態CAS + `version` | — | — |

@@ -1,5 +1,7 @@
 package com.ses.service.scheduler;
 
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTenantInventoryProperties;
@@ -27,10 +29,17 @@ public class ServiceSlaScheduler {
     private final AccountingTimezoneResolver timezoneResolver;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private TenantAwareBatchRunner tenantAwareBatchRunner;
+    /** NF-02機能スイッチ。Spring管理外で生成した単体テスト対象ではnull（従来どおり実行）。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private FeatureSwitches featureSwitches;
 
     @Scheduled(cron = "${servicedesk.sla.cron:0 */5 * * * *}")
     @SchedulerLock(name = "serviceSlaMonitoring", lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
     public void runSlaMonitoring() {
+        if (!FeatureSwitches.allows(featureSwitches, Feature.NF02)) {
+            log.debug("[機能スイッチ] NF02がOFFのためSLA違反監視をスキップしました");
+            return;
+        }
         processSlaMonitoring(null);
     }
 

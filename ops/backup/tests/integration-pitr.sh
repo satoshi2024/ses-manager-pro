@@ -5,13 +5,15 @@
 #   preflight -> backup-full -> archive(checkpoint 前の binlog) ->
 #   checkpoint（before marker を DB/uploads に固定）-> after marker 注入 ->
 #   plan-restore -> restore -> validate-restore（before 存在 / after 不在 /
+#   flyway_schema_history の存在と version 照合 / 主要 table の内容ハッシュ照合 /
 #   uploads 照合 / read-only smoke）-> summary JSON 出力
 #
 # 環境変数: SRC_HOST, TGT_HOST, SRC_PASSWORD_FILE, TGT_PASSWORD_FILE,
 # WORK_DIR, REPOSITORY 系（BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE,
 # RESTIC_REPOSITORY）, UPLOADS_DIR, BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR,
 # REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR, QUIESCE_*, APP_COMMIT,
-# FLYWAY_VERSION, CRITICAL_TABLES, PLANS_DIR, INDEX_DIR 等
+# FLYWAY_VERSION（fixture の history 最新 42 と一致必須）, CRITICAL_TABLES,
+# CONTENT_HASH_TABLES, PLANS_DIR, INDEX_DIR 等
 set -uo pipefail
 
 fail() { echo "[integration] FAIL: $*" >&2; exit 1; }
@@ -50,7 +52,29 @@ log "== 1. preflight =="
 grep -q '"status": "OK"' "$EVID/preflight.json" || fail "preflight が OK でない"
 log "preflight OK"
 
-log "== 2. fixture（marker テーブル + before marker） =="
+log "== 2. fixture（marker テーブル + before marker + 最小の flyway_schema_history） =="
+# 復元検証の Flyway 照合（history table の存在・成功行の版番号順の最大）を実 MySQL で通すため、
+# Flyway と同じ列構成の最小 history を置く。版番号順の最大は 42（辞書順の最大は "9" なので、
+# 辞書順で判定する実装はここで失敗する）。FLYWAY_VERSION（checkpoint metadata の期待値）と一致させる。
+INTEGRATION_FLYWAY_LATEST=42
+[[ "${FLYWAY_VERSION:-}" == "$INTEGRATION_FLYWAY_LATEST" ]] \
+  || fail "FLYWAY_VERSION（${FLYWAY_VERSION:-未設定}）が fixture の flyway_schema_history の最新 version（$INTEGRATION_FLYWAY_LATEST）と一致しません"
+src_root "$MYSQL_DATABASE" \
+  -e "CREATE TABLE IF NOT EXISTS flyway_schema_history (
+        installed_rank INT NOT NULL PRIMARY KEY, version VARCHAR(50), description VARCHAR(200) NOT NULL,
+        type VARCHAR(20) NOT NULL, script VARCHAR(1000) NOT NULL, checksum INT, installed_by VARCHAR(100) NOT NULL,
+        installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, execution_time INT NOT NULL, success TINYINT(1) NOT NULL
+      ) ENGINE=InnoDB;
+      DELETE FROM flyway_schema_history;
+      INSERT INTO flyway_schema_history
+        (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) VALUES
+        (1, '1', 'create tables', 'SQL', 'V1__create_tables.sql', 1, 'integration', 1, 1),
+        (2, '9', 'integration nine', 'SQL', 'V9__integration_nine.sql', 9, 'integration', 1, 1),
+        (3, '10', 'integration ten', 'SQL', 'V10__integration_ten.sql', 10, 'integration', 1, 1),
+        (4, '41.1', 'integration dotted', 'SQL', 'V41_1__integration_dotted.sql', 411, 'integration', 1, 1),
+        (5, '42', 'integration latest', 'SQL', 'V42__integration_latest.sql', 42, 'integration', 1, 1),
+        (6, NULL, 'integration repeatable', 'SQL', 'R__integration_repeatable.sql', 7, 'integration', 1, 1);" \
+  || fail "flyway_schema_history fixture の作成に失敗しました"
 src_root "$MYSQL_DATABASE" \
   -e "CREATE TABLE IF NOT EXISTS marker_test (id BIGINT AUTO_INCREMENT PRIMARY KEY, marker VARCHAR(64)) ENGINE=InnoDB;
       DELETE FROM marker_test;
@@ -265,6 +289,14 @@ chmod +x "$WORK_DIR/smoke.sh"
   > "$EVID/validate.json" 2>&1 || true
 grep -q '"state": "READY_FOR_CUTOVER"' "$EVID/validate.json" \
   || fail "validate が READY_FOR_CUTOVER でない"
+# history table の存在確認と version 照合の経路を実 MySQL で通ったこと（skip 経路でないこと）
+grep -q '"flyway_history_required": true' "$EVID/validate.json" \
+  || fail "validate が flyway_schema_history を必須として検証していません"
+grep -q "\"flyway_latest\": \"$INTEGRATION_FLYWAY_LATEST\"" "$EVID/validate.json" \
+  || fail "validate が flyway_schema_history の version 照合を経由していません"
+# 主要 table の内容ハッシュ（checkpoint 記録値）と復元 DB が一致したこと
+grep -q '"content_hash": "PASS"' "$EVID/validate.json" \
+  || fail "validate の内容ハッシュ照合が PASS でない（CONTENT_HASH_TABLES の記録・照合を確認）"
 
 log "== 11. target の marker 状態を確認 =="
 TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" -urestore-svc \

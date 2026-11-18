@@ -23,6 +23,12 @@ import java.security.MessageDigest;
 public class SalesInvoiceTransactionCoordinator {
 
     private final IntegrationJobService jobService;
+    /**
+     * 送信成功後に、既に消込済みの入金明細をfreeeへ反映するジョブを登録する（先に消込してから送信した場合）。
+     * 売上連携サービスはこのコーディネーターに依存するため、循環しないよう遅延取得する。
+     */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService>
+            salesInvoiceIntegration;
 
     @Transactional(rollbackFor = Exception.class)
     public void handleSalesInvoiceResult(Long jobId, IntegrationJob job, IntegrationConnection conn, CanonicalDealResult result) {
@@ -42,10 +48,16 @@ public class SalesInvoiceTransactionCoordinator {
 
                 jobService.createJob(
                         conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", job.getTargetId(), compIdempotencyKey, compHash,
-                        compPayload, conn.getTenantId(), conn.getLegalEntityId(), job.getOrganizationId());
+                        // NF09: 補償取消は元ジョブと同じ法人で実行する（接続の法人は全社共通ではNULL）
+                        compPayload, conn.getTenantId(), job.getLegalEntityId(), job.getOrganizationId());
             } else {
+                if (result.isAdoptedExisting()) {
+                    // 新しく作成せずfreeeに既にあった取引を採用した（再試行・タイムアウト後の照合）。新規作成と区別して残す
+                    jobService.recordJobEvent(jobId, "ADOPTED_EXISTING_DEAL", "accounting.event.adoptedExistingDeal", null);
+                }
                 jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                         "freee取引登録成功: dealId=" + result.getExternalId());
+                reflectReconciledDeposits(job);
             }
         } else {
             if (result.isRetryable()) {
@@ -54,6 +66,27 @@ public class SalesInvoiceTransactionCoordinator {
             } else {
                 jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
             }
+        }
+    }
+
+    /**
+     * 請求書の取引が作成できたら、その請求書へ既に消込済みの入金明細をfreeeの消込へ反映する（消込が送信より先だと、
+     * 消込の時点では反映先の取引が無く登録されないため）。登録は savepoint（NESTED）で行い、失敗しても送信成功の記録は残す。
+     */
+    private void reflectReconciledDeposits(IntegrationJob job) {
+        if (job == null || job.getTargetId() == null || !"SALES_INVOICE_SYNC".equals(job.getJobType())
+                || salesInvoiceIntegration == null) {
+            return;
+        }
+        com.ses.service.accounting.SalesInvoiceIntegrationService sync = salesInvoiceIntegration.getIfAvailable();
+        if (sync == null) {
+            return;
+        }
+        try {
+            sync.enqueueDepositReconcilesForInvoice(job.getTargetId());
+        } catch (RuntimeException e) {
+            log.warn("送信後の入金消込の反映ジョブを登録できませんでした（送信成功は記録済み）: invoiceId={} error_code=DEPOSIT_RECONCILE_ENQUEUE_FAILED exceptionClass={}",
+                    job.getTargetId(), e.getClass().getSimpleName());
         }
     }
 

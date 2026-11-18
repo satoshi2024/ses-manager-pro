@@ -6,21 +6,33 @@ import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.SystemConfig;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.security.epoch.AuthorizationConfigKeys;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * システム設定サービス実装。
  * 値はConcurrentHashMapにキャッシュし、put/初回アクセス時にDBと同期する。
+ *
+ * <p>NF01 F1（計画 §4.1）: 認可述語が読むキー（{@link AuthorizationConfigKeys}）の値を変える更新は
+ * {@link #updateAll} だけが行い、全体epoch行を最初にX lockしてから旧値をlocking readで読み、値が変わった時だけ
+ * 全体epochを同じtransactionで1進める。{@link #put} は台帳のキーを常に拒否する（他経路から認可キーを書いて増分を
+ * 漏らさない。同じtransactionで全体epoch行をlock済みでも、putからは書かせない）。</p>
  */
 @Slf4j
 @Service
@@ -29,6 +41,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     private final SystemConfigMapper systemConfigMapper;
     private final OutboundUrlGuard outboundUrlGuard;
+    private final AuthorizationEpochFence authorizationEpochFence;
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
     private volatile boolean loaded = false;
 
@@ -45,10 +58,10 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     /** Webhook URLの設定キー（保存時にSSRF観点で宛先を検証する対象） */
     private static final String KEY_WEBHOOK_URL = "notification.webhook-url";
 
-    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
+    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー。本番初回bootstrapの完了markerを含む） */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result",
-            "attendance.discrepancy.confirmed");
+            "attendance.discrepancy.confirmed", com.ses.config.ProductionBootstrapCompletionLatch.CONFIG_KEY);
 
     /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
     private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";
@@ -92,7 +105,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("default_settlement_min", ConfigSchema.integer(0, null));
         SCHEMAS.put("default_settlement_max", ConfigSchema.integer(0, null));
         SCHEMAS.put("ai_enabled", ConfigSchema.bool());
-        // 計算側は小数(0.10=10%)で乗算するため上限は1。commission.rate(百分数0–100)とは別口径。
+        // 計算側は小数(0.10=10%)で乗算するため上限は1。commission.rate(百分数0–100)とは別の基準。
         SCHEMAS.put("billing.tax-rate", ConfigSchema.decimal("0", "1"));
         SCHEMAS.put("billing.payment-due-rule", ConfigSchema.enumOf("next-month-end", "next-next-month-end"));
         SCHEMAS.put("notice.contract-end-days", ConfigSchema.integer(0, null));
@@ -121,6 +134,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
         SCHEMAS.put("procurement.payment-max-days", ConfigSchema.integer(1, null));
         // S11 T072: 外部勤怠同期（provider選択・tenant timezone・cursor・直近結果）
+        // freee=月次サマリ送信・日次勤怠の照合取得（給与連携の接続と従業員対応付けを使う。FreeeAttendanceProvider参照）
         SCHEMAS.put("attendance.sync.provider", ConfigSchema.enumOf("mock", "freee"));
         SCHEMAS.put("attendance.sync.timezone", ConfigSchema.string());
         SCHEMAS.put("attendance.sync.freee.cursor", ConfigSchema.string()); // JSON/ISO cursor。操作状態
@@ -140,7 +154,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("portal.base-domain", ConfigSchema.string());
         // S14 (engineer-self-service-portal-v2 / V105): サーベイ匿名閾値と経費の会計連携provider
         SCHEMAS.put("survey.min-answers", ConfigSchema.integer(1, null));
-        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("mock", "freee"));
+        // freee=承認後にfreeeへ自動送信（会計・支払連携のEXPENSE_DEAL_SYNCを使う）、manual=自動送信しない、
+        // mock=開発用（freeeへは送らない。prodではsenderが無いため何もしない）。
+        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("freee", "manual", "mock"));
     }
 
     private void ensureLoaded() {
@@ -197,10 +213,17 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Override
     public void put(String key, String value, String description) {
-        ConfigSchema schema = SCHEMAS.get(key);
-        if (schema == null) {
-            throw com.ses.common.exception.BusinessException.of(400, "error.config.unknownKey");
+        ConfigSchema schema = requireSchema(key);
+        if (AuthorizationConfigKeys.contains(key)) {
+            // 認可キーは updateAll（全体epoch行のX lock → 旧値のlocking read → 書込み → 増分）以外から書かせない
+            // （計画 §4.1、§4.5）。全体epoch行をlock済みのtransactionでも put からは書かせない（W3-15 review P3-5）。
+            throw new IllegalStateException("認可キーは updateAll でのみ更新できます: " + key);
         }
+        write(key, value, description, schema);
+    }
+
+    /** schema検証済みのキーを書く（{@link #put} と、全体epochのfenceを通した {@link #updateAll} の共通部分）。 */
+    private void write(String key, String value, String description, ConfigSchema schema) {
         if (value != null && !value.isBlank()) {
             if (schema.type == ConfigType.BOOLEAN || schema.type == ConfigType.ENUM) {
                 if (schema.allowedValues != null && !schema.allowedValues.contains(value)) {
@@ -265,20 +288,40 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         return systemConfigMapper.selectList(null);
     }
 
+    /**
+     * 画面からの一括更新。認可キーを含む場合は全体epoch行を最初にX lockし、旧値をlocking readで読む。
+     *
+     * <p>READ_COMMITTED にするのは、REPEATABLE READ で全体epoch行のlockより前に通常読取をしていると、旧値の読取が
+     * lock前のsnapshotを返し得るため（W3-15 review P3-3）。外側transactionへ参加した場合は分離レベルが外側のままになるので、
+     * 旧値・新値は分離レベルに依存しないlocking readで読む。</p>
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void updateAll(List<SystemConfig> configs) {
-        String previousScopeValue = all().stream()
-                .filter(c -> "scope.sales-own-data-only".equals(c.getConfigKey()))
-                .map(SystemConfig::getConfigValue)
-                .findFirst()
-                .orElse(null);
-        String finalScopeValue = previousScopeValue;
+        // システム管理キーの拒否はDBに触れる前に行う（無効な要求で全体epoch行をlockしない）。
+        Set<String> authorizationKeys = new TreeSet<>();
         if (configs != null) {
             for (SystemConfig c : configs) {
                 if (isSystemManagedKey(c.getConfigKey())) {
                     throw BusinessException.of(400, "error.config.systemKey");
                 }
+                if (AuthorizationConfigKeys.contains(c.getConfigKey())) {
+                    authorizationKeys.add(c.getConfigKey());
+                }
+            }
+        }
+        // NF01 F1（計画 §4.1）: payloadに認可キーがあれば、旧値を読む前に全体epoch行（lock rank 1）をX lockする。
+        if (!authorizationKeys.isEmpty()) {
+            authorizationEpochFence.lockForUpdate(AuthorizationEpochAnchor.global());
+        }
+        // 認可キーの旧値はcacheではなくDBからlocking readで読む（cacheはafterCommitでしか失効しない）。
+        Map<String, String> beforeAuthorizationValues = readAuthorizationValues(authorizationKeys);
+        String previousScopeValue = authorizationKeys.contains(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
+                ? beforeAuthorizationValues.get(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
+                : null;
+        String finalScopeValue = previousScopeValue;
+        if (configs != null) {
+            for (SystemConfig c : configs) {
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;
@@ -292,15 +335,42 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                         throw BusinessException.of(400, "error.config.webhookUrl");
                     }
                 }
-                if ("scope.sales-own-data-only".equals(c.getConfigKey())) {
+                if (AuthorizationConfigKeys.SALES_OWN_DATA_ONLY.equals(c.getConfigKey())) {
                     finalScopeValue = c.getConfigValue();
                 }
-                put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
+                // 認可キーも含め、全体epoch行をlockしたこの経路だけが内部の書込みを直接呼ぶ（putは認可キーを拒否する）。
+                write(c.getConfigKey(), c.getConfigValue(), c.getDescription(), requireSchema(c.getConfigKey()));
             }
+        }
+        if (!authorizationKeys.isEmpty()) {
+            // 認可キーの値（書込み後のDB値）が変わった時だけ全体epochを1進める（同じ値の再保存・非認可キーでは進めない）。
+            authorizationEpochFence.advanceIfChanged(AuthorizationEpochAnchor.global(),
+                    beforeAuthorizationValues, readAuthorizationValues(authorizationKeys));
         }
         if (!Objects.equals(previousScopeValue, finalScopeValue) && scopeChangeInvalidator != null) {
             // ScopeChangeInvalidatorはトランザクションのafterCommitでのみ世代を進める。
             scopeChangeInvalidator.invalidate();
         }
+    }
+
+    /**
+     * 指定した認可キーの現在のDB値（行が無い・値がNULLのキーはNULLで持つ）。比較のため順序を固定する。
+     * locking readのため、外側transactionのsnapshotに関係なく最新のcommit値（と自transactionの書込み）を読む。
+     */
+    private Map<String, String> readAuthorizationValues(Set<String> keys) {
+        Map<String, String> values = new TreeMap<>();
+        for (String key : keys) {
+            SystemConfig row = systemConfigMapper.selectByIdForUpdate(key);
+            values.put(key, row == null ? null : row.getConfigValue());
+        }
+        return values;
+    }
+
+    private static ConfigSchema requireSchema(String key) {
+        ConfigSchema schema = SCHEMAS.get(key);
+        if (schema == null) {
+            throw BusinessException.of(400, "error.config.unknownKey");
+        }
+        return schema;
     }
 }

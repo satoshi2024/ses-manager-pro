@@ -25,6 +25,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -46,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * T075 F1: 過配賦判定（日単位）・例外承認・状態機械・scenario外の区間代数の定向test（L2〜L3）。
+ * T075 F1: 過配賦判定（日単位）・例外承認・状態機械・scenario外の区間代数の対象限定test（L2〜L3）。
  * 受入条件R5: 50+50許可 / 60+50拒否 / 重複なし許可 / 1日重複拒否 / 隣接OK・同日NG / 例外承認で許可。
  *
  * <p>reviseのrollback（変更前の区間へ戻る）はREQUIRES_NEWなtransactionで実行し、
@@ -95,6 +96,12 @@ class AllocationPlanServiceTest {
     private long applicantUserId;
     private long approverUserId;
 
+    /** REQUIRES_NEWで確定したfixture。テストTXのrollbackでは消えないため、TX終了後に削除する。 */
+    private CommittedFixture committedFixture;
+
+    private record CommittedFixture(long engineerId, long customerId, long projectId) {
+    }
+
     @BeforeEach
     void setUp() {
         String suffix = String.valueOf(System.nanoTime());
@@ -128,6 +135,26 @@ class AllocationPlanServiceTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+    }
+
+    /**
+     * REQUIRES_NEWでcommitした行を、テストTXのrollback後に削除する。
+     * 残すと法人NULLの顧客・案件・要員が共有H2に残り、全tenantを検査する
+     * {@code LegalEntityReadinessService#assertReady} に依存するテスト
+     * （ExternalApiReadSnapshotIntegrationTest 等）が実行順次第で LEGAL_ENTITY_BACKFILL_INCOMPLETE になる。
+     */
+    @AfterTransaction
+    void deleteCommittedFixture() {
+        CommittedFixture fixture = committedFixture;
+        committedFixture = null;
+        if (fixture == null) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM t_allocation_plan WHERE engineer_id = ?", fixture.engineerId());
+        jdbcTemplate.update("DELETE FROM t_project_position WHERE project_id = ?", fixture.projectId());
+        jdbcTemplate.update("DELETE FROM t_project WHERE id = ?", fixture.projectId());
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = ?", fixture.customerId());
+        jdbcTemplate.update("DELETE FROM t_engineer WHERE id = ?", fixture.engineerId());
     }
 
     // ---------------------------------------------------------------
@@ -289,7 +316,7 @@ class AllocationPlanServiceTest {
     void reviseの失敗時は変更前の区間へ戻る() {
         // REQUIRES_NEWなtransactionで準備と失敗ケースを実行し、rollback後に実DB状態で検証する。
         // 外側transaction（@Transactional）からはuncommitted行が見えないため、
-        // 準備も同じREQUIRES_NEW内で完結させる。
+        // 準備も同じREQUIRES_NEW内で完結させる。commitした準備行は deleteCommittedFixture が削除する。
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         Long aId = tx.execute(s -> {
@@ -305,6 +332,7 @@ class AllocationPlanServiceTest {
                     + "VALUES (?, ?, '募集中')", "T075rv-prj-" + suffix, custId);
             long prjId = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T075rv-prj-" + suffix);
+            committedFixture = new CommittedFixture(engId, custId, prjId);
             ProjectPosition position = new ProjectPosition();
             position.setProjectId(prjId);
             position.setPositionNo("P1");

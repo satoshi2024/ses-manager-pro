@@ -38,6 +38,8 @@ PDF/XLSX/CSV は同じimmutable snapshotから生成し、`DocumentService` の 
 - export と document が report snapshot の値を再集計しない。
 - document restore 後に hash/version/access policy が検証できる。
 - generation時とdownload時の両方でrecipient scopeを検証する。
+- password再認証のgrantは現在のserver-side HTTP session、認証instance、tenant、user、delivery、recipient scopeへ10分だけ結合する。同じuserの別sessionへgrantを共有せず、session無効化/ID rotation、authentication instance/role変更、scope変更、TTL満了後は再認証を要求する。共有deliveryの`reauthenticated_at`は監査時刻であり、download認可には使わない。
+- downloadごとにtoken（token経路の場合）、delivery status/expiry、recipient、現在の権限とscope snapshotを再検証する。session/auth contextを復元できない場合はgrantを認めずstep-upをやり直す。
 
 ## R4. Delivery と運用状態
 

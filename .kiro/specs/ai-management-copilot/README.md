@@ -8,6 +8,7 @@
 | Plan Review | **CONDITIONAL PASS**（2026-09-01 独立Review。owner/`<APPROVED_SCOPE>`/DG-08/NF-07 未決） |
 | Implementation | **NOT STARTED** |
 | 本番外部 AI | **不可**（`ai.external-send-enabled=false`、`GATE-S17-G10-PROD` 保留） |
+| 外部送信承認ゲート（W2・W3-03） | 固定拒否を「署名済み決定IDと承認内容digestに束縛した承認設定」へ置換済み。W3-03で監査のREQUIRES_NEW化、失効時は起動を止めず外部送信だけ停止、最終gateの最小field・PII検査、理由コードのmessage key（4言語）を追加。署名未完のため既定は拒否。詳細は [external-send-approval-gate.md](external-send-approval-gate.md) |
 | 具体モデル | **未決定**（Gemini/OpenAI/Claude 等）。pipeline はモデル非依存で先に構築する |
 | branch | `codex/ai-management-copilot` |
 | worktree | `C:\work\ses-manager-pro-ai-management-copilot` |
@@ -16,7 +17,7 @@
 
 | 用途 | 正本ファイル | 中央 roadmap からの参照 |
 |---|---|---|
-| 実装・開工（F1〜M） | [start-conversations.md](start-conversations.md) | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 は本書へ委譲 |
+| 実装・着手（F1〜M） | [start-conversations.md](start-conversations.md) | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 は本書へ委譲 |
 | 独立 Review（Plan / Task / 最終） | [review-conversations.md](review-conversations.md) | `2026-08-27-post-acceptance-review-conversations.md` §R-NF08 は本書へ委譲 |
 
 **SNF01〜10 を一括 Review する場合**: 各 NF の中央 §R-NF0X は入口のみ。NF-08 の詳細観点・task 別 Review・モデル切替契約は **本 spec の `review-conversations.md` を正**とする。横断 Review AI は本 README と `review-ledger.md` の completion matrix を必ず読む。
@@ -29,8 +30,9 @@
 | [design.md](design.md) | 固定 pipeline、catalog、scope、provider 境界 |
 | [tasks.md](tasks.md) | T000 / F1 / F2 / A1 / B1 / B2 / M |
 | [review-ledger.md](review-ledger.md) | gate 表、task 証跡、Review 判定 |
-| [start-conversations.md](start-conversations.md) | 開工対話集（モデル未決定・役割分離を明記） |
+| [start-conversations.md](start-conversations.md) | 着手対話集（モデル未決定・役割分離を明記） |
 | [review-conversations.md](review-conversations.md) | 独立 Review 対話集 |
+| [external-send-approval-gate.md](external-send-approval-gate.md) | 外部送信承認ゲート（承認設定一覧、承認digest、本番リリース前の署名項目、有効化・停止・失効時の運用、最終gate、監査、費用上限） |
 
 ## AI の役割分離（モデル未決定でも固定）
 

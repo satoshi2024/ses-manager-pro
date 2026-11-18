@@ -286,7 +286,40 @@
         });
     }
 
+    /** OAuth callbackのredirect（?connected=1 / ?error=<kind>&reason=<message key>）を表示し、URLから除去する。 */
+    function showOAuthResult() {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('connected') && !params.has('error')) {
+            return;
+        }
+        if (params.get('connected') === '1') {
+            SES.toast.success(SES.i18n.t('payroll.oauth.connected', 'freeeに接続しました'));
+        } else {
+            const kind = params.get('error');
+            const reason = params.get('reason');
+            let text;
+            if (reason && /^error\.payroll\.[A-Za-z]{1,60}$/.test(reason)) {
+                text = SES.i18n.t(reason);
+            } else if (kind === 'denied') {
+                text = SES.i18n.t('payroll.oauth.denied', 'freee側で連携が許可されませんでした');
+            } else if (kind === 'state') {
+                text = SES.i18n.t('payroll.oauth.state', '認可の有効期限が切れたか、別の画面から開始されました。もう一度接続してください');
+            } else if (kind === 'config') {
+                text = SES.i18n.t('error.payroll.configIncomplete');
+            } else {
+                text = SES.i18n.t('error.payroll.oauthFailed');
+            }
+            Swal.fire({
+                icon: 'error',
+                title: SES.i18n.t('payroll.oauth.failedTitle', 'freee接続に失敗しました'),
+                text: text
+            });
+        }
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+
     function init() {
+        showOAuthResult();
         $('#connectBtn, #reconnectBtn').on('click', () => {
             window.location.href = '/integrations/freee/authorize';
         });

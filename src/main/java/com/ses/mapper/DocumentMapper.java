@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ses.entity.Document;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
@@ -43,4 +44,46 @@ public interface DocumentMapper extends BaseMapper<Document> {
     Long findDocumentIdBySha256AndType(@org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                        @org.apache.ibatis.annotations.Param("sha256") String sha256,
                                        @org.apache.ibatis.annotations.Param("documentType") String documentType);
+
+    /**
+     * 証跡適格性の判定用に文書行を読む（NF01 計画 §5.1 条件3〜6、{@code DocumentEvidenceEligibility} 専用）。
+     *
+     * <p>論理削除済みの行も返し（削除を「不在」ではなく「利用不可」として区別するため）、判定は呼出側が行う。
+     * tenantは引数で明示し、tenant contextに依存しない。判定の最初に読む文で、実行前にMyBatisのsession cacheを
+     * 消す（同じtransactionで先に読んだlink・廃棄申請・版の結果を判定に使い回さない）。</p>
+     */
+    @Select("SELECT id, tenant_id, document_type, status, legal_hold_flag, deleted_flag FROM t_document "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId}")
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
+    Document selectEvidenceCandidate(@Param("id") long id, @Param("tenantId") String tenantId);
+
+    /**
+     * 履歴・スキルシート取込の原本を purge 済み（{@code stored_file_name IS NULL}、確定済・却下）のジョブに link した
+     * 文書台帳の副本（{@code RESUME_INGESTION}）のうち、保存期限をまだ取込原本に合わせていないものの ID
+     * （DRAFT、または保存期限が未設定・{@code retentionUntil} より後）。tenant は引数で明示し、link・ジョブも同じ tenant に限る。
+     * {@code afterId} より大きい ID を昇順に {@code limit} 件まで返す（keyset。呼出側は返った最後の ID を次の {@code afterId}
+     * にして繰り返す。legal hold 中・失敗し続ける副本が先頭に溜まっても、後ろの副本の処理を止めない）。
+     */
+    @Select("SELECT d.id FROM t_document d WHERE d.tenant_id = #{tenantId} AND d.document_type = 'RESUME_INGESTION' "
+            + "AND d.deleted_flag = 0 AND d.status IN ('DRAFT', 'CONFIRMED', 'AMENDED', 'CANCELLED') "
+            + "AND (d.status = 'DRAFT' OR d.retention_until IS NULL OR d.retention_until > #{retentionUntil}) "
+            + "AND d.id > #{afterId} "
+            + "AND EXISTS (SELECT 1 FROM t_document_link l JOIN t_resume_ingestion r "
+            + "ON r.id = l.target_id AND r.tenant_id = l.tenant_id "
+            + "WHERE l.document_id = d.id AND l.tenant_id = d.tenant_id AND l.target_type = 'RESUME_INGESTION' "
+            + "AND r.stored_file_name IS NULL AND r.status IN ('確定済', '却下')) "
+            + "ORDER BY d.id LIMIT #{limit}")
+    List<Long> selectResumeCopiesAwaitingRetention(@Param("tenantId") String tenantId,
+                                                   @Param("retentionUntil") LocalDate retentionUntil,
+                                                   @Param("afterId") long afterId,
+                                                   @Param("limit") int limit);
+
+    /**
+     * 副本の保存期限を合わせる直前に、文書行を lock して最新の値で読む（{@code ResumeIngestionLedgerRetentionService} 専用）。
+     * 同じ transaction で先に読んだ結果（legal hold の解除前の値など）を MyBatis の session cache から使い回さない。
+     */
+    @Select("SELECT id, tenant_id, document_type, status, legal_hold_flag, retention_until, version, deleted_flag "
+            + "FROM t_document WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
+    Document selectResumeCopyForRetention(@Param("id") long id, @Param("tenantId") String tenantId);
 }

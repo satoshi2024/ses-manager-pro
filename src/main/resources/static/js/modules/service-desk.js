@@ -1,5 +1,6 @@
 /**
  * サービスデスク・問い合わせ管理フロントエンドモジュール
+ * 画面文言は SES.i18n.t（messages の servicedesk.* 等）から取る（RB-I18N P3-N2-8）。
  */
 $(function () {
     const $container = $('[data-request-id]');
@@ -9,6 +10,10 @@ $(function () {
         initListPage();
     }
 });
+
+function sdT(key, ...args) {
+    return SES.i18n.t(key, ...args);
+}
 
 /**
  * 一覧画面の初期化
@@ -57,22 +62,23 @@ function initListPage() {
             category: $('#categoryFilter').val()
         };
 
-        $('#requestsTableBody').html('<tr><td colspan="10" class="text-center py-4 text-secondary"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</td></tr>');
+        $('#requestsTableBody').html('<tr><td colspan="10" class="text-center py-4 text-secondary"><div class="spinner-border spinner-border-sm me-2"></div>'
+            + escapeHtml(sdT('common.loading')) + '</td></tr>');
 
         $.ajax({
             url: '/api/service-desk/requests',
             type: 'GET',
             data: params,
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200) {
                     renderTable(res.data);
                 } else {
-                    if (window.Toast) window.Toast.error(res.message || 'データ取得に失敗しました');
+                    if (window.Toast) window.Toast.error(res.message || sdT('servicedesk.msg.loadFailed'));
                 }
             },
             error: function () {
-                if (window.Toast) window.Toast.error('通信エラーが発生しました');
+                if (window.Toast) window.Toast.error(sdT('error.networkError'));
             }
         });
     }
@@ -82,8 +88,8 @@ function initListPage() {
         const $tbody = $('#requestsTableBody').empty();
 
         if (records.length === 0) {
-            $tbody.html('<tr><td colspan="10" class="text-center py-4 text-secondary">問い合わせデータがありません</td></tr>');
-            $('#pageInfo').text('0 件');
+            $tbody.html('<tr><td colspan="10" class="text-center py-4 text-secondary">' + escapeHtml(sdT('servicedesk.list.empty')) + '</td></tr>');
+            $('#pageInfo').text(sdT('servicedesk.list.count', 0));
             $('#pagination').empty();
             return;
         }
@@ -93,24 +99,27 @@ function initListPage() {
             const priorityBadge = getPriorityBadge(r.priority);
             const resolveDeadline = r.currentSlaClock ? formatDateTime(r.currentSlaClock.resolveDeadline) : '-';
             const isBreached = r.currentSlaClock && r.currentSlaClock.resolveBreached;
-            const breachAlert = isBreached ? '<span class="badge bg-danger ms-1">超過</span>' : '';
+            const breachAlert = isBreached ? '<span class="badge bg-danger ms-1">' + escapeHtml(sdT('servicedesk.sla.breached')) + '</span>' : '';
 
             const row = `
                 <tr>
-                    <td><a href="/service-desk/requests/${r.id}" class="text-accent-blue fw-bold text-decoration-none">${escapeHtml(r.requestNo)}</a></td>
+                    <td>
+                        <a href="/service-desk/requests/${r.id}" class="text-accent-blue fw-bold text-decoration-none">${escapeHtml(r.requestNo)}</a>
+                        <div class="mt-1">${getPortalVisibilityBadge(r.portalVisible)}</div>
+                    </td>
                     <td>${escapeHtml(r.customerName || '-')}</td>
-                    <td><span class="badge bg-dark">${escapeHtml(r.category || '-')}</span></td>
+                    <td><span class="badge bg-dark">${escapeHtml(categoryLabel(r.category))}</span></td>
                     <td>${priorityBadge}</td>
                     <td class="text-truncate" style="max-width: 250px;">
                         <a href="/service-desk/requests/${r.id}" class="text-white text-decoration-none">${escapeHtml(r.subject)}</a>
                     </td>
-                    <td>${escapeHtml(r.ownerUserName || '未割当')}</td>
+                    <td>${escapeHtml(r.ownerUserName || sdT('servicedesk.detail.unassigned'))}</td>
                     <td>${statusBadge}</td>
                     <td>${resolveDeadline} ${breachAlert}</td>
                     <td>${formatDateTime(r.createdAt)}</td>
                     <td class="text-end">
                         <a href="/service-desk/requests/${r.id}" class="btn btn-sm btn-outline-primary">
-                            <i class="bi bi-eye me-1"></i>詳細
+                            <i class="bi bi-eye me-1"></i>${escapeHtml(sdT('common.detail'))}
                         </a>
                     </td>
                 </tr>
@@ -129,14 +138,14 @@ function initListPage() {
         const start = total === 0 ? 0 : (current - 1) * size + 1;
         const end = Math.min(current * size, total);
 
-        $('#pageInfo').text(`${total} 件中 ${start} - ${end} 件を表示`);
+        $('#pageInfo').text(sdT('servicedesk.list.pageInfo', total, start, end));
 
         const $ul = $('#pagination').empty();
         if (pages <= 1) return;
 
         $ul.append(`
             <li class="page-item ${current === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" data-page="${current - 1}">前へ</a>
+                <a class="page-link" href="#" data-page="${current - 1}">${escapeHtml(sdT('servicedesk.list.prev'))}</a>
             </li>
         `);
 
@@ -154,7 +163,7 @@ function initListPage() {
 
         $ul.append(`
             <li class="page-item ${current === pages ? 'disabled' : ''}">
-                <a class="page-link" href="#" data-page="${current + 1}">次へ</a>
+                <a class="page-link" href="#" data-page="${current + 1}">${escapeHtml(sdT('servicedesk.list.next'))}</a>
             </li>
         `);
 
@@ -173,11 +182,11 @@ function initListPage() {
             url: '/api/customers',
             type: 'GET',
             data: { current: 1, size: 500 },
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200 && res.data && res.data.records) {
                     const $sel = $('#newCustomerId').empty();
-                    $sel.append('<option value="">顧客を選択してください</option>');
+                    $sel.append('<option value="">' + escapeHtml(sdT('servicedesk.field.selectCustomer')) + '</option>');
                     res.data.records.forEach(function (c) {
                         $sel.append(`<option value="${c.id}">${escapeHtml(c.companyName)}</option>`);
                     });
@@ -203,21 +212,21 @@ function initListPage() {
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 $('#saveRequestBtn').prop('disabled', false);
                 if (res.code === 200) {
-                    if (window.Toast) window.Toast.success('問い合わせを起票しました');
+                    if (window.Toast) window.Toast.success(sdT('servicedesk.msg.created'));
                     bootstrap.Modal.getInstance($('#newRequestModal')[0]).hide();
                     $('#newRequestForm')[0].reset();
                     loadRequests(currentPage);
                 } else {
-                    if (window.Toast) window.Toast.error(res.message || '起票に失敗しました');
+                    if (window.Toast) window.Toast.error(res.message || sdT('servicedesk.msg.createFailed'));
                 }
             },
             error: function (xhr) {
                 $('#saveRequestBtn').prop('disabled', false);
-                const msg = xhr.responseJSON ? xhr.responseJSON.message : '起票処理中にエラーが発生しました';
+                const msg = xhr.responseJSON ? xhr.responseJSON.message : sdT('servicedesk.msg.createError');
                 if (window.Toast) window.Toast.error(msg);
             }
         });
@@ -239,16 +248,16 @@ function initDetailPage(requestId) {
         $.ajax({
             url: `/api/service-desk/requests/${id}`,
             type: 'GET',
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200) {
                     renderDetail(res.data);
                 } else {
-                    if (window.Toast) window.Toast.error(res.message || '詳細データの取得に失敗しました');
+                    if (window.Toast) window.Toast.error(res.message || sdT('servicedesk.msg.detailLoadFailed'));
                 }
             },
             error: function () {
-                if (window.Toast) window.Toast.error('詳細データの取得に失敗しました');
+                if (window.Toast) window.Toast.error(sdT('servicedesk.msg.detailLoadFailed'));
             }
         });
     }
@@ -258,11 +267,12 @@ function initDetailPage(requestId) {
         $('#requestNoBadge').text(data.requestNo);
         $('#statusBadge').replaceWith(getStatusBadge(data.status));
         $('#priorityBadge').replaceWith(getPriorityBadge(data.priority));
-        $('#categoryBadge').text(data.category);
+        $('#portalVisibilityBadge').html(getPortalVisibilityBadge(data.portalVisible));
+        $('#categoryBadge').text(categoryLabel(data.category));
         $('#subjectHeader').text(data.subject);
         $('#customerName').text(data.customerName || '-');
         $('#createdAt').text(formatDateTime(data.createdAt));
-        $('#ownerUserName').text(data.ownerUserName || '未割当');
+        $('#ownerUserName').text(data.ownerUserName || sdT('servicedesk.detail.unassigned'));
         $('#descriptionText').text(data.description);
 
         // メタデータ
@@ -270,7 +280,7 @@ function initDetailPage(requestId) {
         $('#metaContractCode').text(data.contractCode || '-');
         $('#metaProjectName').text(data.projectName || '-');
         $('#metaEngineerName').text(data.engineerName || '-');
-        $('#metaChannel').text(data.channel || '-');
+        $('#metaChannel').text(channelLabel(data.channel));
         $('#metaReopenCount').text(data.reopenCount || 0);
 
         // アクションボタン
@@ -286,10 +296,14 @@ function initDetailPage(requestId) {
         if (data.csatScore) {
             $('#csatCard').removeClass('d-none');
             $('#csatStars').text('★'.repeat(data.csatScore) + '☆'.repeat(5 - data.csatScore));
-            $('#csatCommentText').text(data.csatComment || '(コメントなし)');
+            $('#csatCommentText').text(data.csatComment || sdT('servicedesk.detail.noCsatComment'));
         } else {
             $('#csatCard').addClass('d-none');
         }
+    }
+
+    function statusButton(cls, status, icon, labelKey) {
+        return `<button class="btn ${cls} btn-sm btn-status" data-status="${status}"><i class="bi ${icon} me-1"></i>${escapeHtml(sdT(labelKey))}</button>`;
     }
 
     function renderActionButtons(data) {
@@ -297,22 +311,22 @@ function initDetailPage(requestId) {
         const s = data.status;
 
         if (s === 'RECEIVED') {
-            $btns.append('<button class="btn btn-primary btn-sm btn-status" data-status="IN_PROGRESS"><i class="bi bi-play-fill me-1"></i>対応着手</button>');
-            $btns.append('<button class="btn btn-outline-warning btn-sm btn-status" data-status="WAITING_CUSTOMER"><i class="bi bi-pause-fill me-1"></i>顧客確認待ち</button>');
-            $btns.append('<button class="btn btn-outline-secondary btn-sm btn-status" data-status="CLOSED"><i class="bi bi-x-circle me-1"></i>終了</button>');
+            $btns.append(statusButton('btn-primary', 'IN_PROGRESS', 'bi-play-fill', 'servicedesk.action.start'));
+            $btns.append(statusButton('btn-outline-warning', 'WAITING_CUSTOMER', 'bi-pause-fill', 'servicedesk.status.waitingCustomer'));
+            $btns.append(statusButton('btn-outline-secondary', 'CLOSED', 'bi-x-circle', 'servicedesk.status.closed'));
         } else if (s === 'IN_PROGRESS') {
-            $btns.append('<button class="btn btn-warning btn-sm btn-status" data-status="WAITING_CUSTOMER"><i class="bi bi-pause-fill me-1"></i>顧客確認待ち</button>');
-            $btns.append('<button class="btn btn-success btn-sm btn-status" data-status="RESOLVED"><i class="bi bi-check-circle me-1"></i>解決済みにする</button>');
-            $btns.append('<button class="btn btn-outline-secondary btn-sm btn-status" data-status="CLOSED"><i class="bi bi-x-circle me-1"></i>終了</button>');
+            $btns.append(statusButton('btn-warning', 'WAITING_CUSTOMER', 'bi-pause-fill', 'servicedesk.status.waitingCustomer'));
+            $btns.append(statusButton('btn-success', 'RESOLVED', 'bi-check-circle', 'servicedesk.action.resolve'));
+            $btns.append(statusButton('btn-outline-secondary', 'CLOSED', 'bi-x-circle', 'servicedesk.status.closed'));
         } else if (s === 'WAITING_CUSTOMER') {
-            $btns.append('<button class="btn btn-primary btn-sm btn-status" data-status="IN_PROGRESS"><i class="bi bi-play-fill me-1"></i>対応再開</button>');
-            $btns.append('<button class="btn btn-success btn-sm btn-status" data-status="RESOLVED"><i class="bi bi-check-circle me-1"></i>解決済みにする</button>');
-            $btns.append('<button class="btn btn-outline-secondary btn-sm btn-status" data-status="CLOSED"><i class="bi bi-x-circle me-1"></i>終了</button>');
+            $btns.append(statusButton('btn-primary', 'IN_PROGRESS', 'bi-play-fill', 'servicedesk.action.resume'));
+            $btns.append(statusButton('btn-success', 'RESOLVED', 'bi-check-circle', 'servicedesk.action.resolve'));
+            $btns.append(statusButton('btn-outline-secondary', 'CLOSED', 'bi-x-circle', 'servicedesk.status.closed'));
         } else if (s === 'RESOLVED') {
-            $btns.append('<button class="btn btn-outline-secondary btn-sm btn-status" data-status="CLOSED"><i class="bi bi-check-all me-1"></i>クローズ完了</button>');
-            $btns.append('<button class="btn btn-outline-danger btn-sm btn-status" data-status="REOPENED"><i class="bi bi-arrow-repeat me-1"></i>再オープン</button>');
+            $btns.append(statusButton('btn-outline-secondary', 'CLOSED', 'bi-check-all', 'servicedesk.action.closeComplete'));
+            $btns.append(statusButton('btn-outline-danger', 'REOPENED', 'bi-arrow-repeat', 'servicedesk.status.reopened'));
         } else if (s === 'CLOSED') {
-            $btns.append('<button class="btn btn-outline-danger btn-sm btn-status" data-status="REOPENED"><i class="bi bi-arrow-repeat me-1"></i>再オープン</button>');
+            $btns.append(statusButton('btn-outline-danger', 'REOPENED', 'bi-arrow-repeat', 'servicedesk.status.reopened'));
         }
 
         $btns.find('.btn-status').on('click', function () {
@@ -323,18 +337,21 @@ function initDetailPage(requestId) {
 
     function changeStatus(id, targetStatus, version) {
         Swal.fire({
-            title: `ステータス変更: ${targetStatus}`,
+            title: sdT('servicedesk.statusChange.title', statusLabel(targetStatus)),
             input: 'textarea',
-            inputLabel: '変更理由・対応内容メモ (任意)',
-            inputPlaceholder: 'ステータスを変更する理由や要約を入力...',
+            inputLabel: sdT('servicedesk.statusChange.inputLabel'),
+            inputPlaceholder: sdT('servicedesk.statusChange.placeholder'),
             showCancelButton: true,
-            confirmButtonText: '変更する',
-            cancelButtonText: 'キャンセル'
+            confirmButtonText: sdT('servicedesk.statusChange.confirm'),
+            cancelButtonText: sdT('common.cancel')
         }).then(function (result) {
             if (result.isConfirmed) {
+                // APIの項目名は toStatus（以前は targetStatus を送っていたため必須検査で400になっていた）。
+                // 理由が空なら送らず、serverが言語に依らない既定の理由を記録する（RB-I18N review P3-10）。
+                const reason = result.value && result.value.trim() ? result.value.trim() : null;
                 const payload = {
-                    targetStatus: targetStatus,
-                    reason: result.value || 'ステータス更新',
+                    toStatus: targetStatus,
+                    reason: reason,
                     version: version
                 };
                 $.ajax({
@@ -342,17 +359,17 @@ function initDetailPage(requestId) {
                     type: 'POST',
                     contentType: 'application/json',
                     data: JSON.stringify(payload),
-                    headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+                    headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
                     success: function (res) {
                         if (res.code === 200) {
-                            if (window.Toast) window.Toast.success('ステータスを更新しました');
+                            if (window.Toast) window.Toast.success(sdT('servicedesk.msg.statusUpdated'));
                             loadDetail(id);
                         } else {
-                            if (window.Toast) window.Toast.error(res.message || '更新に失敗しました');
+                            if (window.Toast) window.Toast.error(res.message || sdT('error.updateFailed'));
                         }
                     },
                     error: function (xhr) {
-                        const msg = xhr.responseJSON ? xhr.responseJSON.message : '更新に失敗しました';
+                        const msg = xhr.responseJSON ? xhr.responseJSON.message : sdT('error.updateFailed');
                         if (window.Toast) window.Toast.error(msg);
                     }
                 });
@@ -362,7 +379,7 @@ function initDetailPage(requestId) {
 
     function renderSlaCard(clock) {
         if (!clock) {
-            $('#slaCardBody').html('<div class="text-secondary small">SLAポリシー未適用</div>');
+            $('#slaCardBody').html('<div class="text-secondary small">' + escapeHtml(sdT('servicedesk.sla.notApplied')) + '</div>');
             return;
         }
 
@@ -371,32 +388,37 @@ function initDetailPage(requestId) {
         let cardClass = isBreached ? 'sla-card-breached' : (isPaused ? 'sla-card-paused' : 'sla-card-running');
         $('#slaCard').removeClass('sla-card-running sla-card-paused sla-card-breached').addClass(cardClass);
 
+        const breachedBadge = '<span class="badge bg-danger">' + escapeHtml(sdT('servicedesk.sla.breached')) + '</span>';
+        const achievedBadge = '<span class="badge bg-success">' + escapeHtml(sdT('servicedesk.sla.completed')) + '</span>';
+
         const respDeadline = formatDateTime(clock.responseDeadline);
-        const respActual = clock.firstRespondedAt ? formatDateTime(clock.firstRespondedAt) : '未応答';
-        const respBreachedBadge = clock.responseBreached ? '<span class="badge bg-danger">超過</span>' : '<span class="badge bg-success">達成</span>';
+        const respActual = clock.firstRespondedAt ? formatDateTime(clock.firstRespondedAt) : sdT('servicedesk.sla.notResponded');
+        const respBreachedBadge = clock.responseBreached ? breachedBadge : achievedBadge;
 
         const resolveDeadline = formatDateTime(clock.resolveDeadline);
-        const resolveActual = clock.resolvedAt ? formatDateTime(clock.resolvedAt) : (clock.status === 'COMPLETED' ? '完了' : '対応中');
-        const resolveBreachedBadge = clock.resolveBreached ? '<span class="badge bg-danger">超過</span>' : (clock.status === 'COMPLETED' ? '<span class="badge bg-success">達成</span>' : '');
+        const resolveActual = clock.resolvedAt ? formatDateTime(clock.resolvedAt)
+            : (clock.status === 'COMPLETED' ? sdT('servicedesk.sla.done') : sdT('servicedesk.status.inProgress'));
+        const resolveBreachedBadge = clock.resolveBreached ? breachedBadge : (clock.status === 'COMPLETED' ? achievedBadge : '');
 
-        const pauseInfo = clock.totalPauseMinutes > 0 ? `<div class="text-secondary small mt-1"><i class="bi bi-pause-circle me-1"></i>累計停止: ${clock.totalPauseMinutes} 分</div>` : '';
+        const pauseInfo = clock.totalPauseMinutes > 0
+            ? `<div class="text-secondary small mt-1"><i class="bi bi-pause-circle me-1"></i>${escapeHtml(sdT('servicedesk.sla.totalPause', clock.totalPauseMinutes))}</div>` : '';
 
         const html = `
             <div class="mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="text-secondary small">初回応答目標:</span>
+                    <span class="text-secondary small">${escapeHtml(sdT('servicedesk.sla.responseTarget'))}</span>
                     ${clock.firstRespondedAt ? respBreachedBadge : ''}
                 </div>
-                <div class="text-white small">期限: ${respDeadline}</div>
-                <div class="text-secondary small">実績: ${respActual}</div>
+                <div class="text-white small">${escapeHtml(sdT('servicedesk.sla.deadline', respDeadline))}</div>
+                <div class="text-secondary small">${escapeHtml(sdT('servicedesk.sla.actual', respActual))}</div>
             </div>
             <div class="border-top border-dark pt-2">
                 <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="text-secondary small">解決目標期限:</span>
+                    <span class="text-secondary small">${escapeHtml(sdT('servicedesk.sla.resolveTarget'))}</span>
                     ${resolveBreachedBadge}
                 </div>
-                <div class="text-white small fw-bold">期限: ${resolveDeadline}</div>
-                <div class="text-secondary small">実績: ${resolveActual}</div>
+                <div class="text-white small fw-bold">${escapeHtml(sdT('servicedesk.sla.deadline', resolveDeadline))}</div>
+                <div class="text-secondary small">${escapeHtml(sdT('servicedesk.sla.actual', resolveActual))}</div>
                 ${pauseInfo}
             </div>
         `;
@@ -406,7 +428,7 @@ function initDetailPage(requestId) {
     function renderComments(comments) {
         const $container = $('#commentsContainer').empty();
         if (comments.length === 0) {
-            $container.html('<div class="text-center py-3 text-secondary">コメントはまだありません</div>');
+            $container.html('<div class="text-center py-3 text-secondary">' + escapeHtml(sdT('servicedesk.comment.empty')) + '</div>');
             return;
         }
 
@@ -414,8 +436,10 @@ function initDetailPage(requestId) {
             const isInternal = c.visibility === 'INTERNAL';
             const boxClass = isInternal ? 'comment-internal' : 'comment-portal';
             const badge = isInternal
-                ? '<span class="badge bg-warning text-dark me-2"><i class="bi bi-lock-fill me-1"></i>社内限定メモ</span>'
-                : '<span class="badge bg-primary me-2"><i class="bi bi-globe me-1"></i>ポータル公開</span>';
+                ? '<span class="badge bg-warning text-dark me-2"><i class="bi bi-lock-fill me-1"></i>' + escapeHtml(sdT('servicedesk.comment.internalBadge')) + '</span>'
+                : '<span class="badge bg-primary me-2"><i class="bi bi-globe me-1"></i>' + escapeHtml(sdT('servicedesk.comment.portalBadge')) + '</span>';
+            const author = c.authorType === 'INTERNAL_USER'
+                ? sdT('servicedesk.comment.authorInternal') : sdT('servicedesk.comment.authorCustomer');
 
             const html = `
                 <div class="card border-0 mb-3 ${boxClass} p-3 rounded shadow-sm">
@@ -423,7 +447,7 @@ function initDetailPage(requestId) {
                         <div>
                             ${badge}
                             <strong class="text-white">${escapeHtml(c.authorName)}</strong>
-                            <span class="text-secondary small ms-2">${c.authorType === 'INTERNAL_USER' ? '(社内担当)' : '(顧客)'}</span>
+                            <span class="text-secondary small ms-2">${escapeHtml(author)}</span>
                         </div>
                         <span class="text-secondary small">${formatDateTime(c.createdAt)}</span>
                     </div>
@@ -439,7 +463,7 @@ function initDetailPage(requestId) {
         const vis = $('input[name="visibility"]:checked').val();
 
         if (!text.trim()) {
-            if (window.Toast) window.Toast.error('コメントを入力してください');
+            if (window.Toast) window.Toast.error(sdT('servicedesk.comment.required'));
             return;
         }
 
@@ -455,38 +479,82 @@ function initDetailPage(requestId) {
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 $('#submitCommentBtn').prop('disabled', false);
                 if (res.code === 200) {
-                    if (window.Toast) window.Toast.success('コメントを投稿しました');
+                    if (window.Toast) window.Toast.success(sdT('servicedesk.comment.posted'));
                     $('#commentTextInput').val('');
                     loadDetail(requestId);
                 } else {
-                    if (window.Toast) window.Toast.error(res.message || '投稿に失敗しました');
+                    if (window.Toast) window.Toast.error(res.message || sdT('servicedesk.comment.postFailed'));
                 }
             },
             error: function () {
                 $('#submitCommentBtn').prop('disabled', false);
-                if (window.Toast) window.Toast.error('投稿中にエラーが発生しました');
+                if (window.Toast) window.Toast.error(sdT('servicedesk.comment.postError'));
             }
         });
     }
 }
 
 // ユーティリティ
+const SD_STATUS_LABEL_KEYS = {
+    RECEIVED: 'servicedesk.status.received',
+    IN_PROGRESS: 'servicedesk.status.inProgress',
+    WAITING_CUSTOMER: 'servicedesk.status.waitingCustomer',
+    RESOLVED: 'servicedesk.status.resolved',
+    CLOSED: 'servicedesk.status.closed',
+    REOPENED: 'servicedesk.status.reopened'
+};
+
+const SD_CATEGORY_LABEL_KEYS = {
+    CONTRACT: 'servicedesk.category.contract',
+    BILLING: 'servicedesk.category.billing',
+    ATTENDANCE: 'servicedesk.category.attendance',
+    QUALITY: 'servicedesk.category.quality',
+    SYSTEM: 'servicedesk.category.system',
+    OTHER: 'servicedesk.category.other'
+};
+
+const SD_CHANNEL_LABEL_KEYS = {
+    PORTAL: 'servicedesk.channel.portal',
+    EMAIL: 'servicedesk.channel.email',
+    PHONE: 'servicedesk.channel.phone',
+    MEETING: 'servicedesk.channel.meeting',
+    INTERNAL: 'servicedesk.channel.internal'
+};
+
+/** 既知のコードは表示名にし、未知のコードはそのまま出す（未登録keyを表示しない）。 */
+function labelFor(keys, code) {
+    if (!code) return '-';
+    return keys[code] ? sdT(keys[code]) : String(code);
+}
+
+function statusLabel(status) {
+    return labelFor(SD_STATUS_LABEL_KEYS, status);
+}
+
+function categoryLabel(category) {
+    return labelFor(SD_CATEGORY_LABEL_KEYS, category);
+}
+
+function channelLabel(channel) {
+    return labelFor(SD_CHANNEL_LABEL_KEYS, channel);
+}
+
 function getStatusBadge(status) {
     switch (status) {
         case 'RECEIVED':
-            return '<span class="badge bg-primary">受付 (RECEIVED)</span>';
+            return '<span class="badge bg-primary">' + escapeHtml(statusLabel(status)) + ' (RECEIVED)</span>';
         case 'IN_PROGRESS':
-            return '<span class="badge bg-info text-dark">対応中 (IN_PROGRESS)</span>';
+            return '<span class="badge bg-info text-dark">' + escapeHtml(statusLabel(status)) + ' (IN_PROGRESS)</span>';
         case 'WAITING_CUSTOMER':
-            return '<span class="badge bg-warning text-dark">顧客確認待ち (WAITING)</span>';
+            return '<span class="badge bg-warning text-dark">' + escapeHtml(statusLabel(status)) + ' (WAITING)</span>';
         case 'RESOLVED':
-            return '<span class="badge bg-success">解決 (RESOLVED)</span>';
+            return '<span class="badge bg-success">' + escapeHtml(statusLabel(status)) + ' (RESOLVED)</span>';
         case 'CLOSED':
-            return '<span class="badge bg-secondary">終了 (CLOSED)</span>';
+            return '<span class="badge bg-secondary">' + escapeHtml(statusLabel(status)) + ' (CLOSED)</span>';
         default:
             return `<span class="badge bg-dark">${escapeHtml(status || '-')}</span>`;
     }
@@ -495,16 +563,32 @@ function getStatusBadge(status) {
 function getPriorityBadge(priority) {
     switch (priority) {
         case 'P0':
-            return '<span class="badge bg-danger fw-bold">P0 (緊急)</span>';
+            return '<span class="badge bg-danger fw-bold">' + escapeHtml(sdT('servicedesk.priority.p0')) + '</span>';
         case 'P1':
-            return '<span class="badge bg-warning text-dark fw-bold">P1 (高)</span>';
+            return '<span class="badge bg-warning text-dark fw-bold">' + escapeHtml(sdT('servicedesk.priority.p1')) + '</span>';
         case 'P2':
-            return '<span class="badge bg-info text-dark">P2 (中)</span>';
+            return '<span class="badge bg-info text-dark">' + escapeHtml(sdT('servicedesk.priority.p2')) + '</span>';
         case 'P3':
-            return '<span class="badge bg-secondary">P3 (低)</span>';
+            return '<span class="badge bg-secondary">' + escapeHtml(sdT('servicedesk.priority.p3')) + '</span>';
         default:
             return `<span class="badge bg-dark">${escapeHtml(priority || '-')}</span>`;
     }
+}
+
+/**
+ * 顧客ポータルへ出す範囲の問い合わせかを示すバッジ（W2 r2 P3-5）。portalVisible はサーバー側の公開範囲policyの判定
+ * （portal起票、または公開開始時刻以降の作成）。顧客ポータルの子スイッチがOFFの間は「顧客公開対象」でも顧客には
+ * 表示されないため、title の補足文で示す。値が無い場合は社内限定として扱う（公開側へ倒さない）。
+ */
+function getPortalVisibilityBadge(portalVisible) {
+    const visible = portalVisible === true;
+    const label = SES.i18n.t(visible ? 'servicedesk.portalVisibility.visible' : 'servicedesk.portalVisibility.internal');
+    const hint = SES.i18n.t(visible ? 'servicedesk.portalVisibility.visibleHint'
+        : 'servicedesk.portalVisibility.internalHint');
+    const cls = visible ? 'bg-warning text-dark' : 'bg-secondary';
+    const icon = visible ? 'bi-eye' : 'bi-eye-slash';
+    return `<span class="badge ${cls}" data-portal-visible="${visible}" title="${escapeHtml(hint)}">`
+        + `<i class="bi ${icon} me-1" aria-hidden="true"></i>${escapeHtml(label)}</span>`;
 }
 
 function formatDateTime(dtStr) {
@@ -513,7 +597,7 @@ function formatDateTime(dtStr) {
 }
 
 function escapeHtml(str) {
-    if (!str) return '';
+    if (str === null || str === undefined || str === '') return '';
     return String(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')

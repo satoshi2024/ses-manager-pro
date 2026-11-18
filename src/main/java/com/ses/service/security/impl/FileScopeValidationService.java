@@ -74,6 +74,58 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.ServiceAttachmentLinkMapper serviceAttachmentLinkMapper;
 
+    /**
+     * portal添付downloadで扱ってよい問い合わせの範囲（uploadと同じpolicy。W2 r2 P3-1 の多重防御）。
+     * 未注入ならportal起票のみ（fail-closed。{@code ServiceRequestAttachmentService} と同じ既定）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalServiceRequestVisibilityPolicy;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.jdbc.core.JdbcTemplate importMetadataJdbc;
+
+    /**
+     * NF07 DSAR の開示 package の保存名の照合用（NF07-A2b）。汎用 file 経路の遮断に使い、無ければ全て拒否する（fail-closed）。
+     * 全体の context では常に登録される MyBatis mapper。直接生成する単体テストは明示的に与える。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.beans.factory.ObjectProvider<com.ses.importcenter.metadata.ImportMetadataAuthorizationService>
+            importAuthorizationProvider;
+
+    /** 登録済みsourceの専用reader境界。認可・source snapshot確認より先にstorageを開かない。 */
+    public void assertImportJobDownloadAllowed(Long jobId, Long documentId, Long documentVersionId,
+                                               Integer versionNo, String storageKey, String expectedSha256) {
+        String tenantId = currentTenant();
+        var authorization = importAuthorizationProvider == null ? null : importAuthorizationProvider.getIfAvailable();
+        var context = authorization == null ? null : authorization.requireCurrentAuthorization();
+        if (context == null || !tenantId.equals(context.tenantId()) || importMetadataJdbc == null
+                || jobId == null || documentId == null || documentVersionId == null || versionNo == null
+                || storageKey == null || expectedSha256 == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        Integer matches = importMetadataJdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_import_job j
+                JOIN t_import_source_system s ON s.tenant_id=j.tenant_id AND s.id=j.source_system_id
+                JOIN t_document_link l ON l.tenant_id=j.tenant_id AND l.document_id=j.document_id
+                    AND l.target_type='IMPORT_JOB' AND l.target_id=j.id AND l.deleted_flag=0
+                JOIN t_document d ON d.tenant_id=j.tenant_id AND d.id=j.document_id AND d.deleted_flag=0
+                JOIN t_document_version v ON v.tenant_id=j.tenant_id AND v.document_id=j.document_id
+                    AND v.id=j.document_version_id AND v.deleted_flag=0
+                WHERE j.tenant_id=? AND j.id=? AND j.document_id=? AND j.document_version_id=?
+                  AND j.document_version_no=? AND j.document_sha256=UNHEX(?)
+                  AND s.status='ACTIVE' AND s.version_no=j.source_version
+                  AND d.legal_entity_id=? AND d.legal_hold_flag=0
+                  AND (d.retention_until IS NULL OR d.retention_until>=CURRENT_DATE())
+                  AND v.scan_status='CLEAN' AND v.storage_key=? AND LOWER(v.sha256)=LOWER(?)
+                """, Integer.class, tenantId, jobId, documentId, documentVersionId, versionNo,
+                expectedSha256, Long.toString(context.legalEntityId()), storageKey, expectedSha256);
+        if (matches == null || matches != 1) throw BusinessException.of(403, "error.forbidden");
+    }
+
     public void assertDownloadAllowed(String storedName) {
         assertDownloadAllowed(storedName, null, null);
     }
@@ -101,8 +153,21 @@ public class FileScopeValidationService {
                 || !"PORTAL_VISIBLE".equals(attachmentLink.getVisibility())) {
             throw BusinessException.of(404, "error.notFound");
         }
-        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
         String tenantId = currentTenant();
+        // 問い合わせの顧客とportalの公開範囲を、文書版を引く前に確かめる（W2 r2 P3-1 の多重防御）。
+        // controllerの getPortalDetail を経ない呼出しでも、uploadと同じpolicyで範囲外を他社と同じ404にする。
+        // 版の状態（scan中の403等）より先に判定し、範囲外の問い合わせについて添付の有無・状態を示さない。
+        if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
+                .eq("tenant_id", tenantId).eq("id", serviceRequestId));
+        if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)
+                || !portalServiceRequestVisibility().isVisible(request,
+                com.ses.service.accounting.AccountingTenantContextHolder.getZoneId())) {
+            throw BusinessException.of(404, "error.notFound");
+        }
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
         DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
                 new QueryWrapper<DocumentVersion>().eq("tenant_id", tenantId)
                         .eq("storage_key", storedName)
@@ -112,14 +177,6 @@ public class FileScopeValidationService {
         }
         if (!"CLEAN".equals(version.getScanStatus())) {
             throw BusinessException.of(403, "error.file.scanNotReady");
-        }
-        if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
-            throw BusinessException.of(403, "error.forbidden");
-        }
-        ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
-                .eq("tenant_id", tenantId).eq("id", serviceRequestId));
-        if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)) {
-            throw BusinessException.of(404, "error.notFound");
         }
 
         com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
@@ -151,6 +208,11 @@ public class FileScopeValidationService {
                 || !serviceRequestFileReferenceProvider.referencedFileNames().contains(storedName)) {
             throw BusinessException.of(403, "error.forbidden");
         }
+    }
+
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalServiceRequestVisibility() {
+        return portalServiceRequestVisibilityPolicy != null ? portalServiceRequestVisibilityPolicy
+                : com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY;
     }
 
     /** 資格証憑の専用認可境界。汎用文書リンク規則へフォールバックしない。 */
@@ -191,6 +253,9 @@ public class FileScopeValidationService {
      * @param expectedHash eventに保存したSHA-256 hex（nullなら検証しない）
      */
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
+        // NF07 DSAR の開示 package は専用ダウンロードだけ。role・group・tenant に関係なく、管理者の通過分岐より前に拒否する
+        assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
+        assertImportJobNotAccessibleThroughGenericFilePath(storedName);
         // 1. t_resume_ingestion の原本ファイル
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         ResumeIngestion ingestion = resumeIngestionMapper.selectByStoredFileNameForTenant(tenantId, storedName);
@@ -286,6 +351,11 @@ public class FileScopeValidationService {
                         .eq("storage_key", storedName).last("LIMIT 1"))
                 : null;
         if (documentVersion != null) {
+            String documentType = documentTypeOf(documentVersion.getDocumentId());
+            // 管理レポートは専用delivery経路のエラーを維持する。
+            if ("MANAGEMENT_REPORT".equals(documentType)) {
+                throw BusinessException.of(403, "error.managementReport.deliveryRequired");
+            }
             // P1-02: scan未完了・拒否はfail-closedで拒否 (CLEAN 以外は不可)
             String scanStatus = documentVersion.getScanStatus();
             if (scanStatus == null || !"CLEAN".equals(scanStatus)) {
@@ -296,12 +366,8 @@ public class FileScopeValidationService {
             // PRIVATE_NOTE（1on1 confidential相談）はHR/明示権限割当管理者のみ。RECEIPT（経費領収書）は
             // 本人/管理者/マネージャー（配下）のみで、営業・HRは不可視（給与・経費は営業不可視）。
             // CHANGE_REQUEST_ATTACHMENT（変更申請添付）は本人/HR/管理者/マネージャー（組織scope∩DataScope）のみ。
-            String documentType = documentTypeOf(documentVersion.getDocumentId());
             // 管理レポートはrecipient deliveryのtoken/期限/再認証/scopeを必須とし、
             // 汎用文書台帳downloadからの迂回を許可しない。
-            if ("MANAGEMENT_REPORT".equals(documentType)) {
-                throw BusinessException.of(403, "error.managementReport.deliveryRequired");
-            }
             if ("PRIVATE_NOTE".equals(documentType)) {
                 String role = SecurityUtils.currentRole();
                 if ("HR".equals(role)) {
@@ -429,6 +495,96 @@ public class FileScopeValidationService {
 
         // 未登録・未知のstoredNameは拒否（fail-closed）
         throw BusinessException.of(403, "error.file.unknownReference");
+    }
+
+    /**
+     * 汎用の再scan（{@code POST /api/files/{storedName}/rescan}）の前の確認。NF07 DSAR の開示 package は再scanの対象にしない
+     * （role に関係なく拒否する。production-bridge-phased-plan.md §3.5.2 P2-5）。
+     */
+    public void assertRescanAllowed(String storedName) {
+        assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
+    }
+
+    /**
+     * NF07 DSAR の開示 package（{@code t_privacy_export_package.stored_name}）は専用ダウンロード
+     * （{@code GET /api/privacy/dsar/{id}/package/download}）だけに限定する（production-bridge-phased-plan.md §3.5.2 P2-5）。
+     * 状態（PURGED を含む）・tenant・role・group に関係なく一律に拒否する。保存名は大文字小文字・末尾の {@code .}／空白の違いで
+     * 同じ実体を指し得る（照合順序・file system による）ため、正規化した名前でも照合する（package の保存名は小文字の16進と
+     * 小文字の拡張子で作られる）。mapper が無い・tenant が無い・照会に失敗した場合も拒否する（fail-closed）。
+     *
+     * <p>package の行は全 tenant で照合し、PRIVACY_EXPORT の metadata は照会者の tenant だけで照合する（索引
+     * {@code uk_file_security_stored_name} を使い全表走査を避ける。HYG-FINAL P3-D）。他 tenant の metadata だけを持つ名前は、
+     * この後の汎用の {@code load}・{@code rescan} が照会者の tenant の metadata を要して拒否するため、tenant をまたぐ遮断は弱まらない。
+     */
+    private void assertPrivacyPackageNotAccessibleThroughGenericFilePath(String storedName) {
+        if (storedName == null || storedName.isBlank()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (privacyExportPackageMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        long matches;
+        try {
+            matches = privacyExportPackageMapper.countByStoredNames(currentTenant(), storedName,
+                    normalizedStoredName(storedName));
+        } catch (RuntimeException e) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (matches > 0) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    /** 前後の空白と末尾の {@code .}・空白を除き、小文字にした保存名。 */
+    static String normalizedStoredName(String storedName) {
+        String value = storedName.trim();
+        int end = value.length();
+        while (end > 0 && (value.charAt(end - 1) == '.' || Character.isWhitespace(value.charAt(end - 1)))) {
+            end--;
+        }
+        return value.substring(0, end).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * IMPORT_JOBの原本は専用readerだけに限定する。業務テーブルの早期returnより先に、
+     * tenant内のexact storage key→document version→active typed linkを確認する。
+     */
+    private void assertImportJobNotAccessibleThroughGenericFilePath(String storedName) {
+        if (storedName == null || storedName.isBlank()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        String tenantId = currentTenant();
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
+        if (versionMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        List<DocumentVersion> versions = versionMapper.selectList(new QueryWrapper<DocumentVersion>()
+                .eq("tenant_id", tenantId)
+                .eq("storage_key", storedName)
+                .eq("deleted_flag", 0));
+        if (versions == null || versions.isEmpty()) {
+            return;
+        }
+        DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+        if (linkMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        for (DocumentVersion version : versions) {
+            if (version == null || !tenantId.equals(version.getTenantId())
+                    || version.getDocumentId() == null || version.getId() == null
+                    || !storedName.equals(version.getStorageKey())) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            boolean importJobLinked = linkMapper.selectList(new QueryWrapper<DocumentLink>()
+                            .eq("tenant_id", tenantId)
+                            .eq("document_id", version.getDocumentId())
+                            .eq("target_type", "IMPORT_JOB")
+                            .eq("deleted_flag", 0))
+                    .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
+            if (importJobLinked) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+        }
     }
 
     private void assertMenuAllowed(String menuKey) {

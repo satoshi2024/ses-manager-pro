@@ -5,6 +5,7 @@ import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
@@ -40,6 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -74,12 +77,16 @@ class FileScopeValidationServiceTest {
     @Mock private EngineerCertificationMapper engineerCertificationMapper;
     @Mock private DocumentLinkMapper documentLinkMapper;
     @Mock private Clock clock;
+    @Mock private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
 
     private FileScopeValidationService service;
 
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
+        lenient().when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
+        lenient().when(documentLinkMapperProvider.getIfAvailable()).thenReturn(documentLinkMapper);
+        lenient().when(documentVersionMapper.selectList(any())).thenReturn(List.of());
         service = new FileScopeValidationService(
                 resumeIngestionMapper,
                 engineerMapper,
@@ -96,6 +103,91 @@ class FileScopeValidationServiceTest {
                 authorizationServiceProvider,
                 engineerCertificationMapperProvider,
                 clock);
+        // NF07-A2b: DSAR の開示 package の照合（無ければ全て拒否する fail-closed のため、package でない名前を返す mock を与える）
+        lenient().when(privacyExportPackageMapper.countByStoredNames(any(), any(), any())).thenReturn(0L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper",
+                privacyExportPackageMapper);
+    }
+
+    // ---------------------------------------------------------------- NF07-A2b: 汎用 file 経路の遮断（§3.5.2 P2-5）
+
+    @Test
+    void DSARの開示packageは営業_要員_HR_管理者_privacy_adminの誰が汎用経路で求めても拒否し業務表を見ない() {
+        when(privacyExportPackageMapper.countByStoredNames("default", "dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        // privacy-admin は管理者 role の group 所属で、role の上では管理者と区別されない（管理者の通過分岐より前で拒否する）
+        for (String role : List.of("営業", "要員", "HR", "マネージャー", "管理者")) {
+            loginAs(role);
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("dsarpkg.json"), role);
+            assertEquals(403, ex.getCode(), role);
+            assertEquals("error.forbidden", ex.getMessageKey(), role);
+            BusinessException versioned = assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("dsarpkg.json", 1L, "a".repeat(64)), role);
+            assertEquals(403, versioned.getCode(), role);
+        }
+        verify(resumeIngestionMapper, never()).selectByStoredFileNameForTenant(any(), any());
+        verify(documentVersionMapper, never()).selectList(any());
+        verify(engineerMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void DSARの開示packageは汎用の再scanも拒否する() {
+        when(privacyExportPackageMapper.countByStoredNames("default", "dsarpkg.json", "dsarpkg.json")).thenReturn(1L);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.assertRescanAllowed("dsarpkg.json"));
+        assertEquals(403, ex.getCode());
+        assertDoesNotThrow(() -> service.assertRescanAllowed("other.pdf"));
+    }
+
+    @Test
+    void 大文字と末尾の点や空白で表記を変えた保存名も正規化した名前で照合して拒否する() {
+        when(privacyExportPackageMapper.countByStoredNames("default", "DSARPKG.JSON. ", "dsarpkg.json")).thenReturn(1L);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("DSARPKG.JSON. "));
+        assertEquals(403, ex.getCode());
+        verify(privacyExportPackageMapper).countByStoredNames("default", "DSARPKG.JSON. ", "dsarpkg.json");
+    }
+
+    /**
+     * HYG-FINAL P3-D: PRIVACY_EXPORT の metadata は照会者の tenant だけで照合する（索引 {@code (tenant_id, stored_name)} を使う）。
+     * tenant が決まらなければ照会せずに拒否する（fail-closed）。他 tenant の metadata だけを持つ名前を開けないことは
+     * {@code FileStorageServiceImplTest} の保存層の照合が確かめる。
+     */
+    @Test
+    void DSARの開示packageの照合には照会者のtenantを渡しtenantが無ければ照会せずに拒否する() {
+        loginAs("管理者");
+        service.assertRescanAllowed("tenant-a.json");
+        verify(privacyExportPackageMapper).countByStoredNames("default", "tenant-a.json", "tenant-a.json");
+
+        AccountingTenantContextHolder.setTenantId("tenant-b");
+        service.assertRescanAllowed("tenant-b.json");
+        verify(privacyExportPackageMapper).countByStoredNames("tenant-b", "tenant-b.json", "tenant-b.json");
+
+        AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
+        BusinessException noTenant = assertThrows(BusinessException.class,
+                () -> service.assertRescanAllowed("no-tenant.json"));
+        assertEquals(403, noTenant.getCode());
+        assertEquals("error.forbidden", noTenant.getMessageKey());
+        verify(privacyExportPackageMapper, never()).countByStoredNames(any(), org.mockito.ArgumentMatchers.eq("no-tenant.json"),
+                any());
+    }
+
+    @Test
+    void package表を照合できなければ汎用経路の取得を全て拒否する() {
+        loginAs("管理者");
+        when(privacyExportPackageMapper.countByStoredNames(any(), any(), any())).thenThrow(new IllegalStateException("db"));
+        assertEquals(403, assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("anything.pdf")).getCode());
+
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper", null);
+        assertEquals("error.forbidden", assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("anything.pdf")).getMessageKey());
+        assertEquals(403, assertThrows(BusinessException.class,
+                () -> service.assertRescanAllowed("anything.pdf")).getCode());
     }
 
     @AfterEach
@@ -176,6 +268,59 @@ class FileScopeValidationServiceTest {
         loginAs("管理者");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("abc.eml"));
+    }
+
+    @Test
+    void 既存engineer写真参照は許可し後から付いたIMPORT_JOB_linkは汎用downloadを拒否() {
+        noMatchOnEarlierTables();
+        String storageKey = "shared-engineer-import.csv";
+        Engineer engineer = new Engineer();
+        engineer.setId(77L);
+        when(engineerMapper.selectOne(any())).thenReturn(engineer);
+        DocumentVersion version = importJobVersion(storageKey, 880L);
+        when(documentVersionMapper.selectList(any())).thenReturn(List.of(version));
+        DocumentLink link = new DocumentLink();
+        link.setTenantId("default");
+        link.setDocumentId(880L);
+        link.setTargetType("IMPORT_JOB");
+        link.setTargetId(990L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+
+        loginAs("HR");
+        assertDoesNotThrow(() -> service.assertDownloadAllowed(storageKey, 41L, "ab".repeat(32)));
+
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
+        org.mockito.Mockito.clearInvocations(engineerMapper);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed(storageKey, 41L, "ab".repeat(32)));
+
+        assertEquals(403, ex.getCode());
+        verify(engineerMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void IMPORT_JOB_linkがなければ既存engineer写真のdownload認可を維持() {
+        noMatchOnEarlierTables();
+        String storageKey = "ordinary-engineer-photo.png";
+        Engineer engineer = new Engineer();
+        engineer.setId(78L);
+        when(engineerMapper.selectOne(any())).thenReturn(engineer);
+        when(documentVersionMapper.selectList(any())).thenReturn(List.of(importJobVersion(storageKey, 881L)));
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+        loginAs("HR");
+
+        assertDoesNotThrow(() -> service.assertDownloadAllowed(storageKey));
+    }
+
+    private DocumentVersion importJobVersion(String storageKey, long documentId) {
+        DocumentVersion version = new DocumentVersion();
+        version.setId(41L);
+        version.setTenantId("default");
+        version.setDocumentId(documentId);
+        version.setStorageKey(storageKey);
+        version.setSha256("ab".repeat(32));
+        version.setScanStatus("CLEAN");
+        return version;
     }
 
     @Test
@@ -438,5 +583,97 @@ class FileScopeValidationServiceTest {
 
         assertThrows(BusinessException.class, () -> service.assertCertificationEvidenceDownloadAllowed(
                 "cert-evidence-tenant.pdf", 200L, 9100L, 100L, "abc123"));
+    }
+
+    // ---------------------------------------------------------------- NF-02: portal添付downloadの公開範囲（W2 r2 P3-1）
+
+    @Mock private com.ses.mapper.ServiceRequestMapper serviceRequestMapper;
+    @Mock private com.ses.service.impl.ServiceRequestFileReferenceProvider serviceRequestFileReferenceProvider;
+
+    /**
+     * controller（{@code getPortalDetail}）を経ない呼出しでも、uploadと同じpolicyで公開範囲外の問い合わせを
+     * 他社と同じ404にする。文書版（scan中の403等）を引く前に止め、範囲外の添付の有無・状態を示さない。
+     */
+    @Test
+    void portal添付downloadは公開範囲外の問い合わせを文書版を引く前に404にする() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestMapper", serviceRequestMapper);
+        com.ses.entity.ServiceRequest internal = serviceRequest("INTERNAL", null,
+                java.time.LocalDateTime.of(2026, 3, 31, 23, 59));
+        when(serviceRequestMapper.selectOne(any())).thenReturn(internal);
+
+        // policy未注入はportal起票のみ（fail-closed。uploadと同じ既定）
+        BusinessException withoutPolicy = assertThrows(BusinessException.class,
+                () -> service.assertPortalServiceRequestDownloadAllowed("sr-key", 10L, 20L, 30L, portalLink()));
+        assertEquals(404, withoutPolicy.getCode());
+        assertEquals("error.notFound", withoutPolicy.getMessageKey());
+
+        // 公開開始時刻より前に社内で登録した問い合わせも範囲外
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalServiceRequestVisibilityPolicy",
+                new com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy(
+                        java.time.OffsetDateTime.parse("2026-04-01T00:00:00+09:00")));
+        BusinessException beforeSince = assertThrows(BusinessException.class,
+                () -> service.assertPortalServiceRequestDownloadAllowed("sr-key", 10L, 20L, 30L, portalLink()));
+        assertEquals(404, beforeSince.getCode());
+        assertEquals("error.notFound", beforeSince.getMessageKey());
+
+        verify(documentVersionMapper, never()).selectOne(any());
+        verify(documentMapper, never()).selectOne(any());
+    }
+
+    /** 上の拒否がpolicyによるものであること（範囲内の問い合わせは同じ入力で最後まで通る）。 */
+    @Test
+    void portal添付downloadは公開範囲内の問い合わせなら残りの検証を通過する() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestMapper", serviceRequestMapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "serviceRequestFileReferenceProvider",
+                serviceRequestFileReferenceProvider);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalServiceRequestVisibilityPolicy",
+                new com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy(
+                        java.time.OffsetDateTime.parse("2026-04-01T00:00:00+09:00")));
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(30L);
+        version.setTenantId("default");
+        version.setStorageKey("sr-key");
+        version.setScanStatus("CLEAN");
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
+        Document document = new Document();
+        document.setId(30L);
+        document.setTenantId("default");
+        document.setDocumentType("SERVICE_REQUEST_ATTACHMENT");
+        document.setLegalHoldFlag(0);
+        when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        DocumentLink typedLink = new DocumentLink();
+        typedLink.setDocumentId(30L);
+        typedLink.setTargetType("SERVICE_REQUEST");
+        typedLink.setTargetId(10L);
+        typedLink.setDeletedFlag(0);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(typedLink));
+        when(serviceRequestFileReferenceProvider.referencedFileNames()).thenReturn(java.util.Set.of("sr-key"));
+
+        // 公開開始時刻以降に社内で登録した問い合わせ、およびportal起票の問い合わせ（時刻に関係なく対象）
+        for (com.ses.entity.ServiceRequest visible : List.of(
+                serviceRequest("INTERNAL", null, java.time.LocalDateTime.of(2026, 4, 1, 0, 0)),
+                serviceRequest("PORTAL", 200L, java.time.LocalDateTime.of(2026, 1, 5, 9, 0)))) {
+            when(serviceRequestMapper.selectOne(any())).thenReturn(visible);
+            assertDoesNotThrow(() -> service.assertPortalServiceRequestDownloadAllowed(
+                    "sr-key", 10L, 20L, 30L, portalLink()), visible.getChannel());
+        }
+    }
+
+    private com.ses.entity.ServiceRequest serviceRequest(String channel, Long portalUserId,
+                                                         java.time.LocalDateTime createdAt) {
+        com.ses.entity.ServiceRequest request = new com.ses.entity.ServiceRequest();
+        request.setId(10L);
+        request.setTenantId("default");
+        request.setCustomerId(20L);
+        request.setChannel(channel);
+        request.setPortalUserId(portalUserId);
+        request.setCreatedAt(createdAt);
+        return request;
+    }
+
+    private com.ses.entity.ServiceAttachmentLink portalLink() {
+        return com.ses.entity.ServiceAttachmentLink.builder()
+                .serviceRequestId(10L).documentId(30L).visibility("PORTAL_VISIBLE").build();
     }
 }

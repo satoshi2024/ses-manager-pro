@@ -12,22 +12,36 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 
-/** 添付業務リンク確定の失敗を再試行可能な台帳へ記録する。 */
+/**
+ * 添付業務リンク確定の失敗を再試行可能な台帳へ記録する。
+ * 台帳の日時（次回再試行・作成・解決）は注入したClockで決める（テストで時刻を固定できるようにする。P3-N2-6）。
+ */
 @Service
 public class ServiceRequestAttachmentCompensationService {
 
+    /** 失敗した確定を再試行するまでの待ち時間（分）。 */
+    static final long RETRY_DELAY_MINUTES = 5;
+
     private final ServiceRequestAttachmentCompensationMapper mapper;
     private final ServiceRequestAttachmentCommitService commitService;
+    private final Clock clock;
 
     @Autowired(required = false)
     private PlatformTransactionManager transactionManager;
 
     public ServiceRequestAttachmentCompensationService(ServiceRequestAttachmentCompensationMapper mapper,
-                                                       ServiceRequestAttachmentCommitService commitService) {
+                                                       ServiceRequestAttachmentCommitService commitService,
+                                                       Clock clock) {
         this.mapper = mapper;
         this.commitService = commitService;
+        this.clock = clock;
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -46,9 +60,10 @@ public class ServiceRequestAttachmentCompensationService {
         row.setStatus("RETRY");
         row.setAttemptCount(1);
         row.setLastError(failure == null ? null : failure.getClass().getSimpleName());
-        row.setNextRetryAt(LocalDateTime.now().plusMinutes(5));
-        row.setCreatedAt(LocalDateTime.now());
-        row.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime now = now();
+        row.setNextRetryAt(now.plusMinutes(RETRY_DELAY_MINUTES));
+        row.setCreatedAt(now);
+        row.setUpdatedAt(now);
         try {
             mapper.insert(row);
         } catch (DuplicateKeyException ignored) {
@@ -58,7 +73,7 @@ public class ServiceRequestAttachmentCompensationService {
 
     public int retryDue(int limit) {
         int completed = 0;
-        for (ServiceRequestAttachmentCompensation row : mapper.selectDue(limit)) {
+        for (ServiceRequestAttachmentCompensation row : mapper.selectDue(now(), limit)) {
             try {
                 ServiceAttachmentLink link = commitService.commit(row.getTenantId(), row.getServiceRequestId(),
                         row.getCommentId(), row.getDocumentId(), row.getVisibility(), row.getFileName(), row.getFileSize(),
@@ -77,8 +92,9 @@ public class ServiceRequestAttachmentCompensationService {
     protected void markCompleted(ServiceRequestAttachmentCompensation row) {
         inShortTransaction(() -> {
             row.setStatus("COMPLETED");
-            row.setResolvedAt(LocalDateTime.now());
-            row.setUpdatedAt(LocalDateTime.now());
+            LocalDateTime now = now();
+            row.setResolvedAt(now);
+            row.setUpdatedAt(now);
             mapper.updateById(row);
         });
     }
@@ -87,8 +103,9 @@ public class ServiceRequestAttachmentCompensationService {
         inShortTransaction(() -> {
             row.setAttemptCount((row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1);
             row.setLastError(failure.getClass().getSimpleName());
-            row.setNextRetryAt(LocalDateTime.now().plusMinutes(5));
-            row.setUpdatedAt(LocalDateTime.now());
+            LocalDateTime now = now();
+            row.setNextRetryAt(now.plusMinutes(RETRY_DELAY_MINUTES));
+            row.setUpdatedAt(now);
             mapper.updateById(row);
         });
     }

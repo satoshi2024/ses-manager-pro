@@ -73,7 +73,10 @@ CREATE TABLE t_engineer (
   created_at          DATETIME,
   updated_at          DATETIME,
   deleted_flag        TINYINT DEFAULT 0,
-  version             INT NOT NULL DEFAULT 0
+  version             INT NOT NULL DEFAULT 0,
+  -- V189: 要員単位のscope世代（entityへは写像しない。NF01 epoch A）
+  engineer_scope_epoch BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT ck_engineer_scope_epoch CHECK (engineer_scope_epoch >= 0)
 );
 
 DROP TABLE IF EXISTS m_skill_tag CASCADE;
@@ -663,9 +666,14 @@ CREATE TABLE sys_user (
   status        TINYINT DEFAULT 1,
   failed_count  INT DEFAULT 0,
   locked_until  DATETIME,
+  -- V186: 初回ログイン時のパスワード変更要求
+  password_change_required TINYINT NOT NULL DEFAULT 0,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag  TINYINT DEFAULT 0
+  deleted_flag  TINYINT DEFAULT 0,
+  -- V189: 利用者単位の認可世代（entityへは写像しない。NF01 epoch A）
+  actor_authz_epoch BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT ck_sys_user_actor_authz_epoch CHECK (actor_authz_epoch >= 0)
 );
 
 INSERT INTO sys_user (username, password, real_name, role, email, status)
@@ -739,6 +747,8 @@ CREATE TABLE t_audit_log (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_engineer_audit_reference ON t_audit_log(reference_type, reference_id);
+-- V194（NF08 C-1）: ATTEMPT / RESULT 監査の存在照会（claim IDの完全一致）
+CREATE INDEX idx_audit_dispatch_key ON t_audit_log(idempotency_key, application_code, id);
 
 DROP TABLE IF EXISTS t_external_api_audit CASCADE;
 CREATE TABLE t_external_api_audit (
@@ -753,11 +763,14 @@ CREATE TABLE t_external_api_audit (
   rate_decision VARCHAR(64) NOT NULL, status SMALLINT NOT NULL,
   result_code VARCHAR(64) NOT NULL, success_flag BOOLEAN NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  retention_expires_at DATETIME NOT NULL,
   CONSTRAINT chk_external_audit_principal CHECK (pre_auth_principal = 'UNAUTHENTICATED'),
   CONSTRAINT chk_external_audit_status CHECK (status >= 100 AND status <= 599)
 );
 CREATE INDEX idx_external_audit_created ON t_external_api_audit (created_at, id);
 CREATE INDEX idx_external_audit_client ON t_external_api_audit (client_id, created_at, id);
+
+CREATE INDEX idx_external_audit_retention ON t_external_api_audit (retention_expires_at, id);
 
 DROP TABLE IF EXISTS t_freee_connection CASCADE;
 CREATE TABLE t_freee_connection (
@@ -1123,7 +1136,10 @@ CREATE TABLE m_organization_unit (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,
   legal_entity_key BIGINT AS (COALESCE(legal_entity_id, 0)),
-  UNIQUE (legal_entity_key, code, valid_from)
+  -- V189: 組織部分木単位のscope世代（entityへは写像しない。NF01 epoch A）
+  org_scope_epoch BIGINT NOT NULL DEFAULT 0,
+  UNIQUE (legal_entity_key, code, valid_from),
+  CONSTRAINT ck_org_scope_epoch CHECK (org_scope_epoch >= 0)
 );
 
 CREATE TABLE t_user_organization (
@@ -2744,6 +2760,29 @@ CREATE INDEX idx_portal_access_log_org ON t_portal_access_log(portal_org_id, cre
 CREATE INDEX idx_portal_access_log_user ON t_portal_access_log(portal_user_id, created_at);
 CREATE INDEX idx_portal_access_log_action ON t_portal_access_log(action, created_at);
 
+-- V188: ポータルユーザーと要員の紐付け（NF01 退社自動処理の対象特定）。
+-- FKは置かない（共有H2のschema再投入でt_portal_user・t_engineerのDROPを妨げないため。schema-portal-user-engineer-link-h2.sqlと同じ）。
+DROP TABLE IF EXISTS t_portal_user_engineer_link CASCADE;
+CREATE TABLE t_portal_user_engineer_link (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id      VARCHAR(100) NOT NULL,
+  portal_user_id BIGINT NOT NULL,
+  engineer_id    BIGINT NOT NULL,
+  linked_by      BIGINT NOT NULL,
+  linked_at      DATETIME NOT NULL,
+  released_by    BIGINT,
+  released_at    DATETIME,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag   TINYINT NOT NULL DEFAULT 0,
+  active_portal_user_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN released_at IS NULL AND deleted_flag = 0 THEN portal_user_id ELSE NULL END
+  )
+);
+CREATE UNIQUE INDEX uk_portal_user_engineer_link_active ON t_portal_user_engineer_link(active_portal_user_id);
+CREATE INDEX idx_portal_user_engineer_link_engineer ON t_portal_user_engineer_link(tenant_id, engineer_id, released_at);
+CREATE INDEX idx_portal_user_engineer_link_user ON t_portal_user_engineer_link(portal_user_id);
+
 -- S15: 会計・支払連携テーブル (m_integration_connection, m_external_mapping, t_integration_job, t_integration_job_event)
 DROP TABLE IF EXISTS t_integration_job_event CASCADE;
 DROP TABLE IF EXISTS t_integration_job CASCADE;
@@ -2993,3 +3032,688 @@ CREATE TABLE IF NOT EXISTS t_legal_entity_backfill_audit (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_legal_entity_backfill_audit UNIQUE (entity_type, entity_id, decision)
 );
+
+-- NF06 F1aのH2 schemaもこのisolated test schemaへ含める。
+-- NF06 F1aのH2 counterpart。schema-locationsの再実行に耐える。`r`n-- validationは業務domain tableへ書き込まず、candidate registryは独立操作のみを許可する。
+
+CREATE TABLE IF NOT EXISTS t_import_source_system (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    source_code VARCHAR(64)  NOT NULL,
+    display_name VARCHAR(120) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    version_no BIGINT NOT NULL DEFAULT 1,
+    lookup_key_version VARCHAR(64) NOT NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by BIGINT NOT NULL,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_source_tenant_code (tenant_id, source_code),
+    UNIQUE KEY uk_import_source_tenant_id (tenant_id, id),
+    CONSTRAINT chk_import_source_status CHECK (status IN ('ACTIVE', 'DISABLED')),
+    CONSTRAINT chk_import_source_version CHECK (version_no > 0)
+);
+
+CREATE TABLE IF NOT EXISTS t_import_mapping (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    source_system_id BIGINT NOT NULL,
+    entity_type VARCHAR(24) NOT NULL,
+    schema_version VARCHAR(32) NOT NULL,
+    mapping_version INT NOT NULL,
+    canonical_bytes BLOB NOT NULL,
+    mapping_sha256 BINARY(32) NOT NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_mapping_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_import_mapping_namespace (tenant_id, source_system_id, entity_type, schema_version, mapping_version),
+    UNIQUE KEY uk_import_mapping_snapshot (tenant_id, id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256),
+    CONSTRAINT chk_import_mapping_entity CHECK (entity_type IN ('CUSTOMER', 'ENGINEER', 'PROJECT', 'PROPOSAL', 'CONTRACT')),
+    CONSTRAINT chk_import_mapping_version CHECK (mapping_version > 0),
+    CONSTRAINT chk_import_mapping_size CHECK (OCTET_LENGTH(canonical_bytes) <= 32768),
+    CONSTRAINT fk_import_mapping_source FOREIGN KEY (tenant_id, source_system_id)
+        REFERENCES t_import_source_system (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS t_import_job (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    source_system_id BIGINT NOT NULL,
+    source_version BIGINT NOT NULL,
+    entity_type VARCHAR(24) NOT NULL,
+    schema_version VARCHAR(32) NOT NULL,
+    source_encoding VARCHAR(16) NOT NULL,
+    source_sha256 BINARY(32) NOT NULL,
+    legal_entity_id VARCHAR(100) NOT NULL,
+    document_id BIGINT NOT NULL,
+    document_version_id BIGINT NOT NULL,
+    document_version_no INT NOT NULL,
+    document_sha256 BINARY(32) NOT NULL,
+    mapping_id BIGINT NULL,
+    mapping_version INT NULL,
+    mapping_sha256 BINARY(32) NULL,
+    state VARCHAR(16) NOT NULL DEFAULT 'UPLOADED',
+    version_no BIGINT NOT NULL DEFAULT 1,
+    lease_owner VARCHAR(128) NULL,
+    lease_generation BIGINT NOT NULL DEFAULT 0,
+    lease_expires_at DATETIME(6) NULL,
+    active_validation_run_id BIGINT NULL,
+    current_validation_run_id BIGINT NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_job_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_import_job_identity (tenant_id, source_system_id, entity_type, schema_version, source_sha256),
+    UNIQUE KEY uk_import_job_source_snapshot (tenant_id, id, source_system_id, source_version, entity_type),
+    UNIQUE KEY uk_import_job_mapping_snapshot (tenant_id, id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256),
+    KEY idx_import_job_state (tenant_id, state, updated_at, id),
+    CONSTRAINT chk_import_job_entity CHECK (entity_type IN ('CUSTOMER', 'ENGINEER', 'PROJECT', 'PROPOSAL', 'CONTRACT')),
+    CONSTRAINT chk_import_job_encoding CHECK (source_encoding IN ('UTF8', 'SHIFT_JIS')),
+    CONSTRAINT chk_import_job_state CHECK (state IN ('UPLOADED', 'MAPPED', 'VALIDATING', 'VALIDATED', 'BLOCKED')),
+    CONSTRAINT chk_import_job_mapping_nulls CHECK ((mapping_id IS NULL AND mapping_version IS NULL AND mapping_sha256 IS NULL) OR (mapping_id IS NOT NULL AND mapping_version IS NOT NULL AND mapping_sha256 IS NOT NULL)),
+    CONSTRAINT chk_import_job_lease_pair CHECK ((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)),
+    CONSTRAINT fk_import_job_source FOREIGN KEY (tenant_id, source_system_id)
+        REFERENCES t_import_source_system (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_job_document FOREIGN KEY (tenant_id, document_id)
+        REFERENCES t_document (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_job_document_version FOREIGN KEY (tenant_id, document_version_id)
+        REFERENCES t_document_version (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_job_mapping_snapshot FOREIGN KEY (tenant_id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
+        REFERENCES t_import_mapping (tenant_id, id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS t_import_validation_run (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    job_id BIGINT NOT NULL,
+    run_no INT NOT NULL,
+    state VARCHAR(16) NOT NULL DEFAULT 'BUILDING',
+    created_lease_generation BIGINT NOT NULL,
+    last_resumed_lease_generation BIGINT NOT NULL,
+    active_slot TINYINT NULL DEFAULT 1,
+    published_slot TINYINT NULL,
+    actor_user_id BIGINT NOT NULL,
+    source_system_id BIGINT NOT NULL,
+    source_version BIGINT NOT NULL,
+    source_code_snapshot VARCHAR(64) NOT NULL,
+    entity_type VARCHAR(24) NOT NULL,
+    schema_version VARCHAR(32) NOT NULL,
+    source_encoding VARCHAR(16) NOT NULL,
+    source_sha256 BINARY(32) NOT NULL,
+    document_id BIGINT NOT NULL,
+    document_version_id BIGINT NOT NULL,
+    document_version_no INT NOT NULL,
+    document_sha256 BINARY(32) NOT NULL,
+    mapping_id BIGINT NOT NULL,
+    mapping_version INT NOT NULL,
+    mapping_sha256 BINARY(32) NOT NULL,
+    validation_fingerprint BINARY(32) NOT NULL,
+    source_row_count BIGINT NULL,
+    physical_row_count BIGINT NULL,
+    empty_row_count BIGINT NULL,
+    accepted_row_count BIGINT NULL,
+    rejected_row_count BIGINT NULL,
+    finding_summary_bytes VARBINARY(8192) NULL,
+    finding_summary_sha256 BINARY(32) NULL,
+    expected_unit_price_accepted_known_count BIGINT NULL,
+    expected_unit_price_accepted_sum_yen DECIMAL(38,0) NULL,
+    expected_unit_price_rejected_known_count BIGINT NULL,
+    expected_unit_price_rejected_sum_yen DECIMAL(38,0) NULL,
+    expected_unit_price_excluded_count BIGINT NULL,
+    unit_price_min_accepted_known_count BIGINT NULL,
+    unit_price_min_accepted_sum_yen DECIMAL(38,0) NULL,
+    unit_price_min_rejected_known_count BIGINT NULL,
+    unit_price_min_rejected_sum_yen DECIMAL(38,0) NULL,
+    unit_price_min_excluded_count BIGINT NULL,
+    unit_price_max_accepted_known_count BIGINT NULL,
+    unit_price_max_accepted_sum_yen DECIMAL(38,0) NULL,
+    unit_price_max_rejected_known_count BIGINT NULL,
+    unit_price_max_rejected_sum_yen DECIMAL(38,0) NULL,
+    unit_price_max_excluded_count BIGINT NULL,
+    selling_price_accepted_known_count BIGINT NULL,
+    selling_price_accepted_sum_yen DECIMAL(38,0) NULL,
+    selling_price_rejected_known_count BIGINT NULL,
+    selling_price_rejected_sum_yen DECIMAL(38,0) NULL,
+    selling_price_excluded_count BIGINT NULL,
+    cost_price_accepted_known_count BIGINT NULL,
+    cost_price_accepted_sum_yen DECIMAL(38,0) NULL,
+    cost_price_rejected_known_count BIGINT NULL,
+    cost_price_rejected_sum_yen DECIMAL(38,0) NULL,
+    cost_price_excluded_count BIGINT NULL,
+    amount_excluded_reason_counts VARBINARY(8192) NULL,
+    amount_excluded_reason_sha256 BINARY(32) NULL,
+    row_set_sha256 BINARY(32) NULL,
+    summary_sha256 BINARY(32) NULL,
+    started_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    sealed_at DATETIME(6) NULL,
+    completed_at DATETIME(6) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_run_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_import_run_job_id (tenant_id, job_id, id),
+    UNIQUE KEY uk_import_run_number (tenant_id, job_id, run_no),
+    UNIQUE KEY uk_import_run_active_slot (tenant_id, job_id, active_slot),
+    UNIQUE KEY uk_import_run_published_slot (tenant_id, job_id, published_slot),
+    UNIQUE KEY uk_import_run_provenance (tenant_id, job_id, id, source_system_id, entity_type),
+    KEY idx_import_run_source (tenant_id, source_system_id, source_version),
+    CONSTRAINT chk_import_run_state CHECK (state IN ('BUILDING', 'SEALED', 'COMPLETED', 'ABORTED')),
+    CONSTRAINT chk_import_run_entity CHECK (entity_type IN ('CUSTOMER', 'ENGINEER', 'PROJECT', 'PROPOSAL', 'CONTRACT')),
+    CONSTRAINT chk_import_run_encoding CHECK (source_encoding IN ('UTF8', 'SHIFT_JIS')),
+    CONSTRAINT chk_import_run_slots CHECK ((state IN ('BUILDING', 'SEALED') AND active_slot IS NOT NULL AND active_slot = 1 AND published_slot IS NULL) OR (state = 'COMPLETED' AND active_slot IS NULL AND (published_slot IS NULL OR published_slot = 1)) OR (state = 'ABORTED' AND active_slot IS NULL AND published_slot IS NULL)),
+    CONSTRAINT chk_import_run_counts CHECK ((source_row_count IS NULL OR source_row_count >= 0) AND (physical_row_count IS NULL OR physical_row_count >= 0) AND (empty_row_count IS NULL OR empty_row_count >= 0) AND (accepted_row_count IS NULL OR accepted_row_count >= 0) AND (rejected_row_count IS NULL OR rejected_row_count >= 0)),
+    CONSTRAINT chk_import_run_summary_counts CHECK (
+        (expected_unit_price_accepted_known_count IS NULL OR expected_unit_price_accepted_known_count >= 0) AND
+        (expected_unit_price_rejected_known_count IS NULL OR expected_unit_price_rejected_known_count >= 0) AND
+        (expected_unit_price_excluded_count IS NULL OR expected_unit_price_excluded_count >= 0) AND
+        (unit_price_min_accepted_known_count IS NULL OR unit_price_min_accepted_known_count >= 0) AND
+        (unit_price_min_rejected_known_count IS NULL OR unit_price_min_rejected_known_count >= 0) AND
+        (unit_price_min_excluded_count IS NULL OR unit_price_min_excluded_count >= 0) AND
+        (unit_price_max_accepted_known_count IS NULL OR unit_price_max_accepted_known_count >= 0) AND
+        (unit_price_max_rejected_known_count IS NULL OR unit_price_max_rejected_known_count >= 0) AND
+        (unit_price_max_excluded_count IS NULL OR unit_price_max_excluded_count >= 0) AND
+        (selling_price_accepted_known_count IS NULL OR selling_price_accepted_known_count >= 0) AND
+        (selling_price_rejected_known_count IS NULL OR selling_price_rejected_known_count >= 0) AND
+        (selling_price_excluded_count IS NULL OR selling_price_excluded_count >= 0) AND
+        (cost_price_accepted_known_count IS NULL OR cost_price_accepted_known_count >= 0) AND
+        (cost_price_rejected_known_count IS NULL OR cost_price_rejected_known_count >= 0) AND
+        (cost_price_excluded_count IS NULL OR cost_price_excluded_count >= 0)
+    ),
+    CONSTRAINT chk_import_run_amount_nulls CHECK (
+        (expected_unit_price_accepted_known_count IS NULL OR ((expected_unit_price_accepted_known_count = 0 AND expected_unit_price_accepted_sum_yen IS NULL) OR (expected_unit_price_accepted_known_count > 0 AND expected_unit_price_accepted_sum_yen IS NOT NULL))) AND
+        (expected_unit_price_rejected_known_count IS NULL OR ((expected_unit_price_rejected_known_count = 0 AND expected_unit_price_rejected_sum_yen IS NULL) OR (expected_unit_price_rejected_known_count > 0 AND expected_unit_price_rejected_sum_yen IS NOT NULL))) AND
+        (unit_price_min_accepted_known_count IS NULL OR ((unit_price_min_accepted_known_count = 0 AND unit_price_min_accepted_sum_yen IS NULL) OR (unit_price_min_accepted_known_count > 0 AND unit_price_min_accepted_sum_yen IS NOT NULL))) AND
+        (unit_price_min_rejected_known_count IS NULL OR ((unit_price_min_rejected_known_count = 0 AND unit_price_min_rejected_sum_yen IS NULL) OR (unit_price_min_rejected_known_count > 0 AND unit_price_min_rejected_sum_yen IS NOT NULL))) AND
+        (unit_price_max_accepted_known_count IS NULL OR ((unit_price_max_accepted_known_count = 0 AND unit_price_max_accepted_sum_yen IS NULL) OR (unit_price_max_accepted_known_count > 0 AND unit_price_max_accepted_sum_yen IS NOT NULL))) AND
+        (unit_price_max_rejected_known_count IS NULL OR ((unit_price_max_rejected_known_count = 0 AND unit_price_max_rejected_sum_yen IS NULL) OR (unit_price_max_rejected_known_count > 0 AND unit_price_max_rejected_sum_yen IS NOT NULL))) AND
+        (selling_price_accepted_known_count IS NULL OR ((selling_price_accepted_known_count = 0 AND selling_price_accepted_sum_yen IS NULL) OR (selling_price_accepted_known_count > 0 AND selling_price_accepted_sum_yen IS NOT NULL))) AND
+        (selling_price_rejected_known_count IS NULL OR ((selling_price_rejected_known_count = 0 AND selling_price_rejected_sum_yen IS NULL) OR (selling_price_rejected_known_count > 0 AND selling_price_rejected_sum_yen IS NOT NULL))) AND
+        (cost_price_accepted_known_count IS NULL OR ((cost_price_accepted_known_count = 0 AND cost_price_accepted_sum_yen IS NULL) OR (cost_price_accepted_known_count > 0 AND cost_price_accepted_sum_yen IS NOT NULL))) AND
+        (cost_price_rejected_known_count IS NULL OR ((cost_price_rejected_known_count = 0 AND cost_price_rejected_sum_yen IS NULL) OR (cost_price_rejected_known_count > 0 AND cost_price_rejected_sum_yen IS NOT NULL)))
+    ),
+    CONSTRAINT chk_import_run_completed_summary CHECK (state <> 'COMPLETED' OR (
+        source_row_count IS NOT NULL AND physical_row_count IS NOT NULL AND empty_row_count IS NOT NULL AND
+        accepted_row_count IS NOT NULL AND rejected_row_count IS NOT NULL AND
+        physical_row_count = source_row_count + empty_row_count AND
+        source_row_count = accepted_row_count + rejected_row_count AND
+        finding_summary_bytes IS NOT NULL AND finding_summary_sha256 IS NOT NULL AND
+        expected_unit_price_accepted_known_count IS NOT NULL AND expected_unit_price_rejected_known_count IS NOT NULL AND expected_unit_price_excluded_count IS NOT NULL AND
+        unit_price_min_accepted_known_count IS NOT NULL AND unit_price_min_rejected_known_count IS NOT NULL AND unit_price_min_excluded_count IS NOT NULL AND
+        unit_price_max_accepted_known_count IS NOT NULL AND unit_price_max_rejected_known_count IS NOT NULL AND unit_price_max_excluded_count IS NOT NULL AND
+        selling_price_accepted_known_count IS NOT NULL AND selling_price_rejected_known_count IS NOT NULL AND selling_price_excluded_count IS NOT NULL AND
+        cost_price_accepted_known_count IS NOT NULL AND cost_price_rejected_known_count IS NOT NULL AND cost_price_excluded_count IS NOT NULL AND
+        amount_excluded_reason_counts IS NOT NULL AND amount_excluded_reason_sha256 IS NOT NULL AND
+        row_set_sha256 IS NOT NULL AND summary_sha256 IS NOT NULL
+    )),
+    CONSTRAINT fk_import_run_job_snapshot FOREIGN KEY (tenant_id, job_id, source_system_id, source_version, entity_type)
+        REFERENCES t_import_job (tenant_id, id, source_system_id, source_version, entity_type) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_run_mapping_snapshot FOREIGN KEY (tenant_id, job_id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
+        REFERENCES t_import_job (tenant_id, id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+ALTER TABLE t_import_job
+    ADD CONSTRAINT IF NOT EXISTS fk_import_job_active_run FOREIGN KEY (tenant_id, id, active_validation_run_id)
+        REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+ALTER TABLE t_import_job
+    ADD CONSTRAINT IF NOT EXISTS fk_import_job_current_run FOREIGN KEY (tenant_id, id, current_validation_run_id)
+        REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+CREATE TABLE IF NOT EXISTS t_import_validation_row (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    job_id BIGINT NOT NULL,
+    validation_run_id BIGINT NOT NULL,
+    source_row_number BIGINT NOT NULL,
+    source_row_sha256 BINARY(32) NOT NULL,
+    canonical_fingerprint BINARY(32) NOT NULL,
+    disposition VARCHAR(8) NOT NULL,
+    finding_codes VARBINARY(4096) NOT NULL,
+    row_commit_sha256 BINARY(32) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_row_run_number (tenant_id, validation_run_id, source_row_number),
+    KEY idx_import_row_job_run_order (tenant_id, job_id, validation_run_id, source_row_number),
+    CONSTRAINT chk_import_row_number CHECK (source_row_number > 0),
+    CONSTRAINT chk_import_row_disposition CHECK (disposition IN ('ACCEPTED', 'REJECTED')),
+    CONSTRAINT fk_import_row_run FOREIGN KEY (tenant_id, job_id, validation_run_id)
+        REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS t_import_identity_registry (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100)  NOT NULL,
+    source_system_id BIGINT NOT NULL,
+    entity_type VARCHAR(24) NOT NULL,
+    lookup_key_version VARCHAR(64) NOT NULL,
+    lookup_digest BINARY(32) NOT NULL,
+    cipher_format_version SMALLINT NOT NULL DEFAULT 1,
+    encryption_key_version VARCHAR(64) NOT NULL,
+    nonce BINARY(12) NOT NULL,
+    identity_ciphertext VARBINARY(512) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'CANDIDATE',
+    first_job_id BIGINT NOT NULL,
+    first_validation_run_id BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_import_identity_namespace (tenant_id, source_system_id, entity_type, lookup_digest),
+    UNIQUE KEY uk_import_identity_tenant_id (tenant_id, id),
+    KEY idx_import_identity_first_job (tenant_id, first_job_id),
+    CONSTRAINT chk_import_identity_entity CHECK (entity_type IN ('CUSTOMER', 'ENGINEER', 'PROJECT', 'PROPOSAL', 'CONTRACT')),
+    CONSTRAINT chk_import_identity_candidate CHECK (status = 'CANDIDATE'),
+    CONSTRAINT chk_import_identity_format CHECK (cipher_format_version = 1),
+    CONSTRAINT fk_import_identity_source FOREIGN KEY (tenant_id, source_system_id)
+        REFERENCES t_import_source_system (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_identity_provenance FOREIGN KEY (tenant_id, first_job_id, first_validation_run_id, source_system_id, entity_type)
+        REFERENCES t_import_validation_run (tenant_id, job_id, id, source_system_id, entity_type) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+-- V190: NF07 F1（catalog / policy / hold projection / DSAR request）。schema-privacy-f1-h2.sql と同じ定義。
+-- 共有H2で既存表を落とさないよう CREATE TABLE IF NOT EXISTS とする（DSAR表は相互FKを持つため DROP しない）。
+CREATE TABLE IF NOT EXISTS m_pii_data_element (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100) NOT NULL DEFAULT 'default',
+  data_element_id     VARCHAR(128) NOT NULL,
+  storage_kind        VARCHAR(20)  NOT NULL,
+  storage_ref         VARCHAR(255) NOT NULL,
+  data_class          VARCHAR(50)  NOT NULL DEFAULT 'UNKNOWN',
+  owner_state         VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
+  owner_ref           VARCHAR(100),
+  provider_id         VARCHAR(100),
+  subject_attribution VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
+  third_party_flag    TINYINT      NOT NULL DEFAULT 1,
+  inventory_status    VARCHAR(30)  NOT NULL DEFAULT 'UNKNOWN',
+  inventory_ref       VARCHAR(255),
+  created_at          DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at          DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  deleted_flag        TINYINT      NOT NULL DEFAULT 0,
+  CONSTRAINT uk_pii_data_element UNIQUE (tenant_id, data_element_id),
+  CONSTRAINT chk_pii_data_element_attribution
+    CHECK (subject_attribution IN ('ATTRIBUTABLE', 'NOT_ATTRIBUTABLE', 'NO_PERSONAL_DATA', 'UNKNOWN')),
+  CONSTRAINT chk_pii_data_element_storage_kind
+    CHECK (storage_kind IN ('DB_COLUMN', 'FILE_OBJECT', 'AI_PAYLOAD', 'LOG_OR_BACKUP')),
+  CONSTRAINT chk_pii_data_element_inventory
+    CHECK (inventory_status IN ('CONFIRMED_TECHNICAL', 'PROVISIONAL', 'UNKNOWN'))
+);
+
+CREATE TABLE IF NOT EXISTS m_retention_policy (
+  id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id               VARCHAR(100) NOT NULL,
+  policy_id               VARCHAR(128) NOT NULL,
+  policy_revision         VARCHAR(64)  NOT NULL,
+  module_code             VARCHAR(50)  NOT NULL,
+  legal_entity_id         BIGINT,
+  data_element_id         VARCHAR(128) NOT NULL,
+  target_action           VARCHAR(50)  NOT NULL,
+  target_provider         VARCHAR(100) NOT NULL,
+  status                  VARCHAR(20)  NOT NULL DEFAULT 'CANDIDATE',
+  current_key             VARCHAR(512) GENERATED ALWAYS AS (
+                            CASE WHEN status = 'CURRENT'
+                                 THEN CONCAT_WS('|', tenant_id, module_code,
+                                                CAST(COALESCE(legal_entity_id, 0) AS VARCHAR(20)),
+                                                data_element_id, target_action, target_provider)
+                                 ELSE NULL END),
+  envelope_schema_version INT          NOT NULL,
+  envelope_canonical      BLOB         NOT NULL,
+  envelope_signature      VARBINARY(1024) NOT NULL,
+  envelope_digest         CHAR(64)     NOT NULL,
+  authority_id            VARCHAR(100) NOT NULL,
+  key_id                  VARCHAR(100) NOT NULL,
+  registered_by           BIGINT       NOT NULL,
+  registered_at           DATETIME(6)  NOT NULL,
+  activated_by            BIGINT,
+  activated_at            DATETIME(6),
+  row_version             BIGINT       NOT NULL DEFAULT 0,
+  CONSTRAINT uk_retention_policy_revision UNIQUE (tenant_id, policy_id, policy_revision),
+  CONSTRAINT uk_retention_policy_current UNIQUE (current_key),
+  CONSTRAINT chk_retention_policy_status CHECK (status IN ('CANDIDATE', 'CURRENT', 'SUPERSEDED', 'REVOKED')),
+  CONSTRAINT chk_retention_policy_activation
+    CHECK (status <> 'CURRENT' OR (activated_by IS NOT NULL AND activated_at IS NOT NULL AND activated_by <> registered_by)),
+  CONSTRAINT chk_retention_policy_digest CHECK (CHAR_LENGTH(envelope_digest) = 64)
+);
+
+CREATE INDEX IF NOT EXISTS idx_retention_policy_lookup
+  ON m_retention_policy (tenant_id, module_code, data_element_id, target_action, target_provider, status);
+
+CREATE TABLE IF NOT EXISTS t_legal_hold (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100) NOT NULL,
+  hold_id             VARCHAR(64)  NOT NULL,
+  target_type         VARCHAR(20)  NOT NULL,
+  subject_ref         VARCHAR(128),
+  data_element_id     VARCHAR(128),
+  hold_kind           VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
+  status              VARCHAR(20)  NOT NULL,
+  reason_code         VARCHAR(50)  NOT NULL,
+  reason_hash         CHAR(64)     NOT NULL,
+  ticket_ref          VARCHAR(100) NOT NULL,
+  requested_by        BIGINT       NOT NULL,
+  requested_at        DATETIME(6)  NOT NULL,
+  journal_revision    BIGINT       NOT NULL,
+  journal_event_hash  CHAR(64)     NOT NULL,
+  released_at         DATETIME(6),
+  CONSTRAINT uk_legal_hold UNIQUE (tenant_id, hold_id),
+  CONSTRAINT chk_legal_hold_target
+    CHECK ((target_type = 'SUBJECT' AND subject_ref IS NOT NULL AND data_element_id IS NULL)
+        OR (target_type = 'DATA_ELEMENT' AND data_element_id IS NOT NULL AND subject_ref IS NULL)),
+  CONSTRAINT chk_legal_hold_status CHECK (status IN ('ACTIVE', 'RELEASED')),
+  CONSTRAINT chk_legal_hold_release CHECK ((status = 'RELEASED') = (released_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_legal_hold_subject ON t_legal_hold (tenant_id, subject_ref, status);
+CREATE INDEX IF NOT EXISTS idx_legal_hold_element ON t_legal_hold (tenant_id, data_element_id, status);
+
+CREATE TABLE IF NOT EXISTS t_privacy_projection_state (
+  tenant_id            VARCHAR(100) NOT NULL,
+  journal_id           VARCHAR(64)  NOT NULL,
+  engaged_at           DATETIME(6)  NOT NULL,
+  last_applied_seq     BIGINT       NOT NULL DEFAULT 0,
+  last_applied_hash    CHAR(64),
+  pending_command_id   VARCHAR(64),
+  pending_since        DATETIME(6),
+  verified_at          DATETIME(6),
+  row_version          BIGINT       NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, journal_id),
+  CONSTRAINT chk_projection_pending CHECK ((pending_command_id IS NULL) = (pending_since IS NULL)),
+  CONSTRAINT chk_projection_seq CHECK (last_applied_seq >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS t_privacy_request (
+  id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id                VARCHAR(100) NOT NULL,
+  request_no               VARCHAR(40)  NOT NULL,
+  request_type             VARCHAR(20)  NOT NULL,
+  status                   VARCHAR(30)  NOT NULL,
+  channel                  VARCHAR(20)  NOT NULL,
+  received_at              DATETIME(6)  NOT NULL,
+  due_date                 DATE,
+  intake_ticket_ref        VARCHAR(128) NOT NULL,
+  identity_state           VARCHAR(20)  NOT NULL DEFAULT 'UNVERIFIED',
+  identity_evidence_ref    VARCHAR(128),
+  identity_rule_ref        VARCHAR(128),
+  identity_verified_by     BIGINT,
+  identity_verified_at     DATETIME(6),
+  case_owner_id            BIGINT,
+  scope_snapshot_hash      CHAR(64),
+  prepared_by              BIGINT,
+  approved_by              BIGINT,
+  approved_at              DATETIME(6),
+  approved_package_id      BIGINT,
+  approved_content_sha256  CHAR(64),
+  delivered_by             BIGINT,
+  delivered_at             DATETIME(6),
+  delivery_method          VARCHAR(20),
+  delivery_evidence_ref    VARCHAR(128),
+  reopen_of_request_id     BIGINT,
+  row_version              BIGINT       NOT NULL DEFAULT 0,
+  created_by               BIGINT       NOT NULL,
+  created_at               DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at               DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  deleted_flag             TINYINT      NOT NULL DEFAULT 0,
+  CONSTRAINT uk_privacy_request_no UNIQUE (tenant_id, request_no),
+  CONSTRAINT uk_privacy_request_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_privacy_request_sod
+    CHECK (approved_by IS NULL OR (prepared_by IS NOT NULL AND approved_by <> prepared_by)),
+  CONSTRAINT chk_privacy_request_approval_binding
+    CHECK ((approved_by IS NULL AND approved_at IS NULL AND approved_package_id IS NULL AND approved_content_sha256 IS NULL)
+        OR (approved_by IS NOT NULL AND approved_at IS NOT NULL AND approved_package_id IS NOT NULL
+            AND approved_content_sha256 IS NOT NULL)),
+  CONSTRAINT chk_privacy_request_type
+    CHECK (request_type IN ('ACCESS', 'CORRECTION', 'DELETION', 'RESTRICTION', 'OBJECTION')),
+  CONSTRAINT chk_privacy_request_identity CHECK (identity_state IN ('UNVERIFIED', 'AMBIGUOUS', 'VERIFIED'))
+);
+
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS fk_privacy_request_reopen
+  FOREIGN KEY (tenant_id, reopen_of_request_id) REFERENCES t_privacy_request (tenant_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_privacy_request_status ON t_privacy_request (tenant_id, status, due_date);
+
+CREATE TABLE IF NOT EXISTS t_privacy_request_subject_link (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  request_id        BIGINT       NOT NULL,
+  subject_ref       VARCHAR(128) NOT NULL,
+  link_state        VARCHAR(20)  NOT NULL,
+  resolved_by       BIGINT,
+  resolved_at       DATETIME(6),
+  resolution_code   VARCHAR(50),
+  CONSTRAINT uk_privacy_subject_link UNIQUE (tenant_id, request_id, subject_ref),
+  CONSTRAINT chk_privacy_subject_link_state CHECK (link_state IN ('CANDIDATE', 'SELECTED', 'REJECTED')),
+  CONSTRAINT fk_privacy_subject_link_request FOREIGN KEY (tenant_id, request_id)
+    REFERENCES t_privacy_request (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS t_privacy_action (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  request_id        BIGINT       NOT NULL,
+  action_type       VARCHAR(20)  NOT NULL,
+  provider_id       VARCHAR(100),
+  data_element_id   VARCHAR(128),
+  status            VARCHAR(20)  NOT NULL,
+  idempotency_key   VARCHAR(128) NOT NULL,
+  claim_token       VARCHAR(64),
+  lease_until       DATETIME(6),
+  result_count      INT,
+  result_hash       CHAR(64),
+  blocked_reason    VARCHAR(50),
+  evidence_ref      VARCHAR(128),
+  row_version       BIGINT       NOT NULL DEFAULT 0,
+  created_at        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_privacy_action_idem UNIQUE (tenant_id, idempotency_key),
+  CONSTRAINT chk_privacy_action_type CHECK (action_type IN ('SEARCH', 'EXPORT_DRAFT', 'MANUAL_ACTION')),
+  CONSTRAINT chk_privacy_action_status
+    CHECK (status IN ('PENDING', 'CLAIMED', 'SUCCEEDED', 'BLOCKED', 'UNKNOWN', 'FAILED')),
+  CONSTRAINT fk_privacy_action_request FOREIGN KEY (tenant_id, request_id)
+    REFERENCES t_privacy_request (tenant_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_privacy_action_request ON t_privacy_action (tenant_id, request_id, status);
+
+CREATE TABLE IF NOT EXISTS t_privacy_export_package (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id       VARCHAR(100) NOT NULL,
+  request_id      BIGINT       NOT NULL,
+  stored_name     VARCHAR(255) NOT NULL,
+  content_sha256  CHAR(64)     NOT NULL,
+  size_bytes      BIGINT       NOT NULL,
+  status          VARCHAR(20)  NOT NULL,
+  purge_after     DATETIME(6)  NOT NULL,
+  created_by      BIGINT       NOT NULL,
+  created_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  approved_by     BIGINT,
+  approved_at     DATETIME(6),
+  purged_at       DATETIME(6),
+  CONSTRAINT uk_privacy_export_package UNIQUE (tenant_id, stored_name),
+  CONSTRAINT uk_privacy_export_package_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT uk_privacy_export_package_request UNIQUE (tenant_id, id, request_id),
+  CONSTRAINT chk_privacy_export_package_sod CHECK (approved_by IS NULL OR approved_by <> created_by),
+  CONSTRAINT chk_privacy_export_package_approval CHECK ((approved_by IS NULL) = (approved_at IS NULL)),
+  CONSTRAINT chk_privacy_export_package_status CHECK (status IN ('DRAFT', 'APPROVED', 'DELIVERED', 'PURGED')),
+  CONSTRAINT chk_privacy_export_package_size CHECK (size_bytes >= 0),
+  CONSTRAINT fk_privacy_export_request FOREIGN KEY (tenant_id, request_id)
+    REFERENCES t_privacy_request (tenant_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_privacy_export_package_stored_name ON t_privacy_export_package (stored_name);
+
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS fk_privacy_request_approved_package
+  FOREIGN KEY (tenant_id, approved_package_id, id) REFERENCES t_privacy_export_package (tenant_id, id, request_id);
+
+-- V195（NF01 B0 / W3-18）: 二者確認coordinatorの7表。schema-nf01-dual-confirmation-h2.sql と同じ定義（triggerは置かない）。
+-- 本fileが sys_user・m_organization_unit を DROP ... CASCADE で作り直すと、それらへのB0のFKも外れるため、
+-- 表の作成と分けた ADD CONSTRAINT IF NOT EXISTS で付け直す（t_lifecycle_case・t_lifecycle_task・t_document_version はreplayが作る）。
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_submission (
+    id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id               VARCHAR(100)  NOT NULL,
+    case_id                 BIGINT        NOT NULL,
+    task_id                 BIGINT        NOT NULL,
+    engineer_id             BIGINT        NOT NULL,
+    task_generation         BIGINT        NOT NULL,
+    revision                INT           NOT NULL,
+    submitter_user_id       BIGINT        NOT NULL,
+    submitter_role_snapshot VARCHAR(30)   NOT NULL,
+    global_epoch            BIGINT        NOT NULL,
+    submitter_actor_epoch   BIGINT        NOT NULL,
+    engineer_scope_epoch    BIGINT        NOT NULL,
+    task_version_snapshot   INT           NOT NULL,
+    evidence_canonical_json LONGTEXT      NOT NULL,
+    evidence_sha256         CHAR(64)      NOT NULL,
+    request_sha256          CHAR(64)      NOT NULL,
+    business_comment        VARCHAR(1000),
+    created_at              DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT uk_dual_submission_revision UNIQUE (tenant_id, task_id, task_generation, revision),
+    CONSTRAINT uk_dual_submission_binding UNIQUE (tenant_id, task_id, task_generation, revision, id, evidence_sha256),
+    CONSTRAINT uk_dual_submission_tenant_id UNIQUE (tenant_id, id),
+    CONSTRAINT ck_dual_submission_nonneg CHECK (task_generation >= 0 AND revision > 0
+        AND global_epoch >= 0 AND submitter_actor_epoch >= 0 AND engineer_scope_epoch >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_submission_document (
+    tenant_id                  VARCHAR(100) NOT NULL,
+    submission_id              BIGINT       NOT NULL,
+    document_id                BIGINT       NOT NULL,
+    document_version_id        BIGINT       NOT NULL,
+    version_no                 INT          NOT NULL,
+    sha256                     CHAR(64)     NOT NULL,
+    evidence_eligibility_epoch BIGINT       NOT NULL,
+    PRIMARY KEY (submission_id, document_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_submission_org_fence (
+    tenant_id       VARCHAR(100) NOT NULL,
+    submission_id   BIGINT       NOT NULL,
+    organization_id BIGINT       NOT NULL,
+    org_scope_epoch BIGINT       NOT NULL,
+    PRIMARY KEY (submission_id, organization_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_confirmation (
+    id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id               VARCHAR(100)  NOT NULL,
+    case_id                 BIGINT        NOT NULL,
+    task_id                 BIGINT        NOT NULL,
+    task_generation         BIGINT        NOT NULL,
+    submission_id           BIGINT        NOT NULL,
+    submission_revision     INT           NOT NULL,
+    evidence_sha256         CHAR(64)      NOT NULL,
+    confirmer_user_id       BIGINT        NOT NULL,
+    confirmer_role_snapshot VARCHAR(30)   NOT NULL,
+    global_epoch            BIGINT        NOT NULL,
+    confirmer_actor_epoch   BIGINT        NOT NULL,
+    decision                VARCHAR(10)   NOT NULL,
+    decision_comment        VARCHAR(1000),
+    decided_at              DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT uk_dual_confirmation_submission UNIQUE (tenant_id, submission_id),
+    CONSTRAINT ck_dual_confirmation_decision CHECK (decision IN ('CONFIRMED', 'REJECTED'))
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_projection (
+    tenant_id          VARCHAR(100) NOT NULL,
+    task_id            BIGINT       NOT NULL,
+    case_id            BIGINT       NOT NULL,
+    task_generation    BIGINT       NOT NULL,
+    revision           INT          NOT NULL,
+    submission_id      BIGINT       NOT NULL,
+    evidence_sha256    CHAR(64)     NOT NULL,
+    state              VARCHAR(12)  NOT NULL,
+    projection_version BIGINT       NOT NULL DEFAULT 0,
+    updated_at         DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (tenant_id, task_id),
+    CONSTRAINT ck_dual_projection_state CHECK (state IN ('PENDING', 'CONFIRMED', 'REJECTED'))
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_idempotency (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       VARCHAR(100) NOT NULL,
+    case_id         BIGINT       NOT NULL,
+    task_id         BIGINT       NOT NULL,
+    task_generation BIGINT       NOT NULL,
+    operation       VARCHAR(10)  NOT NULL,
+    actor_user_id   BIGINT       NOT NULL,
+    idempotency_key VARCHAR(190) NOT NULL,
+    request_sha256  CHAR(64)     NOT NULL,
+    submission_id   BIGINT       NOT NULL,
+    confirmation_id BIGINT,
+    created_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT uk_dual_idempotency UNIQUE (tenant_id, task_id, task_generation, operation, actor_user_id, idempotency_key),
+    CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM')),
+    CONSTRAINT ck_dual_idem_key CHECK (CHAR_LENGTH(idempotency_key) >= 1
+        AND NOT REGEXP_LIKE(idempotency_key, '[^A-Za-z0-9._~-]', 'c'))
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_dual_event (
+    id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id               VARCHAR(100) NOT NULL,
+    case_id                 BIGINT,
+    task_id                 BIGINT,
+    task_generation         BIGINT,
+    submission_id           BIGINT,
+    requested_task_id       BIGINT,
+    requested_submission_id BIGINT,
+    actor_user_id           BIGINT       NOT NULL,
+    operation               VARCHAR(10)  NOT NULL,
+    event_type              VARCHAR(20)  NOT NULL,
+    reason_code             VARCHAR(60),
+    http_status             SMALLINT,
+    attempt_count           TINYINT,
+    occurred_at             DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT ck_dual_event_type CHECK (event_type IN ('SUBMITTED', 'SUPERSEDED', 'CONFIRMED', 'REJECTED', 'DENIED'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dual_event_task ON t_lifecycle_dual_event (tenant_id, task_id, occurred_at);
+
+-- sys_user (tenant_id, id) の一意制約を明示する（MySQLのV165 uk_sys_user_tenant_id に対応。H2のMySQL modeが参照列へ
+-- 暗黙に作る一意制約に頼らない）。sys_user はV1のreplayと engineer-schema-h2.sql が作り直すため、FKより先に毎回付ける。
+ALTER TABLE sys_user ADD CONSTRAINT IF NOT EXISTS uk_sys_user_tenant_id UNIQUE (tenant_id, id);
+
+-- 提出
+ALTER TABLE t_lifecycle_dual_submission ADD CONSTRAINT IF NOT EXISTS fk_dual_submission_case
+    FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id);
+ALTER TABLE t_lifecycle_dual_submission ADD CONSTRAINT IF NOT EXISTS fk_dual_submission_task
+    FOREIGN KEY (case_id, task_id) REFERENCES t_lifecycle_task (case_id, id);
+ALTER TABLE t_lifecycle_dual_submission ADD CONSTRAINT IF NOT EXISTS fk_dual_submission_submitter
+    FOREIGN KEY (tenant_id, submitter_user_id) REFERENCES sys_user (tenant_id, id);
+-- 提出文書
+ALTER TABLE t_lifecycle_dual_submission_document ADD CONSTRAINT IF NOT EXISTS fk_dual_doc_submission
+    FOREIGN KEY (tenant_id, submission_id) REFERENCES t_lifecycle_dual_submission (tenant_id, id);
+ALTER TABLE t_lifecycle_dual_submission_document ADD CONSTRAINT IF NOT EXISTS fk_dual_doc_version
+    FOREIGN KEY (tenant_id, document_id, document_version_id) REFERENCES t_document_version (tenant_id, document_id, id);
+-- 提出時の組織集合
+ALTER TABLE t_lifecycle_dual_submission_org_fence ADD CONSTRAINT IF NOT EXISTS fk_dual_org_submission
+    FOREIGN KEY (tenant_id, submission_id) REFERENCES t_lifecycle_dual_submission (tenant_id, id);
+ALTER TABLE t_lifecycle_dual_submission_org_fence ADD CONSTRAINT IF NOT EXISTS fk_dual_org_unit
+    FOREIGN KEY (organization_id) REFERENCES m_organization_unit (id);
+-- 確認・差戻し
+ALTER TABLE t_lifecycle_dual_confirmation ADD CONSTRAINT IF NOT EXISTS fk_dual_confirmation_submission
+    FOREIGN KEY (tenant_id, task_id, task_generation, submission_revision, submission_id, evidence_sha256)
+    REFERENCES t_lifecycle_dual_submission (tenant_id, task_id, task_generation, revision, id, evidence_sha256);
+ALTER TABLE t_lifecycle_dual_confirmation ADD CONSTRAINT IF NOT EXISTS fk_dual_confirmation_confirmer
+    FOREIGN KEY (tenant_id, confirmer_user_id) REFERENCES sys_user (tenant_id, id);
+-- 現在状態
+ALTER TABLE t_lifecycle_dual_projection ADD CONSTRAINT IF NOT EXISTS fk_dual_projection_case
+    FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id);
+ALTER TABLE t_lifecycle_dual_projection ADD CONSTRAINT IF NOT EXISTS fk_dual_projection_task
+    FOREIGN KEY (case_id, task_id) REFERENCES t_lifecycle_task (case_id, id);
+ALTER TABLE t_lifecycle_dual_projection ADD CONSTRAINT IF NOT EXISTS fk_dual_projection_submission
+    FOREIGN KEY (tenant_id, task_id, task_generation, revision, submission_id, evidence_sha256)
+    REFERENCES t_lifecycle_dual_submission (tenant_id, task_id, task_generation, revision, id, evidence_sha256);
+-- 冪等性
+ALTER TABLE t_lifecycle_dual_idempotency ADD CONSTRAINT IF NOT EXISTS fk_dual_idem_case
+    FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id);
+ALTER TABLE t_lifecycle_dual_idempotency ADD CONSTRAINT IF NOT EXISTS fk_dual_idem_actor
+    FOREIGN KEY (tenant_id, actor_user_id) REFERENCES sys_user (tenant_id, id);
+
+-- V201（NF07 F1 の状態・区分の列の CHECK）。schema-privacy-status-check-h2.sql と同じ定義（共有H2での再実行に備え IF NOT EXISTS）。
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_status
+  CHECK (status IN ('REQUESTED', 'IDENTITY_VERIFIED', 'SCOPED', 'PREVIEWED', 'APPROVAL_PENDING', 'APPROVED', 'CLAIMED',
+                    'DISPATCH_AUTHORIZED', 'EXECUTING', 'CONFIRMED', 'BLOCKED', 'UNKNOWN', 'PARTIAL_FAILED', 'CANCELLED'));
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_channel
+  CHECK (channel IN ('EMAIL', 'POSTAL', 'WEB_FORM', 'PHONE', 'IN_PERSON', 'OTHER'));
+ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_delivery_method
+  CHECK (delivery_method IS NULL OR delivery_method IN ('EMAIL', 'POSTAL', 'IN_PERSON', 'SECURE_TRANSFER', 'OTHER'));
+ALTER TABLE t_legal_hold ADD CONSTRAINT IF NOT EXISTS chk_legal_hold_kind CHECK (hold_kind IN ('UNKNOWN'));

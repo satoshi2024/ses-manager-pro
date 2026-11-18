@@ -5,6 +5,8 @@
 # ========================================
 
 server:
+  # 転送ヘッダーの清浄化filterはframeworkのときだけ有効（FWD-SANITIZE）。native/noneは起動時に拒否する。
+  forward-headers-strategy: framework
   servlet:
     session:
       cookie:
@@ -13,13 +15,24 @@ server:
         same-site: lax
 
 spring:
-  # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
+  # 配備決定P-3: 本番のmigrationは全停止中に専用Flyway job（mvn -Pprod-migrate、設定は
+  # ops/flyway/flyway-prod.conf）だけが実行し、アプリinstanceは起動時にmigrateしない。
+  # enabled=true にしても ProductionSchemaGuardConfiguration がmigrateを拒否して起動を止める。
+  # locations は起動時schema guard（ProductionSchemaVersionGuard）がartifactのmigrationを解決する範囲で、
+  # jobのflyway.locationsと同じ値に固定する（ProductionFlywayJobConfigurationTestが一致を確認する）。
   flyway:
+    enabled: false
     locations: classpath:db/migration,classpath:db/migration-prod
+
+# 実プロバイダ実装は未配線のため、prod は明示設定なしで fail-closed provider を使う。
+external-account:
+  provider: ${EXTERNAL_ACCOUNT_PROVIDER:none}
 
 integration:
   hub:
-    # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。
+    # 既定は両方向OFF・provider.mode=MOCK（現行DG-05は本番開放を禁止）。開放はinbound/outboundを別々に、
+    # 署名済みDG-05決定（DG-05-IN-*/DG-05-OUT-*）と承認値を環境から注入し、方向別validatorを通過した場合だけ。
+    # outboundはHTTPS・方向別承認・truststore・再開時隔離の全条件が必要。STUB/LOOPBACKは本番で常に拒否する。
     public-api:
       enabled: false
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
@@ -31,6 +44,10 @@ integration:
       fixed-delay-ms: 1000
       connect-timeout-ms: 3000
       read-timeout-ms: 3000
+      dns-timeout-ms: 2000
+      truststore-path: ${INTEGRATION_HUB_TRUSTSTORE_PATH:}
+      truststore-password: ${INTEGRATION_HUB_TRUSTSTORE_PASSWORD:}
+      truststore-type: PKCS12
     provider:
       mode: MOCK
 
@@ -43,10 +60,20 @@ logging:
     org.springframework.security: WARN
     # ECS/ALB 排水時のネイティブ Tomcat GracefulShutdown を CloudWatch に残す（カスタム reporter 不要）
     org.springframework.boot.web.embedded.tomcat.GracefulShutdown: INFO
+    # HttpClient5のwire/header logは署名・Idempotency-Key・payloadを出すため、障害調査でDEBUGを上げても出さない
+    # （NF05 TLS P3-3）。NF08 Copilot送信も同じHttpClient5を使う。
+    org.apache.hc.client5.http.wire: "OFF"
+    org.apache.hc.client5.http.headers: "OFF"
 
 app:
   security:
     require-https: true
+    # ALBのsubnet CIDR（カンマ区切り）。TCP peerがこの範囲のときだけX-Forwarded-For/Proto/Portの右端1要素を使う。
+    # 既定値は持たない（未設定なら転送ヘッダーを一切信頼しない）。本番では未設定・IPv4で/16より広い・IPv6で/48より広い指定、
+    # private（10/8・172.16/12・192.168/16）とshared（100.64/10）以外のIPv4、IPv6のloopback・未指定・link-local・multicast、
+    # host部にbitがあるCIDRを起動時に拒否する（ForwardedHeaderProductionValidator。VPCはRFC 1918または100.64/10で設計する前提。
+    # 127.0.0.1は入れない。手順は .kiro/specs/production-launch/forwarded-header-sanitize-notes.md）。
+    trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:true}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:false}
@@ -72,20 +99,65 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+    # 本番初回起動の期限付きbootstrap mode（既定OFF）。enabled=true には期限（offset付きISO-8601、
+    # 現在から24時間以内）が必須で、未設定・期限切れ・24時間超は起動を拒否する。期限を過ぎると再起動しなくても
+    # bootstrap login・bootstrap sessionを拒否する。初回bootstrapの完了後（m_system_config:
+    # security.bootstrap.completed-at が有る状態）に再び有効化するには、承認済みの変更ticket（reopen-ticket）も必要で、
+    # 無ければ起動を拒否する。再開は必須監査 BOOTSTRAP_REOPENED に残る。手順: .kiro/specs/production-launch/deploy-runbook.md §5
+    bootstrap:
+      enabled: ${SECURITY_BOOTSTRAP_ENABLED:false}
+      expires-at: ${SECURITY_BOOTSTRAP_EXPIRES_AT:}
+      reopen-ticket: ${SECURITY_BOOTSTRAP_REOPEN_TICKET:}
   # 一括操作 preview token HMAC（未設定は起動 fail-fast）
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:}
   pwa:
     context-secret: ${PWA_CONTEXT_SECRET:}
+  # NF-06 preview・error exportの行参照HMAC鍵（開発用の既定値を引き継がない）。
+  # NF-06 ONで未設定・形式不正・開発用鍵なら起動失敗（ImportRowReferenceKeyStartupValidator）。OFFなら起動を止めない。
+  import-center:
+    row-reference:
+      hmac-key: ${IMPORT_ROW_REFERENCE_HMAC_KEY:}
   # デジタルインボイス（JP PINT / Peppol。sandbox 未取得時は none で fail-closed）
   digital-invoice:
     # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
     provider: ${DIGITAL_INVOICE_PROVIDER:none}
     webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:}
+  # 機能スイッチ（段階公開）。本番も既定は全てOFF。デプロイ後に1機能ずつ環境変数でONにする（再起動で反映）。
+  # 手順: .kiro/specs/production-launch/feature-switches.md
+  features:
+    nf01:
+      enabled: ${FEATURE_NF01_ENABLED:false}
+    # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
+    nf01-dual-confirmation:
+      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
+      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
+    nf02:
+      enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # 未設定ならportal起票の問い合わせだけをportalへ出す（初回リリース中の社内登録分を出さない）
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
+    nf03:
+      enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
+    nf04:
+      enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06（取込センター画面・API）。ONにする場合はapp.import-center.admissionの署名済み承認設定と
+    # 行参照鍵（IMPORT_ROW_REFERENCE_HMAC_KEY）が必須（不備は起動失敗）。手順: feature-switches.md 4.8
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
+    nf10:
+      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== freee連携（HFP-01） =====
-# 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。
-# redirect-uri はHTTPS固定。URLのHTTPS・公式host検証とclient-id有時の一式検証はコード側(FreeeIntegrationServiceImpl)で実施。
-# client-id未設定でも起動は可能（接続状態はMISCONFIGURED、認可開始時に日本語で拒否）。
+# prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。
+# 使う場合だけ FREEE_ENABLED=true にし、FREEE_CLIENT_ID/SECRET/REDIRECT_URI(HTTPS)/TOKEN_ENCRYPTION_KEY の一式を
+# secret storeから供給する（欠けると起動しない: FreeeAccountingProvider・FreeeIntegrationServiceImpl）。
+# 公式host・HTTPSの検証はONでもOFFでも行う。一覧: .kiro/specs/production-launch/deploy-runbook.md §1.0。
 freee:
+  enabled: ${FREEE_ENABLED:false}
   redirect-uri: ${FREEE_REDIRECT_URI:}

@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class ExternalAccountReferenceDto {
     private Long id;
     private Long systemId;
+    private Long legalEntityId;
     private String accountIdentifier;
     private String assigneeType;
     private Long assigneeId;
@@ -39,6 +40,7 @@ public class ExternalAccountReferenceDto {
         ExternalAccountReferenceDto dto = new ExternalAccountReferenceDto();
         dto.id = source.getId();
         dto.systemId = source.getSystemId();
+        dto.legalEntityId = source.getLegalEntityId();
         dto.accountIdentifier = source.getAccountIdentifier();
         dto.assigneeType = source.getAssigneeType();
         dto.assigneeId = source.getAssigneeId();
@@ -101,6 +103,13 @@ public class ExternalAccountReferenceDto {
         if (confirmed && dto.actorType == null) dto.actorType = ActorType.LEGACY_UNRESOLVED.name();
         if (confirmed && dto.confirmationSource == null) dto.confirmationSource = ConfirmationSource.LEGACY_UNRESOLVED.name();
         setDisplayValues(dto);
+        return dto;
+    }
+
+    /** NF01の追加の未処理一覧だけをマスクし、NF09の既存応答・CSVは原値を維持する。 */
+    public static ExternalAccountReferenceDto forPendingRevocation(ExternalAccountReference source) {
+        ExternalAccountReferenceDto dto = from(source);
+        dto.accountIdentifier = com.ses.service.ExternalAccountRevocationStates.maskIdentifier(source.getAccountIdentifier());
         return dto;
     }
 

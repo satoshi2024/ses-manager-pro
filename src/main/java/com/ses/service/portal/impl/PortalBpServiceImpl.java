@@ -112,7 +112,7 @@ public class PortalBpServiceImpl implements PortalBpService {
         entity.setStatus(AVAILABILITY_PENDING);
         entity.setRemarks(request.getRemarks());
         // portal principalは内部組織scopeを持たないが、NF05書込み境界のため権威法人を刻印する。
-        // 硬编码 1L は禁止。bean 欠落は 503、解決不能は LegalEntityContextService 側で fail-closed。
+        // 1L のハードコードは禁止。bean 欠落は 503、解決不能は LegalEntityContextService 側で fail-closed。
         if (legalEntityContextService == null) {
             throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }

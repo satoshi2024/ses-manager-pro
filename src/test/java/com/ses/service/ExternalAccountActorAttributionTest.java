@@ -315,7 +315,8 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         mockClient.setMockStatus(reference.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
         externalAccountService.requestRevokeWithIdempotency(
                 reference.getId(), "poll-test-key-" + reference.getId(), 1L);
-        // 初回確認を未確定にしてから、2つのpoll workerを同時に起動する。
+        // 要求はoutboxで送信済み。確認pollだけを並行させる。
+        jdbcTemplate.update("UPDATE t_external_account_reference SET external_sync_status = 'REVOKE_SENT' WHERE id = ?", reference.getId());
         mockClient.setMockStatus(reference.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
     }
 
@@ -371,7 +372,8 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         assertThat(confirmed.getConfirmationSource()).isIn(
                 ConfirmationSource.MANUAL_API.name(), ConfirmationSource.SCHEDULER_POLL.name());
         assertThat(assetEventMapper.selectList(null).stream()
-                .filter(event -> referenceId.equals(event.getReferenceId()))).hasSize(1);
+                .filter(event -> referenceId.equals(event.getReferenceId()))
+                .filter(event -> "EXTERNAL_ACCOUNT_REVOKE_CONFIRMED".equals(event.getEventType()))).hasSize(1);
         assertThat(auditLogMapper.selectList(null).stream()
                 .filter(log -> referenceId.equals(log.getReferenceId()))).hasSize(1);
     }

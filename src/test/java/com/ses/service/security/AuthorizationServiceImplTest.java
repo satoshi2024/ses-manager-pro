@@ -144,6 +144,79 @@ class AuthorizationServiceImplTest {
         assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "proposal.view"));
     }
 
+    // ---------------------------------------------------------------- NF07 W-5（§6.2）
+
+    @Test
+    void privacy系actionは管理者role以外ならgroupを見ずに拒否する() {
+        for (String role : List.of("営業", "HR", "マネージャー", "要員")) {
+            authenticate(7L, role);
+            assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.view"), role);
+            assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(),
+                    "privacy.dsar.export"), role);
+        }
+        verifyNoInteractions(userPermissionGroupMapper, permissionGroupActionMapper, permissionGroupMapper);
+    }
+
+    @Test
+    void privacy系actionは管理者でも短絡許可せずgroup評価で拒否優先になる() {
+        authenticate(7L, "管理者");
+        UserPermissionGroup assignment = new UserPermissionGroup();
+        assignment.setGroupId(1L);
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of(assignment));
+        PermissionGroup group = new PermissionGroup();
+        group.setId(1L);
+        group.setEnabled(1);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
+        // role-admin 相当: privacy.* の deny に当たる
+        when(permissionGroupActionMapper.selectCount(any())).thenReturn(1L);
+
+        assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.policy.view"));
+        org.mockito.Mockito.verify(permissionGroupActionMapper).selectCount(any());
+    }
+
+    @Test
+    void privacy系actionは拒否が無く明示許可がある管理者だけ許可する() {
+        authenticate(7L, "管理者");
+        UserPermissionGroup assignment = new UserPermissionGroup();
+        assignment.setGroupId(6L);
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of(assignment));
+        PermissionGroup group = new PermissionGroup();
+        group.setId(6L);
+        group.setEnabled(1);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
+        // 1回目: 拒否照合（0件）、2回目: 許可照合（privacy-admin の privacy.* が1件）
+        when(permissionGroupActionMapper.selectCount(any())).thenReturn(0L, 1L);
+
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.policy.view"));
+        org.mockito.Mockito.verify(permissionGroupActionMapper, org.mockito.Mockito.times(2)).selectCount(any());
+    }
+
+    @Test
+    void group未割当の管理者はlegacy_fallbackでもprivacyを使えず他の管理者actionは維持する() {
+        authenticate(7L, "管理者");
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of());
+
+        assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.view"));
+        assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.unknown.view"));
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "dashboard.view"));
+    }
+
+    @Test
+    void privacy系actionの権限DB障害は拒否する() {
+        authenticate(7L, "管理者");
+        when(userPermissionGroupMapper.selectList(any())).thenThrow(new IllegalStateException("db unavailable"));
+
+        assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy.view"));
+    }
+
+    @Test
+    void privacy接頭辞は区切りまで一致した場合だけ適用し別resourceを巻き込まない() {
+        authenticate(7L, "管理者");
+        // privacy-x は privacy ではないので管理者の短絡許可がそのまま効く（DBを見ない）
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "privacy-x.view"));
+        verifyNoInteractions(userPermissionGroupMapper, permissionGroupActionMapper, permissionGroupMapper);
+    }
+
     private AuthorizationServiceImpl service() {
         OidcSecurityProperties properties = new OidcSecurityProperties();
         properties.setTenantId("default");

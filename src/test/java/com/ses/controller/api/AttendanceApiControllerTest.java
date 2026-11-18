@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** T070のAPI認可・CSRF境界を確認するL2定向test。 */
+/** T070のAPI認可・CSRF境界を確認するL2対象限定test。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")

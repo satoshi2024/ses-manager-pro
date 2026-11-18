@@ -3,12 +3,14 @@ package com.ses.service.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.service.FreeeIntegrationService;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -38,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ActiveProfiles("test")
 @DisplayName("REV-004: 並行refreshの外部使用は1回（実MySQL）")
 class FreeeConcurrentRefreshTest {
@@ -63,6 +66,13 @@ class FreeeConcurrentRefreshTest {
             OAUTH_SERVER.start();
         } catch (IOException e) {
             throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    @AfterAll
+    static void stopOAuthServer() {
+        if (OAUTH_SERVER != null) {
+            OAUTH_SERVER.stop(0);
         }
     }
 

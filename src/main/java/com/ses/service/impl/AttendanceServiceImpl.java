@@ -423,7 +423,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     /**
      * 入力された休憩区間（時刻）を勤務開始基準のoffsetへ変換する（方式A）。
-     * 退勤時刻を跨ぐ区間は跨夜休憩として翌日側へ繰り上げ、日付を曖昧にしない。
+     * 退勤時刻を跨ぐ区間は日跨ぎの休憩として翌日側へ繰り上げ、日付を曖昧にしない。
      */
     private List<AttendanceCalculator.BreakInterval> toBreakIntervals(AttendanceDayRequest request) {
         List<AttendanceBreakRequest> input = request.getBreaks();

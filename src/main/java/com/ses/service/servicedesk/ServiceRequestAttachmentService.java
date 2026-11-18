@@ -51,6 +51,10 @@ public class ServiceRequestAttachmentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private PortalRateLimiter internalUploadRateLimiter;
 
+    /** portal uploadで扱ってよい問い合わせの範囲。未注入ならportal起票のみ（fail-closed）。内部uploadは使わない。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PortalServiceRequestVisibilityPolicy portalVisibilityPolicy;
+
     public ServiceRequestAttachmentService(ServiceRequestMapper requestMapper,
                                            ServiceCommentMapper commentMapper,
                                            ServiceAttachmentLinkMapper attachmentLinkMapper,
@@ -87,10 +91,18 @@ public class ServiceRequestAttachmentService {
         String tenantId = currentTenant();
         ServiceRequest request = requestId == null ? null : requestMapper.selectByIdAndTenant(requestId, tenantId);
         if (request == null || !tenantId.equals(request.getTenantId())
-                || (portal && !java.util.Objects.equals(request.getCustomerId(), customerId))) {
+                || (portal && !java.util.Objects.equals(request.getCustomerId(), customerId))
+                || (portal && !portalVisibility().isVisible(request,
+                com.ses.service.accounting.AccountingTenantContextHolder.getZoneId()))) {
+            // portalへ出さない範囲（初回リリース中の社内登録分等）も他社と同じ404で秘匿する
             throw BusinessException.of(404, "error.notFound");
         }
         return request;
+    }
+
+    private PortalServiceRequestVisibilityPolicy portalVisibility() {
+        return portalVisibilityPolicy != null ? portalVisibilityPolicy
+                : PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY;
     }
 
     private ServiceAttachmentLink upload(ServiceRequest request, Long commentId, MultipartFile file,
@@ -203,8 +215,11 @@ public class ServiceRequestAttachmentService {
     }
 
     private void validateFile(MultipartFile file) {
-        if (file == null || file.isEmpty() || file.getSize() <= 0
-                || file.getSize() > uploadProperties.getServiceRequestMaxFileSizeBytes()) {
+        // 空ファイル（0 byte・未指定）は上限超過ではなく入力誤りとして400で返す（W2 NF06 hardening P3-4）。
+        if (file == null || file.isEmpty() || file.getSize() <= 0) {
+            throw BusinessException.of(400, "error.file.empty");
+        }
+        if (file.getSize() > uploadProperties.getServiceRequestMaxFileSizeBytes()) {
             throw BusinessException.of(413, "error.file.sizeExceeded");
         }
         String type = contentType(file);

@@ -61,6 +61,30 @@ public interface OrganizationScopeService {
     /** 組織所属から導出した要員ID。非管理者では空集合を全件扱いしない。 */
     Set<Long> allowedEngineerIds(LocalDate asOf);
 
+    // ===== NF01 明示actor版（細粒度epoch計画 §4.1。ExplicitActorAuthorizationEvaluator が使う） =====
+    // SecurityContext・ReportScopeContext・request属性のcacheを使わず、DBから読んだactorで上の各メソッドと同じ判定を行う。
+    // 既定実装はfail-closed（全件扱いせず、空集合は呼出側で「該当なし」と扱う）。既存メソッドの挙動は変えない。
+
+    /** {@link #hasFullAccess()} の明示actor版。既定は false（組織scopeを受ける側に倒す）。 */
+    default boolean hasFullAccessFor(String role) {
+        return false;
+    }
+
+    /** {@link #allowedOrganizationIds(LocalDate)} の明示actor版。 */
+    default Set<Long> allowedOrganizationIdsFor(Long userId, String role, LocalDate asOf) {
+        return Set.of();
+    }
+
+    /** {@link #allowedDirectUserIds(LocalDate)} の明示actor版。 */
+    default Set<Long> allowedDirectUserIdsFor(Long userId, String role, LocalDate asOf) {
+        return Set.of();
+    }
+
+    /** {@link #allowedEngineerIds(LocalDate)} の明示actor版。tenantはactorのDB上のtenantを渡す。 */
+    default Set<Long> allowedEngineerIdsFor(String tenantId, Long userId, String role, LocalDate asOf) {
+        return Set.of();
+    }
+
     /** 組織所属から導出した契約ID。契約の要員所属を基準にする。 */
     Set<Long> allowedContractIds(LocalDate asOf);
 

@@ -20,6 +20,7 @@ class IntegrationHubSecretLogScanTest {
             Path.of("src/main/java/com/ses/service/integrationhub"),
             Path.of("src/main/java/com/ses/controller/externalapi"),
             Path.of("src/main/java/com/ses/controller/api/IntegrationHubInboundEventAdminApiController.java"),
+            Path.of("src/main/java/com/ses/controller/api/IntegrationHubOutboundAdminApiController.java"),
             Path.of("src/main/java/com/ses/controller/page/IntegrationHubInboundEventPageController.java"));
 
     private static final List<Pattern> FORBIDDEN_LOG_PATTERNS = List.of(

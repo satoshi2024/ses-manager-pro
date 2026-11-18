@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html th:lang="${#locale.toLanguageTag()}" data-bs-theme="light" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{common.password.change} + ' | ' + #{app.title}">パスワード変更 | SES管理プロ</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="/lib/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="/lib/bootstrap-icons/bootstrap-icons.min.css">
+    <!-- Custom CSS -->
+    <link th:href="@{/css/common.css}" rel="stylesheet">
+
+    <!-- 保存済みテーマの適用（FOUC防止のためhead内で同期実行） -->
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('ses_theme') || 'light';
+                document.documentElement.setAttribute('data-bs-theme', theme);
+                document.documentElement.style.colorScheme = theme;
+            } catch (e) {}
+        })();
+    </script>
+
+    <!-- 初回ログイン時のパスワード変更画面。変更が済むまで他の画面・APIは遮断されるため、
+         sidebar・通知を持つ layout/base は使わない（PasswordChangeEnforcementFilter）。 -->
+    <style>
+        body {
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--ses-font-sans);
+            color: var(--text-primary);
+            padding: 1.5rem;
+        }
+
+        .password-change-card {
+            background: var(--card-bg-glass);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 440px;
+            padding: 2.5rem 2rem;
+        }
+    </style>
+</head>
+<body>
+
+    <main class="password-change-card">
+        <h1 class="h4 fw-bold mb-3">
+            <i class="bi bi-shield-lock me-2" aria-hidden="true"></i><span th:text="#{common.password.change}">パスワード変更</span>
+        </h1>
+        <p class="text-muted small mb-4" th:text="#{common.password.changeRequired}">初回ログインのため、利用を開始する前にパスワードを変更してください。</p>
+
+        <form id="password-change-form" novalidate
+              th:attr="data-msg-mismatch=#{profile.msg.passwordMismatch},data-msg-network=#{error.networkError}">
+            <div class="mb-3">
+                <label for="password-change-current" class="form-label small" th:text="#{common.password.current}">現在のパスワード</label>
+                <input type="password" class="form-control" id="password-change-current" autocomplete="current-password" required autofocus>
+            </div>
+            <div class="mb-3">
+                <label for="password-change-new" class="form-label small" th:text="#{common.password.new}">新しいパスワード</label>
+                <input type="password" class="form-control" id="password-change-new" autocomplete="new-password" required>
+            </div>
+            <div class="mb-3">
+                <label for="password-change-confirm" class="form-label small" th:text="#{common.password.confirmNew}">新しいパスワード(確認)</label>
+                <input type="password" class="form-control" id="password-change-confirm" autocomplete="new-password" required>
+            </div>
+            <div id="password-change-message" class="small text-danger mb-3" role="alert" aria-live="polite"></div>
+            <button type="submit" class="btn btn-primary w-100" id="password-change-submit" th:text="#{common.save}">保存</button>
+        </form>
+
+        <form class="text-center mt-3" th:action="@{/logout}" method="post">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+            <button type="submit" class="btn btn-link text-muted" th:text="#{menu.logout}">ログアウト</button>
+        </form>
+    </main>
+
+    <script th:src="@{/js/modules/password-change.js}"></script>
+</body>
+</html>

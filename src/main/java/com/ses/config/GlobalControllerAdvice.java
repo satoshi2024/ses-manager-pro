@@ -81,6 +81,7 @@ public class GlobalControllerAdvice {
             new NavRoute("/analytics", "/analytics"),
             new NavRoute("/sales-performance", "/sales-performance"),
             new NavRoute("/management-reports", "/management-reports"),
+            new NavRoute("/import-center", "/import-center"),
             new NavRoute("/monthly-closing", "/monthly-closing"),
             new NavRoute("/compliance", "/compliance"),
             new NavRoute("/todo", "/todo"),
@@ -89,11 +90,25 @@ public class GlobalControllerAdvice {
             new NavRoute("/management-accounting", "/management-accounting"),
             new NavRoute("/user", "/user"),
             new NavRoute("/system-config", "/system-config"),
-            new NavRoute("/audit-log", "/audit-log")
+            new NavRoute("/audit-log", "/audit-log"),
+            new NavRoute("/privacy/holds", "/privacy/holds"),
+            new NavRoute("/privacy/dsar", "/privacy/dsar")
     );
+
+    /** NF07 保全 hold の画面の action（privacy-admin だけが許可される）。 */
+    private static final String PRIVACY_HOLD_VIEW_ACTION = "privacy.hold.view";
+    /** NF07 DSAR の画面の action（privacy-admin だけが許可される）。 */
+    private static final String PRIVACY_DSAR_VIEW_ACTION = "privacy.dsar.view";
 
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+
+    /**
+     * 機能スイッチ。スライスでは存在しないためObjectProvider経由で取得し、未取得時は何も隠さない。
+     * 既存の2引数constructorを保つためfield injectionにする（Spring管理外で生成した場合はnull）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private ObjectProvider<com.ses.config.feature.FeatureSwitches> featureSwitchesProvider;
 
     @ModelAttribute("currentUri")
     public String currentUri(HttpServletRequest request) {
@@ -152,10 +167,70 @@ public class GlobalControllerAdvice {
 
     /**
      * ログイン中ユーザーのロールがアクセス可能なメニューキー一覧
-     * サイドバーのメニュー表示可否の判定に使用する
+     * サイドバーのメニュー表示可否の判定に使用する。
+     * 機能スイッチOFFの機能のメニューは、管理者を含む全ロールで除外する（権限ではなく公開可否）。
      */
     @ModelAttribute("allowedMenus")
     public List<String> allowedMenus(Authentication authentication) {
+        List<String> menuKeys = resolveAllowedMenus(authentication);
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        return switches == null ? menuKeys : switches.visibleMenuKeys(menuKeys);
+    }
+
+    /**
+     * 機能スイッチOFFの機能の識別子（例: nf04）。サイドバー以外の埋込み導線
+     * （PWA shell・portalの問い合わせタブ・要員詳細のライフサイクル欄）の表示制御に使う。
+     */
+    @ModelAttribute("disabledFeatures")
+    public java.util.Set<String> disabledFeatures() {
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        return switches == null ? Collections.emptySet() : switches.disabledKeys();
+    }
+
+    /**
+     * NF07 保全 hold の導線を出すか（production-bridge-phased-plan.md §6.8）。{@code allowedMenus} は管理者に全 menu を返すため、
+     * それだけでは privacy-admin 以外の管理者にも出てしまう。機能スイッチ ON の管理者についてだけ privacy action を判定し、
+     * 判定部品が取れない・例外の場合は出さない（fail-closed。到達可否そのものは action 層と service 層が決める）。
+     */
+    @ModelAttribute("privacyHoldMenuAllowed")
+    public boolean privacyHoldMenuAllowed(Authentication authentication) {
+        return privacyMenuAllowed(authentication, com.ses.config.feature.Feature.NF07_RETENTION,
+                PRIVACY_HOLD_VIEW_ACTION);
+    }
+
+    /** NF07 DSAR の導線を出すか（{@link #privacyHoldMenuAllowed} と同じ判定を {@code NF07_DSAR}・{@code privacy.dsar.view} で行う）。 */
+    @ModelAttribute("privacyDsarMenuAllowed")
+    public boolean privacyDsarMenuAllowed(Authentication authentication) {
+        return privacyMenuAllowed(authentication, com.ses.config.feature.Feature.NF07_DSAR, PRIVACY_DSAR_VIEW_ACTION);
+    }
+
+    private boolean privacyMenuAllowed(Authentication authentication, com.ses.config.feature.Feature feature,
+                                       String actionKey) {
+        if (authentication == null || authentication.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_管理者".equals(authority.getAuthority()))) {
+            return false;
+        }
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        if (switches == null || !switches.isEnabled(feature)) {
+            return false;
+        }
+        com.ses.service.security.AuthorizationService authorizationService =
+                authorizationServiceProvider == null ? null : authorizationServiceProvider.getIfAvailable();
+        if (authorizationService == null) {
+            return false;
+        }
+        try {
+            return authorizationService.isAllowed(authentication, actionKey);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private com.ses.config.feature.FeatureSwitches featureSwitches() {
+        return featureSwitchesProvider == null ? null : featureSwitchesProvider.getIfAvailable();
+    }
+
+    private List<String> resolveAllowedMenus(Authentication authentication) {
         com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
         if (authentication == null || menuCacheService == null) {
             return Collections.emptyList();

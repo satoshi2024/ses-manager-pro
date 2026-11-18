@@ -254,8 +254,11 @@ SELFをstaffing gap・配置候補・commission計算の入力に使うことは
 | aggregate | normal states | allowed conflict handling | forbidden shortcut |
 |---|---|---|---|
 | certification | DRAFT→SUBMITTED→VERIFIED/REJECTED→ACTIVE/CANCELLED/SUPERSEDED; EXPIREDはas-of導出 | revision/CAS、continuity group unique、append-only event | `CORRECTED`をcurrent statusにする、delete active evidence、direct active |
-| learning plan | DRAFT→SUBMITTED→APPROVED/REJECTED→IN_PROGRESS→COMPLETED/CANCELLED | approval snapshot＋target version CAS | completion before approval |
-| enrollment | PLANNED→STARTED→COMPLETED/CANCELLED | one active enrollment per policy、CAS | duplicate completion/event |
+| learning plan | DRAFT→SUBMITTED→APPROVED/REJECTED→IN_PROGRESS→COMPLETED/CANCELLED | approval snapshot＋target version CAS。plan row lock下で、非取消enrollmentが1件以上かつ全件COMPLETEDの場合だけCOMPLETEDにする | completion before approval、空plan/全取消planの自動完了 |
+| enrollment | PLANNED→STARTED→COMPLETED/CANCELLED | one active enrollment per policy、CAS。complete/cancelはenrollment後にplan rowをlockし、同一plan内の終端判定を直列化する | duplicate completion/event、他course未完了中のplan完了 |
+
+planは完了操作ごとにtenant内の全enrollment statusを再読込し、CANCELLEDを集計対象から除外する。非取消件数が0件（enrollmentなしを含む）ならplan状態を変更しない。取消操作後も同じ判定を行うため、取消と最終course完了の順序が逆でも残存course全完了時にのみplanを終端化する。enrollmentのversion CASとplanのversion CASにより再送は拒否し、各完了操作のeventを一度だけ記録する。
+
 | document | RECEIVED→SCANNING→CLEAN/REJECTED＋legal hold | DocumentService/version/scan check | raw path、unknown file allow |
 | AI candidate | GENERATED→ACCEPTED/REJECTED/EXPIRED | human actor and reason | AI transition to evaluation/placement |
 

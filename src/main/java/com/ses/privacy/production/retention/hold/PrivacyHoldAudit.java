@@ -1,0 +1,101 @@
+package com.ses.privacy.production.retention.hold;
+
+import com.ses.service.AuditLogService;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * hold の required 監査（production-bridge-phased-plan.md §3.4.4 の5・§6.8）。
+ *
+ * <p>本文（URI）に入れてよいのは hold ID・対象種別・data element・ticket 参照・理由コード・D-05 の決定ID と、revision・選択・
+ * hash の先頭などの技術値だけで、subject 識別子（subject 参照・partition・command ID）と理由本文・理由 hash は入れない
+ * （{@code /api/audit-logs} は privacy-admin 以外の管理者も見られるため。理由 hash は短い本文なら総当たりで推測できる）。
+ * 1行は {@value #MAX_URI} 文字以内（値の文字種を検査で限っているため、開始要求を {@code START_REQUESTED} と
+ * {@code START_REASON} の2行に分ければ最長の値でも収まる）。記録できなければ例外を返し、呼出し側の transaction を失敗させる
+ * （{@code recordRequired}）。状態を変えない reconciler の判定は監査に残さない（Review P3-3。WARN と metric だけ）。
+ */
+final class PrivacyHoldAudit {
+
+    /**
+     * 監査の method 列の値。{@code t_audit_log.method} は {@code VARCHAR(10)}（V11）のため10文字以内にする（以前の
+     * {@code PRIVACY_HOLD} は12文字で、MySQL の strict mode では監査の insert が失敗し、required 監査を書く hold の開始・解除が
+     * 常に失敗していた。fast・MySQL の test は監査を mock にしていたため検出できなかった。NF07-REL 第3 commit で発見）。
+     * 経路の識別は application code（{@code NF07_HOLD_<event>}）で行う。
+     */
+    static final String METHOD = "PRIV_HOLD";
+    static final String URI_PREFIX = "/api/privacy/holds#";
+    private static final int MAX_URI = 500;
+
+    static final String START_REQUESTED = "START_REQUESTED";
+    static final String START_REASON = "START_REASON";
+    static final String CHOICE = "CHOICE";
+    static final String DATA_ELEMENT_ACKNOWLEDGED = "DATA_ELEMENT_ACKNOWLEDGED";
+    static final String STARTED = "STARTED";
+    static final String START_REJECTED = "START_REJECTED";
+    static final String ACK_UNKNOWN = "ACK_UNKNOWN";
+    static final String RECONCILE_PROJECTED = "RECONCILE_PROJECTED";
+    static final String RECONCILE_CAUGHT_UP = "RECONCILE_CAUGHT_UP";
+    static final String RECONCILE_ABANDONED = "RECONCILE_ABANDONED";
+    /** 解除の要求（NF07-REL。hold ID・対象種別・element・束縛の digest の先頭・発行者と承認者の authority・claim の digest の先頭）。 */
+    static final String RELEASE_REQUESTED = "RELEASE_REQUESTED";
+    /**
+     * 解除の claim 1件（発行者・承認者ごとに1行。hold ID・役割・anchor・発行日時・期限・署名の hex）。Journal の HOLD_RELEASED の
+     * {@code action_id}（claim の digest）と照合でき、束縛の digest（{@code request_hash}）への署名を anchor の公開鍵で検証し直せる
+     * （REL review P3-6）。署名は秘密ではなく、束縛は理由本文・journal head を含む hash のため subject を推測できない。
+     */
+    static final String RELEASE_CLAIM = "RELEASE_CLAIM";
+    /** 解除の理由コードと ticket（理由本文・理由 hash は残さない）。 */
+    static final String RELEASE_REASON = "RELEASE_REASON";
+    /** 解除の開放の前提にした D-03・D-05 の決定ID（1行の上限に収めるため別の行にする）。 */
+    static final String RELEASE_DECISIONS = "RELEASE_DECISIONS";
+    /** 判定に使った D-05 の解除の承認者規則と許容ずれ（separation・unknownStarter・skewSeconds）。 */
+    static final String RELEASE_RULES = "RELEASE_RULES";
+    static final String RELEASED = "RELEASED";
+    /** proof・束縛・状態の拒否（理由は {@code HoldReleaseRejection} 等の固定 code）。 */
+    static final String RELEASE_REJECTED = "RELEASE_REJECTED";
+    static final String RELEASE_ACK_UNKNOWN = "RELEASE_ACK_UNKNOWN";
+    static final String RECONCILE_RELEASE_PROJECTED = "RECONCILE_RELEASE_PROJECTED";
+    static final String RECONCILE_RELEASE_CAUGHT_UP = "RECONCILE_RELEASE_CAUGHT_UP";
+    /** reconciler が復元した行の開始者を、開始要求の監査から戻した（delta review P2-1）。 */
+    static final String RECONCILE_STARTER_RESTORED = "RECONCILE_STARTER_RESTORED";
+
+    private final AuditLogService auditLogService;
+
+    PrivacyHoldAudit(AuditLogService auditLogService) {
+        this.auditLogService = Objects.requireNonNull(auditLogService, "auditLogService");
+    }
+
+    /** 監査本文の項目（挿入順）。 */
+    static Map<String, String> fields(String... keyValues) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < keyValues.length; i += 2) {
+            if (keyValues[i + 1] != null) {
+                fields.put(keyValues[i], keyValues[i + 1]);
+            }
+        }
+        return fields;
+    }
+
+    /** required 監査を1件記録する（失敗は例外）。 */
+    void record(String username, String event, Map<String, String> fields, int status, boolean success) {
+        auditLogService.recordRequired(username, METHOD, uri(event, fields), status, "NF07_HOLD_" + event, success);
+    }
+
+    static String uri(String event, Map<String, String> fields) {
+        StringBuilder uri = new StringBuilder(URI_PREFIX).append(event);
+        char separator = '?';
+        for (Map.Entry<String, String> field : fields.entrySet()) {
+            uri.append(separator).append(field.getKey()).append('=')
+                    .append(URLEncoder.encode(field.getValue(), StandardCharsets.UTF_8));
+            separator = '&';
+        }
+        if (uri.length() > MAX_URI) {
+            throw new IllegalStateException("hold監査の本文が長すぎます");
+        }
+        return uri.toString();
+    }
+}

@@ -123,6 +123,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         Path quarantine = quarantineDir().resolve(storedName).normalize();
         Path published = publishedDir().resolve(storedName).normalize();
         boolean scanRejectionRecorded = false;
+        FileSecurityMetadata metadata = null;
         try {
             Files.createDirectories(quarantineDir());
             Files.createDirectories(publishedDir());
@@ -130,7 +131,7 @@ public class FileStorageServiceImpl implements FileStorageService {
                 throw BusinessException.of("error.file.invalidDestination");
             }
             Files.write(quarantine, data);
-            FileSecurityMetadata metadata = createPendingMetadata(storedName, kind);
+            metadata = createPendingMetadata(storedName, kind);
             FileScanResult result;
             try {
                 result = fileScanner == null
@@ -143,8 +144,9 @@ public class FileStorageServiceImpl implements FileStorageService {
                 updateMetadata(metadata, "QUARANTINED",
                         result == null ? FileScanResult.Status.UNAVAILABLE.name() : result.status().name(),
                         result, result == null ? "scanner returned no result" : result.reason());
-                // 再scan可能なよう、拒否結果を記録できた実体はquarantineへ保持する。
-                scanRejectionRecorded = true;
+                // 再scan可能なよう、拒否結果を記録できた実体はquarantineへ保持する。server が生成する種別（DSAR の開示
+                // package 等）は再scanの対象にせず実体を残さない（生成し直せる副本で、残すと期限の管理から外れる。NF07-A2b review P2-1）
+                scanRejectionRecorded = !kind.isServerGeneratedOnly();
                 throw BusinessException.of("error.file.scanRejected");
             }
             Files.move(quarantine, published);
@@ -154,14 +156,36 @@ public class FileStorageServiceImpl implements FileStorageService {
             if (!scanRejectionRecorded) {
                 deleteQuietly(quarantine);
             }
+            discardServerGenerated(kind, metadata, published);
             throw e;
         } catch (IOException | RuntimeException e) {
             deleteQuietly(quarantine);
+            discardServerGenerated(kind, metadata, published);
             log.error("ファイル保存またはscanに失敗しました: storedName={} exceptionClass={} detail={}",
                     storedName,
                     com.ses.common.util.LogRedaction.exceptionType(e),
                     com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             throw BusinessException.of("error.file.scanRejected");
+        }
+    }
+
+    /**
+     * 保存できなかった server 生成の file の後始末。公開領域に移った実体も消し、拒否の結果を書いた metadata は論理削除する
+     * （孤児清掃・再scan・取得のどの対象にも残さない）。失敗しても元の例外を優先し、log だけを出す。
+     */
+    private void discardServerGenerated(FileKind kind, FileSecurityMetadata metadata, Path published) {
+        if (kind == null || !kind.isServerGeneratedOnly()) {
+            return;
+        }
+        deleteQuietly(published);
+        if (metadata == null || metadata.getId() == null || metadataMapper == null) {
+            return;
+        }
+        try {
+            metadataMapper.markDeletedForTenant(metadata.getId(), metadata.getTenantId());
+        } catch (RuntimeException e) {
+            log.warn("保存できなかったserver生成fileのmetadataを論理削除できません: exceptionClass={}",
+                    e.getClass().getSimpleName());
         }
     }
 
@@ -197,6 +221,22 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     @Override
     public Resource load(String storedName) {
+        return loadPublished(storedName, null);
+    }
+
+    /**
+     * server が生成した種別の file を、その種別の専用経路から読む（NF07-A2b review P3-8）。metadata の種別が一致しなければ 403。
+     * 汎用の {@link #load} は server 生成の種別を開かない。
+     */
+    @Override
+    public Resource loadServerGenerated(String storedName, FileKind kind) {
+        if (kind == null || !kind.isServerGeneratedOnly()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        return loadPublished(storedName, kind);
+    }
+
+    private Resource loadPublished(String storedName, FileKind serverGeneratedKind) {
         if (storedName == null || storedName.isBlank()
                 || storedName.contains("/") || storedName.contains("\\") || storedName.contains("..")) {
             throw BusinessException.of("error.file.invalidName");
@@ -207,6 +247,12 @@ public class FileStorageServiceImpl implements FileStorageService {
             if (metadata == null || !"PUBLISHED".equals(metadata.getStorageState())
                     || !"CLEAN".equals(metadata.getScanStatus())) {
                 throw BusinessException.of(403, "error.file.scanNotReady");
+            }
+            boolean serverGenerated = isServerGenerated(metadata);
+            if (serverGeneratedKind == null ? serverGenerated
+                    : !serverGeneratedKind.name().equals(metadata.getFileKind())) {
+                // 汎用の取得では server 生成の file（DSAR の開示 package 等）を開かない。専用経路は種別の一致を要する
+                throw BusinessException.of(403, "error.forbidden");
             }
         }
         Path published = publishedDir();
@@ -261,6 +307,10 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (metadata == null || "PUBLISHED".equals(metadata.getStorageState())) {
             throw BusinessException.of(404, "error.file.unknownReference");
         }
+        if (isServerGenerated(metadata)) {
+            // server 生成の file は再scanで公開しない（保存の失敗時に実体を残さず、生成し直す。NF07-A2b review P2-1）
+            throw BusinessException.of(403, "error.forbidden");
+        }
         FileKind kind;
         try {
             kind = FileKind.valueOf(metadata.getFileKind());
@@ -313,6 +363,18 @@ public class FileStorageServiceImpl implements FileStorageService {
         } catch (IOException e) {
             throw BusinessException.of("error.file.scanRejected");
         }
+    }
+
+    private static boolean isServerGenerated(FileSecurityMetadata metadata) {
+        if (metadata == null || metadata.getFileKind() == null) {
+            return false;
+        }
+        for (FileKind candidate : FileKind.values()) {
+            if (candidate.isServerGeneratedOnly() && candidate.name().equals(metadata.getFileKind())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void validateStoredName(String storedName) {

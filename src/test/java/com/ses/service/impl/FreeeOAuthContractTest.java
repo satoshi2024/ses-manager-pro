@@ -188,17 +188,47 @@ class FreeeOAuthContractTest {
     }
 
     @Test
-    @DisplayName("prodでclient-id未設定なら起動可能（MISCONFIGURED運用）")
-    void prodでclientId未設定は起動を妨げない() throws Exception {
+    @DisplayName("prodでfreee連携が無効ならclient設定が無くても起動可能（MISCONFIGURED運用。FINAL-FIX）")
+    void prodでfreee無効ならclient設定未設定でも起動を妨げない() throws Exception {
         Method m = FreeeIntegrationServiceImpl.class.getDeclaredMethod("validateConfig");
         m.setAccessible(true);
         ReflectionTestUtils.setField(service, "activeProfile", "prod");
+        ReflectionTestUtils.setField(service, "enabled", false);
         ReflectionTestUtils.setField(service, "clientId", "");
         ReflectionTestUtils.setField(service, "clientSecret", "");
+        ReflectionTestUtils.setField(service, "redirectUri", "");
         ReflectionTestUtils.setField(service, "oauthBase", "https://accounts.secure.freee.co.jp/public_api");
         ReflectionTestUtils.setField(service, "hrApiBase", "https://api.freee.co.jp/hr");
         ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
         m.invoke(service); // 例外なし
+        assertEquals("MISCONFIGURED", service.connectionStatus().getStatus());
+    }
+
+    @Test
+    @DisplayName("prodでfreee連携が有効ならclient-id未設定で起動を止める（FINAL-FIX）")
+    void prodでfreee有効ならclientId未設定は起動を止める() throws Exception {
+        Method m = FreeeIntegrationServiceImpl.class.getDeclaredMethod("validateConfig");
+        m.setAccessible(true);
+        ReflectionTestUtils.setField(service, "activeProfile", "prod");
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "clientId", "");
+        ReflectionTestUtils.setField(service, "oauthBase", "https://accounts.secure.freee.co.jp/public_api");
+        ReflectionTestUtils.setField(service, "hrApiBase", "https://api.freee.co.jp/hr");
+        ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
+        java.lang.reflect.InvocationTargetException ex =
+                assertThrows(java.lang.reflect.InvocationTargetException.class, () -> m.invoke(service));
+        assertTrue(ex.getCause() instanceof IllegalStateException
+                        && ex.getCause().getMessage().contains("freee.enabled=true"),
+                "一式検証メッセージ: " + ex.getCause().getMessage());
+    }
+
+    @Test
+    @DisplayName("freee連携が無効なら、client設定が揃っていても認可を開始せず状態はMISCONFIGURED（FINAL-FIX）")
+    void freee無効ならclient設定が揃っていても認可を開始しない() {
+        ReflectionTestUtils.setField(service, "enabled", false);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.authorizationUrl("state-abc"));
+        assertEquals("error.payroll.configIncomplete", ex.getMessage());
         assertEquals("MISCONFIGURED", service.connectionStatus().getStatus());
     }
 
@@ -234,6 +264,53 @@ class FreeeOAuthContractTest {
         assertEquals("error.payroll.oauthFailed", ex.getMessage());
         verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
         verify(connectionMapper, never()).updateById(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
+    @DisplayName("token応答にcompany_idが無ければ（事業所未選択の認可）users/meを呼ばず接続しない")
+    void company_id欠落は接続しない() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andRespond(withSuccess("{\"access_token\":\"fixture-access-token\","
+                        + "\"refresh_token\":\"fixture-refresh-token\",\"expires_in\":21600}",
+                        MediaType.APPLICATION_JSON));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.handleCallback("fixture-code", "fixture-state", 7L));
+        assertEquals("error.payroll.oauthFailed", ex.getMessage());
+        server.verify(); // users/meへ進まない
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
+    @DisplayName("exchangeAuthorizationCode: 保存せずtoken・期限・company_idを返す（会計接続と共通）")
+    void code交換は保存せず結果を返す() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(fixture("token-success.json"), MediaType.APPLICATION_JSON));
+
+        com.ses.dto.freee.FreeeTokenGrant grant = service.exchangeAuthorizationCode("fixture-code");
+        server.verify();
+        assertEquals("fixture-access-token", grant.accessToken());
+        assertEquals("fixture-refresh-token", grant.refreshToken());
+        assertEquals(3600L, grant.expiresIn());
+        assertEquals(123L, grant.companyId());
+        assertFalse(grant.toString().contains("fixture-access-token"), "toStringへtokenを出さない");
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
+        verify(connectionMapper, never()).updateById(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
+    @DisplayName("HR users/meが403（人事労務の権限なし）なら権限不足として接続しない")
+    void hr_users_meの403は権限不足() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andRespond(withSuccess(fixture("token-success.json"), MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(HR_BASE + "/api/v1/users/me"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.handleCallback("fixture-code", "fixture-state", 7L));
+        assertEquals("error.payroll.permissionDenied", ex.getMessage());
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
     }
 
     @Test
@@ -308,6 +385,28 @@ class FreeeOAuthContractTest {
         stubLatestRow(connectedRow()); // 1時間後まで有効
         service.refresh();
         // 期待なしなので、外部呼び出しがあればMockRestServiceServerが失敗させる
+    }
+
+    @Test
+    @DisplayName("freee連携が無効なら、期限切れの接続行が残っていてもtoken endpointへ空のclient設定を送らず状態も変えない（FINAL-FIX P3-1）")
+    void freee無効ならrefreshと失効はtoken_endpointを呼ばず行と状態を変えない() throws Exception {
+        ReflectionTestUtils.setField(service, "enabled", false);
+        ReflectionTestUtils.setField(service, "clientId", "");
+        ReflectionTestUtils.setField(service, "clientSecret", "");
+        FreeeConnection expired = connectedRow();
+        expired.setTokenExpiresAt(LocalDateTime.now().minusMinutes(1));
+        stubLatestRow(expired);
+
+        BusinessException refresh = assertThrows(BusinessException.class, () -> service.refresh());
+        assertEquals("error.payroll.configIncomplete", refresh.getMessage());
+        BusinessException forced = assertThrows(BusinessException.class, () -> service.refreshForced());
+        assertEquals("error.payroll.configIncomplete", forced.getMessage());
+        assertThrows(BusinessException.class, () -> service.disconnect());
+
+        // 期待を置いていないため、token endpoint への要求があれば MockRestServiceServer が失敗させる
+        server.verify();
+        verify(connectionMapper, never()).updateById(any(FreeeConnection.class));
+        verify(connectionMapper, never()).deleteById(any(Long.class));
     }
 
     @Test

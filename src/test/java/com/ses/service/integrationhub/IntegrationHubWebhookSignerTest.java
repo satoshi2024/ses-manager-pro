@@ -51,6 +51,28 @@ class IntegrationHubWebhookSignerTest {
         assertThrows(IllegalArgumentException.class, () -> signer.signatureHeaderValue("bad="));
     }
 
+    @Test
+    void v2は同じkeyでも送信先URLが異なれば署名が変わる() {
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        ApiDelivery delivery = delivery(IntegrationHubDigest.sha256Hex(body));
+        IntegrationHubWebhookSigner signer = new IntegrationHubWebhookSigner();
+        String signature = signer.signForAudience(delivery, 1, "key-1", 1_756_520_000L,
+                "synthetic-secret", body, "https://one.example.com:443/hook");
+        assertEquals("PVmNCutAxOP_sZyS62RLhTpRPlGLI9ujfdDEoCilkX8", signature);
+        assertNotEquals(signature, signer.signForAudience(delivery, 1, "key-1", 1_756_520_000L,
+                "synthetic-secret", body, "https://two.example.com:443/hook"));
+        assertNotEquals(signature, signer.sign(delivery, 1, "key-1", 1_756_520_000L, "synthetic-secret", body));
+        assertEquals("v2=" + signature, signer.audienceSignatureHeaderValue(signature));
+    }
+
+    @Test
+    void v2は上限bodyへ追加したframingを誤ってbody超過扱いにしない() {
+        byte[] body = new byte[IntegrationHubWebhookRequest.MAX_BODY_BYTES];
+        var signer = new IntegrationHubWebhookSigner();
+        assertEquals(43, signer.signForAudience(delivery(IntegrationHubDigest.sha256Hex(body)), 1, "key-1",
+                1_756_520_000L, "synthetic-secret", body, "https://web.example.com:443/hook").length());
+    }
+
     private ApiDelivery delivery(String payloadHash) {
         return ApiDelivery.builder().eventId("event-1").eventType("resource.changed")
                 .schemaVersion("v1").createdAt(LocalDateTime.of(2026, 8, 31, 12, 0))

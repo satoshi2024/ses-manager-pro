@@ -308,13 +308,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract) {
-        // 画面 DTO 経由でない呼び出し向け。SAVE_PAYLOAD 列は出現済み、positionId/renewalDecision は回填。
+        // 画面 DTO 経由でない呼び出し向け。SAVE_PAYLOAD 列は出現済み、positionId/renewalDecision は補完。
         return updateWithBusinessRules(contract, com.ses.dto.contract.ContractSaveDto.SAVE_PAYLOAD_ALWAYS_FIELDS);
     }
 
     /**
      * ALWAYS 列の部分更新安全版。{@code presentAlwaysFields} に含まれない ALWAYS フィールドは
-     * 行ロック後の {@code old} から回填し、{@code updateById} による NULL 上書きを防ぐ。
+     * 行ロック後の {@code old} から補完し、{@code updateById} による NULL 上書きを防ぐ。
      * payload で明示 null（クリア）したい列だけを {@code presentAlwaysFields} に含めること。
      */
     @Override
@@ -420,7 +420,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     }
 
     /**
-     * payload に未出現の ALWAYS フィールドを行ロック後の旧値で回填する（CON-01）。
+     * payload に未出現の ALWAYS フィールドを行ロック後の旧値で補完する（CON-01）。
      * {@code presentAlwaysFields} に含まれる列は明示指定（null クリア含む）として触らない。
      */
     private void mergeAbsentRegularFields(Contract incoming, Contract old) {

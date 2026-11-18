@@ -1,5 +1,6 @@
 package com.ses.migration;
 
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -65,6 +66,159 @@ class MigrationScriptIntegrityTest {
                         + "後から追加された側を未使用の最新番号へ採番し直してください: " + duplicates);
     }
 
+    /** SQL・Java双方のversioned migration名（Java migrationはcompile後の {@code .class}）。 */
+    private static final Pattern VERSIONED_SQL_OR_JAVA =
+            Pattern.compile("^V([0-9]+(?:[._][0-9]+)*)__[^$]+\\.(sql|class)$");
+
+    /**
+     * A-NF10-1: {@link LatestMigrationVersion#LATEST} がclasspath上の最大versioned migrationと一致すること。
+     *
+     * <p>MySQL testは「最新版まで適用された」ことを {@code LATEST} との比較で判定するため、新しい
+     * migrationを追加して定数の更新を忘れると、Docker必須のtestでしか気付けない（かつ期待値自体が古いまま
+     * 通る経路が生じうる）。本testはDB・Docker無しでその漂流を検出する。
+     *
+     * <p>version比較はFlywayの {@link MigrationVersion} に委ねる。{@code V102_1} は {@code 102.1} として
+     * 数値要素ごとに比較され、{@code 102.10 > 102.9}、{@code 185 > 108.3} となる。本class内の
+     * {@code versionOf}（double変換）は {@code 102.1} と {@code 102.10} を同値にするため、ここでは使わない。
+     * 対象は {@code db/migration} だけで、devのseed（{@code db/migration-dev}）とprodのrepeatable
+     * （{@code db/migration-prod}）は含めない。
+     */
+    @Test
+    void LatestMigrationVersionはclasspath上の最大versioned_migrationと一致すること() throws Exception {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        MigrationVersion max = null;
+        String maxFile = null;
+        int resolved = 0;
+        for (String pattern : List.of("classpath*:db/migration/V*.sql", "classpath*:db/migration/V*.class")) {
+            for (Resource resource : resolver.getResources(pattern)) {
+                String fileName = resource.getFilename();
+                if (fileName == null) {
+                    continue;
+                }
+                Matcher m = VERSIONED_SQL_OR_JAVA.matcher(fileName);
+                if (!m.matches()) {
+                    continue; // inner class（$を含む）等はmigrationではない
+                }
+                resolved++;
+                MigrationVersion version = MigrationVersion.fromVersion(m.group(1).replace('_', '.'));
+                if (max == null || version.compareTo(max) > 0) {
+                    max = version;
+                    maxFile = fileName;
+                }
+            }
+        }
+
+        assertTrue(max != null && resolved > 0, "db/migration からversioned migrationを1件も解決できていません");
+        assertEquals(MigrationVersion.fromVersion(LatestMigrationVersion.LATEST).getVersion(),
+                LatestMigrationVersion.LATEST,
+                "LatestMigrationVersion.LATEST はFlywayの正規化表記（例: 185 / 186.1）で書くこと");
+        assertEquals(max.getVersion(), LatestMigrationVersion.LATEST,
+                "LatestMigrationVersion.LATEST がclasspath上の最大migration（" + maxFile + "）と一致しません。"
+                        + "新しいmigrationを追加したら定数を更新してください");
+    }
+
+    /**
+     * RB-PRERUN 4: dev profileは {@code application-dev.yml} のlocations（{@code db/migration} + {@code db/migration-dev}）を
+     * 1つのversion空間として解決する。devのseedが {@code db/migration} と同じversion（{@code 1.0} と {@code 1} の同値を含む）を
+     * 使うと、dev profileだけが {@code Found more than one migration with version} で起動できなくなるが、
+     * {@link #マイグレーションのバージョンが重複していないこと} は {@code db/migration} しか見ないため検出できない。
+     * locationsはyamlから読み、devの設定へlocationを足したときも検査範囲が追従するようにする。
+     */
+    @Test
+    void devプロファイルのlocationsを合わせてもversionが重複していないこと() throws Exception {
+        List<String> locations = devFlywayLocations();
+        assertTrue(locations.contains("classpath:db/migration") && locations.contains("classpath:db/migration-dev"),
+                "dev profileのlocationsはdb/migrationとdb/migration-devを含むこと: " + locations);
+
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        Map<MigrationVersion, List<String>> byVersion = new java.util.TreeMap<>();
+        int devScripts = 0;
+        for (String location : locations) {
+            String path = location.substring("classpath:".length());
+            for (String pattern : List.of("classpath*:" + path + "/V*.sql", "classpath*:" + path + "/V*.class")) {
+                for (Resource resource : resolver.getResources(pattern)) {
+                    String fileName = resource.getFilename();
+                    Matcher m = fileName == null ? null : VERSIONED_SQL_OR_JAVA.matcher(fileName);
+                    if (m == null || !m.matches()) {
+                        continue;
+                    }
+                    if (path.endsWith("migration-dev")) {
+                        devScripts++;
+                    }
+                    byVersion.computeIfAbsent(MigrationVersion.fromVersion(m.group(1).replace('_', '.')),
+                            k -> new ArrayList<>()).add(path + "/" + fileName);
+                }
+            }
+        }
+
+        assertTrue(devScripts > 0, "db/migration-dev のseedを1件も解決できていません");
+        List<String> duplicates = byVersion.entrySet().stream()
+                .filter(e -> e.getValue().size() > 1)
+                .map(e -> "V" + e.getKey().getVersion() + " -> " + e.getValue())
+                .toList();
+        assertTrue(duplicates.isEmpty(),
+                "dev profileで同一versionのmigrationが複数解決されます（dev起動がFlywayの例外で止まります）。"
+                        + "devのseedは db/migration と衝突しない番号にしてください: " + duplicates);
+    }
+
+    /**
+     * RB-PRERUN 4: devのseedが {@code t_ai_recommendation_run} へ入れたrunは、V173（親runのtenantを
+     * item/feedback/outcomeへ写し、写せない行があれば停止する）より前に、devのseedでtenantを補われていること。
+     * V161はrunのtenant列をNULLで追加するため、V161より前のseedのrunにはtenantが無い。
+     */
+    @Test
+    void devのseedのAI_recommendation_runはV173より前にtenantを補われること() throws Exception {
+        MigrationVersion v173 = MigrationVersion.fromVersion("173");
+        MigrationVersion v161 = MigrationVersion.fromVersion("161");
+        List<String> seededRunIds = new ArrayList<>();
+        StringBuilder tenantFixes = new StringBuilder();
+        Pattern runInsert = Pattern.compile(
+                "INSERT\\s+(?:IGNORE\\s+)?INTO\\s+`?t_ai_recommendation_run`?\\s*\\(\\s*`?id`?\\s*,[^)]*\\)\\s*VALUES\\s*(.*?);",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Pattern rowId = Pattern.compile("^\\s*\\(\\s*'?(\\d+)'?\\s*,", Pattern.MULTILINE);
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:db/migration-dev/V*.sql")) {
+            Matcher name = resource.getFilename() == null ? null : VERSIONED.matcher(resource.getFilename());
+            if (name == null || !name.matches()) {
+                continue;
+            }
+            MigrationVersion version = MigrationVersion.fromVersion(name.group(1).replace('_', '.'));
+            if (version.compareTo(v173) >= 0) {
+                continue;
+            }
+            String sql = resource.getContentAsString(StandardCharsets.UTF_8);
+            Matcher insert = runInsert.matcher(sql);
+            while (insert.find()) {
+                Matcher ids = rowId.matcher(insert.group(1));
+                while (ids.find()) {
+                    seededRunIds.add(ids.group(1));
+                }
+            }
+            if (version.compareTo(v161) > 0
+                    && Pattern.compile("UPDATE\\s+t_ai_recommendation_run\\s+SET\\s+tenant_id",
+                    Pattern.CASE_INSENSITIVE).matcher(sql).find()) {
+                tenantFixes.append(sql.replaceAll("--[^\\n]*", "")).append('\n');
+            }
+        }
+
+        assertTrue(seededRunIds.contains("85071"), "V145のseed run（85071）を読めていること: " + seededRunIds);
+        List<String> uncovered = seededRunIds.stream()
+                .filter(id -> !Pattern.compile("\\bid\\s*=\\s*" + id + "\\b").matcher(tenantFixes).find())
+                .toList();
+        assertEquals(List.of(), uncovered,
+                "V161〜V173の間のdev seedでtenantを補っていないseed runがあります（dev起動がV173で停止します）");
+    }
+
+    private static List<String> devFlywayLocations() {
+        org.springframework.beans.factory.config.YamlPropertiesFactoryBean yaml =
+                new org.springframework.beans.factory.config.YamlPropertiesFactoryBean();
+        yaml.setResources(new org.springframework.core.io.ClassPathResource("application-dev.yml"));
+        java.util.Properties properties = yaml.getObject();
+        String value = properties == null ? null : properties.getProperty("spring.flyway.locations");
+        assertTrue(value != null && !value.isBlank(), "application-dev.yml の spring.flyway.locations を読めること");
+        return java.util.Arrays.stream(value.split(",")).map(String::trim).toList();
+    }
+
     /**
      * 空のスクリプトは {@code spring.sql.init}（テストのH2スキーマ投入）に拒否されるため、
      * 意図的なno-opでも {@code SELECT 1;} を残す必要がある（CLAUDE.md の V3/V8 の経緯）。
@@ -79,6 +233,61 @@ class MigrationScriptIntegrityTest {
             }
         }
         assertTrue(empties.isEmpty(), "空のマイグレーションスクリプトがあります（no-opでも SELECT 1; が必要）: " + empties);
+    }
+
+    /**
+     * {@code db/migration-prod} はRepeatableだけを持つ。versioned scriptを置くと {@code db/migration} と同じ
+     * version空間を共有し、過去に2回（旧V10 / 旧V41）衝突した。さらに本classの重複・LATEST検査と
+     * {@link LatestMigrationVersion} は {@code db/migration} だけを見ているため、prod側のversionは見落とされる。
+     * Flywayはlocation配下を再帰的に走査するので、ここも再帰で確認する。
+     */
+    @Test
+    void db_migration_prodはRepeatableだけを持ちversioned_migrationを置かない() throws Exception {
+        List<String> files = new ArrayList<>();
+        List<String> nonRepeatable = new ArrayList<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:db/migration-prod/**/*")) {
+            String fileName = resource.getFilename();
+            if (fileName == null || fileName.isEmpty() || !resource.isReadable()) {
+                continue; // directory
+            }
+            files.add(fileName);
+            if (!fileName.matches("^R__[A-Za-z0-9_]+\\.sql$") || resource.contentLength() == 0) {
+                nonRepeatable.add(fileName);
+            }
+        }
+        assertTrue(files.contains("R__update_admin_password_bcrypt.sql")
+                        && files.contains("R__remove_v2_sample_data.sql"),
+                "db/migration-prod の初期管理者scriptとV2 sample削除scriptを解決できていません: " + files);
+        assertTrue(nonRepeatable.isEmpty(),
+                "db/migration-prod にはRepeatable（R__*.sql、空でない）以外を置かないでください: " + nonRepeatable);
+    }
+
+    /**
+     * 本番の起動時schema guard（{@code ProductionSchemaVersionGuard}）が、本番のlocationsから求める
+     * 「artifactの最新versioned migration」が {@link LatestMigrationVersion#LATEST} と一致すること。
+     *
+     * <p>guardは期待versionをコードへ固定せず、Flywayに {@code db/migration} + {@code db/migration-prod} を
+     * 解決させて求める。空のH2に対して実行すると「適用履歴なし」で起動を止め、messageに期待versionを出すので、
+     * その値を比べる。version重複などFlywayが解決に失敗する状態でも、このmessageにならず失敗する。
+     * placeholderは置換しないため、初期管理者hashが無くても解決できること（アプリへsecretを渡さない）も同時に確認する。
+     */
+    @Test
+    void 起動時schema_guardの期待versionはLatestMigrationVersionと一致する() {
+        org.springframework.jdbc.datasource.DriverManagerDataSource dataSource =
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        "jdbc:h2:mem:schema_guard_latest_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL",
+                        "sa", "");
+        com.ses.config.ProductionSchemaVersionGuard guard = new com.ses.config.ProductionSchemaVersionGuard(
+                dataSource, List.of("classpath:db/migration", "classpath:db/migration-prod"), false);
+
+        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, guard::verify);
+
+        assertTrue(failure.getMessage().contains("artifactの最新versioned migration=V" + LatestMigrationVersion.LATEST + ","),
+                "guardの期待versionがLatestMigrationVersion.LATESTと一致すること: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains("適用履歴がありません"),
+                "空DBではjob未実行として起動を止めること: " + failure.getMessage());
     }
 
     private static final Pattern FUNCTION_IF = Pattern.compile("\\bIF\\s*\\(", Pattern.CASE_INSENSITIVE);
@@ -112,6 +321,12 @@ class MigrationScriptIntegrityTest {
         for (Resource resource : new PathMatchingResourcePatternResolver()
                 .getResources("classpath:db/migration/*.sql")) {
             sources.put(String.valueOf(resource.getFilename()),
+                    resource.getContentAsString(StandardCharsets.UTF_8));
+        }
+        // prod専用のRepeatable（初期管理者hashの検査procedure等）も本番の専用Flyway jobで実行される
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration-prod/*.sql")) {
+            sources.put("db/migration-prod/" + resource.getFilename(),
                     resource.getContentAsString(StandardCharsets.UTF_8));
         }
         java.io.File[] runbookFiles = new java.io.File("sql/runbook")
@@ -400,12 +615,12 @@ class MigrationScriptIntegrityTest {
     }
 
     @Test
-    void V66_1は非管理者の全局wildcardを削除して既知actionへ置換すること() throws Exception {
+    void V66_1は非管理者のグローバルwildcardを削除して既知actionへ置換すること() throws Exception {
         String sql = new PathMatchingResourcePatternResolver()
                 .getResource("classpath:db/migration/V66_1__close_security_review_boundaries.sql")
                 .getContentAsString(StandardCharsets.UTF_8);
 
-        assertTrue(sql.contains("AND a.action_key = '*'"), "旧全局wildcardの削除条件が必要です");
+        assertTrue(sql.contains("AND a.action_key = '*'"), "旧グローバルwildcardの削除条件が必要です");
         assertTrue(sql.contains("SELECT 'dashboard.*'") && sql.contains("SELECT 'proposal.*'"),
                 "後方互換は既知resourceの明示許可で維持してください");
         assertTrue(sql.contains("ADD COLUMN allowed_actions"), "break-glass scope列が必要です");
@@ -768,7 +983,7 @@ class MigrationScriptIntegrityTest {
     /**
      * メニューを足したら、その resource の権限seedも足さなければならない。
      *
-     * <p>V66_1が非管理者groupから全局 {@code *} を削除して「既知resource wildcardの列挙」へ
+     * <p>V66_1が非管理者groupからグローバルな {@code *} を削除して「既知resource wildcardの列挙」へ
      * 置換したため、権限modelは baseline+deny ではなく<b>許可listの列挙制</b>になっている。
      * 新しいresource rootを {@code RESOURCE_NAMES} へ登録しても
      * {@code t_permission_group_action} へ {@code <resource>.*} をseedしなければ、
@@ -781,7 +996,8 @@ class MigrationScriptIntegrityTest {
     @Test
     void メニューを持つresourceには権限seedがあること() throws Exception {
         // 管理者専用resource。menuはあるが非管理者groupへは意図的に付与しない。
-        java.util.Set<String> adminOnly = java.util.Set.of("user", "permission", "audit");
+        // import（NF-06取込センター、V193）は管理者専用groupへ import.metadata.manage を明示許可し、他groupはdenyする。
+        java.util.Set<String> adminOnly = java.util.Set.of("user", "permission", "audit", "import");
 
         List<String> allSql = new ArrayList<>();
         Map<String, String> resourceOrigin = new LinkedHashMap<>();

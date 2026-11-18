@@ -257,7 +257,7 @@ class ContractApiControllerTest {
 
     /**
      * CON-01: salesUserId / commission* / endDate を JSON から省略すると presentAlwaysFields に入らず、
-     * サービス側で old 回填される（ALWAYS の NULL 上書きを防ぐ）。
+     * サービス側で old から補完される（ALWAYS の NULL 上書きを防ぐ）。
      */
     @Test
     void update_省略したALWAYSキーはpresentに含めない() throws Exception {

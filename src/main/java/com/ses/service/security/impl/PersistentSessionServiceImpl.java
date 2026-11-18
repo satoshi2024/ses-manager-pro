@@ -1,6 +1,7 @@
 package com.ses.service.security.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.common.util.SecurityUtils;
 import com.ses.config.OidcSecurityProperties;
@@ -14,6 +15,7 @@ import com.ses.service.security.PersistentSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +35,19 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
     private final PersistentSessionProperties properties;
     private final OidcSecurityProperties oidcProperties;
     private final Clock clock;
+
+    /**
+     * ip_hashの元になるclient IP（FWD-SANITIZE PRE-P2-1）。framework strategyの {@code getRemoteAddr()} は
+     * X-Forwarded-Forの最左（clientが書ける値）なので使わない。既存constructorを保つためsetter注入にする。
+     */
+    private ClientIpResolver clientIpResolver = new ClientIpResolver("");
+
+    @Autowired(required = false)
+    public void setClientIpResolver(ClientIpResolver clientIpResolver) {
+        if (clientIpResolver != null) {
+            this.clientIpResolver = clientIpResolver;
+        }
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -81,7 +96,7 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         entity.setLastSeenAt(now);
         entity.setIdleExpiresAt(now.plusMinutes(Math.max(1, properties.getIdleTimeoutMinutes())));
         entity.setExpiresAt(now.plusHours(Math.max(1, properties.getMaxLifetimeHours())));
-        entity.setIpHash(metadataHash(request.getRemoteAddr()));
+        entity.setIpHash(metadataHash(clientIpResolver.resolve(request)));
         entity.setUserAgent(truncate(request.getHeader("User-Agent"), 512));
         userSessionMapper.insert(entity);
         session.setAttribute(SESSION_HASH_ATTRIBUTE, sessionHash);

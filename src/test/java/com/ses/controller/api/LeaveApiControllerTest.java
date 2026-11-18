@@ -27,7 +27,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** T071のAPI認可・CSRF境界を確認するL2定向test。営業はSecurityConfigで休暇APIへ到達できない。 */
+/** T071のAPI認可・CSRF境界を確認するL2対象限定test。営業はSecurityConfigで休暇APIへ到達できない。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")

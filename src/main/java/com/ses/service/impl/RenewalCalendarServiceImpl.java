@@ -40,6 +40,9 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
     private final OrganizationScopeService organizationScopeService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.servicedesk.CustomerHealthService customerHealthService;
+    /** NF-02機能スイッチ。OFFの間は顧客ヘルス（未承認の算定modelを含む）を更新カレンダーへ出さない。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ses.config.feature.FeatureSwitches featureSwitches;
 
     @Override
     public RenewalCalendarResponseDto getCalendar(LocalDate from, LocalDate to) {
@@ -79,7 +82,9 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
                 .map(RenewalCalendarItemDto::getCustomerId)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
-        Map<Long, com.ses.dto.servicedesk.CustomerHealthScoreDto> healthMap = customerHealthService != null
+        boolean healthEnabled = customerHealthService != null && com.ses.config.feature.FeatureSwitches.allows(
+                featureSwitches, com.ses.config.feature.Feature.NF02);
+        Map<Long, com.ses.dto.servicedesk.CustomerHealthScoreDto> healthMap = healthEnabled
                 ? customerHealthService.getHealthMapForCustomers(customerIds)
                 : Collections.emptyMap();
 

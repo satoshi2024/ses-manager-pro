@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{menu.privacyHolds}">プライバシー保全</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-lock me-2 text-primary"></i><th:block th:text="#{privacyHold.title}">保全 hold</th:block></h2>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="privacy-hold-reload">
+            <i class="bi bi-arrow-clockwise me-1"></i><th:block th:text="#{privacyHold.reload}">再読み込み</th:block>
+        </button>
+    </div>
+
+    <!-- 判定状態（gate・Journal・開始の前提） -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyHold.status.heading}">判定状態</div>
+        <div class="card-body small text-light">
+            <dl class="row mb-0">
+                <dt class="col-12 col-sm-4" th:text="#{privacyHold.gate}">gate</dt>
+                <dd class="col-12 col-sm-8" id="privacy-hold-gate">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyHold.journal}">Journal</dt>
+                <dd class="col-12 col-sm-8" id="privacy-hold-journal">…</dd>
+                <dt class="col-12 col-sm-4" th:text="#{privacyHold.prerequisites}">開始の前提</dt>
+                <dd class="col-12 col-sm-8 mb-0" id="privacy-hold-prerequisites">…</dd>
+            </dl>
+        </div>
+    </div>
+
+    <!-- hold 一覧 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyHold.list.heading}">hold 一覧</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small mb-0">
+                    <thead>
+                    <tr>
+                        <th th:text="#{privacyHold.col.holdId}">hold ID</th>
+                        <th th:text="#{privacyHold.col.targetType}">種別</th>
+                        <th th:text="#{privacyHold.col.target}">対象</th>
+                        <th th:text="#{privacyHold.col.status}">状態</th>
+                        <th th:text="#{privacyHold.col.reasonCode}">理由コード</th>
+                        <th th:text="#{privacyHold.col.ticketRef}">ticket</th>
+                        <th th:text="#{privacyHold.col.requestedAt}">開始日時</th>
+                        <th th:text="#{privacyHold.col.revision}">revision</th>
+                        <th th:text="#{privacyHold.col.releasedAt}">解除日時</th>
+                    </tr>
+                    </thead>
+                    <tbody id="privacy-hold-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- hold の開始 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyHold.start.heading}">hold を開始</div>
+        <div class="card-body text-light">
+            <form id="privacy-hold-form" novalidate>
+                <div class="row g-2">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="hold-target-type" th:text="#{privacyHold.start.targetType}">対象の種別</label>
+                        <select id="hold-target-type" class="form-select bg-dark border-secondary text-light"></select>
+                    </div>
+                    <div class="col-12 col-md-4 hold-subject-field">
+                        <label class="form-label small" for="hold-subject-type" th:text="#{privacyHold.start.subjectType}">本人の種別</label>
+                        <select id="hold-subject-type" class="form-select bg-dark border-secondary text-light">
+                            <option value="ENGINEER" th:text="#{privacyHold.subjectType.ENGINEER}">要員</option>
+                            <option value="CANDIDATE" th:text="#{privacyHold.subjectType.CANDIDATE}">候補者</option>
+                            <option value="SYS_USER" th:text="#{privacyHold.subjectType.SYS_USER}">ログインアカウント</option>
+                            <option value="BP_AVAILABILITY" th:text="#{privacyHold.subjectType.BP_AVAILABILITY}">BP 要員の空き情報</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4 hold-subject-field">
+                        <label class="form-label small" for="hold-subject-id" th:text="#{privacyHold.start.subjectId}">ID</label>
+                        <input type="text" inputmode="numeric" id="hold-subject-id" class="form-control bg-dark border-secondary text-light" autocomplete="off">
+                    </div>
+                    <div class="col-12 col-md-8 hold-element-field d-none">
+                        <label class="form-label small" for="hold-data-element" th:text="#{privacyHold.start.dataElement}">data element</label>
+                        <select id="hold-data-element" class="form-select bg-dark border-secondary text-light"></select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="hold-reason-code" th:text="#{privacyHold.start.reasonCode}">理由コード</label>
+                        <input type="text" id="hold-reason-code" class="form-control bg-dark border-secondary text-light" maxlength="50" autocomplete="off">
+                        <div class="form-text text-secondary" th:text="#{privacyHold.start.reasonCodeHint}">英大文字・数字・下線</div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="hold-ticket-ref" th:text="#{privacyHold.start.ticketRef}">ticket 参照</label>
+                        <input type="text" id="hold-ticket-ref" class="form-control bg-dark border-secondary text-light" maxlength="100" autocomplete="off">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small" for="hold-reason-text" th:text="#{privacyHold.start.reasonText}">理由</label>
+                        <textarea id="hold-reason-text" class="form-control bg-dark border-secondary text-light" rows="3" maxlength="2000"></textarea>
+                    </div>
+                    <div class="col-12 hold-element-field d-none">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="hold-acknowledge">
+                            <label class="form-check-label small" for="hold-acknowledge" th:text="#{privacyHold.start.acknowledge}">確認</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUBJECT hold で守られない element（C-2: element ごとに明示選択、既定値なし） -->
+                <div class="mt-3 hold-subject-field" id="hold-unattributable-section">
+                    <h3 class="h6" th:text="#{privacyHold.unattributable.heading}">この hold で守られない data element</h3>
+                    <p class="small text-secondary mb-2" th:text="#{privacyHold.unattributable.description}">説明</p>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle small mb-0">
+                            <thead>
+                            <tr>
+                                <th th:text="#{privacyHold.col.dataElement}">data element</th>
+                                <th th:text="#{privacyHold.col.tenantRowCount}">件数</th>
+                                <th th:text="#{privacyHold.col.elementHold}">DATA_ELEMENT hold</th>
+                                <th th:text="#{privacyHold.col.choice}">選択</th>
+                            </tr>
+                            </thead>
+                            <tbody id="hold-unattributable-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-3 d-grid d-sm-flex justify-content-sm-end">
+                    <button type="submit" class="btn btn-primary" id="hold-submit">
+                        <i class="bi bi-lock-fill me-1"></i><th:block th:text="#{privacyHold.start.submit}">hold を開始</th:block>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- hold の解除（NF07-REL。発行者・承認者の署名付き proof。D-03・D-05 の署名後に開放） -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyHold.release.heading}">hold を解除</div>
+        <div class="card-body text-light">
+            <p class="small text-secondary mb-2" th:text="#{privacyHold.release.description}">説明</p>
+            <div class="alert alert-secondary small py-2 d-none" id="hold-release-closed" th:text="#{privacyHold.release.notOpen}">未開放</div>
+            <form id="privacy-hold-release-form" novalidate>
+                <div class="row g-2">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small" for="hold-release-target" th:text="#{privacyHold.release.hold}">解除する hold</label>
+                        <select id="hold-release-target" class="form-select bg-dark border-secondary text-light"></select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="hold-release-reason-code" th:text="#{privacyHold.start.reasonCode}">理由コード</label>
+                        <input type="text" id="hold-release-reason-code" class="form-control bg-dark border-secondary text-light" maxlength="50" autocomplete="off">
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small" for="hold-release-ticket-ref" th:text="#{privacyHold.start.ticketRef}">ticket 参照</label>
+                        <input type="text" id="hold-release-ticket-ref" class="form-control bg-dark border-secondary text-light" maxlength="100" autocomplete="off">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small" for="hold-release-reason-text" th:text="#{privacyHold.start.reasonText}">理由</label>
+                        <textarea id="hold-release-reason-text" class="form-control bg-dark border-secondary text-light" rows="3" maxlength="2000"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <h3 class="h6 mt-2" th:text="#{privacyHold.release.binding}">署名の対象</h3>
+                        <p class="small text-secondary mb-1" th:text="#{privacyHold.release.bindingHint}">説明</p>
+                        <dl class="row small mb-0 text-break" id="hold-release-binding">
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.tenant}">tenant</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-tenant"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.subjectRef}">partition</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-subject"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.col.holdId}">hold ID</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-hold"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.holdRevision}">hold revision</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-revision"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.reasonHash}">理由の hash</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-reason"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.commandId}">command ID</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-command"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.journalRevision}">journal revision</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-journal-revision"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.eventHash}">event hash</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-hash"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.requesterRef}">要求者</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-requester"></code></dd>
+                            <dt class="col-12 col-sm-4" th:text="#{privacyHold.release.holdStarterRef}">開始者</dt>
+                            <dd class="col-12 col-sm-8"><code id="hold-release-binding-starter"></code>
+                                <div class="small text-warning d-none" id="hold-release-starter-unknown" th:text="#{privacyHold.release.starterUnknown}">不明</div></dd>
+                        </dl>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small" for="hold-release-template" th:text="#{privacyHold.release.template}">署名依頼の JSON</label>
+                        <textarea id="hold-release-template" class="form-control bg-dark border-secondary text-light font-monospace small" rows="8" readonly spellcheck="false"></textarea>
+                        <div class="form-text text-secondary" th:text="#{privacyHold.release.templateHint}">説明</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small" for="hold-release-proof" th:text="#{privacyHold.release.proof}">署名済み解除 proof</label>
+                        <textarea id="hold-release-proof" class="form-control bg-dark border-secondary text-light font-monospace small" rows="6" spellcheck="false"></textarea>
+                        <div class="form-text text-secondary" th:text="#{privacyHold.release.proofHint}">binding・issuer・approver</div>
+                    </div>
+                </div>
+                <div class="mt-3 d-grid d-sm-flex justify-content-sm-end">
+                    <button type="submit" class="btn btn-outline-warning" id="hold-release-submit">
+                        <i class="bi bi-unlock me-1"></i><th:block th:text="#{privacyHold.release.submit}">hold を解除</th:block>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 未分類の element と既知の制約 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{privacyHold.notes.heading}">既知の制約</div>
+        <div class="card-body small text-light">
+            <ul class="mb-2 ps-3">
+                <li th:text="#{privacyHold.notes.batchWindow}">batch の窓</li>
+                <li th:text="#{privacyHold.notes.identity}">名寄せ</li>
+                <li th:text="#{privacyHold.notes.noRelease}">解除</li>
+            </ul>
+            <ul class="mb-2 ps-3" id="hold-related-list"></ul>
+            <h3 class="h6 mt-3" th:text="#{privacyHold.unclassified.heading}">未分類の data element</h3>
+            <p class="text-secondary mb-1" th:text="#{privacyHold.unclassified.description}">説明</p>
+            <div id="hold-unclassified-list" class="text-break"></div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/privacy-holds.js" th:src="@{/js/modules/privacy-holds.js}"></script>
+</th:block>
+</body>
+</html>

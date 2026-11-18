@@ -6,7 +6,9 @@ import java.time.Duration;
 
 /**
  * 外部アカウントプロバイダ連携クライアント
- * ※失効要求と確証確認を分離し、timeoutを成功扱いとしない。
+ * 失効要求受付と実状態の確証を分離する。実プロバイダ実装は外部の権威ある状態を確認できた場合だけ
+ * CONFIRMED を返し、timeout・未配線・分類不能応答を成功扱いしない。アカウント無効化だけで既存session、offline
+ * session、発行済みtokenの無効化まで推定せず、連携先で要求する失効範囲を個別に確認する。秘密情報は台帳やログへ保存しない。
  */
 public interface ExternalAccountProviderClient {
 
@@ -15,6 +17,12 @@ public interface ExternalAccountProviderClient {
      * @return 要求受付成功（true）または失敗（false）
      */
     boolean requestRevoke(ExternalAccountReference accountRef);
+
+    /** 同じ失効keyの再送をprovider側が冪等に処理すると明示できる実装だけtrueにする。 */
+    default boolean supportsIdempotentRevoke() { return false; }
+
+    /** 送信leaseにはHTTP呼出しの上限と接続解放の余裕を含める。 */
+    default Duration revokeRequestTimeout() { return Duration.ofSeconds(30); }
 
     /**
      * 外部プロバイダ側で実際に失効・削除が完了したか確証ステータスを確認する

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.freee.FreeeTokenGrant;
 import com.ses.dto.freee.hr.FreeeBonusStatement;
 import com.ses.dto.freee.hr.FreeeHrEmployee;
 import com.ses.dto.freee.hr.FreeePayrollItem;
@@ -14,7 +15,6 @@ import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollItemDto;
 import com.ses.dto.payroll.PayrollStatementDto;
-import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.FreeeConnection;
 import com.ses.entity.FreeeEmployeeLink;
@@ -174,6 +174,15 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     @Value("${spring.profiles.active:dev}")
     private String activeProfile;
 
+    /**
+     * freee連携（給与・会計のOAuth接続）を使うか（{@code freee.enabled}、FINAL-FIX）。prodの既定はfalse。
+     * falseの間は認可の開始・code交換を行わず（{@link #configured()} がfalse、状態はMISCONFIGURED）、prodの起動時に
+     * client設定一式を要求しない。trueのprodでは client-id・client-secret・redirect-uri（HTTPS）・token-encryption-key の
+     * 一式が無いと起動しない。初期値trueは、Springの外でnewした場合（単体試験）に従来の挙動を保つため。
+     */
+    @Value("${freee.enabled:true}")
+    private boolean enabled = true;
+
     public FreeeIntegrationServiceImpl(
             FreeeConnectionMapper connectionMapper,
             FreeeEmployeeLinkMapper linkMapper,
@@ -189,21 +198,40 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     @PostConstruct
     void validateConfig() {
-        if (activeProfile.contains("prod")) {
-            validateOfficialBase("oauth", oauthBase, "accounts.secure.freee.co.jp");
-            validateOfficialBase("hr-api", hrApiBase, "api.freee.co.jp");
-            validateOfficialBase("api", apiBase, "api.freee.co.jp");
-            if (!isBlank(clientId)) {
-                if (isBlank(clientSecret) || isBlank(redirectUri) || encryptionKey.startsWith("change-me")) {
-                    throw new IllegalStateException(
-                            "freee.client-id 設定時は client-secret, redirect-uri(HTTPS), token-encryption-key を一式設定してください");
-                }
-                URI redirect = URI.create(redirectUri);
-                if (!"https".equalsIgnoreCase(redirect.getScheme())) {
-                    throw new IllegalStateException("freee.redirect-uri は本番ではHTTPS固定です");
-                }
-            }
+        if (!isProdProfile()) {
+            return;
         }
+        // 公式host・HTTPSの検証は連携のON/OFFに関係なく行う（既定値は公式hostで、上書きした場合だけ止まる）
+        validateOfficialBase("oauth", oauthBase, "accounts.secure.freee.co.jp");
+        validateOfficialBase("hr-api", hrApiBase, "api.freee.co.jp");
+        validateOfficialBase("api", apiBase, "api.freee.co.jp");
+        if (!enabled) {
+            log.info("freee連携は無効です（freee.enabled=false）。client設定の起動時検査を行わず、認可も開始しません");
+            return;
+        }
+        if (isBlank(clientId) || isBlank(clientSecret) || isBlank(redirectUri)
+                || encryptionKey == null || encryptionKey.startsWith("change-me")) {
+            throw new IllegalStateException("freee連携を有効にする場合（freee.enabled=true）は client-id, client-secret, "
+                    + "redirect-uri(HTTPS), token-encryption-key を一式設定してください");
+        }
+        URI redirect = URI.create(redirectUri);
+        if (!"https".equalsIgnoreCase(redirect.getScheme())) {
+            throw new IllegalStateException("freee.redirect-uri は本番ではHTTPS固定です");
+        }
+    }
+
+    /**
+     * prodか。{@code spring.profiles.active} の値だけでは、試験の {@code @ActiveProfiles("prod")}（この値を設定しない）で
+     * prodの検査が走らないため、Environmentの有効profileも見る（FINAL-FIX: CIで検出できるようにする）。
+     */
+    private boolean isProdProfile() {
+        if (activeProfile != null && activeProfile.contains("prod")) {
+            return true;
+        }
+        org.springframework.core.env.Environment environment =
+                applicationContext == null ? null : applicationContext.getEnvironment();
+        return environment != null
+                && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"));
     }
 
     private void validateOfficialBase(String name, String base, String officialHost) {
@@ -216,10 +244,13 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     private boolean configured() {
+        if (!enabled) {
+            return false;
+        }
         if (isBlank(clientId) || isBlank(clientSecret) || isBlank(redirectUri)) {
             return false;
         }
-        return !(activeProfile.contains("prod") && encryptionKey.startsWith("change-me"));
+        return !(isProdProfile() && encryptionKey.startsWith("change-me"));
     }
 
     private static boolean isBlank(String value) {
@@ -243,38 +274,19 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     @Override
     public void handleCallback(String code, String state, Long userId) {
-        if (!configured()) {
-            throw BusinessException.of("error.payroll.configIncomplete");
-        }
-        if (isBlank(code)) {
-            throw BusinessException.of("error.payroll.oauthFailed");
-        }
         // 外部HTTP（token POST・users/me）はDB transaction外で実行する（REV-005）。
-        JsonNode n;
-        try {
-            n = tokenEndpointPost(OAUTH_TOKEN, grantForm("authorization_code", code), null);
-        } catch (HttpClientErrorException ex) {
-            // 認可拒否・code不正はtoken交換失敗として扱う。provider error詳細は出さない。
-            throw BusinessException.of("error.payroll.oauthFailed");
-        }
-        String accessToken = requiredToken(n, "access_token");
-        String refreshToken = requiredToken(n, "refresh_token");
-        long expiresIn = n.path("expires_in").asLong(0);
-        long companyId = n.path("company_id").asLong(0);
-        if (expiresIn <= 0 || companyId <= 0) {
-            throw BusinessException.of("error.payroll.oauthFailed");
-        }
+        FreeeTokenGrant grant = exchangeAuthorizationCode(code);
 
         // DB保存前にusers/meで選択事業所の存在・名称・company_adminを検証する。
-        UsersMeCompany company = verifyCompanyAdmin(accessToken, companyId);
+        UsersMeCompany company = verifyCompanyAdmin(grant.accessToken(), grant.companyId());
 
         FreeeConnection existing = latestActiveRow();
         FreeeConnection c = existing == null ? new FreeeConnection() : existing;
-        c.setCompanyId(companyId);
+        c.setCompanyId(grant.companyId());
         c.setCompanyName(company.name());
-        c.setAccessTokenEncrypted(encrypt(accessToken));
-        c.setRefreshTokenEncrypted(encrypt(refreshToken));
-        c.setTokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn));
+        c.setAccessTokenEncrypted(encrypt(grant.accessToken()));
+        c.setRefreshTokenEncrypted(encrypt(grant.refreshToken()));
+        c.setTokenExpiresAt(LocalDateTime.now().plusSeconds(grant.expiresIn()));
         c.setConnectedBy(userId);
         c.setConnectionStatus(STATUS_CONNECTED);
         inTransaction(() -> {
@@ -285,6 +297,77 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             }
             return null;
         });
+    }
+
+    /**
+     * 認可code→token交換と応答必須項目の検証（給与・会計の共通部分）。
+     * 失敗時は段階・HTTP status・freeeのerror code（列挙値）だけをWARNで残す。token・code・client secretは出さない。
+     */
+    @Override
+    public FreeeTokenGrant exchangeAuthorizationCode(String code) {
+        if (!configured()) {
+            log.warn("freee OAuth callback rejected: stage=config reason=client_settings_incomplete");
+            throw BusinessException.of("error.payroll.configIncomplete");
+        }
+        if (isBlank(code)) {
+            log.warn("freee OAuth callback rejected: stage=callback reason=code_missing");
+            throw BusinessException.of("error.payroll.oauthFailed");
+        }
+        JsonNode n;
+        try {
+            n = tokenEndpointPost(OAUTH_TOKEN, grantForm("authorization_code", code), null);
+        } catch (HttpClientErrorException ex) {
+            // 認可拒否・code不正・redirect_uri不一致はtoken交換失敗として扱う。provider error詳細は画面へ出さない。
+            log.warn("freee OAuth callback failed: stage=token_exchange status={} error={} requestId={}",
+                    ex.getStatusCode().value(), safeCode(errorCode(ex.getResponseBodyAsByteArray())), requestId(ex));
+            throw BusinessException.of("error.payroll.oauthFailed");
+        } catch (BusinessException ex) {
+            log.warn("freee OAuth callback failed: stage=token_exchange reason={}", ex.getMessage());
+            throw ex;
+        }
+        if (n == null) {
+            log.warn("freee OAuth callback failed: stage=token_response reason=empty_body");
+            throw BusinessException.of("error.payroll.oauthFailed");
+        }
+        List<String> missing = new ArrayList<>();
+        for (String field : List.of("access_token", "refresh_token")) {
+            if (n.path(field).asText("").isBlank()) {
+                missing.add(field);
+            }
+        }
+        long expiresIn = n.path("expires_in").asLong(0);
+        long companyId = n.path("company_id").asLong(0);
+        if (expiresIn <= 0) {
+            missing.add("expires_in");
+        }
+        if (companyId <= 0) {
+            // company_idはprompt=select_companyで事業所を選択した認可でのみ返る
+            missing.add("company_id");
+        }
+        if (!missing.isEmpty()) {
+            log.warn("freee OAuth callback failed: stage=token_response missing_or_invalid={} present_fields={}",
+                    missing, fieldNames(n));
+            throw BusinessException.of("error.payroll.oauthFailed");
+        }
+        return new FreeeTokenGrant(n.path("access_token").asText(), n.path("refresh_token").asText(),
+                expiresIn, companyId);
+    }
+
+    /** JSON objectのfield名一覧（値は出さない）。応答形の差異調査用。 */
+    private static List<String> fieldNames(JsonNode n) {
+        List<String> names = new ArrayList<>();
+        if (n != null && n.isObject()) {
+            n.fieldNames().forEachRemaining(names::add);
+        }
+        return names;
+    }
+
+    /** provider error codeは英数・記号の列挙値だけをログへ出す（自由文・秘密の混入防止）。 */
+    private static String safeCode(String code) {
+        if (code == null || code.isBlank()) {
+            return "-";
+        }
+        return code.matches("[A-Za-z0-9_.\\-]{1,64}") ? code : "unrecognized";
     }
 
     private MultiValueMap<String, String> grantForm(String grantType, String credential) {
@@ -316,11 +399,22 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         try {
             me = restTemplate.exchange(hrApiBase + USERS_ME_PATH, HttpMethod.GET,
                     new HttpEntity<>(h), JsonNode.class).getBody();
+        } catch (HttpClientErrorException e) {
+            // token error詳細は画面/例外messageへ出さない。調査用にstatusと列挙codeだけ残す。
+            log.warn("freee OAuth callback failed: stage=hr_users_me status={} code={} requestId={}",
+                    e.getStatusCode().value(), safeCode(errorCode(e.getResponseBodyAsByteArray())), requestId(e));
+            if (e.getStatusCode().value() == 403) {
+                // アプリ権限に[人事労務]参照が無い、またはfreee人事労務が未利用の事業所
+                throw BusinessException.of("error.payroll.permissionDenied");
+            }
+            throw BusinessException.of("error.payroll.oauthFailed");
         } catch (Exception e) {
-            // token error詳細はログ/例外messageへ出さない
+            log.warn("freee OAuth callback failed: stage=hr_users_me type={}", e.getClass().getSimpleName());
             throw BusinessException.of("error.payroll.oauthFailed");
         }
         if (me == null || !me.path("companies").isArray()) {
+            log.warn("freee OAuth callback failed: stage=hr_users_me reason=companies_missing present_fields={}",
+                    fieldNames(me));
             throw BusinessException.of("error.payroll.oauthFailed");
         }
         UsersMeCompany found = null;
@@ -332,10 +426,14 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             }
         }
         if (found == null || found.name() == null) {
+            log.warn("freee OAuth callback failed: stage=hr_users_me reason=company_not_listed listed_count={}",
+                    me.path("companies").size());
             throw BusinessException.of("error.payroll.companyMismatch");
         }
         if (!"company_admin".equals(found.role())) {
             // 給与・賞与一覧は会社管理者権限が必要（R02-4）
+            log.warn("freee OAuth callback failed: stage=hr_users_me reason=not_company_admin role={}",
+                    safeCode(found.role()));
             throw BusinessException.of("error.payroll.companyNotAdmin");
         }
         return found;
@@ -672,8 +770,10 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     private PayrollStatementDto fetchSingleBonusStatement(long companyId, String employeeId, Engineer engineer,
                                                           int year, int month) {
         for (int pageNo = 0; pageNo < maxPages; pageNo++) {
-            JsonNode rawJson = hrGet("/api/v1/bonuses/employee_payroll_statements",
-                    statementQuery(companyId, year, month, pageNo * PAGE_SIZE));
+            JsonNode rawJson = bonusPageOrNull(companyId, year, month, pageNo * PAGE_SIZE, pageNo == 0);
+            if (rawJson == null) {
+                return null; // 賞与支給の無い月
+            }
             FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(rawJson);
             for (FreeeBonusStatement s : page.getItems()) {
                 if (employeeId.equals(String.valueOf(s.getEmployeeId()))) {
@@ -767,8 +867,10 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         Integer expectedTotal = null;
         int offset = 0;
         for (int pageNo = 0; pageNo < maxPages; pageNo++) {
-            JsonNode rawJson = hrGet("/api/v1/bonuses/employee_payroll_statements",
-                    statementQuery(companyId, year, month, offset));
+            JsonNode rawJson = bonusPageOrNull(companyId, year, month, offset, pageNo == 0);
+            if (rawJson == null) {
+                return new ArrayList<>(); // 賞与支給の無い月は正常な0件
+            }
             FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(rawJson);
             expectedTotal = validatePageTotal(expectedTotal, page.getTotalCount(), page.getItems().size(),
                     "賞与");
@@ -794,6 +896,23 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             offset += page.getItems().size();
         }
         throw contractError("賞与pagination上限到達");
+    }
+
+    /**
+     * 賞与明細一覧の1page取得。freee人事労務は賞与明細が1件も無い月を
+     * 404（「この月の賞与明細はありません」）で返す（給与は200＋total_count=0）。
+     * 先頭pageの404だけを「その月は賞与なし」としてnullで返し、途中pageの404は従来どおり異常として扱う。
+     */
+    private JsonNode bonusPageOrNull(long companyId, int year, int month, int offset, boolean firstPage) {
+        try {
+            return hrGet("/api/v1/bonuses/employee_payroll_statements",
+                    statementQuery(companyId, year, month, offset));
+        } catch (BusinessException ex) {
+            if (firstPage && ex.getCode() == 404) {
+                return null;
+            }
+            throw ex;
+        }
     }
 
     private int validatePageTotal(Integer expectedTotal, int pageTotal, int pageSize, String what) {
@@ -1030,72 +1149,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         linkMapper.deleteByEngineerIdHard(engineerId);
     }
 
-    @Override
-    public List<BankDepositDto> bankDeposits(java.time.LocalDate from, java.time.LocalDate to) {
-        if (from == null || to == null || from.isAfter(to)) {
-            throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
-        }
-
-        FreeeConnection c = latestActiveRow();
-        if (c == null || c.getCompanyId() == null) {
-            throw BusinessException.of("error.reconciliation.notConnected");
-        }
-
-        // freee会計API: 入金取引(deals, type=income)を取得する。振込名義は明細記載(description)を用いる。
-        String path = "/api/1/deals?company_id=" + c.getCompanyId()
-                + "&type=income&start_issue_date=" + from + "&end_issue_date=" + to;
-        JsonNode arr = get(path);
-        List<BankDepositDto> out = new ArrayList<>();
-
-        if (arr != null) {
-            for (JsonNode n : arr.path("deals")) {
-                BankDepositDto d = new BankDepositDto();
-                d.setFreeeDepositId(n.path("id").asText());
-                d.setDepositDate(java.time.LocalDate.parse(n.path("issue_date").asText()));
-                d.setAmount(decimal(n, "amount"));
-                d.setPayerName(n.path("description").asText(""));
-                out.add(d);
-            }
-        }
-        return out;
-    }
-
-    /** S15会計APIの金額変換（既存挙動を維持: 欠落は0）。HFP-01の給与経路では使わない。 */
-    private BigDecimal decimal(JsonNode n, String k) {
-        return n.has(k) ? n.path(k).decimalValue() : BigDecimal.ZERO;
-    }
-
-    private JsonNode get(String path) {
-        FreeeConnection c = latestActiveRow();
-        if (c == null) {
-            throw BusinessException.of("error.payroll.notConnected");
-        }
-
-        if (c.getTokenExpiresAt() != null && c.getTokenExpiresAt().isBefore(LocalDateTime.now().plusMinutes(1))) {
-            applicationContext.getBean(FreeeIntegrationService.class).refresh();
-            c = latestActiveRow();
-        }
-
-        HttpHeaders h = new HttpHeaders();
-        h.setBearerAuth(decrypt(c.getAccessTokenEncrypted()));
-        h.setAccept(List.of(MediaType.APPLICATION_JSON));
-
-        try {
-            return restTemplate.exchange(apiBase + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class).getBody();
-        } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized ex) {
-            applicationContext.getBean(FreeeIntegrationService.class).refreshForced();
-            c = latestActiveRow();
-            h.setBearerAuth(decrypt(c.getAccessTokenEncrypted()));
-            try {
-                return restTemplate.exchange(apiBase + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class).getBody();
-            } catch (Exception e) {
-                throw BusinessException.of(503, "error.payroll.providerUnavailable");
-            }
-        } catch (Exception ex) {
-            throw BusinessException.of(503, "error.payroll.providerUnavailable");
-        }
-    }
-
     /**
      * HR API（HFP-01）用の認証付きGET。base URLはhrApiBase。
      * queryはUriComponentsBuilderで組み立て、company/year/month/limit/offsetを文字列連結しない。
@@ -1125,6 +1178,25 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     @Override
     public JsonNode apiPost(String path, Object body, String idempotencyKey, String correlationId) {
         return executeWithRetry(apiBase, path, HttpMethod.POST, body, idempotencyKey, correlationId, false);
+    }
+
+    @Override
+    public Long connectedCompanyId() {
+        if (!connected()) {
+            return null;
+        }
+        FreeeConnection c = latestActiveRow();
+        return c == null ? null : c.getCompanyId();
+    }
+
+    @Override
+    public JsonNode hrApiGet(String path, Map<String, String> query) {
+        return hrGet(path, query);
+    }
+
+    @Override
+    public JsonNode hrApiPut(String path, Object body, String correlationId) {
+        return executeWithRetry(hrApiBase, path, HttpMethod.PUT, body, null, correlationId, false);
     }
 
     private JsonNode executeWithRetry(String baseUrl, String path, HttpMethod method, Object body,
@@ -1307,6 +1379,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
      * timeout/5xx/応答不明は503 BusinessException。秘密は例外message/ログへ出さない。
      */
     private JsonNode tokenEndpointPost(String path, MultiValueMap<String, String> form, String correlationId) {
+        if (!enabled) {
+            // freee連携が無効の間はclient設定が無いことがあり、token endpoint（code交換・更新・失効）へ空のclient設定を
+            // 送らない（FINAL-FIX P3-1）。接続行が残っていても使えない扱いにし、行と状態は変えない
+            throw BusinessException.of("error.payroll.configIncomplete");
+        }
         HttpHeaders h = new HttpHeaders();
         h.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
         if (correlationId != null && !correlationId.isBlank()) {

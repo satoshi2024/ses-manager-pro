@@ -39,12 +39,12 @@ A〜D は互いにファイル交差がなく並行実施できる。共有資�
 
 - [x] C. 営業成績サービス+画面 【並行可・担当ファイル: SalesPerformance*, dto/salesperformance/, templates/sales-performance/, sales-performance.js, sidebar.html】
   - **Objective**: `/api/sales-performance` 集計と営業成績画面。
-  - **実装ガイダンス**: design.md 3章の口径どおり。ページ+JS+sidebar メニュー項目。
+  - **実装ガイダンス**: design.md 3章の基準どおり。ページ+JS+sidebar メニュー項目。
     既定規則の表示は `/api/sales-performance/commission-rule`。
   - **テスト要件**: `SalesPerformanceServiceImplTest`(既定規則/上書き率・基準/売上基準/
     work_record 優先/月窓/分母0/切捨て/マイナス0)。
   - **Demo**: 営業で画面表示可、HR はメニュー非表示+直接 URL 403。数値がシードデータと一致。
-  - **実装メモ**: 2026-07-16 レビューで、対象月稼動判定の `startDate=NULL` 耐性、成約件数/成約率の口径注記、
+  - **実装メモ**: 2026-07-16 レビューで、対象月稼動判定の `startDate=NULL` 耐性、成約件数/成約率の基準注記、
     論理削除済み営業ユーザー名の保持(`SysUserMapper.selectByIdsIncludingDeleted`)を補強。
     `SalesPerformanceServiceImplTest` は 8 件(営業ユーザー表示、過去営業、論理削除済み営業名、
     成約率百分率、work_record 優先、契約別上書き、更新契約除外、マイナス粗利0円、開始日NULL)を確認。

@@ -71,6 +71,9 @@ class SalesInvoiceIntegrationTest {
     @Autowired
     private RestTemplate restTemplate;
 
+    @Autowired
+    private com.ses.service.accounting.AccountingIntegrationWorker accountingIntegrationWorker;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
     private Customer customer;
@@ -80,6 +83,7 @@ class SalesInvoiceIntegrationTest {
     void cleanupFixtures() {
         com.ses.service.accounting.AccountingTenantContextHolder.clear();
         if (invoice != null && invoice.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_bank_deposit WHERE matched_invoice_id = ?", invoice.getId());
             invoiceService.removeById(invoice.getId());
             jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
         }
@@ -210,6 +214,11 @@ class SalesInvoiceIntegrationTest {
 
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
                 .andExpect(method(HttpMethod.POST))
+                // 照合済みマッピングの外部IDがそのままfreeeへ届く（取引先はIDで、内部コードは送らない）
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_id").value(1001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_code").doesNotExist())
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].account_item_id").value(2001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].tax_code").value(21))
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON).headers(headers));
 
         // Worker 同期実行
@@ -220,6 +229,61 @@ class SalesInvoiceIntegrationTest {
         assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(updated.getExternalId()).isEqualTo("77777");
         assertThat(updated.getProviderRequestId()).isEqualTo("req-sales-success-001");
+    }
+
+    @Test
+    @DisplayName("NF09: 全社共通接続でも送信ジョブは請求書の法人を持ち、Workerのdispatch経由でfreeeへ送信される")
+    void triggerSalesSync_jobCarriesInvoiceLegalEntity_andWorkerDispatches() {
+        Long invoiceLegalEntity = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        assertThat(connection.getLegalEntityId()).isNull(); // 全社共通接続
+        assertThat(invoiceLegalEntity).isNotNull();
+
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(job.getLegalEntityId()).isEqualTo(invoiceLegalEntity);
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77778, \"company_id\": 99001, \"amount\": 1100000}}",
+                        MediaType.APPLICATION_JSON));
+
+        // 以前はここで job.legal_entity_id が NULL のため SCOPE_MISSING で失敗し、freeeへ一度も送られなかった
+        accountingIntegrationWorker.dispatchJob(jobService.getById(job.getId()));
+
+        mockServer.verify();
+        IntegrationJob updated = jobService.getById(job.getId());
+        assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updated.getExternalId()).isEqualTo("77778");
+    }
+
+    @Test
+    @DisplayName("freeeの管理番号は20文字以内: 請求書番号が長すぎる場合は送信ジョブを作らない")
+    void triggerSalesSync_invoiceNoOver20Chars_rejectedBeforeJob() {
+        String original = invoiceService.getById(invoice.getId()).getInvoiceNo();
+        jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", "INV-2026-11-000000001", invoice.getId()); // 21文字
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.refNumberTooLong");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", original, invoice.getId());
+        }
+    }
+
+    @Test
+    @DisplayName("NF09: 請求書の法人が未設定なら送信ジョブを作らず、理由を返す")
+    void triggerSalesSync_invoiceWithoutLegalEntity_rejectedBeforeJob() {
+        Long original = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = NULL WHERE id = ?", invoice.getId());
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.legalEntityMissing");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            // 後片付け（removeById）は法人一致を要求するため元へ戻す
+            jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = ? WHERE id = ?", original, invoice.getId());
+        }
     }
 
     @Test
@@ -270,6 +334,41 @@ class SalesInvoiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("取消後の再送信: 送信済みの再送信は理由付きで拒否し、freee取引を取消した後は新しい世代で再送信できる")
+    void resendAfterCancel_createsNewGenerationJob() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markSucceeded(first.getId(), "77801", "req-sync-01", "売上登録完了");
+
+        // 送信済みのまま再送信 → 以前は既存ジョブが黙って返り「登録しました」と表示されていた
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySynced");
+
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_AMOUNT_CORRECTION", 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77801}}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesCancelJob(cancel.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(cancel.getId()).getStatus()).isEqualTo("SUCCEEDED");
+
+        // 取消済みの取引をもう一度取消そうとしても、理由付きで拒否する
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadyCancelled");
+
+        // 取消後は訂正した請求書を新しい世代のジョブとして再送信できる（以前は旧ジョブが返り送信されなかった）
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getId()).isNotEqualTo(first.getId());
+        assertThat(second.getStatus()).isEqualTo("PENDING");
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+    }
+
+    @Test
     @DisplayName("月次締めガード: 締め済み月の請求書に対する連携トリガーは拒否される")
     void triggerSalesSync_closedMonth_rejected() {
         Invoice closedInvoice = new Invoice();
@@ -311,7 +410,7 @@ class SalesInvoiceIntegrationTest {
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(draftInvoice.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("送付済または入金済の請求書のみ会計連携可能");
+                .hasMessage("error.accounting.invoiceNotSendable");
     }
 
     @Test
@@ -492,5 +591,325 @@ class SalesInvoiceIntegrationTest {
 
         // 5. 外部 API は一切呼ばれていないこと
         mockServer.verify();
+    }
+
+    /** 既存取引の確認: 売上（income）・取引先（CUSTOMER_PARTNERの1001）・発生日の前後1年で絞る。 */
+    private static final String DEALS_LIST_URL = "https://api.freee.co.jp/api/1/deals?company_id=99001&type=income&partner_id=1001"
+            + "&start_issue_date=" + LocalDate.of(2026, 8, 1).minusDays(366)
+            + "&end_issue_date=" + LocalDate.of(2026, 8, 1).plusDays(366)
+            + "&limit=100&offset=0";
+
+    private long countSalesSyncJobs() {
+        return jobService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getTargetType, "INVOICE")
+                .eq(IntegrationJob::getTargetId, invoice.getId())
+                .eq(IntegrationJob::getJobType, "SALES_INVOICE_SYNC"));
+    }
+
+    @Test
+    @DisplayName("世代キー: 通信中取消の補償取消の前は再送信を拒否し、補償取消の後に作った取引は送信済みとして3件目を作らない")
+    void resendAfterInFlightCancel_doesNotCountTheCompensatedDealTwice() {
+        // 1. 送信中（RUNNING）に取消 → freeeでは取引D1が作成されていた → 補償取消ジョブCが登録される
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        first = jobService.claimJob(first.getId());
+        jobService.cancelJob(first.getId(), "送信中の取消");
+        salesIntegrationService.handleSalesInvoiceResult(first.getId(), first, connection,
+                com.ses.dto.accounting.canonical.CanonicalDealResult.builder()
+                        .success(true).externalId("667701").providerRequestId("req-inflight-g").build());
+        IntegrationJob compensation = jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_CANCEL");
+        assertThat(compensation.getStatus()).isEqualTo("PENDING");
+
+        // 2. 補償取消の完了前に再送信すると、D1が残ったままD2を作り得るため拒否する
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.cancelJobInProgress");
+
+        // 3. 補償取消がD1を削除
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/667701?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 667701}}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/667701?company_id=99001"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesCancelJob(compensation.getId());
+        assertThat(jobService.getById(compensation.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        mockServer.verify();
+        mockServer.reset();
+
+        // 4. 再送信は世代1。前の世代は送信後に取消されたため、作成前に既存取引が無いことを確認する
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+        assertThat(second.getPayloadSnapshot()).contains("\"verifyNoExistingDeal\":true");
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 667702, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+        mockServer.verify();
+        IntegrationJob sent = jobService.getById(second.getId());
+        assertThat(sent.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(sent.getExternalId()).isEqualTo("667702");
+
+        // 5. 以前は「取消済み送信ジョブ1 + 成功した取消ジョブ1 = 世代2」と数え、:g2 でD3を作れた（D2とD3が重複）
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySynced");
+        assertThat(countSalesSyncJobs()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("世代キー: 結果不明の送信（タイムアウト後の再試行待ち）を取消した後の再送信は、freeeに同じ管理番号の取引があれば作成しない")
+    void resendAfterCancellingUncertainSend_refusesWhenTheDealExists() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markRetryable(first.getId(), "TIMEOUT", "一時的タイムアウト", 60);
+        jobService.cancelJob(first.getId(), "結果不明のまま取消");
+
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+        assertThat(second.getPayloadSnapshot()).contains("\"verifyNoExistingDeal\":true");
+
+        // タイムアウトした送信でfreeeに取引が作成されていた → 作成しない（POSTは呼ばない）
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 667801, \"company_id\": 99001, \"amount\": 1100000, "
+                        + "\"ref_number\": \"" + invoice.getInvoiceNo() + "\"}]}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+        mockServer.verify();
+        IntegrationJob refused = jobService.getById(second.getId());
+        assertThat(refused.getStatus()).isEqualTo("FAILED");
+        assertThat(refused.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+
+        // freeeで不要な取引を削除してから再試行すれば作成できる
+        mockServer.reset();
+        jobService.resetForManualRetry(second.getId());
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 667802, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(second.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(jobService.getById(second.getId()).getExternalId()).isEqualTo("667802");
+    }
+
+    @Test
+    @DisplayName("世代キー: 送信前（試行0回）に取消した後の再送信は既存取引の確認を求めない")
+    void resendAfterCancellingUnsentJob_needsNoExistingDealCheck() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.cancelJob(first.getId(), "送信前の取消");
+
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+        assertThat(second.getPayloadSnapshot()).doesNotContain("verifyNoExistingDeal");
+    }
+
+    @Test
+    @DisplayName("同じジョブの再試行: タイムアウト後の再試行は前回の試行で作成済みの取引を採用し、再POSTしない")
+    void retryAfterTimeout_adoptsTheDealCreatedByTheFirstAttempt() {
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(job.getId()); // 1回目の試行: freeeでは取引が作成されたが、応答がタイムアウトした
+        jobService.markRetryable(job.getId(), "TIMEOUT", "一時的タイムアウト", 0);
+        jdbcTemplate.update("UPDATE t_integration_job SET next_retry_at = NULL WHERE id = ?", job.getId());
+
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 667901, \"company_id\": 99001, \"amount\": 1100000, "
+                        + "\"ref_number\": \"" + invoice.getInvoiceNo() + "\"}]}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(job.getId()); // 2回目の試行（以前は確認せずに再POSTしていた）
+
+        mockServer.verify();
+        IntegrationJob retried = jobService.getById(job.getId());
+        assertThat(retried.getAttemptCount()).isEqualTo(2);
+        assertThat(retried.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(retried.getExternalId()).isEqualTo("667901");
+        // 新しく作成した取引と区別できるよう、採用したことをイベントに残す
+        assertThat(jobService.listEvents(job.getId()))
+                .anyMatch(e -> "ADOPTED_EXISTING_DEAL".equals(e.getToStatus()));
+    }
+
+    @Test
+    @DisplayName("同じジョブの再試行: 前回の試行で取引が作成されていなければ作成する")
+    void retryAfterServerError_postsWhenNoDealWasCreated() {
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(job.getId()); // 1回目の試行: 5xxで作成されなかった
+        jobService.markRetryable(job.getId(), "HTTP_503", "一時的な障害", 0);
+        jdbcTemplate.update("UPDATE t_integration_job SET next_retry_at = NULL WHERE id = ?", job.getId());
+
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 667902, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(job.getId());
+
+        mockServer.verify();
+        assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(jobService.getById(job.getId()).getExternalId()).isEqualTo("667902");
+    }
+
+    @Test
+    @DisplayName("取消後の再送信: 取引先マッピングを訂正して再送信しても、取消前の取引先で作成された取引を見つけて作成しない")
+    void resendAfterPartnerMappingChange_findsTheDealUnderThePreviousPartner() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markRetryable(first.getId(), "TIMEOUT", "一時的タイムアウト", 60);
+        jobService.cancelJob(first.getId(), "取引先を訂正するため取消");
+
+        // 取引先マッピングを訂正（1001 → 1002）
+        ExternalMapping partner = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-" + customer.getId());
+        partner.setExternalId("1002");
+        mappingService.saveOrUpdateMapping(partner);
+        ExternalMapping corrected = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-" + customer.getId());
+        mappingService.verifyMapping(corrected.getId(), "{\"verified\":true}");
+
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getPayloadSnapshot()).contains("\"partnerExternalId\":\"1002\"")
+                .contains("\"priorDealScopes\":[{\"partnerExternalId\":\"1001\"");
+
+        // 今回の取引先（1002）の範囲には無いが、取消前の取引先（1001）の範囲に作成済みの取引がある
+        mockServer.expect(requestTo(DEALS_LIST_URL.replace("partner_id=1001", "partner_id=1002")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 668001, \"company_id\": 99001, \"amount\": 1100000, "
+                        + "\"ref_number\": \"" + invoice.getInvoiceNo() + "\"}]}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+
+        mockServer.verify(); // POSTは期待していない
+        IntegrationJob refused = jobService.getById(second.getId());
+        assertThat(refused.getStatus()).isEqualTo("FAILED");
+        assertThat(refused.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
+    @Test
+    @DisplayName("freeeの入力エラー（期首日より前）で失敗した送信は理由を表示し、ジョブを取消すと内容を直して再送信できる（実freeeで見つかった詰まり）")
+    void failedByFreeeValidation_canBeCancelledAndSentAgain() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"現在選択している会計年度の期首日以前の取引を登録することができません。\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(first.getId());
+        mockServer.verify();
+        IntegrationJob failed = jobService.getById(first.getId());
+        assertThat(failed.getStatus()).isEqualTo("FAILED");
+        assertThat(failed.getErrorCode()).isEqualTo("VALIDATION_ERROR");
+        // 以前は「freeeの入力チェックでエラー」だけで、何を直せばよいか分からなかった
+        assertThat(failed.getErrorMessageSafe()).isEqualTo("error.accounting.freeeBeforeFiscalYear");
+
+        // FAILEDのままでは再送信できない（再試行は固定スナップショットのため同じ失敗になる）
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.previousJobFailed");
+
+        // 失敗したジョブを取消すと新しい世代で再送信でき、作成前にfreeeの既存取引を確認する
+        jobService.cancelJob(first.getId(), "発生日を直して再送信");
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+        assertThat(second.getPayloadSnapshot()).contains("\"verifyNoExistingDeal\":true");
+
+        mockServer.reset();
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 668101, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(second.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(jobService.getById(second.getId()).getExternalId()).isEqualTo("668101");
+    }
+
+    /** 請求書を送信済みにする（freee取引IDを持つ送信成功ジョブ）。 */
+    private IntegrationJob markInvoiceSentToFreee(String dealId) {
+        IntegrationJob sync = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(sync.getId());
+        jobService.markSucceeded(sync.getId(), dealId, "req-sent", "売上登録完了");
+        return jobService.getById(sync.getId());
+    }
+
+    @Test
+    @DisplayName("入金消込のfreee反映: 送信済みの請求書なら、口座明細・取引・入金額の反映ジョブを登録し、Workerがfreeeで消込む")
+    void depositReconcile_sentInvoice_isReflectedToFreee() {
+        IntegrationJob sync = markInvoiceSentToFreee("668201");
+        // Workerは送る直前に入金明細がこの請求書・入金行で消込済みかを確かめるため、消込済みの入金明細を用意する
+        jdbcTemplate.update("DELETE FROM t_bank_deposit WHERE freee_deposit_id = '2542349301'");
+        jdbcTemplate.update("INSERT INTO t_bank_deposit (freee_deposit_id, deposit_date, amount, payer_name, status, "
+                + "matched_invoice_id, matched_payment_id) VALUES ('2542349301', ?, 1100000, 'ﾃｽﾄ', '消込済', ?, 9401)",
+                LocalDate.of(2026, 9, 30), invoice.getId());
+        Long depositId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_bank_deposit WHERE freee_deposit_id = '2542349301'", Long.class);
+
+        IntegrationJob job = salesIntegrationService.enqueueDepositReconcile(depositId, "2542349301", invoice.getId(), 9401L,
+                new BigDecimal("1100000"));
+        assertThat(job).isNotNull();
+        assertThat(job.getJobType()).isEqualTo("DEPOSIT_RECONCILE_SYNC");
+        assertThat(job.getTargetType()).isEqualTo("BANK_DEPOSIT");
+        assertThat(job.getLegalEntityId()).isEqualTo(sync.getLegalEntityId());
+        // 冪等キーはSESの入金行ごと（入金を削除して消込し直すと別のジョブになる）
+        assertThat(job.getIdempotencyKey()).isEqualTo("DEPOSIT_RECONCILE:" + depositId + ":9401:668201");
+        assertThat(job.getPayloadSnapshot()).contains("\"walletTxnId\":\"2542349301\"").contains("\"externalDealId\":\"668201\"");
+        // 同じ入金の再登録は同じジョブへ統合される（冪等）
+        assertThat(salesIntegrationService.enqueueDepositReconcile(depositId, "2542349301", invoice.getId(), 9401L,
+                new BigDecimal("1100000")).getId()).isEqualTo(job.getId());
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542349301/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.deals[0].deal_id").value(668201))
+                .andExpect(jsonPath("$.deals[0].amount").value(1100000))
+                .andRespond(withSuccess("{\"wallet_txn_id\": 2542349301, \"deal_ids\": [668201], \"new_deal_id\": null}",
+                        MediaType.APPLICATION_JSON));
+        accountingIntegrationWorker.dispatchJob(jobService.getById(job.getId()));
+        mockServer.verify();
+        IntegrationJob done = jobService.getById(job.getId());
+        assertThat(done.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(done.getExternalId()).isEqualTo("668201");
+    }
+
+    @Test
+    @DisplayName("入金消込のfreee反映: 請求書が未送信、または取引が取消済みなら反映ジョブを作らない")
+    void depositReconcile_unsentOrCancelledInvoice_isNotReflected() {
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9302L, "2542349302", invoice.getId(), 9402L,
+                new BigDecimal("1100000"))).isNull();
+
+        markInvoiceSentToFreee("668202");
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L);
+        jobService.claimJob(cancel.getId());
+        // 取消の処理中も反映しない（取引の削除とfreee上で食い違うため）
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9305L, "2542349305", invoice.getId(), 9405L,
+                new BigDecimal("1100000"))).isNull();
+        jobService.markSucceeded(cancel.getId(), "668202", "req-cancel", "取消完了");
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9303L, "2542349303", invoice.getId(), 9403L,
+                new BigDecimal("1100000"))).isNull();
+
+        // 口座明細IDが無い（freee以外から登録した入金）・金額が0以下も反映しない
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9304L, null, invoice.getId(), 9404L,
+                new BigDecimal("1100000"))).isNull();
+    }
+
+    @Test
+    @DisplayName("取消ジョブが失敗したまま取消を依頼し直すと、送信ジョブ向けではなく取消ジョブの再試行を案内する")
+    void triggerSalesCancel_failedCancelJob_asksToRetryTheCancelJob() {
+        markInvoiceSentToFreee("668203");
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L);
+        jobService.claimJob(cancel.getId());
+        jobService.markFailed(cancel.getId(), "VALIDATION_ERROR", "error.accounting.freeeValidation");
+
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.cancelRetryRequired");
     }
 }

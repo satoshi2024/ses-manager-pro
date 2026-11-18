@@ -15,6 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -48,6 +49,9 @@ public class EngineerSalesServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // NF01 F2: 割当writerは要員行（engineer epochのanchor）をX lockしてから書くため、割当先の要員行を用意する。
+        jdbcTemplate.update("INSERT INTO t_engineer (id, tenant_id, full_name, employment_type, status, deleted_flag) "
+                + "VALUES (?, 'default', '担当営業試験要員', '正社員', 'Bench', 0)", ENGINEER_ID);
         salesUser1Id = insertUser("sales1", "営業 一郎", "営業", 1);
         salesUser2Id = insertUser("sales2", "営業 二郎", "営業", 1);
         hrUserId = insertUser("hr1", "人事 花子", "HR", 1);
@@ -120,6 +124,14 @@ public class EngineerSalesServiceImplTest {
                 () -> engineerSalesService.assign(ENGINEER_ID, hrUserId, false, null));
         assertThrows(BusinessException.class,
                 () -> engineerSalesService.assign(ENGINEER_ID, disabledSalesId, false, null));
+    }
+
+    @Test
+    void 存在しない要員への割当は要員行をlockできず404で拒否される() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> engineerSalesService.assign(999_999L, salesUser1Id, false, null));
+        assertEquals(404, ex.getCode());
+        assertTrue(engineerSalesService.listActive(999_999L).isEmpty());
     }
 
     @Test
@@ -210,6 +222,66 @@ public class EngineerSalesServiceImplTest {
         assertTrue(engineerSalesService.listActive(ENGINEER_ID).isEmpty(), "現任割当が残らないこと");
         // 履歴は残る（物理・論理削除しない）
         assertEquals(2, engineerSalesService.listHistory(ENGINEER_ID).size());
+    }
+
+    @Test
+    void 日付なしのreleaseAllByEngineerIdは本日付を解除日として記録する() {
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+        LocalDate before = LocalDate.now();
+
+        engineerSalesService.releaseAllByEngineerId(ENGINEER_ID);
+
+        LocalDate after = LocalDate.now();
+        List<EngineerSales> rows = salesRowsOf(ENGINEER_ID);
+        assertEquals(1, rows.size());
+        LocalDate releasedAt = rows.get(0).getReleasedAt();
+        assertNotNull(releasedAt);
+        assertFalse(releasedAt.isBefore(before) || releasedAt.isAfter(after), "解除日は本日付であること: " + releasedAt);
+    }
+
+    @Test
+    void 日付指定のreleaseAllByEngineerIdは指定日で現任割当だけを解除し履歴を保つ() {
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+        Long releasedEarlierId = engineerSalesService.listActive(ENGINEER_ID).get(0).getId();
+        engineerSalesService.release(ENGINEER_ID, releasedEarlierId);
+        LocalDate earlierReleasedAt = engineerSalesMapper.selectById(releasedEarlierId).getReleasedAt();
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+        engineerSalesService.assign(ENGINEER_ID, salesUser2Id, false, null);
+        LocalDate anchorDate = LocalDate.now().minusDays(10);
+
+        engineerSalesService.releaseAllByEngineerId(ENGINEER_ID, anchorDate);
+
+        assertTrue(engineerSalesService.listActive(ENGINEER_ID).isEmpty(), "現任割当が残らないこと");
+        List<EngineerSales> rows = salesRowsOf(ENGINEER_ID);
+        assertEquals(3, rows.size(), "履歴は物理・論理削除しないこと");
+        for (EngineerSales row : rows) {
+            if (row.getId().equals(releasedEarlierId)) {
+                assertEquals(earlierReleasedAt, row.getReleasedAt(), "解除済みの履歴は上書きしないこと");
+            } else {
+                assertEquals(anchorDate, row.getReleasedAt(), "現任割当は指定日で解除されること");
+            }
+        }
+    }
+
+    @Test
+    void 日付指定のreleaseAllByEngineerIdはnull日付なら本日付で解除しnull要員IDは何もしない() {
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+
+        assertDoesNotThrow(() -> engineerSalesService.releaseAllByEngineerId(null, LocalDate.now().minusDays(1)));
+        assertEquals(1, engineerSalesService.listActive(ENGINEER_ID).size(), "null要員IDでは解除しないこと");
+
+        LocalDate before = LocalDate.now();
+        engineerSalesService.releaseAllByEngineerId(ENGINEER_ID, null);
+        LocalDate after = LocalDate.now();
+        LocalDate releasedAt = salesRowsOf(ENGINEER_ID).get(0).getReleasedAt();
+        assertNotNull(releasedAt);
+        assertFalse(releasedAt.isBefore(before) || releasedAt.isAfter(after), "null日付は本日付とすること: " + releasedAt);
+    }
+
+    private List<EngineerSales> salesRowsOf(Long engineerId) {
+        return engineerSalesMapper.selectList(new LambdaQueryWrapper<EngineerSales>()
+                .eq(EngineerSales::getEngineerId, engineerId)
+                .orderByAsc(EngineerSales::getId));
     }
 
     @Test

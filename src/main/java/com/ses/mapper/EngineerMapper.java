@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.entity.Engineer;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
@@ -196,8 +197,24 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
             @org.apache.ibatis.annotations.Param("monthEnd") java.time.LocalDate monthEnd,
             @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
+    /**
+     * NF01 lock rank 7（engineer epochのanchor、細粒度epoch計画 §2.2・§3.1）。主キー一点の {@code FOR UPDATE} で行をlockし、
+     * anchorの照合に要る列だけを返す。論理削除済みの行も返す（要員削除の後段の営業解除・紐付け解除も、lockしてから
+     * 世代を進めるため）。tenantでは絞らず、呼出側がDBの {@code tenant_id} でanchorを作る。epoch列は読まない（E-7）。
+     *
+     * <p>実行前にMyBatisのsession cacheを消す（{@link #selectByIdForUpdateForTenant} も同じ）。writerはanchorをlockした後に
+     * 子行（紐付け・担当営業等）を通常読取で読み直して依存先の変化を判定するが（E-2）、同じtransactionでlock前に同じ照会を
+     * 実行していると、cacheがlock前の結果を返し、待っていた相手のcommitを見落とす（W3-16b M6で判明）。</p>
+     */
+    @Select("SELECT id, tenant_id, deleted_flag, organization_id, legal_entity_id, version FROM t_engineer "
+            + "WHERE id = #{id} FOR UPDATE")
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
+    Engineer selectScopeAnchorForUpdate(@Param("id") Long id);
+
+    /** 要員行（rank 7）のX lock。実行前にMyBatisのsession cacheを消す（lock後の読み直しをcacheで済ませない）。 */
     @Select("SELECT e.* FROM t_engineer e "
             + "WHERE e.id = #{id} AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 FOR UPDATE")
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -260,7 +277,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     /**
      * 対象月のBench要員の待機原価を組織・原価部門別に集計する。
      *
-     * <p>Bench判定は {@link com.ses.service.UtilizationCalcService} と同じ契約ベースの口径を使う
+     * <p>Bench判定は {@link com.ses.service.UtilizationCalcService} と同じ契約ベースの集計基準を使う
      * （対象月に 稼動中/準備中/終了 の契約が期間として重ならない要員をBenchとする）。
      * {@code t_engineer.status} は「現在」の値しか持たないため、過去月を照会したときに
      * 数字が後から変わってしまう。月次実績は対象月時点で確定していなければならない（R2.2）。

@@ -32,6 +32,9 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private static final Set<String> ADMIN_ONLY_ACTIONS =
             Set.of("permission.manage", "audit.security.view", "file.scan.retry", "mfa.reset",
                     "user.*", "identity-provider.*", "system-config.*");
+    /** NF07 privacy action の接頭辞と resource wildcard（V191 の privacy-admin だけが許可で持つ）。 */
+    private static final String PRIVACY_PREFIX = "privacy.";
+    private static final String PRIVACY_WILDCARD = "privacy.*";
 
     private final UserPermissionGroupMapper userPermissionGroupMapper;
     private final PermissionGroupActionMapper permissionGroupActionMapper;
@@ -43,11 +46,37 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if (authentication == null || !authentication.isAuthenticated() || !StringUtils.hasText(actionKey)) {
             return false;
         }
-        String role = SecurityUtils.currentRole();
+        return evaluate(SecurityUtils.currentRole(), SecurityUtils::currentUserId, actionKey);
+    }
+
+    /**
+     * NF01（細粒度epoch計画 §4.1）: DBから読んだ明示actorで {@link #isAllowed} と同じ判定を行う。SecurityContextは読まない。
+     *
+     * <p>権限group表は設定tenant（{@link #tenantId()}）で引くため、actorのDB上のtenantが設定tenantと一致しない場合は
+     * 拒否する（単一tenant配備の前提。計画 §9 RR-14。別tenantの利用者を設定tenantのgroupで評価しない）。</p>
+     */
+    @Override
+    public boolean isAllowedForActor(String actorTenantId, Long userId, String role, String actionKey) {
+        if (userId == null || !StringUtils.hasText(role) || !StringUtils.hasText(actionKey)
+                || !StringUtils.hasText(actorTenantId) || !tenantId().equals(actorTenantId.trim())) {
+            return false;
+        }
+        return evaluate(role, () -> userId, actionKey);
+    }
+
+    /** {@link #isAllowed} と {@link #isAllowedForActor} の共通判定。利用者IDは従来どおりDB判定の例外処理の内側で解決する。 */
+    private boolean evaluate(String role, java.util.function.Supplier<Long> userIdResolver, String actionKey) {
+        boolean privacyAction = isPrivacyAction(actionKey);
         if ("one-on-one.confidential".equals(actionKey)) {
             if (ROLE_HR.equals(role)) {
                 return true;
             }
+            if (!ROLE_ADMIN.equals(role)) {
+                return false;
+            }
+        } else if (privacyAction) {
+            // NF07 W-5（production-bridge-phased-plan.md §6.2）。管理者role以外は group に関係なく拒否する
+            // （privacy-admin の誤割当を data の deny だけに任せない）。管理者でも短絡許可せず、group評価（deny優先）へ進む。
             if (!ROLE_ADMIN.equals(role)) {
                 return false;
             }
@@ -61,7 +90,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return true;
         }
         try {
-            Long userId = SecurityUtils.currentUserId();
+            Long userId = userIdResolver.get();
             if (userId != null) {
                 Set<Long> assignedGroupIds = userPermissionGroupMapper.selectList(new LambdaQueryWrapper<UserPermissionGroup>()
                                 .eq(UserPermissionGroup::getTenantId, tenantId())
@@ -80,11 +109,14 @@ public class AuthorizationServiceImpl implements AuthorizationService {
                     }
                     Set<String> candidates = candidateKeys(actionKey);
                     // 明示拒否はbaseline許可（action_key='*'）より優先する。先に評価しないと
-                    // baselineを与えたroleから機密actionを外せない。
+                    // baselineを与えたroleから機密actionを外せない。拒否側は privacy でも '*' を含む同じ候補で照合する
+                    // （拒否を弱めない）。
                     if (matches(enabledGroupIds, candidates, 1)) {
                         return false;
                     }
-                    return matches(enabledGroupIds, candidates, 0);
+                    // privacy の許可候補からは全体baseline '*' を外す（多重防御）。'*' を複製した group が
+                    // privacy.* の deny を欠いても privacy は開かない。許可根拠は privacy-admin の明示 'privacy.*' だけになる。
+                    return matches(enabledGroupIds, privacyAction ? privacyAllowCandidates(actionKey) : candidates, 0);
                 }
             }
             return legacyRoleAllows(role, actionKey);
@@ -100,6 +132,11 @@ public class AuthorizationServiceImpl implements AuthorizationService {
      */
     private boolean legacyRoleAllows(String role, String actionKey) {
         if (role == null) {
+            return false;
+        }
+        // group未割当のユーザーは privacy 管理者になれない。privacy は RESOURCE_NAMES の既知resourceなので、
+        // ここで拒否しないと管理者・既知action扱いで通ってしまう（break-glass も同じ commit で拒否する）。
+        if (isPrivacyAction(actionKey)) {
             return false;
         }
         if ("one-on-one.confidential".equals(actionKey)) {
@@ -149,6 +186,19 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         }
         candidates.add("*");
         return candidates;
+    }
+
+    /** privacy の許可候補（action本体と resource wildcard だけ。全体baseline '*' は含めない）。 */
+    private Set<String> privacyAllowCandidates(String actionKey) {
+        Set<String> candidates = new java.util.LinkedHashSet<>();
+        candidates.add(actionKey);
+        candidates.add(PRIVACY_WILDCARD);
+        return candidates;
+    }
+
+    /** NF07 privacy action（{@code privacy.} 接頭辞。{@code privacy-x} 等の別resourceは含めない）。 */
+    private static boolean isPrivacyAction(String actionKey) {
+        return actionKey.startsWith(PRIVACY_PREFIX);
     }
 
     private boolean isAdminOnlyAction(String actionKey) {

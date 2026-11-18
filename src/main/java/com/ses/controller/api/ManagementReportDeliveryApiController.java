@@ -40,16 +40,18 @@ public class ManagementReportDeliveryApiController {
 
     @PostMapping("/deliveries/{deliveryId}/reauthenticate")
     public ApiResult<Boolean> reauthenticate(@PathVariable Long deliveryId,
-                                             @RequestBody ReauthenticateRequest request) {
-        deliveryService.reauthenticate(deliveryId, request == null ? null : request.password());
+                                             @RequestBody ReauthenticateRequest request,
+                                             HttpServletRequest servletRequest) {
+        deliveryService.reauthenticate(deliveryId, request == null ? null : request.password(), servletRequest);
         return ApiResult.success(true);
     }
 
     @GetMapping("/deliveries/{deliveryId}/download")
     public ResponseEntity<InputStreamResource> download(@PathVariable Long deliveryId,
                                                         @RequestParam(required = false) String token,
-                                                        @RequestParam(defaultValue = "PDF") String format) {
-        ReportDownload download = deliveryService.download(deliveryId, token, format);
+                                                        @RequestParam(defaultValue = "PDF") String format,
+                                                        HttpServletRequest request) {
+        ReportDownload download = deliveryService.download(deliveryId, token, format, request);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + download.getFileName() + "\"")
                 .contentType(MediaType.parseMediaType(download.getContentType()))
@@ -59,8 +61,9 @@ public class ManagementReportDeliveryApiController {
     @GetMapping("/deliveries/{deliveryId}/preview")
     public ResponseEntity<InputStreamResource> preview(@PathVariable Long deliveryId,
                                                        @RequestParam(required = false) String token,
-                                                       @RequestParam(defaultValue = "PDF") String format) {
-        ReportDownload download = deliveryService.preview(deliveryId, token, format);
+                                                       @RequestParam(defaultValue = "PDF") String format,
+                                                       HttpServletRequest request) {
+        ReportDownload download = deliveryService.preview(deliveryId, token, format, request);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + download.getFileName() + "\"")
                 .contentType(MediaType.parseMediaType(download.getContentType()))

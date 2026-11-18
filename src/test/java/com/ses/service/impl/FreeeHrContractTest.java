@@ -337,6 +337,34 @@ class FreeeHrContractTest {
         assertEquals("bonus", all.get(0).getType());
     }
 
+    @Test
+    @DisplayName("bonus: 賞与の無い月はfreeeが404（この月の賞与明細はありません）を返すため0件として扱う")
+    void bonusの404は賞与なしの0件() throws Exception {
+        seedConnection();
+        server.expect(once(), statementQuery(BONUS, 0))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"message\":\"この月の賞与明細はありません\"}"));
+
+        assertTrue(service.statements(2026, 7, "bonus").isEmpty());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("bonus: 2page目以降の404は賞与なしではなく異常として扱う")
+    void bonusの途中page404はnotFound() throws Exception {
+        seedConnection();
+        server.expect(once(), statementQuery(BONUS, 0))
+                .andRespond(withSuccess(bonusPage(9101, 100, 101).toString(), MediaType.APPLICATION_JSON));
+        server.expect(once(), statementQuery(BONUS, 100))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.statements(2026, 7, "bonus"));
+        assertEquals(404, ex.getCode());
+        assertEquals("error.payroll.notFound", ex.getMessage());
+    }
+
     // ============ schema drift / contract error ============
 
     @Test

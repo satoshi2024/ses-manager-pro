@@ -477,7 +477,7 @@ class SpecDispatchConsistencyTest {
                     "platform-invariants.md",
                     "execution-review-handbook.md",
                     "test-execution-policy-s03-s17.md",
-                    // 決定表を逐項照合させる。これが無いと「実装中に決めた設計」を見逃す
+                    // 決定表を項目ごとに照合させる。これが無いと「実装中に決めた設計」を見逃す
                     "既定解と決定表の照合",
                     // issue ID・再現条件・discovered in を必須にし、Round 4で収束させる
                     "指摘形式と収束規則",
@@ -496,7 +496,7 @@ class SpecDispatchConsistencyTest {
     /**
      * S11の開始条件が社労士確認を待たないこと。
      * 時間外計算の値は `overtime-rules.md` で確定済みで、社労士確認は本番releaseのgateである。
-     * これを開工条件に書くとS11が永久に着手できない。
+     * これを着手条件に書くとS11が永久に着手できない。
      */
     @Test
     void S11の開始条件が社労士確認で止まらないこと() throws Exception {
@@ -507,7 +507,7 @@ class SpecDispatchConsistencyTest {
         assertTrue(text.contains("overtime-rules.md"),
                 "S11がovertime-rules.mdを読むよう指示していません（時間外計算の値の唯一の正）");
         assertTrue(text.contains("本番releaseのgate"),
-                "S11の開始条件が社労士確認を本番gateとして明記していません。開工条件に書くと着手できなくなります");
+                "S11の開始条件が社労士確認を本番gateとして明記していません。着手条件に書くと着手できなくなります");
         assertTrue(text.contains("1メソッド1ルール"),
                 "S11にcalculatorの構造制約（1メソッド1ルール）がありません");
 

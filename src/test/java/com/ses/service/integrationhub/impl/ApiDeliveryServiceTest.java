@@ -41,9 +41,17 @@ class ApiDeliveryServiceTest {
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
         publicIdCodec = new ExternalApiPublicIdCodec(properties);
-        when(clientMapper.selectByClientIdForUpdate("client-a")).thenReturn(client());
+        when(clientMapper.selectByClientId("client-a")).thenReturn(client());
         service = new ApiDeliveryServiceImpl(mapper,
                 new IntegrationHubWebhookDeliveryBindingValidator(clientMapper, publicIdCodec));
+    }
+
+    @Test
+    void enqueueは小数秒のcreatedAtを保存前に拒否する() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> service.enqueue("event", 7L, 1,
+                "client-a", "scope", "tenant-a", "project", 1L, "resource.changed", "v1", "correlation",
+                ExternalDtoSnapshot.of("{\"status\":\"ACTIVE\"}"), now.plusNanos(123)));
+        org.mockito.Mockito.verifyNoInteractions(mapper);
     }
 
     @Test

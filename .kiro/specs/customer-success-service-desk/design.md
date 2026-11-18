@@ -26,9 +26,11 @@ portal userは DataScope/組織scope/menu を持たない。母集団は `portal
 ## 逸脱: SLA休日カレンダー
 
 - 既定解: 業務日付はtenant TZ。新規masterを安易に増やさない
-- 本specの解: 休日は **法人既定** `m_work_calendar`（engineer_id/organization_id NULL）を読む。無い場合は土日＋missing_calendar。新規祝日masterは作らない
+- 本specの解: 休日は **法人既定 → 全社共通** の順に有効日付を含む `m_work_calendar`（engineer_id/organization_id NULL）を一つ読む。他法人と和集合しない。日別行があれば週末もその行を優先する。「休」「祝」を含む値とHOLIDAY/NON_WORKINGは休日、「通常」「所定日」/WORKINGは営業日、その他はscheduled_minutes>0だけ営業日（NULL・0は休日）。行が無い日だけ平日営業・土日休業へfallbackする。新規祝日masterは作らない
 - 根拠: CS-R2.2、inventory §3。要員カレンダーは勤怠FTE正本であり顧客SLAに流用すると担当外エンジニアの休日が混入する
-- 追加test: 月曜祝日を法人カレンダーへ入れたP2（4営業時間）が火曜まで延びること、個人カレンダー行を無視すること
+- 2026-11-14 DG-02-B3実装方針: 日別行・選択結果（欠損を含む）と候補カレンダーを計算単位でキャッシュする。候補の有効期間は日付毎に評価し、年跨ぎでも期限切れの暦を流用しない。既存SLA clockに欠損専用メタが無いためDDLを増やさずWARNを採用する。tenant・法人ID・問い合わせID・HTTP相関IDだけを記録し、欠損は計算毎に一回。問い合わせID未取得の互換APIではUNAVAILABLEと明示する。正式署名はCS Owner。
+- サービス境界はorganizationIdの指定を403にし、常にNULLで計算機へ渡す。計算機の組織分岐は互換APIとして残すが本番から到達しない。
+- 追加test: 元日祝日と週末を跨ぐ期限、週末WORKING、NULL/0、法人→全社共通fallback、計算内キャッシュと一回WARN、組織指定403。
 
 ---
 
@@ -105,7 +107,7 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 | CSAT | 1行 | — | 回答時刻 | 現在 | **未回答**（回答可） |
 | health | 最新snapshot_date | 日次行 | snapshot | 指定日（as-of未実装の過去targetは拒否） | 未算定 |
 | QBR action | status列 | 監査 | — | 現在 | owner/due未設定 |
-| 休日 | 法人カレンダー当日 | カレンダー版 | — | asOf日付 | カレンダー未設定=土日fallback+missing |
+| 休日 | 法人カレンダー当日 | カレンダー版 | — | asOf日付 | カレンダー未設定=土日fallback＋missing_calendar WARN（計算毎に一回） |
 
 ### 表2: 主体 × 操作 × 可見母集団
 
@@ -169,6 +171,12 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 - 通知type: `SLA_WARNING` / `SLA_BREACH` / `SLA_BREACH_CONTINUING`。warning、初回breach、継続breach、受信者不在/配信失敗retryを同一dedupe台帳で管理する。
 - 宛先: owner_user_id。未設定時は顧客の主担当営業（`EngineerSales`ではなく契約 `sales_user_id` または顧客DataScopeの営業）。宛先0または一部配信失敗でもescalation台帳へ永続化し、再試行で黙って捨てない。
 - `NotificationLinks.SERVICE_DESK_REQUEST` を追加し `NotificationLinkRouteTest` 対象にする
+
+### 6.1 本番baseline P1 recipient資格の再確認
+
+SLA schedulerの実行主体権限を通知先へ流用しない。各候補`sys_user`についてtenant一致・有効・未削除を確認し、`service-desk` menuを持つ内部role（営業/マネージャー）だけを候補にする。候補本人を明示した一時的な`SecurityContext`で既存`CustomerScopeResolver`を実行し、当該customerが候補本人の現行scopeに含まれる場合だけ通知する。tenantは候補rowを取得したtenantに固定し、候補評価中は`ReportScopeContext`を一時解除し、request-scoped scope cacheを外して再解決する。終了時はsecurity context、request attributes、report scopeを例外経路も含め元へ戻す。HR/要員/未知role、scope不一致、menu未付与は候補から除外し、通知先0件なら既存escalation retry台帳にrecipientCount=0を残すだけで、`NotificationService`/outboxへrequest subjectを渡さない。最終admin fallbackは既存の全件管理者境界に従う。
+
+担当者入力は`SysUserMapper.selectByIdAndTenant`を使い、存在しない/tenant不一致/無効/削除済み/非対象roleを同じgeneric errorにまとめる。別tenantのreal nameやroleを例外へ含めない。create/updateとも検証を保存前に行う。
 
 ---
 

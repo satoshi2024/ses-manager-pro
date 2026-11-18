@@ -211,7 +211,7 @@
       "id": "bp.experienceYears",
       "send": true,
       "segment": false,
-      "rationale": "BP在庫の経験年数。内部要員と同じ口径。"
+      "rationale": "BP在庫の経験年数。内部要員と同じ算定基準。"
     },
     {
       "id": "bp.unitPrice",

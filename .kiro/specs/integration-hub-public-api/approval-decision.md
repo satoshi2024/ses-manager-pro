@@ -25,7 +25,7 @@
 この承認で直ちに実装できるのは、Task 0/0R/0R-Dの正本化とTask F1のclient、credential、scope、
 idempotency、usage bucket、webhook-inbound-outbound persistence contractのDDL、entity、mapper、
 service基盤、H2/MySQL migration、test、purge、rollback証跡、およびF1に必要な最小config/crypto abstraction
-である。ただし同じ開工対話で独立Plan ReviewのPLAN PASSを先に受領する。
+である。ただし同じ着手対話で独立Plan ReviewのPLAN PASSを先に受領する。
 
 F1 Decision時点ではpublic endpointの公開、外部送信、A1、A2、B1、B2、production enablementを開始しない。
 後続のscope expansion DecisionでF2/A1/B1/B2/Mの開発だけを追加承認したが、production enablement、
@@ -148,3 +148,9 @@ B2は独立再ReviewまでIMPLEMENTATION_REVIEW_PENDINGとし、Linux実Tomcat c
 code commit `e564f400`で対応した。`ExternalApiResponseBoundaryFilter`はServlet/Spring wrapperのcause chainに
 `ExternalApiSecurityException`が厳密に含まれる場合だけ元の外部status/codeへ復元し、それ以外は詳細非公開の500へ収束する。
 Linux実connectorで202/200/409/403/400、監査status/result code、拒否時ledger非作成を独立確認するまでB2はPASSへ昇格しない。
+
+## 後続のproduction開放決定（草案・未署名）
+
+production enablementの禁止を方向別（inbound `DG-05-IN-*` / outbound `DG-05-OUT-*`）に解除する追加決定の草案を
+`dg-05-enablement-decision-draft.md` に置く。草案は未署名で効力が無く、署名されるまで本書の禁止条項がそのまま有効である。
+起動時validatorは決定ID・承認値が揃わない方向の開放を拒否し、production既定値（両方向OFF、`provider.mode=MOCK`）を維持する。

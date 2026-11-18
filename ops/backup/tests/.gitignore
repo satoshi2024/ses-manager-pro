@@ -1,0 +1,3 @@
+# run-integration.sh が既定作業ディレクトリを退避した .integration-work.prev-<RUN_ID>/ と、
+# 復旧手順で案内する手動退避先 .integration-work.manual-<日時>/ は合成 secret を含むためコミットしない
+/.integration-work.*/

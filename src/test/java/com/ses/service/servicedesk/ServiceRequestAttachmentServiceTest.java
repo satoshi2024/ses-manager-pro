@@ -105,11 +105,39 @@ class ServiceRequestAttachmentServiceTest {
 
     @Test
     void Portalの顧客scope内uploadは公開リンクとして登録する() {
+        // portal起票の問い合わせ（portalへ出してよい範囲。policy未注入の既定はportal起票のみ）
+        request.setChannel("PORTAL");
+        request.setPortalUserId(200L);
+
         ServiceAttachmentLink result = service.uploadPortal(10L, null,
                 new MockMultipartFile("file", "reply.pdf", "application/pdf", "PDF".getBytes()), 20L, 200L);
 
         assertEquals("PORTAL_VISIBLE", result.getVisibility());
         verify(documentService).link(30L, "SERVICE_REQUEST", 10L);
+    }
+
+    @Test
+    void 社内登録の問い合わせへのPortaluploadは公開範囲外として文書登録前に404で拒否する() {
+        // 既定（公開開始時刻なし）では、社内起票の問い合わせはportalから扱えない。
+        BusinessException error = assertThrows(BusinessException.class, () -> service.uploadPortal(10L, null,
+                new MockMultipartFile("file", "reply.pdf", "application/pdf", "PDF".getBytes()), 20L, 200L));
+
+        assertEquals(404, error.getCode());
+        verify(documentService, never()).registerReceived(any(), any());
+        verify(attachmentLinkMapper, never()).insert(any(ServiceAttachmentLink.class));
+    }
+
+    @Test
+    void 社内uploadは公開範囲policyの影響を受けない() {
+        // 内部経路は社内起票の問い合わせにも従来どおり登録できる（policyを使わない）。
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalVisibilityPolicy",
+                PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY);
+
+        ServiceAttachmentLink result = service.uploadInternal(10L, null,
+                new MockMultipartFile("file", "memo.pdf", "application/pdf", "PDF".getBytes()), "INTERNAL", 100L);
+
+        assertEquals("INTERNAL", result.getVisibility());
+        verify(attachmentLinkMapper).insert(any(ServiceAttachmentLink.class));
     }
 
     @Test
@@ -149,9 +177,56 @@ class ServiceRequestAttachmentServiceTest {
 
     @Test
     void 非許可MIMEはDocumentServiceに到達しない() {
-        assertThrows(BusinessException.class, () -> service.uploadInternal(10L, null,
+        BusinessException rejected = assertThrows(BusinessException.class, () -> service.uploadInternal(10L, null,
                 new MockMultipartFile("file", "payload.exe", "application/octet-stream", "MZ".getBytes()),
                 "INTERNAL", 100L));
+        // P3-N2-1: 415はSafeErrorPolicyで500へ丸めずに返す（GlobalExceptionHandlerTestで確認）
+        assertEquals(415, rejected.getCode());
+        assertEquals("error.file.typeNotAllowed", rejected.getMessageKey());
         verify(documentService, never()).registerReceived(any(), any());
+    }
+
+    /** W2 NF06 hardening P3-4: 空ファイルは「上限超過」の413ではなく入力誤りの400で、空であることを示す文言にする。 */
+    @Test
+    void 空ファイルは400のerror_file_emptyで文書登録前に拒否する() {
+        for (String endpoint : java.util.List.of("internal", "portal")) {
+            MockMultipartFile empty = new MockMultipartFile("file", "empty.pdf", "application/pdf", new byte[0]);
+            BusinessException rejected = assertThrows(BusinessException.class, () -> {
+                if ("internal".equals(endpoint)) {
+                    service.uploadInternal(10L, null, empty, "INTERNAL", 100L);
+                } else {
+                    request.setChannel("PORTAL");
+                    request.setPortalUserId(200L);
+                    service.uploadPortal(10L, null, empty, 20L, 200L);
+                }
+            }, endpoint);
+            assertEquals(400, rejected.getCode(), endpoint);
+            assertEquals("error.file.empty", rejected.getMessageKey(), endpoint);
+        }
+        BusinessException missing = assertThrows(BusinessException.class,
+                () -> service.uploadInternal(10L, null, null, "INTERNAL", 100L));
+        assertEquals(400, missing.getCode());
+        assertEquals("error.file.empty", missing.getMessageKey());
+        verify(documentService, never()).registerReceived(any(), any());
+    }
+
+    @Test
+    void 上限を超えるファイルは413のerror_file_sizeExceededで文書登録前に拒否する() {
+        UploadProperties properties = new UploadProperties();
+        properties.setServiceRequestMaxFileSizeBytes(4L);
+        ServiceRequestAttachmentService limited = new ServiceRequestAttachmentService(requestMapper, commentMapper,
+                attachmentLinkMapper, documentVersionMapper, documentService, dataScopeService, properties,
+                Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> limited.uploadInternal(10L, null,
+                new MockMultipartFile("file", "large.pdf", "application/pdf", "12345".getBytes()), "INTERNAL", 100L));
+        assertEquals(413, rejected.getCode());
+        assertEquals("error.file.sizeExceeded", rejected.getMessageKey());
+        verify(documentService, never()).registerReceived(any(), any());
+
+        // 上限ちょうどは受け付ける（境界の取り違えが無いこと）
+        limited.uploadInternal(10L, null,
+                new MockMultipartFile("file", "exact.pdf", "application/pdf", "1234".getBytes()), "INTERNAL", 100L);
+        verify(documentService).registerReceived(any(), any());
     }
 }

@@ -9,8 +9,27 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
 
-    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
-    LifecycleCase selectByIdForUpdate(@Param("id") Long id);
+    /** 要員行を先にロックした呼出元から利用する。後続の再入社案件は未完了でも自動失効を止める。 */
+    @Select("SELECT c.* FROM t_lifecycle_case c WHERE c.tenant_id = #{tenantId} "
+            + "AND c.engineer_id = #{engineerId} AND c.deleted_flag = 0 AND c.status = 'COMPLETED' "
+            + "AND c.lifecycle_type = 'RESIGNATION' "
+            + "AND NOT EXISTS (SELECT 1 FROM t_lifecycle_case newer WHERE newer.tenant_id = c.tenant_id "
+            + "AND newer.engineer_id = c.engineer_id AND newer.deleted_flag = 0 AND newer.id > c.id "
+            + "AND NOT (newer.status = 'CANCELLED' AND newer.lifecycle_type IN ('JOIN','REINSTATEMENT')) "
+            + "AND (newer.status IN ('COMPLETED','CANCELLED') OR newer.lifecycle_type IN ('JOIN','REINSTATEMENT'))) "
+            + "ORDER BY c.id DESC LIMIT 1")
+    LifecycleCase selectLatestCompletedResignationWithoutReentry(@Param("tenantId") String tenantId,
+                                                                 @Param("engineerId") Long engineerId);
+
+    // tenantを持たない案件のlocking read（selectByIdForUpdate(Long)）は置かない（w1b4 review P3-5）。案件行のlockは常に
+    // tenantで照合する selectByIdForUpdateAndTenant（または LifecycleLockMapper#lockLifecycleCase）を使う
+    // （LifecycleMapperTenantLockingReadTest が固定する）。
+
+    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
+    LifecycleCase selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0 FOR UPDATE")
+    LifecycleCase selectByIdForUpdateAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT l.* FROM t_lifecycle_case l "
             + "INNER JOIN t_engineer_certification c ON c.engineer_id = l.engineer_id "
@@ -20,6 +39,4 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
     java.util.List<LifecycleCase> selectByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
                                                                @Param("tenantId") String tenantId);
 
-    @Select("SELECT MAX(case_no) FROM t_lifecycle_case WHERE case_no LIKE CONCAT(#{prefix}, '%')")
-    String selectMaxCaseNoIncludingDeleted(@Param("prefix") String prefix);
 }

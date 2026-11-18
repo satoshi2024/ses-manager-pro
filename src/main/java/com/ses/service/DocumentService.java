@@ -43,6 +43,19 @@ public interface DocumentService {
     Document registerReceived(DocumentRegisterRequest request, InputStream content);
 
     /**
+     * bounded raw CSVをCLEAN scanしStorageへstageする。Document metadataは作らない。
+     *
+     * @param deadlineCheckpoint 呼出元ingressの総期限check。hash再検証・scanner・storage書込/検証の各境界と
+     *                           read loop内で呼ばれ、超過時に例外を投げて中断させる（storage配置後なら自己削除する）。
+     */
+    com.ses.service.impl.StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request,
+            java.nio.file.Path boundedTempFile, long expectedSizeBytes, String expectedSha256,
+            Runnable deadlineCheckpoint);
+
+    /** commit失敗時に、当該requestが所有するstaging objectだけを削除する。 */
+    void discardImportStage(com.ses.service.impl.StagedImportDocument staged);
+
+    /**
      * 既存文書に新しい版を追加する（差替・訂正）。
      * 旧版は削除しない。CONFIRMED状態の文書に対して差替を行うと状態がAMENDEDに遷移する。
      *
@@ -61,6 +74,19 @@ public interface DocumentService {
      * @param targetId     リンク先ID
      */
     void link(Long documentId, String targetType, Long targetId);
+
+    /** import job登録前に既存CLEAN版と通常のdocument/FileScope権限を確認する。storage I/Oは行わない。 */
+    DocumentVersion authorizeImportSourceRegistration(Long documentId, Long documentVersionId,
+                                                       Integer versionNo, String expectedSha256,
+                                                       Long expectedLegalEntityId);
+
+    /** 登録済みIMPORT_JOBのsourceを開く前に通常文書権限と専用scopeを再検証する。 */
+    DocumentVersion authorizeImportJobDownload(Long jobId, Long documentId, Long documentVersionId,
+                                                Integer versionNo, String expectedSha256);
+
+    /** importの再利用時に、認可済みexact versionをStorageからbounded streamで再hashする。 */
+    void verifyImportJobStoredBytes(Long jobId, Long documentId, Long documentVersionId,
+                                    Integer versionNo, String expectedSha256);
 
     /**
      * 文書に法的holdを設定または解除する。
@@ -133,6 +159,14 @@ public interface DocumentService {
      * 文書詳細取得（版履歴・リンク一覧を含む）。
      */
     com.ses.dto.document.DocumentDetailDTO getDocumentDetail(Long documentId);
+
+    /**
+     * 文書の閲覧ACL。詳細取得と版のdownload（{@code DocumentApiController} は詳細取得を通してからdownloadする）と同じ判定
+     * （法人境界・専用種別・HRの除外種別・link先のdata scope）を現在の認証で行い、許されなければ {@code BusinessException}
+     * （403・404）を投げる。tenant内に限ることは呼出側が先に確かめる。他の画面から文書の情報を返す前にも同じ判定を通す
+     * （NF01 W3-02 P2-2: ライフサイクルの証跡版一覧）。
+     */
+    void assertDocumentAccessAllowed(com.ses.entity.Document document);
 
     /**
      * 最新または指定版のファイルをダウンロード用ストリームとして開く。

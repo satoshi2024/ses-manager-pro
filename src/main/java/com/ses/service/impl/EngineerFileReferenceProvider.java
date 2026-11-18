@@ -10,7 +10,7 @@ import java.util.Set;
 
 /**
  * 要員顔写真の参照ファイル名を提供するプロバイダー。
- * t_engineer.photo_url を孤児清理から保護する。
+ * t_engineer.photo_url を孤児清掃から保護する。
  */
 @Service
 @RequiredArgsConstructor

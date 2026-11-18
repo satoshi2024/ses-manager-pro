@@ -45,7 +45,14 @@ drill は以下の順に実 script を実行する:
 - `rto_ok == true`（total_seconds <= RTO_SECONDS、既定 4h）
 - `rpo_ok == true`（plan の rpo_seconds <= RPO_MAX_SECONDS、既定 15m）
 - segments が 5 つ（plan / integrity / restore / validate / cutover）
+- validate の report で `checks.flyway_history_required == true`・`checks.flyway == "PASS"`
+  （`restore-drill.sh` が `jq` で検査し、満たさなければ cutover リハーサルへ進まずに失敗する）
 - いずれか失敗・skip・evidence 欠如・目標超過で非 0 終了
+
+RPO 15 分 / RTO 4 時間は 2026-11-13 決定の目標値（README「復旧目標」）で、DBA Lead / Operations の署名は PENDING。
+HFP-03-PROD-007 の代表データ量で実測した drill だけが達成の根拠になる。本番相当の隔離環境で行う drill では、
+source / target の MySQL を production と同じ `time_zone = '+09:00'` で起動する（CI の integration は合成 fixture の
+ため対象外）。
 
 ## 5. 証跡
 

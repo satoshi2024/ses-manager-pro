@@ -15,6 +15,8 @@ public class InvoiceBalanceDto {
     private String invoiceNo;
     private Long customerId;
     private String customerName;
+    /** 顧客の会社名カナ（入金消込で振込名義の半角カナと照合する。未登録はnull）。 */
+    private String customerNameKana;
     private String billingMonth;
     private String status;
     private BigDecimal total;

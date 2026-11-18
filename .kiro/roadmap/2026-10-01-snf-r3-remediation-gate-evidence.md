@@ -121,3 +121,12 @@ enablement 条件:
 4. AI / 外部送信等の既存 feature flag は別途 owner approval まで OFF を維持すること。
 
 これらを満たす前に production approval を付与しない。
+
+## 後続の読取監査による訂正（2026-10-01）
+
+上記のmigration「157 files」は整数versionだけを対象にした集計であり、全versioned migration数ではなかった。
+`origin/main@1443fb68943849a3260d7ebe005259f3eb609d60`に対して`V[数字]+([._][数字]+)*__`を解析し、
+全181 versioned scripts（うち24は`V102_1`等のsubversion）と1 repeatable scriptを確認した。
+最大version V182、`.`/`_`を正規化した重複version 0は維持する。上記の当時の記録を消去せず、本項で訂正する。
+PR101はその後mergeされ、PR CI run36857893770は7 jobs SUCCESS、merge後main run36858538460は
+Browser fixture unique競合によりFAILUREとなった。過去のlocal Browser PASSをmerge後CI PASSへ読み替えない。

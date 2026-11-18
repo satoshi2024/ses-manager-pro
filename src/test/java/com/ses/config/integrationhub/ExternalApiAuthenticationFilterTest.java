@@ -118,16 +118,97 @@ class ExternalApiAuthenticationFilterTest {
         assertTrue(response.getContentAsString().contains("AUTHENTICATION_FAILED"));
     }
 
+    @Test
+    void spoofedLeftmostForwardedForBehindTheTrustedProxyCannotPassTheClientCidr() throws Exception {
+        ApiClientService clientService = mock(ApiClientService.class);
+        CredentialVersionService credentialService = mock(CredentialVersionService.class);
+        ApiNonceReplayService nonceService = mock(ApiNonceReplayService.class);
+        IntegrationHubSecretCryptoService crypto = mock(IntegrationHubSecretCryptoService.class);
+        when(clientService.getByClientId("client-a")).thenReturn(activeClient());
+        when(credentialService.getByClientAndVersion(7L, 1)).thenReturn(activeCredential());
+        when(crypto.decrypt("client-a", 1, "credential", "envelope")).thenReturn("test-secret");
+        when(nonceService.accept(eq("client-a"), eq(1), any(byte[].class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(true);
+        IntegrationHubExternalApiProperties properties = enabledProperties();
+        properties.getSecurity().getTrustedProxies().add("10.0.0.1/32");
+        ExternalApiAuthenticationFilter filter = filter(properties, clientService, credentialService, nonceService, crypto);
+
+        // clientはallow-list内の203.0.113.10を先頭に書き、ALB（10.0.0.1）が実peerを右端へ追記した。
+        MockHttpServletRequest spoofed = signedRequest();
+        viaProxy(spoofed, "10.0.0.1", "203.0.113.10, 198.51.100.7");
+        MockHttpServletResponse rejected = new MockHttpServletResponse();
+        AtomicBoolean spoofedReached = new AtomicBoolean();
+        filter.doFilter(spoofed, rejected, (req, res) -> spoofedReached.set(true));
+        assertFalse(spoofedReached.get());
+        assertEquals(401, rejected.getStatus());
+        assertEquals("CLIENT_IP_NOT_ALLOWED", spoofed.getAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE));
+        verify(nonceService, org.mockito.Mockito.never())
+                .accept(any(), org.mockito.ArgumentMatchers.anyInt(), any(), any(), any());
+
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        MockHttpServletRequest legitimate = signedRequest();
+        viaProxy(legitimate, "10.0.0.1", "198.51.100.7, 203.0.113.10");
+        AtomicBoolean legitimateReached = new AtomicBoolean();
+        filter.doFilter(legitimate, new MockHttpServletResponse(), (req, res) -> legitimateReached.set(true));
+        assertTrue(legitimateReached.get());
+    }
+
+    @Test
+    void approvedClientCidrCeilingRejectsSourcesThatOnlyTheDatabaseRowAllows() throws Exception {
+        ApiClientService clientService = mock(ApiClientService.class);
+        CredentialVersionService credentialService = mock(CredentialVersionService.class);
+        ApiNonceReplayService nonceService = mock(ApiNonceReplayService.class);
+        IntegrationHubSecretCryptoService crypto = mock(IntegrationHubSecretCryptoService.class);
+        when(clientService.getByClientId("client-a")).thenReturn(activeClient());
+        when(credentialService.getByClientAndVersion(7L, 1)).thenReturn(activeCredential());
+        when(crypto.decrypt("client-a", 1, "credential", "envelope")).thenReturn("test-secret");
+        when(nonceService.accept(eq("client-a"), eq(1), any(byte[].class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(true);
+        IntegrationHubExternalApiProperties properties = enabledProperties();
+        // DBのclient行は203.0.113.0/24を許すが、DG-05で承認された送信元は198.51.100.0/24だけ。
+        properties.getPublicApi().getApproval().getAllowedClientCidrs().add("198.51.100.0/24");
+        ExternalApiAuthenticationFilter filter = filter(properties, clientService, credentialService, nonceService, crypto);
+
+        MockHttpServletRequest request = signedRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean chainCalled = new AtomicBoolean();
+        filter.doFilter(request, response, (req, res) -> chainCalled.set(true));
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, response.getStatus());
+        assertEquals("CLIENT_IP_NOT_ALLOWED", request.getAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE));
+    }
+
     private ExternalApiAuthenticationFilter filter(ApiClientService clientService,
                                                    CredentialVersionService credentialService,
                                                    ApiNonceReplayService nonceService,
                                                    IntegrationHubSecretCryptoService crypto) {
+        return filter(enabledProperties(), clientService, credentialService, nonceService, crypto);
+    }
+
+    private IntegrationHubExternalApiProperties enabledProperties() {
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getPublicApi().setEnabled(true);
         properties.getExternalTransport().setEnabled(false);
         properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.MOCK);
         properties.getTopology().setMode("DEDICATED_DATABASE");
         properties.getTopology().setBoundTenantId("tenant-a");
+        return properties;
+    }
+
+    /** trusted proxy経由のrequestとして、valveが捕捉するTCP peerと転送header原文を差し替える。 */
+    private static void viaProxy(MockHttpServletRequest request, String proxy, String xForwardedFor) {
+        request.setRemoteAddr(proxy);
+        request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, proxy);
+        request.setAttribute(ExternalApiRawForwardedHeaders.ATTRIBUTE,
+                ExternalApiRawForwardedHeaders.of(java.util.List.of(xForwardedFor), java.util.List.of()));
+    }
+
+    private ExternalApiAuthenticationFilter filter(IntegrationHubExternalApiProperties properties,
+                                                   ApiClientService clientService,
+                                                   CredentialVersionService credentialService,
+                                                   ApiNonceReplayService nonceService,
+                                                   IntegrationHubSecretCryptoService crypto) {
         return new ExternalApiAuthenticationFilter(providerOf(properties), providerOf(new ExternalApiSourceIpResolver()),
                 providerOf(clientService), providerOf(credentialService), providerOf(nonceService), providerOf(crypto),
                 providerOf(Clock.fixed(NOW, ZoneOffset.UTC)), new ObjectMapper());
@@ -142,6 +223,9 @@ class ExternalApiAuthenticationFilterTest {
     private MockHttpServletRequest signedRequest() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/external-api/v1/projects");
         request.setRemoteAddr("203.0.113.10");
+        // 実Tomcatではvalveが設定する。servletの見え方は信用されないため、test requestでも明示する。
+        request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, "203.0.113.10");
+        request.setAttribute(ExternalApiRawForwardedHeaders.ATTRIBUTE, ExternalApiRawForwardedHeaders.none());
         request.setContent(BODY);
         request.setAttribute(ExternalApiCanonicalRequest.RAW_TARGET_ATTRIBUTE,
                 TARGET.getBytes(StandardCharsets.US_ASCII));

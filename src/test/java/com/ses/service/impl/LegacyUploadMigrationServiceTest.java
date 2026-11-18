@@ -111,7 +111,7 @@ class LegacyUploadMigrationServiceTest {
     }
 
     @Test
-    void どのproviderも参照しない実体は移行せず孤児清理へ委ねる() throws Exception {
+    void どのproviderも参照しない実体は移行せず孤児清掃へ委ねる() throws Exception {
         Files.writeString(uploadRoot.resolve("orphan.pdf"), "orphan");
         List<FileSecurityMetadata> inserted = new ArrayList<>();
 

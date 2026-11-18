@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T076 F2: 契約→actual allocation同期の定向test（L2〜L3）。
+ * T076 F2: 契約→actual allocation同期の対象限定test（L2〜L3）。
  * 契約成立でactual行が作成/更新され、終了/解約/削除で破棄される。
  * 同一engineer+positionの確定planはactual成立でsupersedeされ、plan/actualの二重計上が起きない。
  */
@@ -72,10 +73,39 @@ class StaffingContractSyncTest {
     private long positionId;
     private String suffix;
 
+    /** REQUIRES_NEWで確定したfixture。テストTXのrollbackでは消えないため、TX終了後に削除する。 */
+    private CommittedFixture committedFixture;
+
+    private record CommittedFixture(long engineerId, long customerId, long projectId) {
+    }
+
     // 更新処理のREQUIRES_NEWから参照できるよう、法人fixtureをテストtx開始前に確定する。
     @BeforeTransaction
     void ensureLegalEntityBeforeTransaction() {
         TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
+
+    /**
+     * setupTx と processSingleRenewal（REQUIRES_NEW）がcommitした行を、テストTXのrollback後に削除する。
+     * 外側TXが契約行を更新してロックしているため、削除はTX終了後でなければならない。
+     * 残すと法人NULLの顧客・案件・要員が共有H2に残り、全tenantを検査する
+     * {@code LegalEntityReadinessService#assertReady} に依存するテスト
+     * （ExternalApiReadSnapshotIntegrationTest 等）が実行順次第で LEGAL_ENTITY_BACKFILL_INCOMPLETE になる。
+     */
+    @AfterTransaction
+    void deleteCommittedFixture() {
+        CommittedFixture fixture = committedFixture;
+        committedFixture = null;
+        if (fixture == null) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM t_allocation_plan WHERE engineer_id = ?", fixture.engineerId());
+        // 元契約と更新ドラフトはどちらも同じ要員を持つため、要員単位でまとめて削除する。
+        jdbcTemplate.update("DELETE FROM t_contract WHERE engineer_id = ?", fixture.engineerId());
+        jdbcTemplate.update("DELETE FROM t_project_position WHERE project_id = ?", fixture.projectId());
+        jdbcTemplate.update("DELETE FROM t_project WHERE id = ?", fixture.projectId());
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = ?", fixture.customerId());
+        jdbcTemplate.update("DELETE FROM t_engineer WHERE id = ?", fixture.engineerId());
     }
 
     @BeforeEach
@@ -151,6 +181,7 @@ class StaffingContractSyncTest {
     @Test
     void 契約更新ドラフトがpositionIdを引き継ぎactualが維持される() {
         // processSingleRenewalはREQUIRES_NEWのため、fixtureごとcommitしたtxで用意する
+        // （commitした行は deleteCommittedFixture が削除する）
         org.springframework.transaction.support.TransactionTemplate setupTx =
                 new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         setupTx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -167,6 +198,7 @@ class StaffingContractSyncTest {
                     + "VALUES (?, '正社員', 'Bench', 'default')", "T076renew-eng-" + suffix);
             long engRow = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T076renew-eng-" + suffix);
+            committedFixture = new CommittedFixture(engRow, customerId, projectRow);
             jdbcTemplate.update("INSERT INTO t_project_position "
                     + "(project_id, position_no, role_name, required_count, allocation_percent, status, version) "
                     + "VALUES (?, 'P1', 'Javaエンジニア', 1, 100, '募集中', 0)", projectRow);

@@ -1,6 +1,7 @@
 package com.ses.controller.api;
 
 import com.ses.common.enums.FileKind;
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.file.StoredFile;
 import com.ses.service.FileStorageService;
@@ -35,6 +36,10 @@ public class FileApiController {
     @PostMapping
     public ApiResult<StoredFile> upload(@RequestParam("file") MultipartFile file,
                                         @RequestParam("kind") FileKind kind) {
+        if (kind != null && kind.isServerGeneratedOnly()) {
+            // NF07 DSAR の開示 package 等、server が生成する種別は利用者の upload で作らせない
+            throw BusinessException.of(403, "error.forbidden");
+        }
         return ApiResult.success(fileStorageService.store(file, kind));
     }
 
@@ -62,6 +67,8 @@ public class FileApiController {
     @PostMapping("/{storedName}/rescan")
     @org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
     public ApiResult<Boolean> rescan(@PathVariable String storedName) {
+        // NF07 DSAR の開示 package は管理者でも汎用の再scanの対象にしない（§3.5.2 P2-5）
+        fileScopeValidationService.assertRescanAllowed(storedName);
         return ApiResult.success(fileStorageService.rescan(storedName));
     }
 }

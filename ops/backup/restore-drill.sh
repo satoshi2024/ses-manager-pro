@@ -159,6 +159,11 @@ main() {
     tail -8 "$validate_log" >&2
     drill::fail "validate が READY_FOR_CUTOVER でない（state=$vstate。mysqladmin ping のみの代替は受け付けません）"
   fi
+  # G-15 / W1-B1 r2: flyway_schema_history を必須として照合し PASS したことも drill の成功条件にする
+  if ! sed -n '/^{/,$p' "$validate_log" 2>/dev/null \
+      | jq -e '.checks.flyway_history_required == true and .checks.flyway == "PASS"' > /dev/null 2>&1; then
+    drill::fail "validate の Flyway 照合（checks.flyway_history_required=true かつ checks.flyway=PASS）を確認できません"
+  fi
   drill::require_evidence "$validate_log" "validate"
   drill::segment_end validate
 

@@ -438,10 +438,12 @@ class PortalAdminApiTest extends PortalTestSupport {
                 + "VALUES (1, ?, 'b-user@example.com', 'CUSTOMER', 'DOWNLOAD_QUOTATION')", orgB);
 
         try {
+            // 認可キーは updateAll だけが書ける（全体epoch行をX lockしてから書き、値が変われば全体epochを進める。NF01 W3-15）。
             transactionTemplate.setPropagationBehavior(
                     org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             transactionTemplate.executeWithoutResult(status ->
-                    systemConfigService.put("scope.sales-own-data-only", "true", "test"));
+                    systemConfigService.updateAll(java.util.List.of(
+                            new com.ses.entity.SystemConfig("scope.sales-own-data-only", "true", "test"))));
 
             // 営業（DataScope有効）: 自担当顧客（orgB）の招待のみ・access logもorgBのみ
             com.ses.entity.SysUser salesEntity = new com.ses.entity.SysUser();
@@ -471,7 +473,8 @@ class PortalAdminApiTest extends PortalTestSupport {
             transactionTemplate.setPropagationBehavior(
                     org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             transactionTemplate.executeWithoutResult(status ->
-                    systemConfigService.put("scope.sales-own-data-only", "false", "test"));
+                    systemConfigService.updateAll(java.util.List.of(
+                            new com.ses.entity.SystemConfig("scope.sales-own-data-only", "false", "test"))));
         }
     }
 

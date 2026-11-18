@@ -43,5 +43,12 @@ public class ResignationGateResultDto {
         private String message;
         private boolean waived;
         private Long approvalRequestId;
+        /**
+         * 自動処理の対象外で人の確認が要る対象がある（ブロックはしない）。
+         * 例: emailが一致するが要員との紐付けが無いポータルユーザー（NF01 N1-4 / 決定 Q-10）。
+         */
+        private boolean pendingConfirmation;
+        /** {@link #pendingConfirmation} の対象ポータルユーザーID（emailは返さない）。 */
+        private List<Long> pendingPortalUserIds;
     }
 }

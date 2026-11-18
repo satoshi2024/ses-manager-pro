@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.ses.testsupport.TestIsolationAuditTest
+-------------------------------------------------------------------------------
+Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.860 s -- in com.ses.testsupport.TestIsolationAuditTest

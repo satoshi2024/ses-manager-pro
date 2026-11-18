@@ -116,6 +116,68 @@ public class ServiceRequestApiControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1));
     }
 
+    /** P3-N2-3: 一覧はPageUtils.safePageで正規化し、一覧専用の上限（100件）へ丸める。 */
+    @Test
+    @DisplayName("GET /api/service-desk/requests - sizeは一覧の上限へ丸め0以下と負のcurrentは既定値へ補正すること")
+    void listClampsPageSizeAndNormalizesNonPositiveValues() throws Exception {
+        mockMvc.perform(get("/api/service-desk/requests")
+                        .param("current", "1")
+                        .param("size", "5000")
+                        .param("keyword", "APIテスト"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.size").value(ServiceRequestService.LIST_MAX_PAGE_SIZE))
+                .andExpect(jsonPath("$.data.total").value(1));
+        // 負のsizeは全件取得にならず既定の10件、0以下のcurrentは1ページ目になる
+        mockMvc.perform(get("/api/service-desk/requests")
+                        .param("current", "-3")
+                        .param("size", "-1")
+                        .param("keyword", "APIテスト"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.current").value(1))
+                .andExpect(jsonPath("$.data.size").value(10))
+                .andExpect(jsonPath("$.data.records.length()").value(1));
+    }
+
+    /**
+     * P3-N2-1・W2 NF06 hardening P3-4: 添付できないファイル形式は500（システムエラー）ではなく415と専用文言、
+     * 空ファイルは「上限超過」の413ではなく400と空であることを示す文言で返す。
+     */
+    @Test
+    @DisplayName("POST /api/service-desk/requests/{id}/attachments - 形式不可は415、空ファイルは400で専用文言を返すこと")
+    void attachmentRejectionsKeepClientErrorStatusAndMessage() throws Exception {
+        MockMultipartFile executable = new MockMultipartFile("file", "payload.exe", "application/x-msdownload",
+                "MZ".getBytes());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/service-desk/requests/" + testRequest.getId() + "/attachments")
+                        .file(executable)
+                        .with(csrf()))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value(415))
+                .andExpect(jsonPath("$.message").value("添付できないファイル形式です"));
+
+        MockMultipartFile empty = new MockMultipartFile("file", "empty.pdf", "application/pdf", new byte[0]);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/service-desk/requests/" + testRequest.getId() + "/attachments")
+                        .file(empty)
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("ファイルが空です"));
+    }
+
+    /** RB-NF02 review P3-2: {@code @RequestBody} が受け付けないContent-Typeは500ではなく415で返す。 */
+    @Test
+    @DisplayName("POST /api/service-desk/requests - 受け付けないContent-Typeは500ではなく415を返すこと")
+    void unsupportedContentTypeIsRejectedWith415() throws Exception {
+        mockMvc.perform(post("/api/service-desk/requests")
+                        .with(csrf())
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("subject=plain"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value(415))
+                .andExpect(jsonPath("$.message").value("入力内容を確認してください。"));
+    }
+
     @Test
     @DisplayName("GET /api/service-desk/requests/{id} - 詳細取得が成功すること")
     void testGetRequest() throws Exception {

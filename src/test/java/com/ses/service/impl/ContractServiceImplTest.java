@@ -904,15 +904,15 @@ class ContractServiceImplTest {
                 eq("compliance:DOUBLE_DISPATCH"), eq(false));
     }
 
-    // ===== CON-01: ALWAYS フィールドの未出現回填 =====
+    // ===== CON-01: ALWAYS フィールドの未出現時の補完 =====
 
     /**
      * 契約画面 DTO は positionId / renewalDecision を運ばない。updateById は ALWAYS のため
      * null のまま渡すと列を NULL 上書きし、staffing の actual 配賦や更新判断が消える。
-     * 画面保存相当（SAVE_PAYLOAD_ALWAYS_FIELDS）では当該列を old から回填すること。
+     * 画面保存相当（SAVE_PAYLOAD_ALWAYS_FIELDS）では当該列を old から補完すること。
      */
     @Test
-    void updateWithBusinessRules_DTOに無いALWAYS項目はoldから回填される() {
+    void updateWithBusinessRules_DTOに無いALWAYS項目はoldから補完される() {
         Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
@@ -924,7 +924,7 @@ class ContractServiceImplTest {
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
         when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
         when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
-        // 回填後の positionId 検証を通す
+        // 補完後の positionId 検証を通す
         com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
         position.setId(55L);
         position.setProjectId(200L);
@@ -1000,7 +1000,7 @@ class ContractServiceImplTest {
 
     /**
      * フォームが運ぶ ALWAYS 列は明示 null でクリアできる（「既定に戻す」）。
-     * positionId / renewalDecision は DTO 外のため、同時に old から回填されたまま残る。
+     * positionId / renewalDecision は DTO 外のため、同時に old から補完されたまま残る。
      */
     @Test
     void updateWithBusinessRules_payloadで明示nullの担当営業はクリアできる() {

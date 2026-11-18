@@ -169,11 +169,7 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
                 if (email != null && !email.isBlank()) {
                     Long userId = linkedUserId(change.getEngineerId());
                     if (userId != null) {
-                        com.ses.entity.SysUser u = sysUserMapper.selectById(userId);
-                        if (u != null) {
-                            u.setEmail(email);
-                            sysUserMapper.updateById(u);
-                        }
+                        updateLinkedUserEmail(userId, email);
                     }
                 }
             } else {
@@ -181,6 +177,26 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
             }
         }
         engineerService.updateWithStatusGuard(engineer);
+    }
+
+    /**
+     * NF01 F-7（計画 §4.1、§11）: 連携ユーザー行（lock rank 3）をX lockしてから email 列だけを更新する。
+     *
+     * <p>非lockで読んだ全列を {@code updateById} で書き戻すと、読取と書込みの間に管理者が確定した無効化・role変更を
+     * 古い値で黙って元に戻す（{@code SysUser} は {@code @Version} を持たない）。emailは認可列ではないためactor epochは
+     * 進めない。承認確定の申請行（rank 2）の後、要員行（rank 7、{@code updateWithStatusGuard}）の前に取る。</p>
+     */
+    private void updateLinkedUserEmail(Long userId, String email) {
+        SysUser locked = sysUserMapper.selectByIdForUpdate(userId);
+        if (locked == null) {
+            return; // 従来どおり、連携ユーザーが無ければ（削除済みを含む）email反映を行わない。
+        }
+        int updated = sysUserMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SysUser>()
+                .eq("id", userId)
+                .set("email", email));
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
     }
 
     private void applyField(Engineer engineer, String field, Object value) {

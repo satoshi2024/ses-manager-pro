@@ -20,7 +20,7 @@ import java.time.LocalDate;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * R09-P1-01定向テスト: 検収不要契約は理由付きで可能（R3.3/R5）。
+ * R09-P1-01対象限定テスト: 検収不要契約は理由付きで可能（R3.3/R5）。
  * acceptance_required=false に理由なしは拒否、trueへ戻すと理由をクリア。
  */
 @SpringBootTest

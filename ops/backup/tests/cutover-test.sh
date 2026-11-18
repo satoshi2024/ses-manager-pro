@@ -36,8 +36,9 @@ setup_cutover() {
   plan::write "$content" "$PLANS_DIR" > /dev/null
   export PLAN_ID
   PLAN_ID=$(jq -r '.plan_id' "$PLANS_DIR"/*.json)
-  # validation report
-  jq -n --arg p "$PLAN_ID" '{state:"READY_FOR_CUTOVER", plan_id:$p}' > "$T/validation.json"
+  # validation report（validate-restore.sh と同じく、history を必須として Flyway 照合に PASS した結果）
+  jq -n --arg p "$PLAN_ID" \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"PASS"}}' > "$T/validation.json"
   # smoke fixtures
   cat > "$T/smoke-ok.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -163,6 +164,29 @@ case_cutover_validation_not_ready() {
   assert_contains "$OUT" "READY_FOR_CUTOVER" "理由を表示"
 }
 
+# G-15 / W1-B1 r2: state が READY_FOR_CUTOVER でも、flyway_schema_history を必須として照合し PASS した
+# report でなければ cutover しない（r1 は state だけを見ていたため、いずれも cutover していた）。
+case_cutover_requires_flyway_history_check() {
+  local report
+  for report in \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:false, flyway:"PASS"}}' \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p, checks:{flyway_history_required:true, flyway:"FAIL"}}' \
+    '{state:"READY_FOR_CUTOVER", plan_id:$p}'; do
+    setup_cutover
+    make_claims
+    jq -n --arg p "$PLAN_ID" "$report" > "$T/validation.json"
+    export SMOKE_RC=0 WRITE_RC=0
+    run_cutover
+    assert_nonzero "$RC" "Flyway 照合を確認できない report では cutover しない: $report"
+    assert_contains "$OUT" "Flyway の照合" "理由を表示: $report"
+    if [[ -f "$T/state.json" ]] && [[ "$(state_now)" == write-enabled ]]; then
+      test_fail "Flyway 照合を確認できない report では write-enable しない: $report" "state=write-enabled"
+    else
+      test_assert "Flyway 照合を確認できない report では write-enable しない: $report"
+    fi
+  done
+}
+
 case_cutover_approval_missing() {
   setup_cutover
   make_claims
@@ -250,6 +274,7 @@ run_case case_cutover_normal
 run_case case_cutover_mysql_pwd_rejected
 run_case case_cutover_smoke_fail_rollback
 run_case case_cutover_validation_not_ready
+run_case case_cutover_requires_flyway_history_check
 run_case case_cutover_approval_missing
 run_case case_cutover_write_enable_fail
 run_case case_cutover_already_write_enabled

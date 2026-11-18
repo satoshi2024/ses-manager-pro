@@ -21,11 +21,16 @@ RUN chown ses:ses /app/app.jar
 USER ses:ses
 EXPOSE 8080
 
-ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+# JVM のタイムゾーンを Asia/Tokyo に固定する（deploy-runbook §1.0・§4。必須）。account lock の期限と監査等の日時は
+# JVM 既定のタイムゾーンで作られ、UTC のままだと30分の lock が約9時間30分続き、時刻も9時間ずれる。
+# task definition で JAVA_TOOL_OPTIONS を上書きする場合も -Duser.timezone=Asia/Tokyo を残す。
+ENV TZ=Asia/Tokyo
+ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Duser.timezone=Asia/Tokyo"
 
-# ALB/ECS liveness equivalent. Offline prod sim may send X-Forwarded-Proto via compose HEALTHCHECK.
+# ALB/ECS liveness equivalent. Healthy only on HTTP 200: curl -f treats 302 as success, and
+# X-Forwarded-Proto from loopback is never trusted, so the health paths answer over plain HTTP (FWD-SANITIZE P2-1).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=5 \
-  CMD curl -fsS -H "X-Forwarded-Proto: https" http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1
+  CMD test "$(curl -sS -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness)" = 200 || exit 1
 
 # -Dserver.shutdown=graceful: YAML 以外でも確実に排水モードを強制（REV-ECS-P2-003）
 ENTRYPOINT ["java", "-Dserver.shutdown=graceful", "-jar", "/app/app.jar"]

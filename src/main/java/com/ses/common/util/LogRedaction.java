@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 
 /**
  * ログ・例外メッセージ・ジョブ状態向けの機密情報秘匿化ユーティリティ。
- * 入力と例外グラフには上限を設け、脱敏処理自体が障害を起こさないようにする。
+ * 入力と例外グラフには上限を設け、秘匿化処理自体が障害を起こさないようにする。
  */
 public final class LogRedaction {
 
@@ -19,7 +19,7 @@ public final class LogRedaction {
     /**
      * 外部連携で実際に現れる key の表記ゆれを一つの規則で扱う。
      * camelCase と snake_case/kebab-case を別々の呼出側で処理すると、
-     * 新しい連携先を追加したときに脱敏漏れが再発するため、ここを共通境界とする。
+     * 新しい連携先を追加したときに秘匿化漏れが再発するため、ここを共通境界とする。
      */
     private static final Pattern SECRET_KEY_VALUE_PATTERN = Pattern.compile(
             "(?i)(?<![A-Za-z0-9])([\\\"']?)(db(?:[\\s_-]?)password|database(?:[\\s_-]?)password|password|passwd|pwd|"
@@ -63,7 +63,7 @@ public final class LogRedaction {
         return t instanceof VirtualMachineError || t instanceof ThreadDeath;
     }
 
-    /** 文字列の機密情報を秘匿する。脱敏器の異常時も固定文言を返す。 */
+    /** 文字列の機密情報を秘匿する。秘匿化処理の異常時も固定文言を返す。 */
     public static String redact(String text) {
         if (text == null) {
             return text;
@@ -181,7 +181,7 @@ public final class LogRedaction {
         }
     }
 
-    /** 脱敏済みの例外ラッパーを作る。元のThrowableをログ出力しない呼び出し側でも安全に使える。 */
+    /** 秘匿化済みの例外ラッパーを作る。元のThrowableをログ出力しない呼び出し側でも安全に使える。 */
     public static Throwable sanitizeThrowable(Throwable e) {
         try {
             if (e == null) {
@@ -225,7 +225,7 @@ public final class LogRedaction {
                     if (isFatal(ignored)) {
                         throw (Error) ignored;
                     }
-                    // 例外グラフが不正でも脱敏処理は継続する。
+                    // 例外グラフが不正でも秘匿化処理は継続する。
                 }
             }
         }
@@ -312,7 +312,7 @@ public final class LogRedaction {
         private final IdentityHashMap<Throwable, Boolean> visited = new IdentityHashMap<>();
     }
 
-    /** 脱敏済み例外。cause/suppressedも上限内で脱敏済みである。 */
+    /** 秘匿化済み例外。cause/suppressedも上限内で秘匿化済みである。 */
     public static class SanitizedException extends RuntimeException {
         private final String originalClassName;
 

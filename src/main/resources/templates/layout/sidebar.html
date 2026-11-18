@@ -72,7 +72,7 @@
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myCertificationLearningGap')}">
                     <a th:href="@{/my/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
-                        <i class="bi bi-mortarboard me-2"></i><span>資格・学習計画</span>
+                        <i class="bi bi-mortarboard me-2"></i><span th:text="#{myCertGap.title}">資格・学習計画</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myOneOnOnes')}">
@@ -116,7 +116,7 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('certification-learning-skill-gap')}">
                     <a th:href="@{/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-mortarboard me-2"></i>
-                        <span>資格・学習・スキルギャップ</span>
+                        <span th:text="#{certGap.title}">資格・学習・スキルギャップ</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">
@@ -415,10 +415,30 @@
                         <span th:text="#{menu.system.config}">システム設定</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('import-center')}">
+                    <a th:href="@{/import-center}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/import-center' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-cloud-upload me-2"></i>
+                        <span th:text="#{menu.importCenter}">取込センター</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('audit-log')}">
                     <a th:href="@{/audit-log}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/audit-log' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-shield-check me-2"></i>
                         <span th:text="#{menu.auditLog}">監査ログ</span>
+                    </a>
+                </li>
+                <!-- NF07 保全 hold: 機能のmenu keyに加え、privacy action の判定結果（privacy-admin だけ）で表示する（§6.8） -->
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('privacy-retention') and privacyHoldMenuAllowed == true}">
+                    <a th:href="@{/privacy/holds}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/privacy/holds' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-lock me-2"></i>
+                        <span th:text="#{menu.privacyHolds}">プライバシー保全</span>
+                    </a>
+                </li>
+                <!-- NF07 DSAR: 機能のmenu keyに加え、privacy action の判定結果（privacy-admin だけ）で表示する（§6.8） -->
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('privacy-dsar') and privacyDsarMenuAllowed == true}">
+                    <a th:href="@{/privacy/dsar}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/privacy/dsar' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-person me-2"></i>
+                        <span th:text="#{menu.privacyDsar}">本人請求（DSAR）</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('管理者')">

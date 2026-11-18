@@ -75,7 +75,7 @@
 
 - 対象ファイル／行: `src/main/resources/static/js/modules/invoice.js:72` — `SES.i18n.t('invoice.btn.paymentHistory', '入金履歴')`。**キーが4ロケールの messages*.properties のどれにも未定義**（本監査でJS参照キー全300件と定義キーを突合し、静的キーの未定義はこの1件のみ）
 - 発生条件・影響: `SES.i18n.t` は未定義キーのとき**キー文字列そのもの**を返す（第2引数はフォールバックではなく置換引数）。ステータス「入金済」の請求書の行に `invoice.btn.paymentHistory` という文字がボタンラベルとして表示される。
-- 対応方法: `invoice.btn.paymentHistory` を messages.properties（入金履歴）/ _en（Payment history）/ _zh_CN（收款记录）/ _ko（입금 이력）へ追加する。`MessageBundleConsistencyTest` があるため1ロケール追加漏れはテストで検出される。
+- 対応方法: `invoice.btn.paymentHistory` を messages.properties（入金履歴）/ _en（Payment history）/ _zh_CN（`\u6536\u6b3e\u8bb0\u5f55`）/ _ko（입금 이력）へ追加する。`MessageBundleConsistencyTest` があるため1ロケール追加漏れはテストで検出される。
 - 期待結果: 入金済行のボタンが各ロケールの訳語で表示される。
 - 追加すべきテスト: 既存のキー突合テストに「JSが参照する静的キーが ja リソースに存在する」チェックを追加（本監査で使った抽出手順: `grep -rhoE "SES\.i18n\.t\('[^']+'" static/js` とプロパティキーの comm 突合）。
 

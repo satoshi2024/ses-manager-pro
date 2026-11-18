@@ -1,4 +1,4 @@
-# AI Management Copilot — 開工対話集
+# AI Management Copilot — 着手対話集
 
 > **正本**: 本ファイルが NF-08 実装対話の唯一の入口である。
 > 中央 `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 は概要のみ。詳細は本書をコピーする。
@@ -8,7 +8,7 @@
 
 | 用途 | 使用する対話 |
 |---|---|
-| 初回・pipeline 全体の確認 | 本書 §2（S0 総開工） |
+| 初回・pipeline 全体の確認 | 本書 §2（S0 全体着手） |
 | F1 semantic catalog / run / feedback | 本書 §3 F1 |
 | F2 intent / parameter / scope / gateway | 本書 §3 F2 |
 | A1 chat / citation UI | 本書 §3 A1 |
@@ -19,13 +19,13 @@
 
 1 task = 1 commit + push。実装対話では PR を作らない。M 完了後に独立 Review へ remote Head を渡す。
 
-## 2. S0 — 総開工対話
+## 2. S0 — 全体着手対話
 
 以下を新しい実装対話へコピーする。
 
 ---
 
-あなたは `ai-management-copilot`（NF-08）の主実装 AI です。これは F1〜M の総開工対話です。
+あなたは `ai-management-copilot`（NF-08）の主実装 AI です。これは F1〜M の全体着手対話です。
 
 ### 発注者前提（2026-09-01）
 
@@ -85,13 +85,13 @@
 
 ---
 
-## 3. Task 別開工対話
+## 3. Task 別着手対話
 
 ### F1 — Semantic catalog / run / feedback
 
 ```text
 あなたは `ai-management-copilot` の F1 実装 AI です。Task: **F1 Semantic catalog / run / feedback 基盤**。
-前提: T000（Discovery）完了、Plan Review CONDITIONAL PASS。総開工 §2 の契約をすべて適用する。
+前提: T000（Discovery）完了、Plan Review CONDITIONAL PASS。全体着手 §2 の契約をすべて適用する。
 
 【Objective】
 provisional catalog をコード化し、catalog 外実行を型と runtime で拒否する。

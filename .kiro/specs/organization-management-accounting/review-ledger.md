@@ -126,7 +126,7 @@ V59は作成せず、既存DB更新用MigrationはV60を使用する。
 - T012 B2: 修正実装済み（自動検証済み、独立Review再判定待ち）
   - 対応requirements: R2.3、R3.1〜R3.3、R4の全社合計/組織別合計一致
   - 変更範囲: `ManagementAccountingService`/summary DTO、契約の組織scope SQL query、管理会計API/export、管理会計画面/JS、V60 menu、4言語i18n
-  - 金額口径: 既存`MonthlyRevenueCalcService`へ契約単位の金額解決を委譲。確定work recordはsnapshotの組織を優先し、未snapshotの見込みはwork month時点の有効primary所属でSQL取得した契約組織を使用。予算は同じ組織scope wrapperで取得し、売上/粗利の予算差を算出
+  - 金額算定基準: 既存`MonthlyRevenueCalcService`へ契約単位の金額解決を委譲。確定work recordはsnapshotの組織を優先し、未snapshotの見込みはwork month時点の有効primary所属でSQL取得した契約組織を使用。予算は同じ組織scope wrapperで取得し、売上/粗利の予算差を算出
   - scope: 非管理者は契約の所属組織をJOIN条件で`IN`制限し、snapshot/予算もSQL `IN`。管理者のみ全件。export endpointも同じsummary serviceを再利用し、画面後filterなし
   - 自動テスト: `ManagementAccountingServiceImplTest` 1件成功（売上/原価/粗利、予算差、SQL scope引数、組織名）。F2 scope testとA1 API CSRF testも継続成功
   - Demo: 2026-06の組織100で売上120・原価70・粗利50、売上予算110・粗利予算40を入力したsummaryが、売上差10・粗利差10を返し、同じ行の組織名とscopeを保持することをMockで確認
@@ -181,7 +181,7 @@ R02第八次Review（Base `601177a` / Head `030a016`、判定 FAIL、P0=1 / P1=1
   → `fullAccess/allowedIds/legalEntityId/organizationId/costCenterId` をSQL条件として追加し、
   空集合は `1 = 0` で0件にする。取得後フィルターは行わない。
 - 併せて Bench判定を `t_engineer.status`（現在値）から**対象月の契約有無**へ変更した
-  （`UtilizationCalcService` と同じ契約ベース口径）。現在値のままだと過去月の待機費が後から変わり、R2.2に反する。
+  （`UtilizationCalcService` と同じ契約ベース基準）。現在値のままだと過去月の待機費が後から変わり、R2.2に反する。
 
 ### P1
 
@@ -255,7 +255,7 @@ V60未適用環境ではMigration適用を止める。適用後は組織・所�
 
 - 判定: `FIX`。P0/P1の実装・回帰テストを追補中であり、独立Review、Docker MySQL smoke、実ブラウザDemoは未実施。`enterprise-identity-security`は`NOT READY`を維持する。
 - 対象修正: Dashboardキャッシュキーの組織/DataScope分離、forecast pipelineのSQL境界、確定勤怠への組織・原価部門snapshot、組織statusの保護付きversion CAS、法人境界（親子・統合・法人変更）、予算の組織/原価部門の法人・状態・有効期間整合性、管理会計法人予算境界、CSV 15列、上長の有効性・role・scope検査、ユーザー無効化/削除と所属クローズの同一トランザクション、原価部門versionおよび全業務参照元の削除保護。
-- 回帰テスト: `OrganizationServiceImplTest` 11件、`OrganizationServiceManagerScopeTest` 1件、`ManagementAccountingServiceImplTest` 4件、`ManagementAccountingApiControllerTest` 3件、`OrganizationApiControllerTest` 10件、`UserApiControllerTest` 11件、`CostCenterServiceImplTest` 4件、`ContractMapperProjectionTest` 1件を確認済み。既存のDashboard/snapshot関連定向テストも前段で成功している。
+- 回帰テスト: `OrganizationServiceImplTest` 11件、`OrganizationServiceManagerScopeTest` 1件、`ManagementAccountingServiceImplTest` 4件、`ManagementAccountingApiControllerTest` 3件、`OrganizationApiControllerTest` 10件、`UserApiControllerTest` 11件、`CostCenterServiceImplTest` 4件、`ContractMapperProjectionTest` 1件を確認済み。既存のDashboard/snapshot関連対象限定テストも前段で成功している。
 - Schema: V1の`expected_unit_price`コメントを円単位へ修正。V5/V60、`engineer-schema-h2.sql`、`schema-organization-accounting-h2.sql`は勤怠確定時の組織・原価部門列を同期した状態を維持する。
 - 未検証: `mvn test`全量の最終終了コード、Docker MySQL 8によるV1→V60およびlegacy V60 smoke、Node/browser実Demo、独立Review。従って本記録をPASS根拠にしない。
 - Base/Head: Base `601177a14689b6fc12cf79482224e0467a7e00ba`、Head `62a1f8a25b2a0638398cbb477bb10a58dba5afae`。修正は未コミットの作業ツリー差分に含まれる。
@@ -271,7 +271,7 @@ V60未適用環境ではMigration適用を止める。適用後は組織・所�
 - P1-5/P1-6: 組織統合は旧所属を統合日前日で閉じ、統合日付の後続所属を作成。既存統合先との同日重複を避け、status/assignmentの行ロック、同日異動拒否、参照中期間変更拒否を回帰テストで固定。
 - P1-7/P1-8: scope外snapshotを見えない契約はforecastへ再出現させず、Bench待機原価を`bench-engineer`月次snapshotから集計。snapshotが存在する月は現在要員SQLへfallbackしない。
 - P2/テスト追補: 管理会計契約Mapperの両scope SQL、CSVのtab/CR制御文字、V5/V60 DDL順序・列独立性をテスト。
-- 自動検証: 定向79 tests成功。全量`mvn test`: **830 tests / 0 failures / 0 errors / 6 skipped / BUILD SUCCESS**。`git diff --check`はexit 0（LF→CRLF warningのみ）。
+- 自動検証: 対象限定79 tests成功。全量`mvn test`: **830 tests / 0 failures / 0 errors / 6 skipped / BUILD SUCCESS**。`git diff --check`はexit 0（LF→CRLF warningのみ）。
 - 未検証: `docker ps`はDocker Linux engine pipe不在で失敗、`node --version`はコマンド未導入で失敗。従ってMySQL空庫/legacy smoke、Node JS syntax smoke、desktop/390px実ブラウザ一気通貫Demoは未実施。独立semantic reviewもこれから実施する。
 - Git: 修正は未コミット作業ツリーにあり、commitは作成していない。
 
@@ -279,7 +279,7 @@ V60未適用環境ではMigration適用を止める。適用後は組織・所�
 
 - 現行判定: `FIX`。今回の独立再Reviewは未実施のため、P0/P1およびSpec全体をPASSへ変更しない。`enterprise-identity-security`は`NOT READY`を維持する。
 - 修正: `schema-organization-accounting-h2.sql`へ`t_work_record.accounting_dimension_frozen`と`t_bp_payment.cost_center_id`を追加。`ManagementAccountingServiceImpl`は対象月に`bench-engineer` snapshotが1件でも存在すれば、scope外で可視行が0件でも現在要員SQLへfallbackしない。通常の待機原価SQLは対象月の有効な主所属を要員所属より優先する。CSV exportは埋め込みCRを含むセルを引用し、Cost CenterのWorkRecord参照削除を回帰テストで固定した。
-- 回帰テスト: scope外待機snapshotのfallback禁止、scope外確定snapshot契約のforecast再出現禁止、WorkRecord参照中のCost Center削除拒否、CSV埋め込みCRを追加。定向24件成功。全量`mvn test`は**833 tests、Failures 0、Errors 0、Skipped 6、BUILD SUCCESS**。
+- 回帰テスト: scope外待機snapshotのfallback禁止、scope外確定snapshot契約のforecast再出現禁止、WorkRecord参照中のCost Center削除拒否、CSV埋め込みCRを追加。対象限定24件成功。全量`mvn test`は**833 tests、Failures 0、Errors 0、Skipped 6、BUILD SUCCESS**。
 - 未検証: `docker ps`は`dockerDesktopLinuxEngine`のnamed pipe不在で失敗し、MySQL空庫V1→V60/legacy V58→V60 smokeは未実行。`node --version`はコマンド未導入で失敗し、Node JS syntax smokeは未実行。desktop/390px実ブラウザDemoも未実行。独立semantic reviewもこの追補時点では未実施。
 - Git: commitは作成していない。修正は未コミット作業ツリー差分にある。
 
@@ -453,7 +453,7 @@ P0/P1が4件顕在化した。** いずれも修正・回帰テスト済み。
 - Docker Engine を起動し、`FlywayMigrationSmokeTest`（空庫V1→V61）と
   `FlywayLegacyV60MigrationSmokeTest`（旧V58形状→V61）を**実MySQL 8で実行して成功**。
 - `mvn clean test`: **848 tests / Failures 0 / Errors 0 / Skipped 0 / BUILD SUCCESS**
-  （環境変数の小細工なし。Docker/Node.jsの門禁も実行済み）。
+  （環境変数の小細工なし。Docker/Node.jsのゲートも実行済み）。
 - 未実施: desktop/390px 実ブラウザ一気通貫Demo（本環境はアプリ常駐用MySQLを持てない）。
 
 ### 判定（第十三次指摘に対する自己申告。独立再Reviewは未実施）
@@ -570,7 +570,7 @@ copyable-conversations/ S03〜S17・R03〜R17が全て一致し、重複・欠�
 
 ### 最終テスト証拠
 
-- 定向: `WorkRecordServiceImplTest` 43件、`EngineerAccountingHistoryMapperTest` 3件、合計
+- 対象限定: `WorkRecordServiceImplTest` 43件、`EngineerAccountingHistoryMapperTest` 3件、合計
   **46 tests / Failures 0 / Errors 0 / Skipped 0**。
 - L4全量: `mvn clean test`をHead `f6f0027`で独立実行し、
   **904 tests / Failures 0 / Errors 0 / Skipped 1 / BUILD SUCCESS**。

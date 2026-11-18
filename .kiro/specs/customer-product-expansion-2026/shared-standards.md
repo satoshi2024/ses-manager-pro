@@ -22,7 +22,7 @@ Migration fixture・金額/CSVの結論を全specの既定として固定した�
 
 - **S01/S02/S03へ遡及適用しない。** S02はPASS済み、S03は実装進行中であり、`platform-invariants.md`の
   追加だけを理由に再実装・再Reviewしない。判定は`spec-execution-ledger.md`を正とする。
-- S04以降の各`design.md`は「決定表」節（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）を持つ。
+- S04以降の各`design.md`は「決定表」節（時間・asOf / 主体×操作×閲覧可能な母集団 / 状態機械と競合）を持つ。
   この3表が埋まっていないtaskを開始しない。
 
 ## 1. 既存資産を唯一の正として再利用する

@@ -43,6 +43,9 @@ class FreeeOAuthCallbackWebTest {
     @MockBean
     private AuditLogService auditLogService;
 
+    @MockBean
+    private com.ses.service.accounting.FreeeAccountingConnectService accountingConnectService;
+
     private static final String CALLBACK =
             "https://accounts.secure.freee.co.jp/public_api/authorize?response_type=code"
                     + "&client_id=c&redirect_uri=r&state=STATE&prompt=select_company";
@@ -175,6 +178,155 @@ class FreeeOAuthCallbackWebTest {
                 .thenThrow(com.ses.common.exception.BusinessException.of("error.payroll.configIncomplete"));
         mockMvc.perform(get("/integrations/freee/authorize"))
                 .andExpect(redirectedUrl("/payroll?error=config"));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("給与callbackの業務失敗は内部message keyだけをreasonとして返す（provider詳細は載せない）")
+    void 給与callback失敗はreasonを返す() throws Exception {
+        String state = startOAuth();
+        org.mockito.Mockito.doThrow(com.ses.common.exception.BusinessException.of("error.payroll.companyNotAdmin"))
+                .when(service).handleCallback(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE, state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE_ISSUED,
+                                java.time.Instant.now().getEpochSecond()))
+                .andExpect(redirectedUrl("/payroll?error=oauth&reason=error.payroll.companyNotAdmin"));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("自システム以外の文言（provider由来等）はreasonへ載せない")
+    void 想定外messageはreasonへ載せない() throws Exception {
+        String state = startOAuth();
+        org.mockito.Mockito.doThrow(new com.ses.common.exception.BusinessException(400, "invalid_grant: raw provider text"))
+                .when(service).handleCallback(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE, state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE_ISSUED,
+                                java.time.Instant.now().getEpochSecond()))
+                .andExpect(redirectedUrl("/payroll?error=oauth"));
+    }
+
+    // ============ 会計接続（target=accounting） ============
+
+    private org.springframework.mock.web.MockHttpSession startAccountingOAuth() throws Exception {
+        org.mockito.Mockito.when(service.authorizationUrl(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(CALLBACK);
+        MvcResult result = mockMvc.perform(get("/integrations/freee/authorize")
+                        .param("target", "accounting")
+                        .param("connectionId", "5"))
+                .andExpect(redirectedUrl(CALLBACK))
+                .andReturn();
+        org.springframework.mock.web.MockHttpSession session =
+                (org.springframework.mock.web.MockHttpSession) result.getRequest().getSession();
+        org.junit.jupiter.api.Assertions.assertEquals(FreeeOAuthController.TARGET_ACCOUNTING,
+                session.getAttribute(FreeeOAuthController.SESSION_TARGET));
+        org.junit.jupiter.api.Assertions.assertEquals(5L,
+                session.getAttribute(FreeeOAuthController.SESSION_CONNECTION_ID));
+        verify(accountingConnectService).requireConnectable(5L);
+        return session;
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("会計: 認可対象をsessionへ保存し、callbackで会計接続へ保存・会計画面へ戻る")
+    void 会計callbackは会計接続へ保存する() throws Exception {
+        org.springframework.mock.web.MockHttpSession session = startAccountingOAuth();
+        String state = session.getAttribute(FreeeOAuthController.SESSION_STATE).toString();
+
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", state)
+                        .session(session))
+                .andExpect(redirectedUrl("/accounting/integration?freee_connected=1"));
+
+        verify(accountingConnectService, times(1)).completeAuthorization(
+                org.mockito.ArgumentMatchers.eq(5L), org.mockito.ArgumentMatchers.eq("fixture-code"),
+                org.mockito.ArgumentMatchers.any());
+        verify(service, never()).handleCallback(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(auditLogService).recordRequired(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("GET"), org.mockito.ArgumentMatchers.eq("/integrations/freee"),
+                org.mockito.ArgumentMatchers.eq(302), org.mockito.ArgumentMatchers.eq("FREEE_ACCOUNTING_CONNECT"),
+                org.mockito.ArgumentMatchers.eq(true));
+        // 認可対象はcallbackで消費され、次の給与callbackへ持ち越さない
+        org.junit.jupiter.api.Assertions.assertNull(session.getAttribute(FreeeOAuthController.SESSION_TARGET));
+        org.junit.jupiter.api.Assertions.assertNull(session.getAttribute(FreeeOAuthController.SESSION_CONNECTION_ID));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("会計: 業務失敗は会計画面へreason付きで戻り、失敗監査する")
+    void 会計callback失敗は会計画面へ戻る() throws Exception {
+        org.springframework.mock.web.MockHttpSession session = startAccountingOAuth();
+        String state = session.getAttribute(FreeeOAuthController.SESSION_STATE).toString();
+        org.mockito.Mockito.doThrow(com.ses.common.exception.BusinessException.of("error.accounting.freeeCompanyMismatch"))
+                .when(accountingConnectService).completeAuthorization(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", state)
+                        .session(session))
+                .andExpect(redirectedUrl(
+                        "/accounting/integration?freee_error=oauth&reason=error.accounting.freeeCompanyMismatch"));
+        verify(auditLogService).record(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("GET"), org.mockito.ArgumentMatchers.eq("/integrations/freee"),
+                org.mockito.ArgumentMatchers.eq(400), org.mockito.ArgumentMatchers.eq("FREEE_ACCOUNTING_CONNECT"),
+                org.mockito.ArgumentMatchers.eq(false));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("会計: state不一致は会計画面へ戻り、token交換しない")
+    void 会計callbackのstate不一致は処理しない() throws Exception {
+        org.springframework.mock.web.MockHttpSession session = startAccountingOAuth();
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", "WRONG-STATE")
+                        .session(session))
+                .andExpect(redirectedUrl("/accounting/integration?freee_error=state"));
+        verify(accountingConnectService, never()).completeAuthorization(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("会計: 対象外の接続IDでは認可を開始せずstateも発行しない")
+    void 会計の対象外接続は認可開始しない() throws Exception {
+        org.mockito.Mockito.when(accountingConnectService.requireConnectable(99L))
+                .thenThrow(com.ses.common.exception.BusinessException.of(404, "error.accounting.connectionNotFound"));
+        MvcResult result = mockMvc.perform(get("/integrations/freee/authorize")
+                        .param("target", "accounting")
+                        .param("connectionId", "99"))
+                .andExpect(redirectedUrl(
+                        "/accounting/integration?freee_error=connection&reason=error.accounting.connectionNotFound"))
+                .andReturn();
+        org.junit.jupiter.api.Assertions.assertNull(
+                result.getRequest().getSession().getAttribute(FreeeOAuthController.SESSION_STATE));
+        verify(service, never()).authorizationUrl(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("給与の認可開始は前回の会計対象をsessionから消す（給与callbackを会計へ誤保存しない）")
+    void 給与の認可開始は会計対象を消す() throws Exception {
+        org.mockito.Mockito.when(service.authorizationUrl(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(CALLBACK);
+        org.springframework.mock.web.MockHttpSession session = new org.springframework.mock.web.MockHttpSession();
+        session.setAttribute(FreeeOAuthController.SESSION_TARGET, FreeeOAuthController.TARGET_ACCOUNTING);
+        session.setAttribute(FreeeOAuthController.SESSION_CONNECTION_ID, 5L);
+        mockMvc.perform(get("/integrations/freee/authorize").session(session))
+                .andExpect(redirectedUrl(CALLBACK));
+        org.junit.jupiter.api.Assertions.assertNull(session.getAttribute(FreeeOAuthController.SESSION_TARGET));
+        org.junit.jupiter.api.Assertions.assertNull(session.getAttribute(FreeeOAuthController.SESSION_CONNECTION_ID));
     }
 
     @Test

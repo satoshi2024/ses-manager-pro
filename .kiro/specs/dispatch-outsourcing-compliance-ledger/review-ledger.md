@@ -720,7 +720,7 @@ R10 Round 7の「次はT061 code fix deltaを提出すること」に従い、R5
 - `sql/engineer-schema-h2.sql`: dispatch sectionをR5 shapeへ同期（S11 attendance変更は保持）。
 - test: DispatchComplianceSchemaH2Test再書、F1SnapshotWriteProtocolTest/F1NullAndHistoryCorrectionTest/F1MapManifestTest/F1PiiOwnershipScanTest新規、FlywayDispatchComplianceSchemaSmokeTest再書、FlywayV84LegacySchemaSmokeTest/FlywayV84PartialSchemaSmokeTest/FlywayV84FailedHistoryRepairSmokeTest/FlywayV84PostApplyRollbackSmokeTest新規。
 
-**実行test（L1〜L3定向・直接回帰、skip 0）**: `mvn -B -Dtest=<上記17クラス> test` → **127 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: F1-MAP-01 1、F1-SNAPSHOT-01/02 2、F1-NULL-01＋HISTORY-CORRECTION-01 2、PII-OWNERSHIP-01 1、MYSQL-FRESH 1、MYSQL-LEGACY 1、MYSQL-PARTIAL-SCHEMA 1、MYSQL-FAILED-HISTORY-REPAIR 1、MYSQL-POST-APPLY-ROLLBACK 1、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、ComplianceApiControllerTest 1、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、MessageBundleConsistencyTest 4。`git diff --check` exit 0。
+**実行test（L1〜L3の対象限定・直接回帰、skip 0）**: `mvn -B -Dtest=<上記17クラス> test` → **127 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: F1-MAP-01 1、F1-SNAPSHOT-01/02 2、F1-NULL-01＋HISTORY-CORRECTION-01 2、PII-OWNERSHIP-01 1、MYSQL-FRESH 1、MYSQL-LEGACY 1、MYSQL-PARTIAL-SCHEMA 1、MYSQL-FAILED-HISTORY-REPAIR 1、MYSQL-POST-APPLY-ROLLBACK 1、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、ComplianceApiControllerTest 1、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、MessageBundleConsistencyTest 4。`git diff --check` exit 0。
 
 **Demo証跡（SQL/H2・MySQL実測）**: profile snapshot A(v1,hA)→B(v2,hB)→A(v3,hA)を3 version保持、current pointerはv3、v1不変。同じoperation_idのretryはUNIQUE拒否で1行。2 workerのcurrent pointerは独立しCAS競合1勝、失敗txはsnapshot/pointerを全rollbackしorphan 0。current列の値→NULLが保存され旧値残存なし、snapshotは不変。history訂正はCORRECTED/CANCELLED新event（supersedes_event_id/correction_reason付き）で旧行不変、asOfは最新有効event。snapshot/history tableはDB triggerで直接UPDATE/DELETE拒否（MySQL実測）。
 
@@ -738,7 +738,7 @@ R10 Round 8はHead `b9b91f9`をread-only＋独立実行（H2/docs系43/0/0/0、M
 - **R8-P2-01**: design §6.2 F1-NULL-01行へ「省略PATCH rejectはT063 API導入時にvalidationで担保、T061はraw SQL＋mapper full DTO testで値→NULLとCAS 0行を担保」を明記。
 - **R8-NOTE-01**: F1-HISTORY-CORRECTION-01のasOf解決assertをeffective interval（effective_from/to）＋「asOf日に有効な後続eventにsupersedeされていない」NOT EXISTS条件へ強化（8/10→evt-1、8/20→evt-2、8/31→evt-2、10/1→0件を検証）。
 
-**実行test（L1〜L3定向・直接回帰、skip 0）**: H2/F1系（DispatchComplianceSchemaH2Test、F1MapManifestTest、F1SnapshotWriteProtocolTest、F1NullAndHistoryCorrectionTest、F1NullClearMapperTest、F1PiiOwnershipScanTest）8/0/0/0、MySQL 5形状（FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK）5/0/0/0、SpecDispatchConsistencyTest 9/0/0/0、MigrationScriptIntegrityTest 27/0/0/0。`git diff --check` exit 0。
+**実行test（L1〜L3の対象限定・直接回帰、skip 0）**: H2/F1系（DispatchComplianceSchemaH2Test、F1MapManifestTest、F1SnapshotWriteProtocolTest、F1NullAndHistoryCorrectionTest、F1NullClearMapperTest、F1PiiOwnershipScanTest）8/0/0/0、MySQL 5形状（FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK）5/0/0/0、SpecDispatchConsistencyTest 9/0/0/0、MigrationScriptIntegrityTest 27/0/0/0。`git diff --check` exit 0。
 
 **Rollback**: V84は未releaseのためcommit revertのみでDB rollback不要。本deltaのV1/engineer-schema変更はS10側の自前commitとして記録（R10 provenance注意事項に対応）。
 
@@ -753,7 +753,7 @@ R10 Round 9のT061 F1 PASS（R5-P1-01..05・R8全件VERIFIED_CLOSED）を受け�
 - `dto/compliance/ComplianceFinding`: conditionFingerprint/dueDate追加（既存4引数コンストラクタは互換維持）。`RuleRunResultDto`新規。
 - messages 4 bundle: 新rule 9 message key追加（ja/en/ko/zh、MessageBundleConsistencyTest 4件PASS）。
 
-**実行test（L2〜L3定向・直接回帰、skip 0）**: 統合batch **164 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: LimitationDateCalculatorTest 8（連続更新/クーリング/組織単位変更/同日開始/未来開始/並行契約/算定不能）、ComplianceRuleEngineTest 7（新rule code別境界）、ComplianceFindingStoreTest 1（再実行重複0・ack保持・解消RESOLVED・再検出OPEN）、ComplianceRuleRunApiTest 1（Demo: run 2回でopened=0・補完でresolved=2）、LaborComplianceServiceImplTest 12（既存4 rule golden fixture維持）、MessageBundleConsistencyTest 4、ComplianceApiControllerTest 1、MonthlyClosingServiceImplTest 12、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、F1系（MAP/SNAPSHOT/NULL/HISTORY/PII/H2）9。`git diff --check` exit 0。
+**実行test（L2〜L3の対象限定・直接回帰、skip 0）**: 統合batch **164 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: LimitationDateCalculatorTest 8（連続更新/クーリング/組織単位変更/同日開始/未来開始/並行契約/算定不能）、ComplianceRuleEngineTest 7（新rule code別境界）、ComplianceFindingStoreTest 1（再実行重複0・ack保持・解消RESOLVED・再検出OPEN）、ComplianceRuleRunApiTest 1（Demo: run 2回でopened=0・補完でresolved=2）、LaborComplianceServiceImplTest 12（既存4 rule golden fixture維持）、MessageBundleConsistencyTest 4、ComplianceApiControllerTest 1、MonthlyClosingServiceImplTest 12、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、F1系（MAP/SNAPSHOT/NULL/HISTORY/PII/H2）9。`git diff --check` exit 0。
 
 **Demo証跡**: 欠落profileの派遣契約で抵触日2＋責任者3＋保険3＋明示書2＝10 findingがOPEN、rule再実行でopened=0（重複0）、2種抵触日を補完して再実行で該当2件がRESOLVED（欠落解消）、未補完分はOPEN維持。契約chain（連続更新通算・クーリングリセット・組織単位変更別chain・同日開始・未来開始先読み・並行契約通算）をLimitationDateCalculatorTestで実測。
 
@@ -766,11 +766,11 @@ R10 Round 10はT062 F2（`de08f2e4`）を独立実行で検証し、**FAIL**判�
 | issue ID | violated | 根本原因と最小fix | 証跡 |
 |---|---|---|---|
 | R10-P1-01 | platform-invariants §4.1（適用済みmigration編集禁止）、F1-MYSQL-POST-APPLY-ROLLBACK-01、T061 PASS凍結、commit message虚偽 | `de08f2e4`でT061 PASS済みV84の4コメント行（`労働`→`労動`、L262/L267/L306/L545）が混入しchecksumが変動。**T061 PASS時点`34c68f7`のバイト列へ完全復元** | `git diff 34c68f78 -- V84`空（バイト一致）、`労動` count=0、`git diff --check` exit 0 |
-| R10-P1-02 | design §5.1（未入力＝`MISSING_*` finding対象）、R5、R3.1 | 5 rule全てが`profile == null → List.of()`でskipし、最もリスクの高い「一切未設定」状態が検知不能（fail-open）。**null profileを「全field未入力」として評価**し、fingerprint fallback（workplace=contract.customerId、org=unknown）は既存実装を維持。`MissingDocumentDeliveryRule`はprofile非依存のためnull check自体を除去 | ComplianceRuleEngineTest: null-profileでMISSING 7 code全件＋保険3・明示書2の件数、準委任null-profileで指示経路を正本化（旧skip正本化testは置換）。L2〜L3定向・直接回帰 **80/0/0/0 skip 0**（下記） |
+| R10-P1-02 | design §5.1（未入力＝`MISSING_*` finding対象）、R5、R3.1 | 5 rule全てが`profile == null → List.of()`でskipし、最もリスクの高い「一切未設定」状態が検知不能（fail-open）。**null profileを「全field未入力」として評価**し、fingerprint fallback（workplace=contract.customerId、org=unknown）は既存実装を維持。`MissingDocumentDeliveryRule`はprofile非依存のためnull check自体を除去 | ComplianceRuleEngineTest: null-profileでMISSING 7 code全件＋保険3・明示書2の件数、準委任null-profileで指示経路を正本化（旧skip正本化testは置換）。L2〜L3の対象限定・直接回帰 **80/0/0/0 skip 0**（下記） |
 
 **変更file**: `src/main/resources/db/migration/V84__dispatch_outsourcing_compliance_ledger.sql`（34c68f7へ復元・4行）、`service/compliance/{MissingLimitationDateRule,MissingResponsibleRule,MissingInsuranceRule,MissingDocumentDeliveryRule,MissingInstructionRouteRule}.java`（null-profile fail-closed）、`ComplianceRuleEngineTest.java`（skip正本化testをfail-closed正本化へ置換＋準委任test追加）、`tasks.md`（F2 status追記）。
 
-**実行test（L2〜L3定向・直接回帰、skip 0）**: F2系（ComplianceRuleEngineTest 8・ComplianceFindingStoreTest 1・ComplianceRuleRunApiTest 1・LimitationDateCalculatorTest 8・LaborComplianceServiceImplTest 12 golden維持）30/0/0/0、F1系（DispatchComplianceSchemaH2Test・F1MapManifestTest・F1SnapshotWriteProtocolTest・F1NullAndHistoryCorrectionTest・F1NullClearMapperTest・F1PiiOwnershipScanTest）8/0/0/0、MigrationScriptIntegrityTest 27/0/0/0、ComplianceApiControllerTest 1、JsSyntaxCheckTest 1、SpecDispatchConsistencyTestはS10側8/8 PASS（残り1 failureはR10-P2-01のS12〜S14予約V99-V101 vs 実在V101で他track起因）、MessageBundleConsistencyTestは`project.detail.desc`（scale-300 `0e29c555`）のみ他track起因。`git diff --check` exit 0。
+**実行test（L2〜L3の対象限定・直接回帰、skip 0）**: F2系（ComplianceRuleEngineTest 8・ComplianceFindingStoreTest 1・ComplianceRuleRunApiTest 1・LimitationDateCalculatorTest 8・LaborComplianceServiceImplTest 12 golden維持）30/0/0/0、F1系（DispatchComplianceSchemaH2Test・F1MapManifestTest・F1SnapshotWriteProtocolTest・F1NullAndHistoryCorrectionTest・F1NullClearMapperTest・F1PiiOwnershipScanTest）8/0/0/0、MigrationScriptIntegrityTest 27/0/0/0、ComplianceApiControllerTest 1、JsSyntaxCheckTest 1、SpecDispatchConsistencyTestはS10側8/8 PASS（残り1 failureはR10-P2-01のS12〜S14予約V99-V101 vs 実在V101で他track起因）、MessageBundleConsistencyTestは`project.detail.desc`（scale-300 `0e29c555`）のみ他track起因。`git diff --check` exit 0。
 
 **P2（他track・本deltaのfix対象外）**: R10-P2-01 — 現mainでSpecDispatchConsistencyTest（S12/S13/S14予約が実在V101以下）とMessageBundleConsistencyTest（`project.detail.desc`未定義）が他track起因で失敗。dispatchのV84予約・本deltaの変更とは無関係。予約表再同期（S12〜S17を実在latest+1へ）とscale-300側のkey追加は統合/他track担当。
 
@@ -814,7 +814,7 @@ R10 Round 11のT062 F2 PASSを受け、T063 A1を実装した。S11 trackが同�
 - `static/js/modules/contract.js`: 契約一覧の操作列へ詳細リンク（`/contract/detail/{id}`）追加。
 - messages 4 bundle: T063キー約150件追加（ja/en/ko/zh、MessageBundleConsistencyTest PASS）。
 
-**実行test（L1〜L3定向・直接回帰、skip 0）**: ContractComplianceProfileApiTest 15（role別mask matrix: 管理者/HR full・マネージャーP1_MASK・営業P2_LIMITED・findings権限・full DTO欠落400・営業PUT 403・マネージャーsensitive変更403・sensitive省略=現値維持・version 409・期間逆転400・workplace不存在400・契約404）、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26（`/contract/detail/1`追加）、F2系30（Engine 8・golden 12・Store 1・RunApi 1・Calculator 8）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計108件中失敗2件は既知のR10-P2-01他track起因（S12〜S14予約V99-V101 vs 実在V101、`project.detail.desc`）。`git diff --check` exit 0。
+**実行test（L1〜L3の対象限定・直接回帰、skip 0）**: ContractComplianceProfileApiTest 15（role別mask matrix: 管理者/HR full・マネージャーP1_MASK・営業P2_LIMITED・findings権限・full DTO欠落400・営業PUT 403・マネージャーsensitive変更403・sensitive省略=現値維持・version 409・期間逆転400・workplace不存在400・契約404）、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26（`/contract/detail/1`追加）、F2系30（Engine 8・golden 12・Store 1・RunApi 1・Calculator 8）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計108件中失敗2件は既知のR10-P2-01他track起因（S12〜S14予約V99-V101 vs 実在V101、`project.detail.desc`）。`git diff --check` exit 0。
 
 **Demo証跡（L1〜L3実測）**: 派遣/準委任のsection切替はdetail.htmlの`data-section="dispatch"/"quasi"`とJSの`applyContractType`で実装し、page testでマークアップ確認。maskはAPIレスポンスをrole別に実測（管理者=dispatch_fee_amount 10000表示、マネージャー=doesNotExist、営業=限定fieldのみ）。ブラウザでの営業/マネージャーログイン画面DemoはR10 ReviewのDemo確認項目として提示（本環境はbrowser Demo不可のため）。CSV/Excel/PDF/downloadのmaskはT064（B1）のDemo範囲。
 
@@ -831,7 +831,7 @@ R10 Round 12はT063 A1（`6d5e21f5`）を独立実行（121件中失敗2件は�
 
 **変更file**: `ContractComplianceProfileSaveDto.java`（retention/legalHold除去）、`ContractComplianceProfileServiceImpl.java`（requireContactOfCustomer追加）、`ContractComplianceProfileApiTest.java`（EDITABLE_KEYS同期＋UI payload回帰test＋contact顧客一致test、15→17件）、messages 4 bundle（contactCustomerMismatch）。
 
-**実行test（L1〜L3定向・直接回帰、skip 0）**: ContractComplianceProfileApiTest **17/0/0/0**、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26、F2系30（golden 12/12）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計112件中失敗1件は既知のR10-P2-01他track起因（`project.detail.desc`）のみ。`git diff --check` exit 0。
+**実行test（L1〜L3の対象限定・直接回帰、skip 0）**: ContractComplianceProfileApiTest **17/0/0/0**、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26、F2系30（golden 12/12）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計112件中失敗1件は既知のR10-P2-01他track起因（`project.detail.desc`）のみ。`git diff --check` exit 0。
 
 **NOTE（R12・blockしない）**: ① 営業書き込み403・マネージャーmasked writeは決定表にwrite列が無い中のfail-closed実装判断（design §5.3へ明文化推奨）② `guardSensitiveUnchanged`の`String.valueOf`比較（BigDecimal表記差でfalse-403余地、UIがsensitiveを送らないため実害低）③ findingsカードはcanViewCompliance＋DataScope ✓。
 
@@ -877,7 +877,7 @@ R10 Round 14のT064着手許可を受け、B1を実装した。S11 trackが同�
 - `templates/contract/detail.html`＋`static/js/modules/contract-compliance.js`: 法定帳票・交付カード（生成フォーム・交付記録一覧・受領確認・ダウンロード）。営業（LIMITED）にはカード非表示。
 - messages 4 bundle: doc.*/cpp.document.*/error key約60件追加。
 
-**実行test（L2〜L3定向・直接回帰、skip 0）**: ComplianceDocumentApiTest 7（生成→snapshot+archive+delivery・同一内容再生成で2件目なし・profile変更→新snapshot→新交付・templateVersion切替（config）で版が進む・受領確認・PDFダウンロード%PDF・不正種別/方法400・profile未作成400・営業403）、ComplianceDocumentGeneratorTest 5（golden content model・MASKでsensitive「—」・worker PII mask・4帳票構成・PDF生成）、T063系（API 17・page 2・Mobile 26）、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。**計124件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
+**実行test（L2〜L3の対象限定・直接回帰、skip 0）**: ComplianceDocumentApiTest 7（生成→snapshot+archive+delivery・同一内容再生成で2件目なし・profile変更→新snapshot→新交付・templateVersion切替（config）で版が進む・受領確認・PDFダウンロード%PDF・不正種別/方法400・profile未作成400・営業403）、ComplianceDocumentGeneratorTest 5（golden content model・MASKでsensitive「—」・worker PII mask・4帳票構成・PDF生成）、T063系（API 17・page 2・Mobile 26）、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。**計124件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
 
 **Demo証跡（L2〜L3実測）**: 派遣元管理台帳等を生成→交付記録作成。同一snapshot（同一内容）の再生成でdelivery件数・snapshot件数とも増えない（冪等）。profile変更→snapshot v2→新hash→新交付記録（版差分が説明できる）。template version切替（m_system_config）で版が進む。PDFはscanStatus CLEANのみダウンロード可。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
 
@@ -896,7 +896,7 @@ R10 Round 15はT064 B1（`84101461`）を独立実行（135件中失敗2件は�
 
 **変更file**: `ComplianceDocumentServiceImpl.java`（download再mask・営業許可・snapshot検索）、`ComplianceDocumentGenerator.java`（4帳票のsection拡充・party行）、`ComplianceSnapshotWriter.java`（party config投入）、`SystemConfigServiceImpl.java`（`company.representative`＋template version 4 keyをSCHEMASへ）、messages 4 bundle（doc.party.*/doc.section.benefits・retention等）、design.md §3.1（逸脱・範囲）、test 2件拡充（API 7→8、Generator 5）。
 
-**実行test（L2〜L3定向・直接回帰、skip 0）**: **計125件全PASS（失敗0・skip 0）**: T064系13（API 8・Generator 5）、T063系45、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。`git diff --check` exit 0。MessageBundleConsistencyTestは既知の他track失敗（`project.detail.desc`）のみ。
+**実行test（L2〜L3の対象限定・直接回帰、skip 0）**: **計125件全PASS（失敗0・skip 0）**: T064系13（API 8・Generator 5）、T063系45、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。`git diff --check` exit 0。MessageBundleConsistencyTestは既知の他track失敗（`project.detail.desc`）のみ。
 
 **Rollback**: DDL/migration/SecurityConfig変更なし。commit revertでDB rollback不要。
 
@@ -935,7 +935,7 @@ R10 Round 16のT064 B1 PASSを受け、B2を実装した。**isolated worktree�
 - messages 4 bundle: finding操作・エラーkey約20件追加。
 - design.md §3.2: 期限通知の源（finding.due_date）、宛先個人指定、段階境界（91=なし/90=90日前/89=追加なし）、例外失効、V85列の決定を明記。
 
-**実行test（L2〜L3定向・直接回帰、skip 0）**: ComplianceDeadlineServiceTest 5（91日=なし/90日=90日前段階×2名/89日=追加なし、60日・30日で段階が進み境界翌日は追加なし、同一段階冪等（再実行0）、宛先個人指定（営業/HR各8件）、例外失効→OPEN＋通知対象化）、ComplianceFindingActionApiTest 5（ack→in-progress→resolve遷移、note必須400、RESOLVEDからのack 400、exception expiresAt必須/過去400/未来OK、営業403、契約不一致404）、T063系45、T064系13、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1、Mobile 26。**計135件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
+**実行test（L2〜L3の対象限定・直接回帰、skip 0）**: ComplianceDeadlineServiceTest 5（91日=なし/90日=90日前段階×2名/89日=追加なし、60日・30日で段階が進み境界翌日は追加なし、同一段階冪等（再実行0）、宛先個人指定（営業/HR各8件）、例外失効→OPEN＋通知対象化）、ComplianceFindingActionApiTest 5（ack→in-progress→resolve遷移、note必須400、RESOLVEDからのack 400、exception expiresAt必須/過去400/未来OK、営業403、契約不一致404）、T063系45、T064系13、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1、Mobile 26。**計135件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
 
 **Demo証跡（L2〜L3実測）**: 抵触日alert→ack→対応中→解消、例外承認（expiresAt付き）→失効でOPENへ戻る。90日ちょうどで90日前段階、89日で追加なし（60日前段階は60日ちょうどに発火）を実測。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
 

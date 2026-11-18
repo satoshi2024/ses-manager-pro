@@ -21,6 +21,7 @@ import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetOffboardingService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,16 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     public OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId,
                                                                     Long lifecycleCaseId,
                                                                     Long lifecycleTaskId) {
+        return checkOffboardingClearanceForTenant(AccountingTenantContextHolder.requireTenantContext(),
+                engineerId, lifecycleCaseId, lifecycleTaskId);
+    }
+
+    @Override
+    public OffboardingClearanceResultDto checkOffboardingClearanceForTenant(String tenantId, Long engineerId,
+                                                                           Long lifecycleCaseId, Long lifecycleTaskId) {
+        if (!AccountingTenantContextHolder.requireTenantContext().equals(tenantId)) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_MISMATCH");
+        }
         if (engineerId == null) {
             return OffboardingClearanceResultDto.builder().clearancePassed(false).build();
         }
@@ -62,7 +73,7 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
 
         // 2. 未失効の外部アカウント（ACTIVE or SUSPENDED）
         List<ExternalAccountReference> activeAccounts =
-                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
+                externalAccountService.getUnrevokedAccountsForEngineer(tenantId, engineerId);
 
         // 3. 未解放のライセンス（ACTIVE）
         List<LicenseAssignment> activeLicenses = licenseAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
@@ -74,7 +85,10 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             blockingItems.add("未返却端末: " + tag + " [貸与ID: " + as.getId() + "]");
         }
         for (ExternalAccountReference acc : activeAccounts) {
-            blockingItems.add("未失効外部アカウント: " + maskIdentifier(acc.getAccountIdentifier()) + " (System#" + acc.getSystemId() + ")");
+            if (com.ses.service.ExternalAccountRevocationStates.isUnregisterable(acc)) {
+                blockingItems.add("失効要求を登録できない外部アカウント（所有法人不明・例外保留・空の既存key）: "
+                        + com.ses.service.ExternalAccountRevocationStates.maskIdentifier(acc.getAccountIdentifier()));
+            }
         }
         for (LicenseAssignment lic : activeLicenses) {
             blockingItems.add("未解放有償ライセンス: Plan#" + lic.getPlanId() + " [割当ID: " + lic.getId() + "]");
@@ -85,12 +99,17 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         boolean hasWaiver = lifecycleCaseId != null && lifecycleTaskId != null
                 && assetOffboardingWaiverMapper.selectValidByCaseAndTask(
                 engineerId, lifecycleCaseId, lifecycleTaskId) != null;
-        boolean passed = blockingItems.isEmpty() || hasWaiver;
+        boolean passed = (blockingItems.isEmpty() || hasWaiver)
+                && activeAccounts.stream().noneMatch(com.ses.service.ExternalAccountRevocationStates::isUnregisterable);
 
         return OffboardingClearanceResultDto.builder()
                 .clearancePassed(passed)
                 .unreturnedAssetCount(activeAssignments.size())
                 .unrevokedAccountCount(activeAccounts.size())
+                .unregisterableAccountCount((int) activeAccounts.stream().filter(com.ses.service.ExternalAccountRevocationStates::isUnregisterable).count())
+                .registeredAccountCount((int) activeAccounts.stream().filter(a ->
+                        !com.ses.service.ExternalAccountRevocationStates.isUnregisterable(a)
+                                && a.getIdempotencyKey() != null && !a.getIdempotencyKey().isBlank()).count())
                 .unreleasedLicenseCount(activeLicenses.size())
                 .waived(hasWaiver)
                 .blockingItems(blockingItems)
@@ -103,21 +122,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     public void triggerOffboardingRevocations(Long engineerId, Long actorUserId) {
         log.info("Triggering offboarding revocations for engineerId={}, actorUserId={}", engineerId, actorUserId);
 
-        // 1. 外部アカウントの失効要求
-        List<ExternalAccountReference> activeAccounts =
-                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
-        for (ExternalAccountReference acc : activeAccounts) {
-            // 要求送信・確認・タイムアウト再試行の契約を共通サービスへ委譲する。
-            externalAccountService.requestRevokeWithIdempotency(acc.getId(), acc.getIdempotencyKey(), actorUserId);
-        }
-
-        // 2. 有償ライセンスの一括解放
-        List<LicenseAssignment> activeLicenses = licenseAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
-        for (LicenseAssignment lic : activeLicenses) {
-            licenseService.releaseLicense(lic.getId(), LocalDate.now(), actorUserId);
-        }
-
-        log.info("Offboarding revocations completed for engineerId={}", engineerId);
+        // 失効要求とライセンスは案件の基準日を使う完了処理で扱う。旧入口から同期送信しない。
+        throw BusinessException.of(409, "error.asset.revocationLifecycleRequired");
     }
 
     @Override
@@ -133,8 +139,14 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除には対象要員、理由、承認申請IDが必要です。");
         }
 
-        LifecycleTask scopedTask = lifecycleTaskMapper.selectByIdForUpdate(lifecycleTaskId);
-        LifecycleCase scopedCase = scopedTask == null ? null : lifecycleCaseMapper.selectByIdForUpdate(lifecycleCaseId);
+        // ApprovalEngineServiceImpl.approve と同じ「承認申請 → 案件 → タスク」の順でtenant限定ロックする（NF01 batch 0 L2）。
+        // 承認engine経由では申請行は既に保持済みのため再取得は待たない。直接呼出しでも同じ順になり、
+        // タスク先行（cancelCase / completeCase と逆順）や申請行の後取り（approve と逆順）による循環待ちを作らない。
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId, tenantId);
+        LifecycleCase scopedCase = lifecycleCaseMapper.selectByIdForUpdateAndTenant(lifecycleCaseId, tenantId);
+        LifecycleTask scopedTask = scopedCase == null ? null
+                : lifecycleTaskMapper.selectByIdAndCaseIdForUpdate(lifecycleTaskId, scopedCase.getId());
         if (scopedTask == null || scopedCase == null || !lifecycleCaseId.equals(scopedTask.getCaseId())
                 || !lifecycleCaseId.equals(scopedCase.getId())
                 || !"RESIGN_ASSET_RETURN".equals(scopedTask.getTaskCode())
@@ -142,7 +154,6 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除の案件・タスクscopeが対象要員と一致しません。");
         }
 
-        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
         if (approval == null || !"LIFECYCLE_EXCEPTION".equals(approval.getRequestType())
                 || !isApproved(approval.getStatus()) || !approvalTargetMatches(approval, engineerId)) {
             throw new BusinessException(400, "有効な承認済みLIFECYCLE_EXCEPTION申請が対象要員に紐付いていません。");
@@ -182,11 +193,4 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         return status != null && "APPROVED".equalsIgnoreCase(status);
     }
 
-    private static String maskIdentifier(String identifier) {
-        if (!StringUtils.hasText(identifier)) return "***";
-        int atIndex = identifier.indexOf('@');
-        if (atIndex > 2) return identifier.substring(0, 2) + "***" + identifier.substring(atIndex);
-        if (identifier.length() > 4) return identifier.substring(0, 2) + "***" + identifier.substring(identifier.length() - 2);
-        return "***";
-    }
 }

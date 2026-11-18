@@ -358,7 +358,7 @@ public class ExportApiController {
 
     /**
      * 指定年度(4月始まり12ヶ月)の月次売上・粗利・実績/見込み区分を集計する。
-     * 集計ロジックは共通口径サービス({@link MonthlyRevenueCalcService})へ委譲し、Dashboard と数値を一致させる。
+     * 集計ロジックは共通集計基準サービス({@link MonthlyRevenueCalcService})へ委譲し、Dashboard と数値を一致させる。
      * 確定実績は対象月を一括ロードし月別 grouping する(旧実装の月ごと12クエリを廃止)。
      */
     private List<MonthlyRevenueDto> buildMonthlyRevenueRows(int fiscalYear) {

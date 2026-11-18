@@ -4,6 +4,7 @@
 $(function () {
     'use strict';
 
+    const canReRequestRevoke = document.getElementById('outbox-rerequest-permission') !== null;
     let systemsCache = [];
     const accountModal = new bootstrap.Modal(document.getElementById('accountModal'));
     const planModal = new bootstrap.Modal(document.getElementById('planModal'));
@@ -172,12 +173,12 @@ $(function () {
         };
 
         $.ajax({
-            url: '/api/external-accounts',
+            url: params.status === 'OUTBOX' ? '/api/external-accounts/pending-revocations' : '/api/external-accounts',
             method: 'GET',
-            data: params,
+            data: params.status === 'OUTBOX' ? {} : params,
             success: function (res) {
                 if (res.code === 200) {
-                    renderAccounts(res.data.records);
+                    renderAccounts(Array.isArray(res.data) ? res.data : res.data.records);
                 }
             }
         });
@@ -193,11 +194,15 @@ $(function () {
         }
 
         records.forEach(function (acc) {
-            const statusBadge = acc.status === 'ACTIVE' ? '<span class="badge bg-success">ACTIVE</span>' : acc.status === 'REVOKED' ? '<span class="badge bg-danger">REVOKED</span>' : '<span class="badge bg-warning text-dark">SUSPENDED</span>';
+            const statusBadge = '<span class="badge bg-secondary">' + escapeHtml(acc.status) + '</span>'
+                + '<br><small>' + escapeHtml(acc.externalSyncStatus || 'NONE') + '</small>';
             const sys = systemsCache.find(x => x.id === acc.systemId);
             const sysName = sys ? sys.systemName : `Sys #${acc.systemId}`;
             const actorType = acc.actorTypeDisplay || acc.actorType || '未確認';
             const confirmationSource = acc.confirmationSourceDisplay || acc.confirmationSource || '未確認';
+            const reRequestButton = canReRequestRevoke && acc.status === 'UNKNOWN'
+                && /^lifecycle-resign:[0-9]+:[0-9]+:g[0-9]+$/.test(acc.idempotencyKey || '')
+                ? '<button class="btn btn-outline-warning btn-sm btn-rerequest-revoke" data-id="' + acc.id + '">失効要求を再登録</button>' : '';
 
             const tr = $(`
                 <tr>
@@ -212,11 +217,28 @@ $(function () {
                     <td><span class="badge bg-secondary">${escapeHtml(actorType)}</span></td>
                     <td><span class="badge bg-dark">${escapeHtml(confirmationSource)}</span></td>
                     <td class="text-end">
+                        ${reRequestButton}
                         ${acc.status !== 'REVOKED' ? `<button class="btn btn-outline-danger btn-sm btn-confirm-revoke" data-id="${acc.id}" data-id-str="${escapeHtml(acc.accountIdentifier)}">失効確認</button>` : ''}
                     </td>
                 </tr>
             `);
             tbody.append(tr);
+        });
+
+        $('.btn-rerequest-revoke').on('click', function () {
+            const id = $(this).data('id');
+            Swal.fire({title: '失効要求を新しい世代で再登録しますか？', icon: 'warning',
+                showCancelButton: true, confirmButtonText: '再登録', cancelButtonText: 'キャンセル'})
+                .then(function (result) {
+                    if (!result.isConfirmed) return;
+                    $.ajax({url: '/api/external-accounts/' + id + '/re-request-revoke', method: 'POST',
+                        headers: SES.csrf.header(), success: function (res) {
+                            if (res.code === 200) { SES.toast.success('失効要求を再登録しました。'); loadAccounts(); }
+                            else SES.toast.error(res.message || '再登録に失敗しました。');
+                        }, error: function (xhr) {
+                            SES.toast.error(xhr.responseJSON ? xhr.responseJSON.message : '再登録に失敗しました。');
+                        }});
+                });
         });
 
         $('.btn-confirm-revoke').on('click', function () {

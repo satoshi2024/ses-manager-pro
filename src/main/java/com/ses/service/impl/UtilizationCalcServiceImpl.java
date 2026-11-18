@@ -14,9 +14,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 稼働率の共通口径サービス実装(純粋ロジック、DBアクセス無し)。
+ * 稼働率の共通集計基準サービス実装(純粋ロジック、DBアクセス無し)。
  *
- * @see UtilizationCalcService 口径の定義
+ * @see UtilizationCalcService 集計基準の定義
  */
 @Service
 public class UtilizationCalcServiceImpl implements UtilizationCalcService {

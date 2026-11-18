@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.config.portal.PortalRateLimitFilter;
 import com.ses.config.portal.PortalSessionFilter;
 import com.ses.service.portal.PortalRateLimiter;
@@ -95,7 +96,7 @@ public class PortalSecurityConfig {
                     new org.springframework.security.web.util.matcher.AntPathRequestMatcher("/portal/**"))
                 // 認可失敗: APIは403 JSON、画面は403エラーページ
                 .accessDeniedHandler((request, response, denied) -> {
-                    if (request.getRequestURI().startsWith("/api/portal/")) {
+                    if (RequestPaths.pathWithinApplication(request).startsWith("/api/portal/")) {
                         response.setStatus(403);
                         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                         response.setCharacterEncoding(StandardCharsets.UTF_8.name());

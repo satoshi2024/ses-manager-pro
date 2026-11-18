@@ -194,6 +194,62 @@ class PwaMutationApiControllerTest {
     }
 
     @Test
+    void 行lockの競合はPWA送信では再送可能な503で返しledgerを放棄してofflineキューの自動再送に乗せる() throws Exception {
+        // W3-16b review P2-1: 共通の例外handlerは1213・1205を409にするが、pwa-queue.js は409を人の判断が要る競合
+        // （CONFLICT）、5xxを一時的な失敗（queueに残して自動再送）として扱う。PWA送信だけは5xxのまま返す。
+        PwaUserContextService.CurrentContext context =
+                new PwaUserContextService.CurrentContext(7L, 9L, "scope-A");
+        when(ledger.claim(any(), any(), any(), any(), any()))
+                .thenReturn(new PwaClientMutationLedgerService.Claim(5L, context, false, null));
+        when(contractMapper.selectByIdForUpdateForTenant(100L, "tenant-a"))
+                .thenThrow(new org.springframework.dao.CannotAcquireLockException("lock wait timeout",
+                        new java.sql.SQLException("lock wait timeout", "HY000", 1205)));
+        com.ses.common.exception.GlobalExceptionHandler advice = new com.ses.common.exception.GlobalExceptionHandler();
+        org.springframework.context.support.ResourceBundleMessageSource messages =
+                new org.springframework.context.support.ResourceBundleMessageSource();
+        messages.setBasename("messages");
+        messages.setDefaultEncoding("UTF-8");
+        messages.setFallbackToSystemLocale(false);
+        org.springframework.test.util.ReflectionTestUtils.setField(advice, "messageSource", messages);
+        org.springframework.test.web.servlet.MockMvc mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders
+                .standaloneSetup(controller).setControllerAdvice(advice).build();
+        String body = "{\"screen\":\"timesheet\",\"month\":\"2026-08\",\"payload\":{\"contractId\":100,"
+                + "\"workMonth\":\"2026-08\",\"workDate\":\"2026-08-01\",\"startTime\":\"09:00\","
+                + "\"endTime\":\"18:00\",\"breakMinutes\":60}}";
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/my/pwa/timesheet/daily")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body)
+                        .header("X-Client-Request-Id", "req-lock").header("X-Client-Payload-Hash", "a".repeat(64))
+                        .header("X-Client-Base-Version", "4")
+                        .header("X-Client-Created-At", String.valueOf(System.currentTimeMillis()))
+                        .header("X-User-Scope", "scope-A")
+                        .locale(java.util.Locale.JAPAN))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                        .isServiceUnavailable())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                        .value(503))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("自動で再送")));
+        verify(ledger).abandon(5L);
+    }
+
+    @Test
+    void lockの競合の判定はrollback失敗で覆われた元の例外も見て業務例外は含めない() {
+        java.sql.SQLException deadlock = new java.sql.SQLException("deadlock", "40001", 1213);
+        org.springframework.transaction.TransactionSystemException wrapped =
+                new org.springframework.transaction.TransactionSystemException("rollback failed");
+        wrapped.initApplicationException(new org.springframework.dao.DeadlockLoserDataAccessException("deadlock", deadlock));
+
+        assertThat(PwaMutationApiController.isLockConflict(wrapped)).isTrue();
+        assertThat(PwaMutationApiController.isLockConflict(new IllegalStateException("outer",
+                new org.springframework.dao.CannotAcquireLockException("timeout")))).isTrue();
+        assertThat(PwaMutationApiController.isLockConflict(
+                com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock"))).isFalse();
+        assertThat(PwaMutationApiController.isLockConflict(new IllegalStateException("other"))).isFalse();
+    }
+
+    @Test
     void expense更新はURLとpayloadのID不一致を業務処理前に拒否する() {
         ObjectNode payload = new ObjectMapper().createObjectNode()
                 .put("id", 456L).put("expenseDate", "2026-08-28")

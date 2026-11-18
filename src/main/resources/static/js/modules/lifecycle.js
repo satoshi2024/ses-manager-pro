@@ -8,6 +8,10 @@ SES.lifecycle = {
         const container = document.querySelector('[data-case-id]');
         if (container) {
             this.currentCaseId = container.getAttribute('data-case-id');
+            if (SES.lifecycleDual) {
+                // 二者確認の提出・確認・差戻しの後にタスク一覧（状態・後続の昇格）を読み直す
+                SES.lifecycleDual.onChanged = () => this.loadDetail(this.currentCaseId);
+            }
             this.loadDetail(this.currentCaseId);
         } else if (document.getElementById('casesTableBody')) {
             this.loadCases();
@@ -327,17 +331,24 @@ SES.lifecycle = {
             const sLabel = statusLabelMap[t.status] || t.status;
 
             let actionBtns = '';
+            const isDual = this.isDualConfirmationTask(t);
             if (caseStatus === 'ACTIVE') {
                 if (t.status === 'PENDING') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="SES.lifecycle.startTask(${t.id})">着手</button>`;
                 }
-                if (t.status === 'IN_PROGRESS') {
+                if (t.status === 'IN_PROGRESS' && isDual) {
+                    // 二者確認タスクは通常の完了APIでは完了できない（409）。提出・確認・差戻しの画面を開く
+                    actionBtns += this.dualConfirmationAction(t);
+                } else if (t.status === 'IN_PROGRESS') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-success" onclick="SES.lifecycle.openCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了</button>`;
                 }
                 if (t.status === 'PENDING' || t.status === 'IN_PROGRESS') {
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-warning" onclick="SES.lifecycle.openWaiveModal(${t.id})">免除</button>`;
                     actionBtns += `<button type="button" class="btn btn-sm btn-outline-info" onclick="SES.lifecycle.openReassignModal(${t.id})">担当変更</button>`;
                 }
+            }
+            if (isDual && t.status === 'COMPLETED') {
+                actionBtns += this.dualConfirmationAction(t);
             }
 
             const assignee = t.assigneeNameSnapshot
@@ -368,6 +379,24 @@ SES.lifecycle = {
             `;
         });
         tbody.innerHTML = html;
+    },
+
+    isDualConfirmationTask: function(task) {
+        return Boolean(task) && task.evidenceType === 'DUAL_CONFIRMATION';
+    },
+
+    /**
+     * 二者確認タスクの操作（進行中は「二者確認」、完了後は「確認記録」）。子スイッチOFFでモーダルが無ければ無効の表示だけ。
+     * 確認・差戻しボタンの表示はモーダルがA1の canDecide（管理者・HRかつ提出者以外）で決める。
+     */
+    dualConfirmationAction: function(task) {
+        if (!SES.lifecycleDual || !SES.lifecycleDual.available()) {
+            return task.status === 'IN_PROGRESS'
+                ? `<span class="text-muted small">${SES.escapeHtml(SES.i18n.t('lifecycle.dual.disabled'))}</span>`
+                : '';
+        }
+        const label = SES.i18n.t(task.status === 'IN_PROGRESS' ? 'lifecycle.dual.button.open' : 'lifecycle.dual.button.history');
+        return `<button type="button" class="btn btn-sm ${task.status === 'IN_PROGRESS' ? 'btn-success' : 'btn-outline-secondary'}" onclick="SES.lifecycleDual.open(this)" data-task-id="${SES.escapeHtml(String(task.id))}" data-task-name="${SES.escapeHtml(task.taskName || '')}"><i class="bi bi-people me-1"></i>${SES.escapeHtml(label)}</button>`;
     },
 
     renderEvents: function(events) {
@@ -414,19 +443,34 @@ SES.lifecycle = {
             }
             document.getElementById('gateSummaryText').textContent = data.summary || '';
 
+            // ゲート項目はAPIの items（code/name/passed/message/pendingConfirmation）で返る。
+            // 「要確認」（自動処理の対象外で人の確認が要る項目。例: 紐付けの無いポータルユーザー）は通過扱いのまま警告色で示す。
             const list = document.getElementById('gateCriteriaList');
-            if (list && data.criteria) {
+            const criteria = data.items || data.criteria;
+            if (list && Array.isArray(criteria)) {
                 let html = '';
-                data.criteria.forEach(c => {
-                    const icon = c.passed ? '<i class="bi bi-check-circle-fill text-success fs-5"></i>' : '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
-                    const border = c.passed ? 'border-success' : 'border-danger';
+                criteria.forEach(c => {
+                    const pending = c.passed && c.pendingConfirmation;
+                    let icon = '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
+                    let border = 'border-danger';
+                    if (pending) {
+                        icon = '<i class="bi bi-exclamation-triangle-fill text-warning fs-5"></i>';
+                        border = 'border-warning';
+                    } else if (c.passed) {
+                        icon = '<i class="bi bi-check-circle-fill text-success fs-5"></i>';
+                        border = 'border-success';
+                    }
+                    const pendingIds = pending && Array.isArray(c.pendingPortalUserIds) && c.pendingPortalUserIds.length > 0
+                        ? `<div class="text-warning small">要確認のポータルユーザーID: ${SES.escapeHtml(c.pendingPortalUserIds.join(', '))}</div>`
+                        : '';
                     html += `
                         <div class="col-md-6">
                             <div class="p-2 border ${border} rounded bg-card d-flex align-items-center gap-3">
                                 <div>${icon}</div>
                                 <div>
-                                    <div class="text-theme small fw-bold">${SES.escapeHtml(c.criterionName)}</div>
-                                    <div class="text-muted small">${SES.escapeHtml(c.detail || '')}</div>
+                                    <div class="text-theme small fw-bold">${SES.escapeHtml(c.name || c.criterionName || c.code || '')}</div>
+                                    <div class="text-muted small">${SES.escapeHtml(c.message || c.detail || '')}</div>
+                                    ${pendingIds}
                                 </div>
                             </div>
                         </div>
@@ -463,6 +507,8 @@ SES.lifecycle = {
         }
         document.getElementById('completeTaskId').value = taskId;
         document.getElementById('completeComment').value = '';
+        document.getElementById('completeDocumentId').value = '';
+        this.resetEvidenceVersions();
         const evSection = document.getElementById('evidenceSection');
         if (evidenceType === 'DOCUMENT_LINK') {
             evSection.style.display = 'block';
@@ -472,14 +518,66 @@ SES.lifecycle = {
         new bootstrap.Modal(document.getElementById('completeTaskModal')).show();
     },
 
+    // ==========================================
+    // 証跡文書の版選択
+    // 版を固定しない証跡はサーバーが400で拒否するため、ウイルス検査済み（CLEAN）の版から選ばせて版IDを送る。
+    // ==========================================
+    resetEvidenceVersions: function() {
+        const select = document.getElementById('completeDocumentVersionId');
+        if (!select) return;
+        select.innerHTML = '<option value="">文書IDを入力して版を読み込んでください</option>';
+        select.disabled = true;
+    },
+
+    loadEvidenceVersions: async function() {
+        const taskId = document.getElementById('completeTaskId').value;
+        const docId = document.getElementById('completeDocumentId').value;
+        const select = document.getElementById('completeDocumentVersionId');
+        if (!docId) {
+            SES.toast.warning('文書IDを入力してください');
+            return;
+        }
+        try {
+            const versions = (await SES.api.get(
+                `/api/lifecycle/tasks/${encodeURIComponent(taskId)}/evidence-versions`,
+                { documentId: parseInt(docId, 10) })) || [];
+            SES.lifecycle.renderEvidenceVersions(select, versions);
+        } catch (e) {
+            console.error(e);
+            SES.lifecycle.resetEvidenceVersions();
+        }
+    },
+
+    renderEvidenceVersions: function(select, versions) {
+        if (!select) return;
+        if (versions.length === 0) {
+            select.innerHTML = '<option value="">選択できる版がありません（ウイルス検査済みの版がありません）</option>';
+            select.disabled = true;
+            return;
+        }
+        select.innerHTML = versions.map(v => {
+            const registered = v.createdAt ? String(v.createdAt).replace('T', ' ').substring(0, 16) : '-';
+            return `<option value="${SES.escapeHtml(String(v.id))}">第${SES.escapeHtml(String(v.versionNo))}版（登録 ${SES.escapeHtml(registered)}）</option>`;
+        }).join('');
+        select.disabled = false;
+    },
+
     submitCompleteTask: async function() {
         const taskId = document.getElementById('completeTaskId').value;
         const comment = document.getElementById('completeComment').value;
         const docId = document.getElementById('completeDocumentId').value;
+        const versionSelect = document.getElementById('completeDocumentVersionId');
+        const versionId = versionSelect && !versionSelect.disabled ? versionSelect.value : '';
+
+        if (docId && !versionId) {
+            SES.toast.warning('証跡にする版を選択してください');
+            return;
+        }
 
         const payload = {
             completionComment: comment || undefined,
-            documentId: docId ? parseInt(docId, 10) : undefined
+            documentId: docId ? parseInt(docId, 10) : undefined,
+            documentVersionId: docId && versionId ? parseInt(versionId, 10) : undefined
         };
 
         try {
@@ -769,6 +867,7 @@ SES.lifecycle = {
                     <label class="form-check"><input type="checkbox" class="form-check-input task-engineer-visible" checked> 要員に公開</label>
                 </div>
             </div>`;
+        this.addDualEvidenceOption(row.querySelector('.task-evidence-type'), task.evidenceType);
         const set = (selector, value) => { const element = row.querySelector(selector); if (element && value != null) element.value = value; };
         set('.task-code', task.taskCode || '');
         set('.task-name', task.taskName || '');
@@ -784,6 +883,27 @@ SES.lifecycle = {
         row.querySelector('.task-engineer-visible').checked = task.isEngineerVisible == null || task.isEngineerVisible === 1;
         row.querySelector('.remove-template-task').addEventListener('click', () => row.remove());
         document.getElementById('templateTasks').appendChild(row);
+    },
+
+    /**
+     * 証跡種別「二者確認」は子スイッチONのときだけ選べる（テンプレートが #dualEvidenceOptionTemplate を描画する）。
+     * 選択肢に無い既存の値（OFF中のDUAL、開発seedのSYSTEM_CHECK・SELF_DECLARATION等）は、改定で値を失わない
+     * （空の値を送らない）よう残す。DUALはOFF中なら「無効」と示す。保存の可否（許可値一覧・スイッチ）はサーバーが判定する。
+     */
+    addDualEvidenceOption: function(select, currentValue) {
+        if (!select) return;
+        const optionTemplate = document.getElementById('dualEvidenceOptionTemplate');
+        if (optionTemplate && optionTemplate.content) {
+            select.appendChild(optionTemplate.content.cloneNode(true));
+        }
+        if (currentValue && !Array.from(select.options).some(option => option.value === currentValue)) {
+            const option = document.createElement('option');
+            option.value = currentValue;
+            option.textContent = currentValue === 'DUAL_CONFIRMATION'
+                ? SES.i18n.t('lifecycle.dual.evidenceOptionDisabled')
+                : currentValue;
+            select.appendChild(option);
+        }
     },
 
     saveTemplate: async function() {

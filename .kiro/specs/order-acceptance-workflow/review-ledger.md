@@ -24,7 +24,7 @@
 
 | issue ID | severity | 内容 | ステータス / 対応計画 |
 |---|---|---|---|
-| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED（R10-SCOPE、定向/L4・Browser証跡） |
+| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED（R10-SCOPE、対象限定/L4・Browser証跡） |
 | order-acceptance-workflow-R10-P0-01 | P0 | 既適用V80直接変更によるFlyway checksum不一致 | VERIFIED_CLOSED（V80復元＋V81順方向修復、実MySQL smoke） |
 | order-acceptance-workflow-R9-P1-01 | P1 | V81 historical legacy / wrong-shape index/FK | VERIFIED_CLOSED（V81構造三分岐・legacy fixture） |
 | order-acceptance-workflow-R9-P1-02 | P1 | V81 marker前失敗のdurability不備 | VERIFIED_CLOSED（DDL前durable capture） |
@@ -50,7 +50,7 @@
 |---|---|---|---|
 | order-acceptance-workflow-R7-P1-02 | P1 | 最終code/evidence Headでの単一クリーンL4未取得 | afad974上で`verify-like-ci.ps1`単一クリーン実行 → **1549/0/0/0・Skipped 0・BUILD SUCCESS（Total 1:28h・verify-like-ci-r8.log）**（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-03 | P2 | ledger provenanceが実Headと不一致 | review-ledger §1/§2/§21・中央ledger row9を code/evidence Head afad974・L4 1549/0/0/0・runId へ同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-04 | P2 | Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結） | `CdpBrowser`（JDK標準WebSocket+Jacksonのみ）による実Chrome/CDP制御へ書き換え。同一セッション認証→`/acceptance?...&acceptanceId=<動的ID>`→最終URL≠/login→`tr[data-acceptance-id].table-warning`存在→ビューポート内可視を実DOM断言。PNG（SHA-256実ファイル照合）・実HAR（Networkイベント）・実console（favicon 404のみ）を同一runから生成。旧偽証跡を削除（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結） | `CdpBrowser`（JDK標準WebSocket+Jacksonのみ）による実Chrome/CDP制御へ書き換え。同一セッション認証→`/acceptance?...&acceptanceId=<動的ID>`→最終URL≠/login→`tr[data-acceptance-id].table-warning`存在→ビューポート内可視を実DOMでの検証。PNG（SHA-256実ファイル照合）・実HAR（Networkイベント）・実console（favicon 404のみ）を同一runから生成。旧偽証跡を削除（VERIFIED_CLOSED） |
 
 NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreenshotTestの共有H2分離強化推奨・postfix browser Demoは本番前gateとして継続管理。
 
@@ -64,7 +64,7 @@ NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreensho
 | order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code/evidence Head（`4c2a77aad450d609879f1626f2f29140f8186d21`）、review-input docs Head（`4a4101d4f40c20bea0a2a3fef62c6799eba463be`）を明確に完全SHA-1で記載し、判定状態（FIXED_BY_IMPLEMENTER / REVIEW）、Requirements Traceおよび中央ledger（Row 9 FIX/REVIEW, Row 10/11 NOT READY, Wave 2 未解放）と完全同期（FIXED_BY_IMPLEMENTER） |
 | order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | H2/MySQL8 scope隔離・通常page1外定点抽出・フロント厳格一致判定はVERIFIED_CLOSED。実Chrome実行証跡群を`evidence/`へフル保存（`browser-runner.ps1`, `network-export.json`, `console-export.txt`, `notification-seed-provenance.json`, `desktop-1920x1080.png`, `mobile-390x844.png`, `postfix-browser-demo.json/md`）（FIXED_BY_IMPLEMENTER） |
-| order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（"对象月份格式不正确（YYYY-MM）"）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（`\u5bf9\u8c61\u6708\u4efd\u683c\u5f0f\u4e0d\u6b63\u786e（YYYY-MM）`）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
 
 ## 2.5 履歴Review Packet（R10 remediation / 2026-08-09）
 
@@ -115,7 +115,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 | current status | `REVIEW`。R11 FAIL指摘の実装修正・証跡更新完了、独立再Review待ち |
 | migration | V80は不変。V81順方向修復、後続予約V82〜V89を維持 |
 | L4 | `verify-like-ci.ps1`のMaven/Surefire最終report群を確認：282 classes / 1582 tests / 0 failures / 0 errors / 0 skipped。Docker MySQL smokeを含む。外側監視の120秒timeoutでwrapper最終trailerは未取得だが、child完了後の全report集計とzero-skippedを確認 |
-| 定向test | `DocumentStorageTest`等30/0/0/0、`SalesOrderDocumentScopeTest`・`AcceptanceAsOfScopeTest` 9/0/0/0、`ConcurrentSubmitReopenTest` 3/0/0/0（実MySQL） |
+| 対象限定テスト | `DocumentStorageTest`等30/0/0/0、`SalesOrderDocumentScopeTest`・`AcceptanceAsOfScopeTest` 9/0/0/0、`ConcurrentSubmitReopenTest` 3/0/0/0（実MySQL） |
 | Browser / Demo | `round11-20260809-sales-order-mobile-390.png`、`...-filter-390.png`、`...-sidebar-390.png`。390x844でfilter/table/sidebarを分離確認、body width/scroll width 390、modal/reload/back/Enter/double-clickを実測、console log空 |
 | diff hygiene | `git diff --check`を現Headで再確認しexit 0 |
 
@@ -181,7 +181,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 | review-input docs Head | 4a4101d4f40c20bea0a2a3fef62c6799eba463be |
 | code/evidence Head | 4c2a77aad450d609879f1626f2f29140f8186d21 |
 | Round7 指摘件数 | R7-P1-01（V80 zero-legacy）、R7-P1-02（最新Head L4 VERIFIED_CLOSED）、R7-P2-01（design宛先）、R7-P2-02（workMonth 400）、R7-P2-03（ledger Head分離・Trace同期）、R7-P2-04（通知リンク・MySQL直接回帰 VERIFIED_CLOSED / Browser Demo PNG・txt証跡保存）、R7-P2-05（zh_CN/ko i18n key） |
-| 定向test | AcceptanceIdMySqlIntegrationTest 1/0/0/0 / FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / AcceptanceAsOfScopeTest 4/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
+| 対象限定テスト | AcceptanceIdMySqlIntegrationTest 1/0/0/0 / FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / AcceptanceAsOfScopeTest 4/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
 | L4全量 | `verify-like-ci.ps1`: Tests run: 1548, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS (surefirebooter-20260807215711703) |
 | Requirements trace | review-ledger §5 |
 
@@ -356,7 +356,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 - `design.md`: R3.1原本・go-live移行方針・S13注記
 - 新規test: `AcceptanceDocumentTest` 2件、`SalesOrderServiceImplTest#poDuplicateRejectsScopeOutsideCustomer`、既存F2統合testで案件fallback/未設定エラー2件
 
-### R09修正の定向test
+### R09修正の対象限定テスト
 `mvn -o test -Dtest=<order全12クラス>,MobileResponsiveLayoutTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 全緑。`FlywayMigrationSmokeTest`（V80変更後fresh）→ 0/0/0 PASS。
 
 ## 13. R09 Round1 対応後のL4全量証拠（P1-01対応）— 記録（2026-08-06）
@@ -438,7 +438,7 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 
 独立Review（R09 Round5、read-only、prior evidence Base=2dbe83a / fix code Head=5158912 /
 evidence Head=4ee389d / merged Head=8a50eb1=main=origin/main）:
-判定 **FAIL（P0=0 / P1=1 / P2=4 / NOTE=0）**。Reviewer定向test 33/0/0/0、
+判定 **FAIL（P0=0 / P1=1 / P2=4 / NOTE=0）**。Reviewer対象限定テスト 33/0/0/0、
 L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
 
 ### OPEN Issue とRound6対応
@@ -464,7 +464,7 @@ L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
 - `.kiro/specs/order-acceptance-workflow/design.md`（V73残留修正）
 - `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
 
-### Round6定向test・直接回帰
+### Round6対象限定テスト・直接回帰
 
 - `AcceptanceAsOfScopeTest` 2/0/0/0（account-link異動＋会計履歴異動の両経路）、`AcceptanceServiceImplTest` 8/0/0/0、
   `MonthlyClosingUnacceptedTest` 3/0/0/0、`NotificationGenerateServiceTest` 20/0/0/0、
@@ -506,10 +506,10 @@ R07終局判定（Base 5eabc51 / code-evidence Head 327e87c / FAIL: P0=0/P1=1/P2
 
 - **同一ブラウザセッション内でログイン**（フォーム送信・CSRF hidden inputはフォームが保持）→
   通知遷移URL `/acceptance?workMonth=2026-07&acceptanceId=<動的ID>` へ遷移。
-- **最終URLが /login でない**ことを実DOM（`location.href`）で断言。
-- **`tr[data-acceptance-id='<動的ID>'].table-warning` が存在**することを実DOMで断言
+- **最終URLが /login でない**ことを実DOM（`location.href`）で検証。
+- **`tr[data-acceptance-id='<動的ID>'].table-warning` が存在**することを実DOMで検証
   （`acceptance.js` に `tr.dataset.acceptanceId` 付与を追加しDOM検証可能化）。
-- **ビューポート内可視**（`getBoundingClientRect`）でscrollIntoViewの結果を断言。
+- **ビューポート内可視**（`getBoundingClientRect`）でscrollIntoViewの結果を検証。
 - **PNG / HAR / console を同一ブラウザrunから生成**: HARはCDP `Network.*` 実イベント、
   consoleはCDP `Runtime.consoleAPICalled` / `Log.entryAdded` 実イベントから構成。
   結論（"0 errors"等）をJava文字列で連結しない。
@@ -518,7 +518,7 @@ R07終局判定（Base 5eabc51 / code-evidence Head 327e87c / FAIL: P0=0/P1=1/P2
   `finalUrl=/acceptance`・`targetRowTableWarning=true`・`targetRowVisibleInViewport=true` を実測。
   console error は実favicon 404の1件のみ（実ブラウザ挙動・ベニン）。
 - 旧偽証跡（auto-login-redirect.html / browser-runner.ps1 / 偽console・HAR・provenance / postfix-browser-demo）を削除。
-- `AcceptanceJsRuntimeTest` に dataset モックと data-acceptance-id 断言を追加。
+- `AcceptanceJsRuntimeTest` に dataset モックと data-acceptance-id の検証を追加。
 
 ### R7-P1-02（REOPEN・P1）: 最終code/evidence Headでの単一クリーンL4未取得
 
@@ -544,13 +544,13 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
 - `src/test/java/com/ses/web/RealBrowserScreenshotTest.java`（実Chrome/CDP制御へ書き換え）
 - `src/test/java/com/ses/web/CdpBrowser.java`（新規: 最小CDPクライアント）
 - `src/main/resources/static/js/modules/acceptance.js`（tr.dataset.acceptanceId付与）
-- `src/test/java/com/ses/web/AcceptanceJsRuntimeTest.java`（datasetモック＋断言）
+- `src/test/java/com/ses/web/AcceptanceJsRuntimeTest.java`（datasetモック＋検証）
 - `.kiro/specs/order-acceptance-workflow/evidence/browser-r8/*`（実証跡: PNG/HAR/console/summary/seed-provenance）
 - `.kiro/specs/order-acceptance-workflow/evidence/` 旧偽証跡削除
 - `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
 - `.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md`（row9同期）
 
-### Round8定向test・直接回帰
+### Round8対象限定テスト・直接回帰
 
 - `RealBrowserScreenshotTest` 1/0/0/0（実Chrome desktop+mobile）、`AcceptanceJsRuntimeTest` 1/0/0/0、
   `JsSyntaxCheckTest` 1/0/0/0、`MobileResponsiveLayoutTest` 25/0/0/0、
@@ -563,7 +563,7 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
 
 独立Review（R09 Round8、read-only、Base 5eabc51 → code/evidence Head afad974 → current Head 1735ef5）:
 判定 **PASS（P0=0 / P1=0 / P2=0 / NOTE=3 / open release gates=0）**。
-R7終局判定の3指摘（R7-P1-02 / R7-P2-03 / R7-P2-04）を実diff・実DOM断言・PNG SHA-256照合・
+R7終局判定の3指摘（R7-P1-02 / R7-P2-03 / R7-P2-04）を実diff・実DOMでの検証・PNG SHA-256照合・
 実HAR/console・L4ログ（1549/0/0/0・zero-skip・Total 1:28h）で解決確認。新規P0/P1なし。
 
 - 最終Head `1735ef5` のコードtreeはL4証拠commit `afad974` と同一（差分はdocs/evidenceのみ）。

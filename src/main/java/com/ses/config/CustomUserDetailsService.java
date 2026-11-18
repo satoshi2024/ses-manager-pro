@@ -6,7 +6,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +36,14 @@ public class CustomUserDetailsService implements UserDetailsService {
         this.breakGlassService = breakGlassService;
     }
 
+    /** 本番初回の期限付きbootstrap mode。slice等で不在なら従来どおり（bootstrap loginを許さない）。 */
+    private ProductionBootstrapMode productionBootstrapMode;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProductionBootstrapMode(ProductionBootstrapMode productionBootstrapMode) {
+        this.productionBootstrapMode = productionBootstrapMode;
+    }
+
     /**
      * ユーザー名でユーザー情報を読み込む
      * sys_userテーブルからユーザーを検索し、Spring SecurityのUserDetailsに変換する
@@ -54,9 +61,13 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("ユーザーが見つかりません: " + username);
         }
         boolean breakGlassLogin = breakGlassService.isLoginAllowed(username);
-        if (!oidcSecurityProperties.isLocalLoginEnabled() && !breakGlassLogin) {
+        // 本番初回の期限付きbootstrap中だけ、初期管理者adminのlocal loginを許す（他のユーザーは引き続き拒否）。
+        boolean bootstrapLogin = !breakGlassLogin && productionBootstrapMode != null
+                && productionBootstrapMode.isBootstrapLoginAllowed(username, sysUser);
+        if (!oidcSecurityProperties.isLocalLoginEnabled() && !breakGlassLogin && !bootstrapLogin) {
             // IdP障害時の無制限local fallbackを防ぎ、明示されたbreak-glassだけを残す。
-            throw new DisabledException("local login is disabled");
+            // パスワード照合前の拒否なので、LoginFailureHandler は失敗回数に数えない（D-P3-1）。
+            throw new LocalLoginDisabledException();
         }
 
         // ユーザーステータスの確認は LoginUser の isEnabled() で行われます

@@ -52,7 +52,7 @@
 3. credential、token、給与本文、契約本文、DB dump、暗号鍵を log・test artifact・Review packet に残さない。
 4. mock test は error mapping と決定論的回帰に使い、sandbox/隔離実機必須 gate の代替にしない。
 5. DB 変更時は、対象 table/column が V1 に既に統合されている場合だけ V1 も更新する。V20/V21 等で初めて導入された table は V1 へ逆輸入せず、実装時点の `latest + 1` migration、対象 H2 schema/replay、entity、fresh/legacy MySQL smoke assertion を同一 task で同期する。公開済み migration は変更しない。
-6. 計画文書は `powershell -NoProfile -ExecutionPolicy Bypass -File .kiro/specs/half-finished-production-readiness/verify-spec-package.ps1`、実装差分は `git diff --check`、定向 test、直接 consumer 回帰、`scripts/verify-like-ci.ps1` が必要な checkpoint で成功し、skip を列挙する。
+6. 計画文書は `powershell -NoProfile -ExecutionPolicy Bypass -File .kiro/specs/half-finished-production-readiness/verify-spec-package.ps1`、実装差分は `git diff --check`、対象限定テスト、直接 consumer 回帰、`scripts/verify-like-ci.ps1` が必要な checkpoint で成功し、skip を列挙する。
 7. 実装者は自己成果を `PASS` にせず、base/head commit を固定した独立 Review が最終判定する。
 8. provider credential、Docker、実 MySQL 等が無い場合は `BLOCKED` または release gate とし、静的 test だけで合格にしない。
 9. P0/P1 が 0、未管理の acceptance が 0、必須 release gate が 0 の merge 済み head だけを最終 `PASS` とする。

@@ -24,7 +24,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class ReportScheduleServiceImplTest {
@@ -109,6 +112,85 @@ class ReportScheduleServiceImplTest {
         assertThat(schedule.getNextRunAt().getDayOfMonth()).isEqualTo(1);
         assertThat(schedule.getNextRunAt().getHour()).isEqualTo(9);
         assertThat(schedule.getNextRunAt().getMinute()).isZero();
+    }
+
+    @Test
+    void setEnabledはenabledと監査列だけを専用SQLで更新しentityを書き戻さない() {
+        AccountingTenantContextHolder.setTenantId("default");
+        ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
+        ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper,
+                mock(ReportTemplateVersionMapper.class), mock(OrganizationScopeService.class), new ObjectMapper());
+        authenticate(1L, "管理者");
+        ReportSchedule refreshed = new ReportSchedule();
+        refreshed.setId(11L);
+        refreshed.setEnabled(0);
+        refreshed.setVersion(4);
+        when(scheduleMapper.updateEnabled("default", 11L, 0, 1L)).thenReturn(1);
+        when(scheduleMapper.selectOne(any())).thenReturn(refreshed);
+
+        ReportSchedule result = service.setEnabled(11L, false);
+
+        // 読取済みentityのupdateById/update(entity, wrapper)はlease列を古い値へ戻すため使わない。
+        assertThat(result).isSameAs(refreshed);
+        verify(scheduleMapper).updateEnabled("default", 11L, 0, 1L);
+        verify(scheduleMapper).selectOne(any());
+        verifyNoMoreInteractions(scheduleMapper);
+    }
+
+    @Test
+    void setEnabledは更新対象がなければ404とし再読込しない() {
+        AccountingTenantContextHolder.setTenantId("default");
+        ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
+        ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper,
+                mock(ReportTemplateVersionMapper.class), mock(OrganizationScopeService.class), new ObjectMapper());
+        authenticate(1L, "管理者");
+        when(scheduleMapper.updateEnabled("default", 12L, 1, 1L)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.setEnabled(12L, true))
+                .hasMessageContaining("error.managementReport.scheduleNotFound");
+        verify(scheduleMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void setEnabledは管理者以外を拒否しDBへ触れない() {
+        AccountingTenantContextHolder.setTenantId("default");
+        ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
+        ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper,
+                mock(ReportTemplateVersionMapper.class), mock(OrganizationScopeService.class), new ObjectMapper());
+        authenticate(7L, "マネージャー");
+
+        assertThatThrownBy(() -> service.setEnabled(11L, true))
+                .hasMessageContaining("error.managementReport.adminRequired");
+        verifyNoInteractions(scheduleMapper);
+    }
+
+    @Test
+    void createはlease_token_retry列を初期値のまま作成する() {
+        AccountingTenantContextHolder.setTenantId("default");
+        ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
+        ReportTemplateVersionMapper versionMapper = mock(ReportTemplateVersionMapper.class);
+        ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper, versionMapper,
+                mock(OrganizationScopeService.class), new ObjectMapper());
+        authenticate(1L, "管理者");
+        when(versionMapper.selectOne(any())).thenReturn(publishedVersion());
+        ReportSchedule[] inserted = new ReportSchedule[1];
+        doAnswer(invocation -> {
+            inserted[0] = invocation.getArgument(0);
+            return 1;
+        }).when(scheduleMapper).insert(any(ReportSchedule.class));
+        ReportScheduleCreateRequest request = new ReportScheduleCreateRequest();
+        request.setTemplateVersionId(3L);
+        request.setCronExpression("0 0 9 1 * *");
+        request.setNextRunAt(LocalDateTime.of(2026, 9, 1, 9, 0));
+
+        service.create(request);
+
+        assertThat(inserted[0]).isNotNull();
+        assertThat(inserted[0].getProcessingClaimToken()).isNull();
+        assertThat(inserted[0].getProcessingClaimedAt()).isNull();
+        assertThat(inserted[0].getProcessingLogicalRunAt()).isNull();
+        assertThat(inserted[0].getRetryScheduledAt()).isNull();
+        assertThat(inserted[0].getEnabled()).isZero();
     }
 
     private void authenticate(Long userId, String role) {

@@ -35,6 +35,8 @@ class ProductionSecurityConfigurationValidatorTest {
         oidc.setEnabled(true);
         oidc.setLocalLoginEnabled(false);
         oidc.setBreakGlassLoginEnabled(true);
+        // prodではtenant-idが常に必須（review P2-B）
+        oidc.setTenantId("default");
         oidc.setBreakGlassUsernames(Set.of("admin-a", "admin-b"));
         oidc.setIssuerUri("https://idp.example/tenant/v2.0");
         oidc.setAuthorizationUri("https://idp.example/authorize");
@@ -68,6 +70,20 @@ class ProductionSecurityConfigurationValidatorTest {
         ProductionSecurityConfigurationValidator validator =
                 new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper, permissionGroupMapper,
                         aiConfig, outboundUrlGuard);
+        // break-glass以外にOIDCでログインできる管理者3名（起票1名・承認2名）と、初回bootstrapの完了marker
+        com.ses.entity.IdentityProvider provider = new com.ses.entity.IdentityProvider();
+        provider.setId(7L);
+        provider.setProviderType("OIDC");
+        com.ses.mapper.IdentityProviderMapper identityProviderMapper = mock(com.ses.mapper.IdentityProviderMapper.class);
+        when(identityProviderMapper.selectEnabledByTenantAndIssuer(org.mockito.ArgumentMatchers.eq("default"),
+                anyString())).thenReturn(provider);
+        com.ses.mapper.UserExternalIdentityMapper externalIdentityMapper =
+                mock(com.ses.mapper.UserExternalIdentityMapper.class);
+        when(externalIdentityMapper.selectApprovedActiveUsernamesByRole("default", 7L, "管理者"))
+                .thenReturn(java.util.List.of("ops-a", "ops-b", "ops-c"));
+        validator.setIdentityProviderMapper(identityProviderMapper);
+        validator.setUserExternalIdentityMapper(externalIdentityMapper);
+        validator.setBootstrapCompletionLatch(mock(ProductionBootstrapCompletionLatch.class));
 
         assertDoesNotThrow(validator::validate);
 
@@ -84,5 +100,97 @@ class ProductionSecurityConfigurationValidatorTest {
         assertThrows(IllegalStateException.class, validator::validate);
         aiConfig.setApiUrl("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent");
         assertDoesNotThrow(validator::validate);
+    }
+
+    // ---------------------------------------------------------------- NF07 W-5（§3.1.3）
+
+    @Test
+    void 全体baselineを持つgroupが全てprivacyの拒否行を持てば起動を受理する() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default")).thenReturn(java.util.List.of());
+
+        assertDoesNotThrow(validProductionValidator(permissionGroupMapper)::validate);
+        org.mockito.Mockito.verify(permissionGroupMapper).selectWildcardGroupKeysMissingPrivacyDeny("default");
+    }
+
+    @Test
+    void 全体baselineを持ちprivacyの拒否行を欠くgroupがあれば起動を止めgroup_keyだけを出す() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default"))
+                .thenReturn(java.util.List.of("role-admin", "copied-admin"));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                validProductionValidator(permissionGroupMapper)::validate);
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("privacy.*"), error.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("copied-admin,role-admin"),
+                error.getMessage());
+    }
+
+    @Test
+    void privacyの拒否不変条件を照会できなければ起動を止める() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default"))
+                .thenThrow(new IllegalStateException("db unavailable"));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                validProductionValidator(permissionGroupMapper)::validate);
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("privacy deny不変条件を確認できません"),
+                error.getMessage());
+        org.junit.jupiter.api.Assertions.assertFalse(error.getMessage().contains("db unavailable"), error.getMessage());
+    }
+
+    /** NF07以外の検査が全て通る本番設定（privacy の検査結果だけで起動可否が決まる）。 */
+    private static ProductionSecurityConfigurationValidator validProductionValidator(
+            com.ses.mapper.PermissionGroupMapper permissionGroupMapper) {
+        OidcSecurityProperties oidc = new OidcSecurityProperties();
+        oidc.setEnabled(true);
+        oidc.setLocalLoginEnabled(false);
+        oidc.setBreakGlassLoginEnabled(true);
+        oidc.setTenantId("default");
+        oidc.setBreakGlassUsernames(Set.of("admin-a", "admin-b"));
+        oidc.setIssuerUri("https://idp.example/tenant/v2.0");
+        oidc.setAuthorizationUri("https://idp.example/authorize");
+        oidc.setTokenUri("https://idp.example/token");
+        oidc.setJwkSetUri("https://idp.example/jwks");
+        oidc.setUserInfoUri("https://idp.example/userinfo");
+        oidc.setClientId("client");
+        oidc.setClientSecret("secret");
+        MfaSecurityProperties mfa = new MfaSecurityProperties();
+        mfa.setEncryptionKey("01234567890123456789012345678901");
+        PersistentSessionProperties session = new PersistentSessionProperties();
+        session.setAllowUntrackedSessions(false);
+        session.setHashKey("abcdefghijklmnopqrstuvwxyz123456");
+        SysUserMapper mapper = mock(SysUserMapper.class);
+        when(mapper.selectByUsername(anyString())).thenAnswer(invocation -> {
+            SysUser user = new SysUser();
+            user.setUsername(invocation.getArgument(0));
+            user.setId("admin-a".equals(invocation.getArgument(0)) ? 1L : 2L);
+            user.setRole("管理者");
+            user.setStatus(1);
+            return user;
+        });
+        UserMfaMapper userMfaMapper = mock(UserMfaMapper.class);
+        when(userMfaMapper.countEnrolled(org.mockito.ArgumentMatchers.eq("default"),
+                org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
+        ProductionSecurityConfigurationValidator validator =
+                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper,
+                        permissionGroupMapper, new AiConfig(), new com.ses.common.security.OutboundUrlGuard());
+        com.ses.entity.IdentityProvider provider = new com.ses.entity.IdentityProvider();
+        provider.setId(7L);
+        provider.setProviderType("OIDC");
+        com.ses.mapper.IdentityProviderMapper identityProviderMapper = mock(com.ses.mapper.IdentityProviderMapper.class);
+        when(identityProviderMapper.selectEnabledByTenantAndIssuer(org.mockito.ArgumentMatchers.eq("default"),
+                anyString())).thenReturn(provider);
+        com.ses.mapper.UserExternalIdentityMapper externalIdentityMapper =
+                mock(com.ses.mapper.UserExternalIdentityMapper.class);
+        when(externalIdentityMapper.selectApprovedActiveUsernamesByRole("default", 7L, "管理者"))
+                .thenReturn(java.util.List.of("ops-a", "ops-b", "ops-c"));
+        validator.setIdentityProviderMapper(identityProviderMapper);
+        validator.setUserExternalIdentityMapper(externalIdentityMapper);
+        validator.setBootstrapCompletionLatch(mock(ProductionBootstrapCompletionLatch.class));
+        return validator;
     }
 }

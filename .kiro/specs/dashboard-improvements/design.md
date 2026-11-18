@@ -734,7 +734,7 @@ SES.notification = {
 
 | API | 正常時 | 異常時 |
 |---|---|---|
-| `GET /api/dashboard/summary?year=` | `ApiResult.success(DashboardSummaryDto)` | `year`が不正な値でもJava側で`Integer`変換に失敗した場合はSpringの型変換エラーとなり、既存の`GlobalExceptionHandler.handleException`が捕捉し`ApiResult.error("システムエラーが発生しました")`（500）を返す。业務的なバリデーション例外は投げない（`year`は任意の整数として扱い、該当契約が0件でも空グラフとして正常応答する） |
+| `GET /api/dashboard/summary?year=` | `ApiResult.success(DashboardSummaryDto)` | `year`が不正な値でもJava側で`Integer`変換に失敗した場合はSpringの型変換エラーとなり、既存の`GlobalExceptionHandler.handleException`が捕捉し`ApiResult.error("システムエラーが発生しました")`（500）を返す。業務的なバリデーション例外は投げない（`year`は任意の整数として扱い、該当契約が0件でも空グラフとして正常応答する） |
 | `GET /api/dashboard/profit-analysis` | `ApiResult.success(List<ContractProfitDto>)`（0件時は空配列） | Contractに紐づくEngineer/Projectが存在しない場合は例外を投げず、`"不明"`をデフォルト値として使用する（既存`getSummary()`の`retiring`リスト構築ロジックと同様の防御的実装） |
 | `GET /api/notifications` | `ApiResult.success(List<NotificationDto>)`（0件時は空配列、AC 5.4） | Mapperアクセスで想定外の例外が発生した場合は`GlobalExceptionHandler.handleException`が捕捉し500エラーを返す。フロントエンドはこれを「読み込み失敗」として扱い、AC 6.5のメッセージを表示する |
 

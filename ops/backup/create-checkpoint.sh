@@ -29,6 +29,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/manifest.sh"
 . "$LIB_DIR/metadata.sh"
 . "$LIB_DIR/binlog.sh"
+. "$LIB_DIR/content-hash.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -142,6 +143,16 @@ main() {
   closed_size=$(checkpoint::source_size "$closed_file")
   [[ -n "$closed_size" ]] || common::fail "closed file の size を取得できません"
 
+  # A-NF09-5: 主要 table の順序付き内容ハッシュ（静止区間内 = closed coordinate 時点の内容）。
+  # PITR はこの checkpoint の binlog_end まで replay するため、復元検証は同じ値になることを照合する。
+  # 指定した table を 1 つでも計算できなければ checkpoint を VALID にしない。
+  METADATA_CONTENT_HASHES_JSON='{}'
+  if [[ -n "${CONTENT_HASH_TABLES:-}" ]]; then
+    METADATA_CONTENT_HASHES_JSON=$(content_hash::collect "$CONTENT_HASH_TABLES" \
+        "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
+      || common::fail "主要 table の内容ハッシュを計算できません（CONTENT_HASH_TABLES）"
+  fi
+
   # archiver 追従 + checksum
   checkpoint::wait_archiver "$closed_file" "$closed_size" "${CHECKPOINT_ARCHIVER_WAIT:-120}" \
     || common::fail "archiver 追従待ちで失敗"
@@ -244,7 +255,7 @@ Usage: create-checkpoint.sh [--help]
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_USER,
 MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_DIR,
 UPLOADS_STAGING_PARENT, REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR,
-BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR, APP_COMMIT, FLYWAY_VERSION
+BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR, APP_COMMIT, FLYWAY_VERSION, CONTENT_HASH_TABLES
 EOF
     exit 0 ;;
   *) echo "Usage: create-checkpoint.sh [--help]" >&2; exit 2 ;;

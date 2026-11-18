@@ -25,6 +25,13 @@ import java.util.List;
 public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper, IntegrationJob>
         implements IntegrationJobService {
 
+    /**
+     * FAILEDでも取消せるジョブ種別。freee取引を作成する送信ジョブ（世代付きの冪等キーで再送信できる）と、
+     * 入金消込の反映ジョブ（freeeで既に消込済み等の失敗は再試行しても変わらず、取消しても世代・再送信に影響しない）。
+     */
+    private static final java.util.Set<String> FAILED_CANCELLABLE_JOB_TYPES = java.util.Set.of(
+            "SALES_INVOICE_SYNC", "BP_PURCHASE_SYNC", "EXPENSE_DEAL_SYNC", "DEPOSIT_RECONCILE_SYNC");
+
     private final IntegrationJobEventMapper jobEventMapper;
 
     @Override
@@ -225,23 +232,69 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         // 3. RUNNING 状態の取消マトリクス:
         //    - BP仕入/支払/経費 (PURCHASE_PAYMENT_SYNC, EXPENSE_PAYMENT_SYNC, BP_PURCHASE_SYNC) は RUNNING 取消拒否 (400)
         //    - 売上/入金 (SALES_INVOICE_SYNC, INVOICE_PAYMENT_SYNC) は RUNNING 取消許可 -> CANCELLED 遷移
+        //    - 入金消込の反映 (DEPOSIT_RECONCILE_SYNC) は RUNNING 取消拒否: freeeで消込が成立しても補償する手段が無く、
+        //      ジョブだけ CANCELLED になってSESとfreeeの食い違いが見えなくなるため
         if ("RUNNING".equals(job.getStatus())) {
             if ("PURCHASE_PAYMENT_SYNC".equals(job.getJobType())
                     || "EXPENSE_PAYMENT_SYNC".equals(job.getJobType())
                     || "BP_PURCHASE_SYNC".equals(job.getJobType())
-                    || "EXPENSE_DEAL_SYNC".equals(job.getJobType())) {
-                throw new BusinessException(400, "CANNOT_CANCEL_RUNNING_JOB: 仕入・経費ジョブの実行中キャンセルは許可されていません");
+                    || "EXPENSE_DEAL_SYNC".equals(job.getJobType())
+                    || "DEPOSIT_RECONCILE_SYNC".equals(job.getJobType())) {
+                throw new BusinessException(400, "CANNOT_CANCEL_RUNNING_JOB: 仕入・経費・入金消込反映ジョブの実行中キャンセルは許可されていません");
             }
+        }
+
+        // 4. FAILED は取引作成系の送信ジョブと入金消込の反映ジョブだけ取消せる。FAILEDは再試行しても固定スナップショットのまま
+        //    同じ失敗になり（freeeの期首日より前の発生日など）、送信ボタンも previousJobFailed で拒否するため、取消さないと二度と送れない。
+        //    取消後の再送信は新しい世代になり、作成前にfreeeの既存取引を確認する（失敗前に作成されていれば作らない）。
+        boolean failedCreateJob = "FAILED".equals(job.getStatus());
+        if (failedCreateJob && !FAILED_CANCELLABLE_JOB_TYPES.contains(job.getJobType())) {
+            throw new BusinessException(400, "CANNOT_CANCEL_TERMINAL_JOB: 失敗したジョブは再試行してください (status=FAILED)");
         }
 
         String fromStatus = job.getStatus();
         String safeReason = SafeErrorPolicy.safeJobMessage("USER_CANCELLED", reason);
-        int updated = baseMapper.transitionToCancelled(jobId, job.getVersion(), safeReason);
+        int updated = failedCreateJob
+                ? baseMapper.transitionFailedToCancelled(jobId, job.getVersion(), safeReason)
+                : baseMapper.transitionToCancelled(jobId, job.getVersion(), safeReason);
         if (updated == 0) {
             throw new BusinessException(409, "ジョブの状態が変更されました。再試行してください。");
         }
 
         recordEvent(jobId, fromStatus, "CANCELLED", SafeErrorPolicy.safeJobMessage("USER_CANCELLED", reason));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean cancelBySystem(IntegrationJob job, String errorCode, String safeMessage) {
+        if (job == null || job.getId() == null || job.getStatus() == null) {
+            return false;
+        }
+        String fromStatus = job.getStatus();
+        String safe = SafeErrorPolicy.safeJobMessage(errorCode, safeMessage);
+        int updated = baseMapper.transitionToCancelledBySystem(job.getId(), job.getVersion(), fromStatus,
+                SafeErrorPolicy.safeErrorCode(errorCode), safe);
+        if (updated == 0) {
+            log.warn("連携ジョブのシステム取消をスキップ（状態が変わった）: jobId={} status={}", job.getId(), fromStatus);
+            return false;
+        }
+        recordEvent(job.getId(), fromStatus, "CANCELLED", safe);
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean markActionRequired(Long jobId, String errorCode, String safeMessage) {
+        if (jobId == null) {
+            return false;
+        }
+        String safe = SafeErrorPolicy.safeJobMessage(errorCode, safeMessage);
+        int updated = baseMapper.markSucceededActionRequired(jobId, SafeErrorPolicy.safeErrorCode(errorCode), safe);
+        if (updated == 0) {
+            return false;
+        }
+        recordEvent(jobId, "SUCCEEDED", "ACTION_REQUIRED", safe);
+        return true;
     }
 
     @Override

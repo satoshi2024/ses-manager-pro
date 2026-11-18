@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.*;
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
@@ -160,6 +161,18 @@ public class LifecycleApiController {
     }
 
     /**
+     * タスク証跡として選択できる文書版（scan結果CLEAN）の一覧（NF01 Q-9）。
+     * 完了時は版IDの指定が必須のため、画面はここで得た版から利用者に選ばせる。認可は完了操作と同じ。
+     */
+    @GetMapping("/tasks/{id}/evidence-versions")
+    public ApiResult<List<LifecycleEvidenceVersionDto>> listEvidenceVersions(
+            @PathVariable("id") Long id,
+            @RequestParam("documentId") Long documentId) {
+        SysUser user = getCurrentUser();
+        return ApiResult.success(taskService.listEvidenceVersions(id, documentId, user));
+    }
+
+    /**
      * タスク免除 (例外処理)
      */
     @PostMapping("/tasks/{id}/waive")
@@ -237,6 +250,7 @@ public class LifecycleApiController {
      */
     @PostMapping("/templates")
     public ApiResult<LifecycleTemplateDto> createTemplate(@Valid @RequestBody LifecycleTemplateDto dto) {
+        assertTemplateManager();
         Long userId = getCurrentUserId();
         LifecycleTemplateDto created = templateService.createTemplate(dto, userId);
         return ApiResult.success("テンプレートを作成しました", created);
@@ -248,6 +262,7 @@ public class LifecycleApiController {
     @PutMapping("/templates/{id}")
     public ApiResult<LifecycleTemplateDto> updateTemplate(@PathVariable("id") Long id,
                                                           @Valid @RequestBody LifecycleTemplateDto dto) {
+        assertTemplateManager();
         Long userId = getCurrentUserId();
         LifecycleTemplateDto updated = templateService.updateTemplate(id, dto, userId);
         return ApiResult.success("テンプレートを改定しました", updated);
@@ -259,9 +274,17 @@ public class LifecycleApiController {
     @PostMapping("/templates/{id}/toggle-status")
     public ApiResult<Void> toggleTemplateStatus(@PathVariable("id") Long id,
                                                 @RequestBody Map<String, String> body) {
+        assertTemplateManager();
         Long userId = getCurrentUserId();
         String status = body != null ? body.get("status") : "INACTIVE";
         templateService.toggleStatus(id, status, userId);
         return ApiResult.success("ステータスを更新しました", null);
+    }
+
+    private void assertTemplateManager() {
+        SysUser user = getCurrentUser();
+        if (user == null || !("管理者".equals(user.getRole()) || "HR".equals(user.getRole()))) {
+            throw BusinessException.of(403, "error.lifecycle.templateMutationDenied");
+        }
     }
 }

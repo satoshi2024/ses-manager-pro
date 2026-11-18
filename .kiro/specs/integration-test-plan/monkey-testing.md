@@ -47,7 +47,7 @@
 - 更新系成功に audit row が存在（`ApiAuditFilter` の frozen 対象 method のみ。PATCH 等は対象外を正とする）
 - 参照整合性（orphan FK 0、soft-delete 行の復活・再表示 0）
 
-モジュール別 invariant は `module-test-matrix.md` の DB 断言から機械抽出して suite に追加する。**invariant 違反 1 件 = P1 相当で即時停止・defect 化**する。
+モジュール別 invariant は `module-test-matrix.md` の DB の検証から機械抽出して suite に追加する。**invariant 違反 1 件 = P1 相当で即時停止・defect 化**する。
 
 ## 4. モジュール別 ID 一覧
 

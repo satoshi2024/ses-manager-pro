@@ -9,13 +9,11 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Document;
-import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.ExpenseRequest;
 import com.ses.mapper.ApprovalRequestMapper;
-import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ExpenseRequestMapper;
@@ -24,6 +22,7 @@ import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.NotificationService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalTargetAdapterRegistry;
+import com.ses.service.document.DocumentLinkCommandService;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.impl.ExpenseRequestApprovalAdapter;
 import com.ses.service.security.OrganizationScopeService;
@@ -62,7 +61,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     private final EngineerMapper engineerMapper;
     private final ApprovalRequestMapper approvalRequestMapper;
     private final DocumentVersionMapper documentVersionMapper;
-    private final DocumentLinkMapper documentLinkMapper;
+    private final DocumentLinkCommandService documentLinkCommandService;
     private final ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
     private final ApprovalEngineService approvalEngineService;
     private final DocumentService documentService;
@@ -233,8 +232,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         }
         // 文書台帳へ登録（scan fail-closed: CLEAN以外はregisterReceivedが拒否）。
         // businessKey冪等のため同じ経費への再添付は既存文書を返す。
-        // ※ リンクはDocumentServiceImpl.link経由でなく直接insertする
-        //   （H2のt_document_linkにskill_sheet列が無い場合でもSELECTが壊れない。UNIQUEで冪等）。
+        // ※ リンクはDocumentLinkCommandServiceで作る（文書行のX lock → insert（一意keyの重複は既存linkとして照合）→ 証跡利用可否epochの増分。
+        //   一意keyの既存linkは再作成しないため冪等。NF01 F3）。
         Document document = documentService.registerReceived(DocumentRegisterRequest.builder()
                 .documentType("RECEIPT")
                 .title("経費領収書 EX-" + id)
@@ -249,8 +248,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .build(), content);
         // FileScopeValidationServiceのRECEIPT規則（本人/管理者/マネージャー配下のみ）は
         // ENGINEERリンクから要員を解決するため、領収書には必ずENGINEERリンクを付ける。
-        insertDocumentLink(document.getId(), "ENGINEER", expense.getEngineerId());
-        insertDocumentLink(document.getId(), "EXPENSE_REQUEST", id);
+        insertDocumentLink(document, "ENGINEER", expense.getEngineerId());
+        insertDocumentLink(document, "EXPENSE_REQUEST", id);
 
         int version = value(expense.getVersion());
         int updated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
@@ -266,20 +265,15 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         return toDto(requireOwned(engineerId, id), null, null, null);
     }
 
-    /** DocumentLinkへ直接insertする（UNIQUE(document_id,target_type,target_id)で冪等）。 */
-    private void insertDocumentLink(Long documentId, String targetType, Long targetId) {
-        if (documentId == null || targetType == null || targetId == null) {
+    /**
+     * 領収書文書へlinkを作る（冪等）。linkのtenantは文書行のtenantにする（F-3）。同じtransactionで2件作っても
+     * 証跡利用可否epochの増分は1回だけ（NF01 E-4）。
+     */
+    private void insertDocumentLink(Document document, String targetType, Long targetId) {
+        if (document == null || document.getId() == null || targetType == null || targetId == null) {
             return;
         }
-        DocumentLink link = new DocumentLink();
-        link.setDocumentId(documentId);
-        link.setTargetType(targetType);
-        link.setTargetId(targetId);
-        try {
-            documentLinkMapper.insert(link);
-        } catch (DuplicateKeyException e) {
-            // 既にリンク済み（冪等）。
-        }
+        documentLinkCommandService.link(document.getTenantId(), document.getId(), targetType, targetId);
     }
 
     @Override

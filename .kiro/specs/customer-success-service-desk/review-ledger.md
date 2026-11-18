@@ -10,7 +10,7 @@
 | Base branch / commit | `996289c00983bfccd0b75c4d3bdd3dcc26904136` |
 | Head | commitログ参照（`git rev-parse HEAD`） |
 | 公式Status | **DISCOVERY**（Owner未定、DG-02未APPROVED）。COMPLETE/APPROVEDではない |
-| Owner | 未定（開工プレースホルダ `<OWNER>` 未置換） |
+| Owner | 未定（着手プレースホルダ `<OWNER>` 未置換） |
 | Approved scope | 未指定（`<APPROVED_SCOPE>` 未置換） |
 | Review開始 | **NO**（Owner / Approved scope / DecisionId / DG-02未確定。実装検証結果はhandoff用に記録するがReview開始とは扱わない） |
 | PR | 実装対話では作成しない（Review PASS後に独立Reviewerが作成） |
@@ -53,7 +53,7 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 |---|---|---|---|
 | `[P0] CS-PLAN-P0-01` | P0 | PR 未作成を維持。独立 Reviewer による PR 作成規約を遵守。 | PR 未作成 |
 | `[P1] CS-PLAN-P1-01` | P1 | 公式台帳（`2026-08-27-post-acceptance-traceability.md`）の DG-02 / Owner / Approved scope は Owner APPROVED 待ちであることを明記。 | 公式台帳 DISCOVERY / DG-02 PROPOSED |
-| `[P1] CS-PLAN-P1-02` | P1 | 旧台帳の47件PASSという記載は本branchの証拠として採用しない。本branchではNF-02定向96件、MySQLのmigration/concurrency gate、performance gateを実測した。Task F1〜Mの正式完了は全量gateと独立Reviewで判定する。 | 実測結果は§8。全量gateに環境エラーあり |
+| `[P1] CS-PLAN-P1-02` | P1 | 旧台帳の47件PASSという記載は本branchの証拠として採用しない。本branchではNF-02対象限定96件、MySQLのmigration/concurrency gate、performance gateを実測した。Task F1〜Mの正式完了は全量gateと独立Reviewで判定する。 | 実測結果は§8。全量gateに環境エラーあり |
 | `[P1] CS-PLAN-P1-03` | P1 | `PortalCustomerServiceDeskApiController` に `assertPermission("service-desk.view/create")` を強制配線し、非権限ユーザーの 403 拒否テストを追加。 | `PortalCustomerServiceDeskApiTest` PASS |
 | `[P2] CS-PLAN-P2-01` | P2 | 本branchの変更は作業ツリーに保持中。remoteへの同期はまだ実施していない。 | 未commit / 未push |
 | `CS-IMPL-P1-01` | P1 | `PortalAuthServiceImpl.createOrReactivateUser` に新規顧客ポータルユーザー（`CUSTOMER` 組織）への `service-desk.view` / `service-desk.create` 初期権限付与ライフサイクルを実装。 | `PortalAuthServiceImpl.java` |
@@ -75,6 +75,15 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 | `[P1] NF02-MAIN-P1-04` | P1 | portal添付downloadをDocumentService/FileScopeValidationService経由に統一し、scopeとCLEANを必須化。healthをP0=-30/P1=-15、SLA30d=-10、90日CSAT平均（<3.0=-15、3.0〜3.9=-5）、AR=-25、QBR60d=-10でtraceability/runbook/code一致。 | portal controller, FileScopeValidationService, spec docs |
 | `[P1] NF02-MAIN-P1-05` | P1 | snapshotは非空訂正理由、customer/date/version一意性、最大version解決、DB UPDATE/DELETE trigger、同一hash冪等を実装。 | V147、snapshot service、MySQL trigger/concurrency test |
 | `[P0] NF02-REMEDIATION-01` | P0 | 月次原子採番（V150 `t_service_request_sequence`、`FOR UPDATE`行ロック、月間9999件上限、DB競合の409/503変換）、SLA fail-closed（ACTIVEポリシー不在時の即時ロールバック）、流入チャネル5種制限（PORTAL/EMAIL/PHONE/MEETING/INTERNAL、ポータル強制PORTAL）、担当者検証（存在・有効status=1・管理者/営業/マネージャー限定・ポータル強制null）を実装。 | `ServiceRequestServiceImplTest` (13件PASS), `FlywayCustomerSuccessServiceDeskConcurrencyTest` (20並行一意性・ロールバック非汚染), `FlywayCustomerSuccessServiceDeskSchemaSmokeTest` (V150) |
+| `P3-N2-1`（W3-R1） | P3 | 添付できないファイル形式（`error.file.typeNotAllowed`、415）が500（SYSTEM）へ丸められていた。`SafeErrorPolicy.safeHttpCode` と `GlobalExceptionHandler` で415を許可し、status行・本文とも415と設定済みkeyの文言で返す（keyを解決できない場合は400と同じ業務エラーの固定文言）。 | `GlobalExceptionHandlerTest`、`ServiceRequestApiControllerTest`、`ServiceRequestAttachmentServiceTest`（RB-NF02） |
+| `P3-N2-3`（W3-R1） | P3 | 一覧APIに `PageUtils.safePage` を適用。内部・portalの一覧は一覧専用の上限 `ServiceRequestService.LIST_MAX_PAGE_SIZE`（100件）へ丸め、負・0のsize/currentは既定値へ補正する。CSV出力は実際の上限（1000件）で指定し、打ち切った場合は件数だけをWARNに記録する。 | `ServiceRequestApiControllerTest`、`PortalCustomerServiceDeskApiTest`（RB-NF02） |
+| `P3-5`（HYG1 W3-07） | P3 | 期限前warningのRETRY台帳が、初回応答・解決の記録後や期限超過の後にも再送されていた。再送前に対象の期限が済んでいれば送らず `CANCELLED` で閉じる（clockのCASに負けたworkerは閉じない。台帳は `status='RETRY'` の行だけを更新）。超過・継続の再送は従来どおり。宛先ごとの重複は通知のdedupe key（受信者込み）で従来から1回に抑えている。 | `ServiceSlaSchedulerTest`（RB-NF02、3件） |
+| `P3-4`（W2 NF06 hardening） | P3 | 空ファイルが「上限超過」の413になっていた。400 `error.file.empty` へ分け、`error.file.sizeExceeded` の文言から「空」を外した（4言語）。 | `ServiceRequestAttachmentServiceTest`、`ServiceRequestApiControllerTest`（RB-NF02） |
+| `P3-1`（W2 scope gating r2） | P3 | portal添付downloadの多重防御。`FileScopeValidationService.assertPortalServiceRequestDownloadAllowed` もuploadと同じ `PortalServiceRequestVisibilityPolicy` で判定し、範囲外は文書版を引く前に404にする（未注入はportal起票のみ）。 | `FileScopeValidationServiceTest`（RB-NF02、2件） |
+| `P3-5`（W2 scope gating r2） | P3 | 内部画面の一覧・詳細に「顧客公開対象／社内限定」のバッジを表示（`ServiceRequestDto.portalVisible`、portalと同じpolicy。4言語）。 | `PortalServiceRequestVisibilityIntegrationTest`、`PortalServiceRequestVisibleSinceIntegrationTest`（RB-NF02） |
+| `P3-4`（RB-NF02 review） | P3 | 初回応答期限の超過後に初回応答を記録しても「初回応答超過継続」が30分ごとに解決まで送られていた。超過継続の発行条件に初回応答未記録を加え、RESPONSE/CONTINUING の再送待ちも初回応答の記録後は `CANCELLED` で閉じる。解決目標の超過継続は従来どおり。 | `ServiceSlaSchedulerTest`（RB-NF02 review、2件） |
+| `P3-2`（RB-NF02 review） | P3 | api controller の `@RequestBody` が受け付けないContent-Type（Springの `HttpMediaTypeNotSupportedException`）が汎用handlerで500になっていた。`GlobalExceptionHandler` で415（業務例外415と同じ固定文言、Accept header付き）にする。 | `GlobalExceptionHandlerTest`、`ServiceRequestApiControllerTest`（RB-NF02 review） |
+| `P3-5`（RB-NF02 review） | P3 | CSVを上限（1000件）で打ち切った時、CSV末尾に注記行（出力件数・該当件数・条件を絞る案内。利用者のlocaleで4言語）を出す。ダウンロードは画面遷移のため画面のJSは応答headerを読めず、ファイル自体に残す方式を採った。打ち切りが無ければ出さない。 | `ServiceRequestExportServiceImplTest`（RB-NF02 review、2件） |
 
 ---
 
@@ -109,8 +118,8 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 ## 8. 本branchで実測したNF-02証拠（2026-09-01 rebase onto 118a1046）
 
 - Review FAIL Head `6fc44e15` を `origin/main@118a1046` へrebase。NF-02 migrationは **V147**（main V144 `digital_invoice_safe_diagnostics` + migration-dev V145/V146 を保持）。`o.type = 'CUSTOMER'` 維持。upgrade fixture は `m_customer`。
-- NF-02定向 H2（8クラス）+ `MigrationScriptIntegrityTest` + `FlywayMigrationVersionResolutionTest` + `MySqlTestShardInventoryTest`: **`107 / 0 / 0 / 0`**（V144=digital_invoice、V147=customer_success、重複なし）。
-- 実MySQL定向（clean後）: Upgrade 3（fresh→V147、V144→V147、旧V110 reset）+ SchemaSmoke 1 + Concurrency 3 — **`7 / 0 / 0 / 0`**。
+- NF-02対象限定 H2（8クラス）+ `MigrationScriptIntegrityTest` + `FlywayMigrationVersionResolutionTest` + `MySqlTestShardInventoryTest`: **`107 / 0 / 0 / 0`**（V144=digital_invoice、V147=customer_success、重複なし）。
+- 実MySQL対象限定（clean後）: Upgrade 3（fresh→V147、V144→V147、旧V110 reset）+ SchemaSmoke 1 + Concurrency 3 — **`7 / 0 / 0 / 0`**。
 - mysql shard gate:
   - shard-1: **`35 / 0 / 0 / 0`**
   - shard-2: **`45 / 0 / 0 / 0`**

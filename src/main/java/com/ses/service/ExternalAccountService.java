@@ -13,6 +13,9 @@ import java.util.List;
  */
 public interface ExternalAccountService {
 
+    /** 退社gate専用。案件tenantを明示し、本人用の法人scopeとは分離する。 */
+    List<ExternalAccountReference> getUnrevokedAccountsForEngineer(String tenantId, Long engineerId);
+
     /**
      * 外部アカウント参照を新規登録する
      */
@@ -80,9 +83,15 @@ public interface ExternalAccountService {
     ExternalAccountReference confirmRevokeFromSchedulerPoll(Long id, String correlationId, String idempotencyKey);
 
     /**
-     * 外部アカウントの失効要求を送信する（冪等性キー付与・タイムアウト時はPENDING_CONFIRMATIONへ）
+     * 外部アカウントの失効要求をoutboxへ登録する（送信はcommit後のdispatcherへ分離）。
      */
     ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId);
+
+    /** 結果不明のlifecycle要求を新しいgenerationで登録する。管理APIからのみ呼ぶ。 */
+    ExternalAccountReference reRequestUnknownRevoke(Long id, Long actorUserId);
+
+    /** tenant内全法人の未処理要求。返却値の識別子は必ず表示DTOでマスクする。 */
+    List<ExternalAccountReference> pendingRevocations();
 
     /**
      * 失効確認待ち（PENDING_CONFIRMATION）の定期ポーリング・リトライジョブを実行する

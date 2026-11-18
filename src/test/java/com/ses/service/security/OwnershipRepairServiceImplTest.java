@@ -1,6 +1,8 @@
 package com.ses.service.security;
 
 import com.ses.dto.security.OwnershipRepairRequest;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.OwnershipRepairQueue;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.mapper.CustomerMapper;
@@ -9,11 +11,14 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OwnershipRepairQueueMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import com.ses.service.security.impl.OwnershipRepairServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,6 +37,7 @@ class OwnershipRepairServiceImplTest {
     @Mock private EngineerAccountLinkMapper engineerAccountLinkMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private RepairAuthorityResolver authorityResolver;
+    @Mock private AuthorizationEpochFence authorizationEpochFence;
     @InjectMocks private OwnershipRepairServiceImpl service;
 
     @BeforeEach
@@ -79,6 +85,58 @@ class OwnershipRepairServiceImplTest {
     }
 
     @Test
+    void 要員のtenant補正は要員行をlockしてから行い補正後のDBのtenantでengineer_epochを進める() {
+        OwnershipRepairQueue row = claimedRow("ENGINEER", 10L);
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
+        Engineer unresolved = engineer(10L, null);
+        Engineer repaired = engineer(10L, "tenant-a");
+        when(engineerMapper.selectScopeAnchorForUpdate(10L)).thenReturn(unresolved, repaired);
+        when(engineerMapper.assignTenantForRepair(10L, "tenant-a")).thenReturn(1);
+        stubResolvedCas();
+
+        service.resolve(1L, validRequest());
+
+        // 計画 §2.6・§4.2: 7 X{要員} → tenant補正 → 補正後の行のtenantで engineer epoch +1
+        InOrder order = inOrder(engineerMapper, authorizationEpochFence);
+        order.verify(engineerMapper).selectScopeAnchorForUpdate(10L);
+        order.verify(engineerMapper).assignTenantForRepair(10L, "tenant-a");
+        order.verify(engineerMapper).selectScopeAnchorForUpdate(10L);
+        order.verify(authorizationEpochFence).advance(AuthorizationEpochAnchor.engineer("tenant-a", 10L));
+    }
+
+    @Test
+    void 紐付けのtenant補正は紐付け先の要員行をlockしてその要員のengineer_epochを進める() {
+        OwnershipRepairQueue row = claimedRow("ENGINEER_ACCOUNT_LINK", 20L);
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setId(20L);
+        link.setEngineerId(10L);
+        when(engineerAccountLinkMapper.selectById(20L)).thenReturn(link);
+        when(engineerMapper.selectScopeAnchorForUpdate(10L)).thenReturn(engineer(10L, "tenant-a"));
+        when(engineerAccountLinkMapper.assignTenantForRepair(20L, "tenant-a")).thenReturn(1);
+        stubResolvedCas();
+
+        service.resolve(1L, validRequest());
+
+        InOrder order = inOrder(engineerMapper, engineerAccountLinkMapper, authorizationEpochFence);
+        order.verify(engineerMapper).selectScopeAnchorForUpdate(10L);
+        order.verify(engineerAccountLinkMapper).assignTenantForRepair(20L, "tenant-a");
+        order.verify(authorizationEpochFence).advance(AuthorizationEpochAnchor.engineer("tenant-a", 10L));
+    }
+
+    @Test
+    void 要員のtenant補正が0件なら世代を進めず409() {
+        OwnershipRepairQueue row = claimedRow("ENGINEER", 10L);
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
+        when(engineerMapper.assignTenantForRepair(10L, "tenant-a")).thenReturn(0);
+
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class, () -> service.resolve(1L, validRequest()));
+        assertEquals(409, ex.getCode());
+        verifyNoInteractions(authorizationEpochFence);
+    }
+
+    @Test
     void authorityが無ければ業務mapperを呼ばない() {
         when(authorityResolver.requireAuthority()).thenThrow(new RuntimeException("denied"));
         assertThrows(RuntimeException.class, service::listPending);
@@ -121,6 +179,44 @@ class OwnershipRepairServiceImplTest {
         verifyNoInteractions(customerMapper, engineerMapper, bpAvailabilityMapper, engineerAccountLinkMapper);
         verify(queueMapper, never()).markResolvedCas(anyLong(), anyString(), anyString(), anyString(),
                 any(), any(), any(), anyString(), anyString(), any(), anyString(), anyInt());
+    }
+
+    private static OwnershipRepairQueue claimedRow(String entityType, Long entityId) {
+        OwnershipRepairQueue row = new OwnershipRepairQueue();
+        row.setId(1L);
+        row.setEntityType(entityType);
+        row.setEntityId(entityId);
+        row.setStatus("CLAIMED");
+        row.setVersion(2);
+        row.setClaimToken("claim");
+        row.setConflictingTenantId("tenant-a");
+        return row;
+    }
+
+    private static OwnershipRepairRequest validRequest() {
+        OwnershipRepairRequest request = new OwnershipRepairRequest();
+        request.setExpectedVersion(2);
+        request.setClaimToken("claim");
+        request.setReason("台帳照合");
+        OwnershipRepairRequest.Evidence evidence = new OwnershipRepairRequest.Evidence();
+        evidence.setSourceType("LEDGER");
+        evidence.setSourceReference("ticket-123");
+        evidence.setStatement("契約台帳と管理者承認を照合した");
+        request.setEvidence(evidence);
+        return request;
+    }
+
+    private void stubResolvedCas() {
+        when(queueMapper.markResolvedCas(eq(1L), eq("tenant-a"), eq("台帳照合"), anyString(),
+                any(), eq(10L), eq(77L), eq("tenant-a"), anyString(), eq(11L), eq("claim"), eq(2)))
+                .thenReturn(1);
+    }
+
+    private static Engineer engineer(Long id, String tenantId) {
+        Engineer engineer = new Engineer();
+        engineer.setId(id);
+        engineer.setTenantId(tenantId);
+        return engineer;
     }
 
     @Test

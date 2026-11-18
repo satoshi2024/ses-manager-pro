@@ -72,7 +72,7 @@ public class DashboardServiceImpl implements DashboardService {
     /** 未検収KPI（R4.3）。テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.AcceptanceMapper acceptanceMapper;
-    /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通口径サービスで算出する(Requirement 1.3)。 */
+    /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通集計基準サービスで算出する(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
     private final Clock clock;
 
@@ -155,7 +155,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
 
         // 売上着地予測（パイプライン加重）: 確定契約ベース(既存 sales)に、オープン提案の
-        // 提示単価×ステージ確率を翌月以降の各月へ加算した別系列を重ねる（実績口径は汚さない）。
+        // 提示単価×ステージ確率を翌月以降の各月へ加算した別系列を重ねる（実績の集計基準は汚さない）。
         if ("true".equalsIgnoreCase(systemConfigService.getString("forecast.enabled", "true"))) {
             QueryWrapper<Proposal> proposalQuery = new QueryWrapper<Proposal>()
                     .in("status", Arrays.asList(
@@ -198,7 +198,7 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
 
-        // Calculate actual KPI trends (チャート当月値と同一ソース: 共通口径サービス)
+        // Calculate actual KPI trends (チャート当月値と同一ソース: 共通集計基準サービス)
         MonthlyRevenueCalcService.MonthlyAmount currentAmount = monthlyRevenueCalcService.calc(
                 currentMonth, allContracts, confirmedByMonth.getOrDefault(currentMonth.toString(), Collections.emptyMap()));
         MonthlyRevenueCalcService.MonthlyAmount previousAmount = monthlyRevenueCalcService.calc(
@@ -269,8 +269,8 @@ public class DashboardServiceImpl implements DashboardService {
                 .filter(e -> "提案中".equals(e.getStatus()) && !retiringEngineerIds.contains(e.getId()))
                 .count();
 
-        // 全社稼動率は契約ベースの共通口径サービスで算出する。将来稼働率予測(FR-07)の当月値と
-        // 必ず一致させるため、Engineer.status ベースの集計(下のステータス構成チャート)とは口径を分ける。
+        // 全社稼動率は契約ベースの共通集計基準サービスで算出する。将来稼働率予測(FR-07)の当月値と
+        // 必ず一致させるため、Engineer.status ベースの集計(下のステータス構成チャート)とは集計基準を分ける。
         Map<Long, List<Contract>> utilizationContractsByEngineer = existingEngineerIds.isEmpty()
                 ? Collections.emptyMap()
                 : contractMapper.selectListForTenant(new QueryWrapper<Contract>()
@@ -290,7 +290,7 @@ public class DashboardServiceImpl implements DashboardService {
                 UtilizationCalcService.resolveAssumeRenew(systemConfigService));
         double utilization = utilizationSnapshot.getUtilizationRate();
 
-        // KPI「当月予想売上」「粗利率」はチャート当月値と同一ソース(共通口径の当月 calc 結果)を使用する。
+        // KPI「当月予想売上」「粗利率」はチャート当月値と同一ソース(共通の集計基準の当月 calc 結果)を使用する。
         long totalRevenue = currentAmount.getSales();
         long grossProfit = currentAmount.getProfit();
         double profitMargin = totalRevenue > 0 ? (double) grossProfit / totalRevenue * 100 : 0.0;

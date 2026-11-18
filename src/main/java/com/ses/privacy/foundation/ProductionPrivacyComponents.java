@@ -1,0 +1,156 @@
+package com.ses.privacy.foundation;
+
+import com.ses.mapper.SysUserMapper;
+import com.ses.service.security.AuthorizationService;
+import com.ses.service.security.LegalEntityContextService;
+import org.springframework.core.env.Environment;
+
+import javax.sql.DataSource;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
+
+/**
+ * foundation の production 部品を package 外から生成する唯一の入口（production-bridge-phased-plan.md §3.1.1）。
+ *
+ * <p>生成前に {@link ProductionEnvironmentGuard} で prod profile を要求する（prod 以外では例外）。
+ * 生成する service・caller provider・verifier は package-private のままで、package 外から直接は作れない。
+ * Spring アノテーションは持たず、Spring 登録は {@code com.ses.privacy.production} 側が行う。
+ * 生成時に DB・catalog・source・trust registry へ触れない（全て照会時に lazy に読む）。
+ */
+public final class ProductionPrivacyComponents {
+
+    private ProductionPrivacyComponents() {
+    }
+
+    /**
+     * production の読み取り専用 policy 照会 port を生成する。
+     *
+     * @param environment            起動環境（prod profile 必須）
+     * @param sourceEnabled          公開スイッチ（{@code privacy.retention.enabled}）。照会のたびに読む
+     * @param authorizationService   action 権限の判定部品。照会時に取得し、取れなければ拒否する
+     * @param authorizationTenantId  {@code AuthorizationService} が group を評価する設定tenant
+     */
+    public static PolicyReadonlyQueryPort productionPolicyReadonlyQuery(
+            Environment environment,
+            BooleanSupplier sourceEnabled,
+            LegalEntityContextService legalEntityContextService,
+            SysUserMapper sysUserMapper,
+            Supplier<AuthorizationService> authorizationService,
+            String authorizationTenantId,
+            ProductionPolicyCatalogPort catalog,
+            CurrentPolicySource source,
+            ProductionPolicyTrustRegistry trustRegistry,
+            RevocationStatusProvider revocations,
+            Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        SecurityContextCallerContextProvider callerProvider = new SecurityContextCallerContextProvider(
+                legalEntityContextService, sysUserMapper, authorizationService, authorizationTenantId, clock);
+        return new ProductionPolicyReadonlyQueryService(sourceEnabled, callerProvider, catalog, source,
+                trustRegistry, revocations, guard, clock);
+    }
+
+    /**
+     * NF07 policy の内部判定 port を生成する（NF07-NF08-LINK、production-bridge-phased-plan.md §4 の LINK 行・§8）。
+     *
+     * <p>説明照会と同じ catalog・current source・trust anchor・失効状態を読み、同じ検証を通すが、呼出し元の privacy 権限は
+     * 要求せず判定対象の tenant だけを束縛し、可否と固定の理由コードだけを返す（説明 DTO を返さない）。
+     * prod profile 以外では生成を拒否する。生成時に catalog・source・trust registry へ触れない（判定のたびに読む）。
+     *
+     * @param environment   起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param sourceEnabled 公開スイッチ（{@code privacy.retention.enabled} と決定ID束縛の有効期間）。判定のたびに読む
+     * @param catalog       policy catalog
+     * @param source        current policy source
+     * @param trustRegistry policy envelope の署名 anchor（D-03 の署名前は空）
+     * @param revocations   失効状態（第1期は常に UNKNOWN）
+     * @param clock         検証の時計
+     */
+    public static PolicyEnforcementPort productionPolicyEnforcement(
+            Environment environment,
+            BooleanSupplier sourceEnabled,
+            ProductionPolicyCatalogPort catalog,
+            CurrentPolicySource source,
+            ProductionPolicyTrustRegistry trustRegistry,
+            RevocationStatusProvider revocations,
+            Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        return new ProductionPolicyEnforcementService(sourceEnabled, catalog, source, trustRegistry, revocations,
+                guard, clock);
+    }
+
+    /**
+     * 独立 Journal インスタンスへの本番 adapter を生成する（NF07-A1J、production-bridge-phased-plan.md §3.3）。
+     *
+     * <p>合成 {@code JdbcPrivacyJournalAdapter} とは別 class・別入口で、合成層のコードは使わない（I-6）。
+     * {@code journalDataSource} は Journal 専用の接続（{@code PrivacyJournalConnections} の内部 pool）だけを渡す。
+     * application DB の {@code DataSource} を渡さないことは、起動時検査（{@code PrivacyJournalStartupVerifier}）の
+     * {@code server_uuid}・schema・権限の照合で検出する。生成時に DB へ触れない。
+     *
+     * @param environment       起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param journalDataSource Journal 専用の接続
+     * @param clock             event 時刻の時計
+     */
+    public static PrivacyJournalPort productionPrivacyJournal(Environment environment, DataSource journalDataSource,
+                                                              Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        return new ProductionPrivacyJournalAdapter(journalDataSource, guard, clock);
+    }
+
+    /**
+     * hold 解除 proof の verifier を生成する（NF07-REL、sf-w2-protocol.md §11.1）。
+     *
+     * <p>生成した verifier だけが {@link VerifiedHoldRelease} を発行する。prod profile 以外では生成を拒否する（解除の経路を
+     * dev・test profile の実行時に開かない）。生成時に registry・失効 provider へ触れない（検証のたびに読む）。
+     *
+     * @param environment 起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param registry    解除 authority の trust anchor（D-03 の署名前は空）
+     * @param revocations 失効状態（第1期は常に UNKNOWN）
+     * @param clock       検証の時計
+     */
+    public static HoldReleaseVerifier holdReleaseVerifier(Environment environment, HoldReleaseTrustRegistry registry,
+                                                          RevocationStatusProvider revocations, Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        return new HoldReleaseProofVerifier(registry, revocations, guard, clock);
+    }
+
+    /**
+     * policy envelope の登録・有効化の verifier を生成する（NF07-REG、W-2）。
+     *
+     * <p>生成した verifier だけが {@link VerifiedPolicyRegistration} を発行する。prod profile 以外では生成を拒否する（登録の経路を
+     * dev・test profile の実行時に開かない）。生成時に registry・失効 provider へ触れない（検証のたびに読む）。
+     *
+     * @param environment 起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param registry    policy envelope の署名 anchor（D-03 の署名前は空）
+     * @param revocations 失効状態（第1期は常に UNKNOWN）
+     * @param clock       検証の時計
+     */
+    public static PolicyRegistrationVerifier policyRegistrationVerifier(Environment environment,
+                                                                        ProductionPolicyTrustRegistry registry,
+                                                                        RevocationStatusProvider revocations,
+                                                                        Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        guard.requireProductionProfile();
+        return new ProductionPolicyRegistrationVerifier(registry, revocations, guard, clock);
+    }
+
+    /** 本番 Journal の append・照会の transaction 上限（{@code privacy.journal.pending-timeout} の下限）。 */
+    public static Duration journalAppendTimeout() {
+        return ProductionPrivacyJournalAdapter.APPEND_TRANSACTION_TIMEOUT;
+    }
+
+    /** 本番 Journal の表名（起動時検査の権限・engine 照合に使う）。 */
+    public static List<String> journalTables() {
+        return ProductionPrivacyJournalAdapter.JOURNAL_TABLES;
+    }
+}

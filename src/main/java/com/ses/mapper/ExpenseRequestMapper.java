@@ -131,6 +131,20 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
     List<ExpenseRequest> selectApprovedUnaccountedByTenant(@Param("tenantId") String tenantId,
                                                            @Param("limit") int limit);
 
+    /**
+     * freee会計送信の候補（承認後: 承認済・会計連携済・支払済）。経費会計連携schedulerの処理有無では絞らない。
+     * tenant境界は selectApprovedUnaccountedByTenant と同じ要員account link経由で適用する。
+     */
+    @Select("SELECT DISTINCT er.* FROM t_expense_request er "
+            + "JOIN t_engineer e ON e.id = er.engineer_id AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
+            + "AND l.tenant_id = #{tenantId} "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE u.tenant_id = #{tenantId} AND er.status IN ('承認済', '会計連携済', '支払済') AND er.deleted_flag = 0 "
+            + "ORDER BY er.id DESC LIMIT #{limit}")
+    List<ExpenseRequest> selectApprovedByTenant(@Param("tenantId") String tenantId,
+                                                @Param("limit") int limit);
+
     /** PWAのbaseVersion確認とdomain更新を同一transactionで直列化する。 */
     @Select("SELECT * FROM t_expense_request WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     ExpenseRequest selectByIdForUpdate(@Param("id") Long id);

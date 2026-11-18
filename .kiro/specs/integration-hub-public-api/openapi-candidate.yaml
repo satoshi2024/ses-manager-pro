@@ -931,12 +931,12 @@ components:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         publicEngineerId:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         availabilityStatus:
           type: string
           nullable: true
@@ -961,7 +961,7 @@ components:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         status:
           type: string
           nullable: true
@@ -979,12 +979,12 @@ components:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         publicContractId:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         renewalStatus:
           type: string
           nullable: true
@@ -994,7 +994,7 @@ components:
           type: string
           nullable: true
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'
         issueDate:
           type: string
           nullable: true
@@ -1027,19 +1027,19 @@ components:
           additionalProperties: false
           maxProperties: 17
           properties:
-            publicEngineerId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            publicEngineerId: {type: string, nullable: true, maxLength: 128, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'}
             availabilityStatus: {type: string, nullable: true, enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]}
             availableFrom: {type: string, nullable: true, format: date}
             availableTo: {type: string, nullable: true, format: date}
             skillTagCode: {type: array, nullable: true, maxItems: 50, items: {type: string, maxLength: 64, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}}
-            publicProjectId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            publicProjectId: {type: string, nullable: true, maxLength: 128, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'}
             status: {type: string, nullable: true, maxLength: 64, pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
             startDate: {type: string, nullable: true, format: date}
             endDate: {type: string, nullable: true, format: date}
-            publicCustomerId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
-            publicContractId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            publicCustomerId: {type: string, nullable: true, maxLength: 128, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'}
+            publicContractId: {type: string, nullable: true, maxLength: 128, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'}
             renewalStatus: {type: string, nullable: true, maxLength: 64, pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
-            publicInvoiceId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            publicInvoiceId: {type: string, nullable: true, maxLength: 128, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|[A-Za-z0-9_-]{43})$'}
             issueDate: {type: string, nullable: true, format: date}
             dueDate: {type: string, nullable: true, format: date}
             paidAt: {type: string, nullable: true, format: date-time}

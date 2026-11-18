@@ -108,4 +108,37 @@ class SecuritySessionApiControllerTest {
                 MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
         verify(mfaAttemptService, never()).recordSuccess(1L, request);
     }
+
+    @Test
+    void MFA検証の成功は検証済みの印を本人のuserIdへ結び付ける() {
+        when(mfaService.isRequired(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        when(mfaService.verify(1L, "123456")).thenReturn(true);
+
+        controller.verify(new com.ses.dto.security.MfaCodeRequest("123456"),
+                SecurityContextHolder.getContext().getAuthentication(), request);
+
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE,
+                request.getSession().getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
+        org.junit.jupiter.api.Assertions.assertEquals(1L,
+                request.getSession().getAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE));
+    }
+
+    @Test
+    void 別の主体のMFA検証済みの印ではTOTPを再登録できない() {
+        // review P3-a: 同じブラウザで別の主体が検証した印を引き継いでも、本人の検証が済むまで既存TOTPを置き換えさせない
+        when(mfaService.isRequired(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        when(mfaService.isConfigured(1L)).thenReturn(true);
+        HttpSession session = request.getSession(true);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, 99L);
+
+        assertThrows(BusinessException.class, () -> controller.setup(
+                SecurityContextHolder.getContext().getAuthentication(), request));
+        verify(mfaService, never()).setup(1L);
+
+        // 本人（user id 1）が検証した印なら再登録できる
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, 1L);
+        controller.setup(SecurityContextHolder.getContext().getAuthentication(), request);
+        verify(mfaService).setup(1L);
+    }
 }

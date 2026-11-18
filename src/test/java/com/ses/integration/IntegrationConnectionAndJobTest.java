@@ -166,7 +166,7 @@ class IntegrationConnectionAndJobTest {
         // 未検証状態での assertMappingVerified は例外をスロー
         assertThatThrownBy(() -> mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("未検証です");
+                .hasMessage("error.accounting.mappingUnverified");
 
         // 検証済みに更新
         ExternalMapping saved = mappingService.getMapping(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");

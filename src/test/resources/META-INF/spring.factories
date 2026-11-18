@@ -1,0 +1,5 @@
+# Spring TestContext の既定 TestExecutionListener へ追加する。
+# @TestExecutionListeners を MERGE_WITH_DEFAULTS なしで宣言したクラス以外へ自動適用される。
+# クラス単位の Testcontainers に束縛されたコンテキストを、そのクラスの終了時に破棄する。
+org.springframework.test.context.TestExecutionListener=\
+com.ses.test.ContainerBoundContextCloseListener

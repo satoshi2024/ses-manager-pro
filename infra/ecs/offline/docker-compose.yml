@@ -88,6 +88,8 @@ services:
       ALLOW_UNTRACKED_SESSIONS: "false"
       PERSISTENT_SESSION_ENABLED: "true"
       APP_SECURITY_REQUIRE_HTTPS: "false"
+      # Simulation only: no ALB in front, so trust a private /32 that never connects (prod requires a value).
+      TRUSTED_PROXIES: "10.255.255.255/32"
       SHUTDOWN_TIMEOUT: 30s
       SERVER_SHUTDOWN: graceful
       # Simulation only: no SMTP in offline compose — do not disable mail health globally.
@@ -97,8 +99,8 @@ services:
     networks:
       - ses-offline-internal
     healthcheck:
-      # ECS container health = liveness only (REV-ECS-P1-001)
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"]
+      # ECS container health = liveness only (REV-ECS-P1-001). Healthy only on HTTP 200 ($$ escapes compose interpolation).
+      test: ["CMD-SHELL", "test \"$$(curl -sS -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness)\" = 200 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 18

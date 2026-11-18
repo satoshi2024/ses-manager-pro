@@ -55,7 +55,7 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
     private final EngineerSalesService engineerSalesService;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
-    /** 当月値がダッシュボードKPIと一致することを保証する共通口径サービス(Requirement 1.3)。 */
+    /** 当月値がダッシュボードKPIと一致することを保証する共通集計基準サービス(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
     private final Clock clock;
     /** report schedulerの保存済みscopeを含め、画面と同じ組織母集団で予測する。 */
@@ -151,7 +151,7 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
                     .build();
         }
 
-        // 2. 対象要員の契約一覧ロード (共通口径サービスと同一のステータス集合)
+        // 2. 対象要員の契約一覧ロード (共通集計基準サービスと同一のステータス集合)
         QueryWrapper<Contract> contractQuery = new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
                         .in("engineer_id", engineerIds)

@@ -1,0 +1,48 @@
+-- V191相当のH2 seed（NF07 W-5 権限: privacy-admin group・privacy.* の deny・menu 2件）。
+-- V191本体は MySQL の UPDATE ... JOIN を使うため、H2では副問合せで同じ最終状態を作る。
+-- schema-locations の最後に置き、共有H2への再実行に耐えるよう全て存在確認付きで書く。
+-- ActionPermissionMatrixTest 等の group fixture は permission-group-seed-h2.sql が同じ内容を明示 id で作る。
+
+INSERT INTO m_permission_group (tenant_id, group_key, group_name, description, enabled, deleted_flag)
+SELECT g.tenant_id, 'privacy-admin', 'プライバシー管理（管理者専用）',
+       'NF07 privacy.*。管理者roleのユーザーにだけ、role-adminの代わりに割り当てる', 1, 0
+FROM m_permission_group g
+WHERE g.group_key = 'role-admin'
+  AND NOT EXISTS (SELECT 1 FROM m_permission_group e WHERE e.tenant_id = g.tenant_id AND e.group_key = 'privacy-admin');
+
+UPDATE t_permission_group_action SET deny_flag = 0, deleted_flag = 0
+WHERE action_key IN ('*', 'privacy.*')
+  AND group_id IN (SELECT id FROM m_permission_group WHERE group_key = 'privacy-admin');
+
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT g.tenant_id, g.id, a.action_key, 0, 0
+FROM m_permission_group g
+CROSS JOIN (SELECT '*' AS action_key UNION ALL SELECT 'privacy.*') a
+WHERE g.group_key = 'privacy-admin'
+  AND NOT EXISTS (SELECT 1 FROM t_permission_group_action x
+                  WHERE x.tenant_id = g.tenant_id AND x.group_id = g.id AND x.action_key = a.action_key);
+
+UPDATE t_permission_group_action SET deny_flag = 1, deleted_flag = 0
+WHERE action_key = 'privacy.*'
+  AND group_id IN (SELECT id FROM m_permission_group WHERE group_key <> 'privacy-admin');
+
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT g.tenant_id, g.id, 'privacy.*', 1, 0
+FROM m_permission_group g
+WHERE g.group_key <> 'privacy-admin'
+  AND NOT EXISTS (SELECT 1 FROM t_permission_group_action x
+                  WHERE x.tenant_id = g.tenant_id AND x.group_id = g.id AND x.action_key = 'privacy.*');
+
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+SELECT 'privacy-retention', 'プライバシー保全', '/privacy/holds', '/api/privacy/holds', 260
+WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'privacy-retention');
+
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+SELECT 'privacy-dsar', '本人請求（DSAR）', '/privacy/dsar', '/api/privacy/dsar', 261
+WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'privacy-dsar');
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '管理者', m.id
+FROM m_menu m
+WHERE m.menu_key IN ('privacy-retention', 'privacy-dsar')
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu r WHERE r.role = '管理者' AND r.menu_id = m.id);

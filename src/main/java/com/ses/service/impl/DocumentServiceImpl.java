@@ -1,7 +1,6 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.audit.ActorAttribution;
 import com.ses.common.audit.ActorType;
@@ -80,10 +79,18 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ObjectProvider<com.ses.service.security.impl.FileScopeValidationService> fileScopeValidationServiceProvider;
     /** FileScope の RECEIPT/CRA 規則を list/detail で再利用（規則自体は広げない）。 */
     private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     private final AssetScopeService assetScopeService;
+    /** 法的hold・廃棄・状態の書込み（文書行のX lockと証跡利用可否epoch。NF01 F3）。 */
+    private final com.ses.service.document.DocumentEligibilityService documentEligibilityService;
+    /** linkの書込み（文書行のX lockと証跡利用可否epoch。NF01 F3）。 */
+    private final com.ses.service.document.DocumentLinkCommandService documentLinkCommandService;
+    /** NF07 保全hold（subject・data element 単位。正本は Journal）の判定。廃棄の申請・執行（D1・D2）で使う（A1H-2）。 */
+    private final com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard privacyHoldPathGuard;
 
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
             "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
@@ -107,6 +114,185 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public Document registerReceived(DocumentRegisterRequest request, InputStream content) {
         return doRegister(request, content);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    public StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request, Path boundedTempFile,
+                                                       long expectedSizeBytes, String expectedSha256,
+                                                       Runnable deadlineCheckpoint) {
+        if (request == null || boundedTempFile == null || expectedSizeBytes < 1
+                || expectedSizeBytes > 64L * 1024 * 1024 || expectedSha256 == null
+                || !expectedSha256.matches("[0-9a-f]{64}") || deadlineCheckpoint == null) {
+            throw BusinessException.of(400, "error.document.invalidRequest");
+        }
+        if (!"IMPORT".equals(request.getDocumentType()) || !"text/csv".equals(request.getContentType())
+                || !"RECEIVED".equals(request.getSourceType())) {
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+        String tenantId = currentTenant(request);
+        Long legalEntityId = request.getLegalEntityId();
+        if (legalEntityId == null || legalEntityContextService == null
+                || !java.util.Objects.equals(legalEntityContextService.requireCurrentLegalEntityId(), legalEntityId)) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        validateDocumentType(request.getDocumentType(), "INCOMING");
+        deadlineCheckpoint.run();
+        try {
+            if (Files.size(boundedTempFile) != expectedSizeBytes
+                    || !expectedSha256.equals(sha256File(boundedTempFile, deadlineCheckpoint))) {
+                throw BusinessException.of(409, "error.import.sourceHashMismatch");
+            }
+        } catch (java.io.IOException failure) {
+            // server側一時ファイルの再検証読込失敗。client入力の誤りとして400にしない。
+            log.error("[文書台帳] import一時ファイルの再検証読込に失敗しました: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
+            throw BusinessException.of(500, "error.import.tempStorageFailed");
+        }
+        deadlineCheckpoint.run();
+        FileScanner scanner = fileScannerProvider.getIfAvailable();
+        FileScanResult scan;
+        try {
+            scan = scanner == null ? FileScanResult.unavailable("scanner is not configured")
+                    : scanner.scan(boundedTempFile, com.ses.common.enums.FileKind.IMPORT);
+        } catch (Exception failure) {
+            log.warn("[文書台帳] import scanner実行中例外のためfail-closedで拒否します: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
+            scan = FileScanResult.unavailable("scanner failed");
+        }
+        if (scan == null || scan.status() != FileScanResult.Status.CLEAN) {
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+        // scannerが期限後に戻った場合は、CLEAN判定でもstorageへ進めない。
+        deadlineCheckpoint.run();
+
+        String storageKey = generateStorageKey();
+        String operationId = UUID.randomUUID().toString();
+        try {
+            try (InputStream input = new DeadlineCheckpointInputStream(
+                    Files.newInputStream(boundedTempFile), deadlineCheckpoint)) {
+                documentStorage.put(storageKey, input, true);
+            }
+            deadlineCheckpoint.run();
+            documentStorage.promote(storageKey);
+            deadlineCheckpoint.run();
+            verifyStoredImportObject(storageKey, expectedSizeBytes, expectedSha256, operationId, deadlineCheckpoint);
+            deadlineCheckpoint.run();
+            ActorAttribution actor = resolveActor(request);
+            Document document = buildDocument(request, tenantId, legalEntityId, actor);
+            DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
+                    expectedSizeBytes, expectedSha256, actor);
+            version.setBusinessKey("IMPORT_UPLOAD:" + UUID.randomUUID());
+            version.setVersionDiscriminator("v1");
+            version.setScanStatus("CLEAN");
+            return new StagedImportDocument(document, version, storageKey, operationId);
+        } catch (Exception failure) {
+            try {
+                deleteImportStorageOrThrow(storageKey, operationId);
+            } catch (RuntimeException cleanupFailure) {
+                // 補償削除の失敗（ログ済み）で元の失敗（期限超過・検証失敗等）を上書きせず、suppressedとして残す。
+                failure.addSuppressed(cleanupFailure);
+            }
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            throw new RuntimeException("CSV取込のstorage stageに失敗しました", failure);
+        }
+    }
+
+    @Override
+    public void discardImportStage(StagedImportDocument staged) {
+        if (staged == null || staged.storageKey() == null || staged.version() == null
+                || !staged.storageKey().equals(staged.version().getStorageKey())
+                || staged.document() == null || !"IMPORT".equals(staged.document().getDocumentType())
+                || staged.operationId() == null || staged.operationId().isBlank()) {
+            return;
+        }
+        deleteImportStorageOrThrow(staged.storageKey(), staged.operationId());
+    }
+
+    private void verifyStoredImportObject(String storageKey, long expectedSize, String expectedSha256,
+                                         String operationId, Runnable deadlineCheckpoint) {
+        try (InputStream input = documentStorage.open(storageKey)) {
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                deadlineCheckpoint.run();
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
+                digest.update(buffer, 0, read);
+            }
+            if (count != expectedSize || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            log.error("[文書台帳] import storage bytes検証失敗: operationId={} exceptionClass={}",
+                    operationId, failure.getClass().getSimpleName());
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
+        }
+    }
+
+    /**
+     * 取込stageの補償削除（stage失敗時と破棄時の両方）。N6-2: 失敗を握りつぶす{@code delete}ではなく
+     * {@code deleteStrict}を使い、失敗は原因に{@link ImportStageCleanupFailure}を付けた500で返す。
+     * 取込側はこの印から照合台帳へ記録し、metricで通知し、照合batchで再試行する。
+     */
+    private void deleteImportStorageOrThrow(String storageKey, String operationId) {
+        try {
+            documentStorage.deleteStrict(storageKey);
+        } catch (Exception failure) {
+            log.error("[文書台帳] import storageの補償削除に失敗しました: operationId={} storageKey={} exceptionClass={}",
+                    operationId, storageKey, failure.getClass().getSimpleName());
+            BusinessException cleanup = BusinessException.of(500, "error.import.storageCleanupFailed");
+            cleanup.initCause(new ImportStageCleanupFailure(storageKey, operationId, failure));
+            throw cleanup;
+        }
+    }
+
+    private static String sha256File(Path path, Runnable deadlineCheckpoint) throws java.io.IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                for (int read; (read = input.read(buffer)) != -1;) {
+                    deadlineCheckpoint.run();
+                    digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256が利用できません", impossible);
+        }
+    }
+
+    /** storage書込中もingress総期限を確認する。超過例外はそのまま伝播し、呼出元catchでstageを自己削除する。 */
+    private static final class DeadlineCheckpointInputStream extends java.io.FilterInputStream {
+        private final Runnable deadlineCheckpoint;
+
+        private DeadlineCheckpointInputStream(InputStream input, Runnable deadlineCheckpoint) {
+            super(input);
+            this.deadlineCheckpoint = deadlineCheckpoint;
+        }
+
+        @Override
+        public int read() throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read();
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read(buffer, offset, length);
+        }
+
+        @Override
+        public long skip(long count) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.skip(count);
+        }
     }
 
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
@@ -189,7 +375,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 claimHashIfRequired(doc, streamResult.sha256());
                 documentVersionMapper.insert(version);
                 if (request.getTargetType() != null && request.getTargetId() != null) {
-                    linkWithinRegistration(doc.getId(), tenantId, request.getTargetType(), request.getTargetId());
+                    documentLinkCommandService.link(tenantId, doc.getId(), request.getTargetType(), request.getTargetId());
                 }
                 recordAccessLog(doc.getId(), version.getId(), "REGISTER");
             }
@@ -284,15 +470,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 // 直接生成された旧test adapterでは外側transactionのrollbackを補償する。
                 registerStorageRollbackCompensation(storageKey);
                 documentVersionMapper.insert(version);
-                if ("CONFIRMED".equals(doc.getStatus())) {
-                    int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                            .eq(Document::getId, documentId)
-                            .eq(Document::getVersion, doc.getVersion())
-                            .set(Document::getStatus, "AMENDED")
-                            .set(Document::getVersion, doc.getVersion() + 1));
-                    if (updated == 0) {
-                        throw BusinessException.of(409, "error.document.optimisticLock");
-                    }
+                // AMENDEDは利用可否を変えないためepochを進めない（NF01 F3）。状態列の更新はDocumentEligibilityServiceへ集める。
+                if (documentEligibilityService.markAmended(doc)) {
                     recordAccessLog(documentId, version.getId(), "AMEND");
                 }
             }
@@ -375,23 +554,99 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void link(Long documentId, String targetType, Long targetId) {
-        getDocumentOrThrow(documentId);
-        linkWithinRegistration(documentId, currentTenant(null), targetType, targetId);
+        Document doc = getDocumentOrThrow(documentId);
+        // 文書行のX lock → link挿入 → 証跡利用可否epochの増分（NF01 F3）。tenantは文書行の値を使う。
+        documentLinkCommandService.link(doc.getTenantId(), doc.getId(), targetType, targetId);
     }
 
-    private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {
-        DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
-                .eq(DocumentLink::getTenantId, tenantId)
-                .eq(DocumentLink::getDocumentId, documentId)
-                .eq(DocumentLink::getTargetType, targetType)
-                .eq(DocumentLink::getTargetId, targetId));
-        if (existing == null) {
-            DocumentLink link = new DocumentLink();
-            link.setTenantId(tenantId);
-            link.setDocumentId(documentId);
-            link.setTargetType(targetType);
-            link.setTargetId(targetId);
-            documentLinkMapper.insert(link);
+    @Override
+    public DocumentVersion authorizeImportSourceRegistration(Long documentId, Long documentVersionId,
+                                                              Integer versionNo, String expectedSha256,
+                                                              Long expectedLegalEntityId) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .eq(Document::getId, documentId)
+                .eq(Document::getDeletedFlag, 0)
+                .last("FOR UPDATE"));
+        if (document == null || documentId == null || documentVersionId == null || versionNo == null
+                || expectedLegalEntityId == null
+                || !String.valueOf(expectedLegalEntityId).equals(document.getLegalEntityId())) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, tenantId)
+                .eq(DocumentVersion::getDocumentId, documentId)
+                .eq(DocumentVersion::getId, documentVersionId)
+                .eq(DocumentVersion::getVersionNo, versionNo)
+                .eq(DocumentVersion::getDeletedFlag, 0)
+                .last("FOR UPDATE"));
+        if (version == null || !"CLEAN".equals(version.getScanStatus())
+                || expectedSha256 == null || !expectedSha256.equalsIgnoreCase(version.getSha256())
+                || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null && document.getRetentionUntil().isBefore(LocalDate.now()))) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        assertDocumentAccessAllowed(document);
+        com.ses.service.security.impl.FileScopeValidationService fileScope =
+                fileScopeValidationServiceProvider.getIfAvailable();
+        if (fileScope == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        fileScope.assertDownloadAllowed(version.getStorageKey(), version.getId(), version.getSha256());
+        return version;
+    }
+
+    @Override
+    public DocumentVersion authorizeImportJobDownload(Long jobId, Long documentId, Long documentVersionId,
+                                                       Integer versionNo, String expectedSha256) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId).eq(Document::getId, documentId)
+                .eq(Document::getDeletedFlag, 0));
+        DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, tenantId).eq(DocumentVersion::getDocumentId, documentId)
+                .eq(DocumentVersion::getId, documentVersionId).eq(DocumentVersion::getVersionNo, versionNo)
+                .eq(DocumentVersion::getDeletedFlag, 0));
+        if (document == null || version == null || !"CLEAN".equals(version.getScanStatus())
+                || expectedSha256 == null || !expectedSha256.equalsIgnoreCase(version.getSha256())
+                || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null && document.getRetentionUntil().isBefore(LocalDate.now()))) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        assertDocumentAccessAllowed(document);
+        com.ses.service.security.impl.FileScopeValidationService fileScope =
+                fileScopeValidationServiceProvider.getIfAvailable();
+        if (fileScope == null) throw BusinessException.of(403, "error.forbidden");
+        fileScope.assertImportJobDownloadAllowed(jobId, documentId, documentVersionId, versionNo,
+                version.getStorageKey(), version.getSha256());
+        return version;
+    }
+
+    @Override
+    public void verifyImportJobStoredBytes(Long jobId, Long documentId, Long documentVersionId,
+                                           Integer versionNo, String expectedSha256) {
+        DocumentVersion version = authorizeImportJobDownload(jobId, documentId, documentVersionId,
+                versionNo, expectedSha256);
+        try (InputStream input = documentStorage.open(version.getStorageKey())) {
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
+                digest.update(buffer, 0, read);
+            }
+            if (version.getSizeBytes() == null || count != version.getSizeBytes()
+                    || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+            authorizeImportJobDownload(jobId, documentId, documentVersionId, versionNo, expectedSha256);
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
         }
     }
 
@@ -401,17 +656,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         Document doc = getDocumentOrThrow(documentId);
         assertDocumentAccessAllowed(doc);
         int newFlag = hold ? 1 : 0;
-        if (doc.getLegalHoldFlag() == newFlag) {
+        if (Integer.valueOf(newFlag).equals(doc.getLegalHoldFlag())) {
             return;
         }
-        int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                .eq(Document::getId, documentId)
-                .eq(Document::getVersion, doc.getVersion())
-                .set(Document::getLegalHoldFlag, newFlag)
-                .set(Document::getVersion, doc.getVersion() + 1));
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.optimisticLock");
-        }
+        // 文書行のX lock → CAS → 証跡利用可否epochの増分（設定・解除とも。NF01 F3）
+        documentEligibilityService.changeLegalHold(doc, hold);
         recordAccessLog(documentId, null, hold ? "LEGAL_HOLD" : "LEGAL_HOLD_RELEASE");
         log.info("[文書台帳] legal hold {}. documentId={} reason={}", hold ? "設定" : "解除", documentId, reason);
     }
@@ -434,12 +683,15 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         Long currentUserId = SecurityUtils.currentUserId();
 
-        DocumentDisposalRequest req = new DocumentDisposalRequest();
-        req.setDocumentId(documentId);
-        req.setRequestedBy(currentUserId);
-        req.setStatus("PENDING");
-        req.setReason(reason);
-        documentDisposalRequestMapper.insert(req);
+        // D2: NF07 保全hold は legal_hold_flag と独立に、同じ transaction の中・申請の作成の前に判定する（plan §3.4.2）。
+        // 当たれば（または判定できなければ）409 で申請を作らない。hold 機構を使っていない tenant では照会は gate の1回だけ
+        privacyHoldPathGuard.requireDocumentDisposable(
+                com.ses.privacy.production.retention.hold.PrivacyHoldPath.D2, doc.getTenantId(), doc.getId(),
+                doc.getDocumentType());
+
+        // 文書行のX lock → 条件の再確認 → 申請insert → 証跡利用可否epochの増分（NF01 F3）
+        DocumentDisposalRequest req = documentEligibilityService.requestDisposal(
+                doc.getTenantId(), doc.getId(), currentUserId, reason);
 
         recordAccessLog(documentId, null, "DISPOSE_REQUEST");
         log.info("[文書台帳] 廃棄申請: documentId={} requestedBy={}", documentId, currentUserId);
@@ -458,7 +710,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional(rollbackFor = Exception.class)
     public void approveDisposal(Long disposalRequestId) {
         assertAdminUser();
-        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
+        DisposalTarget target = getDisposalRequestOrThrow(disposalRequestId);
+        DocumentDisposalRequest req = target.request();
         if (!"PENDING".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotPending");
         }
@@ -468,16 +721,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             throw BusinessException.of(400, "error.document.disposalSelfApproval");
         }
 
-        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                .eq(DocumentDisposalRequest::getStatus, "PENDING")
-                .set(DocumentDisposalRequest::getStatus, "APPROVED")
-                .set(DocumentDisposalRequest::getApprovedBy, currentUserId)
-                .set(DocumentDisposalRequest::getApprovedAt, LocalDateTime.now()));
-
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
-        }
+        // 文書行のX lock → 申請CAS（PENDING→APPROVED）→ 証跡利用可否epochの増分（NF01 F3）
+        documentEligibilityService.approveDisposal(target.document().getTenantId(), target.document().getId(),
+                disposalRequestId, currentUserId);
 
         recordAccessLog(req.getDocumentId(), null, "DISPOSE_APPROVE");
         log.info("[文書台帳] 廃棄申請を承認しました: requestId={} approvedBy={}", disposalRequestId, currentUserId);
@@ -487,38 +733,39 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional(rollbackFor = Exception.class)
     public void rejectDisposal(Long disposalRequestId, String reason) {
         assertAdminUser();
-        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
+        DisposalTarget target = getDisposalRequestOrThrow(disposalRequestId);
+        DocumentDisposalRequest req = target.request();
         if (!"PENDING".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotPending");
         }
 
         Long currentUserId = SecurityUtils.currentUserId();
-        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                .eq(DocumentDisposalRequest::getStatus, "PENDING")
-                .set(DocumentDisposalRequest::getStatus, "REJECTED")
-                .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | 却下理由: " : "却下理由: ") + reason)
-                .set(DocumentDisposalRequest::getApprovedBy, currentUserId)
-                .set(DocumentDisposalRequest::getApprovedAt, LocalDateTime.now()));
-
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
-        }
+        // 文書行のX lock → 申請CAS（PENDING→REJECTED）→ 証跡利用可否epochの増分（NF01 F3）
+        documentEligibilityService.rejectDisposal(target.document().getTenantId(), target.document().getId(),
+                disposalRequestId, currentUserId,
+                (req.getReason() != null ? req.getReason() + " | 却下理由: " : "却下理由: ") + reason);
 
         recordAccessLog(req.getDocumentId(), null, "DISPOSE_REJECT");
         log.info("[文書台帳] 廃棄申請を却下しました: requestId={} rejectedBy={}", disposalRequestId, currentUserId);
     }
 
+    /**
+     * 承認済みの廃棄申請を執行する。READ_COMMITTEDで動かし、文書行のX lockを取った後に版の一覧を読む
+     * （REPEATABLE READでは最初の読取のsnapshotのままlock前にcommitされた版を取りこぼし、その版のstorageが残る）。
+     * 版追加（{@code DocumentMetadataCommitService.commitVersion}）は同じ文書行のX lockの下でDISPOSEDを拒否するため、
+     * lock後に読んだ一覧が廃棄対象の全版になる。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void executeDisposal(Long disposalRequestId) {
         assertAdminUser();
-        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
+        DisposalTarget target = getDisposalRequestOrThrow(disposalRequestId);
+        DocumentDisposalRequest req = target.request();
         if (!"APPROVED".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotApproved");
         }
 
-        Document doc = getDocumentOrThrow(req.getDocumentId());
+        Document doc = target.document();
         if (doc.getLegalHoldFlag() != null && doc.getLegalHoldFlag() == 1) {
             throw BusinessException.of(400, "error.document.legalHoldActive");
         }
@@ -526,63 +773,76 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
-        List<DocumentVersion> versions = findVersions(doc.getTenantId(), req.getDocumentId());
+        // D1: NF07 保全hold は legal_hold_flag と独立に、同じ transaction の中・DISPOSED への更新の前に判定する（plan §3.4.2）。
+        // 当たれば（または判定できなければ）409。legal_hold_flag は立てない（正本を2つにしない）
+        privacyHoldPathGuard.requireDocumentDisposable(
+                com.ses.privacy.production.retention.hold.PrivacyHoldPath.D1, doc.getTenantId(), doc.getId(),
+                doc.getDocumentType());
 
-        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                .eq(Document::getId, req.getDocumentId())
-                .set(Document::getStatus, "DISPOSED"));
-        documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                .set(DocumentDisposalRequest::getStatus, "DISPOSED")
-                .set(DocumentDisposalRequest::getDisposedAt, LocalDateTime.now()));
+        // 文書行のX lock → holdと状態の再確認 → DISPOSED・申請CAS → 証跡利用可否epochの増分（NF01 F3）。
+        // storageの物理削除はcommit後に行うため、証跡readerはDISPOSEDを必ず先に観測する。
+        if (!documentEligibilityService.executeDisposal(doc.getTenantId(), doc.getId(), disposalRequestId)) {
+            return;
+        }
+        // lock取得後に読む（READ_COMMITTEDのため、lock前にcommitされた版も含む）。
+        List<DocumentVersion> versions = findVersions(doc.getTenantId(), req.getDocumentId());
+        String failedReasonPrefix = req.getReason() != null ? req.getReason() + " | " : "";
 
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    boolean allSuccess = true;
-                    List<String> failedKeys = new ArrayList<>();
-                    for (DocumentVersion v : versions) {
-                        try {
-                            documentStorage.delete(v.getStorageKey());
-                        } catch (Exception e) {
-                            allSuccess = false;
-                            failedKeys.add(v.getStorageKey());
-                            log.error("[文書台帳] Storage削除失敗: key={} exceptionClass={} detail={}",
-                                    v.getStorageKey(),
-                                    com.ses.common.util.LogRedaction.exceptionType(e),
-                                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
-                        }
-                    }
-                    if (!allSuccess) {
+                    List<String> failedKeys = deleteDisposedStorage(versions);
+                    if (!failedKeys.isEmpty()) {
                         log.error("[文書台帳] 一部Storageの削除に失敗しました: documentId={} failedKeys={}",
                                 req.getDocumentId(), failedKeys);
-                        documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                                .set(DocumentDisposalRequest::getStatus, "FAILED")
-                                .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys)));
+                        recordDisposalStorageFailure(disposalRequestId, req.getDocumentId(),
+                                failedReasonPrefix + "Storage物理削除失敗: " + String.join(", ", failedKeys));
                     }
                 }
             });
         } else {
-            List<String> failedKeys = new ArrayList<>();
-            for (DocumentVersion v : versions) {
-                try {
-                    documentStorage.delete(v.getStorageKey());
-                } catch (Exception e) {
-                    failedKeys.add(v.getStorageKey());
-                }
-            }
+            List<String> failedKeys = deleteDisposedStorage(versions);
             if (!failedKeys.isEmpty()) {
-                documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                        .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                        .set(DocumentDisposalRequest::getStatus, "FAILED")
-                        .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys)));
+                recordDisposalStorageFailure(disposalRequestId, req.getDocumentId(),
+                        failedReasonPrefix + "Storage物理削除失敗: " + String.join(", ", failedKeys));
             }
         }
 
         recordAccessLog(req.getDocumentId(), null, "DISPOSE");
         log.info("[文書台帳] 廃棄実行指示完了: documentId={}", req.getDocumentId());
+    }
+
+    private List<String> deleteDisposedStorage(List<DocumentVersion> versions) {
+        List<String> failedKeys = new ArrayList<>();
+        for (DocumentVersion v : versions) {
+            try {
+                documentStorage.delete(v.getStorageKey());
+            } catch (Exception e) {
+                failedKeys.add(v.getStorageKey());
+                log.error("[文書台帳] Storage削除失敗: key={} exceptionClass={} detail={}",
+                        v.getStorageKey(),
+                        com.ses.common.util.LogRedaction.exceptionType(e),
+                        com.ses.common.util.LogRedaction.safeThrowableSummary(e));
+            }
+        }
+        return failedKeys;
+    }
+
+    /**
+     * storage削除失敗をFAILEDとして記録する。廃棄はcommit済みのため、記録の失敗で応答を500にせずWARNだけを残す
+     * （DISPOSEDは終端で不適格のままのためepochは進めない）。
+     */
+    private void recordDisposalStorageFailure(Long disposalRequestId, Long documentId, String reasonText) {
+        try {
+            if (documentEligibilityService.markDisposalStorageFailed(disposalRequestId, reasonText) == 0) {
+                log.warn("[文書台帳] 廃棄申請がDISPOSEDでないためFAILEDを記録しませんでした: requestId={} documentId={}",
+                        disposalRequestId, documentId);
+            }
+        } catch (RuntimeException failure) {
+            log.warn("[文書台帳] storage削除失敗のFAILED記録に失敗しました: requestId={} documentId={} exceptionType={}",
+                    disposalRequestId, documentId, com.ses.common.util.LogRedaction.exceptionType(failure));
+        }
     }
 
     @Override
@@ -640,15 +900,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         LocalDate retentionUntil = computeRetentionUntil(doc);
 
-        int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                .eq(Document::getId, documentId)
-                .eq(Document::getVersion, doc.getVersion())
-                .set(Document::getStatus, "CONFIRMED")
-                .set(Document::getRetentionUntil, retentionUntil)
-                .set(Document::getVersion, doc.getVersion() + 1));
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.optimisticLock");
-        }
+        // DRAFT→CONFIRMEDは利用可否を変えないためepochを進めない。文書行のX lockの下でCASする（NF01 F3）。
+        documentEligibilityService.confirm(doc, retentionUntil);
         log.info("[文書台帳] 確定: documentId={} retentionUntil={}", documentId, retentionUntil);
     }
 
@@ -729,14 +982,17 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 .eq(Document::getTenantId, tenantId));
     }
 
-    private DocumentDisposalRequest getDisposalRequestOrThrow(Long id) {
+    /** 廃棄申請と、その親文書（tenant・法人境界を検証済み）。親文書のtenantを証跡利用可否epochのanchorに使う。 */
+    private record DisposalTarget(DocumentDisposalRequest request, Document document) {}
+
+    private DisposalTarget getDisposalRequestOrThrow(Long id) {
         DocumentDisposalRequest req = documentDisposalRequestMapper.selectById(id);
         if (req == null) {
             throw BusinessException.of(404, "error.document.disposalNotFound");
         }
         // 申請IDだけで別法人の廃棄操作へ到達できないよう、親文書の境界も検証する。
-        getDocumentOrThrow(req.getDocumentId());
-        return req;
+        Document document = getDocumentOrThrow(req.getDocumentId());
+        return new DisposalTarget(req, document);
     }
 
     private Document buildDocument(DocumentRegisterRequest request, String tenantId, Long legalEntityId,
@@ -1154,6 +1410,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 .build();
     }
 
+    @Override
     public void assertDocumentAccessAllowed(Document doc) {
         // 管理者も法人境界は越えない。歴史NULLは修復完了までfail-closedとする。
         assertDigitalInvoiceDocumentAccess(doc);
@@ -1170,6 +1427,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
+        // 種別ごとの規則（ここと呼出し先の private method、FileScopeValidationService）へ SKILL_SHEET を加えるときは、
+        // NF01 二者確認の可視性（DocumentEvidenceEligibility#visibleEvidenceCandidate。ENGINEER link の data scope だけを見る）も
+        // 同じ規則へ合わせ直す。DocumentEvidenceEligibilityTest が source を読んで SKILL_SHEET が無いことを固定している（RB-NF01 D-P3-1）。
         boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();
         if (isHr) {
             if (Set.of("ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE").contains(doc.getDocumentType())) {

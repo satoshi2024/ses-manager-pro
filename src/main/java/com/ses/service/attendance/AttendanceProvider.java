@@ -16,6 +16,12 @@ import java.util.List;
  */
 public interface AttendanceProvider {
 
+    /**
+     * 要員が外部の従業員と対応付けされていないことを表すmessage key。pushでこのkeyの例外を受けた要員は
+     * エラーではなく対象外として数える（外部で給与計算しない要員まで失敗扱いにしない）。
+     */
+    String NOT_LINKED_KEY = "error.attendance.sync.freeeEmployeeNotLinked";
+
     /** provider識別子（"mock" / "freee"）。 */
     String source();
 
@@ -39,4 +45,13 @@ public interface AttendanceProvider {
      * @return 外部レコード一覧
      */
     List<ExternalAttendanceRecord> fetchUpdatedSince(String cursor);
+
+    /**
+     * 対象月の外部レコードを取得する（read-only照合）。既定は {@link #fetchUpdatedSince(String)}。
+     * 更新日時を返さない外部（freeeの日次勤怠等）は月単位の全件スナップショットを返し、
+     * レコードの {@code updatedAt} をnullにする。
+     */
+    default List<ExternalAttendanceRecord> fetchForMonth(java.time.YearMonth month, String cursor) {
+        return fetchUpdatedSince(cursor);
+    }
 }

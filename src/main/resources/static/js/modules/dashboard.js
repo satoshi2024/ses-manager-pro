@@ -294,7 +294,7 @@ function renderCharts(chartsData) {
     });
 }
 
-// 起点月の売上口径を全社KPIと突合した結果を1行で表示する。
+// 起点月の売上の集計基準を全社KPIと突合した結果を1行で表示する。
 // 差分が出るのは実績未確定・未請求の売上があるときで、その分は入金予定に現れていない。
 function renderCashflowReconcileNote(rec) {
     const el = document.getElementById('cashflowReconcileNote');
