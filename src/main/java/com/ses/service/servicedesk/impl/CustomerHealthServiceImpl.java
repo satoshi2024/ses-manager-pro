@@ -109,20 +109,20 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     @Transactional(readOnly = true)
     public CustomerHealthScoreDto calculateCustomerHealth(Long customerId) {
         if (customerId == null) {
-            throw BusinessException.of(400, "顧客IDは必須です");
+            throw BusinessException.of(400, "error.customerHealth.customerIdRequired");
         }
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         assertAllowedCustomer(customerId);
 
         Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, customerId);
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
-            throw BusinessException.of(404, "指定された顧客が見つかりません");
+            throw BusinessException.of(404, "error.customerSuccess.customerNotFound");
         }
 
         Map<Long, CustomerHealthScoreDto> map = getHealthMapForCustomers(Set.of(customerId));
         CustomerHealthScoreDto dto = map.get(customerId);
         if (dto == null) {
-            throw BusinessException.of(404, "顧客ヘルススコアの算定に失敗しました");
+            throw BusinessException.of(404, "error.customerHealth.scoreFailed");
         }
         return dto;
     }
@@ -366,7 +366,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                 && authentication.getAuthorities().stream()
                 .anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (!admin) {
-            throw BusinessException.of(403, "顧客ヘルススナップショットは認証済み管理者または許可されたschedulerのみ実行可能です");
+            throw BusinessException.of(403, "error.customerHealth.snapshotForbidden");
         }
         generateMonthlySnapshot(targetMonth, reason,
                 SnapshotExecutionContext.admin(SecurityUtils.currentUsername(), SecurityUtils.currentUserId()));
@@ -386,20 +386,20 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         }
 
         if (!MONTH_PATTERN.matcher(effectiveMonth).matches()) {
-            throw BusinessException.of(400, "対象月の形式が不正です (YYYY-MM形式で指定してください)");
+            throw BusinessException.of(400, "error.customerHealth.invalidMonth");
         }
 
         LocalDate snapshotDate;
         try {
             snapshotDate = LocalDate.parse(effectiveMonth + "-01");
         } catch (DateTimeParseException e) {
-            throw BusinessException.of(400, "対象月の形式が不正です (YYYY-MM形式で指定してください)");
+            throw BusinessException.of(400, "error.customerHealth.invalidMonth");
         }
 
         // 現行の算定器は現在時点のデータを読むため、過去月を現在値で上書きしない。
         // as-of 算定を導入するまでは、対象月を現在月だけに限定する。
         if (!YearMonth.from(tenantNow()).equals(YearMonth.from(snapshotDate))) {
-            throw BusinessException.of(400, "過去または未来の対象月はas-of算定が未提供のため指定できません");
+            throw BusinessException.of(400, "error.customerHealth.asOfUnsupported");
         }
 
         log.info("顧客ヘルス月次スナップショット生成開始: month={}", effectiveMonth);
@@ -448,24 +448,24 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
 
     private void validateExecutionContext(SnapshotExecutionContext context) {
         if (context == null) {
-            throw BusinessException.of(403, "スナップショット実行主体が必要です");
+            throw BusinessException.of(403, "error.customerHealth.actorRequired");
         }
         if ("SYSTEM".equals(context.actorType())) {
             if (!SnapshotExecutionContext.SYSTEM_SCHEDULER.equals(context.source())
                     || context.actorId() != null || !"SYSTEM".equals(context.actorName())) {
-                throw BusinessException.of(403, "SYSTEM実行は許可されたスケジューラからのみ可能です");
+                throw BusinessException.of(403, "error.customerHealth.systemActorSchedulerOnly");
             }
             return;
         }
         if (!"INTERNAL_USER".equals(context.actorType())) {
-            throw BusinessException.of(403, "スナップショット実行主体の種別が不正です");
+            throw BusinessException.of(403, "error.customerHealth.invalidActorType");
         }
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         boolean admin = authentication != null && authentication.isAuthenticated()
                 && authentication.getAuthorities().stream()
                 .anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (!admin || !SnapshotExecutionContext.ADMIN_HTTP.equals(context.source())) {
-            throw BusinessException.of(403, "管理者の明示的な実行主体が必要です");
+            throw BusinessException.of(403, "error.customerHealth.adminActorRequired");
         }
     }
 
@@ -483,7 +483,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                 return;
             }
             if (latest != null && !StringUtils.hasText(reason)) {
-                throw BusinessException.of(400, "既存スナップショットを修正する場合は修正理由が必須です");
+                throw BusinessException.of(400, "error.customerHealth.correctionReasonRequired");
             }
 
             int version = latest == null ? 1 : latest.getVersionNo() + 1;
@@ -516,7 +516,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             } catch (DuplicateKeyException duplicate) {
                 // 別トランザクションが同じ版を先に挿入した場合は再読込する。
                 if (attempt == 2) {
-                    throw BusinessException.of(409, "顧客ヘルススナップショットの同時更新が競合しました");
+                    throw BusinessException.of(409, "error.customerHealth.snapshotConflict");
                 }
             }
         }

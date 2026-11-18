@@ -146,7 +146,7 @@ public class PortalCustomerServiceDeskApiController {
         if (req.getContractId() != null) {
             Contract contract = contractMapper.selectByIdForCustomerAndTenant(req.getContractId(), custId, tenantId);
             if (contract == null || !Objects.equals(contract.getCustomerId(), custId)) {
-                throw BusinessException.of(400, "指定された契約は自社に紐付いていません");
+                throw BusinessException.of(400, "error.serviceDesk.portalContractNotOwned");
             }
         }
 
@@ -154,7 +154,7 @@ public class PortalCustomerServiceDeskApiController {
         if (req.getProjectId() != null) {
             Project project = projectMapper.selectByIdForCustomerAndTenant(req.getProjectId(), custId, tenantId);
             if (project == null || !Objects.equals(project.getCustomerId(), custId)) {
-                throw BusinessException.of(400, "指定された案件は自社に紐付いていません");
+                throw BusinessException.of(400, "error.serviceDesk.portalProjectNotOwned");
             }
         }
 
@@ -162,7 +162,7 @@ public class PortalCustomerServiceDeskApiController {
         if (req.getContactId() != null) {
             CustomerContact contact = contactMapper.selectByIdForTenant(req.getContactId(), custId, tenantId);
             if (contact == null || !Objects.equals(contact.getCustomerId(), custId)) {
-                throw BusinessException.of(400, "指定された顧客担当者は自社に紐付いていません");
+                throw BusinessException.of(400, "error.serviceDesk.portalContactNotOwned");
             }
         }
 
@@ -170,12 +170,12 @@ public class PortalCustomerServiceDeskApiController {
         if (req.getEngineerId() != null) {
             Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, req.getEngineerId());
             if (engineer == null) {
-                throw BusinessException.of(400, "指定された要員が見つかりません");
+                throw BusinessException.of(400, "error.serviceDesk.engineerNotFound");
             }
             Long contractCount = contractMapper.countByCustomerAndEngineerForTenant(
                     custId, req.getEngineerId(), tenantId);
             if (contractCount == null || contractCount == 0) {
-                throw BusinessException.of(400, "指定された要員は自社の契約に紐付いていません");
+                throw BusinessException.of(400, "error.serviceDesk.portalEngineerNotOnOwnContract");
             }
         }
 

@@ -449,7 +449,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("無効なチャネルです"));
+        assertEquals("error.serviceDesk.invalidChannel", ex.getMessage());
     }
 
     @Test
@@ -492,7 +492,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("有効なSLAポリシー"));
+        assertEquals("error.serviceDesk.slaPolicyNotFound", ex.getMessage());
 
         Long countReq = serviceRequestMapper.selectCount(
                 new LambdaQueryWrapper<ServiceRequest>().eq(ServiceRequest::getSubject, "SLAポリシー未定義テスト")
@@ -530,7 +530,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req2, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("月間リクエスト採番上限（9999件）を超過しました"));
+        assertEquals("error.serviceDesk.monthlySequenceExceeded", ex.getMessage());
     }
 
     @Test
@@ -548,7 +548,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex1 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqNonexistent, 100L, false, null));
         assertEquals(400, ex1.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", ex1.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", ex1.getMessage());
 
         // 2. 無効化されたユーザー (status = 0)
         SysUser inactiveUser = SysUser.builder()
@@ -571,7 +571,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex2 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqInactive, 100L, false, null));
         assertEquals(400, ex2.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", ex2.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", ex2.getMessage());
 
         // 3. 対象外ロール (HR)
         SysUser hrUser = SysUser.builder()
@@ -636,7 +636,7 @@ class ServiceRequestServiceImplTest {
         BusinessException createError = assertThrows(BusinessException.class,
                 () -> serviceRequestService.createRequest(create, 100L, false, null));
         assertEquals(400, createError.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", createError.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", createError.getMessage());
         assertTrue(!createError.getMessage().contains("DO-NOT-LEAK"));
         assertEquals(0L, serviceRequestMapper.selectCount(new LambdaQueryWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getSubject, "tenant境界create")));
