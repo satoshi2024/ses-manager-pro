@@ -13,7 +13,8 @@ public interface PolicyRegistrationVerifier {
      *
      * @param callerTenant 登録者・有効化者の tenant（envelope の tenant と完全一致しなければ拒否）
      * @param canonical    envelope の canonical bytes（{@link ApprovalEnvelopeCanonicalizer} の v1 形式）
-     * @param signature    canonical bytes への署名
+     * @param signature    canonical bytes の digest 声明（{@link PolicyEnvelopeSigningStatement}）への Ed25519 署名（本番は
+     *                     この形だけを受け付け、canonical bytes そのものへの署名は拒否する）
      * @throws PolicyRegistrationRejectedException 拒否（理由は固定 code）
      * @throws SecurityException                   prod profile ではない
      */

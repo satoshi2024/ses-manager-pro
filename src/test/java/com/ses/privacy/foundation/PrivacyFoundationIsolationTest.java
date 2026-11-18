@@ -92,6 +92,47 @@ class PrivacyFoundationIsolationTest {
         assertEquals(allowed, found, "許可した呼出し元と実際の出現が一致しません");
     }
 
+    /**
+     * canonical bytes そのものへの署名の検証（{@code PurePolicyVerificationKernel.verifySignature}）は、本番ではない合成の
+     * {@link ApprovalEnvelopeVerifier} だけが呼ぶ。本番の policy envelope は digest 声明への署名だけを受け付ける
+     * （{@code verifyProductionPolicySignature}。RB-NF07-TRUST-KMS review P3-2・delta review P3-d）ため、本番の class が誤って
+     * 直接の署名の検証を使わないよう、呼出し元を source の走査で固定する。kernel は package-private なので、呼べるのは foundation の
+     * class だけで、static import も許さない。
+     */
+    @Test
+    void canonical_bytesへの直接の署名の検証は合成層のApprovalEnvelopeVerifierだけが呼ぶ() throws Exception {
+        Path root = Path.of("src/main/java");
+        java.util.Set<String> callers = new java.util.TreeSet<>();
+        java.util.Set<String> productionCallers = new java.util.TreeSet<>();
+        java.util.List<String> violations = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> files = Files.walk(root)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = com.ses.testsupport.JavaSourceText.stripComments(
+                        Files.readString(file, java.nio.charset.StandardCharsets.UTF_8));
+                String relative = root.relativize(file).toString().replace('\\', '/');
+                if (source.contains("PurePolicyVerificationKernel.verifySignature(")) {
+                    callers.add(relative);
+                }
+                if (source.contains("PurePolicyVerificationKernel.verifyProductionPolicySignature(")) {
+                    productionCallers.add(relative);
+                }
+                if (source.contains("import static com.ses.privacy.foundation.PurePolicyVerificationKernel")) {
+                    violations.add(relative + " static import");
+                }
+            }
+        }
+        String kernel = com.ses.testsupport.JavaSourceText.stripComments(Files.readString(
+                root.resolve("com/ses/privacy/foundation/PurePolicyVerificationKernel.java"),
+                java.nio.charset.StandardCharsets.UTF_8));
+        // kernel の中でも、直接の署名の検証は宣言の1か所だけ（本番の検証の中から呼ばない）
+        assertEquals(1, kernel.split("verifySignature\\(", -1).length - 1, "kernel 内の verifySignature( の出現");
+        assertTrue(violations.isEmpty(), "PurePolicyVerificationKernel の static import: " + violations);
+        assertEquals(java.util.Set.of("com/ses/privacy/foundation/ApprovalEnvelopeVerifier.java"), callers,
+                "canonical bytes への直接の署名の検証の呼出し元");
+        assertEquals(java.util.Set.of("com/ses/privacy/foundation/ProductionApprovalEnvelopeVerifier.java"),
+                productionCallers, "digest 声明の署名の検証の呼出し元");
+    }
+
     @Test
     void production部品はProductionPrivacyComponents経由でしか生成できない() throws Exception {
         for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,

@@ -15,7 +15,8 @@ import org.springframework.stereotype.Component;
  *   <li>{@code privacy.retention.enabled} が OFF: 何も検査せず、起動を止めない（OFF の間は入口が404で、trust を読む経路が無い）。</li>
  *   <li>trust が未設定（{@link UnconfiguredPrivacyTrustSource}。第1期）: 違反ではない（登録・有効化と解除の入口が404のまま）。</li>
  *   <li>ON で KMS の trust を設定した: 設定（{@code anchor-file} が絶対 path、{@code max-document-age} が5分〜31日、
- *       {@code reload-interval} が1秒〜5分。時間の値は解釈できなければ {@code *.invalid}。OFF の起動では bind も失敗しない）と文書（読める・1MiB 以下・{@link KmsTrustDocument} の規則）の<b>構造的な不足</b>が
+ *       {@code reload-interval} が1秒〜5分。時間の値は解釈できなければ {@code *.invalid}。OFF の起動では bind も失敗しない）と文書（読める・1MiB 以下・{@link KmsTrustDocument} の規則・file の I/O が20秒の内に終わる（EFS に届かなければ
+ *       {@code trust.kms.document.timeout}））の<b>構造的な不足</b>が
  *       1つでもあれば、固定の違反コードだけを列挙して起動を止める（Tomcat の port を開く前）。値・公開鍵・ARN は出さない。</li>
  *   <li><b>時間要因</b>（文書が鮮度の上限を過ぎた・作成日時が未来、有効期間内で ACTIVE の anchor が無い）だけなら起動は止めず、
  *       WARN（{@value #LOG_CODE_NOT_READY}）を出す。入口は閉じたまま（gate が anchor・失効状態を確認できない）で、文書を

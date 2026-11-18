@@ -27,6 +27,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * D-03（AWS KMS 非対称署名、鍵 version 単位の失効。2026-11-18 決定）の {@link PrivacyTrustSource} の adapter（NF07-TRUST）。
@@ -58,6 +63,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * 巻戻しとして文書全体を受け付けない。どちらも process の中だけの防護で、再起動の後は文書の値に従う（そのため運用では
  * {@code REVOKED} を戻さず、古い版を置かない。deploy-runbook §4.6）。
  *
+ * <p>file の I/O で要求を止めない（RB-NF07-TRUST-KMS delta review P2-A）: 文書は EFS（NFS、Fargate では hard mount の見込み）に
+ * 置くため、file system に届かないと stat・読込みが返らない。判定は1つの lock で直列化するが、lock は最長
+ * {@link #LOCK_WAIT}（0.3秒）しか待たず、lock を持つ thread の I/O が {@link #LOCK_WAIT} を超えて続いていれば待たない。lock を
+ * 取れなかった判定は I/O をせず、最後に file を確かめた時刻（stat・読込みが成功した時刻）から {@code reload-interval} の内なら
+ * 直前に読めた内容を使い、外なら閉じる（anchor 0件・UNKNOWN、WARN {@code UNAVAILABLE reason=document.stalled} を状態が
+ * 変わったときに1回）。止まるのは I/O 中の1 thread だけで、他の要求の待ちは最長 {@link #LOCK_WAIT}。起動時の検査は
+ * {@link #DEFAULT_INSPECT_TIMEOUT}（20秒）で打ち切り、構造的な不足（{@code trust.kms.document.timeout}）として扱う。
+ *
  * <p>状態の変化は WARN / INFO の log（{@value #LOG_CODE_STATE}）に固定の code だけを出す（公開鍵・ARN・参照の値は出さない）。
  * thread-safe。
  */
@@ -74,6 +87,16 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
     /** 文書の作成日時が判定の時刻より未来でも受け付ける幅（作成した host の時計の進み）。 */
     static final Duration GENERATED_AT_FUTURE_TOLERANCE = Duration.ofMinutes(5);
 
+    /**
+     * lock を待つ上限。stat・読込みは通常 µs〜ms（EFS でも同じ AZ の往復は ms 程度）で、その100倍以上の余裕があり平常時に
+     * 誤って閉じることは無い。一方で、利用者の要求1件が trust を数回照会しても止まる時間は1秒程度に収まる（NF08 の送信は
+     * 1件で6回以上照会するが、I/O が止まっていると分かった後は待たない）。固定値（設定にしない）。
+     */
+    static final Duration LOCK_WAIT = Duration.ofMillis(300);
+
+    /** 起動時の検査（{@link #inspect()}）の上限。正常な起動の file の読込みより十分長く、ECS の起動の猶予より短い。 */
+    static final Duration DEFAULT_INSPECT_TIMEOUT = Duration.ofSeconds(20);
+
     private static final ConfiguredPolicyTrustRegistry NO_POLICY_ANCHORS = ConfiguredPolicyTrustRegistry.empty();
     private static final ConfiguredHoldReleaseTrustRegistry NO_HOLD_RELEASE_ANCHORS =
             ConfiguredHoldReleaseTrustRegistry.empty();
@@ -83,10 +106,17 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
     private final Duration maxDocumentAge;
     private final Duration reloadInterval;
     private final Clock clock;
+    private final TrustFileAccess files;
+    private final Duration inspectTimeout;
 
-    private final Object lock = new Object();
+    private final ReentrantLock lock = new ReentrantLock();
     private final Set<String> revokedSeen = ConcurrentHashMap.newKeySet();
-    private Snapshot cached;
+    /** 直前の結果（lock を持つ thread が書き、lock を取れなかった判定が読む）。 */
+    private volatile Snapshot cached;
+    /** 最後に file を確かめた（stat・読込みが成功した）時刻。 */
+    private volatile Instant checkedAt;
+    /** lock を持つ thread が I/O を始めた時刻（{@link System#nanoTime()}。I/O 中でなければ 0）。 */
+    private volatile long ioStartedNanos;
     private Instant lastAcceptedGeneratedAt;
     private volatile String lastState;
 
@@ -97,8 +127,15 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
      * @param clock      verifier と同じ時計
      */
     public KmsPrivacyTrustSource(KmsTrustProperties properties, Clock clock) {
+        this(properties, clock, TrustFileAccess.SYSTEM, DEFAULT_INSPECT_TIMEOUT);
+    }
+
+    /** file の読み方と起動時の検査の上限を指定する（試験で I/O の停止を模擬する）。 */
+    KmsPrivacyTrustSource(KmsTrustProperties properties, Clock clock, TrustFileAccess files, Duration inspectTimeout) {
         Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.files = Objects.requireNonNull(files, "files");
+        this.inspectTimeout = Objects.requireNonNull(inspectTimeout, "inspectTimeout");
         this.path = properties.anchorPath();
         this.propertyViolations = List.copyOf(properties.violations());
         this.maxDocumentAge = properties.maxDocumentAgeValue();
@@ -123,8 +160,36 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
         return reference -> statusOf(snapshot.document(), reference, clock.instant());
     }
 
-    /** 起動時の検査（{@link PrivacyTrustStartupValidator}）。構造的な違反と、時間要因の状態を返す。 */
+    /**
+     * 起動時の検査（{@link PrivacyTrustStartupValidator}）。構造的な違反と、時間要因の状態を返す。file の I/O が止まって
+     * {@code inspectTimeout} の内に終わらなければ、{@code trust.kms.document.timeout} を構造的な違反として返す（読めないのと
+     * 同じ扱い。I/O を続ける daemon thread は残るが、NF07 の flag が ON の起動はこれで止まる）。
+     */
     StartupReport inspect() {
+        FutureTask<StartupReport> task = new FutureTask<>(this::inspectNow);
+        Thread worker = new Thread(task, "nf07-trust-startup-inspect");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            return task.get(inspectTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            task.cancel(true);
+            return failedReport("trust.kms.document.timeout");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return failedReport("trust.kms.document.timeout");
+        } catch (ExecutionException e) {
+            return failedReport("trust.kms.document.unreadable");
+        }
+    }
+
+    private StartupReport failedReport(String code) {
+        List<String> structural = new ArrayList<>(propertyViolations);
+        structural.add(code);
+        return new StartupReport(structural, false, 0, 0);
+    }
+
+    private StartupReport inspectNow() {
         List<String> structural = new ArrayList<>(propertyViolations);
         Snapshot snapshot = snapshot();
         if (snapshot.document() == null) {
@@ -212,25 +277,75 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
         return !now.isBefore(validFrom) && now.isBefore(validUntil);
     }
 
+    /**
+     * 現在の文書。lock は最長 {@link #LOCK_WAIT} しか待たず、lock を持つ thread の I/O が {@link #LOCK_WAIT} を超えて続いて
+     * いれば待たない（{@link #stalled()}）。
+     */
     private Snapshot snapshot() {
-        synchronized (lock) {
-            Instant now = clock.instant();
-            if (path == null) {
-                return remember(Snapshot.failed("anchorFile.notAbsolute", null, now));
+        boolean locked;
+        try {
+            locked = lock.tryLock();
+            if (!locked && !ioStalled()) {
+                locked = lock.tryLock(LOCK_WAIT.toMillis(), TimeUnit.MILLISECONDS);
             }
-            BasicFileAttributes attributes;
-            try {
-                attributes = Files.readAttributes(path, BasicFileAttributes.class);
-            } catch (IOException | RuntimeException e) {
-                return remember(Snapshot.failed("document.unreadable", null, now));
-            }
-            Snapshot current = cached;
-            if (current != null && current.sameFile(attributes)
-                    && now.isBefore(current.loadedAt().plus(reloadInterval))) {
-                return current;
-            }
-            return remember(load(attributes, now));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            locked = false;
         }
+        if (!locked) {
+            return stalled();
+        }
+        try {
+            return refresh();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** lock を持つ thread の I/O が {@link #LOCK_WAIT} を超えて続いているか。 */
+    private boolean ioStalled() {
+        long started = ioStartedNanos;
+        return started != 0 && System.nanoTime() - started > LOCK_WAIT.toNanos();
+    }
+
+    /**
+     * lock を取れなかった（file の I/O が止まっている）判定の結果。I/O はしない。最後に file を確かめた時刻から
+     * {@code reload-interval} の内なら直前に読めた内容、外なら閉じる（anchor 0件・UNKNOWN）。
+     */
+    private Snapshot stalled() {
+        Instant now = clock.instant();
+        Snapshot current = cached;
+        Instant checked = checkedAt;
+        if (current != null && current.document() != null && checked != null
+                && now.isBefore(checked.plus(reloadInterval))) {
+            return current;
+        }
+        noteState("UNAVAILABLE reason=document.stalled", false);
+        return Snapshot.failed("document.stalled", null, now);
+    }
+
+    /** lock を持って file を確かめ、必要なら読み直す。 */
+    private Snapshot refresh() {
+        Instant now = clock.instant();
+        if (path == null) {
+            return remember(Snapshot.failed("anchorFile.notAbsolute", null, now));
+        }
+        BasicFileAttributes attributes;
+        ioStartedNanos = System.nanoTime();
+        try {
+            attributes = files.attributes(path);
+        } catch (IOException | RuntimeException e) {
+            return remember(Snapshot.failed("document.unreadable", null, now));
+        } finally {
+            ioStartedNanos = 0;
+        }
+        checkedAt = now;
+        Snapshot current = cached;
+        if (current != null && current.sameFile(attributes)
+                && now.isBefore(current.loadedAt().plus(reloadInterval))) {
+            return current;
+        }
+        return remember(load(attributes, now));
     }
 
     private Snapshot load(BasicFileAttributes attributes, Instant now) {
@@ -241,10 +356,13 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
             return Snapshot.failed("document.tooLarge", attributes, now);
         }
         byte[] bytes;
+        ioStartedNanos = System.nanoTime();
         try {
-            bytes = Files.readAllBytes(path);
+            bytes = files.read(path);
         } catch (IOException | RuntimeException e) {
             return Snapshot.failed("document.unreadable", attributes, now);
+        } finally {
+            ioStartedNanos = 0;
         }
         if (bytes.length > MAX_DOCUMENT_BYTES) {
             return Snapshot.failed("document.tooLarge", attributes, now);
@@ -300,6 +418,27 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
             log.warn("{}: state={}（hold解除とpolicyの登録・有効化の入口は閉じ、policyの照会はUNKNOWNになります）",
                     LOG_CODE_STATE, state);
         }
+    }
+
+    /** file の読み方（試験で I/O の停止を模擬するための境界）。 */
+    interface TrustFileAccess {
+
+        /** 実際の file system。 */
+        TrustFileAccess SYSTEM = new TrustFileAccess() {
+            @Override
+            public BasicFileAttributes attributes(Path path) throws IOException {
+                return Files.readAttributes(path, BasicFileAttributes.class);
+            }
+
+            @Override
+            public byte[] read(Path path) throws IOException {
+                return Files.readAllBytes(path);
+            }
+        };
+
+        BasicFileAttributes attributes(Path path) throws IOException;
+
+        byte[] read(Path path) throws IOException;
     }
 
     /**
