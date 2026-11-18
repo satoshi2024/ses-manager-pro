@@ -3,7 +3,7 @@
 #
 # baseline §5 failure inventory のうち HFP-03-002 担当分 + RQ-002/006/008/009:
 # lock race、timeout、provider partial failure、replica 未静止、scheduler active、
-# DDL lock conflict、解除 failure、special file 拒否。
+# DDL lock conflict、解除 failure、special file 拒否、uploads snapshot の同一 filesystem 判定（st_dev。RB-W）。
 # fake mysql / fake replica・scheduler fixture を使い、実 DB には接続しない。
 set -uo pipefail
 
@@ -264,6 +264,108 @@ case_uploads_snapshot_encoded_name() {
   assert_contains "$(cat "$T/snap.json")" '..%2fetc' "エンコード名が inventory に残る"
 }
 
+# RB-W: uploads-local.sh の同一 filesystem 判定用の stat の stub（$T/bin/stat。PATH の先頭に置いて uploads-local.sh を起動する）。
+# - stat [-L] -c %d <path>（st_dev）: path が FAKE_STAT_SRC / FAKE_STAT_STAGING なら FAKE_STAT_SRC_DEV / FAKE_STAT_STAGING_DEV を
+#   返す（ERR なら失敗）。
+# - stat -f -c %d（GNU の --file-system の書式では空き inode 数）: FAKE_STAT_FREE_MODE=counter なら呼ぶたびに違う値、
+#   same なら常に 0（0 を返す network fs の再現）。修正前の判定はこの値を比べていた。
+# - それ以外（-c %h・-c %s 等）は実際の stat に任せる。
+setup_fake_stat() { # <src_dev> <staging_dev> <free_mode>
+  mkdir -p "$T/bin"
+  export REAL_STAT_BIN
+  REAL_STAT_BIN=$(command -v stat)
+  export FAKE_STAT_SRC="$T/uploads" FAKE_STAT_STAGING="$T/staging"
+  export FAKE_STAT_SRC_DEV=$1 FAKE_STAT_STAGING_DEV=$2 FAKE_STAT_FREE_MODE=$3 FAKE_STAT_COUNTER="$T/stat-free-counter"
+  cat > "$T/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+fsmode=0 fmt="" path=""
+args=("$@")
+while (( $# > 0 )); do
+  case "$1" in
+    -f|--file-system) fsmode=1 ;;
+    -L|--dereference) : ;;
+    -c) fmt=$2; shift ;;
+    *) path=$1 ;;
+  esac
+  shift
+done
+if [[ "$fmt" == %d ]]; then
+  if (( fsmode )); then
+    if [[ "$FAKE_STAT_FREE_MODE" == counter ]]; then
+      n=$(cat "$FAKE_STAT_COUNTER" 2>/dev/null || echo 1000)
+      printf '%s\n' "$((n + 1))" > "$FAKE_STAT_COUNTER"
+      printf '%s\n' "$n"
+    else
+      printf '0\n'
+    fi
+    exit 0
+  fi
+  dev=""
+  [[ "$path" == "$FAKE_STAT_SRC" ]] && dev=$FAKE_STAT_SRC_DEV
+  [[ "$path" == "$FAKE_STAT_STAGING" ]] && dev=$FAKE_STAT_STAGING_DEV
+  if [[ -n "$dev" ]]; then
+    [[ "$dev" == ERR ]] && { echo "stat: cannot stat '$path'" >&2; exit 1; }
+    printf '%s\n' "$dev"
+    exit 0
+  fi
+fi
+exec "$REAL_STAT_BIN" "${args[@]}"
+EOF
+  chmod +x "$T/bin/stat"
+}
+
+run_uploads_snapshot_with_fake_stat() {
+  UP_OUT=$(PATH="$T/bin:$PATH" "$PROVIDERS/uploads-local.sh" snapshot "$T/uploads" "$T/staging" "$T/snap.json" 2>&1)
+  UP_RC=$?
+}
+
+# 同じ filesystem（st_dev が同じ）なら、空き inode 数が呼び出しの間に変わっても受け付ける（修正前は stat -f -c %d の
+# 空き inode 数を比べており、この場合に拒否していた）
+case_uploads_snapshot_same_filesystem_by_device() {
+  setup_common
+  mkdir -p "$T/uploads" "$T/staging"
+  printf 'x\n' > "$T/uploads/a.txt"
+  setup_fake_stat 2049 2049 counter
+  run_uploads_snapshot_with_fake_stat
+  assert_not_contains "$UP_OUT" "同一 filesystem ではありません" "st_dev が同じなら同一 filesystem と判定する"
+  assert_not_contains "$UP_OUT" "filesystem（st_dev）を取得できません" "st_dev を取得できる"
+  assert_zero "$UP_RC" "同一 filesystem の snapshot は成功する"
+  assert_file "$T/snap.json" "snapshot JSON あり"
+}
+
+# 別の filesystem（st_dev が違う）なら、空き inode 数がたまたま同じ（0 を返す network fs 等）でも拒否する（修正前は通していた）。
+# 拒否は staging を作る前に行う。
+case_uploads_snapshot_different_filesystem_rejected() {
+  setup_common
+  mkdir -p "$T/uploads" "$T/staging"
+  printf 'x\n' > "$T/uploads/a.txt"
+  setup_fake_stat 2049 53 same
+  run_uploads_snapshot_with_fake_stat
+  assert_nonzero "$UP_RC" "st_dev が違えば拒否する"
+  assert_contains "$UP_OUT" "staging が src と同一 filesystem ではありません" "別 filesystem を通知"
+  assert_contains "$UP_OUT" "src=2049 staging=53" "比べた st_dev を通知"
+  assert_eq "" "$(find "$T/staging" -mindepth 1 2>/dev/null)" "拒否したときは staging に何も作らない"
+  assert_no_file "$T/snap.json" "拒否したときは snapshot JSON を書かない"
+  # 静的: コメント以外で stat -f（--file-system の書式。%d は空き inode 数）を使わない
+  assert_eq "" "$(grep -vE '^[[:space:]]*#' "$PROVIDERS/uploads-local.sh" | grep -E 'stat[[:space:]]+(-[A-Za-z]*f|--file-system)' || true)" \
+    "空き inode 数（stat -f -c %d）で filesystem を判定しない"
+}
+
+# st_dev を取得できない・数値でない場合は拒否する（fail-closed）
+case_uploads_snapshot_filesystem_unknown_rejected() {
+  local dev
+  for dev in ERR abc; do
+    setup_common
+    mkdir -p "$T/uploads" "$T/staging"
+    printf 'x\n' > "$T/uploads/a.txt"
+    setup_fake_stat "$dev" 2049 same
+    run_uploads_snapshot_with_fake_stat
+    assert_nonzero "$UP_RC" "st_dev を取得できなければ拒否する: $dev"
+    assert_contains "$UP_OUT" "filesystem（st_dev）を取得できません" "取得できないことを通知: $dev"
+    assert_eq "" "$(find "$T/staging" -mindepth 1 2>/dev/null)" "staging に何も作らない: $dev"
+  done
+}
+
 case_quiesce_no_secret_leak() {
   setup_quiesce
   # shellcheck disable=SC1091
@@ -293,6 +395,9 @@ run_case case_uploads_snapshot_symlink
 run_case case_uploads_snapshot_fifo
 run_case case_uploads_snapshot_hardlink
 run_case case_uploads_snapshot_encoded_name
+run_case case_uploads_snapshot_same_filesystem_by_device
+run_case case_uploads_snapshot_different_filesystem_rejected
+run_case case_uploads_snapshot_filesystem_unknown_rejected
 run_case case_quiesce_no_secret_leak
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

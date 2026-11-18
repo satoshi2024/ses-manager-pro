@@ -61,12 +61,25 @@ uploads_local::snapshot() {
   local started ended
   started=$(common::now_utc)
 
-  # 同一 filesystem 判定（cp -a は同一 fs の staging で行う）
+  # 同一 filesystem 判定（cp -a は同一 fs の staging で行う）。
+  # stat -c %d（st_dev。file が載っている filesystem の device 番号）で比べる。RB-W 以前の stat -f -c %d は、GNU coreutils の
+  # --file-system の書式では「空き inode 数」で filesystem の識別子ではなかった（同じ fs でも 2 回の呼び出しの間に値が
+  # 変わって拒否し得、別の fs でも値が同じ（0 や固定値を返す network fs・overlay）なら通していた）。stat -f -c %i
+  # （statfs の f_fsid）も使わない: f_fsid の意味は fs の実装ごとに違い、0 のままの実装もあって network mount を区別
+  # できない。st_dev は mount された filesystem（superblock）ごとに kernel が割り当てる値で、本番の実行環境（Linux の
+  # container 内。uploads と staging は bind mount、または EFS（NFS）の mount）でも、同じ fs なら同じ値、別の mount の
+  # 別の fs なら別の値になる。symlink は辿る（-L。実際に読み書きする場所を比べる）。btrfs の subvolume は同じ fs でも
+  # st_dev が違うため拒否する（fail-closed）。Git Bash（MSYS）の st_dev は Windows の volume から作られる値で、
+  # network drive での挙動は未確認（本番は Linux の container 内で動く）。値を取れない・数値でない場合も拒否する。
   local src_fs staging_fs
-  src_fs=$(stat -f -c %d "$src_dir")
-  staging_fs=$(stat -f -c %d "$staging_parent")
+  src_fs=$(stat -L -c %d "$src_dir" 2>/dev/null) || src_fs=""
+  staging_fs=$(stat -L -c %d "$staging_parent" 2>/dev/null) || staging_fs=""
+  if [[ ! "$src_fs" =~ ^[0-9]+$ || ! "$staging_fs" =~ ^[0-9]+$ ]]; then
+    echo "uploads-local: src / staging の filesystem（st_dev）を取得できません（src=${src_fs:-なし} staging=${staging_fs:-なし}）" >&2
+    return 1
+  fi
   if [[ "$src_fs" != "$staging_fs" ]]; then
-    echo "uploads-local: staging が src と同一 filesystem ではありません（atomic snapshot 不可）" >&2
+    echo "uploads-local: staging が src と同一 filesystem ではありません（atomic snapshot 不可。st_dev: src=$src_fs staging=$staging_fs）" >&2
     return 1
   fi
 
