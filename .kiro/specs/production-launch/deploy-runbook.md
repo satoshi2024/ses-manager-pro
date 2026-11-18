@@ -292,8 +292,16 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 - **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1、要決定（§1.6 の3））。
 - **Backup・PITR**:
   - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**（署名事項。§1.6 の10）。
-  - **DBA-6**: prodの `.env.backup` に `CONTENT_HASH_TABLES` を設定する（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
-  - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`CONTENT_HASH_TABLES` の形式）。
+  - **DBA-6**: prodの `.env.backup` を用意する（形式は `ops/backup/README.md` の「前提」「設定」）。
+    - `CONTENT_HASH_TABLES`（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+    - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
+    - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER` と、`secrets/` の 0600 の file（MySQL と restic の password、CA の capath）。
+  - **初回 backup（§2 の5。§3 の完了直後）と BLOCKED の解除**: `ops/backup/README.md` は、production 固有値（HFP-03-PROD-001〜008。`.kiro/specs/database-backup-recovery/baseline.md` §4）が未確定の間、production への接続・復元を BLOCKED としている。DBA（と各 owner）が次の時点までに確定する。
+    - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値）、002（全表の engine とアプリ以外の writer の有無）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5）、005（S3 互換 backend・IAM・versioning/immutability・容量と throughput）と、上の `.env.backup` の値。
+    - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner）。
+    - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み）、007（代表 profile。RTO の実測に使う）。
+    - 解除の条件: 項目ごとに baseline §4 の「確定に必要な証跡」を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力で、`preflight` が 0 で終わること）、DBA が DBA-6 に署名した時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。
+  - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`.env.backup` の形式）、`.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値と確定に要る証跡）。
 
 **初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
 
@@ -358,7 +366,7 @@ W1-B1（backup toolchain）で「書面での受理が要る」とされた事�
    ```sql
    SELECT COUNT(*) FROM information_schema.processlist WHERE user = '<アプリaccount>';  -- 0
    ```
-5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する。
+5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する（前提は §1.7 の DBA-6: `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新versionにし、production 固有値の BLOCKED を解除してから取る）。
 
 ## 3. 専用Flyway jobの実行と確認
 
