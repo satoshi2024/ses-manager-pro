@@ -1,6 +1,18 @@
 package com.ses.privacy.production.retention.trust;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ses.config.LoginUser;
+import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
+import com.ses.privacy.foundation.PolicyDecisionStatus;
+import com.ses.privacy.foundation.PolicyEvaluationQuery;
+import com.ses.privacy.foundation.PolicyExplanationResult;
+import com.ses.privacy.foundation.PolicyReadonlyQueryPort;
+import com.ses.service.security.AuthorizationService;
+import com.ses.service.security.LegalEntityContextService;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.ses.privacy.foundation.CurrentPolicySnapshot;
 import com.ses.privacy.foundation.HoldReleaseAuthorityClaim;
 import com.ses.privacy.foundation.HoldReleaseBinding;
@@ -51,6 +63,10 @@ import static com.ses.privacy.production.retention.trust.KmsTrustTestDocuments.p
 import static com.ses.privacy.production.retention.trust.KmsTrustTestDocuments.signPolicy;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * NF07-TRUST の D-03 方式（AWS KMS 非対称署名、鍵 version 単位の失効）の adapter（{@link KmsPrivacyTrustSource}）。計画 §4 の
@@ -87,7 +103,7 @@ class KmsPrivacyTrustSourceTest {
         clock = new MutableClock(T0);
         properties = new KmsTrustProperties();
         properties.setAnchorFile(file.toString());
-        properties.setMaxDocumentAge(DAY);
+        properties.setMaxDocumentAge("24h");
         source = new KmsPrivacyTrustSource(properties, clock);
     }
 
@@ -111,9 +127,9 @@ class KmsPrivacyTrustSourceTest {
                         newUntil, TENANT));
         Instant issued = T0.plus(Duration.ofDays(6));
         KmsTrustTestDocuments.SignedEnvelope byOld = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
-                "policy-old", "rev-old", issued, issued.plus(Duration.ofDays(60)), "TEST_ONLY_RULE", true);
+                "policy-old", "rev-old", issued, issued.plus(Duration.ofDays(60)), "TEST_ONLY_RULE");
         KmsTrustTestDocuments.SignedEnvelope byNew = signPolicy(policyNew, "policy-issuer", "kms-2026b", TENANT,
-                "policy-new", "rev-new", issued, issued.plus(Duration.ofDays(60)), "TEST_ONLY_RULE", true);
+                "policy-new", "rev-new", issued, issued.plus(Duration.ofDays(60)), "TEST_ONLY_RULE");
         PolicyRegistrationVerifier registration = registrationVerifier();
         HoldReleaseVerifier release = releaseVerifier();
 
@@ -151,8 +167,7 @@ class KmsPrivacyTrustSourceTest {
         List<ObjectNode> revoked = List.of(policyAnchor("policy-issuer", "kms-2026a", policyOld, "REVOKED",
                 T0.minus(DAY), T0.plus(Duration.ofDays(30)), TENANT));
         KmsTrustTestDocuments.SignedEnvelope envelope = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
-                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE",
-                true);
+                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE");
         PolicyEnforcementPort enforcement = enforcement(envelope);
         PolicyRegistrationVerifier registration = registrationVerifier();
 
@@ -211,12 +226,12 @@ class KmsPrivacyTrustSourceTest {
     // --- provider（文書の読込み）の障害で UNKNOWN ---
 
     @Test
-    void 文書が消えた_壊れた_古すぎる_未来の作成日時_鮮度の上限が無い間は失効状態がUNKNOWNで入口は閉じる() throws IOException {
+    void 文書が消えた_壊れた_古すぎる_未来の作成日時_鮮度の上限が無い間はanchorが0件で失効状態がUNKNOWNで入口は閉じる()
+            throws IOException {
         List<ObjectNode> policies = List.of(policyAnchor("policy-issuer", "kms-2026a", policyOld, "ACTIVE",
                 T0.minus(DAY), T0.plus(Duration.ofDays(30)), TENANT));
         KmsTrustTestDocuments.SignedEnvelope envelope = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
-                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE",
-                true);
+                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE");
         PolicyRegistrationVerifier registration = registrationVerifier();
         write(document(T0, policies, List.of(), Map.of("rev-1", "ACTIVE")));
         assertThat(status("policy-issuer:kms-2026a")).isEqualTo(RevocationStatus.ACTIVE);
@@ -243,27 +258,84 @@ class KmsPrivacyTrustSourceTest {
         write(document(T0, policies, List.of(), Map.of("rev-1", "ACTIVE")));
         assertThat(registration.verify(TENANT, envelope.canonical(), envelope.signature())).isNotNull();
 
-        // 鮮度の上限を過ぎた: anchor は残るが失効状態を確認できない
+        // 鮮度の上限を過ぎた: anchor も0件にし（縦深防御。review P3-1）、失効状態も確認できない
         clock.set(T0.plus(DAY));
-        assertThat(PrivacyTrustSource.policyAnchorsOf(source).anchors()).hasSize(1);
+        assertThat(PrivacyTrustSource.policyAnchorsOf(source).anchors()).isEmpty();
         assertThat(status("policy-issuer:kms-2026a")).isEqualTo(RevocationStatus.UNKNOWN);
         assertThat(registration.trustReady(TENANT)).isFalse();
-        assertRejected(registration, envelope, PolicyFailureReason.REVOCATION_STATUS_UNKNOWN);
+        assertRejected(registration, envelope, PolicyFailureReason.UNKNOWN_TRUST_ANCHOR);
 
-        // 作成日時が未来（許容の5分を超える）
+        // 作成日時が未来（許容の5分を超える）: anchor 0件・UNKNOWN
         write(document(clock.instant().plus(Duration.ofMinutes(10)), policies, List.of(), Map.of("rev-1", "ACTIVE")));
+        assertThat(PrivacyTrustSource.policyAnchorsOf(source).anchors()).isEmpty();
         assertThat(status("policy-issuer:kms-2026a")).isEqualTo(RevocationStatus.UNKNOWN);
         write(document(clock.instant().plus(Duration.ofMinutes(4)), policies, List.of(), Map.of("rev-1", "ACTIVE")));
+        assertThat(PrivacyTrustSource.policyAnchorsOf(source).anchors()).hasSize(1);
         assertThat(status("policy-issuer:kms-2026a")).isEqualTo(RevocationStatus.ACTIVE);
 
-        // 鮮度の上限の設定が無い・範囲外なら常に UNKNOWN
-        for (Duration invalid : new Duration[]{null, Duration.ofMinutes(1), Duration.ofDays(32)}) {
+        // 鮮度の上限の設定が無い・解釈できない・範囲外なら常に anchor 0件・UNKNOWN
+        for (String invalid : new String[]{null, "", "1m", "32d", "1 day"}) {
             KmsTrustProperties misconfigured = new KmsTrustProperties();
             misconfigured.setAnchorFile(file.toString());
             misconfigured.setMaxDocumentAge(invalid);
             KmsPrivacyTrustSource other = new KmsPrivacyTrustSource(misconfigured, clock);
+            assertThat(PrivacyTrustSource.policyAnchorsOf(other).anchors()).as(String.valueOf(invalid)).isEmpty();
             assertThat(PrivacyTrustSource.revocationsOf(other).statusOf("policy-issuer:kms-2026a"))
                     .as(String.valueOf(invalid)).isEqualTo(RevocationStatus.UNKNOWN);
+        }
+    }
+
+    // --- 鍵と envelope の失効状態の名前空間（RB-NF07-TRUST-KMS review P2-1） ---
+
+    @Test
+    void anchorIDと同じrevocationReferenceのenvelopeは鍵がACTIVEでもACTIVEにならず登録と照会は通らない() {
+        List<ObjectNode> policies = List.of(policyAnchor("policy-issuer", "kms-2026a", policyOld, "ACTIVE",
+                T0.minus(DAY), T0.plus(Duration.ofDays(30)), TENANT));
+        List<ObjectNode> holds = List.of(holdAnchor("issuer-a", "kms-2026a", issuerOld, "sys_user:20", "ACTIVE",
+                T0.minus(DAY), T0.plus(Duration.ofDays(30)), TENANT));
+        write(document(T0, policies, holds, Map.of("rev-1", "ACTIVE")));
+        PolicyRegistrationVerifier registration = registrationVerifier();
+
+        // 署名した鍵の anchor ID、解除の anchor ID、その他の ':' を含む参照: envelope を登録していないのに ACTIVE にならない
+        for (String reference : List.of("policy-issuer:kms-2026a", "issuer-a:kms-2026a", "urn:nf07:policy-1")) {
+            KmsTrustTestDocuments.SignedEnvelope envelope = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
+                    "policy-test-1", reference, T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE");
+            assertRejected(registration, envelope, PolicyFailureReason.REVOCATION_STATUS_UNKNOWN);
+            PolicyEnforcementDecision decision = enforcement(envelope).check(request(envelope));
+            assertThat(decision.permitted()).as(reference).isFalse();
+            assertThat(decision.detail()).as(reference).isEqualTo(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN);
+        }
+        // 鍵の ID の形の参照は鍵の状態だけ、そうでない参照は envelope の状態だけを引く
+        assertThat(status("policy-issuer:kms-2026a")).isEqualTo(RevocationStatus.ACTIVE);
+        assertThat(status("rev-1")).isEqualTo(RevocationStatus.ACTIVE);
+        // ':' を含まない正しい参照の envelope は通る
+        KmsTrustTestDocuments.SignedEnvelope listed = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
+                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE");
+        assertThat(registration.verify(TENANT, listed.canonical(), listed.signature())).isNotNull();
+    }
+
+    // --- 説明照会の経路（RB-NF07-TRUST-KMS review P3-8） ---
+
+    @Test
+    void 説明照会も鍵を失効させた文書を置いた次の照会からPOLICY_REVOKEDになる() {
+        List<ObjectNode> active = List.of(policyAnchor("policy-issuer", "kms-2026a", policyOld, "ACTIVE",
+                T0.minus(DAY), T0.plus(Duration.ofDays(30)), TENANT));
+        KmsTrustTestDocuments.SignedEnvelope envelope = signPolicy(policyOld, "policy-issuer", "kms-2026a", TENANT,
+                "policy-test-1", "rev-1", T0.minusSeconds(3600), T0.plus(Duration.ofDays(20)), "TEST_ONLY_RULE");
+        ObjectNode revokedAnchor = active.get(0).deepCopy();
+        revokedAnchor.put("status", "REVOKED");
+        PolicyReadonlyQueryPort query = explanation(envelope);
+        authenticateAdmin();
+        try {
+            write(document(T0, active, List.of(), Map.of("rev-1", "ACTIVE")));
+            assertThat(query.evaluate(evaluation()).status()).isEqualTo(PolicyDecisionStatus.APPROVED_ACTIVE);
+
+            write(document(T0.plusSeconds(1), List.of(revokedAnchor), List.of(), Map.of("rev-1", "ACTIVE")));
+            PolicyExplanationResult revoked = query.evaluate(evaluation());
+            assertThat(revoked.status()).isEqualTo(PolicyDecisionStatus.POLICY_REVOKED);
+            assertThat(revoked.failureReason()).isEqualTo(PolicyFailureReason.KEY_REVOKED);
+        } finally {
+            SecurityContextHolder.clearContext();
         }
     }
 
@@ -392,6 +464,43 @@ class KmsPrivacyTrustSourceTest {
                 (key, ignored) -> CurrentPolicySnapshot.current(envelope.policyId(), envelope.revision(),
                         envelope.digest(), envelope.canonical(), envelope.signature()),
                 PrivacyTrustSource.policyAnchorsOf(source), PrivacyTrustSource.revocationsOf(source), clock);
+    }
+
+    private PolicyReadonlyQueryPort explanation(KmsTrustTestDocuments.SignedEnvelope envelope) {
+        SysUserMapper users = mock(SysUserMapper.class);
+        when(users.selectByIdAndTenant(17L, TENANT)).thenReturn(admin());
+        LegalEntityContextService legalEntity = mock(LegalEntityContextService.class);
+        when(legalEntity.requireCurrentLegalEntityId()).thenReturn(42L);
+        AuthorizationService authorization = mock(AuthorizationService.class);
+        when(authorization.isAllowed(any(), eq("privacy.policy.view"))).thenReturn(true);
+        ProductionCatalogBinding binding = new ProductionCatalogBinding(envelope.policyId(), MODULE,
+                ProductionCatalogBinding.TENANT_WIDE_ACTOR_BINDING, ELEMENT, ACTION, PROVIDER,
+                PolicyLookupKey.TENANT_WIDE);
+        return ProductionPrivacyComponents.productionPolicyReadonlyQuery(prod, () -> true, legalEntity, users,
+                () -> authorization, TENANT, key -> Optional.of(binding),
+                (key, ignored) -> CurrentPolicySnapshot.current(envelope.policyId(), envelope.revision(),
+                        envelope.digest(), envelope.canonical(), envelope.signature()),
+                PrivacyTrustSource.policyAnchorsOf(source), PrivacyTrustSource.revocationsOf(source), clock);
+    }
+
+    private static PolicyEvaluationQuery evaluation() {
+        return new PolicyEvaluationQuery(TENANT, "17", MODULE, ELEMENT, ACTION, PROVIDER);
+    }
+
+    private static SysUser admin() {
+        SysUser user = new SysUser();
+        user.setId(17L);
+        user.setTenantId(TENANT);
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setDeletedFlag(0);
+        return user;
+    }
+
+    private static void authenticateAdmin() {
+        List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_管理者"));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(admin(), authorities, TENANT), "test-credential", authorities));
     }
 
     private PolicyEnforcementRequest request(KmsTrustTestDocuments.SignedEnvelope envelope) {

@@ -217,7 +217,8 @@ class CopilotExternalSendPrivacyPolicyLinkTest {
         byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
         Signature signer = Signature.getInstance("Ed25519");
         signer.initSign(keyPair.getPrivate());
-        signer.update(canonical);
+        // 本番は digest 声明への署名だけを受け付ける（NF07-TRUST）
+        signer.update(com.ses.privacy.foundation.PolicyEnvelopeSigningStatement.of(canonical));
         byte[] signature = signer.sign();
         if (scenario == Scenario.SIGNATURE_TAMPERED) {
             signature[0] ^= 1;

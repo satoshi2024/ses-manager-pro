@@ -11,16 +11,21 @@ import java.util.HexFormat;
  * <p>AWS KMS の Ed25519（key spec {@code ECC_NIST_EDWARDS25519}、署名算法 {@code ED25519_SHA_512}、{@code MessageType=RAW}）は
  * 署名する message を 4096 bytes までしか受け付けない。policy envelope の canonical bytes（{@link ApprovalEnvelopeCanonicalizer}
  * の v1 形式）は、目的・trigger・保持規則等の文字列の長さで決まり、登録の上限は 64KB で 4096 bytes を超え得る。そこで本番の
- * verifier は、canonical bytes そのものへの署名に加えて、canonical bytes の SHA-256 を持つ固定長（100 bytes）の声明への署名も
- * 受け付ける。どちらも純粋な Ed25519（RFC 8032）で、prehash 版（Ed25519ph、KMS の {@code ED25519_PH_SHA_512}）は受け付けない。
+ * verifier（説明照会・登録・有効化・NF08 の内部判定）は、canonical bytes の SHA-256 を持つ固定長（100 bytes）の本声明への
+ * 純粋な Ed25519（RFC 8032）署名<b>だけ</b>を受け付ける。canonical bytes そのものへの署名と、prehash 版（Ed25519ph、KMS の
+ * {@code ED25519_PH_SHA_512}）の署名は拒否する（RB-NF07-TRUST-KMS review P3-2: 4096 bytes 以下なら直接の署名が KMS で作れて
+ * しまい、超えると作れない運用の罠を避け、受け付ける message を1つにする）。
  *
  * <p>正規形（{@code HoldReleaseBinding} と同じ {@code <UTF-8 の byte 長>:<値>} の field を区切り無しで連結）:
  * {@value #DOMAIN} の field、canonical bytes の SHA-256（小文字 hex 64桁）の field。例:
- * {@code 30:NF07-POLICY-ENVELOPE-DIGEST-V164:<hex>}。
+ * {@code 30:NF07-POLICY-ENVELOPE-DIGEST-V164:<hex>}。digest は登録の一覧・詳細の {@code envelopeDigest}（D-02 の決定書の digest）と
+ * 同じ値。
  *
- * <p>2つの形は先頭で区別できる（canonical bytes は4 byte の長さ 20 と {@code SES-PRIVACY-APPROVAL} で始まり、声明は ASCII の
- * {@code 30:} で始まる）ため、一方への署名が他方の正しい署名として読まれることはない。声明は digest を通して canonical bytes の
- * 全体（tenant・audience・authority・key・時刻・保持規則等）に束縛される。状態を持たない。
+ * <p>canonical bytes そのものへの署名を検証するのは、本番ではない合成の {@link ApprovalEnvelopeVerifier}（第1期の合成層と試験）
+ * だけ。その形と本声明は先頭で区別できる（canonical bytes は4 byte の長さ 20 と {@code SES-PRIVACY-APPROVAL} で始まり、声明は
+ * ASCII の {@code 30:NF07-POLICY-ENVELOPE-DIGEST-V1} で始まる。{@code PolicyEnvelopeSigningStatementTest} が先頭の bytes を固定する）
+ * ため、一方への署名が他方の正しい署名として読まれることはない。声明は digest を通して canonical bytes の全体（tenant・
+ * audience・authority・key・時刻・保持規則等）に束縛される。状態を持たない。
  */
 public final class PolicyEnvelopeSigningStatement {
 

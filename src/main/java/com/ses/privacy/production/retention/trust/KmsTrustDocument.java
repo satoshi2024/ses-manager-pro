@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.privacy.foundation.HoldReleaseAuthorityClaim;
 import com.ses.privacy.foundation.HoldReleaseTrustAnchor;
+import com.ses.privacy.foundation.RevocationReferences;
 import com.ses.privacy.foundation.RevocationStatus;
 import com.ses.privacy.foundation.TrustedAuthority;
 import com.ses.privacy.production.retention.hold.ConfiguredHoldReleaseTrustRegistry;
@@ -40,7 +41,7 @@ import java.util.regex.Pattern;
  * {@code ED25519_PH_SHA_512} は不可）、公開鍵が Ed25519 の SubjectPublicKeyInfo でない（{@link KmsEd25519PublicKeys}）、
  * 状態が {@code ACTIVE} / {@code REVOKED} でない、有効期間が空・逆順、範囲（tenant 等）が空・重複・文字種外、anchor ID の重複
  * （policy と hold 解除をまたいでも不可。失効状態の照会の名前空間が1つのため）、同じ KMS key ARN・同じ公開鍵の anchor が2件以上、
- * envelope の参照が anchor ID と同じ。
+ * envelope の参照が {@code :} を含む（鍵の ID と区別できない。{@code RevocationReferences}、review P2-1）。
  *
  * <p>policy の anchor の {@code envelopeKinds} は {@code POLICY}、{@code audiences} は {@code PRODUCTION} に固定する（verifier は
  * 本番の policy envelope にこの2つを要求し、それ以外の値は使われないため、文書には書かせない）。解除の anchor の主体は
@@ -240,11 +241,8 @@ final class KmsTrustDocument {
             String reference = entry.getKey();
             String at = "$.envelopeStatuses";
             if (!validReference(reference)) {
+                // ':' を含む参照は鍵の ID（authorityId:keyId）と区別できないため受け付けない（anchor ID との重なりもこれで防ぐ）
                 throw new InvalidDocumentException("envelope.reference", at);
-            }
-            if (keyStatuses.containsKey(reference)) {
-                // 失効状態の照会は鍵と envelope の参照が同じ名前空間のため、anchor ID と同じ参照は区別できない
-                throw new InvalidDocumentException("envelope.collidesWithAnchor", at);
             }
             envelopeStatuses.put(reference, status(entry.getValue(), at));
         }
@@ -384,7 +382,7 @@ final class KmsTrustDocument {
     }
 
     private static boolean validReference(String reference) {
-        if (reference == null || reference.isEmpty() || reference.length() > MAX_REFERENCE_LENGTH
+        if (!RevocationReferences.isEnvelopeReference(reference) || reference.length() > MAX_REFERENCE_LENGTH
                 || Character.isWhitespace(reference.charAt(0))
                 || Character.isWhitespace(reference.charAt(reference.length() - 1))) {
             return false;

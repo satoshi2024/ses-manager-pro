@@ -225,7 +225,8 @@ class PrivacyPolicyRegistrationServiceTest {
         // 登録済みの authority を名乗る別の鍵（同じ authority・key ID の未登録の鍵）
         PolicyEnvelopeTestSigner.Signed genuine = signer.sign(POLICY_ID, "r1");
         PolicyEnvelopeTestSigner.Signed foreignKey = new PolicyEnvelopeTestSigner.Signed(genuine.canonical(),
-                PolicyEnvelopeTestSigner.sign(PolicyEnvelopeTestSigner.generate().getPrivate(), genuine.canonical()));
+                PolicyEnvelopeTestSigner.sign(PolicyEnvelopeTestSigner.generate().getPrivate(),
+                        com.ses.privacy.foundation.PolicyEnvelopeSigningStatement.of(genuine.canonical())));
         assertBusiness(() -> service.register(foreignKey.request()), 403, "error.privacy.policyEnvelopeRejected");
         assertThat(rows()).isZero();
     }

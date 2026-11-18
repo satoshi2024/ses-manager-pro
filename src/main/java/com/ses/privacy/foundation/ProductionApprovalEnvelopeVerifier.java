@@ -155,15 +155,19 @@ final class ProductionApprovalEnvelopeVerifier {
         }
         RevocationStatus keyStatus;
         RevocationStatus envelopeStatus;
+        String envelopeReference = candidate.metadata().revocationReference();
         try {
             keyStatus = productionRevocations.statusOf(anchorId);
-            envelopeStatus = productionRevocations.statusOf(candidate.metadata().revocationReference());
+            // envelope の参照に ':' を含む値は鍵の ID（authorityId:keyId）の名前空間と区別できないため照会せず UNKNOWN にする
+            // （anchor ID と同じ参照が鍵の状態で ACTIVE にならない。RB-NF07-TRUST-KMS review P2-1）
+            envelopeStatus = RevocationReferences.isEnvelopeReference(envelopeReference)
+                    ? productionRevocations.statusOf(envelopeReference) : RevocationStatus.UNKNOWN;
         } catch (RuntimeException unavailable) {
             throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR,
                     "production失効確認providerを利用できません", unavailable);
         }
         PurePolicyVerificationKernel.verifyRevocationStatus(keyStatus, envelopeStatus);
-        // 本番は canonical bytes の digest 声明への署名も受け付ける（KMS の RAW は 4096 bytes まで。NF07-TRUST）
+        // 本番は canonical bytes の digest 声明への署名だけを受け付ける（KMS の RAW は 4096 bytes まで。NF07-TRUST）
         PurePolicyVerificationKernel.verifyProductionPolicySignature(anchor,
                 ApprovalEnvelopeCanonicalizer.canonicalBytes(candidate), candidate.signature());
         PurePolicyVerificationKernel.verifyPolicySoD(candidate.metadata());

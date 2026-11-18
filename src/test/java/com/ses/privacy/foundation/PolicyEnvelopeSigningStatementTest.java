@@ -26,8 +26,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <ul>
  *   <li>policy envelope の canonical bytes は 4096 bytes を超え得る（登録の上限は 64KB）。KMS では固定長（100 bytes）の digest
- *       声明に純粋な Ed25519 で署名し、本番の verifier が受け付ける。canonical bytes そのものへの署名も引き続き受け付ける。</li>
+ *       声明に純粋な Ed25519 で署名し、本番の verifier はこの形<b>だけ</b>を受け付ける（canonical bytes そのものへの署名は、
+ *       4096 bytes 以下でも拒否する。RB-NF07-TRUST-KMS review P3-2）。</li>
  *   <li>Ed25519ph（prehash。KMS の {@code ED25519_PH_SHA_512}）の署名と、digest だけへの署名は受け付けない。</li>
+ *   <li>canonical bytes への署名を検証する合成の {@link ApprovalEnvelopeVerifier}（本番ではない）の形と声明は、先頭の bytes で
+ *       区別できる（先頭を固定する）。</li>
  *   <li>hold 解除の claim の被署名 bytes は、authority・key の ID が64文字・日時が {@link Instant} の範囲の端でも 4096 bytes を
  *       大きく下回る（digest 声明は要らない）。</li>
  * </ul>
@@ -64,8 +67,36 @@ class PolicyEnvelopeSigningStatementTest {
 
         assertThat(verifier.verify(TENANT, canonical, sign(key, statement, false)).digest())
                 .isEqualTo(ApprovalEnvelopeCanonicalizer.digest(canonical));
-        // canonical bytes そのものへの署名も受け付ける（4096 bytes 以下の envelope・既存の署名手順）
-        assertThat(verifier.verify(TENANT, canonical, sign(key, canonical, false))).isNotNull();
+    }
+
+    @Test
+    void 本番はcanonical_bytesそのものへの署名を4096bytes以下でも受け付けない() throws Exception {
+        KeyPair key = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(envelope("TEST_ONLY_RULE"));
+        assertThat(canonical.length).isLessThanOrEqualTo(PolicyEnvelopeSigningStatement.KMS_RAW_MESSAGE_LIMIT);
+        PolicyRegistrationVerifier verifier = verifier(key);
+
+        assertThatThrownBy(() -> verifier.verify(TENANT, canonical, sign(key, canonical, false)))
+                .isInstanceOfSatisfying(PolicyRegistrationRejectedException.class,
+                        e -> assertThat(e.reason()).isEqualTo(PolicyFailureReason.SIGNATURE_INVALID));
+        assertThat(verifier.verify(TENANT, canonical, sign(key, PolicyEnvelopeSigningStatement.of(canonical), false)))
+                .isNotNull();
+    }
+
+    @Test
+    void 合成層のcanonical_bytesの形と本番の声明は先頭のbytesで区別できる() {
+        byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(envelope("TEST_ONLY_RULE"));
+        byte[] statement = PolicyEnvelopeSigningStatement.of(canonical);
+        byte[] canonicalHead = new byte[24];
+        canonicalHead[3] = 20;
+        System.arraycopy("SES-PRIVACY-APPROVAL".getBytes(StandardCharsets.US_ASCII), 0, canonicalHead, 4, 20);
+
+        // canonical bytes は4 byte の長さ 20（00 00 00 14）と SES-PRIVACY-APPROVAL で始まる
+        assertThat(java.util.Arrays.copyOf(canonical, 24)).isEqualTo(canonicalHead);
+        // 声明は ASCII の 30:NF07-POLICY-ENVELOPE-DIGEST-V1 で始まり、1 byte 目から canonical bytes と違う
+        assertThat(new String(statement, 0, 33, StandardCharsets.US_ASCII))
+                .isEqualTo("30:" + PolicyEnvelopeSigningStatement.DOMAIN);
+        assertThat(statement[0]).isNotEqualTo(canonical[0]);
     }
 
     @Test

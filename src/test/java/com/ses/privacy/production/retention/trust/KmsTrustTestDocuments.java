@@ -103,20 +103,19 @@ final class KmsTrustTestDocuments {
     }
 
     /**
-     * policy envelope に署名する。{@code viaStatement} なら KMS の手順（digest 声明 {@link PolicyEnvelopeSigningStatement} を
-     * RAW で署名）、そうでなければ canonical bytes そのものに署名する。
+     * policy envelope に KMS の手順で署名する（digest 声明 {@link PolicyEnvelopeSigningStatement} を RAW で署名。本番の verifier は
+     * この形だけを受け付ける）。
      */
     static SignedEnvelope signPolicy(KeyPair key, String authorityId, String keyId, String tenant, String policyId,
                                      String revocationReference, Instant issuedAt, Instant expiresAt,
-                                     String retentionRule, boolean viaStatement) {
+                                     String retentionRule) {
         ApprovalEnvelopeMetadata metadata = new ApprovalEnvelopeMetadata("1", authorityId, keyId, tenant, MODULE,
                 "PRODUCTION", "r1", "requester-test", "approver-test", revocationReference, issuedAt, issuedAt,
                 expiresAt);
         PolicyApprovalEnvelope unsigned = new PolicyApprovalEnvelope(metadata, policyId, "v1", ELEMENT, ACTION,
                 PROVIDER, "TEST_PURPOSE", "TEST_TRIGGER", retentionRule, "TEST_ONLY_DISPOSITION", new byte[]{0});
         byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
-        byte[] message = viaStatement ? PolicyEnvelopeSigningStatement.of(canonical) : canonical;
-        return new SignedEnvelope(policyId, "r1", canonical, sign(key, message),
+        return new SignedEnvelope(policyId, "r1", canonical, sign(key, PolicyEnvelopeSigningStatement.of(canonical)),
                 ApprovalEnvelopeCanonicalizer.digest(canonical));
     }
 

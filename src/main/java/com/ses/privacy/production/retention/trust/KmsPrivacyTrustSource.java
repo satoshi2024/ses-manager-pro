@@ -3,6 +3,7 @@ package com.ses.privacy.production.retention.trust;
 import com.ses.privacy.foundation.HoldReleaseTrustAnchor;
 import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.ProductionPolicyTrustRegistry;
+import com.ses.privacy.foundation.RevocationReferences;
 import com.ses.privacy.foundation.RevocationStatus;
 import com.ses.privacy.foundation.RevocationStatusProvider;
 import com.ses.privacy.foundation.TrustedAuthority;
@@ -44,9 +45,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *       {@code Configured*TrustRegistry}・{@link HoldReleaseTrustAnchor} の constructor が検査する。</li>
  *   <li>{@code statusOf} は、文書が読めて鮮度の上限（{@code max-document-age}）の内にあり、参照が文書に {@code ACTIVE} と
  *       書かれているときだけ {@code ACTIVE}。文書に無い参照・読めない・形式が違う・古すぎる・未来の作成日時・鮮度の上限の
- *       設定が無い・範囲外は全て {@code UNKNOWN}（{@code ACTIVE} を既定にしない）。</li>
- *   <li>読めない・形式が違う文書（実行中に壊れた場合を含む）では anchor を0件として返す（入口は閉じ、検証は
- *       {@code UNKNOWN_TRUST_ANCHOR}）。直前に読めた内容に戻らない（file が正本で、古い内容を使い続けない）。</li>
+ *       設定が無い・範囲外は全て {@code UNKNOWN}（{@code ACTIVE} を既定にしない）。{@code :} を含む参照は鍵の状態だけ、
+ *       含まない参照は envelope の状態だけを引く（名前空間を文法で分ける。{@code RevocationReferences}、review P2-1）。</li>
+ *   <li>読めない・形式が違う文書（実行中に壊れた場合を含む）、および鮮度の上限の外（古すぎる・作成日時が未来・鮮度の上限の
+ *       設定が無い・範囲外）の文書では anchor を0件として返す（入口は閉じ、検証は {@code UNKNOWN_TRUST_ANCHOR}。review P3-1 の
+ *       縦深防御: 失効状態の UNKNOWN と二重に閉じる）。直前に読めた内容に戻らない（file が正本で、古い内容を使い続けない）。</li>
  *   <li>rotation: 新しい key ID の anchor を足し、有効期間を重ねる（旧鍵の {@code validUntil} まで両方が有効）。</li>
  * </ul>
  *
@@ -98,20 +101,19 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.path = properties.anchorPath();
         this.propertyViolations = List.copyOf(properties.violations());
-        this.maxDocumentAge = properties.isMaxDocumentAgeValid() ? properties.getMaxDocumentAge() : null;
-        this.reloadInterval = properties.isReloadIntervalValid() ? properties.getReloadInterval()
-                : KmsTrustProperties.DEFAULT_RELOAD_INTERVAL;
+        this.maxDocumentAge = properties.maxDocumentAgeValue();
+        this.reloadInterval = properties.reloadIntervalValue();
     }
 
     @Override
     public ProductionPolicyTrustRegistry policyAnchors() {
-        KmsTrustDocument document = snapshot().document();
+        KmsTrustDocument document = usable(snapshot().document());
         return document == null ? NO_POLICY_ANCHORS : document.policyRegistry();
     }
 
     @Override
     public HoldReleaseTrustRegistry holdReleaseAnchors() {
-        KmsTrustDocument document = snapshot().document();
+        KmsTrustDocument document = usable(snapshot().document());
         return document == null ? NO_HOLD_RELEASE_ANCHORS : document.holdReleaseRegistry();
     }
 
@@ -167,6 +169,18 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
         }
     }
 
+    /** 鮮度の上限の内の文書だけを返す（外なら null。anchor も0件にする）。 */
+    private KmsTrustDocument usable(KmsTrustDocument document) {
+        if (document == null) {
+            return null;
+        }
+        if (!fresh(document.generatedAt(), clock.instant())) {
+            noteState("STALE", false);
+            return null;
+        }
+        return document;
+    }
+
     private RevocationStatus statusOf(KmsTrustDocument document, String reference, Instant now) {
         if (document == null || reference == null) {
             return RevocationStatus.UNKNOWN;
@@ -175,10 +189,10 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
             noteState("STALE", false);
             return RevocationStatus.UNKNOWN;
         }
-        RevocationStatus status = document.keyStatusOf(reference);
-        if (status == null) {
-            status = document.envelopeStatusOf(reference);
-        }
+        // ':' を含む参照は鍵（authorityId:keyId）、含まない参照は envelope だけを引く（名前空間を文法で分ける。review P2-1）
+        RevocationStatus status = RevocationReferences.isKeyReference(reference)
+                ? document.keyStatusOf(reference)
+                : RevocationReferences.isEnvelopeReference(reference) ? document.envelopeStatusOf(reference) : null;
         if (status == null) {
             return RevocationStatus.UNKNOWN;
         }

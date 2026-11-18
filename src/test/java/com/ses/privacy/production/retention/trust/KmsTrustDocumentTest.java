@@ -63,11 +63,17 @@ class KmsTrustDocumentTest {
         byte[] valid = Base64.getDecoder().decode(RFC8410_PUBLIC_KEY);
         byte[] trailing = Arrays.copyOf(valid, valid.length + 1);
         byte[] truncated = Arrays.copyOf(valid, valid.length - 1);
+        byte[] x25519Der = KeyPairGenerator.getInstance("X25519").generateKeyPair().getPublic().getEncoded();
+        assertThat(x25519Der).hasSize(KmsEd25519PublicKeys.SPKI_LENGTH);
+        assertThat(HexFormat.of().formatHex(x25519Der)).startsWith("302a300506032b656e032100");
+        String x25519 = Base64.getEncoder().encodeToString(x25519Der);
         List<String> rejected = List.of(
                 Base64.getEncoder().encodeToString(rsa.generateKeyPair().getPublic().getEncoded()),
                 Base64.getEncoder().encodeToString(ec.generateKeyPair().getPublic().getEncoded()),
                 Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("Ed448").generateKeyPair()
                         .getPublic().getEncoded()),
+                // X25519（同じ 44 bytes で OID だけが 1.3.101.110。鍵交換用で署名には使えない。review P3-8）
+                x25519,
                 Base64.getEncoder().encodeToString(trailing),
                 Base64.getEncoder().encodeToString(truncated),
                 // 生の32 bytes（SubjectPublicKeyInfo でない）
@@ -187,7 +193,7 @@ class KmsTrustDocumentTest {
     }
 
     @Test
-    void 解除のanchorは主体の正規形と役割と対象種別を検査しenvelopeの参照はanchorIDと重ねない() {
+    void 解除のanchorは主体の正規形と役割と対象種別を検査しenvelopeの参照はコロンを含めない() {
         ObjectNode badPrincipal = holdAnchor("issuer-a", "k1", ed25519(), "sys_user:020", "ACTIVE", FROM, UNTIL,
                 "default");
         assertCode(document(NOW, List.of(), List.of(badPrincipal), Map.of()), "anchor.principal");
@@ -199,8 +205,10 @@ class KmsTrustDocumentTest {
         assertCode(document(NOW, List.of(), List.of(badTarget), Map.of()), "anchor.targetTypes");
 
         ObjectNode anchor = holdAnchor("issuer-a", "k1", ed25519(), "sys_user:20", "ACTIVE", FROM, UNTIL, "default");
-        assertCode(document(NOW, List.of(), List.of(anchor), Map.of("issuer-a:k1", "ACTIVE")),
-                "envelope.collidesWithAnchor");
+        // 鍵の ID（authorityId:keyId）と区別できないため、':' を含む参照は anchor ID と同じでも違っても受け付けない（review P2-1）
+        assertCode(document(NOW, List.of(), List.of(anchor), Map.of("issuer-a:k1", "ACTIVE")), "envelope.reference");
+        assertCode(document(NOW, List.of(), List.of(anchor), Map.of("urn:nf07:policy-1", "ACTIVE")),
+                "envelope.reference");
         assertCode(document(NOW, List.of(), List.of(anchor), Map.of("envelope-1", "UNKNOWN")), "status.invalid");
         assertCode(document(NOW, List.of(), List.of(anchor), Map.of(" envelope-1", "ACTIVE")), "envelope.reference");
     }

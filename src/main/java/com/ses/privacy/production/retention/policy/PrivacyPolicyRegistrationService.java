@@ -42,8 +42,10 @@ import java.util.regex.Pattern;
  *   <li>D-01（正式 Privacy Owner）・D-02（保持期間・起算 trigger・法的根拠）・D-03（署名鍵）の決定ID が、署名日・失効・
  *       placeholder・重複を含めて有効（{@link PrivacyDecisionBinding#evaluateStandalone}）。</li>
  *   <li>verifier がある（{@code ProductionPrivacyComponents.policyRegistrationVerifier} は prod profile でしか生成できない）。</li>
- *   <li>trust anchor が1件以上登録され、そのうち1件以上の失効状態を失効 provider が ACTIVE と答える
- *       （{@link PolicyRegistrationVerifier#trustReady()}。第1期は registry が空・失効 provider が常に UNKNOWN のため開かない）。</li>
+ *   <li>trust anchor が1件以上登録され、そのうち1件以上が、verifier と同じ clock の時刻に有効期間内で、授権 tenant
+ *       （{@code OIDC_TENANT_ID}、未設定なら {@code default}）を範囲に含み、失効 provider がその失効状態を ACTIVE と答える
+ *       （{@link PolicyRegistrationVerifier#trustReady(String)}。trust 文書（D-03 = AWS KMS の adapter）を設定するまでは
+ *       registry が空・失効 provider が常に UNKNOWN のため開かない）。</li>
  * </ul>
  *
  * <p>状態の遷移（{@code m_retention_policy.status}）:
