@@ -672,3 +672,13 @@ privacy:
       expires-on: ${PRIVACY_APPROVAL_D09_EXPIRES_ON:}
     # 失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）。承認内容ではないためdigestに含めない
     expiry-warning-days: ${PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS:30}
+  # NF07 の trust（D-03 = AWS KMS 非対称署名・鍵 version 単位の失効。deploy-runbook §4.6）。anchor-file が空（既定）なら
+  # trust は第1期と同じ（anchor 0件・失効状態 UNKNOWN。policy の登録・有効化と hold 解除の入口は404）。値は D-03 owner が設定する。
+  trust:
+    kms:
+      # trust 文書（JSON）の file の絶対 path。application は AWS を呼ばず、この file の公開鍵と失効状態だけを使う
+      anchor-file: ${PRIVACY_TRUST_KMS_ANCHOR_FILE:}
+      # 文書の generatedAt からの鮮度の上限（5分〜31日。過ぎると失効状態は全て UNKNOWN）。D-03 で決めるため既定を持たない
+      max-document-age: ${PRIVACY_TRUST_KMS_MAX_DOCUMENT_AGE:}
+      # file の最終更新日時・大きさが変わらない間に読んだ内容を使い続ける最長の時間（1秒〜5分）
+      reload-interval: ${PRIVACY_TRUST_KMS_RELOAD_INTERVAL:30s}

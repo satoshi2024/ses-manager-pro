@@ -118,7 +118,7 @@ class PrivacyTrustSourceTest {
 
     @Test
     void 第1期のtrustはanchorが0件で失効状態は常にUNKNOWN() {
-        PrivacyTrustSource source = new PrivacyTrustConfiguration().privacyTrustSource();
+        PrivacyTrustSource source = new PrivacyTrustConfiguration().privacyTrustSource(new KmsTrustProperties(), null);
 
         assertThat(source).isInstanceOf(UnconfiguredPrivacyTrustSource.class);
         assertThat(source.policyAnchors().anchors()).isEmpty();

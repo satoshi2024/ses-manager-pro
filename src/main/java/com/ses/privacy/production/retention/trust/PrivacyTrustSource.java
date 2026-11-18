@@ -5,12 +5,14 @@ import com.ses.privacy.foundation.ProductionPolicyTrustRegistry;
 import com.ses.privacy.foundation.RevocationStatusProvider;
 
 /**
- * NF07 の trust（W-3）の接続点。D-03 で決める方式（KMS / HSM の anchor registry、CRL / OCSP の失効 provider 等）の adapter は
- * 本 interface を実装し、{@link PrivacyTrustConfiguration} の Bean を差し替える。policy envelope の登録・照会（NF07-REG・W-4）と
- * hold 解除（NF07-REL）が同じ Bean を使う（anchor と失効状態の正本を1つにする）。
+ * NF07 の trust（W-3）の接続点。D-03 で決める方式の adapter は本 interface を実装し、{@link PrivacyTrustConfiguration} の Bean が
+ * それを返す。policy envelope の登録・照会（NF07-REG・W-4）と hold 解除（NF07-REL）が同じ Bean を使う（anchor と失効状態の
+ * 正本を1つにする）。
  *
- * <p>第1期は {@link UnconfiguredPrivacyTrustSource}（anchor 0件、失効状態は常に UNKNOWN）で、登録・有効化と解除の入口は404のまま、
- * 説明照会は {@code APPROVED_ACTIVE} にならない。
+ * <p>D-03 の方式は AWS KMS 非対称署名・鍵 version 単位の失効（2026-11-18 決定）で、adapter は {@link KmsPrivacyTrustSource}
+ * （trust 文書の file を判定のたびに読む。{@code privacy.trust.kms.anchor-file} を設定したときだけ使う）。未設定（既定）なら
+ * 第1期と同じ {@link UnconfiguredPrivacyTrustSource}（anchor 0件、失効状態は常に UNKNOWN）で、登録・有効化と解除の入口は404の
+ * まま、説明照会は {@code APPROVED_ACTIVE} にならない。
  *
  * <p>呼出しの時機: 説明照会・登録・解除の Spring 登録は、本 Bean を {@link #policyAnchorsOf}・{@link #holdReleaseAnchorsOf}・
  * {@link #revocationsOf} で包んで verifier に渡す。そのため {@link #policyAnchors()}・{@link #holdReleaseAnchors()}・
