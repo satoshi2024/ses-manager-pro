@@ -59,6 +59,11 @@ log "== 2. fixture（marker テーブル + before marker + 最小の flyway_sche
 INTEGRATION_FLYWAY_LATEST=42
 [[ "${FLYWAY_VERSION:-}" == "$INTEGRATION_FLYWAY_LATEST" ]] \
   || fail "FLYWAY_VERSION（${FLYWAY_VERSION:-未設定}）が fixture の flyway_schema_history の最新 version（$INTEGRATION_FLYWAY_LATEST）と一致しません"
+# RB-W P2-1: source DB の既定の照合順序を production と同じ utf8mb4_unicode_ci にする（server の既定は
+# utf8mb4_0900_ai_ci）。復元 DB が server の既定で作られると schema fingerprint の schema 区分が一致しないため、
+# restore.sh が記録値で DB を作ることをこの往復で確かめる。
+src_root -e "ALTER DATABASE \`$MYSQL_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
+  || fail "source DB の既定の照合順序を設定できません"
 src_root "$MYSQL_DATABASE" \
   -e "CREATE TABLE IF NOT EXISTS flyway_schema_history (
         installed_rank INT NOT NULL PRIMARY KEY, version VARCHAR(50), description VARCHAR(200) NOT NULL,
@@ -308,6 +313,12 @@ TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" 
 printf '%s\n' "$TGT_MARKERS" > "$EVID/target-markers.txt"
 grep -qx 'marker-before-checkpoint' "$EVID/target-markers.txt" \
   || fail "target に before marker がありません"
+# RB-W P2-1: 復元 DB の既定の照合順序が source（production と同じ utf8mb4_unicode_ci）と同じであること
+TGT_DB_DEFAULTS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" -urestore-svc -N -B \
+  -e "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.schemata WHERE schema_name = '$MYSQL_DATABASE';" 2>/dev/null)
+printf '%s\n' "$TGT_DB_DEFAULTS" > "$EVID/target-db-defaults.txt"
+[[ "$TGT_DB_DEFAULTS" == $'utf8mb4\tutf8mb4_unicode_ci' ]] \
+  || fail "復元 DB の既定の文字集合・照合順序が source と違います（$TGT_DB_DEFAULTS）"
 # 中間 DML が replay されていること（R1 P2: replay 不在の検出）
 grep -qx 'marker-mid' "$EVID/target-markers.txt" \
   || fail "target に中間 DML（marker-mid）がありません（binlog replay が実行されていません）"
@@ -395,6 +406,25 @@ FP_NEXT=$(probe_fp) || fail "既定値変更後の schema fingerprint を計算�
 [[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == column ]] \
   || fail "既定値の変更で column 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
 echo "default_changed=changed(column)" >> "$FP_EVID"
+# RB-W P3-4: 件数だけでなく定義の変更も該当区分だけを変えること（直前の状態と比べる）
+fp_expect_change() { # <説明> <期待する区分> <SQL>
+  local prev next
+  prev=$(probe_fp) || fail "$1 の前の schema fingerprint を計算できません"
+  src_root -e "$3" || fail "$1 を実行できません"
+  next=$(probe_fp) || fail "$1 の後の schema fingerprint を計算できません"
+  [[ "$(fp_diff "$prev" "$next")" == "$2" ]] \
+    || fail "$1 で $2 区分だけが変わっていません（差異: $(fp_diff "$prev" "$next")）"
+  echo "$1=changed($2)" >> "$FP_EVID"
+}
+fp_expect_change trigger_body trigger \
+  "DROP TRIGGER $FP_PROBE_DB.trg_p; CREATE TRIGGER $FP_PROBE_DB.trg_p BEFORE INSERT ON $FP_PROBE_DB.p FOR EACH ROW SET NEW.b = COALESCE(NEW.b, 1);"
+fp_expect_change view_definition view \
+  "CREATE OR REPLACE VIEW $FP_PROBE_DB.v_p AS SELECT id, a FROM $FP_PROBE_DB.p WHERE id > 0;"
+fp_expect_change fk_on_delete fk_rule \
+  "ALTER TABLE $FP_PROBE_DB.c DROP FOREIGN KEY fk_c_p; ALTER TABLE $FP_PROBE_DB.c ADD CONSTRAINT fk_c_p FOREIGN KEY (p_id) REFERENCES $FP_PROBE_DB.p (id) ON DELETE RESTRICT;"
+# RB-W P2-1: DB の既定の照合順序の変更は schema 区分だけを変える（既存の table・routine の照合順序は変わらない）
+fp_expect_change database_collation schema \
+  "ALTER DATABASE $FP_PROBE_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
 src_root -e "DROP DATABASE $FP_PROBE_DB;" || fail "確認用 DB を削除できません"
 log "schema fingerprint の正規化規則 OK（$FP_EVID）"
 

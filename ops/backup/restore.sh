@@ -185,9 +185,20 @@ main() {
   local dump_file
   dump_file=$(find "$full_root" -name '*.sql' -type f -print -quit 2>/dev/null)
   [[ -n "$dump_file" ]] || restore::fail "dump が見つかりません"
+  # RB-W P2-1: 復元 DB は backup 時の DB の既定の文字集合・照合順序で作る（dump は --databases を使わないため
+  # CREATE DATABASE を含まない）。server の既定（utf8mb4_0900_ai_ci）で作ると、cutover 後に文字集合を書かずに作る
+  # table・routine の照合順序が production と変わる。値は manifest で検証した full の metadata.json の
+  # schema_fingerprint.database から読む。既に作られた空の DB（target guard で確認済み）も ALTER で揃える。
+  # full より後の ALTER DATABASE は binlog replay が再現する。
+  local db_charset db_collation
+  db_charset=$(jq -r '.schema_fingerprint.database.character_set // empty' "$full_root/metadata.json" 2>/dev/null || true)
+  db_collation=$(jq -r '.schema_fingerprint.database.collation // empty' "$full_root/metadata.json" 2>/dev/null || true)
+  if [[ ! "$db_charset" =~ ^[A-Za-z0-9_]{1,64}$ || ! "$db_collation" =~ ^[A-Za-z0-9_]{1,64}$ ]]; then
+    restore::fail "full の metadata.json に DB の既定の文字集合・照合順序（schema_fingerprint.database）がありません。backup 時と同じ照合順序で復元 DB を作れないため復元しません"
+  fi
   "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" --binary-mode \
-    --execute "CREATE DATABASE IF NOT EXISTS \`$TARGET_DATABASE\` CHARACTER SET utf8mb4;" 2>/dev/null \
-    || restore::fail "target DB を作成できません"
+    --execute "CREATE DATABASE IF NOT EXISTS \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation; ALTER DATABASE \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation;" 2>/dev/null \
+    || restore::fail "target DB を backup 時の文字集合・照合順序（$db_charset / $db_collation）で作成できません"
   "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" --binary-mode "$TARGET_DATABASE" < "$dump_file" \
     || restore::fail "dump import に失敗しました"
 

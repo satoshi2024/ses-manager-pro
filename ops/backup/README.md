@@ -218,10 +218,15 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 
 ### schema fingerprint（G-04）
 
-内容ハッシュは主要 table の行しか見ないため、table・列・索引・制約・trigger・routine・view の定義が backup 時と
-違う復元を検出できない。full / checkpoint は書込み静止区間内に、対象 DB の schema を information_schema から
-正規化して SHA-256 にかけ（`lib/schema-fingerprint.sh`、algorithm `mysql-information-schema-sha256-v1`）、
+内容ハッシュは主要 table の行しか見ないため、table・列・索引・制約・trigger・routine・view の定義や DB の既定の
+照合順序が backup 時と違う復元を検出できない。full / checkpoint は書込み静止区間内に、対象 DB の schema を
+information_schema から正規化して SHA-256 にかけ（`lib/schema-fingerprint.sh`、algorithm `mysql-information-schema-sha256-v2`）、
 metadata.json と index の `schema_fingerprint` に記録する。計算できなければ backup を VALID にしない。
+あわせて DB の既定の文字集合・照合順序（`schema_fingerprint.database`）と、診断用に server の版・`lower_case_table_names`
+（`schema_fingerprint.server`。hash には入れない）を記録する。`restore.sh` は復元 DB を `database` の値で作り
+（`CREATE DATABASE … CHARACTER SET … COLLATE …` と、既にある空の DB への `ALTER DATABASE`）、記録が無い full は復元しない。
+v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない）の記録は「算出方式が異なります」で FAIL になる
+（production に v1 の記録は無い。開発・試験の v1 の backup は取り直す）。
 
 正規化の規則:
 
@@ -230,21 +235,26 @@ metadata.json と index の `schema_fingerprint` に記録する。計算でき�
 - 1 行 = 1 要素（区分名 + 項目）。各項目は `IF(x IS NULL, 'NULL', QUOTE(x))` で文字列化し（SQL の NULL と文字列
   `'NULL'` を区別する）、行を `LC_ALL=C` の sort で並べてから、算出方式名の 1 行を先頭に置いて SHA-256 にかける。
   server が返す順序・照合順序には依存しない。区分ごとの件数と SHA-256 も記録し、不一致時は違う区分を表示する。
-- 含めるもの: table（種別・engine・照合順序・`CREATE_OPTIONS`）、列（序数＝並び順・`COLUMN_TYPE`・NULL 可否・
+- 含めるもの: DB の既定の文字集合・照合順序（schema 区分。後から文字集合を書かずに作る table・routine が使う）、
+  table（種別・engine・照合順序・`CREATE_OPTIONS`）、列（序数＝並び順・`COLUMN_TYPE`・NULL 可否・
   既定値・文字集合・照合順序・`EXTRA`・生成式・`SRS_ID`）、索引（一意性・列の序数・prefix 長・昇降順・種別・関数索引の式・
   可視性）、制約（種別・`ENFORCED`）、外部キーの列・参照先・`MATCH`/`ON UPDATE`/`ON DELETE`、CHECK の式、
-  trigger（event・timing・`ACTION_ORDER`・本体・`SQL_MODE`・`DEFINER`・client の文字集合と照合順序）、
+  trigger（event・timing・`ACTION_ORDER`・本体・`SQL_MODE`・`DEFINER`・client の文字集合と照合順序・`DATABASE_COLLATION`）、
   routine と引数（本体・戻り値・`DETERMINISTIC`・`SQL DATA ACCESS`・`SQL SECURITY`・`SQL_MODE`・`DEFINER`・client の
-  文字集合と照合順序）、view（定義・`CHECK OPTION`・`DEFINER`・`SQL SECURITY`・client の文字集合と照合順序）。
-- 含めないもの: コメント（table・列・索引・routine）、`AUTO_INCREMENT` の現在値・行数・容量などの統計・`CARDINALITY`、
-  作成・更新日時、`PRIVILEGES`（照会した利用者の権限で変わる）、`COLUMN_KEY`（索引から導出）、schema の既定の
-  文字集合・照合順序と routine / trigger の `DATABASE_COLLATION`、`ROW_FORMAT` の実値（明示した値は `CREATE_OPTIONS` に入る）、
-  event、partition の詳細（`CREATE_OPTIONS` の `partitioned` だけ）。
+  文字集合と照合順序・`DATABASE_COLLATION`）、view（定義・`CHECK OPTION`・`DEFINER`・`SQL SECURITY`・client の文字集合と照合順序）。
+- 含めないもの: コメント（table・列・索引・routine）、`AUTO_INCREMENT` の現在値（`information_schema_stats_expiry` の
+  cache で古い値が見え得る）・行数・容量などの統計・`CARDINALITY`、作成・更新日時、`PRIVILEGES`（照会した利用者の権限で
+  変わる）、`COLUMN_KEY`（索引から導出）、`ROW_FORMAT` の実値（明示した値は `CREATE_OPTIONS` に入る）、
+  event と partition の詳細（このアプリは event も table の partition も使わない。migration に `CREATE EVENT` と
+  `PARTITION BY`（window 関数以外）は無い。`CREATE_OPTIONS` の `partitioned` は入る。使い始めるときは区分を足す）、
+  利用者と権限（server 単位の設定で、DB の schema ではない）。
 - 境界の期待値（`tests/schema-fingerprint-test.sh` と integration の実 MySQL で固定）: **列コメント・table コメントだけの
   変更では変わらない。列の並び順の変更では変わる**（`SELECT *` や列名の無い `INSERT` の意味が変わるため。column 区分だけが
-  変わり、元に戻すと元の値に戻る）。索引の追加は index 区分、既定値の変更は column 区分だけが変わる。
-- 次の場合は計算を失敗させる（fail-closed）: table が 1 つも見えない、routine の本体が NULL（照会する利用者に
-  `SHOW_ROUTINE` が無い）、view の定義が空（対象 DB の `SHOW VIEW` が無い）、想定外の出力、mysql の失敗。
+  変わり、元に戻すと元の値に戻る）。索引の追加は index 区分、既定値の変更は column 区分、trigger の本体は trigger 区分、
+  view の定義は view 区分、外部キーの `ON DELETE` は fk_rule 区分、DB の既定の照合順序は schema 区分だけが変わる。
+- 次の場合は計算を失敗させる（fail-closed）: table が 1 つも見えない、DB の既定値が 1 行でない、routine の本体が NULL
+  （照会する利用者に `SHOW_ROUTINE` が無い）、view の定義が空（対象 DB の `SHOW VIEW` が無い）、想定外の出力、mysql の失敗。
+- 不一致の通知には、違う区分と、記録時と現在の server の版・`lower_case_table_names`・DB の既定値を並べて出す。
 - 次の場合も不一致として FAIL になる（fail-closed）: backup 時と復元検証時で MySQL server の版（8.0 の minor を含む）や
   `lower_case_table_names` が違い information_schema の表示が変わる、trigger の本体などが schema 名を明示している状態で
   別名の DB へ復元する、復元検証の利用者に `TRIGGER` 権限が無く trigger が見えない（件数の違いとして現れる）。

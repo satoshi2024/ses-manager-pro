@@ -37,6 +37,9 @@ setup_drill() {
     "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000001', MASTER_LOG_POS=4;" \
     "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);" > "$full_payload/db/database.sql"
 printf 'marker-before-full\n' > "$full_payload/uploads/published/marker.txt"
+# RB-W P2-1: full の metadata.json の DB の既定値（restore.sh が復元 DB をこの値で作る）
+printf '%s\n' '{"kind":"full","schema_fingerprint":{"database":{"character_set":"utf8mb4","collation":"utf8mb4_unicode_ci"}}}' \
+  > "$full_payload/metadata.json"
 printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker-before.txt"
   make_manifest "$full_payload"
   make_manifest "$ckpt_payload"

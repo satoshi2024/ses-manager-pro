@@ -375,18 +375,22 @@ run_case case_backup_full_no_secret_leak
 # 記録する。期待値は算出方式名の 1 行 + LC_ALL=C で並べた行の SHA-256（lib を使わずに計算する）。
 case_backup_full_records_schema_fingerprint() {
   setup_full
-  export FAKE_SCHEMA_ROWS="column\t'sys_use'\t'2'\t'name'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\ntable\t'sys_use'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'sys_use'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\n"
+  export FAKE_SCHEMA_ROWS="schema\t'utf8mb4'\t'utf8mb4_unicode_ci'\ncolumn\t'sys_use'\t'2'\t'name'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\ntable\t'sys_use'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'sys_use'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\n"
   local out="" code expected idx
   out=$("$BACKUP_FULL" 2>&1)
   code=$?
   assert_zero "$code" "schema fingerprint 付き full backup 成功"
-  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v1 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
+  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v2 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
     | sha256sum | awk '{print $1}')
   idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
   assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "index に schema fingerprint を記録"
-  assert_eq "mysql-information-schema-sha256-v1" "$(jq -r '.schema_fingerprint.algorithm // empty' "$idx" 2>/dev/null)" \
+  assert_eq "mysql-information-schema-sha256-v2" "$(jq -r '.schema_fingerprint.algorithm // empty' "$idx" 2>/dev/null)" \
     "算出方式を記録"
   assert_eq "2" "$(jq -r '.schema_fingerprint.sections.column.count // empty' "$idx" 2>/dev/null)" "区分ごとの件数を記録"
+  # RB-W P2-1: DB の既定の文字集合・照合順序を記録する（restore.sh が復元 DB をこの値で作る）
+  assert_eq "utf8mb4/utf8mb4_unicode_ci" \
+    "$(jq -r '"\(.schema_fingerprint.database.character_set)/\(.schema_fingerprint.database.collation)"' "$idx" 2>/dev/null)" \
+    "DB の既定の文字集合・照合順序を記録"
   assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "ses-backup:schema-fingerprint" "information_schema から schema を取得"
   assert_contains "$(grep 'ses-backup:schema-fingerprint' "$FAKE_ARGV_LOG" 2>/dev/null)" "ses_manager_db" "対象 DB を指定して取得"
   unset FAKE_SCHEMA_ROWS

@@ -322,12 +322,12 @@ case_checkpoint_records_content_hash() {
 case_checkpoint_records_schema_fingerprint() {
   setup_checkpoint_env
   head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
-  export FAKE_SCHEMA_ROWS="table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+  export FAKE_SCHEMA_ROWS="schema\t'utf8mb4'\t'utf8mb4_unicode_ci'\ntable\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
   local out="" code expected idx
   out=$("$CHECKPOINT" 2>&1)
   code=$?
   assert_zero "$code" "schema fingerprint 付き checkpoint 成功"
-  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v1 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
+  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v2 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
     | sha256sum | awk '{print $1}')
   idx=$(ls "$BACKUP_WORK_DIR"/index/checkpoint-*.json 2>/dev/null | head -n 1)
   assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "checkpoint index に schema fingerprint を記録"

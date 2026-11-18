@@ -45,10 +45,11 @@ setup_validate() {
   chmod +x "$ROOT/ops/backup/providers/approval-verifier-local.sh" 2>/dev/null || true
 }
 
-# schema fingerprint の fixture（G-04）。backup 時の schema = 主キー付きの marker_test。
-SCHEMA_ROWS_BASE="table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'2'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+# schema fingerprint の fixture（G-04）。backup 時の schema = DB の既定が utf8mb4_unicode_ci で、主キー付きの marker_test。
+SCHEMA_ROW_DB="schema\t'utf8mb4'\t'utf8mb4_unicode_ci'\nserver\t'8.4.13'\t'0'\n"
+SCHEMA_ROWS_BASE="${SCHEMA_ROW_DB}table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'2'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
 # 列の並び順（序数）だけを入れ替えた schema
-SCHEMA_ROWS_REORDERED="table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'2'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'1'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+SCHEMA_ROWS_REORDERED="${SCHEMA_ROW_DB}table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'2'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'1'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
 
 # 現在の FAKE_SCHEMA_ROWS（fake mysql の応答）から lib/schema-fingerprint.sh で記録値を作る
 schema_fingerprint_for() {
@@ -402,6 +403,19 @@ case_validate_schema_fingerprint_mismatch() {
   assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
 }
 
+# RB-W P2-1: 復元 DB の既定の照合順序が backup 時と違う（例: server の既定 utf8mb4_0900_ai_ci で作られた）場合も FAIL。
+# table・列が同じでも、cutover 後に文字集合を書かずに作る table・routine の照合順序が変わるため。
+case_validate_schema_fingerprint_database_collation_mismatch() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_SCHEMA_ROWS="${SCHEMA_ROWS_BASE/utf8mb4_unicode_ci/utf8mb4_0900_ai_ci}"
+  run_validate
+  assert_nonzero "$VAL_RC" "DB の既定の照合順序の違いは非 0"
+  assert_contains "$VAL_OUT" '"schema_fingerprint": "FAIL"' "schema_fingerprint FAIL"
+  assert_contains "$VAL_OUT" "差異のある区分: schema" "違う区分（schema）だけを通知"
+  assert_contains "$VAL_OUT" "database=utf8mb4/utf8mb4_unicode_ci" "記録時の DB の既定値を通知"
+}
+
 # 記録の無い checkpoint は、設定によらず FAIL（NOT_RECORDED を report に残す）。照合を省略する設定は無い。
 case_validate_schema_fingerprint_not_recorded_fails() {
   setup_common_fixture
@@ -517,6 +531,7 @@ run_case case_validate_content_hash_configured_table_missing
 run_case case_validate_content_hash_requires_primary_key
 run_case case_validate_content_hash_missing_table_and_old_algorithm
 run_case case_validate_schema_fingerprint_mismatch
+run_case case_validate_schema_fingerprint_database_collation_mismatch
 run_case case_validate_schema_fingerprint_not_recorded_fails
 run_case case_validate_schema_fingerprint_query_error_and_old_algorithm
 run_case case_validate_count_mismatch
