@@ -11,6 +11,8 @@
 #   SET_USER_ID）を書かない（行全体のコメントは除く）。
 # - EXIT trap（RB-W）: handler は関数を抜けた後に評価されるため、単一引用符で登録する handler に関数の local 変数を
 #   書かない（set -u で unbound variable になり後始末が動かない）。登録時に printf %q で展開するか global 変数を使う。
+# - mysqldump の option（2026-11-18 利用者決定）: 本番 script の mysqldump はすべて --no-tablespaces を付ける（source 側の account に
+#   PROCESS を与えない）。その前提として、production に入る migration は TABLESPACE を使わない（repository の migration を読む）。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -313,11 +315,104 @@ EOF
   assert_eq "" "$out" "本番 script の EXIT trap の handler は local 変数を参照しない（登録時に展開するか global 変数を使う）"
 }
 
+# mysqldump の起動（"$MYSQLDUMP_BIN" / ${MYSQLDUMP_BIN} / 行頭・;・&・|・( の後の mysqldump。--version を除く）を、行末の \ で
+# 続く行をつないだ 1 つの command として見て、--no-tablespaces の有無を出力する（OK|NG <file>:<開始行>）。行全体のコメントは見ない。
+mysqldump_invocations() { # <file>...
+  awk '
+    function check(cmd, start) {
+      if (cmd !~ /("[$][{]?MYSQLDUMP_BIN[}]?"|[$][{]?MYSQLDUMP_BIN[}]?)[[:space:]]/ &&
+          cmd !~ /(^|[;&|(])[[:space:]]*mysqldump[[:space:]]/) return
+      if (cmd ~ /[[:space:]]--version([[:space:]]|[)]|$)/) return
+      print ((cmd ~ /[[:space:]]--no-tablespaces([[:space:]]|$)/) ? "OK " : "NG ") FILENAME ":" start
+    }
+    FNR == 1 { if (buf != "") check(buf, bstart); buf = "" }
+    buf == "" && /^[[:space:]]*#/ { next }
+    {
+      line = $0
+      if (buf == "") bstart = FNR
+      if (line ~ /\\$/) { sub(/\\$/, "", line); buf = buf line " "; next }
+      buf = buf line
+      check(buf, bstart)
+      buf = ""
+    }
+    END { if (buf != "") check(buf, bstart) }' "$@"
+}
+
+# RB-W（2026-11-18 利用者決定）: 本番 script の mysqldump はすべて --no-tablespaces を付ける（source 側の account に PROCESS を
+# 与えないため）。走査器そのものも見本で確かめる。
+case_mysqldump_invocations_use_no_tablespaces() {
+  local t out f
+  local -a files=()
+  t=$(mktemp -d)
+  cat > "$t/sample.sh" <<'EOF'
+"$MYSQLDUMP_BIN" "${MYSQL_OPT_ARGS[@]}" \
+  --single-transaction --no-tablespaces db > out
+"$MYSQLDUMP_BIN" --single-transaction db > out
+mysqldump --single-transaction \
+  --routines db > out
+x=$(mysqldump --version)
+"$MYSQLDUMP_BIN" --version
+MYSQLDUMP_BIN=${MYSQLDUMP_BIN:-mysqldump}
+echo "mysqldump が失敗しました: $MYSQLDUMP_BIN"
+# "$MYSQLDUMP_BIN" --single-transaction db
+${MYSQLDUMP_BIN} --no-tablespaces db > out
+EOF
+  out=$(mysqldump_invocations "$t/sample.sh")
+  assert_contains "$out" "OK $t/sample.sh:1" "--no-tablespaces を付けた起動（行の継続を含む）を OK と判定する"
+  assert_contains "$out" "NG $t/sample.sh:3" "--no-tablespaces の無い起動を検出する"
+  assert_contains "$out" "NG $t/sample.sh:4" "--no-tablespaces の無い起動（行の継続）を検出する"
+  assert_contains "$out" "OK $t/sample.sh:11" "\${MYSQLDUMP_BIN} の起動も見る"
+  assert_eq 4 "$(grep -c . <<< "$out")" "--version・変数の代入・文字列・コメントは起動として数えない"
+  rm -rf "$t"
+
+  while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
+  out=$(mysqldump_invocations "${files[@]}")
+  assert_contains "$out" "OK $BACKUP_ROOT/backup-full.sh:" "backup-full.sh の mysqldump を走査した（前提）"
+  assert_eq "" "$(grep '^NG ' <<< "$out" || true)" "本番 script の mysqldump はすべて --no-tablespaces を付ける"
+}
+
+# 上の --no-tablespaces の前提: production に入る migration（db/migration・db/migration-prod の SQL と、src/main/java/db/migration
+# の Java migration）は general tablespace を使わない（TABLESPACE を書かない。大文字・小文字を区別しない）。使い始めるときは
+# dump の option と source 側の account の権限を見直す。backup unit は repository 全体を /repo に mount して動くため読める。
+MIGRATION_DIRS=("$ROOT/src/main/resources/db/migration" "$ROOT/src/main/resources/db/migration-prod" "$ROOT/src/main/java/db/migration")
+
+tablespace_mentions() { # <dir>... → TABLESPACE を含む file:行
+  grep -rniE 'tablespace' "$@" 2>/dev/null || true
+}
+
+case_migrations_do_not_use_tablespace() {
+  local t d n=0
+  t=$(mktemp -d)
+  mkdir -p "$t/m"
+  printf '%s\n' 'CREATE TABLE t_a (id BIGINT PRIMARY KEY) ENGINE=InnoDB;' > "$t/m/V1__ok.sql"
+  printf '%s\n' 'create tablespace ts1 add datafile '"'"'ts1.ibd'"'"' engine=InnoDB;' > "$t/m/V2__ts.sql"
+  printf '%s\n' 'ALTER TABLE t_a TABLESPACE = ts1;' > "$t/m/V3__alter.sql"
+  assert_eq 2 "$(tablespace_mentions "$t/m" | grep -c .)" "走査器は TABLESPACE を大文字・小文字によらず検出する（見本）"
+  rm -rf "$t"
+
+  for d in "${MIGRATION_DIRS[@]}"; do
+    if [[ -d "$d" ]]; then
+      n=$((n + $(find "$d" -type f | wc -l)))
+    else
+      test_fail "migration の directory がある" "$d がありません"
+    fi
+  done
+  if (( n > 100 )); then
+    test_assert "production に入る migration を走査する（${n} file）"
+  else
+    test_fail "production に入る migration を走査する" "file が少なすぎます（${n}）"
+  fi
+  assert_eq "" "$(tablespace_mentions "${MIGRATION_DIRS[@]}")" \
+    "migration は TABLESPACE を使わない（mysqldump の --no-tablespaces の前提。使うなら dump の option と権限を見直す）"
+}
+
 run_case case_pipefail_scanner_detects_each_form
 run_case case_pipefail_production_scripts_have_no_early_exit_reader_after_pipe
 run_case case_pipefail_binlog_size_from_logs_with_large_list
 run_case case_pipefail_validate_db_check_tables_with_large_output
 run_case case_mysql84_no_removed_syntax
 run_case case_trap_handlers_do_not_reference_function_locals
+run_case case_mysqldump_invocations_use_no_tablespaces
+run_case case_migrations_do_not_use_tablespace
 
-test_summary "本番 script の横断的な契約（pipefail と SIGPIPE・MySQL 8.4・EXIT trap）"
+test_summary "本番 script の横断的な契約（pipefail と SIGPIPE・MySQL 8.4・EXIT trap・mysqldump の option）"

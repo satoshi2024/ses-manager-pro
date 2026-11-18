@@ -161,9 +161,13 @@ main() {
   CONSISTENCY_TIME_UTC=$(quiesce::status_json | jq -r '.started_at_utc // empty')
 
   # mysqldump（--source-data=2 の coordinate を後で機械抽出）
+  # --no-tablespaces: tablespace の定義（CREATE TABLESPACE 等）を書かない。これにより dump account に PROCESS 権限が要らない
+  # （mysqldump 8.0.21 以降は tablespace の情報を読むのに PROCESS が要る。2026-11-18 利用者決定で上線前に外した）。
+  # 前提: migration（db/migration・db/migration-prod・db/migration の Java）は general tablespace を使わない
+  # （tests/script-contract-test.sh が TABLESPACE の不在を確かめる）。使い始めるときは見直す。
   local dump_file="$work/db/database.sql"
   if ! "$MYSQLDUMP_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" \
-      --single-transaction --quick --routines --events --triggers --hex-blob \
+      --single-transaction --quick --routines --events --triggers --hex-blob --no-tablespaces \
       --source-data=2 --set-gtid-purged=OFF "$MYSQL_DATABASE" > "$dump_file" 2> "$work/db/mysqldump.err"; then
     common::fail "mysqldump が失敗しました: $(common::redact < "$work/db/mysqldump.err")"
   fi

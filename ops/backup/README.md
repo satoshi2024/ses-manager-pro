@@ -198,7 +198,7 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 
 | role | DB 権限 | repository 権限 | 用途 |
 |---|---|---|---|
-| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`・`PROCESS`） | writer（backup 可・delete 不可） | full/checkpoint |
+| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`） | writer（backup 可・delete 不可） | full/checkpoint |
 | binlog role | 下の「source 側の account の権限」のうち archive・snapshot・check の行（`REPLICATION SLAVE`・`REPLICATION CLIENT`） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
 | restore target role | recovery target 新規 DB のみ（source 権限なし）。下の「restore target role の権限」を全部持つこと | read | restore/validate |
@@ -214,14 +214,23 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 | `SHOW_ROUTINE` | global | full・checkpoint | mysqldump `--routines` の `SHOW CREATE FUNCTION / PROCEDURE`、schema fingerprint の routine 本体。mysqldump の文書は `--routines` に global の `SELECT` を挙げるため、`SHOW_ROUTINE` だけで足りるかは本番相当の権限での実測で確かめる（未取得。integration は root のため CI では確かめられない） |
 | `RELOAD` | global | full・checkpoint | mysqldump `--source-data=2`（起点を取る間の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`）、create-checkpoint の `FLUSH BINARY LOGS` |
 | `REPLICATION CLIENT` | global | full・checkpoint・archive・snapshot・check | mysqldump `--source-data=2` が 8.4 で発行する `SHOW BINARY LOG STATUS`、`SHOW BINARY LOGS`（create-checkpoint・archive-binlog・snapshot-binlog・check-backup） |
-| `PROCESS` | global | full | mysqldump に `--no-tablespaces` を付けていないため（mysqldump 8.0.21 以降は tablespace の情報を読むのに要る） |
 | `REPLICATION SLAVE` | global | archive | `mysqlbinlog --read-from-remote-server`（source から binlog を受け取る） |
 
-要らないもの: `LOCK TABLES`（`--single-transaction` のため table lock を取らない）、`SUPER`、DDL 凍結の `GET_LOCK`（権限不要）、
-`SELECT @@server_uuid`・`SHOW GLOBAL VARIABLES`・`SHOW SESSION STATUS`（権限不要）。
+要らないもの: `PROCESS`（mysqldump に `--no-tablespaces` を付けるため不要。付けないと mysqldump 8.0.21 以降は tablespace の情報を
+読むのに `PROCESS` が要る。2026-11-18 利用者決定で上線前に付けた）、`LOCK TABLES`（`--single-transaction` のため table lock を
+取らない）、`SUPER`、DDL 凍結の `GET_LOCK`（権限不要）、`SELECT @@server_uuid`・`SHOW GLOBAL VARIABLES`・`SHOW SESSION STATUS`
+（権限不要）。
 
-- 現在の `docker-compose.yml` は全 service が同じ `.env.backup`（同じ `MYSQL_USER`）を使うため、その account には上の表の
-  全部が要る（dump role と binlog role を別の account に分けるには service ごとの env が要る。未実装）。
+- `--no-tablespaces` の前提: production に入る migration（`src/main/resources/db/migration`・`db/migration-prod` の SQL と
+  `src/main/java/db/migration` の Java migration）は `CREATE TABLESPACE` などの general tablespace を使わない
+  （`tests/script-contract-test.sh` の `case_migrations_do_not_use_tablespace` が `TABLESPACE` の不在を確かめ、
+  `case_mysqldump_invocations_use_no_tablespaces` が本番 script の mysqldump がすべて `--no-tablespaces` を付けることを
+  確かめる）。使い始めるときは dump の option と source 側の account の権限を見直す（`--no-tablespaces` のままだと tablespace の
+  定義が dump に入らず、復元先に同じ tablespace が無ければ import が失敗する）。`--no-tablespaces` と `--single-transaction`・
+  `--source-data=2`・`--routines`・`--triggers`・`--events` の組合せを mysqldump 8.4.13 が受け付けることは CI（backup
+  integration）で確認する（未取得）。
+- dump role と binlog role の分離（account を分ける）は上線後に行う（2026-11-18 利用者決定）。現状は一つの account が上の表の
+  全権限を持つ（`docker-compose.yml` の全 service が同じ `.env.backup` の `MYSQL_USER` を使う。分けるには service ごとの env が要る）。
 - preflight は権限を検査しない。不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は source 側を
   root で動かすため、この表で足りることは CI でも確かめられない（**本番相当の権限での実測は未取得**。DBA が本番の account で
   初回の full・checkpoint・archive を流して確かめる）。

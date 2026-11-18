@@ -80,6 +80,11 @@ case_backup_full_normal() {
   assert_contains "$out" '"status": "VALID"' "result status VALID"
   assert_contains "$out" 'binlog.000010' "coordinate file は metadata と一致"
   assert_contains "$out" '"position": 154' "coordinate position"
+  # RB-W（2026-11-18 利用者決定）: mysqldump に --no-tablespaces を渡す（dump account に PROCESS を要らなくする）
+  local dump_argv=""
+  dump_argv=$(grep -e '--source-data=2' "$FAKE_ARGV_LOG" 2>/dev/null || true)
+  assert_contains "$dump_argv" "--no-tablespaces" "mysqldump に --no-tablespaces を渡す"
+  assert_contains "$dump_argv" "--single-transaction" "mysqldump に --single-transaction を渡す"
   # R1 P1-06: full coordinate file が書き出されていること
   if [[ -f "$FULL_COORDINATE_FILE" ]] && grep -qx 'binlog.000010' "$FULL_COORDINATE_FILE"; then
     test_assert "FULL_COORDINATE_FILE を書き出し（archiver の初回起点）"
