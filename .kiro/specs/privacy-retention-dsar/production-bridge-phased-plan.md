@@ -834,6 +834,12 @@ A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway j
   - P3-7: `PrivacyPolicyRegistrationService`・`PrivacyHoldReleaseService` の gate の Javadoc（`trustReady(String)`、有効期間・tenant）と、D-03 の行の §4.6 への参照を直した。
   - P3-8: X25519 の SubjectPublicKeyInfo（同じ 44 bytes、OID だけが違う）の拒否と、KMS の trust を通した説明照会の `POLICY_REVOKED` の試験を足した。
   - P3-9（trust 文書そのものに署名が無い）: 本 batch の範囲外として記録した（deploy-runbook §4.6。EFS の書込み権限が trust の根になる）。
+- **delta review（`rb-nf07trust-d16b2177-delta-review.md`、PASS 附条件）への対応（RB-NF07-TRUST-KMS 第7 commit。DDL なし）**:
+  - P2-A（可用性）: `KmsPrivacyTrustSource` は file の I/O を1つの lock で直列化したまま、lock の待ちを `ReentrantLock.tryLock` の最長0.3秒（`LOCK_WAIT`、固定値。stat・読込みは通常 µs〜ms で100倍以上の余裕があり、要求1件の trust の照会が数回でも止まる時間は1秒程度）にし、lock を持つ thread の I/O が0.3秒を超えて続いていれば待たない。lock を取れなかった判定は I/O をせず、最後に file を確かめた（stat・読込みが成功した）時刻から `reload-interval` の内なら直前の内容、外なら閉じる（anchor 0件・UNKNOWN、`document.stalled` の WARN を状態が変わったときに1回）。EFS（Fargate の hard mount の見込み）に届かないとき、止まるのは I/O 中の1 thread だけになり、NF08 の送信等が Tomcat の thread を使い切らない。trust が閉じるまでは最長でおよそ `reload-interval` の2倍（既定で約60秒）の見込み（実測は SRE、未実施）。起動時の検査（`inspect`）は daemon thread で行い20秒で打ち切り、`trust.kms.document.timeout` を構造的な違反として返す（flag が ON の起動を止める）。試験は `KmsPrivacyTrustSourceStallTest`（`CountDownLatch` で stat・読込みを止める file の読み方で、他の判定が上限の内に返ること、cache の内と外、I/O が戻った後の回復、起動時の打ち切り）。
+  - P3-a: `PolicyRegistrationVerifier.verify` の `signature` の Javadoc を digest 声明への署名に直した。
+  - P3-b: deploy-runbook §4.6 の mount の path は §1.6 の 11（RB-DEPLOY。`/app/privacy-trust`）を正本として参照し、`PRIVACY_TRUST_KMS_ANCHOR_FILE` の例（`/app/privacy-trust/nf07-trust.json`）だけを書いた。
+  - P3-c: `hard`/`soft` の説明を Fargate の事実に改めた（task definition の `efsVolumeConfiguration` に NFS の mount option を書く項目が無く、hard mount を前提にする。実際の option は SRE の確認項目）。
+  - P3-d: canonical bytes への直接の署名の検証（`PurePolicyVerificationKernel.verifySignature`）の呼出し元を合成の `ApprovalEnvelopeVerifier` だけ、digest 声明の検証の呼出し元を `ProductionApprovalEnvelopeVerifier` だけに固定する静的な検査を `PrivacyFoundationIsolationTest` に足した。
 
 B1 の DDL 草案（番号なし）:
 
