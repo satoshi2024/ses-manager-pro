@@ -45,6 +45,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.EnableDefaultTenantTestContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -97,7 +98,7 @@ class OperationalBoundaryMySqlIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_operational_boundary")
             .withUsername("root")
             .withPassword("ses");

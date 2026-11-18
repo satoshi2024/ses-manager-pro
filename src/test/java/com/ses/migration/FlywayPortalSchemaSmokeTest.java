@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -25,7 +26,7 @@ class FlywayPortalSchemaSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_portal_v104")
             .withUsername("root")
             .withPassword("ses");
@@ -33,7 +34,7 @@ class FlywayPortalSchemaSmokeTest {
     /** legacy path検証用: V103_1適用済みDBへV104を適用する。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_portal_legacy")
             .withUsername("root")
             .withPassword("ses");

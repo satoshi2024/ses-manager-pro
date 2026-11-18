@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -25,7 +26,7 @@ class FlywaySelfServiceSchemaSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_selfservice_v105")
             .withUsername("root")
             .withPassword("ses");
@@ -33,7 +34,7 @@ class FlywaySelfServiceSchemaSmokeTest {
     /** legacy path検証用: V104_4適用済みDBへV105を適用する。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_selfservice_legacy")
             .withUsername("root")
             .withPassword("ses");
@@ -41,7 +42,7 @@ class FlywaySelfServiceSchemaSmokeTest {
     /** 4fa3a689版V105_1（phone/template_snapshot_version未追加）環境からの移行検証用container */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> HISTORICAL_V105_1_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> HISTORICAL_V105_1_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_selfservice_historical_v105_1")
             .withUsername("root")
             .withPassword("ses");

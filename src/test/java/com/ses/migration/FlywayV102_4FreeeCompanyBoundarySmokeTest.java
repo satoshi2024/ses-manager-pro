@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -36,7 +37,7 @@ class FlywayV102_4FreeeCompanyBoundarySmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_legacy_v103")
             .withUsername("root")
             .withPassword("ses")
@@ -46,7 +47,7 @@ class FlywayV102_4FreeeCompanyBoundarySmokeTest {
     /** 複数company時のbackfill非適用を検証する専用container（test間の順序依存を排除）。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL_MULTI_COMPANY = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL_MULTI_COMPANY = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_v103_multi")
             .withUsername("root")
             .withPassword("ses")

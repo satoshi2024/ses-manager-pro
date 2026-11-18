@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -22,7 +23,7 @@ class FlywayStaffingSchemaSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_staffing_v103")
             .withUsername("root")
             .withPassword("ses");
@@ -30,7 +31,7 @@ class FlywayStaffingSchemaSmokeTest {
     /** legacy path検証用: V102_3適用済みDBへV103を適用する（S12-R1-P1-04）。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_staffing_legacy")
             .withUsername("root")
             .withPassword("ses");

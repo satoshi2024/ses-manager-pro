@@ -7,6 +7,7 @@ import com.ses.entity.UserExternalIdentity;
 import com.ses.mapper.UserExternalIdentityMapper;
 import com.ses.service.ExternalIdentityProvisioningService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -48,7 +49,7 @@ class ExternalIdentityConcurrentApprovalMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");

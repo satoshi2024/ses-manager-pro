@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import db.migration.V74_3__crm_lead_search_key_nfkc;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_v106_2_repair")
             .withUsername("root")
             .withPassword("ses")
@@ -43,7 +44,7 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> PUBLISHED_V106_2_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> PUBLISHED_V106_2_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_v106_2_published")
             .withUsername("root")
             .withPassword("ses")

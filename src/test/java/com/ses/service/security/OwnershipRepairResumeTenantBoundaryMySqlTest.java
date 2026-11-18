@@ -2,6 +2,7 @@ package com.ses.service.security;
 
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,7 @@ class OwnershipRepairResumeTenantBoundaryMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_resume_repair_tenant")
             .withUsername("root")
             .withPassword("ses");

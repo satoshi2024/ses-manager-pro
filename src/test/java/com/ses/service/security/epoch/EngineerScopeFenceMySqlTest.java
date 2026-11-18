@@ -20,6 +20,7 @@ import com.ses.service.security.LegalEntityContextService;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.InnoDbRecordLockWaits.PointLock;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -95,7 +96,7 @@ class EngineerScopeFenceMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf01_engineer_epoch")
             .withUsername("root")
             .withPassword("ses");

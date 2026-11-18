@@ -1,6 +1,7 @@
 package com.ses.migration;
 
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Transactional
 class PortalEngineerLinkSchemaMySqlTest {
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("g5_portal_link").withUsername("root").withPassword("ses");
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {

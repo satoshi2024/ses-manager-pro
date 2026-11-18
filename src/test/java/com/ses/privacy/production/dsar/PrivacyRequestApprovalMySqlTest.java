@@ -40,6 +40,7 @@ import com.ses.service.security.FileScanner;
 import com.ses.service.security.impl.UnavailableFileScanner;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.MySqlConstraintRejections;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -124,7 +125,7 @@ class PrivacyRequestApprovalMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf07_dsar_approval")
             .withUsername("root")
             .withPassword("ses");

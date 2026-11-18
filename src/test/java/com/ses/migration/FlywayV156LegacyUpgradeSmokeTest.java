@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import db.migration.V74_3__crm_lead_search_key_nfkc;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.Tag;
@@ -24,7 +25,7 @@ class FlywayV156LegacyUpgradeSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_nf09_v156_legacy")
             .withUsername("root")
             .withPassword("ses");

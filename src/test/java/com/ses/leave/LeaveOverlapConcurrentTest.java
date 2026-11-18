@@ -12,6 +12,7 @@ import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,7 +61,7 @@ class LeaveOverlapConcurrentTest {
 
     @Container
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");

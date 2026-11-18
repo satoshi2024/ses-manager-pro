@@ -7,6 +7,7 @@ import org.springframework.core.io.support.EncodedResource;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.service.security.LegalEntityReadinessService;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -42,7 +43,7 @@ class FlywayMigrationSmokeTest {
 
     @Container
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");
@@ -50,7 +51,7 @@ class FlywayMigrationSmokeTest {
     /** V77適用済みlegacy DBへ、V78の成功/停止両経路を適用する専用container。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> LEGACY_V78 = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> LEGACY_V78 = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_legacy_v78")
             .withUsername("root")
             .withPassword("ses");
@@ -58,7 +59,7 @@ class FlywayMigrationSmokeTest {
     /** V158のbackfill/readiness検証はseed行を変更しない専用DBで行う。 */
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> READINESS_MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> READINESS_MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_readiness")
             .withUsername("root")
             .withPassword("ses");

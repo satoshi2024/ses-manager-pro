@@ -16,6 +16,7 @@ import com.ses.service.impl.DocumentMetadataCommitService;
 import com.ses.service.impl.StagedImportDocument;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -106,7 +107,7 @@ class ImportCsvIngestionRealMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(DATABASE).withUsername("root").withPassword("ses");
 
     @DynamicPropertySource

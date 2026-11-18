@@ -3,6 +3,7 @@ package com.ses.migration;
 import com.ses.privacy.foundation.PrivacyCaseState;
 import com.ses.privacy.production.dsar.PrivacyDsarVocabulary;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.MySqlConstraintRejections;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
@@ -53,7 +54,7 @@ class FlywayNf07PrivacyF1MigrationTest {
     static final MySQLContainer<?> UPGRADE = mysql("ses_nf07_f1_upgrade");
 
     private static MySQLContainer<?> mysql(String database) {
-        return new MySQLContainer<>("mysql:8.0")
+        return new MySQLContainer<>(MySqlTestImages.image())
                 .withDatabaseName(database)
                 .withUsername("root")
                 .withPassword("ses");

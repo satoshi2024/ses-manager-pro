@@ -12,6 +12,7 @@ import com.ses.importcenter.foundation.SourceRow;
 import com.ses.importcenter.foundation.ValidationContext;
 import com.ses.service.DocumentService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,7 @@ import static org.mockito.Mockito.*;
 class ImportValidationResolverRealMySqlTest {
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("nf06_resolver").withUsername("root").withPassword("ses");
 
     private static final String TENANT = "synthetic-resolver-tenant";

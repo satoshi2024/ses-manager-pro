@@ -32,6 +32,7 @@ import com.ses.service.EngineerService;
 import com.ses.service.InvoiceService;
 import com.ses.service.ProjectService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,7 +81,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_f1_concurrency")
             .withUsername("root")
             .withPassword("ses");
