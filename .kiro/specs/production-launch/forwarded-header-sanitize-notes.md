@@ -90,7 +90,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-Ssl: on' https://<公�
 
 0. **配備前: VPC CIDRとALB subnetの確認**。本番VPCのprimary・secondary CIDRと、ALBを置くsubnetのIPv4 CIDRが全てRFC 1918（`10/8`・`172.16/12`・`192.168/16`）または `100.64/10` に収まること、`TRUSTED_PROXIES` に入れる値がそのALB subnetのnetwork address（host部が0）であることを確認する。収まらない場合は配備を止め、§3.3の前提の見直し（validatorの変更）を依頼する。
 1. ブラウザで公開FQDNの `/login` を開き、redirectが繰り返されずにlogin画面が出ること（`X-Forwarded-Proto` が信頼されている）。
-2. OIDC loginを開始し、IdPへのredirectの `redirect_uri` が `https://<公開FQDN>/login/oauth2/code/<registrationId>` であること。初回配備はbootstrap中でIdPが未登録のため、deploy直後ではなく `deploy-runbook.md` §5.3 でIdPを登録した後、§5.3 の5の最初のOIDC loginで確かめる。
+2. OIDC loginを開始し、IdPへのredirectの `redirect_uri` が `https://<公開FQDN>/login/oauth2/code/<registrationId>` であること。client registration は起動設定から作られるため redirect の URL 自体は deploy 直後でも見られるが、login を最後まで通すには IdP の登録と外部 identity link が要る。初回配備は bootstrap 中のため、`deploy-runbook.md` §5.3 の5の最初の OIDC login でまとめて確かめる。
 3. §3.1 のcurl 4本がWAFの403になること（BLOCK切替後）。
 4. **ECSのcontainer health check**: ECS Exec（または `docker exec`）でtask内から `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness` を実行し、`200` であること（`302` ならHTTPS強制の例外が効いていない）。task定義のhealth checkは `%{http_code}` を200と比較する形で、`curl -f`（302を成功と扱う）や `X-Forwarded-Proto` 付きの書き方に戻さない（`ContainerHealthCheckCommandGuardTest` が検査する）。
 5. ALBのtarget groupでtargetがhealthyになること（readiness・`matcher=200`）。

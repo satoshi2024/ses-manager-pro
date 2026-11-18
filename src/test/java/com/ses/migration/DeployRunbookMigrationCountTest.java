@@ -42,8 +42,8 @@ class DeployRunbookMigrationCountTest {
         // backup の checkpoint は FLYWAY_VERSION を復元先の flyway_schema_history と照合する（古い値は復元検証で FAIL）
         Matcher backupVersion = required(runbook,
                 "`FLYWAY_VERSION`[^\\n]*?本 release は `([0-9.]+)`",
-                "§1.7 DBA-6 の FLYWAY_VERSION に 本 release は `最新version` と記載してください");
-        assertThat(backupVersion.group(1)).as(".env.backup の FLYWAY_VERSION（DBA-6）").isEqualTo(latest);
+                "§1.7「Backup 開始の前提」の FLYWAY_VERSION に 本 release は `最新version` と記載してください");
+        assertThat(backupVersion.group(1)).as(".env.backup の FLYWAY_VERSION（§1.7「Backup 開始の前提」）").isEqualTo(latest);
     }
 
     /**

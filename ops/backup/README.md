@@ -20,7 +20,7 @@ MySQL 8 の業務データと uploads を restic repository へ退避し、指�
 
 **現状の注意:** production 固有値（HFP-03-PROD-001〜008）は未確定のため
 [`.kiro/specs/database-backup-recovery/baseline.md`](../../.kiro/specs/database-backup-recovery/baseline.md) §4 で BLOCKED。
-production 環境への接続・復元は行わないこと。初回本番配備で backup を始める前に確定する値と BLOCKED の解除条件は `.kiro/specs/production-launch/deploy-runbook.md` §1.7 の DBA-6 に書く。
+production 環境への接続・復元は行わないこと。初回本番配備で backup を始める前に確定する値と BLOCKED の解除条件は `.kiro/specs/production-launch/deploy-runbook.md` §1.7 の「Backup 開始の前提」に書く。
 
 ## 前提
 

@@ -155,8 +155,8 @@
   - image（`Dockerfile`）も `TZ` と `JAVA_TOOL_OPTIONS` の `-Duser.timezone=Asia/Tokyo` を持つ。task definition でも `TZ` を設定する。
   - `validate-task-definition.ps1` は、`TZ` が無い場合と、`JAVA_TOOL_OPTIONS` を上書きして `-Duser.timezone` を落とした場合に Fail する。
 - **`RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false`（初回配備の雛形の値）**: V197 の署名まで、副本の保存期限を縮めず、廃棄候補を毎日作り直さない。署名後に `true` にする（§4.3）。
-- `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。雛形は host が placeholder、port が `3310`。ClamAV の置き方（同じ task の sidecar か外部の service か）は要決定（§1.6 の6）。
-- `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。雛形は `METRICS_SCRAPER_ENABLED=true`、username が placeholder、password が secret。scrape 経路は要決定（§1.6 の7）。
+- `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`: ClamAV。既定は `localhost:3310`。届かないとscanできず、uploadを公開できない。ClamAV は同じ task の sidecar で動かす（決定済み（2026-11-18）。§1.6 の6）ため、雛形は `FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`。
+- `METRICS_SCRAPER_ENABLED` / `METRICS_SCRAPER_USERNAME` / `METRICS_SCRAPER_PASSWORD`: metricsの取得用。adminのHTTP Basicは常に401になる（§1.7 SRE-9）。scrape は ALB 経由の HTTPS で scraper 口座を使う（決定済み（2026-11-18）。§1.6 の7）ため、雛形は `METRICS_SCRAPER_ENABLED=true`、username が placeholder、password が secret。
 - `SMTP_HOST` 等: 通知メール。
 
 **環境変数ではないが起動時に検査されるDBの状態**: 次は §5 の手順で揃える。bootstrap中は、break-glass管理者とOIDC管理者の人数の検査を省略する（§4.2）。
@@ -167,7 +167,10 @@
 
 ### 1.1 DBサーバー（DBA）
 
-- MySQL 8.0系（版はDBAが確定する。要決定（§1.6 の3・DBA-4）。testは `mysql:8.0.36`。確定後は `-Dses.flyway.fresh-install.mysql-image` で同じ版を検証する）。
+- **MySQL 8.4 LTS**（決定済み（2026-11-18）。§1.6 の3・DBA-4。exact 版の候補は 8.4.13。8.0 系の community support は 2026-04-30 に終わった（同日の決定の根拠））。
+  - 試験の現状（事実）: `FlywayProdFreshInstallMySqlTest` は `mysql:8.0.36` で、`-Dses.flyway.fresh-install.mysql-image` で切り替えられるのはこの1 class だけである。他の MySQL 試験（124 file）は `mysql:8.0` を直に書いている。試験の image を1か所で切り替えられるようにし、8.4 で MySQL suite を CI で通すのは RB-MYSQL84 が行う（**未完**）。
+  - backup tool（MySQL 8.0.46 client・mysqlbinlog）の 8.4 への適合は第二段階で行う（**未完**）。適合を確かめるまで、8.4 の本番に対する backup・PITR は検証済みとはいえない（§1.7 の「Backup 開始の前提」）。
+  - recovery target（restore 先）は本番と**同じ exact 版**にする（backup tool は backup 時と復元検証時の server の版が違うと schema fingerprint が一致せず FAIL にする）。
 - **serverタイムゾーン `+09:00`**（ユーザー決定）。my.cnf / parameter groupで `default_time_zone = '+09:00'` を設定し、次で確認する。
   ```sql
   SELECT @@global.time_zone, @@session.time_zone, NOW(), UTC_TIMESTAMP();
@@ -212,8 +215,10 @@ migrator（job専用）とアプリ用を分ける。
     SHOW GRANTS FOR '<migrator>'@'<host>';
     -- 期待: GRANT USAGE ON *.* と、`ses_manager_db`.* への上の14権限だけ（DBA-1 で SUPER 相当を渡すと決めた場合はその行も）。
     --       ALL PRIVILEGES、*.* への DDL、他の schema への権限が無い
-    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<migrator>';
+    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<migrator>' AND to_host = '<host>';
     -- 0。0 でなければ SHOW GRANTS FOR '<migrator>'@'<host>' USING <role> で role の権限も確かめる（USING 無しでは role の権限が出ない）
+    SELECT @@global.mandatory_roles;
+    -- 空。値があれば、その role は全 account に付くため、その権限も上と同じく確かめる
     SELECT @@global.log_bin, @@global.log_bin_trust_function_creators, @@global.binlog_format,
            @@global.gtid_mode, @@global.enforce_gtid_consistency;
     -- 期待: binlog_format = 'ROW'（DBA-3）。log_bin = 1 なら、log_bin_trust_function_creators = 1 か migrator の SUPER 相当（DBA-1 の決定どおり）
@@ -223,7 +228,7 @@ migrator（job専用）とアプリ用を分ける。
     ```sql
     SHOW GRANTS FOR '<アプリaccount>'@'<host>';
     -- 期待: GRANT USAGE ON *.* と、`ses_manager_db`.* への SELECT, INSERT, UPDATE, DELETE だけ。PROCESS・DDL・他の schema への権限が無い
-    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<アプリaccount>';   -- 0（0 でなければ USING で role の権限も確かめる）
+    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<アプリaccount>' AND to_host = '<host>';   -- 0（0 でなければ USING で role の権限も確かめる）
     ```
     起動後（§4）に、全 instance が同じ user 名で接続していることを確かめる（PROCESS を持つ管理用の account で実行する）。
     ```sql
@@ -234,7 +239,17 @@ migrator（job専用）とアプリ用を分ける。
   - **全 instance が同じアプリ account（同じ user 名）を使う**。Secrets Manager の alternating-users 方式（2つの user を交互に切り替える rotation）は使わない。password だけを替える single-user の rotation は使える（RB-NF05 review P3-2）。
     - 理由: NF06 の取込 stage 照合（`ImportStageReconciler`）は、結果不明の COMMIT を送った接続がまだ文を実行しているかを `information_schema.PROCESSLIST` で確かめる。PROCESS 権限の無い account には**同じ user 名の thread だけ**が見えるため、別の user で張った接続は見えず、照合は黙って時間だけの判定へ戻る（`feature-switches.md` 4.8.2 #10、a1a §6）。
     - PROCESS 権限は渡さない（同じ user なら不要。`ImportCsvIngestionRealMySqlTest` が業務権限だけの専用 user で確かめる）。`SHOW GLOBAL STATUS`（server の起動時刻）と `@@server_uuid` も権限なしで読める。
-    - DBA が配備前に確認する（§1.7 NF06 行。未取得）。rotation の方式は要決定（§1.6 の9）。
+    - DBA が配備前に確認する（§1.7 NF06 行。未取得）。
+  - **password の rotation**（決定済み（2026-11-18）。§1.6 の9）: 手動の single-user rotation と MySQL の二重 password で行う。保守の時間帯に、release の節目に合わせて行う。DBA が general log を無効にした接続で実行し、password は記録しない。
+    ```sql
+    -- 1. 新しい password を足す（古い password も有効なまま残る）
+    ALTER USER '<アプリaccount>'@'<host>' IDENTIFIED BY '<新しいpassword>' RETAIN CURRENT PASSWORD;
+    -- 2. secret store の値を新しい password に替え、全 task を再起動する（ECS は secret を起動時に環境変数へ入れるため、
+    --    再起動するまで app は古い password で接続を張る。in-memory の session は全員 logout になる）
+    -- 3. 全 task が再起動した後（processlist のアプリaccount の接続が全て再起動後のもの）に古い password を消す
+    ALTER USER '<アプリaccount>'@'<host>' DISCARD OLD PASSWORD;
+    ```
+- **backup 用の account**（`ops/backup/README.md`「権限分離」）: dump role と restore target role は、schema fingerprint のために `SHOW VIEW`・`TRIGGER`・`SHOW_ROUTINE` も要る（backup tool の要求）。確認は上と同じく `SHOW GRANTS FOR '<backup account>'@'<host>';` と `mysql.role_edges`（DBA-1 と同じ日に DBA が確かめる）。
 
 ### 1.3 secretの注入（Security / SRE）
 
@@ -263,7 +278,10 @@ job実行環境へ渡す値は環境変数の次の4つだけ。POM・Maven prop
 
 ### 1.4 artifactとjobの一致（SRE）
 
-- jobはsource checkoutで `compile` したclass/resourceを使う。**jobのcommit SHAと、配備するimageのSHAを一致させる**。imageの配布経路（registry と digest の記録）は要決定（§1.6 の5）。docker save/load と digest の記録（決定XB-10）は backup tool image の決定で、アプリ image には決まっていない。
+- jobはsource checkoutで `compile` したclass/resourceを使う。**jobのcommit SHAと、配備するimageのSHAを一致させる**。
+- **image の配布**（決定済み（2026-11-18）。§1.6 の5）: アプリ image は ECR の private repository へ push し、task definition では registry digest（`<registry>/<repository>@sha256:<64桁>`）で指す。tag では指さない。docker save/load と digest の記録（決定 XB-10）は backup tool image だけの決定である。ClamAV の sidecar の image も ECR へ写し、digest で指す。
+  - 配備記録には、次を1行にまとめて残す: 配備する commit SHA（`git rev-parse HEAD`）、`infra/ecs/image-lock.json` の `gitRevision`・`jarSha256`、ECR の repository と tag（commit SHA を tag にする）、push 後の registry digest、ClamAV の image の digest、登録した task definition の revision。
+  - 照合: task definition の image の digest が記録の digest と同じで、ECR でその digest に commit SHA の tag が付いていること（クラウドの管理画面／CLI で、repository の image 一覧から digest と tag を見る）。tag の付け替えを防ぐため、repository の tag の不変（immutable）の設定を SRE が確かめる。
   ```bash
   git rev-parse HEAD   # imageの記録SHAと一致すること
   git status --porcelain   # 空であること
@@ -286,14 +304,17 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 1. **初回起動のbootstrap**: **決定済み（方式A: 期限付きbootstrap mode。完了後の再開は承認ticket必須。管理者5名）**。空DBにはadmin 1件だけでMFA・IdP・外部identityも無く、通常のprod設定では最初の1人がログインできない（`ProductionSecurityConfigurationValidator` もbreak-glass管理者2件・MFA登録済みを起動条件にしている）。期限付きで初期adminのlocal loginだけを開け、bootstrapに必要な入口だけを使わせる（§4・§5）。管理者の人数と役割は§5.0、完了後の再開は§5.7。
 2. §1.2のmigrator権限・trigger/binlog・DEFINERの扱い（DBA。§1.7 の DBA-1）。
-3. MySQLの版・collation・parameter group（DBA。DBA-4）。版を test の `mysql:8.0.36` 以外にする場合は、`-Dses.flyway.fresh-install.mysql-image` でその版を指定して MySQL の試験を再検証する（§1.1）。
+3. MySQLの版・collation・parameter group（DBA。DBA-4）。**版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13）**。試験側（RB-MYSQL84）と backup tool 側（第二段階）の適合は**未完**（§1.1）。collation・parameter group は DBA-4 で確定する。
 4. job実行環境（Maven・JDK・依存取得経路。§1.5のlocal repositoryの準備方法）（SRE。SRE-11）。
-5. **アプリ image の配布経路**（SRE）。docker save/load と digest の記録（決定 XB-10）は backup tool image（`ops/backup/README.md`「ツールイメージの build・配布」）についての決定である。Fargate の task はアプリ image を registry から pull し、`infra/ecs/task-definition.prod.json` は ECR の registry digest を前提にしている（ECR は未構築）。どの registry から、どの digest で配るかを決める（§1.4）。
-6. **ClamAV の置き方**（SRE）。同じ task の sidecar か、外部の service か。これで `FILE_SCANNER_HOST` / `FILE_SCANNER_PORT`（§1.0）の値と task definition の形が決まる。ClamAV に届かないと upload を公開できない。
-7. **Prometheus の scrape 経路**（SRE。SRE-7 の(4)・SRE-9）。ALB 経由の HTTPS か、同じ task の sidecar か（`forwarded-header-sanitize-notes.md` §3.6。sidecar 経路の扱いは未決）。
-8. **`LOCK_CONFLICT` の alert の閾値と通知先**（SRE。SRE-8）。
-9. **アプリ account の password rotation の方式**（DBA。§1.2）。同じ user 名のまま password だけを替える方式に限られる（alternating-users 方式は使わない）。方式と周期、全 instance へ反映する（task を再起動する）までの扱いを決める。
-10. **RPO 15分・RTO 4時間の署名**（DBA-5）。値は決定済み（2026-11-13）で、要るのは DBA Lead と Operations の署名である。
+5. **アプリ image の配布経路**（SRE）: **決定済み（2026-11-18）**。ECR の private repository と registry digest で配る（Fargate）。docker save/load の XB-10 は backup tool image だけに適用する。記録と照合の方法は §1.4。ECR は新しく作る基盤である（それまでは private registry が無かった）。
+6. **ClamAV の置き方**（SRE）: **決定済み（2026-11-18）**。同じ task の sidecar（`clamav`）で動かし、`FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`。task は 2048 CPU / 6144 MiB（app 1024 / 2048 の hard limit、clamav 1024 / 4096）にし、sidecar は essential にしない（clamd が止まっている間、app は動き続け、upload は quarantine に留まる）。`infra/ecs/task-definition.prod.json`・`validate-task-definition.ps1`・`ContainerHealthCheckCommandGuardTest` がこの形を検査する。
+   - 分かっていること: clamd は signature を全て memory に載せ、再読込の間は新旧の2組を持ち得る。signature の取得（freshclam）には、ClamAV の配布元か社内 mirror への外向きの経路が要る。task の再起動で signature は消え、起動のたびに取り直す（取り終わるまで upload は quarantine のまま）。clamd の INSTREAM は暗号化されないが、sidecar では task の中の loopback だけを通る。
+   - **SRE が確かめること（未取得）**: signature の取得経路（NAT・proxy・社内 mirror）と更新の頻度、clamav の memory の実測と task の大きさの見直し、起動から signature を読み終わるまでの時間（health check の `startPeriod` 600秒で足りるか）、写した image に health の command（`clamdcheck.sh`、公式 image が持つ script）があること、clamd が止まったまま戻らないときの検知と再起動の方法（essential でない container は ECS が自動で再起動しない）、image（engine）の更新の頻度と ECR への写し方、root filesystem を読取り専用にできるか（書込み先の確認）。
+7. **Prometheus の scrape 経路**（SRE。SRE-7 の(4)・SRE-9）: **決定済み（2026-11-18）**。ALB 経由の HTTPS で scraper 口座（`METRICS_SCRAPER_*`）を使う。設定する項目は SRE-9。sidecar の経路は使わない。
+8. **`LOCK_CONFLICT` の alert の閾値と通知先**（SRE。SRE-8）: **決定済み（2026-11-18）**。CloudWatch Logs の metric filter で件数を数え、5分間に5件以上で運用担当へ通知し、日次で集計する。運用2週間後に実測で閾値を見直す。通知先（SNS topic 等）は SRE の配備項目。設定の例は SRE-8。
+9. **アプリ account の password rotation の方式**（DBA。§1.2）: **決定済み（2026-11-18）**。手動の single-user rotation と MySQL の二重 password（`RETAIN CURRENT PASSWORD` → secret を替えて全 task を再起動 → `DISCARD OLD PASSWORD`）。保守の時間帯に release の節目に合わせて行う。手順の SQL は §1.2。
+10. **RPO 15分・RTO 4時間の署名**（DBA-5）: **決定済み（2026-11-18）**。配備日に目標値として署名し、達成は restore drill の実測待ちと注記する。署名そのものは**未取得**。
+11. **NF07 の trust 文書の置き方**（SRE・D-03 owner）: **決定済み（2026-11-18）**。EFS の volume に置き、app は `/app/privacy-trust` に読取り専用で mount する（task definition の `privacy-trust`。uploads と別の access point）。file は D-03 owner が更新する（app からは書かない）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のまま配備する。開ける時は、その mount の下の file の絶対 path を設定する（NF07-TRUST の手順と設定の正本は NF07-TRUST の節）。**SRE と D-03 owner が確かめること（未取得）**: D-03 owner が書くための別の経路（書込みのできる access point と、そこへ届く管理用の端末）、書くときは一時 file に書いてから rename で置き換えること、EFS の backup の扱い。
 
 ### 1.7 配備前提と、機能スイッチをONにする前の署名（一覧。X3-4）
 
@@ -307,16 +328,17 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
 | SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
 | SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする。確認: クラウドの管理画面／CLI で ALB の load balancer 属性 `idle_timeout.timeout_seconds` が130以上。ALB の前に reverse proxy・CDN を置く場合は、その idle timeout も同じく確かめる | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
-| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止）。確認: (a) DB: 起動後に `SELECT COUNT(DISTINCT SUBSTRING_INDEX(host, ':', 1)) FROM information_schema.processlist WHERE user = '<アプリaccount>';` が1（接続元の task が1つ。PROCESS を持つ管理用の account で実行する）。(b) クラウドの管理画面／CLI: ECS service の desired count と running count が1、進行中の deployment が1件だけ、deployment configuration の maximum percent が100（新旧の task を重ねない。そのため minimum healthy percent は0になる） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
+| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止）。確認: (a) DB: 起動後に `SELECT COUNT(DISTINCT SUBSTRING_INDEX(host, ':', 1)) FROM information_schema.processlist WHERE user = '<アプリaccount>';` が1（接続元の task が1つ。PROCESS を持つ管理用の account で実行する。RDS Proxy 等の中継を挟むと全接続が中継の IP に見えて数えられないため、その場合は (b) だけで確かめる）。(b) クラウドの管理画面／CLI: ECS service の desired count と running count が1、進行中の deployment が1件だけ、deployment configuration の maximum percent が100（新旧の task を重ねない。そのため minimum healthy percent は0になる） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
-| SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜5（§3.4）。2（OIDC の `redirect_uri`）は、初回は bootstrap 中で IdP が未登録のため、本書 §5.3 の5で行う。6・7 は staging で行う項目で、本番の配備日には行わない（staging で人が実測する。**未取得**）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）。経路は要決定（§1.6 の7） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
-| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。alertの閾値と通知先は要決定（§1.6 の8）。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
-| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。scrape経路は要決定（§1.6 の7） | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
+| SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜5（§3.4）。2（OIDC の `redirect_uri`）は、IdP への redirect の URL 自体は deploy 直後でも見られるが、login を最後まで通すには §5.3 の IdP 登録と外部 identity link が要るため、初回は本書 §5.3 の5でまとめて行う。6・7 は staging で行う項目で、本番の配備日には行わない（staging で人が実測する。**未取得**）。<br>(4) Prometheusのscrape経路（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）: ALB 経由の HTTPS に決定済み（2026-11-18。§1.6 の7）。設定する項目は SRE-9 | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
+| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま。<br>**方式は決定済み（2026-11-18。§1.6 の8）**: CloudWatch Logs の metric filter で数え、5分間に5件以上で運用担当へ通知し、日次で集計する。運用2週間後に実測で閾値を見直す。設定の例（名前は例。通知先の SNS topic 等は SRE の配備項目）:<br>・log group `/ecs/ses-manager-prod` に filter pattern `"errorCode=LOCK_CONFLICT"`（PWA の503も同じ文字列を出す。`errorCode=OPTIMISTIC_LOCK_CONFLICT` には一致しない）、metric `SES/App` の `LockConflictCount`（値1、既定値0）。<br>・alarm: 統計 Sum、期間300秒、5以上で1回、欠損は閾値未満として扱う → 運用担当の通知先。<br>・日次の集計: Logs Insights で `filter @message like /errorCode=LOCK_CONFLICT/ \| stats count(*) by bin(1d)` | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
+| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。<br>**scrape 経路は決定済み（2026-11-18。§1.6 の7）: ALB 経由の HTTPS**。設定する項目:<br>・Prometheus: `scheme: https`、`metrics_path: /actuator/prometheus`、target は公開FQDNの443（ALB は公開FQDNの Host だけを forward する。SRE-7(2)）、`basic_auth` は scraper 口座（password は secret store から file で渡す）。<br>・ALB の HTTPS listener rule: path `/actuator/prometheus` かつ送信元が採集端の CIDR（source IP 条件）のときだけ forward し、同じ path のそれ以外は固定の 404（または WAF の IP set で採集端以外を block）。<br>・確認: 採集端から scraper 口座で 200、他の送信元からは 404（WAF なら 403）、`admin`・break-glass 名の Basic は 401 | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
 | SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。登録する task definition を起動の前に `infra/ecs/offline/validate-task-definition.ps1` の実値の mode で照合する（呼出し方と検査の範囲は §4） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
 | SRE-11 | **job実行環境（Maven・JDK・依存の取得経路）を決め、local repositoryを揃える** | 別の機械・別の `.m2` で job を動かすと、片方にだけ無い artifact で job が止まる。推奨は build と同じ機械・同じ `.m2`。要決定（§1.6 の4） | 本書 §1.5・§1.6 の4 |
 
 **DBA の前提**（番号は署名一覧の DBA-1〜DBA-6 と同じ）
 - **DBA-1**: migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
+  - backup 用の account（dump role・restore target role）の `SHOW VIEW`・`TRIGGER`・`SHOW_ROUTINE` も同じ日に確かめる（§1.2）。
   - 配備前の検証（**未実施**）: 決めた設定と同じ条件（binlog 有効、`log_bin_trust_function_creators` を決めた値、root でない migrator account と §1.2 の権限）の検証用MySQL（本番ではない）に §3.3 の job を1回通し、§3.4 の routine 0件・trigger 67件を確かめる。CI の MySQL 試験は `--skip-log-bin` かつ root で動き、この条件を検証しない。
 - **DBA-2**: serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
 - **DBA-3**: **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
@@ -324,19 +346,27 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
   - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
   - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
-- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1、要決定（§1.6 の3））。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
+- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1・§1.6 の3）。版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13。recovery target も同じ exact 版）。試験側と backup tool 側の適合は**未完**（§1.1）。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
 - **Backup・PITR**:
-  - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**（署名事項。§1.6 の10）。
-  - **DBA-6**: prodの `.env.backup` を用意する（形式は `ops/backup/README.md` の「前提」「設定」）。
-    - `CONTENT_HASH_TABLES`（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。DBAが決める。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
-    - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
-    - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER` と、`secrets/` の 0600 の file（MySQL と restic の password、CA の capath）。
-  - **初回 backup（§2 の5。§3 の完了直後）と BLOCKED の解除**: `ops/backup/README.md` は、production 固有値（HFP-03-PROD-001〜008。`.kiro/specs/database-backup-recovery/baseline.md` §4）が未確定の間、production への接続・復元を BLOCKED としている。DBA（と各 owner）が次の時点までに確定する。
-    - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値）、002（全表の engine とアプリ以外の writer の有無）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5）、005（S3 互換 backend・IAM・versioning/immutability・容量と throughput）と、上の `.env.backup` の値。
-    - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner）。
-    - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み）、007（代表 profile。RTO の実測に使う）。
-    - 解除の条件: 項目ごとに baseline §4 の「確定に必要な証跡」を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力で、`preflight` が 0 で終わること）、DBA が DBA-6 に署名した時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。
-  - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`.env.backup` の形式）、`.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値と確定に要る証跡）。
+  - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）の署名。署名の方法は決定済み（2026-11-18。§1.6 の10）: 配備日に目標値として署名し、達成は restore drill の実測待ちと注記する。DBA Lead と Operations の署名は**未取得**（PENDING）。
+  - **DBA-6**: prodの `.env.backup` の `CONTENT_HASH_TABLES` の本番値を決める（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+  - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`.env.backup` の形式）。
+
+**Backup 開始の前提（BLOCKED の解除。初回 backup（§2 の5。§3 の完了直後）の前）**
+
+署名一覧の DBA-6 とは別の項目である。`ops/backup/README.md` は、production 固有値（HFP-03-PROD-001〜008。`.kiro/specs/database-backup-recovery/baseline.md` §4）が未確定の間、production への接続・復元を BLOCKED としている。各値は baseline §4 の owner が確定して証跡を出し、DBA がまとめて配備記録に残す（SRE・DBA を兼ねる場合も、006・008 は Security・運用組織の事項である）。
+- `.env.backup`（形式は `ops/backup/README.md` の「前提」「設定」）:
+  - `CONTENT_HASH_TABLES`（DBA-6）。
+  - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
+  - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER`。password は `secrets/` の 0600 の file（MySQL と restic）、CA は hashed CA の directory（`secrets/mysql-capath/`）。
+- 確定する時点と owner（baseline §4 の「確定に必要な証跡」の欄）:
+  - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。production owner）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否。storage owner）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5。deployment owner）、005（S3 互換 backend・IAM・versioning/immutability・容量と throughput。infra owner）と、上の `.env.backup`。
+  - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner。運用組織）。
+  - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み。security owner）、007（代表 profile。RTO の実測に使う。production owner）。
+- 初回 backup の前の手順（`ops/backup/README.md`「ツールイメージの build・配布」と「実行」）: backup tool image の content ID（v2。RB-W）で compose の pin をし直し、配布先で `tool-image.sh load` → `tool-image.sh check` が一致し、`tool-image.sh compose run --rm preflight` が 0 で終わること。
+- 解除の条件: 項目ごとに owner の証跡を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力）、DBA がまとめた記録を確かめた時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。
+- MySQL 8.4 で backup tool の適合（第二段階）が済むまで、001 の証跡（8.4 の本番に対する `preflight`）は取れても、backup・PITR 全体は 8.4 で検証済みとはいえない（§1.1。**未完**）。
+- 正本: `.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値・owner・確定に要る証跡）、`ops/backup/README.md`。
 
 **初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
 
@@ -395,11 +425,11 @@ W1-B1（backup toolchain）で「書面での受理が要る」とされた事�
 NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規則を書くとしたもの。表単位のrestoreの禁止（RR-13）は §1.7 の SRE-6 にある。
 
 - **本番DBへ手作業の変更（DML・DDL）をしない（RR-10）**。NF01 の writer の閉包は guard test（Java・注釈SQL）で守っており、手動のSQLやDBの直接操作による変更は検出できない（認可epochが進まず、確認時の判定が古い前提のまま通り得る）。
-  - 例外は、本書が手順として書いたものだけ: §3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の侵害の疑い・`admin` の lock 解除。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（hash 等の値は残さない）。
+  - 例外は、本書が手順として書いたものだけ: §3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の各手順（侵害の疑い、TOTP の喪失、break-glass 保持者の交代、`admin` の lock 解除）。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（hash 等の値は残さない）。
   - 参照（SELECT）は本書の確認SQLの範囲で行ってよい。
   - 画面・API（監査が残る）で直せないデータの誤りは、手で直さずに Owner と DBA へ上げる。
 - **権限に関わる設定を変える配備では、未確認の二者確認の提出を差し戻す（RR-2）**。`ORGANIZATION_SCOPE_ENABLED`（`organization.scope.enabled`）や機能スイッチ等の property の変更は認可epochを進めない。確認時の再評価で拒否側には効くが、2回の配備をまたいで元へ戻る変更（例: ある配備で外し、次の配備で戻す）は検出しない。
-  1. 配備の前（§2 の1の前）に、未確認の提出を一覧して配備記録に残す。
+  1. 配備の途中、§2 の4（アプリ接続0件）の後、§3 の前に、未確認の提出を一覧して配備記録に残す（停止の前に一覧すると、停止までの間の提出が漏れる）。
      ```sql
      SELECT tenant_id, case_id, task_id, submission_id, updated_at FROM t_lifecycle_dual_projection
       WHERE state = 'PENDING' ORDER BY updated_at;
@@ -413,15 +443,15 @@ NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規�
 初回導入では稼働中のinstanceは無い。§2.1〜§2.3は2回目以降のreleaseの手順で、初回は「アプリinstanceが1台も起動していないこと」の確認だけを行う。
 
 1. LB/ingressを保守表示にし、新しいrequestを止める。
-2. **scheduler drain**: 全instanceを `APP_SCHEDULING_ENABLED=false`（`app.scheduling.enabled=false`）で再起動し、`@Scheduled` を止める。定期管理レポートの実行中leaseが無いことを `scheduler-claim-fence-plan.md` §10.3 のQ1で確認する（0件、または全件がlease期限30分を超過）。手動でclearしない。
+2. **scheduler drain**: 全instanceを `APP_SCHEDULING_ENABLED=false`（`app.scheduling.enabled=false`）で再起動し、`@Scheduled` を止める。定期管理レポートの実行中leaseが無いことを `scheduler-claim-fence-plan.md` §10.3 のQ1で確認する（0件、または全件がlease期限30分を超過）。手動でclearしない。drain 用の task definition は `-Phase Steady -Scheduler Disabled` で照合し（§4）、release の後に常態へ戻す revision は、scheduler を有効化した後（§4）なら `-Scheduler Enabled` で照合する（戻し忘れると中核jobが黙って止まる）。
 3. 全instanceを停止する（SIGTERM。`server.shutdown: graceful` で処理中requestを排水してから終了する）。
 4. DBへのアプリ接続が0件であることを確認する。
    ```sql
    SELECT COUNT(*) FROM information_schema.processlist WHERE user = '<アプリaccount>';  -- 0
    ```
-5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する（前提は §1.7 の DBA-6: `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新versionにし、production 固有値の BLOCKED を解除してから取る）。
+5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する（前提は §1.7 の「Backup 開始の前提」: `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新versionにし、production 固有値の BLOCKED を解除してから取る）。
 
-- 権限に関わる設定（`ORGANIZATION_SCOPE_ENABLED`・機能スイッチ等）を変える release では、1の前に §1.8 の RR-2 の手順を行う。
+- 権限に関わる設定（`ORGANIZATION_SCOPE_ENABLED`・機能スイッチ等）を変える release では、4の後（アプリ接続0件）、§3 の前に §1.8 の RR-2 の1を行い、配備の後に2を行う。
 
 ## 3. 専用Flyway jobの実行と確認
 
@@ -623,22 +653,28 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する（task definition の雛形の値。`SchedulingConfig` は未設定を有効とみなすため、外すと scheduler が動く）。
-- **起動の前に、登録する task definition を照合する（SRE-10）**。`infra/ecs/offline/validate-task-definition.ps1` を実値の mode で実行し、0 で終わることを確かめる。証跡は既定で OS の一時 directory の下に作り、repository には書かない（設定の名前だけを書き、値は書かない）。`-EvidenceRoot` で配備記録の保管場所を指定する。PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する。
+- **起動の前に、登録する task definition を照合する（SRE-10）**。`infra/ecs/offline/validate-task-definition.ps1` を実値の mode で実行し、0 で終わることを確かめる。証跡は既定で OS の一時 directory の下に作り、repository には書かない。証跡には設定の名前と期待した状態だけを書き、設定の値（ID・host・ARN 等）は書き写さない。`-EvidenceRoot` で配備記録の保管場所を指定する。PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する（内蔵の負例自己検査は実行中と同じ PowerShell で子 process を起こすため、pwsh の無い 5.1 だけの環境でもそのまま動く。省くなら `-SkipInlineNegativeSelfTest`）。登録する JSON からは `_offlineAcceptanceNotes` を消しておく（ECS は未知の field を拒否し、実値の mode も FAIL にする）。
   ```powershell
-  # 初回起動（§4.2 の bootstrap 設定）
+  # 初回起動（§4.2 の bootstrap 設定。scheduler は止める）。期限は起動の直前に設定して照合する（24時間を越えると FAIL）
   pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
-  # §5.5 の bootstrap を終える起動と、以後の起動
-  pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
+  # §5.5 の bootstrap を終える起動と以後の起動。-Scheduler は必須で APP_SCHEDULING_ENABLED の期待値を指定する:
+  #   scheduler の署名（下の「schedulerは」）の前と、release の drain 用（§2 の2）は Disabled、署名後の常態は Enabled
+  pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -Scheduler Disabled -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
+  pwsh infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Steady -Scheduler Enabled -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
+  # pwsh の無い Windows PowerShell 5.1 だけの環境（引数は上と同じ）
+  powershell -NoProfile -ExecutionPolicy Bypass -File infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
   # 雛形（repository の infra/ecs/task-definition.prod.json）だけを検査する場合は引数なし（-Mode Template）
   ```
-  - 実値の mode が見るもの: §1.0 の1〜26（freee を使うなら27〜30）と運用設定（`FILE_SCANNER_*`・`METRICS_SCRAPER_*`）の名前、secret を environment に置いていないこと、§1.0 で禁止した値が無いこと、placeholder が残っていないこと、image が registry digest で固定されていること、EFS の ID、`TZ`、scraper 口座が `admin`・break-glass 名でないこと。`-Phase Initial` は加えて `APP_SCHEDULING_ENABLED=false`・`SECURITY_BOOTSTRAP_ENABLED=true`・期限（offset 付き ISO-8601 で未来）・空の `BREAK_GLASS_USERNAMES`・機能スイッチの環境変数が無いこと、`-Phase Steady` は bootstrap の設定が外れ `BREAK_GLASS_USERNAMES` がちょうど2名であること。
-  - 見ないもの: secret の値（起動時の validator が見る）、ALB・security group、service の desired count と deployment の設定（SRE-5）。§5.7 の bootstrap 再開は対象外。
+  - 実値の mode が見るもの: §1.0 の1〜26（freee を使うなら27〜30）と運用設定の名前、同じ設定を2回（environment と secrets の両方、別の綴りを含む）書いていないこと、secret を environment に置いていないこと、§1.0 で禁止した値が無いこと、`JAVA_TOOL_OPTIONS` 等に `-Duser.timezone` 以外の `-D` が無く environment の `SPRING_APPLICATION_JSON` が検査対象の設定を上書きしないこと、placeholder が残っていないこと、2つの image が registry digest で固定されていること、task の形（app と ClamAV の sidecar だけ、task と container の大きさ、sidecar は essential でない）、`FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`、`METRICS_SCRAPER_ENABLED=true`、EFS の ID と2つの volume（uploads は読書き、`privacy-trust` は読取り専用で別の access point）、`TZ`、scraper 口座が `admin`・break-glass 名でないこと。
+    - `-Phase Initial` は加えて `APP_SCHEDULING_ENABLED=false`・`SECURITY_BOOTSTRAP_ENABLED=true`・期限（offset 付き ISO-8601 で、現在から24時間以内の未来）・空の `BREAK_GLASS_USERNAMES`・空の `PRIVACY_TRUST_KMS_ANCHOR_FILE`・機能スイッチの環境変数（NF05 を含む）が無いこと。
+    - `-Phase Steady` は bootstrap の設定が外れ、`BREAK_GLASS_USERNAMES` がちょうど2名、`APP_SCHEDULING_ENABLED` が `-Scheduler` の期待どおり（Disabled は `false` だけ、Enabled は `true` か未設定）、`PRIVACY_TRUST_KMS_ANCHOR_FILE` が空か読取り専用の mount の下の file であること。
+  - 見ないもの: secret の値（起動時の validator が見る）、secret store から渡す `SPRING_APPLICATION_JSON` の中身、ALB・security group、service の desired count と deployment の設定（SRE-5）。§5.7 の bootstrap 再開は対象外。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
   - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。UPであれば §1.0 の18 の鍵検査も通っている（検査に失敗した起動はUPにならずに停止する）。
-- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。
+- schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。この task definition は `-Phase Steady -Scheduler Enabled` で照合し、以後の常態の revision も同じく照合する。
   - scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用なので、有効化は通常運用の再開を意味する。
   - 履歴取込の清掃（02:00）は、文書台帳の副本を廃棄候補にする。ただし処分には管理者の承認と執行が要るため、V197 の署名事項は scheduler の有効化の前提にしない。
   - 署名までは、`RESUME_INGESTION` の副本の廃棄申請を承認しない（§4.3）。
@@ -963,7 +999,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
        { userId: <sys_user.id>, subject: '<IdPのsub>', emailSnapshot: '<任意。sys_user.emailと一致させる>' });
    ```
 5. B〜Eが、それぞれ別のブラウザ（またはprivate window）でOIDCでログインし、通常の画面を使えることを確認する（IdP側のMFA assuranceが必要）。C〜Eの3名がloginできることが、§5.5の起動時検査の前提になる。
-   - 最初のloginで、IdPへのredirectの `redirect_uri` が `https://<公開FQDN>/login/oauth2/code/<registrationId>` であることも確かめる（`forwarded-header-sanitize-notes.md` §3.4 の2）。`http://` なら `TRUSTED_PROXIES` がALBの実IPを含んでいない（同 §3.3）。hostが公開FQDNと違えばALBのlistener ruleとHostの転送を見直す（同 §3.2）。初回は1でIdPを登録するまでOIDC loginを最後まで通せないため、deploy直後ではなくここで行う。
+   - 最初のloginで、IdPへのredirectの `redirect_uri` が `https://<公開FQDN>/login/oauth2/code/<registrationId>` であることも確かめる（`forwarded-header-sanitize-notes.md` §3.4 の2）。`http://` なら `TRUSTED_PROXIES` がALBの実IPを含んでいない（同 §3.3）。hostが公開FQDNと違えばALBのlistener ruleとHostの転送を見直す（同 §3.2）。client registration は起動設定から作られるため、redirect の URL 自体は deploy 直後でも見られる。ただし login を最後まで通すには1のIdP登録と4の外部identity linkが要るため、初回はここでまとめて確かめる。
 
 ### 5.4 break-glass管理者Bの準備（BのOIDC session）
 
@@ -986,7 +1022,7 @@ break-glass incidentは、起票者1名と、起票者以外の互いに異な�
    SELECT username, role, status FROM sys_user
     WHERE username COLLATE utf8mb4_bin IN ('admin', 'bg-second') AND deleted_flag = 0;
    ```
-2. **bootstrapを無効にして再起動する**。`SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT`（設定していれば `SECURITY_BOOTSTRAP_REOPEN_TICKET` も）を外し、`BREAK_GLASS_USERNAMES=admin,bg-second` を設定して再起動する。**`OIDC_TENANT_ID` は外さない**（§4.1）。再起動の前に、新しい task definition を `-Mode Actual -Phase Steady` で照合する（§4）。LBのアクセス元制限は、この起動を確認してから通常の設定へ戻す。
+2. **bootstrapを無効にして再起動する**。`SECURITY_BOOTSTRAP_ENABLED`・`SECURITY_BOOTSTRAP_EXPIRES_AT`（設定していれば `SECURITY_BOOTSTRAP_REOPEN_TICKET` も）を外し、`BREAK_GLASS_USERNAMES=admin,bg-second` を設定して再起動する。**`OIDC_TENANT_ID` は外さない**（§4.1）。再起動の前に、新しい task definition を `-Mode Actual -Phase Steady` で照合する（§4。scheduler の署名（§4）の前なら `-Scheduler Disabled`、後なら `-Scheduler Enabled`）。LBのアクセス元制限は、この起動を確認してから通常の設定へ戻す。
 3. **完全な起動検査が通ることを確認する**。`[bootstrap] 期限付きbootstrap modeが有効です` のWARN logが出ず、`ProductionSecurityConfigurationValidator` の例外（`本番security configurationが安全な既定値を満たしません`）で停止しないこと。readinessがUPになり、C〜EがOIDCでログインできること。完全な検査が見るbootstrap関連の条件は次のとおり。
    - break-glass usernameがちょうど2件で、どちらも有効な管理者かつMFA登録済み（未登録なら `break-glass usernameはMFA enrollment完了済みでなければなりません`）。
    - 設定tenant・issuerの有効なOIDC providerが登録済み（無ければ `設定tenant・issuerの有効なOIDC providerが登録されていません`）。
