@@ -108,12 +108,12 @@ class KoZhCnBundleJapaneseResidueTest {
 
     /**
      * RB-POSTLAUNCH A-4: 「要員」を簡体字にしただけの語は中国語として通じないため、zh_CN の値に使わない。
-     * 管理対象の人は「人员」、要員ロールの利用者アカウントは「工程师」と訳す（ロール名の訳に合わせる）。
-     * 簡体字を本 file に書かないため、語は Unicode escape で持つ。
+     * 管理対象の人は「人員」に当たる簡体字の語、要員ロールの利用者アカウントはロール名の訳（enum.userRole.engineer）に合わせる。
+     * 簡体字を本 file に書かないため、語は code point で持つ（U+8981 U+5458）。
      */
     @Test
     void zhCNの値は要員の字形変換だけの語を使わない() throws IOException {
-        String calque = "要员";
+        String calque = new String(new int[] {0x8981, 0x5458}, 0, 2);
         Properties zh = load("zh_CN");
         List<String> violations = new ArrayList<>();
         for (String key : new TreeSet<>(zh.stringPropertyNames())) {
