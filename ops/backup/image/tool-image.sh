@@ -50,7 +50,7 @@ export MSYS_NO_PATHCONV=1
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_ROOT=$(cd "$HERE/.." && pwd)
-DEFAULT_TAG=ses-backup-tool:8.0.46
+DEFAULT_TAG=ses-backup-tool:8.4.13
 PROD_COMPOSE="$BACKUP_ROOT/docker-compose.yml"
 MANIFEST_IN_IMAGE=/usr/local/share/ses-backup/image-manifest
 PIN_KEY=x-ses-backup-tool-content-id

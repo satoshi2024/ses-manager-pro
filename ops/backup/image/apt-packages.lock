@@ -8,6 +8,8 @@
 # - 記載がある場合: build 結果の一覧（base image 由来を含む全 ii パッケージ）と完全一致しなければ
 #   build を失敗させる。Debian の更新で版が変わったときは差分を確認・承認してから更新する。
 #
+# RB-W 8.4 対応: MySQL client を 8.4.13（mysql-8.4-lts）へ替えたため、版を書く場合は 8.4.13 の build の record で
+# 確定する（8.0 の build の一覧を流用しない。MySQL 以外の版も推測で書かない）。空のままなら record-only。
 # 反映手順: 検証済みの build で image/tool-image.sh build-record が出力した dpkg-packages.tsv を、
 # 内容を確認したうえでこの行の下へそのまま追記する（README「ツールイメージの build・配布」参照）。
 # ============================================================

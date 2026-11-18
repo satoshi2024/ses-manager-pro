@@ -12,7 +12,7 @@ query=""
 for arg in "$@"; do
   case "$arg" in
     --version)
-      printf '%s\n' "${FAKE_CLIENT_VERSION_LINE:-mysql  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)}"
+      printf '%s\n' "${FAKE_CLIENT_VERSION_LINE:-mysql  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)}"
       exit 0
       ;;
     --execute|-e)
@@ -166,8 +166,31 @@ case "$query" in
     printf '%s\n' "${FAKE_COUNT:-0}"
     exit 0
     ;;
+  # preflight の server 変数（RB-W 8.4 対応: SHOW GLOBAL VARIABLES + この接続の Ssl_cipher）。
+  # FAKE_MYSQL_STATUS_ROW（version / server_uuid / log_bin / binlog_format / binlog_checksum /
+  # binlog_transaction_compression / gtid_mode / TLS(YES|NO) / log_bin_basename / binlog_expire_logs_seconds の tab 区切り）
+  # から「変数名<TAB>値」の行を作る。FAKE_MISSING_VARIABLES（空白区切り）の変数は行を出さない（8.4 で無い変数の再現）。
+  *"SHOW GLOBAL VARIABLES WHERE Variable_name IN"*)
+    IFS=$'\t' read -r f_ver f_uuid f_logbin f_format f_checksum f_compress f_gtid f_tls f_base f_expire \
+      <<< "${FAKE_MYSQL_STATUS_ROW:-8.4.13	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
+    [[ "$f_logbin" == 1 ]] && f_logbin=ON
+    [[ "$f_logbin" == 0 ]] && f_logbin=OFF
+    for pair in "version=$f_ver" "server_uuid=$f_uuid" "log_bin=$f_logbin" "binlog_format=$f_format" \
+        "binlog_checksum=$f_checksum" "binlog_transaction_compression=$f_compress" "gtid_mode=$f_gtid" \
+        "log_bin_basename=$f_base" "binlog_expire_logs_seconds=$f_expire"; do
+      name=${pair%%=*}
+      [[ " ${FAKE_MISSING_VARIABLES:-} " == *" $name "* ]] && continue
+      printf '%s\t%s\n' "$name" "${pair#*=}"
+    done
+    if [[ "$f_tls" == YES ]]; then
+      printf 'Ssl_cipher\tTLS_AES_256_GCM_SHA384\n'
+    else
+      printf 'Ssl_cipher\t\n'
+    fi
+    exit 0
+    ;;
   *SELECT*@@version*)
-    printf '%s\n' "${FAKE_MYSQL_STATUS_ROW:-8.0.36	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
+    printf '%s\n' "${FAKE_MYSQL_STATUS_ROW:-8.4.13	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
     exit 0
     ;;
   *@@server_uuid*)
@@ -215,8 +238,9 @@ case "$query" in
   *CREATE*DATABASE*)
     exit 0
     ;;
-  *RESET*MASTER*)
-    # R1 P0-01: 再 restore の GTID リセット（restore.sh が import 前に発行）
+  *"RESET BINARY LOGS AND GTIDS"*)
+    # R1 P0-01: 再 restore の GTID リセット（restore.sh が import 前に発行）。8.4 の RESET MASTER は削除されたため
+    # 新しい文だけを受け付ける（RESET MASTER は「未知の query」として失敗させる）。env 名は旧名のまま。
     printf '%s\n' "$*" >> "${FAKE_RESET_MASTER_LOG:-/dev/null}"
     exit "${FAKE_RESET_MASTER_RC:-0}"
     ;;

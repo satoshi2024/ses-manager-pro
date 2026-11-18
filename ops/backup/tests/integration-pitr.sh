@@ -52,6 +52,13 @@ log "== 1. preflight =="
 grep -q '"status": "OK"' "$EVID/preflight.json" || fail "preflight が OK でない"
 log "preflight OK"
 
+log "== 1.5 MySQL server の版（RB-W 8.4 対応。production と同じ 8.4 系列で検証したことを evidence に残す） =="
+SRC_VERSION=$(src_root -N -B -e "SELECT VERSION();" 2>/dev/null) || fail "source の版を取得できません"
+TGT_VERSION=$(tgt_root -N -B -e "SELECT VERSION();" 2>/dev/null) || fail "target の版を取得できません"
+printf 'source=%s\ntarget=%s\n' "$SRC_VERSION" "$TGT_VERSION" > "$EVID/server-versions.txt"
+[[ "$SRC_VERSION" == 8.4.* && "$TGT_VERSION" == 8.4.* ]] \
+  || fail "integration の MySQL server が 8.4 系列ではありません（source=$SRC_VERSION target=$TGT_VERSION）"
+
 log "== 2. fixture（marker テーブル + before marker + 最小の flyway_schema_history） =="
 # 復元検証の Flyway 照合（history table の存在・成功行の版番号順の最大）を実 MySQL で通すため、
 # Flyway と同じ列構成の最小 history を置く。版番号順の最大は 42（辞書順の最大は "9" なので、
@@ -223,13 +230,13 @@ tgt_root \
       CREATE USER IF NOT EXISTS '$FIXTURE_MIGRATOR'@'%' IDENTIFIED BY '$FIXTURE_MIGRATOR_PW';
       GRANT ALL ON \`$MYSQL_DATABASE\`.* TO '$FIXTURE_MIGRATOR'@'%';
       CREATE USER IF NOT EXISTS 'restore-svc'@'%' IDENTIFIED BY 'restore-svc-pw';
-      GRANT SYSTEM_VARIABLES_ADMIN, REPLICATION_APPLIER, RELOAD, SHOW_ROUTINE, SET_USER_ID ON *.* TO 'restore-svc'@'%';
+      GRANT SYSTEM_VARIABLES_ADMIN, REPLICATION_APPLIER, RELOAD, SHOW_ROUTINE, SET_ANY_DEFINER ON *.* TO 'restore-svc'@'%';
       GRANT ALL ON ses_recovery_control.* TO 'restore-svc'@'%';
       GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER,
         CREATE ROUTINE, ALTER ROUTINE, EXECUTE, EVENT, LOCK TABLES ON \`$MYSQL_DATABASE\`.* TO 'restore-svc'@'%';" \
   || fail "target provision に失敗しました"
 # RB-W P2-2: restore-svc の権限は README の restore target role と同じ（RELOAD は GTID のリセット、SHOW_ROUTINE・
-# SHOW VIEW・TRIGGER は schema fingerprint、SET_USER_ID は dump の DEFINER の再現、REFERENCES は外部キー、
+# SHOW VIEW・TRIGGER は schema fingerprint、SET_ANY_DEFINER（MySQL 8.4）は dump の DEFINER の再現、REFERENCES は外部キー、
 # CREATE ROUTINE / ALTER ROUTINE は function）。DEFINER の account（migrator 相当）は復元先に用意する（DBA の前提）。
 printf 'restore-svc-pw\n' > "$WORK_DIR/restore-svc-pw"
 
@@ -387,7 +394,7 @@ SRC_STATE=$(src_root "$MYSQL_DATABASE" -N -B \
 printf '%s\n' "$SRC_STATE" > "$EVID/source-state.txt"
 
 log "== 13. schema fingerprint の正規化規則（実 MySQL・source の使い捨て DB） =="
-# README「schema fingerprint」の規則を実 MySQL 8.0 で確かめる。PITR の対象 DB とは別の DB で行い、最後に削除する
+# README「schema fingerprint」の規則を実 MySQL（8.4）で確かめる。PITR の対象 DB とは別の DB で行い、最後に削除する
 # （checkpoint より後の source の変更は復元・drill に影響しない）。
 #   - 列コメント・table コメントだけの変更では変わらない
 #   - 列の並び順を変えると column 区分だけが変わり、元に戻すと元の値に戻る

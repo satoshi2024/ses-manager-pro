@@ -34,7 +34,7 @@ setup_drill() {
   local full_payload="$T/full-payload" ckpt_payload="$T/ckpt-payload"
   mkdir -p "$full_payload/db" "$full_payload/uploads/published" "$ckpt_payload/uploads/published"
   printf '%s\n' "-- MySQL dump (source-data=2)" \
-    "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000001', MASTER_LOG_POS=4;" \
+    "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000001', SOURCE_LOG_POS=4;" \
     "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);" > "$full_payload/db/database.sql"
 printf 'marker-before-full\n' > "$full_payload/uploads/published/marker.txt"
 # RB-W P2-1: full の metadata.json の DB の既定値（restore.sh が復元 DB をこの値で作る）

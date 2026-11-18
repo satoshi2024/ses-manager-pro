@@ -6,24 +6,19 @@
 # - closed file の end position（SHOW BINARY LOGS の File_size）照合
 # ============================================================
 
-# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）
+# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）。backup-full.sh の
+# backup_full::parse_dump_coords と同じ規則（MySQL 8.4 の CHANGE REPLICATION SOURCE TO だけを読む。RB-W 8.4 対応）
 binlog::parse_dump_coords() { # dump_file
-  local dump=$1
+  local dump=$1 line
+  local re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
   BINLOG_START_FILE=""
   BINLOG_START_POSITION=""
   while IFS= read -r line; do
-    case "$line" in
-      *"CHANGE MASTER TO"*)
-        local f="" p=""
-        f=$(printf '%s' "$line" | grep -oE "MASTER_LOG_FILE='[^']+'" | head -n1 | sed "s/MASTER_LOG_FILE='//;s/'//")
-        p=$(printf '%s' "$line" | grep -oE "MASTER_LOG_POS=[0-9]+" | head -n1 | sed 's/MASTER_LOG_POS=//')
-        if [[ -n "$f" && -n "$p" ]]; then
-          BINLOG_START_FILE=$f
-          BINLOG_START_POSITION=$p
-          return 0
-        fi
-        ;;
-    esac
+    if [[ "$line" =~ $re ]]; then
+      BINLOG_START_FILE=${BASH_REMATCH[1]}
+      BINLOG_START_POSITION=${BASH_REMATCH[2]}
+      return 0
+    fi
   done < "$dump"
   return 1
 }

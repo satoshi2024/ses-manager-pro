@@ -114,10 +114,16 @@ fi
 # 0. 固定値の検査（ダウンロード・apt より前。占位値のままなら失敗する）
 # ------------------------------------------------------------
 [[ "${BASE_IMAGE:-}" == *@sha256:* ]] || die "BASE_IMAGE が digest で固定されていません（現在値: ${BASE_IMAGE:-未設定}）"
-[[ "${MYSQL_CLIENT_VERSION:-}" =~ ^8\.0\.[0-9]{1,3}$ ]] || die "MYSQL_CLIENT_VERSION が不正です（現在値: ${MYSQL_CLIENT_VERSION:-未設定}）"
+# RB-W 8.4 対応: production の MySQL は 8.4 LTS だけ。client は 8.4.x、repo の component は mysql-8.4-lts だけを
+# 受け付ける（8.0 の client・component、innovation 系の component は受け付けない）。
+[[ "${MYSQL_CLIENT_VERSION:-}" =~ ^8\.4\.[0-9]{1,3}$ ]] \
+  || die "MYSQL_CLIENT_VERSION が MySQL 8.4 LTS（8.4.x）ではありません（現在値: ${MYSQL_CLIENT_VERSION:-未設定}）"
 [[ "${MYSQL_DEB_REVISION:-}" =~ ^[0-9]+debian[0-9]+$ ]] || die "MYSQL_DEB_REVISION が不正です（現在値: ${MYSQL_DEB_REVISION:-未設定}）"
 [[ "${MYSQL_APT_SUITE:-}" =~ ^[a-z]+$ ]] || die "MYSQL_APT_SUITE が不正です"
-[[ "${MYSQL_APT_COMPONENT:-}" =~ ^mysql-[0-9.]+$ ]] || die "MYSQL_APT_COMPONENT が不正です"
+case "${MYSQL_APT_COMPONENT:-}" in
+  mysql-8.4-lts) ;;
+  *) die "MYSQL_APT_COMPONENT は mysql-8.4-lts だけを受け付けます（現在値: ${MYSQL_APT_COMPONENT:-未設定}）" ;;
+esac
 [[ "${MYSQL_REPO_KEY_URL:-}" =~ ^https://repo\.mysql\.com/[A-Za-z0-9._-]+$ ]] || die "MYSQL_REPO_KEY_URL が不正です（https://repo.mysql.com/ 直下に限る）"
 require_sha256 MYSQL_REPO_KEY_SHA256 "${MYSQL_REPO_KEY_SHA256:-}"
 require_fingerprint MYSQL_REPO_KEY_FINGERPRINT "${MYSQL_REPO_KEY_FINGERPRINT:-}"

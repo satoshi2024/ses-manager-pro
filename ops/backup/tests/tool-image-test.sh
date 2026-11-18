@@ -222,7 +222,7 @@ case_content_id_covers_runtime_config() {
     test_fail "既定の描画から content ID を計算できる（前提）" "[$base]"
   fi
   for variant in 'volume="/var/lib/ses-backup"' 'port="3306/tcp"' 'shell="/bin/sh"' 'onbuild="RUN true"' \
-      'label="org.opencontainers.image.version"="8.0.46"' 'entrypoint="/bin/true"'; do
+      'label="org.opencontainers.image.version"="8.4.13"' 'entrypoint="/bin/true"'; do
     export FAKE_CONFIG="${CONFIG_DEFAULT}${variant}\n"
     changed=$(current_content_id)
     if [[ "$changed" =~ ^sha256:[0-9a-f]{64}$ && "$changed" != "$base" ]]; then
@@ -440,9 +440,9 @@ case_compose_runs_checked_image_id_even_if_retagged() {
   TOOL_RC=$?
   assert_zero "$TOOL_RC" "照合した image で run する"
   assert_file "$T/retagged" "照合の直後に tag が別の image へ付け替えられた（前提）"
-  assert_eq 1 "$(grep -c '{{.Id}} ses-backup-tool:8.0.46$' "$FAKE_DOCKER_LOG")" "tag の image ID への解決は 1 回だけ"
+  assert_eq 1 "$(grep -c '{{.Id}} ses-backup-tool:8.4.13$' "$FAKE_DOCKER_LOG")" "tag の image ID への解決は 1 回だけ"
   assert_contains "$(grep 'RootFS.Layers' "$FAKE_DOCKER_LOG")" "$ID_CLASSIC" "content ID は解決した image ID から計算する"
-  assert_not_contains "$(grep 'RootFS.Layers' "$FAKE_DOCKER_LOG")" "ses-backup-tool:8.0.46" "content ID の計算に tag を使わない"
+  assert_not_contains "$(grep 'RootFS.Layers' "$FAKE_DOCKER_LOG")" "ses-backup-tool:8.4.13" "content ID の計算に tag を使わない"
   override=$(cat "$FAKE_DOCKER_LOG.override" 2>/dev/null)
   assert_eq 7 "$(grep -c "image: \"$ID_CLASSIC\"" <<< "$override")" "全 service の image を照合した image ID に固定する"
   assert_not_contains "$override" "$ID_CONTAINERD" "付け替え後の image は使わない"
@@ -487,7 +487,7 @@ case_check_requires_pull_policy_per_service() {
   expect_compose_rejected "$T/other-image.yml" "ツールイメージ 1 種類ではありません" "1 つの service だけ別の tag"
   compose_with_line "$T/base.yml" "$T/foreign-image.yml" "  check:" "    image: alpine:3"
   expect_compose_rejected "$T/foreign-image.yml" "service check の image: がツールイメージの tag ではありません" "ツール以外の image"
-  compose_with_line "$T/base.yml" "$T/extra-service.yml" "services:" "  sidecar:"$'\n'"    image: ses-backup-tool:8.0.46"$'\n'"    pull_policy: never"
+  compose_with_line "$T/base.yml" "$T/extra-service.yml" "services:" "  sidecar:"$'\n'"    image: ses-backup-tool:8.4.13"$'\n'"    pull_policy: never"
   expect_compose_rejected "$T/extra-service.yml" "services がツールの service" "ツール以外の service（依存で起動され得る）"
   compose_with_line "$T/base.yml" "$T/extends.yml" "  retention:" "    extends: check"
   expect_compose_rejected "$T/extends.yml" "extends:" "extends で別の定義を取り込む"
@@ -507,14 +507,14 @@ case_check_rejects_flow_style_and_unparsed_yaml() {
   expect_compose_rejected "$T/flow-map.yml" "flow style（{）の YAML は解釈しません" "service 内の flow mapping"
   compose_with_line "$T/base.yml" "$T/flow-seq.yml" "  backup:" "    secrets: [mysql_password]"
   expect_compose_rejected "$T/flow-seq.yml" "flow style（[）の YAML は解釈しません" "service 内の flow sequence"
-  printf 'x-ses-backup-tool-content-id: "%s"\nservices: {preflight: {image: "ses-backup-tool:8.0.46", pull_policy: always}}\n' \
+  printf 'x-ses-backup-tool-content-id: "%s"\nservices: {preflight: {image: "ses-backup-tool:8.4.13", pull_policy: always}}\n' \
     "$content" > "$T/flow-services.yml"
   expect_compose_rejected "$T/flow-services.yml" "flow style" "services 全体の flow style"
   compose_with_line "$T/base.yml" "$T/dup.yml" "  pull_policy: never" "  pull_policy: always"
   expect_compose_rejected "$T/dup.yml" "key が重複しています" "同じ mapping の key の重複"
   compose_with_line "$T/base.yml" "$T/tab.yml" "  backup:" $'\t'"pull_policy: always"
   expect_compose_rejected "$T/tab.yml" "indent に tab があります" "indent の tab"
-  compose_with_line "$T/base.yml" "$T/tag.yml" "  backup:" "    image: !!str ses-backup-tool:8.0.46"
+  compose_with_line "$T/base.yml" "$T/tag.yml" "  backup:" "    image: !!str ses-backup-tool:8.4.13"
   expect_compose_rejected "$T/tag.yml" "tag・block scalar" "YAML の tag"
   compose_with_line "$T/base.yml" "$T/block-scalar.yml" "  backup:" "    command: |"$'\n'"      sh -c true"
   expect_compose_rejected "$T/block-scalar.yml" "tag・block scalar" "block scalar"
@@ -526,7 +526,7 @@ case_check_rejects_flow_style_and_unparsed_yaml() {
   expect_compose_rejected "$T/include.yml" "include" "別の compose ファイルの include"
   { printf -- '---\n'; cat "$T/base.yml"; } > "$T/document.yml"
   expect_compose_rejected "$T/document.yml" "document marker" "document marker"
-  compose_with_line "$T/base.yml" "$T/continuation.yml" "  image: ses-backup-tool:8.0.46" "    :other"
+  compose_with_line "$T/base.yml" "$T/continuation.yml" "  image: ses-backup-tool:8.4.13" "    :other"
   expect_compose_rejected "$T/continuation.yml" "indent が揃っていません" "複数行にわたる値"
   compose_with_line "$T/base.yml" "$T/seq-map.yml" "  volumes:" "    - type: bind"
   expect_compose_rejected "$T/seq-map.yml" "sequence の中の mapping は扱いません" "sequence の中の mapping（long syntax）"
@@ -614,12 +614,12 @@ setup_installer_full_flow() {
   export FAKE_RESTIC_BZ2="$T/restic.bz2"
   FAKE_RESTIC_SHA=$(sha256sum "$T/restic.bz2" | cut -d' ' -f1)
   for b in mysql mysqlbinlog mysqldump; do
-    printf '#!/usr/bin/env bash\necho "%s  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)"\n' "$b" > "$T/bin/$b"
+    printf '#!/usr/bin/env bash\necho "%s  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)"\n' "$b" > "$T/bin/$b"
     chmod +x "$T/bin/$b"
   done
   write_gpg_listing "$T/listing-ok" 1824293027 BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
   export FAKE_DPKG_LIST='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u7\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
-  export FAKE_DPKG_LIST_AFTER='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u8\tamd64\nii \tmysql-community-client\t8.0.46-1debian12\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
+  export FAKE_DPKG_LIST_AFTER='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u8\tamd64\nii \tmysql-community-client\t8.4.13-1debian12\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
   export FAKE_DPKG_ESSENTIAL='ii \tbash\tyes\nii \tlibc-bin\tyes\nii \ttar\tyes\n'
   INSTALLED_TSV=$(printf '%b' "$FAKE_DPKG_LIST_AFTER" | awk -F'\t' '{print $2 "\t" $3 "\t" $4}' | LC_ALL=C sort)
 }
@@ -642,7 +642,7 @@ case_installer_apt_lock_enforced_via_injected_paths() {
   assert_eq "$INSTALLED_TSV" "$(cat "$T/manifest/dpkg-packages.tsv" 2>/dev/null)" "導入結果の版一覧を記録"
   assert_eq "fake-keyring" "$(cat "$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg" 2>/dev/null)" \
     "fingerprint を確認した鍵の keyring を注入した path に書く"
-  assert_eq "deb [signed-by=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg] https://repo.mysql.com/apt/debian/ bookworm mysql-8.0" \
+  assert_eq "deb [signed-by=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg] https://repo.mysql.com/apt/debian/ bookworm mysql-8.4-lts" \
     "$(cat "$SYSROOT/etc/apt/sources.list.d/mysql.list" 2>/dev/null)" "apt source を注入した path に書く"
   if [[ -x "$SYSROOT/usr/local/bin/restic" ]]; then
     test_assert "SHA-256 を確認した restic を注入した path に導入する"
@@ -722,7 +722,7 @@ run_installer() { # [VAR=value ...] [-- <install-toolchain.sh の引数>...]
   done
   INSTALL_OUT=$(env PATH="$T/bin:$PATH" TMPDIR="$T" \
     BASE_IMAGE="debian:bookworm-slim@sha256:$(hex64 c)" \
-    MYSQL_CLIENT_VERSION=8.0.46 MYSQL_DEB_REVISION=1debian12 MYSQL_APT_SUITE=bookworm MYSQL_APT_COMPONENT=mysql-8.0 \
+    MYSQL_CLIENT_VERSION=8.4.13 MYSQL_DEB_REVISION=1debian12 MYSQL_APT_SUITE=bookworm MYSQL_APT_COMPONENT=mysql-8.4-lts \
     MYSQL_REPO_KEY_URL=https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 \
     MYSQL_REPO_KEY_SHA256="$(hex64 d)" \
     MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C \
@@ -765,6 +765,17 @@ case_installer_rejects_placeholders_before_download() {
   assert_nonzero "$INSTALL_RC" "base image が digest 固定でなければ失敗"
   assert_contains "$INSTALL_OUT" "BASE_IMAGE が digest で固定されていません" "base digest 未固定を通知"
   assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "base digest 未固定でも何も実行しない"
+
+  # RB-W 8.4 対応: client は 8.4.x、component は mysql-8.4-lts だけを受け付ける（8.0・innovation 系は何もせずに失敗）
+  local variant
+  for variant in MYSQL_CLIENT_VERSION=8.0.46 MYSQL_CLIENT_VERSION=9.1.0 MYSQL_APT_COMPONENT=mysql-8.0 \
+      MYSQL_APT_COMPONENT=mysql-innovation MYSQL_APT_COMPONENT=mysql-8.4; do
+    : > "$FAKE_INSTALL_LOG"
+    run_installer "$variant"
+    assert_nonzero "$INSTALL_RC" "8.4 LTS 以外は失敗: $variant"
+    assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "8.4 LTS 以外では apt・ダウンロードを一切行わない: $variant"
+  done
+  assert_contains "$INSTALL_OUT" "MYSQL_APT_COMPONENT は mysql-8.4-lts だけを受け付けます" "受け付ける component を通知"
 }
 
 case_installer_rejects_key_checksum_mismatch() {
@@ -852,11 +863,15 @@ case_static_image_contract() {
       'RESTIC_INSTALL_PATH=$SYSROOT/usr/local/bin/restic' 'APT_LISTS_DIR=$SYSROOT/var/lib/apt/lists'; do
     assert_contains "$installer" "$path" "既定の system path: ${path%%=*}"
   done
-  if [[ "$integration" =~ image:\ mysql:8\.0\.36@sha256:[0-9a-f]{64} ]]; then
-    test_assert "integration の mysql:8.0.36 を digest 固定"
-  else
-    test_fail "integration の mysql:8.0.36 を digest 固定" "tag だけの参照です"
-  fi
+  # RB-W 8.4 対応: integration の MySQL は production と同じ 8.4 LTS 系列（index digest で固定）
+  assert_contains "$integration" \
+    "image: mysql:8.4.13@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902" \
+    "integration の mysql:8.4.13 を index digest で固定"
+  assert_not_contains "$integration" "image: mysql:8.0" "integration に 8.0 の MySQL を残さない"
+  assert_not_contains "$integration" "      - --binlog-format=" "8.4 で非推奨の --binlog-format を server に渡さない"
+  assert_contains "$dockerfile" "ARG MYSQL_CLIENT_VERSION=8.4.13" "ツールイメージの client は 8.4.13"
+  assert_contains "$dockerfile" "ARG MYSQL_APT_COMPONENT=mysql-8.4-lts" "repo の component は mysql-8.4-lts"
+  assert_contains "$prod" "image: ses-backup-tool:8.4.13" "production compose のツールイメージの tag は 8.4.13"
   assert_not_contains "$prod" "  build:" "production compose は build しない"
   assert_contains "$prod" "pull_policy: never" "production compose は registry から pull しない"
   assert_contains "$prod" "x-ses-backup-tool-content-id:" "production compose は store に依存しない content ID を参照する"

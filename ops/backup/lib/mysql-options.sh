@@ -7,7 +7,7 @@
 # - TLS は fail-closed: MYSQL_SSL_CAPATH（hashed CA dir）または
 #   MYSQL_SSL_CA のどちらかが無ければ接続できない。
 #   2026-08-14 実測: MySQL 8.0.46 client は --ssl-ca + VERIFY_* で
-#   "SSL_CTX_set_default_verify_paths failed" となり使用不能。
+#   "SSL_CTX_set_default_verify_paths failed" となり使用不能（8.4 client で同じかは未確認。CI で確認する）。
 #   hashed ssl-capath では VERIFY_CA/VERIFY_IDENTITY が機能する
 #   （ID 照合には server cert の CN/SAN が host 名と一致する必要がある）。
 #   したがって CA は hashed capath で提供するのを推奨とし、

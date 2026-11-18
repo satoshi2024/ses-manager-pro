@@ -63,7 +63,7 @@ make_manifest() { # di
 local full_payload="$T/full-payload"
 mkdir -p "$full_payload/db" "$full_payload/uploads/published"
 printf '%s\n' "-- MySQL dump (source-data=2)" \
-  "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000010', MASTER_LOG_POS=154;" \
+  "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000010', SOURCE_LOG_POS=154;" \
   "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);" > "$full_payload/db/database.sql"
 printf 'marker-before-full\n' > "$full_payload/uploads/published/marker.txt"
 # RB-W P2-1: full の metadata.json の DB の既定値（restore.sh が復元 DB をこの値で作る）。
@@ -176,11 +176,11 @@ case_restore_normal_flow() {
   assert_contains "$(cat "$FAKE_ARGV_LOG")" \
     'CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; ALTER DATABASE `ses_manager_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' \
     "復元 DB を backup 時の照合順序で作る"
-  # R1 P0-01: import 前に RESET MASTER（GTID リセット）が発行されること
-  if grep -q "RESET MASTER" "$FAKE_ARGV_LOG"; then
-    test_assert "RESET MASTER を発行（再 restore の沈黙スキップ防止）"
+  # R1 P0-01: import 前に RESET BINARY LOGS AND GTIDS（GTID リセット）が発行されること
+  if grep -q "RESET BINARY LOGS AND GTIDS" "$FAKE_ARGV_LOG"; then
+    test_assert "RESET BINARY LOGS AND GTIDS を発行（再 restore の沈黙スキップ防止）"
   else
-    test_fail "RESET MASTER を発行（再 restore の沈黙スキップ防止）" "argv log に RESET MASTER がない"
+    test_fail "RESET BINARY LOGS AND GTIDS を発行（再 restore の沈黙スキップ防止）" "argv log に RESET BINARY LOGS AND GTIDS がない"
   fi
 }
 
@@ -204,12 +204,12 @@ case_restore_reset_master_fail() {
   setup_restore
   build_backup_fixture
   make_claims
-  # RESET MASTER を失敗させると restore は中断（fail closed）
+  # RESET BINARY LOGS AND GTIDS を失敗させると restore は中断（fail closed）
   export FAKE_RESET_MASTER_RC=1
   local out=""
   out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
-  assert_nonzero "$?" "RESET MASTER 失敗は非 0"
-  assert_contains "$out" "RESET MASTER" "理由"
+  assert_nonzero "$?" "RESET BINARY LOGS AND GTIDS 失敗は非 0"
+  assert_contains "$out" "RESET BINARY LOGS AND GTIDS" "理由"
   unset FAKE_RESET_MASTER_RC
 }
 

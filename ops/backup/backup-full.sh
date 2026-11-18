@@ -52,24 +52,21 @@ backup_full::cleanup() {
   repository_lock::release
 }
 
-# dump の --source-data=2 coordinate を抽出
+# dump の --source-data=2 coordinate を抽出（RB-W 8.4 対応）
+# MySQL 8.4 の mysqldump は CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='…', SOURCE_LOG_POS=…; を書く
+# （8.4 の server は CHANGE MASTER TO を持たない）。production は 8.4 だけのため旧形式（CHANGE MASTER TO）は読まない。
+# 旧形式の dump は coordinate を取れずに失敗する（fail-closed）。パイプを使わず bash の正規表現で取り出す（P1-1）。
 backup_full::parse_dump_coords() { # dump_file -> BINLOG_START_FILE/BINLOG_START_POSITION
-  local dump=$1
+  local dump=$1 line
+  local re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
   BINLOG_START_FILE=""
   BINLOG_START_POSITION=""
   while IFS= read -r line; do
-    case "$line" in
-      *"CHANGE MASTER TO"*)
-        local f="" p=""
-        f=$(printf '%s' "$line" | grep -oE "MASTER_LOG_FILE='[^']+'" | head -n1 | sed "s/MASTER_LOG_FILE='//;s/'//")
-        p=$(printf '%s' "$line" | grep -oE "MASTER_LOG_POS=[0-9]+" | head -n1 | sed 's/MASTER_LOG_POS=//')
-        if [[ -n "$f" && -n "$p" ]]; then
-          BINLOG_START_FILE=$f
-          BINLOG_START_POSITION=$p
-          return 0
-        fi
-        ;;
-    esac
+    if [[ "$line" =~ $re ]]; then
+      BINLOG_START_FILE=${BASH_REMATCH[1]}
+      BINLOG_START_POSITION=${BASH_REMATCH[2]}
+      return 0
+    fi
   done < "$dump"
   return 1
 }

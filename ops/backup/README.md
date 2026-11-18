@@ -24,9 +24,20 @@ production 環境への接続・復元は行わないこと。
 
 ## 前提
 
-- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.0.46 client + mysqlbinlog + mysqldump + restic 0.17.3。
+- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.4 LTS（8.4.13）client + mysqlbinlog + mysqldump + restic 0.17.3。
+  production の MySQL server は 8.4 LTS だけで（2026-11-13 決定）、`preflight.sh` は client・mysqlbinlog・mysqldump と
+  server がすべて 8.4 系列であることを求める（RB-W 8.4 対応）。
   private registry は使わず、検証済み build の content ID（image store に依存しない識別子）を記録して
   `docker save` / `docker load` で配布する（「ツールイメージの build・配布」参照）。
+- MySQL 8.4 で変わった点への対応（RB-W 8.4 対応）: mysqldump の `--source-data=2` が書く
+  `CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE=…, SOURCE_LOG_POS=…` から full の起点を読む（`CHANGE MASTER TO` は 8.4 に無いため
+  読まない）。復元前の GTID・binlog のリセットは `RESET BINARY LOGS AND GTIDS`（8.4 で `RESET MASTER` は削除）。
+  `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外し、preflight は
+  記録だけに使う。`SHOW MASTER STATUS` は使わない（mysqldump 8.4 は内部で `SHOW BINARY LOG STATUS` を使う）。
+  preflight の server の変数は `SHOW GLOBAL VARIABLES` で 1 つずつ有無を見て、無い変数は名前を挙げて失敗する。
+  TLS は `@@have_ssl`（8.4 で残るかは CI で確認）を使わず、この接続の `Ssl_cipher` で判定する。
+  mysqlbinlog の `--read-from-remote-server --raw --stop-never` と `MYSQL_PWD`（integration の root 操作だけが使う）が 8.4 でも
+  使えることは CI（実 MySQL 8.4.13）で確認する（未取得）。
 - MySQL サーバの時刻帯（2026-11-13 決定）: production の source と、復元先（recovery target）の MySQL サーバは
   いずれも **`time_zone = '+09:00'`**（DBA が設定）とする。復元先が異なる時刻帯だと、cutover 後のアプリの
   `NOW()` / `CURRENT_DATE` と TIMESTAMP 列の表示が変わるため、復元前に `SELECT @@global.time_zone;` で確認する。
@@ -36,7 +47,8 @@ production 環境への接続・復元は行わないこと。
 - `secrets/mysql-password`（0600）: MySQL パスワード
 - `secrets/restic-password`（0600）: restic repository パスワード
 - `secrets/mysql-capath/` : hashed CA ディレクトリ（`openssl rehash` / `c_rehash` 済み）
-  ※ MySQL 8.0.46 client は `--ssl-ca` + VERIFY_* が使えない（research.md §4 実測）。
+  ※ MySQL 8.0.46 client は `--ssl-ca` + VERIFY_* が使えなかった（research.md §4 実測）。8.4 client で同じかは未確認のため
+  （CI で確認）、引き続き capath を使う。
   CA は hashed capath で提供し、`MYSQL_SSL_CAPATH` で指定する。
 
 ## 設定（`.env.backup`）
@@ -53,7 +65,7 @@ production 環境への接続・復元は行わないこと。
 ## 実行
 
 job は必ず `image/tool-image.sh compose` 経由で起動する。docker-compose.yml の
-`x-ses-backup-tool-content-id` とローカルの `ses-backup-tool:8.0.46` の content ID が一致しない
+`x-ses-backup-tool-content-id` とローカルの `ses-backup-tool:8.4.13` の content ID が一致しない
 （または未 pin の）場合は起動を拒否する。`tool-image.sh compose` が渡すのは次の使い方だけで、
 `-f`・`-p`・`--pull`・`--build`・`--entrypoint`・`-e`・`-v` などの compose 側 option、別の compose ファイル、
 未定義の service は拒否する（終了コード 2）。
@@ -195,7 +207,7 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 | global | `RELOAD` | 復元前の GTID・binlog のリセット |
 | global | `SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER` | binlog replay（session 変数・GTID の適用） |
 | global | `SHOW_ROUTINE` | schema fingerprint で routine の本体を読む（無いと計算が失敗する） |
-| global | DEFINER の再現: 8.0 は `SET_USER_ID`、8.4 は `SET_ANY_DEFINER`（DEFINER の account が復元先に無い場合は `ALLOW_NONEXISTENT_DEFINER` も） | dump の `CREATE DEFINER=… TRIGGER / VIEW / FUNCTION` を元の DEFINER のまま作る。DEFINER を外して復元すると schema fingerprint が一致しない（DEFINER は照合の対象） |
+| global | DEFINER の再現: `SET_ANY_DEFINER`（MySQL 8.4。8.0 の `SET_USER_ID` は使わない。DEFINER の account が復元先に無い場合は `ALLOW_NONEXISTENT_DEFINER` も） | dump の `CREATE DEFINER=… TRIGGER / VIEW / FUNCTION` を元の DEFINER のまま作る。DEFINER を外して復元すると schema fingerprint が一致しない（DEFINER は照合の対象） |
 
 前提（DBA が復元先で用意する。**DBA の確認は未取得**）: 復元先で binlog が有効なら `log_bin_trust_function_creators = ON`（restore role は
 SUPER を持たないため。stored function と trigger の作成に要る）。DEFINER の account（production では migrator）を復元先に作るか、
@@ -273,7 +285,7 @@ v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない�
 - 次の場合は計算を失敗させる（fail-closed）: table が 1 つも見えない、DB の既定値が 1 行でない、routine の本体が NULL
   （照会する利用者に `SHOW_ROUTINE` が無い）、view の定義が空（対象 DB の `SHOW VIEW` が無い）、想定外の出力、mysql の失敗。
 - 不一致の通知には、違う区分と、記録時と現在の server の版・`lower_case_table_names`・DB の既定値を並べて出す。
-- 次の場合も不一致として FAIL になる（fail-closed）: backup 時と復元検証時で MySQL server の版（8.0 の minor を含む）や
+- 次の場合も不一致として FAIL になる（fail-closed）: backup 時と復元検証時で MySQL server の版（8.4 の patch を含む）や
   `lower_case_table_names` が違い information_schema の表示が変わる、trigger の本体などが schema 名を明示している状態で
   別名の DB へ復元する、復元検証の利用者に `TRIGGER` 権限が無く trigger が見えない（件数の違いとして現れる）。
   いずれも原因を直してから再検証する（照合を省略する設定は無い）。
@@ -308,7 +320,7 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 
 - unit: `tests/run-unit-tests.sh`（fake CLI に対する全 script の検証、Docker 必須。ツールイメージを build するため、
   Dockerfile の固定値が仮置きの値のままだと build で失敗する）
-- integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合、
+- integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.4.13 ×2 コンテナで実 PITR、before/after marker 照合、
   最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合、schema fingerprint 照合と
   その正規化規則（コメントだけの変更・列の並び順・索引・既定値・trigger の本体・view の定義・外部キーの `ON DELETE`・
   DB の既定の照合順序）の実 MySQL での確認、migrator 相当の利用者が作った trigger・view・routine・外部キー・CHECK を

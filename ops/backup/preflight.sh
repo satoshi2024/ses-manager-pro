@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # ============================================================
 # HFP-03-001 読み取り専用 preflight（環境契約検査）
-# MySQL 8 client/server、source UUID、binlog、table engine、
+# MySQL 8.4 LTS の client/server、source UUID、binlog、table engine、
 # TLS、空き容量、uploads topology を機械判定し JSON を出力する。
 # 読み取り専用であり、DB へ一切書込みを行わない。
+#
+# RB-W 8.4 対応: production の MySQL は 8.4 LTS だけ（2026-11-13 決定）。mysql・mysqlbinlog・mysqldump と server が
+# すべて SUPPORTED_MYSQL_SERIES（8.4）であることを求める（patch は違ってよい）。server の変数は
+# SHOW GLOBAL VARIABLES で読み（無い変数は行が出ないだけで、1 つの SELECT 全体が失敗しない）、判定に要る変数が
+# 無ければその名前を挙げて失敗する。TLS は @@have_ssl（8.4 で残るかは CI で確認。使わない）ではなく、
+# この接続の Ssl_cipher（session status）が空でないことで判定する。
 #
 # 使い方: preflight.sh [--json|--help]
 #
 # exit code:
 #   0   全チェック PASS
-#   10  mysql client が不正（MariaDB / 非 8.0）
-#   11  server version が 8.0 以外、または client/server 不整合
+#   10  mysql client / mysqlbinlog / mysqldump が不正（MariaDB / 8.4 以外）
+#   11  server version が 8.4 以外、client/server の系列不整合、または判定に要る server の変数を取得できない
 #   12  log_bin = OFF
 #   13  binlog checksum が OFF
 #   14  対象 DB に非 InnoDB table がある
@@ -40,6 +46,25 @@ EXIT_TLS=15
 EXIT_UPLOADS=16
 EXIT_DISK=17
 EXIT_MYSQL_PWD=18
+
+# 対応する MySQL の系列（major.minor）
+SUPPORTED_MYSQL_SERIES=8.4
+
+# --version の出力から x.y.z を取り出す（「Ver 8.4.13」または旧形式の「Distrib 5.7.44」）。取れなければ空
+mysql_tool_version() { # <--version の出力>
+  if [[ "$1" =~ Ver[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  elif [[ "$1" =~ Distrib[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+  return 0
+}
+
+# x.y.z（または x.y.z-suffix）の major.minor
+mysql_series() { # <version>
+  [[ "$1" =~ ^([0-9]+\.[0-9]+)\. ]] && printf '%s\n' "${BASH_REMATCH[1]}"
+  return 0
+}
 
 usage() {
   cat <<'EOF'
@@ -91,10 +116,10 @@ main() {
 
   local client_ver="" server_ver="" server_uuid="" log_bin=""
   local binlog_format="" binlog_checksum="" binlog_compression=""
-  local gtid_mode="" have_ssl="" log_bin_basename="" binlog_expire=""
+  local gtid_mode="" tls_cipher="" log_bin_basename="" binlog_expire=""
   local engines_out="" disk_free_bytes=""
 
-  # --- client 検査（Oracle MySQL 8 のみ） ---
+  # --- client 検査（Oracle MySQL 8.4 のみ） ---
   local client_line=""
   if [[ "$fail_code" -eq 0 || "$fail_code" -eq 18 ]]; then
     if client_line=$("$MYSQL_CLIENT_BIN" --version 2>&1); then
@@ -103,8 +128,11 @@ main() {
           note_fail "$EXIT_CLIENT" "mysql client が MariaDB 系です: $client_line"
           ;;
         *)
-          client_ver=$(printf '%s' "$client_line" | grep -oE '8\.0\.[0-9]+' | head -n1 || true)
-          [[ -n "$client_ver" ]] || note_fail "$EXIT_CLIENT" "mysql client が MySQL 8.0 ではありません: $client_line"
+          client_ver=$(mysql_tool_version "$client_line")
+          if [[ "$(mysql_series "$client_ver")" != "$SUPPORTED_MYSQL_SERIES" ]]; then
+            note_fail "$EXIT_CLIENT" "mysql client が MySQL $SUPPORTED_MYSQL_SERIES ではありません: $client_line"
+            client_ver=""
+          fi
           ;;
       esac
     else
@@ -112,13 +140,14 @@ main() {
     fi
   fi
 
-  # mysqlbinlog / mysqldump の存在確認
+  # mysqlbinlog / mysqldump も同じ系列であること
   if [[ "$fail_code" -eq 0 || "$fail_code" -eq 18 ]]; then
     local bl=""
     if bl=$("$MYSQLBINLOG_BIN" --version 2>&1); then
       case "$bl" in
         *[Mm]ariaDB*) note_fail "$EXIT_CLIENT" "mysqlbinlog が MariaDB 系です: $bl" ;;
-        *) [[ "$bl" == *"Ver 8.0"* ]] || note_fail "$EXIT_CLIENT" "mysqlbinlog が MySQL 8.0 ではありません: $bl" ;;
+        *) [[ "$(mysql_series "$(mysql_tool_version "$bl")")" == "$SUPPORTED_MYSQL_SERIES" ]] \
+             || note_fail "$EXIT_CLIENT" "mysqlbinlog が MySQL $SUPPORTED_MYSQL_SERIES ではありません: $bl" ;;
       esac
     else
       note_fail "$EXIT_CLIENT" "mysqlbinlog を実行できません: $MYSQLBINLOG_BIN"
@@ -127,30 +156,56 @@ main() {
     if dl=$("$MYSQLDUMP_BIN" --version 2>&1); then
       case "$dl" in
         *[Mm]ariaDB*) note_fail "$EXIT_CLIENT" "mysqldump が MariaDB 系です: $dl" ;;
-        *) [[ "$dl" == *"Ver 8.0"* ]] || note_fail "$EXIT_CLIENT" "mysqldump が MySQL 8.0 ではありません: $dl" ;;
+        *) [[ "$(mysql_series "$(mysql_tool_version "$dl")")" == "$SUPPORTED_MYSQL_SERIES" ]] \
+             || note_fail "$EXIT_CLIENT" "mysqldump が MySQL $SUPPORTED_MYSQL_SERIES ではありません: $dl" ;;
       esac
     else
       note_fail "$EXIT_CLIENT" "mysqldump を実行できません: $MYSQLDUMP_BIN"
     fi
   fi
 
-  # --- server status 検査（読み取りのみ） ---
+  # --- server status 検査（読み取りのみ。RB-W 8.4 対応） ---
+  # 変数ごとに有無を見るため SHOW GLOBAL VARIABLES で読む（1 つの SELECT @@a, @@b … は、どれか 1 つが無いだけで
+  # 全体が失敗する）。判定に要る変数（REQUIRED）が無ければ名前を挙げて失敗し、記録だけに使う変数（binlog_format
+  # （8.4 で非推奨）・binlog_transaction_compression・gtid_mode・log_bin_basename・binlog_expire_logs_seconds）は
+  # 無ければ空で出力する。TLS はこの接続の Ssl_cipher で判定する。
+  local -A server_vars=()
+  local vars_out="" var_name var_value missing_vars=""
+  local -a required_vars=(version server_uuid log_bin binlog_checksum Ssl_cipher)
   if [[ "$fail_code" -eq 0 || "$fail_code" -eq 18 ]]; then
-    local status_row=""
     # shellcheck disable=SC2153  # MYSQL_HOST は require_env で検証済みの env 値
-    if status_row=$("$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" -N -B \
-        --execute "SELECT @@version, @@server_uuid, @@log_bin, @@binlog_format, @@binlog_checksum, @@binlog_transaction_compression, @@gtid_mode, @@have_ssl, @@log_bin_basename, @@binlog_expire_logs_seconds;" 2>&1); then
-      IFS=$'\t' read -r server_ver server_uuid log_bin binlog_format binlog_checksum \
-        binlog_compression gtid_mode have_ssl log_bin_basename binlog_expire <<< "$status_row"
+    if vars_out=$("$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" -N -B \
+        --execute "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('version', 'server_uuid', 'log_bin', 'binlog_format', 'binlog_checksum', 'binlog_transaction_compression', 'gtid_mode', 'log_bin_basename', 'binlog_expire_logs_seconds'); SHOW SESSION STATUS WHERE Variable_name = 'Ssl_cipher';" 2>&1); then
+      while IFS=$'\t' read -r var_name var_value; do
+        [[ -n "$var_name" ]] && server_vars[$var_name]=$var_value
+      done <<< "$vars_out"
+      for var_name in "${required_vars[@]}"; do
+        [[ -n "${server_vars[$var_name]+set}" ]] || missing_vars+="${missing_vars:+, }$var_name"
+      done
+      if [[ -n "$missing_vars" ]]; then
+        note_fail "$EXIT_SERVER" "server の変数を取得できません: $missing_vars（MySQL $SUPPORTED_MYSQL_SERIES に無い・権限不足の可能性）"
+      fi
+      server_ver=${server_vars[version]:-}
+      server_uuid=${server_vars[server_uuid]:-}
+      log_bin=${server_vars[log_bin]:-}
+      binlog_format=${server_vars[binlog_format]:-}
+      binlog_checksum=${server_vars[binlog_checksum]:-}
+      binlog_compression=${server_vars[binlog_transaction_compression]:-}
+      gtid_mode=${server_vars[gtid_mode]:-}
+      log_bin_basename=${server_vars[log_bin_basename]:-}
+      binlog_expire=${server_vars[binlog_expire_logs_seconds]:-}
+      tls_cipher=${server_vars[Ssl_cipher]:-}
     else
-      note_fail 1 "server status を取得できません（接続/TLS を確認してください）: $(printf '%s' "$status_row" | common::redact)"
+      note_fail 1 "server status を取得できません（接続/TLS を確認してください）: $(printf '%s' "$vars_out" | common::redact)"
     fi
   fi
 
   if [[ -n "$server_ver" ]]; then
-    [[ "$server_ver" == 8.0.* ]] || note_fail "$EXIT_SERVER" "server version が MySQL 8.0 ではありません: $server_ver"
+    [[ "$(mysql_series "$server_ver")" == "$SUPPORTED_MYSQL_SERIES" ]] \
+      || note_fail "$EXIT_SERVER" "server version が MySQL $SUPPORTED_MYSQL_SERIES ではありません: $server_ver"
     if [[ -n "$client_ver" ]]; then
-      [[ "$client_ver" == 8.0.* && "$server_ver" == 8.0.* ]] || note_fail "$EXIT_SERVER" "client/server の major.minor が一致しません: client=$client_ver server=$server_ver"
+      [[ "$(mysql_series "$client_ver")" == "$(mysql_series "$server_ver")" ]] \
+        || note_fail "$EXIT_SERVER" "client/server の major.minor が一致しません: client=$client_ver server=$server_ver"
     fi
   fi
 
@@ -186,11 +241,10 @@ main() {
     fi
   fi
 
-  # --- TLS 検査 ---
-  case "$have_ssl" in
-    YES) : ;;
-    *) note_fail "$EXIT_TLS" "TLS が無効です（have_ssl=${have_ssl:-NO}）" ;;
-  esac
+  # --- TLS 検査（この接続の Ssl_cipher。空なら TLS で接続していない） ---
+  if [[ -z "$tls_cipher" ]]; then
+    note_fail "$EXIT_TLS" "TLS が無効です（この接続の Ssl_cipher が空です）"
+  fi
 
   # --- uploads topology（任意。指定されたら存在チェック） ---
   local uploads_status="not-configured"
@@ -226,10 +280,10 @@ main() {
 
   # 各チェックの成否（reasons から機械判定ではなく、個別変数で持つ）
   local client_ok=false server_ok=false binlog_on=false tls_ok=false innodb_ok=false
-  [[ -n "$client_ver" && "$client_ver" == 8.0.* ]] && client_ok=true
-  [[ -n "$server_ver" && "$server_ver" == 8.0.* ]] && server_ok=true
+  [[ -n "$client_ver" && "$(mysql_series "$client_ver")" == "$SUPPORTED_MYSQL_SERIES" ]] && client_ok=true
+  [[ -n "$server_ver" && "$(mysql_series "$server_ver")" == "$SUPPORTED_MYSQL_SERIES" ]] && server_ok=true
   [[ "$log_bin" == 1 || "$log_bin" == "ON" ]] && binlog_on=true
-  [[ "$have_ssl" == "YES" ]] && tls_ok=true
+  [[ -n "$tls_cipher" ]] && tls_ok=true
   local noninnodb_all=""
   noninnodb_all=$(printf '%s\n' "$engines_out" | awk -F'\t' '$1 != "InnoDB" {print}' | tr -d '[:space:]')
   [[ -z "$noninnodb_all" ]] && innodb_ok=true

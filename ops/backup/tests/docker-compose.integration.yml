@@ -1,10 +1,15 @@
 # HFP-03-011 integration suite（実 MySQL PITR の自動検証）
 #
-# - pinned MySQL 8.0.36（source/target を別コンテナ・専用 network で分離）。tag だけでなく digest で固定する。
-#   digest は manifest list（index）のもの。2 つの独立した出典で一致を確認済み:
+# - pinned MySQL 8.4.13（production と同じ 8.4 LTS 系列。source/target を別コンテナ・専用 network で分離）。
+#   tag だけでなく digest で固定する。
+#   digest は従来と同じく manifest list（index）のもの（linux/amd64 の manifest digest
+#   sha256:72c368d898861f3b3a07af0e6d690400f44f048799ed46822783d9224cc2c86d ではない）。2026-11-18 に統括が
+#   Docker Hub の tag API（library/mysql:8.4.13、last_updated 2026-11-03）で確認した値。
+#   （8.0.36 の値は 2 つの独立した出典で一致を確認していた:
 #   .kiro/specs/database-backup-recovery/baseline.md §4.1（2026-08-14 docker inspect 実測）と
-#   Docker Hub の tag API（library/mysql:8.0.36 の digest）。Runner は docker pull 後の
-#   docker image inspect --format '{{index .RepoDigests 0}}' mysql:8.0.36 で再確認する。
+#   Docker Hub の tag API（library/mysql:8.0.36 の digest）。）Runner は docker pull 後の
+#   docker image inspect --format '{{index .RepoDigests 0}}' mysql:8.4.13 で再確認する（8.4.13 は未取得）。
+# - --binlog-format=ROW は指定しない（8.4 で非推奨。既定が ROW のため、外しても同じ）。
 # - host port を公開しない（internal network）
 # - パスワードは env（INTEGRATION_SRC_PW / INTEGRATION_TGT_PW）から注入する
 #   synthetic secret（repo には値を書かない）
@@ -13,7 +18,7 @@
 name: ses-backup-integration
 
 x-mysql-common: &mysql-common
-  image: mysql:8.0.36@sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964
+  image: mysql:8.4.13@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
   networks: [ses-bkup]
   restart: "no"
 
@@ -24,7 +29,6 @@ services:
     command:
       - --log-bin=/var/lib/mysql/binlog
       - --server-id=100
-      - --binlog-format=ROW
       - --binlog-checksum=CRC32
       - --gtid-mode=ON
       - --enforce-gtid-consistency=ON

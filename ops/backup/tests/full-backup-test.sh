@@ -47,7 +47,7 @@ setup_full() {
   # R1 P1-06: full coordinate は必須（archiver の初回起点）
   export FULL_COORDINATE_FILE="$T/full-coordinate"
   export FAKE_GET_LOCK_HOLD=1
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
     CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
     FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
@@ -215,6 +215,33 @@ case_backup_full_coord_parse_failure() {
   teardown_full
 }
 
+# RB-W 8.4 対応: 8.4 の mysqldump が書く CHANGE REPLICATION SOURCE TO の coordinate を読み、旧形式（CHANGE MASTER TO。
+# 8.4 の server には無い）だけの dump は coordinate を取れずに失敗する（fail-closed）。
+case_backup_full_coord_source_syntax() {
+  setup_full
+  printf '%s\n' "-- MySQL dump 10.13  Distrib 8.4.13, for Linux (x86_64)" \
+    "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000123', SOURCE_LOG_POS=4567;" > "$T/source-dump.sql"
+  export FAKE_DUMP_FILE="$T/source-dump.sql"
+  local out="" code idx
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_zero "$code" "CHANGE REPLICATION SOURCE TO の dump で full backup 成功"
+  idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
+  assert_eq "binlog.000123/4567" "$(jq -r '"\(.binlog_start.file)/\(.binlog_start.position)"' "$idx" 2>/dev/null)" \
+    "SOURCE_LOG_FILE / SOURCE_LOG_POS を記録"
+  teardown_full
+
+  setup_full
+  printf '%s\n' "-- MySQL dump" "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000123', MASTER_LOG_POS=4567;" > "$T/master-dump.sql"
+  export FAKE_DUMP_FILE="$T/master-dump.sql"
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "旧形式（CHANGE MASTER TO）だけの dump は coordinate を取れずに失敗"
+  assert_contains "$out" "coordinate" "理由を通知"
+  unset FAKE_DUMP_FILE
+  teardown_full
+}
+
 case_backup_full_quiesce_failure() {
   setup_full
   # replica を全部 stale にする
@@ -366,6 +393,7 @@ run_case case_manifest_corrupt_one_byte
 run_case case_manifest_extra_file
 run_case case_manifest_absolute_path
 run_case case_backup_full_coord_parse_failure
+run_case case_backup_full_coord_source_syntax
 run_case case_backup_full_quiesce_failure
 run_case case_backup_full_uploads_symlink
 run_case case_backup_full_restic_failure

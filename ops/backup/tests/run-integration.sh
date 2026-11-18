@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # HFP-03-011 integration suite ランナー（ホスト側）
 #
-# docker compose（pinned MySQL 8.0.36 ×2 + tool イメージ）で隔離ネットワークを
+# docker compose（pinned MySQL 8.4.13 ×2 + tool イメージ）で隔離ネットワークを
 # 構築し、integration-pitr.sh を tool コンテナ内で実行して実 PITR を検証する。
 #
 # - host port を公開しない（internal network）
@@ -1430,7 +1430,7 @@ if ! check_fixed_container_names; then FAILURE_STAGE=fixed-name-preflight; exit 
 if ! prepare_work_dir; then FAILURE_STAGE=work-prepare; exit 1; fi
 PROJECT_OWNED=1
 
-echo "== compose up（pinned MySQL 8.0.36 ×2 + tool image build） =="
+echo "== compose up（pinned MySQL 8.4.13 ×2 + tool image build） =="
 upAttempted=1
 UP_OUTPUT_FILE="$WORK/.compose-up-output"
 compose up -d --build 2>&1 | redact_stream_to_file "$UP_OUTPUT_FILE" 65536

@@ -11,7 +11,7 @@
 #     content ID を照合）で読み込む。この compose は build しない（build: を書かない）。
 #   - 下記 x-ses-backup-tool-content-id に、記録した content ID（sha256:<16 進 64 桁>。image store に
 #     依存しない識別子。image ID は store により変わるため使わない）を設定する。仮置きの値（UNPINNED）のまま、
-#     またはローカルの ses-backup-tool:8.0.46 の content ID と一致しない場合、image/tool-image.sh check /
+#     またはローカルの ses-backup-tool:8.4.13 の content ID と一致しない場合、image/tool-image.sh check /
 #     compose が拒否する。job は必ず
 #       ops/backup/image/tool-image.sh compose run --rm <service>
 #     で起動する（docker compose を直接実行しない。tool-image.sh は許可した使い方だけを渡す）。
@@ -25,7 +25,7 @@
 x-ses-backup-tool-content-id: "sha256:UNPINNED"
 
 x-backup-common: &backup-common
-  image: ses-backup-tool:8.0.46
+  image: ses-backup-tool:8.4.13
   pull_policy: never
   env_file:
     - .env.backup

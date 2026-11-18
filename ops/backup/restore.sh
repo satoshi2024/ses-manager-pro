@@ -122,9 +122,10 @@ main() {
   # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
   # target guard が source と同一 UUID を拒否済み）。
   # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
+  # RB-W 8.4 対応: MySQL 8.4 では RESET MASTER が削除されたため、8.2 以降の RESET BINARY LOGS AND GTIDS を使う。
   if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "RESET MASTER;" 2>/dev/null; then
-    restore::fail "target の GTID 状態をリセットできません（RESET MASTER）。再 restore の正しさを保証できません"
+    --execute "RESET BINARY LOGS AND GTIDS;" 2>/dev/null; then
+    restore::fail "target の GTID 状態をリセットできません（RESET BINARY LOGS AND GTIDS）。再 restore の正しさを保証できません"
   fi
 
   # staging（失敗時は read-only に隔離）
