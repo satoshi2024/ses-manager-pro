@@ -23,6 +23,7 @@
 #   - 固定名の事前確認を WORK 判定より前に行うこと（P3-N1）、別の PID 名前空間の前回 run は終了記録が
 #     無ければ退避しないこと（P3-N2）、所有マーカーの排他作成（P3-S1）
 #   - 排他作成に事前検査と open の間の窓が無いこと（RB-W W-2。dd の conv=excl = O_CREAT|O_EXCL の 1 回の open）
+#   - 前回 run の生存判定は owner= / session= も一致するときだけ kill -0 で行い、EPERM を生存とすること（RB-W W-6）
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
 # 実行方式: case 1〜3 は fresh な bash -c 子プロセスで実行する（source 済み関数は子 bash へ継承されないため、
@@ -197,6 +198,7 @@ MOCK
 #   RUNNER_SELF_PID_MARKER_DIR を設定すると、runner 自身の PID（exec で引き継ぐ）を run= に持つ
 #   所有マーカーをそのディレクトリへ書いてから起動する（PID 再利用＝旧 PID が自分自身の検証用）。
 #   RUNNER_SELF_PID_MARKER_NS を併せて設定すると、そのマーカーに pidns= 行を加える。
+#   RUNNER_SELF_PID_MARKER_EXTRA を設定すると、その内容（owner= / session= の行など）をマーカーの末尾に加える。
 runner_mock_run() {
   local temp=$1 scenario=$2 work=$3 runner=${RUNNER_UNDER_TEST:-$RUNNER}
   local -a work_env env_args
@@ -224,6 +226,9 @@ runner_mock_run() {
         > "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
       if [[ -n "${RUNNER_SELF_PID_MARKER_NS:-}" ]]; then
         printf 'pidns=%s\n' "$RUNNER_SELF_PID_MARKER_NS" >> "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
+      fi
+      if [[ -n "${RUNNER_SELF_PID_MARKER_EXTRA:-}" ]]; then
+        printf '%s\n' "$RUNNER_SELF_PID_MARKER_EXTRA" >> "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
       fi
       printf '%s\n' "$BASHPID" > "$temp/self-pid"
       exec env "${env_args[@]}" bash "$runner"
@@ -316,6 +321,15 @@ runner_runtime_ns() { # <temp> → stdout: pidns=
   marker_pidns "$probe"
 }
 
+# RB-W W-6: runner 自身が所有マーカーへ書く owner= / session= の行（この環境の利用者・session の識別子）を得る。
+runner_runtime_owner_session() { # <temp> → stdout: owner=...（改行）session=...
+  local temp=$1 probe="$1/allowed/owner-probe-$RANDOM" saved_runner=${RUNNER_UNDER_TEST:-}
+  RUNNER_UNDER_TEST=""
+  runner_mock_run "$temp" up-fail "$probe"
+  RUNNER_UNDER_TEST=$saved_runner
+  grep -E '^(owner|session)=' "$probe/.ses-pitr-run-owner" 2>/dev/null
+}
+
 # 6) 失敗証跡フローの静的契約（挙動は以降の mock シナリオで検証する）。
 case_integration_failure_capture_contract() {
   local runner
@@ -350,7 +364,10 @@ case_integration_failure_capture_contract() {
     "$(first_line_no "$RUNNER" 'if ! prepare_work_dir; then')" "固定名の事前確認をWORKの作成・退避より前に行う"
   assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
     "$(first_line_no "$RUNNER" 'if ! validate_work_path; then')" "固定名の事前確認をWORKの判定（前回runの生存判定）より前に行う（P3-N1）"
-  assert_contains "$runner" 'set -o noclobber' "所有マーカーと合成secretはnoclobber（O_EXCL）で排他作成する（P3-S1）"
+  assert_contains "$runner" 'conv=excl' "所有マーカーと合成secretは dd の conv=excl（O_EXCL）で排他作成する（P3-S1 / RB-W W-2）"
+  assert_not_contains "$runner" 'set -o noclobber' "事前検査と open の間に窓のある noclobber を使わない（RB-W W-2）"
+  assert_contains "$runner" 'owner=%s\nsession=%s' "所有マーカーに利用者と session の識別子を記録する（RB-W W-6）"
+  assert_contains "$runner" '! pid_is_gone "$old_pid"' "前回 run の生存は ESRCH だけを終了済みとする pid_is_gone で判定する（RB-W W-6）"
   assert_not_contains "$runner" '> "$WORK/.ses-pitr-run-owner"' "所有マーカーを追従・上書きするリダイレクトで書かない（P3-S1）"
   assert_contains "$runner" 'pidns=%s' "所有マーカーにPID名前空間の識別子を記録する（P3-N2）"
   assert_contains "$runner" '.ses-pitr-run-ended' "終了処理の最後に終了記録を残す（P3-N2）"
@@ -1214,9 +1231,12 @@ case_integration_default_work_pid_reuse_is_not_alive() {
   printf 'previous evidence\n' > "$default/previous.txt"
   RUNNER_SELF_PID_MARKER_DIR="$default"
   RUNNER_SELF_PID_MARKER_NS="$ns"
+  # RB-W W-6: 同じ利用者・session で書かれたマーカーとする（kill -0 による判定の対象）
+  RUNNER_SELF_PID_MARKER_EXTRA=$(runner_runtime_owner_session "$temp")
   runner_mock_run "$temp" up-fail "-"
   RUNNER_SELF_PID_MARKER_DIR=""
   RUNNER_SELF_PID_MARKER_NS=""
+  RUNNER_SELF_PID_MARKER_EXTRA=""
   self_pid=$(cat "$temp/self-pid" 2>/dev/null)
   new_run=$(marker_run_id "$default")
   new_run=${new_run#*-}
@@ -1256,8 +1276,9 @@ case_integration_default_work_marker_mismatch_rejected() {
   expect_work_rejected "$temp" "-" "所有マーカー .ses-pitr-run-owner がありません" "所有マーカー無し（73aa時代の残り）"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "マーカー無し時は既存内容を変更しない"
 
-  # 同じ PID 名前空間で書かれ、終了記録の無い前回 run の PID（この selftest 自身）が生存している
-  printf 'run=1700000000-%s-1\nwork=%s\npidns=%s\n' "$$" "$default" "$ns" > "$default/.ses-pitr-run-owner"
+  # 同じ PID 名前空間・同じ利用者・同じ session で書かれ、終了記録の無い前回 run の PID（この selftest 自身）が生存している
+  printf 'run=1700000000-%s-1\nwork=%s\npidns=%s\n%s\n' "$$" "$default" "$ns" "$(runner_runtime_owner_session "$temp")" \
+    > "$default/.ses-pitr-run-owner"
   expect_work_rejected "$temp" "-" "実行中の可能性があります" "前回runのPIDが生存"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "前回run生存時は退避しない"
 
@@ -1602,6 +1623,87 @@ case_integration_exclusive_create_has_no_check_open_window() {
   rm -rf "$temp"
 }
 
+# 37) RB-W W-6: 同じ PID 名前空間でも、前回 run の所有マーカーの owner= / session= が本 run と違う（別の利用者・
+#     別の session。MSYS では昇格状態を含む）か記録が無い（r2 までの形式）なら、PID が終了済みに見えても退避しない。
+#     終了記録があれば退避する。
+case_integration_default_work_foreign_owner_or_session_requires_end_record() {
+  local temp tests_dir default dead_pid old_run ns own own_lines variant
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  ns=$(runner_runtime_ns "$temp")
+  own=$(runner_runtime_owner_session "$temp")
+  if [[ "$own" == *"owner="* && "$own" == *"session="* && "$own" != *unknown* ]]; then
+    test_assert "この環境の利用者・session を識別できる（前提）"
+  else
+    test_fail "この環境の利用者・session を識別できる（前提）" "[$own]"
+  fi
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  ( exit 0 ) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null
+  old_run="1700000000-$dead_pid-1"
+  mkdir -p "$default"
+  printf 'previous evidence\n' > "$default/previous.txt"
+  for variant in foreign-owner foreign-session no-owner-session; do
+    case "$variant" in
+      foreign-owner) own_lines=$(printf '%s\n' "$own" | sed 's/^owner=.*/owner=uid:4294967294/') ;;
+      foreign-session) own_lines=$(printf '%s\n' "$own" | sed 's/^session=.*/session=win:99:local/') ;;
+      no-owner-session) own_lines="" ;;
+    esac
+    printf 'run=%s\nwork=%s\nproject=selftest\npidns=%s\n%s\n' "$old_run" "$default" "$ns" "$own_lines" \
+      > "$default/.ses-pitr-run-owner"
+    expect_work_rejected "$temp" "-" "生存を確認できません" "同じPID名前空間で終了記録の無い前回run（$variant）"
+    assert_contains "$(cat "$default/previous.txt" 2>/dev/null)" "previous evidence" "判定できない前回runの既定WORKを変更しない（$variant）"
+    assert_no_file "$tests_dir/.integration-work.prev-$old_run" "判定できない前回runの既定WORKを退避しない（$variant）"
+  done
+
+  printf 'run=%s\n' "$old_run" > "$default/.ses-pitr-run-ended"
+  runner_mock_run "$temp" up-fail "-"
+  RUNNER_UNDER_TEST=""
+  assert_contains "$RUNNER_OUT" "前回の既定作業ディレクトリを退避しました" "終了記録があれば別の利用者・sessionの前回runも退避する"
+  assert_file "$tests_dir/.integration-work.prev-$old_run/previous.txt" "前回の内容を退避先に保全"
+  rm -rf "$temp"
+}
+
+# 38) RB-W W-6: pid_is_gone は kill -0 の ESRCH（No such process）だけを終了済みとし、EPERM（別の利用者の
+#     プロセスは存在する）・翻訳された文言・判定できない値は生存として扱う（fail-closed）。r2 は kill -0 の失敗を
+#     すべて終了済みとしていた。
+case_integration_pid_is_gone_treats_eperm_as_alive() {
+  local temp fn dead_pid
+  temp=$(mktemp -d)
+  fn="$temp/pid-is-gone.sh"
+  sed -n '/^pid_is_gone() {/,/^}/p' "$RUNNER" > "$fn"
+  pig() { # <kill の振る舞い（real / eperm / esrch / localized）> <pid> → PIG_RC
+    bash -c '
+      . "$1"
+      case "$2" in
+        eperm) kill() { echo "bash: kill: ($3) - Operation not permitted" >&2; return 1; } ;;
+        esrch) kill() { echo "bash: kill: ($3) - No such process" >&2; return 1; } ;;
+        localized) kill() { echo "bash: kill: ($3) - そのようなプロセスはありません" >&2; return 1; } ;;
+      esac
+      pid_is_gone "$3"' _ "$fn" "$1" "$2" > /dev/null 2>&1
+    PIG_RC=$?
+  }
+  pig eperm 4242
+  assert_eq 1 "$PIG_RC" "kill -0 の EPERM は生存（終了済みとしない）"
+  pig esrch 4242
+  assert_eq 0 "$PIG_RC" "kill -0 の ESRCH は終了済み"
+  pig localized 4242
+  assert_eq 1 "$PIG_RC" "翻訳された文言は ESRCH と見なさず生存側に倒す"
+  pig real "$$"
+  assert_eq 1 "$PIG_RC" "生存中の PID（この selftest）は生存"
+  ( exit 0 ) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null
+  pig real "$dead_pid"
+  assert_eq 0 "$PIG_RC" "終了済みの PID は（C locale の ESRCH で）終了済み"
+  pig real "not-a-pid"
+  assert_eq 1 "$PIG_RC" "PID でない値は生存側（判定できない）"
+  rm -rf "$temp"
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1638,5 +1740,7 @@ run_case case_integration_fixed_name_checked_before_work_judgement
 run_case case_integration_default_work_foreign_namespace_requires_end_record
 run_case case_integration_owner_marker_exclusive_create
 run_case case_integration_exclusive_create_has_no_check_open_window
+run_case case_integration_default_work_foreign_owner_or_session_requires_end_record
+run_case case_integration_pid_is_gone_treats_eperm_as_alive
 
 test_summary "ACC-OPS-P2 harness self-tests"

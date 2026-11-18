@@ -281,10 +281,14 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 
 - 退避するのは、所有マーカー（`.ses-pitr-run-owner`）の `work=` が既定パスと一致し、前回 run の終了を確認できた場合だけ。
   前回 run が終了処理の最後に書く `.ses-pitr-run-ended` があれば、どの実行環境の run でも終了済みと判定する。
-  無い場合は、所有マーカーの `pidns=`（PID 名前空間の識別子）が本 run と同じときだけ `kill -0` で判定し、
-  別の実行環境（コンテナ・WSL・別の MSYS 等）で作られた・識別子の無い旧形式のマーカーは判定できないため退避しない
-  （表示される復旧手順に従って手動で退避する）。**W1-B1 より前の harness が残した既定 WORK は旧形式のため、
-  更新後の最初の実行で 1 回だけ手動の退避が必要になる。**
+  無い場合は、所有マーカーの `pidns=`（PID 名前空間の識別子）・`owner=`（`uid:<id -u>`）・`session=`（Linux は `n/a`、
+  Git for Windows / Cygwin は `win:<Windows の session ID>:<global|local>`）がすべて本 run と同じときだけ `kill -0` で判定する。
+  Cygwin のプロセス表は Windows の session と昇格状態（`SeCreateGlobalPrivilege` の有無）で分かれ得るため、別の利用者・
+  session・昇格状態の run の PID は `kill -0` で見えないことがある（RB-W W-6）。`kill -0` の失敗は `ESRCH`（C locale の
+  `No such process`）だけを終了済みとし、`EPERM`（別の利用者のプロセスは存在する）やそれ以外の失敗は実行中として扱う。
+  別の実行環境（コンテナ・WSL・別の MSYS・別の利用者・別の session 等）で作られた・識別子の無い旧形式のマーカーは
+  判定できないため退避しない（表示される復旧手順に従って手動で退避する）。**RB-W より前の harness が残した既定 WORK は
+  `owner=` / `session=` の無い旧形式のため、終了記録が無い場合は更新後の最初の実行で 1 回だけ手動の退避が必要になる。**
 - 固定名のコンテナ（`ses-bkup-int-*`）が残っている場合は、WORK を判定・変更する前に失敗する。
 - 所有マーカー・終了記録・合成 secret は、事前検査をせず `dd` の `conv=excl`（1 回の `open(O_CREAT|O_EXCL)`）で
   排他作成する。名前に何か（通常ファイル・symlink・FIFO・device・directory）があれば辿らず・止まらずに失敗するため、

@@ -87,8 +87,11 @@ WORK_PLAN_HERE=""
 WORK_PLAN_ROTATE_RUN=""
 WORK_PLAN_EXISTED=0
 ROTATE_OLD_RUN=""
-# 本 run の PID 名前空間の識別子（runtime_identity）。判定できなければ unknown。
+# 本 run の PID 名前空間・利用者・session の識別子（runtime_identity / runtime_owner / runtime_session）。
+# 判定できなければ unknown。
 RUNTIME_NS=unknown
+RUNTIME_OWNER=unknown
+RUNTIME_SESSION=unknown
 
 compose() {
   docker compose -f "$COMPOSE_FILE" -p "$PROJECT" "$@"
@@ -184,6 +187,60 @@ runtime_identity() {
       ;;
   esac
   return 1
+}
+
+# kill -0 の結果を信頼できる範囲のうち、PID 名前空間の他に要る「利用者」と「session」の識別子（RB-W W-6）。
+# 所有マーカーに owner= / session= として記録し、次回 run はこの 2 つと pidns= がすべて本 run と一致するときだけ
+# kill -0 で前回 run の生存を判定する（一致しない・記録が無い・判定できない場合は終了記録を要求する = fail-closed）。
+#   owner:   uid:<id -u>（Git for Windows / Cygwin では Windows の SID に対応する uid）
+#   session: Linux は n/a（同じ PID 名前空間なら利用者や session が違っても kill -0 で見える。権限の違いは EPERM で
+#            返り、pid_is_gone が生存として扱う）。Git for Windows / Cygwin は win:<Windows の session ID>:<global|local>。
+#            Cygwin のプロセス表は Windows の session ごと、および Global 名前空間を使えるか（SeCreateGlobalPrivilege の
+#            有無 = 管理者として昇格しているか）で分かれ得るため、別の session・別の昇格状態で動く run の PID は
+#            kill -0 で見えない（ESRCH で終了済みに見える）。session ID は /proc/<pid>/winpid の Windows PID を tasklist で引く。
+runtime_owner() {
+  local uid
+  uid=$(id -u 2>/dev/null) || return 1
+  [[ "$uid" =~ ^[0-9]{1,10}$ ]] || return 1
+  printf 'uid:%s\n' "$uid"
+}
+
+runtime_session() {
+  local kernel winpid sysdir line sess priv scope
+  kernel=$(uname -s 2>/dev/null) || return 1
+  case "$kernel" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) printf 'n/a\n'; return 0 ;;
+  esac
+  IFS= read -r winpid < "/proc/$$/winpid" 2>/dev/null || return 1
+  [[ "$winpid" =~ ^[0-9]{1,10}$ ]] || return 1
+  # PATH の whoami は coreutils のため、Windows の tasklist.exe / whoami.exe を System32 から直接使う
+  sysdir=$(cygpath -u "${SYSTEMROOT:-${WINDIR:-}}" 2>/dev/null) || return 1
+  sysdir="$sysdir/System32"
+  [[ -x "$sysdir/tasklist.exe" && -x "$sysdir/whoami.exe" ]] || return 1
+  line=$("$sysdir/tasklist.exe" /FI "PID eq $winpid" /FO CSV /NH 2>/dev/null | tr -d '\r' | head -n 1) || return 1
+  sess=$(printf '%s\n' "$line" | awk -F'","' 'NF >= 5 { print $4 }')
+  [[ "$sess" =~ ^[0-9]{1,10}$ ]] || return 1
+  priv=$("$sysdir/whoami.exe" /priv /FO CSV /NH 2>/dev/null | tr -d '\r') || return 1
+  [[ -n "$priv" ]] || return 1
+  if [[ "$priv" == *SeCreateGlobalPrivilege* ]]; then scope=global; else scope=local; fi
+  printf 'win:%s:%s\n' "$sess" "$scope"
+}
+
+# 前回 run の PID が終了済みかを判定する（RB-W W-6）。0 = 終了済み、1 = 生存または判定できない。
+# kill -0 が成功すれば生存。失敗した場合は errno で分け、ESRCH（No such process）だけを終了済みとする。
+# EPERM（Operation not permitted: 別の利用者のプロセスは存在する）とそれ以外の失敗は生存として扱う（fail-closed）。
+# errno は C locale の strerror の文言で区別する。翻訳された文言が出た場合も ESRCH とは見なさず、生存側に倒れる。
+pid_is_gone() { # <pid>
+  local pid=$1 err
+  [[ "$pid" =~ ^[0-9]{1,10}$ ]] || return 1
+  if kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  if err=$( (export LC_ALL=C LANG=C LANGUAGE=C; kill -0 "$pid") 2>&1 ); then
+    return 1
+  fi
+  [[ "$err" == *"No such process"* ]]
 }
 
 # 本 run が WORK の使用を終えたことを .ses-pitr-run-ended に記録する（終了処理の最後に呼ぶ）。
@@ -380,12 +437,13 @@ prune_previous_default_works() {
 # 本 harness の所有マーカー（.ses-pitr-run-owner）の work= が既定パスと一致し、前回の run が
 # 終了済みと判定できる場合だけ許可する。終了済みの判定（P3-N2: kill -0 は同じ PID 名前空間しか見えない）:
 #   1. 前回 run の終了記録 .ses-pitr-run-ended（run= が一致）がある → 実行環境を問わず終了済み
-#   2. 終了記録が無い場合は、所有マーカーの pidns= が本 run の RUNTIME_NS と一致するときだけ kill -0 で
-#      判定する（kill -0 が失敗する、または記録された PID が本プロセス自身＝PID 再利用なら終了済み）
-#   3. pidns= が無い（旧形式）・unknown・一致しない場合は生存を判定できないため fail-closed
+#   2. 終了記録が無い場合は、所有マーカーの pidns= / owner= / session= がすべて本 run の RUNTIME_NS /
+#      RUNTIME_OWNER / RUNTIME_SESSION と一致するときだけ kill -0 で判定する（pid_is_gone が ESRCH を返す、
+#      または記録された PID が本プロセス自身＝PID 再利用なら終了済み。EPERM は生存。RB-W W-6）
+#   3. どれかが無い（旧形式）・unknown・一致しない場合は生存を判定できないため fail-closed
 # マーカーが無い・一致しない・前回 run が生存している（または判定できない）場合は何も変更しない。
 check_default_work_rotation() {
-  local default_work=$1 here_canon=$2 owner size old_run old_pid old_ns ended prev
+  local default_work=$1 here_canon=$2 owner size old_run old_pid old_ns old_owner old_session ended prev
   ROTATE_OLD_RUN=""
   owner="$default_work/.ses-pitr-run-owner"
   if [[ ! -f "$owner" || -L "$owner" ]]; then
@@ -419,10 +477,23 @@ check_default_work_rotation() {
       default_work_recovery_hint "$default_work" "前回の run（run=$old_run）には終了記録が無く、別の実行環境（PID 名前空間）で作られたか実行環境を判定できないため、生存を確認できません（記録: ${old_ns:-なし} / 本 run: $RUNTIME_NS）"
       return 1
     fi
+    # RB-W W-6: 同じ PID 名前空間でも、別の利用者・別の session（MSYS では昇格状態を含む）の run の PID は kill -0 で
+    # 正しく判定できないことがあるため、owner= / session= も一致するときだけ kill -0 を使う
+    old_owner=$(grep '^owner=' "$owner" 2>/dev/null)
+    old_owner=${old_owner#owner=}
+    old_session=$(grep '^session=' "$owner" 2>/dev/null)
+    old_session=${old_session#session=}
+    if [[ -z "$old_owner" || "$old_owner" == *$'\n'* || "$old_owner" == unknown \
+        || "$RUNTIME_OWNER" == unknown || "$old_owner" != "$RUNTIME_OWNER" \
+        || -z "$old_session" || "$old_session" == *$'\n'* || "$old_session" == unknown \
+        || "$RUNTIME_SESSION" == unknown || "$old_session" != "$RUNTIME_SESSION" ]]; then
+      default_work_recovery_hint "$default_work" "前回の run（run=$old_run）には終了記録が無く、別の利用者・session で作られたか利用者・session を判定できないため、生存を確認できません（記録: owner=${old_owner:-なし} session=${old_session:-なし} / 本 run: owner=$RUNTIME_OWNER session=$RUNTIME_SESSION）"
+      return 1
+    fi
     old_pid=${old_run#*-}
     old_pid=${old_pid%%-*}
-    if [[ "$old_pid" != "$$" ]] && kill -0 "$old_pid" 2>/dev/null; then
-      default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります"
+    if [[ "$old_pid" != "$$" ]] && ! pid_is_gone "$old_pid"; then
+      default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります（kill -0 が成功した、または ESRCH 以外で失敗した: EPERM 等）"
       return 1
     fi
   fi
@@ -661,9 +732,11 @@ prepare_work_dir() {
   WORK=$work_canon
 
   # 所有マーカーは排他作成する（P3-S1）。空確認の後に置かれたファイルや symlink は上書きも追従もせず拒否する。
-  # pidns= は次回 run が kill -0 の判定可否（同じ PID 名前空間か）を確かめるために使う（P3-N2）。
+  # pidns= / owner= / session= は次回 run が kill -0 の判定可否（同じ PID 名前空間・同じ利用者・同じ session か）を
+  # 確かめるために使う（P3-N2 / RB-W W-6）。
   if ! write_exclusive_file "$WORK/.ses-pitr-run-owner" \
-      "$(printf 'run=%s\nwork=%s\nproject=%s\npidns=%s' "$RUN_ID" "$WORK" "$PROJECT" "$RUNTIME_NS")"$'\n'; then
+      "$(printf 'run=%s\nwork=%s\nproject=%s\npidns=%s\nowner=%s\nsession=%s' \
+          "$RUN_ID" "$WORK" "$PROJECT" "$RUNTIME_NS" "$RUNTIME_OWNER" "$RUNTIME_SESSION")"$'\n'; then
     reject_work_path "所有マーカー（.ses-pitr-run-owner）を排他的に作成できません（既存のファイルまたは symlink があります）: $WORK"
     return 1
   fi
@@ -1327,6 +1400,10 @@ INTEGRATION_TGT_PW=${INTEGRATION_TGT_PW:-"int-tgt-$(date +%s)-pw"}
 export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
 RUNTIME_NS=$(runtime_identity) || RUNTIME_NS=unknown
 [[ -n "$RUNTIME_NS" ]] || RUNTIME_NS=unknown
+RUNTIME_OWNER=$(runtime_owner) || RUNTIME_OWNER=unknown
+[[ -n "$RUNTIME_OWNER" && "$RUNTIME_OWNER" != *$'\n'* ]] || RUNTIME_OWNER=unknown
+RUNTIME_SESSION=$(runtime_session) || RUNTIME_SESSION=unknown
+[[ -n "$RUNTIME_SESSION" && "$RUNTIME_SESSION" != *$'\n'* ]] || RUNTIME_SESSION=unknown
 # 1) 固定名の事前確認（読み取り専用の docker ps だけ）。他の run のコンテナが残っていれば、WORK の判定
 #    （前回 run の生存判定を含む）より前に止める。どの PID 名前空間の run かに依存せず検出でき、
 #    衝突中の run が前回の証跡を退避・淘汰することもない（P3-N1）。
