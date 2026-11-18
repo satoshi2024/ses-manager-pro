@@ -33,8 +33,9 @@ production 環境への接続・復元は行わないこと。
   private registry は使わず、検証済み build の content ID（image store に依存しない識別子）を記録して
   `docker save` / `docker load` で配布する（「ツールイメージの build・配布」参照）。
 - MySQL 8.4 で変わった点への対応（RB-W 8.4 対応）: mysqldump の `--source-data=2` が書く
-  `CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE=…, SOURCE_LOG_POS=…` から full の起点を読む（`CHANGE MASTER TO` は 8.4 に無いため
-  読まない）。復元前の GTID・binlog のリセットは `RESET BINARY LOGS AND GTIDS`（8.4 で `RESET MASTER` は削除）。
+  `CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE=…, SOURCE_LOG_POS=…` から full の起点を読む。8.0 の旧形式
+  `CHANGE MASTER TO … MASTER_LOG_FILE` は受け付けない（production は 8.4 だけで、8.4 の server・mysqldump 8.4.13 は旧形式を
+  使わない。旧形式だけの dump は起点を取れずに backup が失敗する = fail-closed）。復元前の GTID・binlog のリセットは `RESET BINARY LOGS AND GTIDS`（8.4 で `RESET MASTER` は削除）。
   `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外し、preflight は
   記録だけに使う。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
   integration を走査する）。mysqldump 8.4.13 が `--source-data=2` で 8.4 の server に発行する構文（`SHOW BINARY LOG STATUS`
@@ -197,10 +198,33 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 
 | role | DB 権限 | repository 権限 | 用途 |
 |---|---|---|---|
-| dump role | 対象 DB read、view/trigger/event/routine の最小権限（schema fingerprint のため `SHOW VIEW`・`TRIGGER`・`SHOW_ROUTINE` を含む） | writer（backup 可・delete 不可） | full/checkpoint |
-| binlog role | `REPLICATION CLIENT`（+ checkpoint 用 rotation 権限は別 account） | writer | archive/snapshot |
+| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`・`PROCESS`） | writer（backup 可・delete 不可） | full/checkpoint |
+| binlog role | 下の「source 側の account の権限」のうち archive・snapshot・check の行（`REPLICATION SLAVE`・`REPLICATION CLIENT`） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
 | restore target role | recovery target 新規 DB のみ（source 権限なし）。下の「restore target role の権限」を全部持つこと | read | restore/validate |
+
+#### source 側の account の権限（RB-W。script が source に発行する文と mysqldump の option から）
+
+| 権限 | 範囲 | 使う job | 依拠する文・option |
+|---|---|---|---|
+| `SELECT` | 対象 DB（`<db>.*`） | full・checkpoint・preflight | mysqldump の table の読み取り、`CRITICAL_TABLES` の `COUNT(*)`（backup-full）、内容ハッシュ（`lib/content-hash.sh`）。schema fingerprint と preflight の engine の検査は information_schema を読み、見える範囲はこの権限で決まる |
+| `SHOW VIEW` | 対象 DB | full・checkpoint | mysqldump の view（`SHOW CREATE VIEW`）、schema fingerprint の view 定義 |
+| `TRIGGER` | 対象 DB | full・checkpoint | mysqldump `--triggers`、schema fingerprint の trigger |
+| `EVENT` | 対象 DB | full | mysqldump `--events`（このアプリは event を使わないが、option を付けているため） |
+| `SHOW_ROUTINE` | global | full・checkpoint | mysqldump `--routines` の `SHOW CREATE FUNCTION / PROCEDURE`、schema fingerprint の routine 本体。mysqldump の文書は `--routines` に global の `SELECT` を挙げるため、`SHOW_ROUTINE` だけで足りるかは本番相当の権限での実測で確かめる（未取得。integration は root のため CI では確かめられない） |
+| `RELOAD` | global | full・checkpoint | mysqldump `--source-data=2`（起点を取る間の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`）、create-checkpoint の `FLUSH BINARY LOGS` |
+| `REPLICATION CLIENT` | global | full・checkpoint・archive・snapshot・check | mysqldump `--source-data=2` が 8.4 で発行する `SHOW BINARY LOG STATUS`、`SHOW BINARY LOGS`（create-checkpoint・archive-binlog・snapshot-binlog・check-backup） |
+| `PROCESS` | global | full | mysqldump に `--no-tablespaces` を付けていないため（mysqldump 8.0.21 以降は tablespace の情報を読むのに要る） |
+| `REPLICATION SLAVE` | global | archive | `mysqlbinlog --read-from-remote-server`（source から binlog を受け取る） |
+
+要らないもの: `LOCK TABLES`（`--single-transaction` のため table lock を取らない）、`SUPER`、DDL 凍結の `GET_LOCK`（権限不要）、
+`SELECT @@server_uuid`・`SHOW GLOBAL VARIABLES`・`SHOW SESSION STATUS`（権限不要）。
+
+- 現在の `docker-compose.yml` は全 service が同じ `.env.backup`（同じ `MYSQL_USER`）を使うため、その account には上の表の
+  全部が要る（dump role と binlog role を別の account に分けるには service ごとの env が要る。未実装）。
+- preflight は権限を検査しない。不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は source 側を
+  root で動かすため、この表で足りることは CI でも確かめられない（**本番相当の権限での実測は未取得**。DBA が本番の account で
+  初回の full・checkpoint・archive を流して確かめる）。
 
 #### restore target role の権限（RB-W P2-2。integration の `restore-svc` はこれだけで復元・検証する）
 
@@ -213,10 +237,12 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 | global | `SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER` | binlog replay（session 変数・GTID の適用） |
 | global | `SHOW_ROUTINE` | schema fingerprint で routine の本体を読む（無いと計算が失敗する） |
 | global | DEFINER の再現: `SET_ANY_DEFINER`（MySQL 8.4。8.0 の `SET_USER_ID` は使わない。DEFINER の account が復元先に無い場合は `ALLOW_NONEXISTENT_DEFINER` も） | dump の `CREATE DEFINER=… TRIGGER / VIEW / FUNCTION` を元の DEFINER のまま作る。DEFINER を外して復元すると schema fingerprint が一致しない（DEFINER は照合の対象） |
+| global | `SYSTEM_USER`（DEFINER の account が `SYSTEM_USER` を持つ場合だけ） | `SYSTEM_USER` を持つ account を DEFINER にした stored object を作るには、作る側も `SYSTEM_USER` が要る（MySQL の文書の規則からの推断。**実測は未取得**）。restore role に `SYSTEM_USER` を与えると system account を操作できるようになるため、DEFINER の account（migrator）には `SYSTEM_USER` を与えないことを推奨する |
 
 前提（DBA が復元先で用意する。**DBA の確認は未取得**）: 復元先で binlog が有効なら `log_bin_trust_function_creators = ON`（restore role は
 SUPER を持たないため。stored function と trigger の作成に要る）。DEFINER の account（production では migrator）を復元先に作るか、
-`ALLOW_NONEXISTENT_DEFINER` を与える（account が無い trigger・view は実行時に失敗するため、作ることを推奨）。
+`ALLOW_NONEXISTENT_DEFINER` を与える（account が無い trigger・view は実行時に失敗するため、作ることを推奨）。DEFINER の
+account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が要る（上の表。持たせないことを推奨）。
 復元先の MySQL server は backup 元と同じ版（patch を含む）・同じ `lower_case_table_names` にする（違うと schema fingerprint が
 一致しない場合がある）。
 
