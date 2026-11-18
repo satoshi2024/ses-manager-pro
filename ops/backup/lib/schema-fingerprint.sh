@@ -104,8 +104,7 @@ schema_fingerprint::sql() {
     "$($q table_name)" "$($q "REPLACE(view_definition, CONCAT('\`', DATABASE(), '\`.'), '\`=\`.')")" \
     "$($q check_option)" "$($q definer)" "$($q security_type)" "$($q character_set_client)" "$($q collation_connection)"
   # 診断用の server の版と lower_case_table_names（schema_fingerprint::compute が hash の対象から外す）
-  printf "SELECT 'server', %s, %s;
-" "$($q @@version)" "$($q @@lower_case_table_names)"
+  printf "SELECT 'server', %s, %s;\n" "$($q @@version)" "$($q @@lower_case_table_names)"
 }
 
 # mysql -N -B の出力（標準入力）を検査・正規化し、次の形式で出力する:

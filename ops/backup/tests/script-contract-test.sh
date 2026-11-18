@@ -6,6 +6,9 @@
 #   （Linux 64 KiB）を超えたとき前段が SIGPIPE（141）で終わり、パイプ全体が失敗に見える（table 0 件の誤判定、
 #   archive / snapshot / checkpoint の停止）。入力は here-string で渡す。静的な走査と、1 MiB を超える入力での
 #   挙動の両方で確かめる（走査器そのものも、検出すべき書き方と検出しない書き方の見本で確かめる）。
+# - MySQL 8.4（RB-W 8.4 対応）: 本番 script と、実 MySQL 8.4 で動く integration の script・compose は、8.4 で削除された
+#   構文（RESET MASTER・SHOW MASTER STATUS・CHANGE MASTER TO 等）と、使わないと決めたもの（@@have_ssl・--binlog-format・
+#   SET_USER_ID）を書かない（行全体のコメントは除く）。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -179,9 +182,65 @@ EOF
   rm -rf "$t"
 }
 
+# MySQL 8.4 で削除された構文（MySQL 8.4.0 release notes。MASTER / SLAVE を含む構文は 8.2.0 から非推奨）と、8.4 対応で
+# 使わないと決めたもの（@@have_ssl・--binlog-format の指定・SET_USER_ID）。大文字・小文字を区別しない。
+MYSQL84_REMOVED_PATTERN='RESET MASTER|SHOW MASTER (STATUS|LOGS)|PURGE MASTER LOGS|CHANGE MASTER TO|MASTER_LOG_(FILE|POS)|(START|STOP|RESET) SLAVE|SHOW SLAVE (STATUS|HOSTS)|--master-data|--delete-master-logs|--default[-_]authentication[-_]plugin|have_ssl|--binlog[-_]format|SET_USER_ID'
+
+# 8.4 の server・client に対して動く file（本番 script と、実 MySQL 8.4 で動く integration の script・compose）
+mysql84_target_files() {
+  production_scripts
+  printf '%s\n' "$BACKUP_ROOT/docker-compose.yml" "$HERE/docker-compose.integration.yml" "$HERE/integration-pitr.sh"
+}
+
+# 上の構文を含む行を出力する（<file>:<行番号>: <行>）。行全体のコメントは見ない（経緯の説明は書いてよい）
+mysql84_removed_syntax() { # <file>...
+  awk -v pat="$MYSQL84_REMOVED_PATTERN" '
+    /^[[:space:]]*#/ { next }
+    toupper($0) ~ toupper(pat) { print FILENAME ":" FNR ": " $0 }' "$@"
+}
+
+# RB-W 8.4 対応: 走査器の確認と、本番 script・integration が 8.4 で削除された構文を使わないこと
+case_mysql84_no_removed_syntax() {
+  local t out expected f
+  local -a files=()
+  t=$(mktemp -d)
+  cat > "$t/sample.sh" <<'EOF'
+mysql --execute "RESET MASTER;"
+mysql -e "reset master"
+mysql -e "SHOW MASTER STATUS"
+grep "CHANGE MASTER TO MASTER_LOG_FILE='binlog.000001'" dump.sql
+      - --binlog-format=ROW
+mysql -e "SELECT @@have_ssl"
+GRANT SET_USER_ID ON *.* TO 'restore-svc'@'%';
+mysql -e "START SLAVE"
+mysqldump --master-data=2 db
+# RESET MASTER は 8.4 で削除された（コメントは見ない）
+mysql --execute "RESET BINARY LOGS AND GTIDS;"
+re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
+mysql -e "SHOW BINARY LOG STATUS"
+mysqldump --source-data=2 db
+mysql -e "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('binlog_format')"
+GRANT SET_ANY_DEFINER ON *.* TO 'restore-svc'@'%';
+EOF
+  out=$(mysql84_removed_syntax "$t/sample.sh")
+  for expected in 1 2 3 4 5 6 7 8 9; do
+    assert_contains "$out" "sample.sh:$expected: " "8.4 で削除・不使用の構文を検出する（見本の $expected 行目）"
+  done
+  assert_eq 9 "$(grep -c . <<< "$out")" "8.4 の構文・コメントは検出しない"
+  rm -rf "$t"
+
+  while IFS= read -r f; do files+=("$f"); done < <(mysql84_target_files)
+  for f in "${files[@]}"; do
+    [[ -f "$f" ]] || test_fail "走査する file がある" "$f がありません"
+  done
+  out=$(mysql84_removed_syntax "${files[@]}")
+  assert_eq "" "$out" "本番 script と integration は MySQL 8.4 で削除された構文（MASTER / SLAVE 等）と不使用と決めたものを使わない"
+}
+
 run_case case_pipefail_scanner_detects_each_form
 run_case case_pipefail_production_scripts_have_no_early_exit_reader_after_pipe
 run_case case_pipefail_binlog_size_from_logs_with_large_list
 run_case case_pipefail_validate_db_check_tables_with_large_output
+run_case case_mysql84_no_removed_syntax
 
-test_summary "本番 script の横断的な契約（pipefail と SIGPIPE）"
+test_summary "本番 script の横断的な契約（pipefail と SIGPIPE・MySQL 8.4）"

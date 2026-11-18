@@ -904,6 +904,9 @@ case_static_image_contract() {
     "image: mysql:8.4.13@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902" \
     "integration の mysql:8.4.13 を index digest で固定"
   assert_not_contains "$integration" "image: mysql:8.0" "integration に 8.0 の MySQL を残さない"
+  # コメントを含めて MySQL image の tag は 8.4.13 だけ（RB-MYSQL84 の image 守衛は既定と違う tag の参照を例外の要否に使う）
+  assert_eq "8.4.13" "$(grep -oE 'mysql:[0-9A-Za-z][A-Za-z0-9._-]*' <<< "$integration" | sed 's/^mysql://' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')" \
+    "integration compose の MySQL image の tag は 8.4.13 だけ（コメントも含む）"
   assert_not_contains "$integration" "      - --binlog-format=" "8.4 で非推奨の --binlog-format を server に渡さない"
   assert_contains "$dockerfile" "ARG MYSQL_CLIENT_VERSION=8.4.13" "ツールイメージの client は 8.4.13"
   assert_contains "$dockerfile" "ARG MYSQL_APT_COMPONENT=mysql-8.4-lts" "repo の component は mysql-8.4-lts"

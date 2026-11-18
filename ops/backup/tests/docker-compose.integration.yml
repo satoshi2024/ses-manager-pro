@@ -5,9 +5,9 @@
 #   digest は従来と同じく manifest list（index）のもの（linux/amd64 の manifest digest
 #   sha256:72c368d898861f3b3a07af0e6d690400f44f048799ed46822783d9224cc2c86d ではない）。2026-11-18 に統括が
 #   Docker Hub の tag API（library/mysql:8.4.13、last_updated 2026-11-03）で確認した値。
-#   （8.0.36 の値は 2 つの独立した出典で一致を確認していた:
-#   .kiro/specs/database-backup-recovery/baseline.md §4.1（2026-08-14 docker inspect 実測）と
-#   Docker Hub の tag API（library/mysql:8.0.36 の digest）。）Runner は docker pull 後の
+#   （RB-W より前の 8.0.36 の digest は、.kiro/specs/database-backup-recovery/baseline.md §4.1 の docker inspect 実測と
+#   Docker Hub の tag API の 2 つの出典で一致を確認していた。この file には 8.4.13 以外の MySQL image を書かない:
+#   RB-MYSQL84 の MySqlTestImagesTest が、既定と違う tag の参照を例外の要否の判定に使うため。）Runner は docker pull 後の
 #   docker image inspect --format '{{index .RepoDigests 0}}' mysql:8.4.13 で再確認する（8.4.13 は未取得）。
 # - --binlog-format=ROW は指定しない（8.4 で非推奨。既定が ROW のため、外しても同じ）。
 # - host port を公開しない（internal network）

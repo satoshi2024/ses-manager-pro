@@ -113,13 +113,23 @@ case_preflight_server_same_series_other_patch() {
   assert_zero "$code" "server 8.4.1 と client 8.4.13 は同じ系列で exit 0"
 }
 
-# mysqlbinlog / mysqldump も server と同じ系列であること（client 8.4 でも mysqldump 8.0 は exit 10）
+# mysql・mysqlbinlog・mysqldump はどれも server と同じ 8.4 系列であること（server が 8.4 でも、どれか 1 つが 8.0 なら exit 10）
 case_preflight_tool_series_mismatch() {
   setup_env
   export FAKE_MYSQLDUMP_VERSION_LINE='mysqldump  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
   run_preflight
   assert_eq 10 "$code" "mysqldump 8.0 は exit 10"
   assert_contains "$out" "mysqldump が MySQL 8.4 ではありません" "理由を通知"
+  setup_env
+  export FAKE_MYSQLBINLOG_VERSION_LINE='mysqlbinlog  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_eq 10 "$code" "mysqlbinlog 8.0 は exit 10"
+  assert_contains "$out" "mysqlbinlog が MySQL 8.4 ではありません" "理由を通知（mysqlbinlog）"
+  setup_env
+  export FAKE_CLIENT_VERSION_LINE='mysql  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_eq 10 "$code" "mysql client 8.0 は exit 10"
+  assert_contains "$out" "mysql client が MySQL 8.4 ではありません" "理由を通知（mysql client）"
 }
 
 # RB-W 8.4 対応: server の変数は SHOW GLOBAL VARIABLES で読み、無い変数は名前を挙げて失敗する（1 つの SELECT 全体の
