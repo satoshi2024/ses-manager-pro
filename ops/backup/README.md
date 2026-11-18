@@ -183,7 +183,25 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 | dump role | 対象 DB read、view/trigger/event/routine の最小権限（schema fingerprint のため `SHOW VIEW`・`TRIGGER`・`SHOW_ROUTINE` を含む） | writer（backup 可・delete 不可） | full/checkpoint |
 | binlog role | `REPLICATION CLIENT`（+ checkpoint 用 rotation 権限は別 account） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
-| restore target role | recovery target 新規 DB のみ（source 権限なし。`flyway_schema_history` を含む SELECT が必要。schema fingerprint の照合に対象 DB の `SHOW VIEW`・`TRIGGER` と `SHOW_ROUTINE` が必要） | read | restore/validate |
+| restore target role | recovery target 新規 DB のみ（source 権限なし）。下の「restore target role の権限」を全部持つこと | read | restore/validate |
+
+#### restore target role の権限（RB-W P2-2。integration の `restore-svc` はこれだけで復元・検証する）
+
+| 範囲 | 権限 | 理由 |
+|---|---|---|
+| 対象 DB（`<db>.*`） | `CREATE`・`DROP`・`ALTER`・`INDEX`・`REFERENCES`・`SELECT`・`INSERT`・`UPDATE`・`DELETE`・`LOCK TABLES` | dump の import（`REFERENCES` は外部キーの作成）、`ALTER DATABASE` による既定の照合順序の設定、復元検証 |
+| 対象 DB | `CREATE VIEW`・`SHOW VIEW`・`TRIGGER`・`CREATE ROUTINE`・`ALTER ROUTINE`・`EXECUTE`・`EVENT` | dump の view・trigger・routine の再現。`SHOW VIEW`・`TRIGGER` は schema fingerprint で定義を読むためにも要る |
+| `ses_recovery_control.*` | `ALL` | target guard の marker |
+| global | `RELOAD` | 復元前の GTID・binlog のリセット |
+| global | `SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER` | binlog replay（session 変数・GTID の適用） |
+| global | `SHOW_ROUTINE` | schema fingerprint で routine の本体を読む（無いと計算が失敗する） |
+| global | DEFINER の再現: 8.0 は `SET_USER_ID`、8.4 は `SET_ANY_DEFINER`（DEFINER の account が復元先に無い場合は `ALLOW_NONEXISTENT_DEFINER` も） | dump の `CREATE DEFINER=… TRIGGER / VIEW / FUNCTION` を元の DEFINER のまま作る。DEFINER を外して復元すると schema fingerprint が一致しない（DEFINER は照合の対象） |
+
+前提（DBA が復元先で用意する。**DBA の確認は未取得**）: 復元先で binlog が有効なら `log_bin_trust_function_creators = ON`（restore role は
+SUPER を持たないため。stored function と trigger の作成に要る）。DEFINER の account（production では migrator）を復元先に作るか、
+`ALLOW_NONEXISTENT_DEFINER` を与える（account が無い trigger・view は実行時に失敗するため、作ることを推奨）。
+復元先の MySQL server は backup 元と同じ版（patch を含む）・同じ `lower_case_table_names` にする（違うと schema fingerprint が
+一致しない場合がある）。
 
 - repository の S3 versioning/immutability を有効化し、通常 backup credential だけで全世代を削除できないようにする。
 - 書込み静止（quiesce）は `providers/quiesce-local.sh`（version 管理された executable）のみ。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
@@ -278,7 +296,7 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   （report 再計算で一致確認 → 二者承認 → maintenance lock → forget --prune）
 - `RETENTION_ROLE=retention|admin` 以外では実行不可（writer は削除できない）
 - archiver の初回起点 `FULL_COORDINATE_FILE` は `backup-full` が書き出す（.env.backup で backup-data 上の共有 path を指定。欠如時は archiver が fail する）
-- restore target の provision には `RELOAD`（RESET MASTER）・`SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER`・`LOCK TABLES` が必要
+- restore target の provision に要る権限は「権限分離」の「restore target role の権限」の表を参照（DEFINER の再現と schema fingerprint の分を含む）
 - key rotation は `rotate-key.sh --new-key-file <file>`（旧・新の両キーで restore verify 成功時のみ切替え）。手順は `runbooks/key-rotation.md`
 
 ## 演習（restore drill）

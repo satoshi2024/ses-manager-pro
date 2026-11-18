@@ -133,6 +133,44 @@ src_root "$MYSQL_DATABASE" \
       INSERT INTO t_report_delivery (id, run_id, document_id, document_version_no, notification_outbox_id, delivery_status)
         VALUES (91007, 91001, 91004, 1, 91006, 'ENQUEUED');" \
   || fail "fixture 作成に失敗しました"
+# RB-W P2-2: production と同じく、migrator 相当の root 以外の利用者（DEFINER = その利用者）が trigger・view・
+# function・外部キー・CHECK を作る。restore-svc は README の restore target role の権限だけで、DEFINER を保ったまま
+# 復元し、schema fingerprint が一致することをこの往復で確かめる。binlog が有効な server で root 以外が function・
+# trigger を作るため log_bin_trust_function_creators を ON にする（production では DBA が設定する前提）。
+FIXTURE_MIGRATOR=ses-migrator
+FIXTURE_MIGRATOR_PW=ses-migrator-pw
+src_root -e "SET GLOBAL log_bin_trust_function_creators = 1;
+    CREATE USER IF NOT EXISTS '$FIXTURE_MIGRATOR'@'%' IDENTIFIED BY '$FIXTURE_MIGRATOR_PW';
+    GRANT ALL ON \`$MYSQL_DATABASE\`.* TO '$FIXTURE_MIGRATOR'@'%';" \
+  || fail "migrator 相当の利用者を作成できません"
+MYSQL_PWD="$FIXTURE_MIGRATOR_PW" mysql -h"$SRC_HOST" -u "$FIXTURE_MIGRATOR" "$MYSQL_DATABASE" \
+  -e "CREATE TABLE IF NOT EXISTS t_fp_parent (id BIGINT PRIMARY KEY, name VARCHAR(32) NOT NULL) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_fp_child (
+        id BIGINT PRIMARY KEY, parent_id BIGINT NOT NULL, qty INT NOT NULL DEFAULT 0,
+        CONSTRAINT fk_fp_child_parent FOREIGN KEY (parent_id) REFERENCES t_fp_parent (id) ON DELETE CASCADE,
+        CONSTRAINT ck_fp_child_qty CHECK (qty >= 0)
+      ) ENGINE=InnoDB;
+      DROP TRIGGER IF EXISTS trg_fp_child_bi;
+      CREATE TRIGGER trg_fp_child_bi BEFORE INSERT ON t_fp_child FOR EACH ROW SET NEW.qty = GREATEST(NEW.qty, 0);
+      DROP FUNCTION IF EXISTS f_fp_next;
+      CREATE FUNCTION f_fp_next(x INT) RETURNS INT DETERMINISTIC NO SQL RETURN x + 1;
+      CREATE OR REPLACE VIEW v_fp_child AS SELECT id, parent_id, qty FROM t_fp_child;
+      DELETE FROM t_fp_child;
+      DELETE FROM t_fp_parent;
+      INSERT INTO t_fp_parent (id, name) VALUES (1, 'parent-1');
+      INSERT INTO t_fp_child (id, parent_id, qty) VALUES (1, 1, 3);" \
+  || fail "migrator 相当の利用者で trigger・view・function・外部キー・CHECK を作成できません"
+# 復元後の比較のため、source の DEFINER を記録する
+definer_list() { # <root 実行関数> → 「種別 名前 DEFINER」の行（並びは固定）
+  "$1" -N -B -e "SELECT CONCAT('trigger ', trigger_name, ' ', definer) FROM information_schema.triggers WHERE trigger_schema = '$MYSQL_DATABASE'
+      UNION ALL SELECT CONCAT('routine ', routine_name, ' ', definer) FROM information_schema.routines WHERE routine_schema = '$MYSQL_DATABASE'
+      UNION ALL SELECT CONCAT('view ', table_name, ' ', definer) FROM information_schema.views WHERE table_schema = '$MYSQL_DATABASE'
+      ORDER BY 1;" 2>/dev/null
+}
+SRC_DEFINERS=$(definer_list src_root) || fail "source の DEFINER を取得できません"
+printf '%s\n' "$SRC_DEFINERS" > "$EVID/source-definers.txt"
+[[ "$SRC_DEFINERS" == "routine f_fp_next $FIXTURE_MIGRATOR@%"$'\n'"trigger trg_fp_child_bi $FIXTURE_MIGRATOR@%"$'\n'"view v_fp_child $FIXTURE_MIGRATOR@%" ]] \
+  || fail "source の trigger・routine・view の DEFINER が migrator 相当の利用者ではありません（$EVID/source-definers.txt）"
 mkdir -p "$UPLOADS_DIR/published"
 printf 'marker-before-checkpoint\n' > "$UPLOADS_DIR/published/marker-before.txt"
 printf 'report-restore\n' > "$UPLOADS_DIR/published/report-restore.pdf"
@@ -181,13 +219,18 @@ tgt_root \
       CREATE TABLE IF NOT EXISTS ses_recovery_control.targets (
         uuid VARCHAR(64) PRIMARY KEY, allowlist_ref VARCHAR(64), plan_id VARCHAR(64), provisioned_at DATETIME
       ) ENGINE=InnoDB;
+      SET GLOBAL log_bin_trust_function_creators = 1;
+      CREATE USER IF NOT EXISTS '$FIXTURE_MIGRATOR'@'%' IDENTIFIED BY '$FIXTURE_MIGRATOR_PW';
+      GRANT ALL ON \`$MYSQL_DATABASE\`.* TO '$FIXTURE_MIGRATOR'@'%';
       CREATE USER IF NOT EXISTS 'restore-svc'@'%' IDENTIFIED BY 'restore-svc-pw';
-      GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO 'restore-svc'@'%';
-      GRANT REPLICATION_APPLIER ON *.* TO 'restore-svc'@'%';
-      GRANT RELOAD ON *.* TO 'restore-svc'@'%';   -- RESET MASTER（GTID リセット）に必要
+      GRANT SYSTEM_VARIABLES_ADMIN, REPLICATION_APPLIER, RELOAD, SHOW_ROUTINE, SET_USER_ID ON *.* TO 'restore-svc'@'%';
       GRANT ALL ON ses_recovery_control.* TO 'restore-svc'@'%';
-      GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, CREATE VIEW, TRIGGER, EXECUTE, EVENT, LOCK TABLES ON $MYSQL_DATABASE.* TO 'restore-svc'@'%';" \
+      GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER,
+        CREATE ROUTINE, ALTER ROUTINE, EXECUTE, EVENT, LOCK TABLES ON \`$MYSQL_DATABASE\`.* TO 'restore-svc'@'%';" \
   || fail "target provision に失敗しました"
+# RB-W P2-2: restore-svc の権限は README の restore target role と同じ（RELOAD は GTID のリセット、SHOW_ROUTINE・
+# SHOW VIEW・TRIGGER は schema fingerprint、SET_USER_ID は dump の DEFINER の再現、REFERENCES は外部キー、
+# CREATE ROUTINE / ALTER ROUTINE は function）。DEFINER の account（migrator 相当）は復元先に用意する（DBA の前提）。
 printf 'restore-svc-pw\n' > "$WORK_DIR/restore-svc-pw"
 
 log "== 8. plan + 承認 claim =="
@@ -319,6 +362,11 @@ TGT_DB_DEFAULTS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HO
 printf '%s\n' "$TGT_DB_DEFAULTS" > "$EVID/target-db-defaults.txt"
 [[ "$TGT_DB_DEFAULTS" == $'utf8mb4\tutf8mb4_unicode_ci' ]] \
   || fail "復元 DB の既定の文字集合・照合順序が source と違います（$TGT_DB_DEFAULTS）"
+# RB-W P2-2: trigger・routine・view が DEFINER を保ったまま復元されたこと（restore-svc は README の権限だけ）
+TGT_DEFINERS=$(definer_list tgt_root) || fail "target の DEFINER を取得できません"
+printf '%s\n' "$TGT_DEFINERS" > "$EVID/target-definers.txt"
+[[ "$TGT_DEFINERS" == "$SRC_DEFINERS" ]] \
+  || fail "復元後の trigger・routine・view の DEFINER が source と違います（$EVID/target-definers.txt）"
 # 中間 DML が replay されていること（R1 P2: replay 不在の検出）
 grep -qx 'marker-mid' "$EVID/target-markers.txt" \
   || fail "target に中間 DML（marker-mid）がありません（binlog replay が実行されていません）"
