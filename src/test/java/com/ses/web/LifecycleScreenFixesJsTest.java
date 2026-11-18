@@ -140,6 +140,25 @@ class LifecycleScreenFixesJsTest {
                 SES.lifecycle.renderReassignCandidates(empty, []);
                 assert.ok(empty.innerHTML.includes('選択できる担当者がいません') && empty.disabled, 'empty candidates');
 
+                // review P3-8: 社内専用（本人非公開）のタスクには要員を候補に出さない（サーバーも拒否する）
+                const engineerCandidates = [
+                    { id: 31, username: 'hr1', realName: '人事 一郎', role: 'HR' },
+                    { id: 32, username: 'eng1', realName: '検証 二号', role: '要員' }];
+                const internalSelect = { innerHTML: '', disabled: true };
+                SES.lifecycle.renderReassignCandidates(internalSelect, engineerCandidates,
+                    SES.lifecycle.engineerAssignable({ id: 5, isEngineerVisible: 0 }));
+                assert.ok(internalSelect.innerHTML.includes('value="31"') && !internalSelect.innerHTML.includes('value="32"'),
+                    'internal task excludes engineer role: ' + internalSelect.innerHTML);
+                const visibleSelect = { innerHTML: '', disabled: true };
+                SES.lifecycle.renderReassignCandidates(visibleSelect, engineerCandidates,
+                    SES.lifecycle.engineerAssignable({ id: 6, isEngineerVisible: 1 }));
+                assert.ok(visibleSelect.innerHTML.includes('value="31"') && visibleSelect.innerHTML.includes('value="32"'),
+                    'visible task includes engineer role');
+                assert.strictEqual(SES.lifecycle.engineerAssignable(undefined), false, 'unknown task excludes engineer');
+                SES.lifecycle.renderTasks([{ id: 7, status: 'PENDING', evidenceType: 'NONE', taskName: 'h', taskCode: 'H',
+                    isEngineerVisible: 1 }], 'ACTIVE');
+                assert.strictEqual(SES.lifecycle.engineerAssignable(SES.lifecycle.tasksById['7']), true, 'tasks by id');
+
                 // D-2: 名前があれば名前、本人画面で名前の無い他の利用者は「社内の担当者」、社内画面で名前が無ければID
                 assert.strictEqual(SES.lifecycleDual.personLabel('検証 二号', 11), '検証 二号');
                 assert.strictEqual(SES.lifecycleDual.personLabel(null, 22), '社内の担当者');

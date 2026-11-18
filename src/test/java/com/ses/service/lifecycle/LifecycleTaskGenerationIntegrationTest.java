@@ -208,6 +208,35 @@ class LifecycleTaskGenerationIntegrationTest {
         assertEquals(0L, generation(tasks.get(1).getId()));
     }
 
+    /**
+     * RB-POSTLAUNCH review P3-8: 社内専用（本人非公開）のタスクは要員ロールの利用者へ割り当てない。割り当てると期日の通知や
+     * 確認待ちの通知でタスク名・案件titleが要員側へ渡る。本人公開のタスクは要員へ、社内専用のタスクも要員以外へは割り当てられる。
+     */
+    @Test
+    void 社内専用のタスクは要員へ担当変更できず本人公開のタスクと要員以外への変更はできる() {
+        List<LifecycleTask> tasks = createJoinCaseTasks();
+        LifecycleTask internalTask = tasks.get(0);
+        LifecycleTask visibleTask = tasks.get(1);
+        jdbc.update("UPDATE t_lifecycle_task SET is_engineer_visible = 0 WHERE id = ?", internalTask.getId());
+        jdbc.update("UPDATE t_lifecycle_task SET is_engineer_visible = 1 WHERE id = ?", visibleTask.getId());
+        SysUser engineerUser = insertUser("w316b_eng_assignee_" + System.nanoTime(), "要員");
+
+        taskService.reassignTask(visibleTask.getId(), engineerUser.getId(), admin.getId(), "本人公開");
+        assertEquals(engineerUser.getId(), taskMapper.selectById(visibleTask.getId()).getAssigneeUserId());
+        taskService.reassignTask(internalTask.getId(), admin.getId(), admin.getId(), "社内の担当");
+        assertEquals(admin.getId(), taskMapper.selectById(internalTask.getId()).getAssigneeUserId());
+        long generationBefore = generation(internalTask.getId());
+
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> taskService.reassignTask(internalTask.getId(), engineerUser.getId(), admin.getId(), "要員へ"));
+
+        assertEquals(400, rejected.getCode());
+        assertEquals("error.lifecycle.internalTaskEngineerAssignee", rejected.getMessageKey());
+        LifecycleTask unchanged = taskMapper.selectById(internalTask.getId());
+        assertEquals(admin.getId(), unchanged.getAssigneeUserId(), "担当を変えない");
+        assertEquals(generationBefore, generation(internalTask.getId()), "世代を進めない");
+    }
+
     @Test
     void タスク世代が上限なら担当変更は409で止まり値を変えない() {
         List<LifecycleTask> tasks = createJoinCaseTasks();

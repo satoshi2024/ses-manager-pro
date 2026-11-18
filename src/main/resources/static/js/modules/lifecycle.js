@@ -322,6 +322,9 @@ SES.lifecycle = {
     },
 
     renderTasks: function(tasks, caseStatus) {
+        // 担当変更の候補の絞り込み（本人公開か）に使うため、描画したタスクをIDで引けるようにしておく
+        this.tasksById = {};
+        (tasks || []).forEach(t => { if (t && t.id != null) this.tasksById[String(t.id)] = t; });
         const tbody = document.getElementById('tasksTableBody');
         if (!tbody) return;
         if (tasks.length === 0) {
@@ -648,16 +651,17 @@ SES.lifecycle = {
     openReassignModal: function(taskId) {
         document.getElementById('reassignTaskId').value = taskId;
         document.getElementById('reassignReason').value = '';
-        this.loadReassignCandidates();
+        this.loadReassignCandidates(this.engineerAssignable((this.tasksById || {})[String(taskId)]));
         new bootstrap.Modal(document.getElementById('reassignTaskModal')).show();
     },
 
     /**
      * 担当変更の候補（RB-POSTLAUNCH B-2。以前は利用者IDの数値を直接入力させていた）。
      * 候補は組織管理の所属登録と同じ /api/autocomplete/assignable-users（自tenantの有効な利用者を照会者の組織scopeで
-     * 絞ったもの。氏名・username・roleだけを返す）。受付の可否はサーバーが従来どおり判定する。
+     * 絞ったもの。氏名・username・roleだけを返す）。受付の可否はサーバーが判定する。
+     * 社内専用（本人非公開）のタスクには要員を候補に出さない（サーバーも同じ規則で拒否する。RB-POSTLAUNCH review P3-8）。
      */
-    loadReassignCandidates: async function() {
+    loadReassignCandidates: async function(engineerAllowed) {
         const select = document.getElementById('reassignUserId');
         select.disabled = true;
         select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('common.loading'))}</option>`;
@@ -669,11 +673,19 @@ SES.lifecycle = {
             select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('lifecycle.reassign.loadFailed'))}</option>`;
             return;
         }
-        this.renderReassignCandidates(select, users);
+        this.renderReassignCandidates(select, users, engineerAllowed);
     },
 
-    renderReassignCandidates: function(select, users) {
-        const usable = (users || []).filter(u => u && u.id);
+    /**
+     * 要員ロールの利用者へ割り当ててよいタスクか（本人公開のタスクだけ）。社内専用のタスクを要員へ割り当てると、期日の通知等で
+     * タスク名・案件titleが本人側へ渡る。タスクが分からなければ割り当てない側に倒す。
+     */
+    engineerAssignable: function(task) {
+        return Boolean(task) && Number(task.isEngineerVisible) === 1;
+    },
+
+    renderReassignCandidates: function(select, users, engineerAllowed) {
+        const usable = (users || []).filter(u => u && u.id && (engineerAllowed === true || u.role !== '要員'));
         if (usable.length === 0) {
             select.innerHTML = `<option value="">${SES.escapeHtml(SES.i18n.t('lifecycle.reassign.empty'))}</option>`;
             select.disabled = true;
