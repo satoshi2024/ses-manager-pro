@@ -23,6 +23,9 @@
 #   BASE_IMAGE, MYSQL_CLIENT_VERSION, MYSQL_DEB_REVISION, MYSQL_APT_SUITE, MYSQL_APT_COMPONENT,
 #   MYSQL_REPO_KEY_URL, MYSQL_REPO_KEY_SHA256, MYSQL_REPO_KEY_FINGERPRINT,
 #   RESTIC_VERSION, RESTIC_LINUX_AMD64_SHA256
+# 単体試験用の注入（Dockerfile では設定しない。既定値は実際の path）:
+#   APT_PACKAGES_LOCK_FILE（lock）、IMAGE_MANIFEST_DIR（版一覧の出力先）、
+#   INSTALL_TOOLCHAIN_SYSROOT（keyring・apt source・restic・apt lists を書く system path の接頭辞。既定は空）
 # ============================================================
 set -Eeuo pipefail
 umask 022
@@ -30,10 +33,21 @@ umask 022
 BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LOCK_FILE=${APT_PACKAGES_LOCK_FILE:-$BUILD_DIR/apt-packages.lock}
 MANIFEST_DIR=${IMAGE_MANIFEST_DIR:-/usr/local/share/ses-backup/image-manifest}
-MYSQL_KEYRING=/usr/share/keyrings/mysql-release-engineering.gpg
 TMP_DIR=""
 
 die() { echo "install-toolchain: ERROR: $*" >&2; exit 1; }
+
+# 書き込む system path の接頭辞（RB-W W-5）。既定は空で、実際の system path（下記）に書く。Dockerfile は設定しない。
+# 単体試験だけが一時ディレクトリを指定し、lock の enforced 経路・不一致経路を system path に書かずに通す。
+SYSROOT=${INSTALL_TOOLCHAIN_SYSROOT:-}
+if [[ -n "$SYSROOT" ]]; then
+  [[ "$SYSROOT" == /* && -d "$SYSROOT" && ! -L "$SYSROOT" ]] \
+    || die "INSTALL_TOOLCHAIN_SYSROOT は既存の絶対パスのディレクトリを指定してください（現在値: $SYSROOT）"
+fi
+MYSQL_KEYRING=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg
+MYSQL_APT_LIST=$SYSROOT/etc/apt/sources.list.d/mysql.list
+RESTIC_INSTALL_PATH=$SYSROOT/usr/local/bin/restic
+APT_LISTS_DIR=$SYSROOT/var/lib/apt/lists
 
 cleanup() {
   if [[ -n "$TMP_DIR" ]]; then rm -rf "$TMP_DIR"; fi
@@ -158,7 +172,7 @@ gpg --batch --export "$MYSQL_REPO_KEY_FINGERPRINT" > "$MYSQL_KEYRING"
 [[ -s "$MYSQL_KEYRING" ]] || die "MySQL APT keyring を作成できません"
 chmod 644 "$MYSQL_KEYRING"
 printf 'deb [signed-by=%s] https://repo.mysql.com/apt/debian/ %s %s\n' \
-  "$MYSQL_KEYRING" "$MYSQL_APT_SUITE" "$MYSQL_APT_COMPONENT" > /etc/apt/sources.list.d/mysql.list
+  "$MYSQL_KEYRING" "$MYSQL_APT_SUITE" "$MYSQL_APT_COMPONENT" > "$MYSQL_APT_LIST"
 apt-get update
 apt-get install -y --no-install-recommends \
   "mysql-community-client=${MYSQL_CLIENT_VERSION}-${MYSQL_DEB_REVISION}" \
@@ -170,15 +184,15 @@ apt-get install -y --no-install-recommends \
 curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$TMP_DIR/restic.bz2" \
   "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2"
 verify_sha256 "$TMP_DIR/restic.bz2" "$RESTIC_LINUX_AMD64_SHA256" "restic_${RESTIC_VERSION}_linux_amd64.bz2"
-bzip2 -dc "$TMP_DIR/restic.bz2" > /usr/local/bin/restic
-chmod 755 /usr/local/bin/restic
+bzip2 -dc "$TMP_DIR/restic.bz2" > "$RESTIC_INSTALL_PATH"
+chmod 755 "$RESTIC_INSTALL_PATH"
 
-rm -rf /var/lib/apt/lists/*
+rm -rf "${APT_LISTS_DIR:?}"/*
 
 mysql --version
 mysqlbinlog --version
 mysqldump --version
-restic version
+"$RESTIC_INSTALL_PATH" version
 
 # ------------------------------------------------------------
 # 4. 版一覧と固定値の記録（image 内）。lock があれば完全一致を要求する
@@ -225,13 +239,13 @@ fi
 {
   printf 'base_image=%s\n' "$BASE_IMAGE"
   printf 'mysql_packages=%s-%s\n' "$MYSQL_CLIENT_VERSION" "$MYSQL_DEB_REVISION"
-  printf 'mysql_apt_source=%s\n' "$(cat /etc/apt/sources.list.d/mysql.list)"
+  printf 'mysql_apt_source=%s\n' "$(cat "$MYSQL_APT_LIST")"
   printf 'mysql_repo_key_url=%s\n' "$MYSQL_REPO_KEY_URL"
   printf 'mysql_repo_key_sha256=%s\n' "$MYSQL_REPO_KEY_SHA256"
   printf 'mysql_repo_key_fingerprint=%s\n' "$MYSQL_REPO_KEY_FINGERPRINT"
   printf 'restic_version=%s\n' "$RESTIC_VERSION"
   printf 'restic_linux_amd64_bz2_sha256=%s\n' "$RESTIC_LINUX_AMD64_SHA256"
-  printf 'restic_binary_sha256=%s\n' "$(sha256sum /usr/local/bin/restic | cut -d' ' -f1)"
+  printf 'restic_binary_sha256=%s\n' "$(sha256sum "$RESTIC_INSTALL_PATH" | cut -d' ' -f1)"
   printf 'apt_lock=%s\n' "$apt_lock_mode"
   printf 'dpkg_packages_sha256=%s\n' "$(sha256sum "$MANIFEST_DIR/dpkg-packages.tsv" | cut -d' ' -f1)"
   printf 'essential_changed=%s\n' "$essential_changed"

@@ -140,6 +140,9 @@ ops/backup/image/tool-image.sh compose run --rm check --json
      base image からの変化は `essential-packages.tsv`（パッケージ名・base の版・導入後の版・same/changed/added/removed）に
      記録され、変化があれば build ログに WARN が出る。Essential を含む全パッケージの版を固定するのは lock で、
      lock が空なら Debian パッケージ版は記録だけを行う（build ログに WARN）。
+   - lock の照合（記載あり = enforced・不一致は失敗・空 = record-only）は `tests/tool-image-test.sh` が、keyring・apt source・
+     restic・apt lists を書く system path を `INSTALL_TOOLCHAIN_SYSROOT`（単体試験だけが一時ディレクトリを指定する。既定は空 =
+     実際の path で、Dockerfile は設定しない）で一時ディレクトリへ向けて、導入経路の最後まで通して確かめる（RB-W W-5）。
    - 機械的な照合: Dockerfile の最後の RUN（`install-toolchain.sh --verify-manifest`）が image の実際の dpkg の版と
      `dpkg-packages.tsv`・`toolchain.env` の SHA-256 を照合し、一致しなければ build が失敗する。`record` も build 後の image で
      network なしの一時コンテナの `dpkg-query` を実行して同じ照合を行い、一致しなければ何も記録しない。

@@ -458,9 +458,11 @@ case_check_rejects_flow_style_and_unparsed_yaml() {
 setup_fake_installer() {
   T=$(mktemp -d "$TEST_TMP_ROOT/tool-image-test.XXXXXX")
   mkdir -p "$T/bin"
+  # apt-get: 呼び出しを記録し、install の後は FAKE_APT_INSTALLED を置く（dpkg-query が導入後の一覧を返す）
   cat > "$T/bin/apt-get" <<'MOCK'
 #!/usr/bin/env bash
 printf 'apt-get %s\n' "$*" >> "$FAKE_INSTALL_LOG"
+[[ "${1:-}" == install ]] && : > "$FAKE_APT_INSTALLED"
 exit 0
 MOCK
   cat > "$T/bin/gpg" <<'MOCK'
@@ -472,15 +474,24 @@ case "$*" in
 esac
 exit 0
 MOCK
+  # curl: -o の先へ書く。restic の URL で FAKE_RESTIC_BZ2 があればその内容（それ以外は固定の内容）
   cat > "$T/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >> "$FAKE_INSTALL_LOG"
 out=""
+url=""
 while (( $# > 0 )); do
   if [[ "$1" == -o ]]; then out=$2; shift 2; continue; fi
+  [[ "$1" == https://* ]] && url=$1
   shift
 done
-[[ -n "$out" ]] && printf 'fake downloaded content\n' > "$out"
+if [[ -n "$out" ]]; then
+  if [[ "$url" == *restic* && -n "${FAKE_RESTIC_BZ2:-}" ]]; then
+    cp "$FAKE_RESTIC_BZ2" "$out"
+  else
+    printf 'fake downloaded content\n' > "$out"
+  fi
+fi
 exit 0
 MOCK
   cat > "$T/bin/dpkg" <<'MOCK'
@@ -509,8 +520,91 @@ MOCK
   export FAKE_INSTALL_LOG="$T/install.log"
   : > "$FAKE_INSTALL_LOG"
   export FAKE_APT_INSTALLED="$T/apt-installed"
-  unset FAKE_DPKG_LIST FAKE_DPKG_ESSENTIAL FAKE_DPKG_LIST_AFTER FAKE_DPKG_ESSENTIAL_AFTER
+  unset FAKE_DPKG_LIST FAKE_DPKG_ESSENTIAL FAKE_DPKG_LIST_AFTER FAKE_DPKG_ESSENTIAL_AFTER FAKE_RESTIC_BZ2
   FAKE_KEY_SHA=$(printf 'fake downloaded content\n' | sha256sum | cut -d' ' -f1)
+}
+
+# RB-W W-5: system path を INSTALL_TOOLCHAIN_SYSROOT で一時ディレクトリへ向け、導入経路を最後（lock の照合・記録）まで通す。
+# base image では libc-bin（Essential）が deb12u7 で、導入後は依存解決で deb12u8 に上がる（W-4 の記録の確認にも使う）。
+setup_installer_full_flow() {
+  local b
+  setup_fake_installer
+  SYSROOT="$T/sysroot"
+  mkdir -p "$SYSROOT/usr/share/keyrings" "$SYSROOT/etc/apt/sources.list.d" "$SYSROOT/usr/local/bin" "$SYSROOT/var/lib/apt/lists"
+  printf 'stale\n' > "$SYSROOT/var/lib/apt/lists/stale-list"
+  printf '#!/bin/sh\necho "restic 0.17.3 compiled with go1.23.3 on linux/amd64"\n' | bzip2 -c > "$T/restic.bz2"
+  export FAKE_RESTIC_BZ2="$T/restic.bz2"
+  FAKE_RESTIC_SHA=$(sha256sum "$T/restic.bz2" | cut -d' ' -f1)
+  for b in mysql mysqlbinlog mysqldump; do
+    printf '#!/usr/bin/env bash\necho "%s  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)"\n' "$b" > "$T/bin/$b"
+    chmod +x "$T/bin/$b"
+  done
+  write_gpg_listing "$T/listing-ok" 1824293027 BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+  export FAKE_DPKG_LIST='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u7\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
+  export FAKE_DPKG_LIST_AFTER='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u8\tamd64\nii \tmysql-community-client\t8.0.46-1debian12\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
+  export FAKE_DPKG_ESSENTIAL='ii \tbash\tyes\nii \tlibc-bin\tyes\nii \ttar\tyes\n'
+  INSTALLED_TSV=$(printf '%b' "$FAKE_DPKG_LIST_AFTER" | awk -F'\t' '{print $2 "\t" $3 "\t" $4}' | LC_ALL=C sort)
+}
+
+run_installer_full_flow() { # <lock file> [VAR=value ...]
+  local lock=$1
+  shift
+  run_installer MYSQL_REPO_KEY_SHA256="$FAKE_KEY_SHA" RESTIC_LINUX_AMD64_SHA256="$FAKE_RESTIC_SHA" \
+    FAKE_GPG_LISTING="$T/listing-ok" INSTALL_TOOLCHAIN_SYSROOT="$SYSROOT" APT_PACKAGES_LOCK_FILE="$lock" "$@"
+}
+
+# lock に記載があり導入結果と完全一致する場合（enforced）。CRLF で checkout された lock も CR を除いて照合する。
+# r2 までは system path に書くため単体試験が無く、初回 build の実測だけだった。
+case_installer_apt_lock_enforced_via_injected_paths() {
+  setup_installer_full_flow
+  { printf '# lock（試験）\n'; printf '%s\n' "$INSTALLED_TSV" | sed 's/$/\r/'; } > "$T/lock"
+  run_installer_full_flow "$T/lock"
+  assert_zero "$INSTALL_RC" "lock と導入結果が一致すれば 0"
+  assert_contains "$(cat "$T/manifest/toolchain.env" 2>/dev/null)" "apt_lock=enforced" "lock を enforced として記録"
+  assert_eq "$INSTALLED_TSV" "$(cat "$T/manifest/dpkg-packages.tsv" 2>/dev/null)" "導入結果の版一覧を記録"
+  assert_eq "fake-keyring" "$(cat "$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg" 2>/dev/null)" \
+    "fingerprint を確認した鍵の keyring を注入した path に書く"
+  assert_eq "deb [signed-by=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg] https://repo.mysql.com/apt/debian/ bookworm mysql-8.0" \
+    "$(cat "$SYSROOT/etc/apt/sources.list.d/mysql.list" 2>/dev/null)" "apt source を注入した path に書く"
+  if [[ -x "$SYSROOT/usr/local/bin/restic" ]]; then
+    test_assert "SHA-256 を確認した restic を注入した path に導入する"
+  else
+    test_fail "SHA-256 を確認した restic を注入した path に導入する" "実行可能な restic がありません"
+  fi
+  assert_contains "$INSTALL_OUT" "restic 0.17.3 compiled" "導入した restic を実行して版を表示する"
+  assert_no_file "$SYSROOT/var/lib/apt/lists/stale-list" "注入した path の apt lists を消す"
+  # W-4: Essential の base image からの変化を記録する（依存解決で libc-bin が更新された）
+  assert_contains "$(cat "$T/manifest/essential-packages.tsv" 2>/dev/null)" $'libc-bin\t2.36-9+deb12u7\t2.36-9+deb12u8\tchanged' \
+    "依存解決で更新された Essential を changed として記録"
+  assert_contains "$(cat "$T/manifest/essential-packages.tsv" 2>/dev/null)" $'tar\t1.34+dfsg-1.2\t1.34+dfsg-1.2\tsame' \
+    "変わらない Essential を same として記録"
+  assert_not_contains "$(cat "$T/manifest/essential-packages.tsv" 2>/dev/null)" "mysql-community-client" "Essential 以外は記録しない"
+  assert_contains "$(cat "$T/manifest/toolchain.env" 2>/dev/null)" "essential_changed=1" "変化の件数を記録"
+  assert_contains "$INSTALL_OUT" "WARN: Essential パッケージ 1 件が base image の版から変わりました" "変化を build ログに出す"
+}
+
+# lock に記載があり導入結果と一致しない場合は失敗し、固定値の記録（toolchain.env）を書かない。空の lock は記録だけ。
+case_installer_apt_lock_mismatch_fails_via_injected_paths() {
+  setup_installer_full_flow
+  printf '%s\n' "$INSTALLED_TSV" | sed 's/deb12u8/deb12u7/' > "$T/lock"
+  run_installer_full_flow "$T/lock"
+  assert_nonzero "$INSTALL_RC" "lock と導入結果が違えば失敗"
+  assert_contains "$INSTALL_OUT" "Debian パッケージの版が apt-packages.lock と一致しません" "不一致を通知"
+  assert_contains "$INSTALL_OUT" "2.36-9+deb12u8" "差分を表示"
+  assert_no_file "$T/manifest/toolchain.env" "不一致なら固定値の記録を書かない"
+
+  rm -f "$FAKE_APT_INSTALLED"
+  printf '# 記載なし\n\n' > "$T/lock"
+  run_installer_full_flow "$T/lock"
+  assert_zero "$INSTALL_RC" "空の lock は記録だけで 0"
+  assert_contains "$(cat "$T/manifest/toolchain.env" 2>/dev/null)" "apt_lock=record-only" "record-only として記録"
+  assert_contains "$INSTALL_OUT" "WARN: apt-packages.lock が空のため" "固定していないことを WARN で出す"
+
+  : > "$FAKE_INSTALL_LOG"
+  run_installer_full_flow "$T/lock" INSTALL_TOOLCHAIN_SYSROOT=relative/sysroot
+  assert_nonzero "$INSTALL_RC" "相対パスの INSTALL_TOOLCHAIN_SYSROOT は失敗"
+  assert_contains "$INSTALL_OUT" "INSTALL_TOOLCHAIN_SYSROOT は既存の絶対パス" "注入値の不正を通知"
+  assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "不正な注入値では apt・ダウンロードを一切行わない"
 }
 
 # RB-W W-4: --verify-manifest は image の実際の dpkg の版と dpkg-packages.tsv・toolchain.env の SHA-256 を照合する
@@ -659,6 +753,16 @@ case_static_image_contract() {
     "$(grep '^RUN ' "$BACKUP_ROOT/Dockerfile" | tail -n 1)" "Dockerfile の最後の RUN で dpkg の版を照合する"
   assert_eq "" "$(grep -E 'base image の版のまま|base image の版を使う' "$BACKUP_ROOT/Dockerfile" "$INSTALL_TOOLCHAIN" || true)" \
     "Essential が base image の版を保つという記述をしない（依存解決で更新され得る）"
+  # RB-W W-5: 注入できる system path の既定値は実際の path のままで、Dockerfile は接頭辞を設定しない
+  local installer path
+  installer=$(cat "$INSTALL_TOOLCHAIN")
+  assert_not_contains "$dockerfile" "INSTALL_TOOLCHAIN_SYSROOT" "Dockerfile は system path の接頭辞を設定しない"
+  assert_contains "$installer" 'SYSROOT=${INSTALL_TOOLCHAIN_SYSROOT:-}' "接頭辞の既定値は空"
+  for path in 'MYSQL_KEYRING=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg' \
+      'MYSQL_APT_LIST=$SYSROOT/etc/apt/sources.list.d/mysql.list' \
+      'RESTIC_INSTALL_PATH=$SYSROOT/usr/local/bin/restic' 'APT_LISTS_DIR=$SYSROOT/var/lib/apt/lists'; do
+    assert_contains "$installer" "$path" "既定の system path: ${path%%=*}"
+  done
   if [[ "$integration" =~ image:\ mysql:8\.0\.36@sha256:[0-9a-f]{64} ]]; then
     test_assert "integration の mysql:8.0.36 を digest 固定"
   else
@@ -697,6 +801,8 @@ run_case case_installer_rejects_placeholders_before_download
 run_case case_installer_rejects_key_checksum_mismatch
 run_case case_installer_checks_primary_key_only
 run_case case_installer_verify_manifest
+run_case case_installer_apt_lock_enforced_via_injected_paths
+run_case case_installer_apt_lock_mismatch_fails_via_injected_paths
 run_case case_static_image_contract
 
 test_summary "W1-B1 tool image reproducibility"
