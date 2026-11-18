@@ -564,17 +564,23 @@ public class PrivacyHoldReleaseService {
     /** 失効 provider が発行者と承認者に要る anchor を ACTIVE と答えるか（verifier の判定。判定できなければ false）。 */
     private boolean trustReady() {
         try {
-            return verifier != null && verifier.trustReady();
+            // gate は授権 tenant（要求者の tenant はこれと一致しなければ403）を範囲に含む anchor の組だけを数える
+            return verifier != null && verifier.trustReady(authorizationTenant());
         } catch (RuntimeException e) {
             return false;
         }
     }
 
+    /** 権限評価の設定 tenant（{@code OIDC_TENANT_ID}、未設定なら {@code default}）。 */
+    private String authorizationTenant() {
+        return oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
+                ? oidcProperties.getTenantId() : "default";
+    }
+
     /** 照会者の tenant（principal に束縛された値）。権限評価の設定 tenant と一致しなければ403。 */
     private String requireCallerTenant(PrivacyHoldService.Actor actor) {
         String callerTenant = actor == null ? null : actor.tenantId();
-        String authorizationTenant = oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
-                ? oidcProperties.getTenantId() : "default";
+        String authorizationTenant = authorizationTenant();
         if (!StringUtils.hasText(callerTenant) || !authorizationTenant.equals(callerTenant)) {
             throw BusinessException.of(403, "error.accessDenied");
         }

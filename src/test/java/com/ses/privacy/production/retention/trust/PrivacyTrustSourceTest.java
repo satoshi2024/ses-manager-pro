@@ -135,9 +135,9 @@ class PrivacyTrustSourceTest {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
         assertThat(ProductionPrivacyComponents.policyRegistrationVerifier(prod, source.policyAnchors(),
-                source.revocations(), clock).trustReady()).isFalse();
+                source.revocations(), clock).trustReady("default")).isFalse();
         assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod, source.holdReleaseAnchors(),
-                source.revocations(), clock).trustReady()).isFalse();
+                source.revocations(), clock).trustReady("default")).isFalse();
     }
 
     @Test

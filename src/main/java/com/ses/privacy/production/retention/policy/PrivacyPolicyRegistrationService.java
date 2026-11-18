@@ -538,18 +538,24 @@ public class PrivacyPolicyRegistrationService {
 
     private boolean trustReady() {
         try {
-            return verifier != null && verifier.trustReady();
+            // gate は授権 tenant（呼出し元の tenant はこれと一致しなければ403）を範囲に含む anchor だけを数える
+            return verifier != null && verifier.trustReady(authorizationTenant());
         } catch (RuntimeException e) {
             return false;
         }
+    }
+
+    /** 権限評価の設定 tenant（{@code OIDC_TENANT_ID}、未設定なら {@code default}）。 */
+    private String authorizationTenant() {
+        return oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
+                ? oidcProperties.getTenantId() : "default";
     }
 
     /** 照会者（principal に束縛された tenant と user）。tenant が権限評価の設定 tenant と違えば403。 */
     private Actor requireActor() {
         Actor actor = actorSource.get();
         String callerTenant = actor == null ? null : actor.tenantId();
-        String authorizationTenant = oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
-                ? oidcProperties.getTenantId() : "default";
+        String authorizationTenant = authorizationTenant();
         if (!StringUtils.hasText(callerTenant) || !authorizationTenant.equals(callerTenant)
                 || actor.userId() == null || actor.userId() <= 0) {
             throw BusinessException.of(403, "error.accessDenied");
