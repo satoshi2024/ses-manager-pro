@@ -203,7 +203,8 @@ migrator（job専用）とアプリ用を分ける。
   - 対象schemaへの `CREATE, ALTER, DROP, INDEX, REFERENCES, SELECT, INSERT, UPDATE, DELETE, CREATE TEMPORARY TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE, TRIGGER`。
     - `CREATE TEMPORARY TABLES`: V169等3本が一時表を使う。
     - `CREATE ROUTINE / ALTER ROUTINE / EXECUTE`: helper procedureを作成・実行・削除する（V102_1のhelperはV186で削除する。全migration後にroutineは0件）。function・event・viewは作らない。
-  - **trigger（67件。V194までの55件＋V195の12件）とbinlog**: binlogが有効で `log_bin_trust_function_creators = 0` のとき、`CREATE TRIGGER` はSUPER相当の権限を要求する。RDS等でSUPERを渡せない場合は parameter group で `log_bin_trust_function_creators = 1` にするか、DBAが代替を決める。**testは `--skip-log-bin` かつrootで実行しており、この条件は検証していない**（DBA確定後に同条件のDB変種で検証する。W1-B3 review §9.4）。
+  - **trigger（67件）とbinlog**: binlogが有効で `log_bin_trust_function_creators = 0` のとき、`CREATE TRIGGER` はSUPER相当の権限を要求する。RDS等でSUPERを渡せない場合は parameter group で `log_bin_trust_function_creators = 1` にするか、DBAが代替を決める。**testは `--skip-log-bin` かつrootで実行しており、この条件は検証していない**（配備前のDBA項目。§1.7 の DBA-1。W1-B3 review §9.4）。
+    - 件数の根拠: 67件は、versioned migration の `CREATE TRIGGER` と `DROP TRIGGER` を版の順に適用した正味の件数で、`DeployRunbookMigrationCountTest` が本書の値（ここと §3.4）と照合する。V194までは55件で、2026-11-14 の R-3 予行演習（MySQL 8.0.36・offline job）の実測と一致する。V195 は `CREATE TRIGGER` 12件・`DROP TRIGGER` 0件で、不変6表の UPDATE・DELETE に各1件付く（実MySQLでは `AuthorizationEpochSchemaMySqlTest`（mysql shard 1）が表と event の組を確かめる）。V195を含めた総数の実測は**未取得**で、配備前の DBA-1 の検証（§1.7）と §3.4 で確かめる。
   - **DEFINER**: triggerは `DEFINER = migrator` で作られる。migrator accountを削除・lockするとtriggerの付いた表への書き込みが `ERROR 1449`（definer不在）で失敗する。migrator accountは残す（loginだけ無効化する等はDBAが判断する）。
   - binlogが有効で `enforce_gtid_consistency = ON` の場合、transaction内の一時表はbinlog_format=ROW等の条件が要る。DBAが設定を確認する。
   - 確認（DBA。job の前に、権限を見られる管理用の account で実行する。`<migrator>`・`<host>` は実際の account）:
@@ -316,6 +317,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 **DBA の前提**（番号は署名一覧の DBA-1〜DBA-6 と同じ）
 - **DBA-1**: migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
+  - 配備前の検証（**未実施**）: 決めた設定と同じ条件（binlog 有効、`log_bin_trust_function_creators` を決めた値、root でない migrator account と §1.2 の権限）の検証用MySQL（本番ではない）に §3.3 の job を1回通し、§3.4 の routine 0件・trigger 67件を確かめる。CI の MySQL 試験は `--skip-log-bin` かつ root で動き、この条件を検証しない。
 - **DBA-2**: serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
 - **DBA-3**: **`binlog_format` は ROW（STATEMENT 不可）**。これは READ COMMITTED を宣言した transaction の前提である。
   - 対象: 退社完了の `LifecycleCaseServiceImpl.completeCase`、ポータル紐付け登録の `PortalEngineerLinkServiceImpl.register` 等。一覧は `WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS`。
@@ -571,7 +573,10 @@ SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
-SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE();           -- 67（V194までの55件は2026-11-14 R-3予行演習（MySQL 8.0.36・offline job）の実測値で、静的計数の56は誤り。V195の12件を加えた値。V195込みの実測は未実施）
+SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE();           -- 67（根拠は §1.2。V194までの55件は2026-11-14 R-3予行演習（MySQL 8.0.36・offline job）の実測と一致し、V195の12件を加えた値。V195込みの実測は未取得）
+-- 67でない場合の切り分け: 表ごとの件数を migration の CREATE TRIGGER と比べる（V195 の6表は各2件、projection は0件）
+SELECT event_object_table, COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()
+ GROUP BY event_object_table ORDER BY event_object_table;
 ```
 
 - `R__remove_v2_sample_data.sql` は「本scriptの成功履歴が無い」かつ「sample 5表がV2の行だけ」のときだけ削除する。条件を満たさない場合は何も削除せず成功扱いになるため、上の件数が0でなければ実データ混入の可能性として停止し、DBAと調査する（手作業で消さない）。
