@@ -388,6 +388,24 @@ W1-B1（backup toolchain）で「書面での受理が要る」とされた事�
 8. **子スイッチOFF**: 詳細画面のHTMLに `dualConfirmModal` と `lifecycle-dual.js` が無く、DUALの行は「二者確認は現在無効です」だけ。
 9. **通知**: 提出後、「確認待ち」を受け取るのは管理者・HR・担当者だけで、範囲外の営業には届かない。本文に案件titleとcommentが無い。
 
+### 1.8 本番DBの手作業の変更と、権限の設定を変える配備（RR-10・RR-2）
+
+NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規則を書くとしたもの。表単位のrestoreの禁止（RR-13）は §1.7 の SRE-6 にある。
+
+- **本番DBへ手作業の変更（DML・DDL）をしない（RR-10）**。NF01 の writer の閉包は guard test（Java・注釈SQL）で守っており、手動のSQLやDBの直接操作による変更は検出できない（認可epochが進まず、確認時の判定が古い前提のまま通り得る）。
+  - 例外は、本書が手順として書いたものだけ: §3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の侵害の疑い・`admin` の lock 解除。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（hash 等の値は残さない）。
+  - 参照（SELECT）は本書の確認SQLの範囲で行ってよい。
+  - 画面・API（監査が残る）で直せないデータの誤りは、手で直さずに Owner と DBA へ上げる。
+- **権限に関わる設定を変える配備では、未確認の二者確認の提出を差し戻す（RR-2）**。`ORGANIZATION_SCOPE_ENABLED`（`organization.scope.enabled`）や機能スイッチ等の property の変更は認可epochを進めない。確認時の再評価で拒否側には効くが、2回の配備をまたいで元へ戻る変更（例: ある配備で外し、次の配備で戻す）は検出しない。
+  1. 配備の前（§2 の1の前）に、未確認の提出を一覧して配備記録に残す。
+     ```sql
+     SELECT tenant_id, case_id, task_id, submission_id, updated_at FROM t_lifecycle_dual_projection
+      WHERE state = 'PENDING' ORDER BY updated_at;
+     ```
+  2. 配備の後、一覧の提出を、確認者（提出者以外の管理者またはHR）が画面で差し戻す（理由に「配備で権限の設定が変わったため、再提出してください」と書く）。提出者が改めて提出する。DBは手で変えない（RR-10）。
+  3. 対象は NF01 二者確認（`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED`）をONにした後の配備である。初回リリースはOFFで、表は空のまま配備する。
+  - この運用は NF01 計画 §10 の Identity/Security の受理事項（RR-2。**未取得**）である。起動時に property の指紋を比べて global epoch を進める改修は、同 §9 RR-2 の別の検討事項のまま。
+
 ## 2. 全停止とdrain（SRE）
 
 初回導入では稼働中のinstanceは無い。§2.1〜§2.3は2回目以降のreleaseの手順で、初回は「アプリinstanceが1台も起動していないこと」の確認だけを行う。
@@ -400,6 +418,8 @@ W1-B1（backup toolchain）で「書面での受理が要る」とされた事�
    SELECT COUNT(*) FROM information_schema.processlist WHERE user = '<アプリaccount>';  -- 0
    ```
 5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する（前提は §1.7 の DBA-6: `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新versionにし、production 固有値の BLOCKED を解除してから取る）。
+
+- 権限に関わる設定（`ORGANIZATION_SCOPE_ENABLED`・機能スイッチ等）を変える release では、1の前に §1.8 の RR-2 の手順を行う。
 
 ## 3. 専用Flyway jobの実行と確認
 
