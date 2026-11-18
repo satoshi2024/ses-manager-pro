@@ -79,7 +79,7 @@
 |---|---|---|---|---|---|
 | 16 | `BATCH_TOKEN_SECRET`（`app.batch.token-secret`） | 一括操作のpreview tokenのHMAC鍵 | 空でない（十分な長さの乱数） | 〇 | `application-prod.yml:113`、`BatchOperationServiceImpl.java:46-51` |
 | 17 | `PWA_CONTEXT_SECRET`（`app.pwa.context-secret`） | PWA利用者文脈のHMAC鍵（NF04がOFFでも必要） | 空でなく、開発用の既定値でない | 〇 | `application-prod.yml:115`、`PwaUserContextService.java:28,39-45` |
-| 18 | `BP_BANK_ACCOUNT_ENCRYPTION_KEY`（`bp.bank-account-encryption-key`） | BP口座番号の暗号鍵（AES。UTF-8の先頭32 byteを使う） | `dev-only` で始まらない32文字以上の乱数。**検査は起動完了の直後（`ApplicationReadyEvent`）に行うため、portを開いた後に停止する** | 〇 | ymlに定義なし。`BpCompanyServiceImpl.java:61-74,339` |
+| 18 | `BP_BANK_ACCOUNT_ENCRYPTION_KEY`（`bp.bank-account-encryption-key`） | BP口座番号の暗号鍵（AES。UTF-8の先頭32 byteを使う） | `dev-only` で始まらない32文字以上の乱数。**検査は起動完了の直後（`ApplicationReadyEvent`）に行うため、portを開いた後に停止する**。readiness（`/actuator/health/readiness`）がUPになるのはこの検査を通った後だけである（Spring Boot は `ApplicationReadyEvent` の listener を終えてから受付可へ切り替える）。確認は §4 の readiness のUPと、起動logに `bp.bank-account-encryption-key must be configured in prod` が無いこと。検査するのは `dev-only` で始まらないことだけで、長さは見ない（32文字以上は secret を作るときに守る） | 〇 | ymlに定義なし。`BpCompanyServiceImpl.java:61-74,339` |
 
 **暗号鍵（key version と鍵の組）**
 
@@ -178,6 +178,16 @@
   ```sql
   CREATE DATABASE ses_manager_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
   ```
+  確認（DBA。版と server の文字コードも配備記録に残す）:
+  ```sql
+  SELECT VERSION(), @@global.character_set_server, @@global.collation_server;  -- 版は §1.6 の3 の決定と一致
+  SELECT default_character_set_name, default_collation_name FROM information_schema.schemata
+   WHERE schema_name = 'ses_manager_db';                                         -- utf8mb4 / utf8mb4_unicode_ci
+  ```
+- **`innodb_print_all_deadlocks = ON`**（SRE-8・RR-15。parameter group / my.cnf。DBA-4）: deadlock の待機graphを error log へ出し、`LOCK_CONFLICT`（409）の原因を調べられるようにする。
+  ```sql
+  SELECT @@global.innodb_print_all_deadlocks;  -- 1
+  ```
 - **対象schemaが空であること**。jobは `baselineOnMigrate=true`（従来設定と同じ）のため、履歴表の無い非空schemaはV9としてbaselineされ、V1〜V9を飛ばしてV10で失敗する（`FlywayProdFreshInstallMySqlTest` の対照caseで確認済み）。
   ```sql
   SELECT COUNT(*) FROM information_schema.tables   WHERE table_schema = 'ses_manager_db';  -- 0
@@ -196,7 +206,30 @@ migrator（job専用）とアプリ用を分ける。
   - **trigger（67件。V194までの55件＋V195の12件）とbinlog**: binlogが有効で `log_bin_trust_function_creators = 0` のとき、`CREATE TRIGGER` はSUPER相当の権限を要求する。RDS等でSUPERを渡せない場合は parameter group で `log_bin_trust_function_creators = 1` にするか、DBAが代替を決める。**testは `--skip-log-bin` かつrootで実行しており、この条件は検証していない**（DBA確定後に同条件のDB変種で検証する。W1-B3 review §9.4）。
   - **DEFINER**: triggerは `DEFINER = migrator` で作られる。migrator accountを削除・lockするとtriggerの付いた表への書き込みが `ERROR 1449`（definer不在）で失敗する。migrator accountは残す（loginだけ無効化する等はDBAが判断する）。
   - binlogが有効で `enforce_gtid_consistency = ON` の場合、transaction内の一時表はbinlog_format=ROW等の条件が要る。DBAが設定を確認する。
+  - 確認（DBA。job の前に、権限を見られる管理用の account で実行する。`<migrator>`・`<host>` は実際の account）:
+    ```sql
+    SHOW GRANTS FOR '<migrator>'@'<host>';
+    -- 期待: GRANT USAGE ON *.* と、`ses_manager_db`.* への上の14権限だけ（DBA-1 で SUPER 相当を渡すと決めた場合はその行も）。
+    --       ALL PRIVILEGES、*.* への DDL、他の schema への権限が無い
+    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<migrator>';
+    -- 0。0 でなければ SHOW GRANTS FOR '<migrator>'@'<host>' USING <role> で role の権限も確かめる（USING 無しでは role の権限が出ない）
+    SELECT @@global.log_bin, @@global.log_bin_trust_function_creators, @@global.binlog_format,
+           @@global.gtid_mode, @@global.enforce_gtid_consistency;
+    -- 期待: binlog_format = 'ROW'（DBA-3）。log_bin = 1 なら、log_bin_trust_function_creators = 1 か migrator の SUPER 相当（DBA-1 の決定どおり）
+    ```
 - **アプリ account**: 対象schemaへの `SELECT, INSERT, UPDATE, DELETE` だけ。DDL権限は渡さない。起動時schema guardが `flyway_schema_history` を読むため、そのSELECTも必要（schema単位のSELECTで足りる）。
+  - 確認（DBA。配備前）:
+    ```sql
+    SHOW GRANTS FOR '<アプリaccount>'@'<host>';
+    -- 期待: GRANT USAGE ON *.* と、`ses_manager_db`.* への SELECT, INSERT, UPDATE, DELETE だけ。PROCESS・DDL・他の schema への権限が無い
+    SELECT COUNT(*) FROM mysql.role_edges WHERE to_user = '<アプリaccount>';   -- 0（0 でなければ USING で role の権限も確かめる）
+    ```
+    起動後（§4）に、全 instance が同じ user 名で接続していることを確かめる（PROCESS を持つ管理用の account で実行する）。
+    ```sql
+    SELECT user, COUNT(*) FROM information_schema.processlist WHERE db = 'ses_manager_db' GROUP BY user;
+    -- アプリの接続はアプリaccount の1行にまとまる（別の user 名のアプリ接続が無い）。backup・管理用の account の行は別に出てよい。
+    -- job の実行中でなければ migrator は出ない
+    ```
   - **全 instance が同じアプリ account（同じ user 名）を使う**。Secrets Manager の alternating-users 方式（2つの user を交互に切り替える rotation）は使わない。password だけを替える single-user の rotation は使える（RB-NF05 review P3-2）。
     - 理由: NF06 の取込 stage 照合（`ImportStageReconciler`）は、結果不明の COMMIT を送った接続がまだ文を実行しているかを `information_schema.PROCESSLIST` で確かめる。PROCESS 権限の無い account には**同じ user 名の thread だけ**が見えるため、別の user で張った接続は見えず、照合は黙って時間だけの判定へ戻る（`feature-switches.md` 4.8.2 #10、a1a §6）。
     - PROCESS 権限は渡さない（同じ user なら不要。`ImportCsvIngestionRealMySqlTest` が業務権限だけの専用 user で確かめる）。`SHOW GLOBAL STATUS`（server の起動時刻）と `@@server_uuid` も権限なしで読める。
@@ -225,7 +258,7 @@ job実行環境へ渡す値は環境変数の次の4つだけ。POM・Maven prop
   - 作業directory（checkoutのroot）に `flyway.conf` が無い（`ls flyway.conf` が失敗する）。
   - `~/.m2/settings.xml`（および `MAVEN_OPTS`・`.mvn/maven.config`）に `flyway.*` のpropertyと `-Dflyway.*` が無い。
   - `~/.m2/settings.xml` に `<server><id>flyway-db</id>` が無い（plugin既定のserver idで接続情報を差し込めるため）。
-- 秘匿上の注意: hashは `R__update_admin_password_bcrypt.sql` の `SET` 文1行だけに展開される。その文が失敗するのは値に引用符等が含まれる（＝BCryptではない）場合だけだが、jobのlogは秘匿扱いで保管する。job実行中はDBの general log を無効にする。`flyway_schema_history.checksum` にはhashを含む内容のCRC32が残る（hash自体は復元できない）。
+- 秘匿上の注意: hashは `R__update_admin_password_bcrypt.sql` の `SET` 文1行だけに展開される。その文が失敗するのは値に引用符等が含まれる（＝BCryptではない）場合だけだが、jobのlogは秘匿扱いで保管する。job実行中はDBの general log を無効にする（DBA が job の直前と直後に `SELECT @@global.general_log;  -- 0` で確かめる。RDS 等では parameter group の `general_log` も同じ値であること）。`flyway_schema_history.checksum` にはhashを含む内容のCRC32が残る（hash自体は復元できない）。
 
 ### 1.4 artifactとjobの一致（SRE）
 
@@ -272,8 +305,8 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-1 | **単一tenantで配備する**（`OIDC_TENANT_ID=default`、`ACCOUNTING_TENANT_IDS` は1件）。多tenantで公開しない（RR-14） | `/api/users` の一覧・取得・更新・削除がtenant境界を持たず、多tenantでは管理者が他tenantの利用者を操作できる。外部アカウント関連の表・schedulerも単一tenantを前提にする。NF02のSLA営業日カレンダー（`m_work_calendar`）もtenant列を持たず、`ServiceSlaCalculator.findCalendarForScope` の4段目（全社共通）のカレンダーは全tenantで共用される（W3 review P3-N2-4。tenant列の追加はDDLが要るため未対応。多tenant化の前に対応する） | `.kiro/roadmap/2026-11-14-snf-nf01-fine-grained-epoch-plan.md` §9 RR-14 |
 | SRE-2 | **inboundを開放するまで、LB/WAFで `/external-api/**` を遮断する**（D-1） | appのOFF時の404に頼らず入口で止める（認証前のrate制限が無く、届けばDB接続・CPUを消費する）。解除はDG-05-INの署名後に、承認済み送信元だけを通すruleへ置き換える（外すだけにしない） | `ops/security/runbooks/integration-hub-public-api.md` §0 |
 | SRE-3 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`）にALBのsubnet CIDRを設定する | 未設定・空・広すぎる範囲・構文不正では本番は起動しない。公開APIを開ける場合は `integration.hub.security.trusted-proxies` も同じALB経路にそろえる | `forwarded-header-sanitize-notes.md` §3.3 |
-| SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
-| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
+| SRE-4 | LB / reverse proxy の idle timeout を**130秒以上**にする。確認: クラウドの管理画面／CLI で ALB の load balancer 属性 `idle_timeout.timeout_seconds` が130以上。ALB の前に reverse proxy・CDN を置く場合は、その idle timeout も同じく確かめる | 取込センターの検証は同期要求で、最長120秒＋αの間1 byteも返さない。60秒等の既定では504で途切れる（NF06のONの条件） | `feature-switches.md` 4.8.2 の6 |
+| SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止）。確認: (a) DB: 起動後に `SELECT COUNT(DISTINCT SUBSTRING_INDEX(host, ':', 1)) FROM information_schema.processlist WHERE user = '<アプリaccount>';` が1（接続元の task が1つ。PROCESS を持つ管理用の account で実行する）。(b) クラウドの管理画面／CLI: ECS service の desired count と running count が1、進行中の deployment が1件だけ、deployment configuration の maximum percent が100（新旧の task を重ねない。そのため minimum healthy percent は0になる） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
 | SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜7（§3.4）。<br>(4) Prometheusのscrape経路を決める（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）。経路は要決定（§1.6 の7） | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
 | SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。alertの閾値と通知先は要決定（§1.6 の8）。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
@@ -289,7 +322,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
   - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
   - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
-- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1、要決定（§1.6 の3））。
+- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1、要決定（§1.6 の3））。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
 - **Backup・PITR**:
   - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）について、DBA Lead と Operations の署名が **PENDING**（署名事項。§1.6 の10）。
   - **DBA-6**: prodの `.env.backup` を用意する（形式は `ops/backup/README.md` の「前提」「設定」）。
@@ -579,7 +612,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
-- `/actuator/health/readiness` がUPであることを確認する。
+- `/actuator/health/readiness` がUPであることを確認する。UPであれば §1.0 の18 の鍵検査も通っている（検査に失敗した起動はUPにならずに停止する）。
 - schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。
   - scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用なので、有効化は通常運用の再開を意味する。
   - 履歴取込の清掃（02:00）は、文書台帳の副本を廃棄候補にする。ただし処分には管理者の承認と執行が要るため、V197 の署名事項は scheduler の有効化の前提にしない。
