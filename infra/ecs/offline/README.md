@@ -23,6 +23,7 @@ pwsh infra/ecs/build-image.ps1
 
 ```powershell
 pwsh infra/ecs/offline/validate-task-definition.ps1
+pwsh infra/ecs/offline/test-validate-task-definition.ps1
 pwsh infra/ecs/offline/verify-offline-sim.ps1 -EgressNegativeSelfTestOnly
 pwsh infra/ecs/offline/verify-offline-sim.ps1
 ```

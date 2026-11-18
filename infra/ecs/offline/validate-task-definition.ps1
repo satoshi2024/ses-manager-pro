@@ -190,7 +190,10 @@ foreach ($cd in @($c, $scanner)) {
 foreach ($field in @('command', 'entryPoint')) {
   if (@($c.$field).Count -gt 0 -and $null -ne $c.$field) { Fail "ses-manager must keep the image $field (an override can pass Spring arguments such as --app.scheduling.enabled=true past this validator)" }
 }
-Ok 'no environmentFiles; ses-manager keeps the image command and entryPoint'
+foreach ($cd in @($c, $scanner)) {
+  if (@($cd.volumesFrom).Count -gt 0 -and $null -ne $cd.volumesFrom) { Fail "$($cd.name) must not use volumesFrom: mounts must be declared in mountPoints (clamav would otherwise reach uploads and privacy-trust)" }
+}
+Ok 'no environmentFiles or volumesFrom; ses-manager keeps the image command and entryPoint'
 
 # ClamAV sidecar: not essential (uploads fail closed while it is down), sized, health-checked, no app volumes.
 if ($scanner.essential -ne $false) { Fail 'clamav must not be essential: the app keeps serving and uploads stay in quarantine while it is down' }
@@ -258,6 +261,8 @@ foreach ($volumeName in @('uploads', $TrustVolume)) {
     if ($ap -notmatch '^fsap-[0-9a-f]{8,}$') { Fail "volume ${volumeName}: EFS accessPointId must be a real fsap-<hex> id" }
   }
   if ([string]$efs.transitEncryption -ne 'ENABLED') { Fail "volume ${volumeName}: EFS transitEncryption must be ENABLED" }
+  # The file system policy grants by the task role (deploy-runbook 1.6 item 11); without IAM the mount is anonymous.
+  if ([string]$efs.authorizationConfig.iam -ne 'ENABLED') { Fail "volume ${volumeName}: EFS authorizationConfig.iam must be ENABLED (deploy-runbook 1.6 item 11)" }
   $volumeAp[$volumeName] = $ap
   (Assert-EfsRootDirectoryRule $volumeName $efs) | ForEach-Object { $lines.Add($_) }
 }
@@ -267,18 +272,22 @@ $trustMount = @($c.mountPoints | Where-Object { $_.sourceVolume -eq $TrustVolume
 if (-not $uploadsMount -or $uploadsMount.containerPath -ne '/app/uploads' -or $uploadsMount.readOnly -eq $true) { Fail 'ses-manager must mount uploads read-write at /app/uploads' }
 if (-not $trustMount -or $trustMount.readOnly -ne $true -or [string]$trustMount.containerPath -notmatch '^/[^.]') { Fail 'ses-manager must mount privacy-trust read-only at an absolute path (deploy-runbook 1.6 item 11)' }
 $trustPath = ([string]$trustMount.containerPath).TrimEnd('/')
-Ok 'uploads (read-write) and privacy-trust (read-only, own access point) on EFS with transit encryption'
+Ok 'uploads (read-write) and privacy-trust (read-only, own access point) on EFS with transit encryption and IAM authorization'
 if ($Mode -eq 'Template') { Ok 'EFS-ACTUAL=DEFERRED (template static only)' }
 
 $envNames = @($c.environment | ForEach-Object { [string]$_.name })
 $secretNames = @($c.secrets | ForEach-Object { [string]$_.name })
 $allNames = $envNames + $secretNames
 
+# Spring binds every spelling of a property name (APP_FEATURES_NF01_ENABLED, app.features.nf01.enabled, ...) to the same
+# property, so names are compared by this key: upper case without '.', '_' and '-'.
+function NameKey([string]$name) { ($name.ToUpperInvariant() -replace '[._-]', '') }
+
 # The same setting twice (also across environment and secrets, or in another spelling Spring binds to the same
 # property) leaves the effective value to ordering; fail instead of guessing.
 $byKey = @{}
 foreach ($name in $allNames) {
-  $key = ($name.ToUpperInvariant() -replace '[._-]', '')
+  $key = NameKey $name
   if (-not $byKey.ContainsKey($key)) { $byKey[$key] = New-Object System.Collections.Generic.List[string] }
   $byKey[$key].Add($name)
 }
@@ -286,24 +295,56 @@ $duplicates = @($byKey.Values | Where-Object { $_.Count -gt 1 } | ForEach-Object
 if ($duplicates.Count -gt 0) { Fail ('settings given more than once: ' + ($duplicates -join ', ')) }
 Ok 'each setting given once'
 
+# Feature switches (feature-switches.md section 1, and the NF05 switches of deploy-runbook 1.7) are recognised by their
+# key, whatever the spelling, and must use the documented names: the first-start and secrets checks read those names.
+$switchKeyPattern = '^(FEATURENF[0-9A-Z]*ENABLED|APPFEATURES[0-9A-Z]*ENABLED|PRIVACYRETENTIONENABLED|PRIVACYDSARENABLED|INTEGRATIONHUB(PUBLICAPI|EXTERNALTRANSPORT)ENABLED)$'
+$switchNamePattern = '^(FEATURE_NF[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED|INTEGRATION_HUB_(PUBLICAPI|PUBLIC_API|EXTERNALTRANSPORT|EXTERNAL_TRANSPORT)_ENABLED)$'
+$switchNames = @($allNames | Where-Object { (NameKey $_) -match $switchKeyPattern })
+$misspelt = @($switchNames | Where-Object { $_ -cnotmatch $switchNamePattern })
+if ($misspelt.Count -gt 0) { Fail ('feature switches must use the documented names (FEATURE_NF*_ENABLED, PRIVACY_*_ENABLED, INTEGRATION_HUB_*_ENABLED; feature-switches.md 1): ' + ($misspelt -join ',')) }
+
 # Settings judged by their value must be visible, so they belong in environment, not in the secret store.
 $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY_BOOTSTRAP_ENABLED', 'SECURITY_BOOTSTRAP_EXPIRES_AT',
   'SECURITY_BOOTSTRAP_REOPEN_TICKET', 'BREAK_GLASS_USERNAMES', 'TRUSTED_PROXIES', 'TZ', 'FILE_SCANNER_HOST', 'FILE_SCANNER_PORT',
   'METRICS_SCRAPER_ENABLED', 'METRICS_SCRAPER_USERNAME', 'PRIVACY_TRUST_KMS_ANCHOR_FILE', 'FREEE_ENABLED', 'CLOUDSIGN_ENABLED',
   'LOCAL_LOGIN_ENABLED', 'OIDC_ENABLED', 'BREAK_GLASS_LOGIN_ENABLED', 'OIDC_REQUIRE_MFA_ASSURANCE', 'MFA_ENABLED',
   'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED')
-$hidden = @($secretNames | Where-Object { $mustBeVisible -contains $_ -or $_ -match '^(FEATURE_[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED|INTEGRATION_HUB_(PUBLICAPI|PUBLIC_API|EXTERNALTRANSPORT|EXTERNAL_TRANSPORT)_ENABLED)$' })
+$visibleKeys = @($mustBeVisible | ForEach-Object { NameKey $_ })
+$hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' })
 if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
 
 # deploy-runbook.md section 4: prod alone, and no other profile or configuration source the validator cannot read.
 $profiles = @($c.environment | Where-Object { $_.name -eq 'SPRING_PROFILES_ACTIVE' } | ForEach-Object { ([string]$_.value).Trim() })
-if ($profiles.Count -ne 1 -or $profiles[0] -ne 'prod') { Fail 'SPRING_PROFILES_ACTIVE must be exactly prod (deploy-runbook 4)' }
+if ($profiles.Count -ne 1 -or $profiles[0] -cne 'prod') { Fail 'SPRING_PROFILES_ACTIVE must be exactly prod (deploy-runbook 4)' }
 $configSources = @($allNames | Where-Object {
-    $k = ($_.ToUpperInvariant() -replace '[._-]', '')
+    $k = NameKey $_
     $k -eq 'SPRINGPROFILESINCLUDE' -or $k.StartsWith('SPRINGPROFILESGROUP') -or $k.StartsWith('SPRINGCONFIG')
   })
 if ($configSources.Count -gt 0) { Fail ('extra profile or configuration sources must not be set: ' + ($configSources -join ',')) }
-Ok 'SPRING_PROFILES_ACTIVE=prod alone; value-checked settings in environment; no extra profile or config source'
+$flyway = @($allNames | Where-Object { (NameKey $_).StartsWith('SPRINGFLYWAY') })
+if ($flyway.Count -gt 0) { Fail ('spring.flyway settings such as SPRING_FLYWAY_ENABLED must not be set (deploy-runbook 4): ' + ($flyway -join ',')) }
+Ok 'SPRING_PROFILES_ACTIVE=prod alone; value-checked settings in environment; no extra profile or config source; no Flyway setting'
+
+# Canonical property names bind just like the short names declared in application*.yml and win over the yml
+# defaults (APP_SECURITY_BOOTSTRAP_ENABLED reaches the property behind SECURITY_BOOTSTRAP_ENABLED, MANAGEMENT_* opens
+# actuator endpoints). Under these property trees only the declared short names are allowed, so every such setting is
+# one this validator reads. integration.hub is not among them: opening NF05 sets approval lists and the provider mode
+# that have no short name (DG-05 draft section 4), and its two switches are caught above in any spelling.
+$declared = New-Object System.Collections.Generic.HashSet[string]
+foreach ($yml in @('application.yml', 'application-prod.yml')) {
+  $ymlPath = Join-Path $RepoRoot "src\main\resources\$yml"
+  if (-not (Test-Path $ymlPath)) { Fail "cannot read $yml to learn the declared environment variable names" }
+  foreach ($m in [regex]::Matches((Get-Content $ymlPath -Raw), '\$\{([A-Z][A-Z0-9_]*)')) { $null = $declared.Add($m.Groups[1].Value) }
+}
+$null = $declared.Add('APP_SCHEDULING_ENABLED')
+$guardedTrees = @('APPFEATURES', 'APPSECURITY', 'APPSCHEDULING', 'MANAGEMENT', 'SPRINGMAIN', 'SERVERFORWARDHEADERSSTRATEGY')
+$canonical = @($allNames | Where-Object {
+    $n = $_
+    $k = NameKey $n
+    @($guardedTrees | Where-Object { $k.StartsWith($_) }).Count -gt 0 -and -not $declared.Contains($n)
+  })
+if ($canonical.Count -gt 0) { Fail ('settings under guarded property trees must use the short names declared in application.yml: ' + ($canonical -join ',')) }
+Ok 'no canonical-name override of feature switches, security, scheduling, management or forwarded-header settings'
 
 $secretOnly = @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET',
   'SESSION_HASH_KEY','MFA_ENCRYPTION_KEY','PWA_CONTEXT_SECRET','BP_BANK_ACCOUNT_ENCRYPTION_KEY',
@@ -359,7 +400,6 @@ $forbidden = [ordered]@{
 foreach ($name in $forbidden.Keys) {
   if ((EnvValues $name | ForEach-Object { $_.ToLowerInvariant() }) -contains $forbidden[$name]) { Fail "$name=$($forbidden[$name]) stops the prod start (deploy-runbook 1.0)" }
 }
-if ($allNames -contains 'SPRING_FLYWAY_ENABLED') { Fail 'SPRING_FLYWAY_ENABLED must not be set (deploy-runbook 4)' }
 if (((EnvValues 'CLOUDSIGN_ENABLED') | ForEach-Object { $_.ToLowerInvariant() }) -contains 'true' -and $allNames -notcontains 'CLOUDSIGN_CLIENT_ID') {
   Fail 'CLOUDSIGN_ENABLED=true without CLOUDSIGN_CLIENT_ID stops the prod start (deploy-runbook 1.0)'
 }
@@ -371,13 +411,24 @@ foreach ($name in @('JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS')) {
   if ($secretNames -contains $name) { Fail "$name must not come from the secret store: its contents could not be checked" }
   foreach ($value in @(EnvValues $name)) {
     if ($value -match '(^|\s)["'']?@') { Fail "$name must not read an @argfile: its contents could not be checked (deploy-runbook 1.0)" }
+    if ($value -match '-XX:(VMOptionsFile|Flags)=') { Fail "$name must not read JVM options from a file (-XX:VMOptionsFile / -XX:Flags): its contents could not be checked (deploy-runbook 1.0)" }
     $props = @([regex]::Matches($value, '(?:^|\s)["'']?-D([^=\s"'']+)') | ForEach-Object { $_.Groups[1].Value })
     $other = @($props | Where-Object { $_ -ne 'user.timezone' })
     if ($other.Count -gt 0) { Fail ("$name sets system properties other than user.timezone: " + ($other -join ',') + ' (use environment variables; deploy-runbook 1.0)') }
   }
 }
+# Spring also reads SPRING_APPLICATION_JSON as spring.application.json or spring_application_json; only the name read
+# below is allowed. From the secret store its contents could not be checked. compliance.* covers the fingerprint keys
+# (deploy-runbook 1.0 rows 23-25), which go by their own variables so that the key stays in the secret store.
+$jsonNames = @($allNames | Where-Object { (NameKey $_) -eq 'SPRINGAPPLICATIONJSON' })
+$jsonOther = @($jsonNames | Where-Object { $_ -cne 'SPRING_APPLICATION_JSON' })
+if ($jsonOther.Count -gt 0) { Fail ('SPRING_APPLICATION_JSON must be spelt exactly so that it is checked: ' + ($jsonOther -join ',')) }
+if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
+  Fail 'SPRING_APPLICATION_JSON must not come from the secret store: its contents could not be checked; pass the fingerprint keys by their environment variable names (deploy-runbook 1.0 rows 23-25)'
+}
 $guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
-  'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main')
+  'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main',
+  'compliance')
 function Get-JsonKeys([object]$node, [string]$prefix) {
   if ($node -is [System.Management.Automation.PSCustomObject]) {
     foreach ($p in $node.PSObject.Properties) {
@@ -394,16 +445,11 @@ foreach ($json in @(EnvValues 'SPRING_APPLICATION_JSON')) {
   $hit = @($keys | Where-Object { $k = $_; @($guarded | Where-Object { $k -eq $_ -or $k.StartsWith("$_.") }).Count -gt 0 })
   if ($hit.Count -gt 0) { Fail ('SPRING_APPLICATION_JSON sets guarded properties: ' + ($hit -join ',') + ' (use environment variables)') }
 }
-if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
-  Info 'SPRING_APPLICATION_JSON comes from the secret store and is not checked here: it may carry compliance.gate.fingerprint-keys only (deploy-runbook 1.0 rows 23-25)'
-}
 Ok 'no system property or SPRING_APPLICATION_JSON override of the checked settings'
 
 $breakGlass = @(EnvValues 'BREAK_GLASS_USERNAMES')
 $anchorFile = @(EnvValues 'PRIVACY_TRUST_KMS_ANCHOR_FILE')
-$featureSwitches = @($c.environment | Where-Object {
-    $_.name -match '^(FEATURE_NF[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED|INTEGRATION_HUB_(PUBLICAPI|PUBLIC_API|EXTERNALTRANSPORT|EXTERNAL_TRANSPORT)_ENABLED)$'
-  } | ForEach-Object { $_.name })
+$featureSwitches = $switchNames
 $schedulerValues = @(EnvValues 'APP_SCHEDULING_ENABLED' | ForEach-Object { $_.ToLowerInvariant() })
 if ($ExpectedScheduler -eq 'Disabled') {
   if ($schedulerValues.Count -ne 1 -or $schedulerValues[0] -ne 'false') {

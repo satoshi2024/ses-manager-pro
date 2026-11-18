@@ -32,6 +32,7 @@ class ProductionTaskDefinitionTemplateTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Path TEMPLATE = Path.of("infra", "ecs", "task-definition.prod.json");
     private static final Path VALIDATOR = Path.of("infra", "ecs", "offline", "validate-task-definition.ps1");
+    private static final Path SELF_TEST = Path.of("infra", "ecs", "offline", "test-validate-task-definition.ps1");
     private static final Pattern FEATURE_SWITCH =
             Pattern.compile("^(FEATURE_NF[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED)$");
 
@@ -122,7 +123,10 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("port を公開しない（app は 127.0.0.1 で clamd に届く）").isTrue();
     }
 
-    /** NF07 の trust 文書は EFS に置き、app は読取りだけで mount する（§1.6 の11。2026-11-18 決定）。第1期は file を指さない。 */
+    /**
+     * NF07 の trust 文書は EFS に置き、app は読取りだけで mount する（§1.6 の11。2026-11-18 決定）。第1期は file を指さない。
+     * EFS の file system policy は task role で許すため、uploads と trust の volume は IAM 認可で mount する。
+     */
     @Test
     void 雛形はNF07_trust文書のEFSを読取り専用でmountし第1期はfileを指さない() throws IOException {
         JsonNode taskDefinition = taskDefinition();
@@ -137,6 +141,11 @@ class ProductionTaskDefinitionTemplateTest {
         String trustAccessPoint = null;
         for (JsonNode volume : taskDefinition.path("volumes")) {
             String accessPoint = volume.path("efsVolumeConfiguration").path("authorizationConfig").path("accessPointId").asText();
+            if (!volume.path("efsVolumeConfiguration").isMissingNode()) {
+                assertThat(volume.path("efsVolumeConfiguration").path("authorizationConfig").path("iam").asText())
+                        .as("%s は IAM 認可で mount する（file system policy は task role で許す）", volume.path("name").asText())
+                        .isEqualTo("ENABLED");
+            }
             if ("uploads".equals(volume.path("name").asText())) {
                 uploadsAccessPoint = accessPoint;
             } else if ("privacy-trust".equals(volume.path("name").asText())) {
@@ -176,6 +185,12 @@ class ProductionTaskDefinitionTemplateTest {
         assertThat(validator).contains("ValidateSet('Template', 'Actual')").contains("ValidateSet('Initial', 'Steady')")
                 .contains("ValidateSet('Enabled', 'Disabled')").contains("-Phase Steady needs -Scheduler")
                 .contains("GetTempPath()").doesNotContain(".kiro\\reviews\\production-acceptance");
+        // RB-DEPLOY 第3次差分復審 P3: profile の大文字小文字、volumesFrom、file から読む JVM option、EFS の IAM 認可
+        assertThat(validator).contains("-cne 'prod'").contains("volumesFrom").contains("VMOptionsFile")
+                .contains("authorizationConfig.iam");
+        // 規則ごとの正例・負例（CI では動かないため、手で流す script が repository にあることだけを見る）
+        assertThat(SELF_TEST).exists();
+        assertThat(Files.readString(SELF_TEST, StandardCharsets.UTF_8)).contains(VALIDATOR.getFileName().toString());
     }
 
     private static JsonNode taskDefinition() throws IOException {
