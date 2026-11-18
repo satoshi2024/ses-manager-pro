@@ -9,6 +9,8 @@
 # - MySQL 8.4（RB-W 8.4 対応）: 本番 script と、実 MySQL 8.4 で動く integration の script・compose は、8.4 で削除された
 #   構文（RESET MASTER・SHOW MASTER STATUS・CHANGE MASTER TO 等）と、使わないと決めたもの（@@have_ssl・--binlog-format・
 #   SET_USER_ID）を書かない（行全体のコメントは除く）。
+# - EXIT trap（RB-W）: handler は関数を抜けた後に評価されるため、単一引用符で登録する handler に関数の local 変数を
+#   書かない（set -u で unbound variable になり後始末が動かない）。登録時に printf %q で展開するか global 変数を使う。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -237,10 +239,85 @@ EOF
   assert_eq "" "$out" "本番 script と integration は MySQL 8.4 で削除された構文（MASTER / SLAVE 等）と不使用と決めたものを使わない"
 }
 
+# EXIT trap の handler（common::trap_add '…' と trap '…' EXIT の、単一引用符で登録時に展開しないもの）が、同じ file の
+# local 変数を参照している行を出力する（<file>:<行番号>: <理由>）。handler は関数を抜けた後に評価されるため、local 変数は
+# set -u で unbound variable になり、後始末が動かない（uploads-local.sh の staging が残っていた。RB-W）。
+# handler から呼ぶ関数の中身までは追わない（後始末の関数は global 変数だけを使う）。
+trap_handlers_referencing_locals() { # <file>...
+  local f
+  for f in "$@"; do
+    awk -v q="'" '
+      BEGIN {
+        add_re = "common::trap_add[[:space:]]+" q "[^" q "]*" q
+        trap_re = "trap[[:space:]]+" q "[^" q "]*" q "[[:space:]]+EXIT"
+      }
+      FNR == NR {
+        if ($0 ~ /^[[:space:]]*local[[:space:]]/) {
+          n = split($0, tok, /[[:space:]]+/)
+          for (i = 1; i <= n; i++) {
+            t = tok[i]
+            if (t == "" || t == "local" || t ~ /^-/) continue
+            sub(/=.*/, "", t)
+            if (t ~ /^[A-Za-z_][A-Za-z0-9_]*$/) locals[t] = 1
+          }
+        }
+        next
+      }
+      /^[[:space:]]*#/ { next }
+      {
+        h = ""
+        if (match($0, add_re)) h = substr($0, RSTART, RLENGTH)
+        else if (match($0, trap_re)) h = substr($0, RSTART, RLENGTH)
+        while (h != "" && match(h, /[$][{]?[A-Za-z_][A-Za-z0-9_]*/)) {
+          v = substr(h, RSTART, RLENGTH)
+          sub(/^[$][{]?/, "", v)
+          if (v in locals) print FILENAME ":" FNR ": EXIT trap の handler が local 変数 " v " を参照している"
+          h = substr(h, RSTART + RLENGTH)
+        }
+      }' "$f" "$f"
+  done
+}
+
+# RB-W: 走査器の確認と、本番 script の EXIT trap の handler が local 変数を参照しないこと
+case_trap_handlers_do_not_reference_function_locals() {
+  local t out f
+  local -a files=()
+  t=$(mktemp -d)
+  cat > "$t/sample.sh" <<'EOF'
+f() {
+  local staging="$1"
+  common::trap_add 'rm -rf "$staging"'
+}
+g() {
+  local -a items=()
+  trap 'echo "${items[0]}"' EXIT
+}
+WORK=""
+h() {
+  WORK=/tmp/x
+  common::trap_add 'rm -rf "$WORK"'
+  local path=/tmp/y
+  common::trap_add "rm -rf -- $(printf '%q' "$path")"
+  common::trap_add 'restore::cleanup'
+}
+# common::trap_add 'rm -rf "$staging"'
+EOF
+  out=$(trap_handlers_referencing_locals "$t/sample.sh")
+  assert_contains "$out" "sample.sh:3: " "local 変数を参照する trap_add の handler を検出する"
+  assert_contains "$out" "sample.sh:7: " "local 変数を参照する trap '…' EXIT を検出する"
+  assert_eq 2 "$(grep -c . <<< "$out")" "global 変数・登録時に展開した handler・関数呼び出し・コメントは検出しない"
+  rm -rf "$t"
+
+  while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
+  out=$(trap_handlers_referencing_locals "${files[@]}")
+  assert_eq "" "$out" "本番 script の EXIT trap の handler は local 変数を参照しない（登録時に展開するか global 変数を使う）"
+}
+
 run_case case_pipefail_scanner_detects_each_form
 run_case case_pipefail_production_scripts_have_no_early_exit_reader_after_pipe
 run_case case_pipefail_binlog_size_from_logs_with_large_list
 run_case case_pipefail_validate_db_check_tables_with_large_output
 run_case case_mysql84_no_removed_syntax
+run_case case_trap_handlers_do_not_reference_function_locals
 
-test_summary "本番 script の横断的な契約（pipefail と SIGPIPE・MySQL 8.4）"
+test_summary "本番 script の横断的な契約（pipefail と SIGPIPE・MySQL 8.4・EXIT trap）"

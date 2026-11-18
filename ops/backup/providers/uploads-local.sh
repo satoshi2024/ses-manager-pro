@@ -87,7 +87,10 @@ uploads_local::snapshot() {
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   local staging="$staging_parent/uploads-snap-$stamp-$$"
   mkdir -p "$staging"
-  common::trap_add 'rm -rf "$staging"'
+  # 失敗したら staging を消す（成功時は末尾の trap - EXIT で外す）。EXIT trap は関数を抜けた後に評価されるため、
+  # 関数の local 変数（$staging）を handler に書くと set -u で unbound variable になり、staging が残っていた（RB-W）。
+  # 登録時に path を展開し、printf %q で空白・引用符・改行を含む path も 1 語のまま渡す。
+  common::trap_add "rm -rf -- $(printf '%q' "$staging")"
 
   # 通常 file のみ複製（検査済み）
   local entry=""

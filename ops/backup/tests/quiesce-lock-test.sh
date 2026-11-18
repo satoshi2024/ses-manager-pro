@@ -3,7 +3,7 @@
 #
 # baseline §5 failure inventory のうち HFP-03-002 担当分 + RQ-002/006/008/009:
 # lock race、timeout、provider partial failure、replica 未静止、scheduler active、
-# DDL lock conflict、解除 failure、special file 拒否、uploads snapshot の同一 filesystem 判定（st_dev。RB-W）。
+# DDL lock conflict、解除 failure、special file 拒否、uploads snapshot の同一 filesystem 判定（st_dev）と失敗時の staging の後始末（RB-W）。
 # fake mysql / fake replica・scheduler fixture を使い、実 DB には接続しない。
 set -uo pipefail
 
@@ -366,6 +366,27 @@ case_uploads_snapshot_filesystem_unknown_rejected() {
   done
 }
 
+# RB-W: staging を作った後に失敗したら、EXIT trap が staging を消す（修正前は trap の handler が関数の local 変数を参照し、
+# set -u で unbound variable になって staging が残っていた）。空白と引用符を含む staging の親 path でも消す。
+# 失敗は jq の stub（$T/bin/jq。inventory の JSON 化で失敗する）で起こす（本物の jq が無い環境でも同じ経路を通る）。
+case_uploads_snapshot_failure_removes_staging() {
+  setup_common
+  local parent="$T/stg dir's"
+  mkdir -p "$T/uploads/sub" "$parent" "$T/bin"
+  printf 'x\n' > "$T/uploads/a.txt"
+  printf 'y\n' > "$T/uploads/sub/b.txt"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "jq: 試験のための失敗" >&2' 'exit 5' > "$T/bin/jq"
+  chmod +x "$T/bin/jq"
+  UP_OUT=$(PATH="$T/bin:$PATH" "$PROVIDERS/uploads-local.sh" snapshot "$T/uploads" "$parent" "$T/snap.json" 2>&1)
+  UP_RC=$?
+  assert_nonzero "$UP_RC" "staging を作った後の失敗は非 0"
+  assert_contains "$UP_OUT" "jq: 試験のための失敗" "staging を作った後の段階で失敗した（前提）"
+  assert_not_contains "$UP_OUT" "unbound variable" "EXIT trap が unbound variable にならない"
+  assert_eq "" "$(find "$parent" -mindepth 1 2>/dev/null)" "失敗したら staging（uploads-snap-*）を消す"
+  assert_no_file "$T/snap.json" "失敗したら snapshot JSON を書かない"
+  assert_eq "2" "$(find "$T/uploads" -type f | wc -l | tr -d ' ')" "source は変えない"
+}
+
 case_quiesce_no_secret_leak() {
   setup_quiesce
   # shellcheck disable=SC1091
@@ -398,6 +419,7 @@ run_case case_uploads_snapshot_encoded_name
 run_case case_uploads_snapshot_same_filesystem_by_device
 run_case case_uploads_snapshot_different_filesystem_rejected
 run_case case_uploads_snapshot_filesystem_unknown_rejected
+run_case case_uploads_snapshot_failure_removes_staging
 run_case case_quiesce_no_secret_leak
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
