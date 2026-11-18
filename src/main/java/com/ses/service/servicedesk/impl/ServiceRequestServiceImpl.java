@@ -171,7 +171,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
 
         validateLinkedEntities(tenantId, req.getCustomerId(), req.getContactId(), req.getContractId(),
-                req.getProjectId(), req.getEngineerId());
+                req.getProjectId(), req.getEngineerId(), isPortal);
 
         // 担当者検証 (ポータル起票時は常にnull、内部起票時は存在・有効・適格ロール検証)
         Long effectiveOwnerUserId = isPortal ? null : req.getOwnerUserId();
@@ -407,7 +407,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
 
         validateLinkedEntities(currentTenant(), existing.getCustomerId(), req.getContactId(), req.getContractId(),
-                req.getProjectId(), req.getEngineerId());
+                req.getProjectId(), req.getEngineerId(), false);
         validateOwnerUser(req.getOwnerUserId());
 
         int expectedVersion = req.getVersion();
@@ -936,26 +936,35 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
     }
 
-    /** 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。 */
+    /**
+     * 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。
+     *
+     * <p>ポータルからの起票（{@code isPortal}）では、各対象を「存在しない」と「自社のものではない」で区別しない
+     * （同じ status・key）。社外の利用者に他社や社内の業務対象のIDが存在するかを判別させないため
+     * （RB-POSTLAUNCH review P2-1。controller の検証と同じ key で、service 境界でも同じ秘匿を保つ）。</p>
+     */
     private void validateLinkedEntities(String tenantId, Long customerId, Long contactId, Long contractId,
-                                        Long projectId, Long engineerId) {
+                                        Long projectId, Long engineerId, boolean isPortal) {
         if (contactId != null) {
             CustomerContact contact = contactMapper.selectByIdForTenant(contactId, customerId, tenantId);
             if (contact == null || !Objects.equals(customerId, contact.getCustomerId())) {
-                throw BusinessException.of(400, "error.serviceDesk.contactCustomerMismatch");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalContactNotOwned"
+                        : "error.serviceDesk.contactCustomerMismatch");
             }
         }
         Contract contract = null;
         if (contractId != null) {
             contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, tenantId);
             if (contract == null || !Objects.equals(customerId, contract.getCustomerId())) {
-                throw BusinessException.of(400, "error.serviceDesk.contractCustomerMismatch");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalContractNotOwned"
+                        : "error.serviceDesk.contractCustomerMismatch");
             }
         }
         if (projectId != null) {
             Project project = projectMapper.selectByIdForCustomerAndTenant(projectId, customerId, tenantId);
             if (project == null || !Objects.equals(customerId, project.getCustomerId())) {
-                throw BusinessException.of(400, "error.serviceDesk.projectCustomerMismatch");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalProjectNotOwned"
+                        : "error.serviceDesk.projectCustomerMismatch");
             }
             if (contract != null && !Objects.equals(projectId, contract.getProjectId())) {
                 throw BusinessException.of(400, "error.serviceDesk.projectContractMismatch");
@@ -963,13 +972,21 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         if (engineerId != null) {
             Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
-            if (engineer == null) {
+            if (isPortal) {
+                // 存在しない要員と自社の契約に無い要員を同じ key にする（自社の契約に居ることを確かめてから、
+                // 指定された契約との一致を見る。一致しない場合はどちらも自社の業務対象なので区別してよい）
+                Long ownContracts = contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId);
+                if (engineer == null || ownContracts == null || ownContracts == 0) {
+                    throw BusinessException.of(400, "error.serviceDesk.portalEngineerNotOnOwnContract");
+                }
+            } else if (engineer == null) {
                 throw BusinessException.of(400, "error.serviceDesk.engineerNotFound");
             }
             if (contract != null && !Objects.equals(engineerId, contract.getEngineerId())) {
                 throw BusinessException.of(400, "error.serviceDesk.engineerContractMismatch");
             }
-            if (contract == null && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
+            if (!isPortal && contract == null
+                    && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
                 throw BusinessException.of(400, "error.serviceDesk.engineerNotOnCustomerContract");
             }
         }

@@ -26,8 +26,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * そのため対象範囲では:
  * <ul>
  *   <li>{@code BusinessException.of(...)}・{@code new BusinessException(...)} の引数の文字列リテラルに日本語を置かない。</li>
- *   <li>{@code BusinessException.of} の message key（ドット区切り）は4つの bundle に存在する。全体共通の内部コード
- *       （{@code LEGAL_ENTITY_CONTEXT_REQUIRED} 等）は key ではなく、status 別の汎用文言になる既存の扱いなので対象外。</li>
+ *   <li>{@code BusinessException.of} の引数中の message key（ドット区切り。三項演算子で選ぶ2つ目の key も含む）は
+ *       4つの bundle に存在する。全体共通の内部コード（{@code LEGAL_ENTITY_CONTEXT_REQUIRED} 等）は key ではなく、
+ *       status 別の汎用文言になる既存の扱いなので対象外。</li>
+ *   <li>{@code new BusinessException(code, "error.x")} は messageKey を持たず key を解決しないため、key を渡さない
+ *       （RB-POSTLAUNCH review P3-7）。定数・変数に入れた文言は検出しない（現在の範囲には無い）。</li>
  * </ul>
  * 引数の値を {@code {0}} で埋め込む文言は作らない。{@code SafeErrorPolicy.safeArgs} は数値・真偽値・enum 以外を
  * 「入力値」に置き換えるため、カテゴリ名・状態名などの文字列は表示されないからである。
@@ -79,12 +82,17 @@ class Nf02BusinessExceptionMessageKeyGuardTest {
                     continue;
                 }
                 Matcher literal = STRING.matcher(args);
-                boolean firstLiteral = true;
+                boolean factory = call.group().startsWith("BusinessException");
                 while (literal.find()) {
                     String text = literal.group(1);
                     if (JAPANESE.matcher(text).find()) {
                         violations.add(site + " : 日本語の生文言 \"" + text + "\"");
-                    } else if (firstLiteral && call.group().startsWith("BusinessException") && KEY.matcher(text).matches()) {
+                    } else if (KEY.matcher(text).matches() && !factory) {
+                        // new BusinessException(code, "error.x") は messageKey を持たず key を解決しない（汎用文言になる）
+                        violations.add(site + " : new BusinessException に key " + text
+                                + " を渡している（BusinessException.of を使う）");
+                    } else if (KEY.matcher(text).matches()) {
+                        // 三項演算子等で key を選ぶ場合も、引数中の全ての key が bundle にあること（RB-POSTLAUNCH review P3-7）
                         for (Properties bundle : bundles) {
                             if (!bundle.containsKey(text)) {
                                 violations.add(site + " : key " + text + " が bundle に無い");
@@ -92,7 +100,6 @@ class Nf02BusinessExceptionMessageKeyGuardTest {
                             }
                         }
                     }
-                    firstLiteral = false;
                 }
             }
         }

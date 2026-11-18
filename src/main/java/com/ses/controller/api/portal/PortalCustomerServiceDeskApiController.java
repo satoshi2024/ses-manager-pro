@@ -166,15 +166,14 @@ public class PortalCustomerServiceDeskApiController {
             }
         }
 
-        // 要員が指定された場合の存在検証および自社契約所属検証
+        // 要員が指定された場合の存在検証および自社契約所属検証。存在しない要員と他社契約の要員は同じ status・key で拒否し、
+        // 社外の利用者に要員IDの存在を判別させない（契約・案件・担当者と同じ秘匿。RB-POSTLAUNCH review P2-1）。
+        // 検索も両方の場合に同じだけ行う。
         if (req.getEngineerId() != null) {
             Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, req.getEngineerId());
-            if (engineer == null) {
-                throw BusinessException.of(400, "error.serviceDesk.engineerNotFound");
-            }
             Long contractCount = contractMapper.countByCustomerAndEngineerForTenant(
                     custId, req.getEngineerId(), tenantId);
-            if (contractCount == null || contractCount == 0) {
+            if (engineer == null || contractCount == null || contractCount == 0) {
                 throw BusinessException.of(400, "error.serviceDesk.portalEngineerNotOnOwnContract");
             }
         }
