@@ -55,10 +55,11 @@ class KmsPrivacyTrustSourceStallTest {
     private final KmsPrivacyTrustSourceTest.MutableClock clock = new KmsPrivacyTrustSourceTest.MutableClock(T0);
     private final KeyPair key = ed25519();
     private KmsTrustProperties properties;
+    private Path file;
 
     @BeforeEach
     void setUp() throws IOException {
-        Path file = directory.resolve("nf07-trust.json").toAbsolutePath();
+        file = directory.resolve("nf07-trust.json").toAbsolutePath();
         Files.write(file, bytes(document(T0, List.of(policyAnchor("policy-issuer", "kms-2026a", key, "ACTIVE",
                 T0.minus(Duration.ofDays(1)), T0.plus(Duration.ofDays(30)), TENANT)), List.of(), Map.of())));
         properties = new KmsTrustProperties();
@@ -131,6 +132,73 @@ class KmsPrivacyTrustSourceStallTest {
     }
 
     @Test
+    void 停止から戻ればLOADEDを記し二度目の停止でもWARNを出す() throws Exception {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(KmsPrivacyTrustSource.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            KmsPrivacyTrustSource source = source(Duration.ofSeconds(20));
+            assertThat(status(source)).isEqualTo(RevocationStatus.ACTIVE);
+
+            // 1回目の停止（reload-interval の外で閉じる）→ 戻る
+            files.block();
+            Future<RevocationStatus> first = background.submit(() -> status(source));
+            assertThat(files.awaitBlocked()).isTrue();
+            clock.set(T0.plusSeconds(31));
+            assertThat(status(source)).isEqualTo(RevocationStatus.UNKNOWN);
+            files.release();
+            first.get(5, TimeUnit.SECONDS);
+            assertThat(status(source)).isEqualTo(RevocationStatus.ACTIVE);
+
+            // 2回目の停止
+            files.block();
+            Future<RevocationStatus> second = background.submit(() -> status(source));
+            assertThat(files.awaitBlocked()).isTrue();
+            clock.set(T0.plusSeconds(62));
+            assertThat(status(source)).isEqualTo(RevocationStatus.UNKNOWN);
+            files.release();
+            second.get(5, TimeUnit.SECONDS);
+
+            List<String> states = appender.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .filter(message -> message.contains("state="))
+                    .map(message -> message.contains("document.stalled") ? "STALLED"
+                            : message.contains("state=LOADED") ? "LOADED" : "OTHER")
+                    .toList();
+            assertThat(states).containsSubsequence("LOADED", "STALLED", "LOADED", "STALLED");
+            assertThat(states.stream().filter("STALLED"::equals).count()).as("停止ごとに1回").isEqualTo(2);
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    void fileが変わった後の読込みが止まれば他の判定は古い内容を使わずに閉じる() throws Exception {
+        KmsPrivacyTrustSource source = source(Duration.ofSeconds(20));
+        assertThat(status(source)).isEqualTo(RevocationStatus.ACTIVE);
+
+        // 鍵を失効させた文書に置き換える（大きさと最終更新日時が変わる）。stat は返り、読込みが止まる
+        Files.write(file, bytes(document(T0.plusSeconds(1), List.of(policyAnchor("policy-issuer", "kms-2026a", key,
+                "REVOKED", T0.minus(Duration.ofDays(1)), T0.plus(Duration.ofDays(30)), TENANT)), List.of(), Map.of())));
+        Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.from(T0.plusSeconds(3600)));
+        files.blockReads();
+        Future<RevocationStatus> stuck = background.submit(() -> status(source));
+        assertThat(files.awaitBlocked()).isTrue();
+
+        // reload-interval の内でも、変わった file の読込みが止まっている間は古い内容（ACTIVE）を返さない
+        long started = System.nanoTime();
+        assertThat(status(source)).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(PrivacyTrustSource.policyAnchorsOf(source).anchors()).isEmpty();
+        assertThat(elapsedMillis(started)).isLessThan(BOUND_MILLIS);
+
+        files.release();
+        assertThat(stuck.get(5, TimeUnit.SECONDS)).isEqualTo(RevocationStatus.REVOKED);
+        assertThat(status(source)).isEqualTo(RevocationStatus.REVOKED);
+    }
+
+    @Test
     void 起動時の検査はI_Oが止まれば上限で打ち切りflagがONなら起動を止める() {
         KmsPrivacyTrustSource source = source(Duration.ofMillis(200));
         files.block();
@@ -175,8 +243,18 @@ class KmsPrivacyTrustSourceStallTest {
     private static final class BlockingFiles implements KmsPrivacyTrustSource.TrustFileAccess {
         private volatile CountDownLatch gate;
         private volatile CountDownLatch blocked = new CountDownLatch(1);
+        private volatile boolean statBlocks = true;
 
+        /** 次の stat（と読込み）を止める。 */
         void block() {
+            statBlocks = true;
+            blocked = new CountDownLatch(1);
+            gate = new CountDownLatch(1);
+        }
+
+        /** stat は返し、次の読込みだけを止める。 */
+        void blockReads() {
+            statBlocks = false;
             blocked = new CountDownLatch(1);
             gate = new CountDownLatch(1);
         }
@@ -195,7 +273,9 @@ class KmsPrivacyTrustSourceStallTest {
 
         @Override
         public BasicFileAttributes attributes(Path path) throws IOException {
-            pause();
+            if (statBlocks) {
+                pause();
+            }
             return KmsPrivacyTrustSource.TrustFileAccess.SYSTEM.attributes(path);
         }
 
@@ -212,7 +292,8 @@ class KmsPrivacyTrustSourceStallTest {
             }
             blocked.countDown();
             try {
-                // interrupt では戻らない hard mount に近づけるため、release されるまで待つ（試験の後始末で必ず release する）
+                // release されるか、別の block() で gate が替わるまで待つ（試験の後始末で必ず release する）。本物の hard mount と
+                // 違い interrupt では IOException で戻る（executor の shutdownNow で後始末できるようにするため）
                 while (!current.await(100, TimeUnit.MILLISECONDS)) {
                     if (gate != current) {
                         return;

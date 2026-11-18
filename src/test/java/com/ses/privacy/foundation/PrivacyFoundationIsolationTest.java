@@ -119,6 +119,12 @@ class PrivacyFoundationIsolationTest {
                 if (source.contains("import static com.ses.privacy.foundation.PurePolicyVerificationKernel")) {
                     violations.add(relative + " static import");
                 }
+                // method 参照は呼出しの "(" を含まないため、どこにも書かせない（delta review 2 P3-3）
+                for (String reference : java.util.List.of("::verifySignature", "::verifyProductionPolicySignature")) {
+                    if (source.contains(reference)) {
+                        violations.add(relative + " " + reference);
+                    }
+                }
             }
         }
         String kernel = com.ses.testsupport.JavaSourceText.stripComments(Files.readString(

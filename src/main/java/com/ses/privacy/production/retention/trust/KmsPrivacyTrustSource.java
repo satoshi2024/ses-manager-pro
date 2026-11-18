@@ -339,13 +339,37 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
         } finally {
             ioStartedNanos = 0;
         }
-        checkedAt = now;
         Snapshot current = cached;
-        if (current != null && current.sameFile(attributes)
-                && now.isBefore(current.loadedAt().plus(reloadInterval))) {
-            return current;
+        if (current != null && current.sameFile(attributes)) {
+            // file は変わっていない（直前の内容を確かめた）
+            checkedAt = now;
+            if (now.isBefore(current.loadedAt().plus(reloadInterval))) {
+                if (current.document() != null) {
+                    noteRecovered();
+                }
+                return current;
+            }
+        } else {
+            // file が変わった（失効を書いた文書を置いた等）。読込みが止まっている間に、lock を取れなかった判定が古い内容を
+            // 使わないよう、読む前に確かめた時刻を消す（delta review 2 P3-2）
+            checkedAt = null;
         }
-        return remember(load(attributes, now));
+        Snapshot loaded = load(attributes, now);
+        if (loaded.document() != null) {
+            checkedAt = now;
+        }
+        return remember(loaded);
+    }
+
+    /**
+     * 停止・読めない状態（{@code UNAVAILABLE}）から読めた状態に戻ったことを記す（delta review 2 P3-1。記さないと、次の停止の
+     * WARN が状態の重複として出なくなる）。鮮度の上限の外（{@code STALE}）は戻ったことにしない（読めても使えないため）。
+     */
+    private void noteRecovered() {
+        String state = lastState;
+        if (state == null || state.startsWith("UNAVAILABLE")) {
+            noteState("LOADED", true);
+        }
     }
 
     private Snapshot load(BasicFileAttributes attributes, Instant now) {
@@ -403,6 +427,9 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
             log.info("{}: NF07のtrust文書を読みました: generatedAt={} policyAnchors={} holdReleaseAnchors={}",
                     LOG_CODE_STATE, document.generatedAt(), document.policyRegistry().anchors().size(),
                     document.holdReleaseRegistry().anchors().size());
+        } else {
+            // 同じ file を読み直した（停止から戻った場合を含む）
+            noteRecovered();
         }
         return snapshot;
     }
