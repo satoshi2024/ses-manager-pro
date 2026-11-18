@@ -106,6 +106,24 @@ class KoZhCnBundleJapaneseResidueTest {
         assertThat(violations).as("zh_CN に残った日本語の字形").isEmpty();
     }
 
+    /**
+     * RB-POSTLAUNCH A-4: 「要員」を簡体字にしただけの語は中国語として通じないため、zh_CN の値に使わない。
+     * 管理対象の人は「人员」、要員ロールの利用者アカウントは「工程师」と訳す（ロール名の訳に合わせる）。
+     * 簡体字を本 file に書かないため、語は Unicode escape で持つ。
+     */
+    @Test
+    void zhCNの値は要員の字形変換だけの語を使わない() throws IOException {
+        String calque = "要员";
+        Properties zh = load("zh_CN");
+        List<String> violations = new ArrayList<>();
+        for (String key : new TreeSet<>(zh.stringPropertyNames())) {
+            if (zh.getProperty(key).contains(calque)) {
+                violations.add(key + "=" + zh.getProperty(key));
+            }
+        }
+        assertThat(violations).isEmpty();
+    }
+
     /** 許可した key が bundle から消えたり、日本語の表記でなくなったりしたら、許可を外す。 */
     @Test
     void 許可リストの理由は空でなくkeyは今も日本語の表記を持つ() throws IOException {
