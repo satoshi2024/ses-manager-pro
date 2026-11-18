@@ -135,10 +135,18 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    - `mysql-apt-config` deb は使わない（旧版 0.8.33-1 の SHA-256 を一次資料で確認できないため）。
      fingerprint を確認した鍵だけで keyring を作り、apt source を直接定義する。
    - MySQL client / server-core は exact version、base image は digest で固定する。tar / util-linux などの
-     Essential パッケージは明示的には再インストールしない。lock が空なら Debian パッケージ版は記録だけを行う（build ログに WARN）。
+     Essential パッケージは明示的には導入・再インストールしないが、**依存解決で base image の版から更新されることがある**
+     （「base image の版を保つ」とは限らない。RB-W W-4）。実際の版は image 内の `dpkg-packages.tsv` が正本で、Essential の
+     base image からの変化は `essential-packages.tsv`（パッケージ名・base の版・導入後の版・same/changed/added/removed）に
+     記録され、変化があれば build ログに WARN が出る。Essential を含む全パッケージの版を固定するのは lock で、
+     lock が空なら Debian パッケージ版は記録だけを行う（build ログに WARN）。
+   - 機械的な照合: Dockerfile の最後の RUN（`install-toolchain.sh --verify-manifest`）が image の実際の dpkg の版と
+     `dpkg-packages.tsv`・`toolchain.env` の SHA-256 を照合し、一致しなければ build が失敗する。`record` も build 後の image で
+     network なしの一時コンテナの `dpkg-query` を実行して同じ照合を行い、一致しなければ何も記録しない。
    - `<evidence-dir-2>` に `tool-content-id.txt`（content ID）、`tool-image-id.txt`（image ID。記録のみ）、
      `tool-image-record.txt`（content ID・image ID・image store の種類・storage driver・Docker version）、
-     `image-manifest/`（image 内の `toolchain.env` = 固定値、`dpkg-packages.tsv` = 全パッケージ版）を書く。既存の記録は上書きしない。
+     `image-manifest/`（image 内の `toolchain.env` = 固定値、`dpkg-packages.tsv` = 全パッケージ版、`essential-packages.tsv` =
+     Essential の base image からの変化）を書く。既存の記録は上書きしない。
 3. **pin**: `docker-compose.yml` の `x-ses-backup-tool-content-id` を 2. の `tool-content-id.txt` の値に書き換えて commit する
    （compose は image に COPY されないため、この commit で image は変わらない）。
 4. **配布 tar の作成**（2. の build 機で）:

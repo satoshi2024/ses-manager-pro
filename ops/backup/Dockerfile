@@ -2,8 +2,11 @@
 # HFP-03 バックアップツールイメージ（Oracle MySQL 8 client + restic）
 # - `# syntax=` 行は置かない（build のたびに docker/dockerfile:1 の floating tag の frontend image を
 #   registry から取得させないため。本 Dockerfile は builtin frontend の機能だけを使う）。
-# - base image は digest 固定（debian bookworm-slim）。tar / util-linux 等の Essential パッケージは
-#   再インストールせず base image の版のまま使う（base digest で固定）。
+# - base image は digest 固定（debian bookworm-slim）。tar / util-linux 等の Essential パッケージは明示的には
+#   導入・再インストールしないが、MySQL client 等の依存解決で base image の版から更新され得る（RB-W W-4）。
+#   実際の版は image 内の dpkg-packages.tsv が正本で、Essential の変化は essential-packages.tsv に記録される。
+#   最後の RUN（install-toolchain.sh --verify-manifest）が、image の実際の dpkg の版と dpkg-packages.tsv の
+#   一致を確かめ、一致しなければ build を失敗させる。
 # - MySQL client は Oracle MySQL APT repo から exact version で固定導入する。
 #   Alpine の汎用 mysql-client（MariaDB 系: HFP-03-BL-013）は使用しない。
 # - Oracle MySQL APT repo の署名鍵は SHA-256 と full fingerprint で検証し、apt source を直接定義する。
@@ -48,5 +51,7 @@ COPY providers/ /usr/local/lib/ses-backup/providers/
 COPY *.sh /usr/local/bin/
 COPY tests/integration-pitr.sh /usr/local/bin/
 RUN chmod 700 /usr/local/bin/*.sh /usr/local/lib/ses-backup/providers/*.sh
+# 最後の層: image の実際の dpkg の版が記録した dpkg-packages.tsv と一致することを確かめる（RB-W W-4）
+RUN bash /usr/local/share/ses-backup/image-build/install-toolchain.sh --verify-manifest
 
 WORKDIR /var/lib/ses-backup

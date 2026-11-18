@@ -79,10 +79,21 @@ case "${1:-} ${2:-}" in
   "save -o") printf 'fake image tar\n' > "$3"; exit 0 ;;
   "create "*) printf '%s\n' fakecid; exit 0 ;;
   "cp "*)
+    # image 内の版一覧（toolchain.env の dpkg_packages_sha256 は dpkg-packages.tsv の SHA-256。FAKE_MANIFEST_BAD_SHA で崩す）
     dest=${*: -1}
     mkdir -p "$dest"
-    printf 'base_image=fake\n' > "$dest/toolchain.env"
     printf 'bash\t5.2\tamd64\n' > "$dest/dpkg-packages.tsv"
+    sha=$(sha256sum "$dest/dpkg-packages.tsv" | cut -d' ' -f1)
+    [[ -n "${FAKE_MANIFEST_BAD_SHA:-}" ]] && sha=$(printf '%064d' 0)
+    printf 'base_image=fake\ndpkg_packages_sha256=%s\n' "$sha" > "$dest/toolchain.env"
+    exit 0 ;;
+  "run --rm")
+    # build 後の image の dpkg-query（FAKE_DPKG_RUN を printf %b で返す。FAKE_DPKG_RUN_RC で失敗させる）
+    case "$*" in
+      *"--entrypoint dpkg-query"*)
+        printf '%b' "${FAKE_DPKG_RUN:-ii \tbash\t5.2\tamd64\n}"
+        exit "${FAKE_DPKG_RUN_RC:-0}" ;;
+    esac
     exit 0 ;;
   "rm "*) exit 0 ;;
 esac
@@ -94,7 +105,7 @@ MOCK
   export DOCKER_BIN="$T/bin/docker"
   export FAKE_IMAGE_ID="$ID_CLASSIC" FAKE_LAYERS="$LAYERS_DEFAULT" FAKE_CONFIG="$CONFIG_DEFAULT"
   export FAKE_DRIVER_STATUS="$STATUS_CLASSIC" FAKE_STORAGE_DRIVER=overlay2
-  unset FAKE_RETAG_ID FAKE_RETAG_LAYERS FAKE_RETAG_DONE
+  unset FAKE_RETAG_ID FAKE_RETAG_LAYERS FAKE_RETAG_DONE FAKE_MANIFEST_BAD_SHA FAKE_DPKG_RUN FAKE_DPKG_RUN_RC
 }
 
 # 現行の production compose を複製し、pin 値を差し替えたものを作る
@@ -214,6 +225,36 @@ case_record_writes_store_and_refuses_overwrite() {
   run_tool record --out "$T/rec"
   assert_nonzero "$TOOL_RC" "既存の記録は上書きしない"
   assert_contains "$TOOL_OUT" "上書きしません" "上書き拒否を通知"
+}
+
+# RB-W W-4: record は build 後の image の実際の dpkg の版が image 内の dpkg-packages.tsv（と toolchain.env の SHA-256）と
+# 一致することを確かめ、一致しなければ何も記録しない（「Essential は base の版を保つ」等の説明に頼らず、事実を照合する）。
+case_record_verifies_image_dpkg_against_manifest() {
+  setup_fake_docker
+  run_tool record --out "$T/ok"
+  assert_zero "$TOOL_RC" "実際の版と dpkg-packages.tsv が一致すれば記録する"
+  assert_contains "$(cat "$FAKE_DOCKER_LOG")" "run --rm --network none --entrypoint dpkg-query $ID_CLASSIC -W" \
+    "network なしの一時コンテナで、解決した image ID の dpkg-query を実行する"
+  export FAKE_DPKG_RUN='ii \tbash\t5.2.1\tamd64\n'
+  run_tool record --out "$T/mismatch"
+  assert_nonzero "$TOOL_RC" "実際の版が dpkg-packages.tsv と違えば失敗"
+  assert_contains "$TOOL_OUT" "image の実際の dpkg の版が dpkg-packages.tsv と一致しません" "不一致を通知"
+  assert_contains "$TOOL_OUT" "5.2.1" "差分を表示"
+  assert_no_file "$T/mismatch/tool-content-id.txt" "不一致なら content ID を記録しない"
+  export FAKE_DPKG_RUN='ii \tbash\t5.2\tamd64\nii \ttar\t1.34\tamd64\n'
+  run_tool record --out "$T/extra"
+  assert_nonzero "$TOOL_RC" "記録に無いパッケージが image にあれば失敗"
+  unset FAKE_DPKG_RUN
+  export FAKE_MANIFEST_BAD_SHA=1
+  run_tool record --out "$T/bad-sha"
+  assert_nonzero "$TOOL_RC" "toolchain.env の dpkg_packages_sha256 が dpkg-packages.tsv と違えば失敗"
+  assert_contains "$TOOL_OUT" "dpkg_packages_sha256" "SHA-256 の不一致を通知"
+  assert_no_file "$T/bad-sha/tool-image-record.txt" "SHA-256 不一致なら記録しない"
+  unset FAKE_MANIFEST_BAD_SHA
+  export FAKE_DPKG_RUN_RC=1
+  run_tool record --out "$T/run-fail"
+  assert_nonzero "$TOOL_RC" "dpkg-query を実行できなければ失敗"
+  unset FAKE_DPKG_RUN_RC
 }
 
 case_save_and_load_by_content_id() {
@@ -447,13 +488,66 @@ MOCK
 [[ "${1:-}" == --print-architecture ]] && { echo amd64; exit 0; }
 exit 1
 MOCK
-  chmod +x "$T/bin/apt-get" "$T/bin/gpg" "$T/bin/curl" "$T/bin/dpkg"
+  # dpkg-query: FAKE_DPKG_LIST（全パッケージ）/ FAKE_DPKG_ESSENTIAL（Essential の照会）を printf %b で返す。
+  # apt-get install の後（FAKE_APT_INSTALLED がある）は *_AFTER があればそちらを返す（依存解決による更新の再現）。
+  cat > "$T/bin/dpkg-query" <<'MOCK'
+#!/usr/bin/env bash
+printf 'dpkg-query %s\n' "$*" >> "$FAKE_INSTALL_LOG"
+list=${FAKE_DPKG_LIST:-}
+essential=${FAKE_DPKG_ESSENTIAL:-}
+if [[ -e "$FAKE_APT_INSTALLED" ]]; then
+  list=${FAKE_DPKG_LIST_AFTER:-$list}
+  essential=${FAKE_DPKG_ESSENTIAL_AFTER:-$essential}
+fi
+case "$*" in
+  *'${Essential}'*) printf '%b' "$essential" ;;
+  *) printf '%b' "$list" ;;
+esac
+exit 0
+MOCK
+  chmod +x "$T/bin/apt-get" "$T/bin/gpg" "$T/bin/curl" "$T/bin/dpkg" "$T/bin/dpkg-query"
   export FAKE_INSTALL_LOG="$T/install.log"
   : > "$FAKE_INSTALL_LOG"
+  export FAKE_APT_INSTALLED="$T/apt-installed"
+  unset FAKE_DPKG_LIST FAKE_DPKG_ESSENTIAL FAKE_DPKG_LIST_AFTER FAKE_DPKG_ESSENTIAL_AFTER
   FAKE_KEY_SHA=$(printf 'fake downloaded content\n' | sha256sum | cut -d' ' -f1)
 }
 
-run_installer() { # [VAR=value ...]
+# RB-W W-4: --verify-manifest は image の実際の dpkg の版と dpkg-packages.tsv・toolchain.env の SHA-256 を照合する
+# （Dockerfile の最後の RUN）。固定値の検査・ダウンロード・apt は行わない。
+case_installer_verify_manifest() {
+  setup_fake_installer
+  mkdir -p "$T/manifest"
+  printf 'bash\t5.2.15-2+b2\tamd64\ntar\t1.34+dfsg-1.2\tamd64\n' > "$T/manifest/dpkg-packages.tsv"
+  printf 'dpkg_packages_sha256=%s\n' "$(sha256sum "$T/manifest/dpkg-packages.tsv" | cut -d' ' -f1)" > "$T/manifest/toolchain.env"
+  export FAKE_DPKG_LIST='ii \ttar\t1.34+dfsg-1.2\tamd64\nii \tbash\t5.2.15-2+b2\tamd64\nrc \told-removed\t1.0\tamd64\n'
+  run_installer -- --verify-manifest
+  assert_zero "$INSTALL_RC" "実際の版（ii のみ・順不同）が dpkg-packages.tsv と一致すれば 0"
+  assert_contains "$INSTALL_OUT" "dpkg-packages.tsv と一致します（2 件）" "一致を通知"
+  assert_not_contains "$(cat "$FAKE_INSTALL_LOG")" "apt-get" "verify では apt を使わない"
+  assert_not_contains "$(cat "$FAKE_INSTALL_LOG")" "curl" "verify ではダウンロードしない"
+  export FAKE_DPKG_LIST='ii \ttar\t1.35+dfsg-1\tamd64\nii \tbash\t5.2.15-2+b2\tamd64\n'
+  run_installer -- --verify-manifest
+  assert_nonzero "$INSTALL_RC" "実際の版が違えば失敗"
+  assert_contains "$INSTALL_OUT" "image の実際の dpkg の版が dpkg-packages.tsv と一致しません" "不一致を通知"
+  assert_contains "$INSTALL_OUT" "1.35+dfsg-1" "差分を表示"
+  export FAKE_DPKG_LIST='ii \ttar\t1.34+dfsg-1.2\tamd64\nii \tbash\t5.2.15-2+b2\tamd64\n'
+  printf 'dpkg_packages_sha256=%s\n' "$(hex64 0)" > "$T/manifest/toolchain.env"
+  run_installer -- --verify-manifest
+  assert_nonzero "$INSTALL_RC" "toolchain.env の SHA-256 が違えば失敗"
+  assert_contains "$INSTALL_OUT" "dpkg_packages_sha256" "SHA-256 の不一致を通知"
+  run_installer -- --unknown-option
+  assert_nonzero "$INSTALL_RC" "未知の引数は失敗"
+  unset FAKE_DPKG_LIST
+}
+
+run_installer() { # [VAR=value ...] [-- <install-toolchain.sh の引数>...]
+  local -a vars=() args=()
+  while (( $# > 0 )); do
+    if [[ "$1" == -- ]]; then shift; args=("$@"); break; fi
+    vars+=("$1")
+    shift
+  done
   INSTALL_OUT=$(env PATH="$T/bin:$PATH" TMPDIR="$T" \
     BASE_IMAGE="debian:bookworm-slim@sha256:$(hex64 c)" \
     MYSQL_CLIENT_VERSION=8.0.46 MYSQL_DEB_REVISION=1debian12 MYSQL_APT_SUITE=bookworm MYSQL_APT_COMPONENT=mysql-8.0 \
@@ -462,7 +556,7 @@ run_installer() { # [VAR=value ...]
     MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C \
     RESTIC_VERSION=0.17.3 RESTIC_LINUX_AMD64_SHA256="$(hex64 e)" \
     IMAGE_MANIFEST_DIR="$T/manifest" \
-    "$@" bash "$INSTALL_TOOLCHAIN" 2>&1)
+    "${vars[@]}" bash "$INSTALL_TOOLCHAIN" "${args[@]}" 2>&1)
   INSTALL_RC=$?
 }
 
@@ -560,6 +654,11 @@ case_static_image_contract() {
   assert_contains "$dockerfile" "ARG MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C" "MySQL 署名鍵の full fingerprint を固定"
   assert_not_contains "$dockerfile" "mysql-apt-config_" "SHA-256 を確認できない mysql-apt-config deb をダウンロードしない"
   assert_contains "$dockerfile" "install-toolchain.sh" "導入は検証付きの install-toolchain.sh で行う"
+  # RB-W W-4: 最後の RUN で image の実際の dpkg の版と dpkg-packages.tsv を照合し、「base の版を保つ」とは書かない
+  assert_eq "RUN bash /usr/local/share/ses-backup/image-build/install-toolchain.sh --verify-manifest" \
+    "$(grep '^RUN ' "$BACKUP_ROOT/Dockerfile" | tail -n 1)" "Dockerfile の最後の RUN で dpkg の版を照合する"
+  assert_eq "" "$(grep -E 'base image の版のまま|base image の版を使う' "$BACKUP_ROOT/Dockerfile" "$INSTALL_TOOLCHAIN" || true)" \
+    "Essential が base image の版を保つという記述をしない（依存解決で更新され得る）"
   if [[ "$integration" =~ image:\ mysql:8\.0\.36@sha256:[0-9a-f]{64} ]]; then
     test_assert "integration の mysql:8.0.36 を digest 固定"
   else
@@ -587,6 +686,7 @@ run_case case_check_is_store_independent
 run_case case_check_rejects_changed_content
 run_case case_check_rejects_build_and_pull
 run_case case_record_writes_store_and_refuses_overwrite
+run_case case_record_verifies_image_dpkg_against_manifest
 run_case case_save_and_load_by_content_id
 run_case case_compose_rejects_unlisted_usage_without_docker
 run_case case_compose_runs_allowed_usage_after_check
@@ -596,6 +696,7 @@ run_case case_check_rejects_flow_style_and_unparsed_yaml
 run_case case_installer_rejects_placeholders_before_download
 run_case case_installer_rejects_key_checksum_mismatch
 run_case case_installer_checks_primary_key_only
+run_case case_installer_verify_manifest
 run_case case_static_image_contract
 
 test_summary "W1-B1 tool image reproducibility"

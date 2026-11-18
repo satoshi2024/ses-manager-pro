@@ -9,9 +9,15 @@
 #     keyring にする。mysql-apt-config（旧版 deb の SHA-256 を一次資料で確認できない）は使わず、
 #     apt source を直接定義する。MySQL client / server-core は exact version で固定する。
 #   - restic は GitHub release の公式 SHA256SUMS に記載された値で検証する。
-#   - tar / util-linux などの Essential パッケージは再インストールせず、digest 固定の base image の版を使う。
+#   - tar / util-linux などの Essential パッケージは明示的には導入・再インストールしない。ただし MySQL client 等の
+#     依存解決で base image の版から更新されることがあり、「base image の版を保つ」とは限らない（RB-W W-4）。
+#     実際の版は導入後の dpkg-packages.tsv が正本で、Essential パッケージの base image からの変化は
+#     essential-packages.tsv に記録する（変化があれば build ログに WARN）。Essential を含む全パッケージの版を
+#     固定するのは apt-packages.lock（記載があれば完全一致しない build を失敗させる）。
 #   - 導入後の全 dpkg パッケージの版一覧と固定値を image 内 MANIFEST_DIR に記録する。
-#     apt-packages.lock に版一覧が記載されていれば、完全一致しない build を失敗させる。
+#   - --verify-manifest: image の実際の dpkg の版が記録した dpkg-packages.tsv（と toolchain.env の SHA-256）と
+#     一致することを確かめ、一致しなければ失敗する。Dockerfile の最後の RUN で実行する（記録の後に版が
+#     変わった image を build させない）。tool-image.sh record も build 後の image で同じ照合を行う。
 #
 # 入力（Dockerfile の ARG。build 中は環境変数として見える）:
 #   BASE_IMAGE, MYSQL_CLIENT_VERSION, MYSQL_DEB_REVISION, MYSQL_APT_SUITE, MYSQL_APT_COMPONENT,
@@ -50,6 +56,46 @@ verify_sha256() { # <file> <expected> <label>
   [[ "$actual" == "$2" ]] || die "$3 の SHA-256 が一致しません（expected=$2 actual=$actual）"
 }
 
+# 導入済み（ii）の全パッケージを「パッケージ名<TAB>版<TAB>アーキテクチャ」で、LC_ALL=C の順に出力する
+dpkg_installed() {
+  dpkg-query -W -f='${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n' \
+    | awk -F'\t' '$1 ~ /^ii/ {print $2 "\t" $3 "\t" $4}' \
+    | LC_ALL=C sort
+}
+
+# 導入済み（ii）のうち Essential: yes のパッケージ名
+dpkg_essential_names() {
+  dpkg-query -W -f='${db:Status-Abbrev}\t${Package}\t${Essential}\n' \
+    | awk -F'\t' '$1 ~ /^ii/ && $3 == "yes" {print $2}' \
+    | LC_ALL=C sort
+}
+
+# image の実際の dpkg の版が、記録した dpkg-packages.tsv と toolchain.env の SHA-256 に一致することを確かめる（W-4）
+verify_manifest() {
+  local recorded actual
+  [[ -s "$MANIFEST_DIR/dpkg-packages.tsv" && -s "$MANIFEST_DIR/toolchain.env" ]] \
+    || die "版一覧がありません（$MANIFEST_DIR の dpkg-packages.tsv / toolchain.env）"
+  TMP_DIR=$(mktemp -d)
+  dpkg_installed > "$TMP_DIR/dpkg-actual.tsv" || die "dpkg パッケージ一覧を取得できません"
+  [[ -s "$TMP_DIR/dpkg-actual.tsv" ]] || die "dpkg パッケージ一覧が空です"
+  if ! cmp -s "$TMP_DIR/dpkg-actual.tsv" "$MANIFEST_DIR/dpkg-packages.tsv"; then
+    echo "install-toolchain: dpkg-packages.tsv と image の実際の版の差分（< 記録 / > 実際）:" >&2
+    diff "$MANIFEST_DIR/dpkg-packages.tsv" "$TMP_DIR/dpkg-actual.tsv" >&2 || true
+    die "image の実際の dpkg の版が dpkg-packages.tsv と一致しません（記録の後にパッケージが変わりました）"
+  fi
+  recorded=$(sed -n 's/^dpkg_packages_sha256=//p' "$MANIFEST_DIR/toolchain.env")
+  actual=$(sha256sum "$MANIFEST_DIR/dpkg-packages.tsv" | cut -d' ' -f1)
+  [[ "$recorded" == "$actual" ]] \
+    || die "toolchain.env の dpkg_packages_sha256（${recorded:-なし}）が dpkg-packages.tsv（$actual）と一致しません"
+  echo "install-toolchain: image の dpkg の版は dpkg-packages.tsv と一致します（$(wc -l < "$MANIFEST_DIR/dpkg-packages.tsv" | tr -d ' ') 件）"
+}
+
+if [[ "${1:-}" == --verify-manifest ]]; then
+  verify_manifest
+  exit 0
+fi
+[[ $# -eq 0 ]] || die "未知の引数です: $1（--verify-manifest だけを受け付けます）"
+
 # ------------------------------------------------------------
 # 0. 固定値の検査（ダウンロード・apt より前。占位値のままなら失敗する）
 # ------------------------------------------------------------
@@ -70,8 +116,13 @@ arch=$(dpkg --print-architecture)
 TMP_DIR=$(mktemp -d)
 export DEBIAN_FRONTEND=noninteractive
 
+# base image の版（Essential パッケージの変化を記録するため、apt を使う前に取る）
+dpkg_installed > "$TMP_DIR/base-dpkg.tsv" || die "base image の dpkg パッケージ一覧を取得できません"
+dpkg_essential_names > "$TMP_DIR/essential-base.txt" || die "base image の Essential パッケージ一覧を取得できません"
+
 # ------------------------------------------------------------
-# 1. Debian パッケージ（Essential の tar / util-linux 等は指定しない = base image の版のまま）
+# 1. Debian パッケージ（Essential の tar / util-linux 等は指定しない。ただし依存解決で base image の版から
+#    更新され得る。変化は 4. で essential-packages.tsv に記録する）
 #    procps: 運用時の ps 等、bzip2: restic の展開、gnupg: 署名鍵の検証（build 時）
 # ------------------------------------------------------------
 apt-get update
@@ -133,10 +184,28 @@ restic version
 # 4. 版一覧と固定値の記録（image 内）。lock があれば完全一致を要求する
 # ------------------------------------------------------------
 mkdir -p "$MANIFEST_DIR"
-dpkg-query -W -f='${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n' \
-  | awk -F'\t' '$1 ~ /^ii/ {print $2 "\t" $3 "\t" $4}' \
-  | LC_ALL=C sort > "$MANIFEST_DIR/dpkg-packages.tsv"
+dpkg_installed > "$MANIFEST_DIR/dpkg-packages.tsv" || die "dpkg パッケージ一覧を取得できません"
 [[ -s "$MANIFEST_DIR/dpkg-packages.tsv" ]] || die "dpkg パッケージ一覧を取得できません"
+
+# Essential パッケージ（base image と導入後のどちらかで Essential: yes）の base image からの変化を記録する。
+# 形式: パッケージ名<TAB>base image の版<TAB>導入後の版<TAB>same / changed / added / removed（版が無い側は -）
+dpkg_essential_names > "$TMP_DIR/essential-after.txt" || die "Essential パッケージ一覧を取得できません"
+LC_ALL=C sort -u "$TMP_DIR/essential-base.txt" "$TMP_DIR/essential-after.txt" > "$TMP_DIR/essential-all.txt"
+awk -F'\t' -v OFS='\t' -v base_file="$TMP_DIR/base-dpkg.tsv" -v now_file="$MANIFEST_DIR/dpkg-packages.tsv" '
+  FILENAME == base_file { base[$1] = $2; next }
+  FILENAME == now_file { now[$1] = $2; next }
+  $1 != "" {
+    b = ($1 in base) ? base[$1] : "-"
+    n = ($1 in now) ? now[$1] : "-"
+    s = (b == n) ? "same" : (b == "-" ? "added" : (n == "-" ? "removed" : "changed"))
+    print $1, b, n, s
+  }' "$TMP_DIR/base-dpkg.tsv" "$MANIFEST_DIR/dpkg-packages.tsv" "$TMP_DIR/essential-all.txt" \
+  > "$MANIFEST_DIR/essential-packages.tsv"
+essential_changed=$(awk -F'\t' '$4 != "same"' "$MANIFEST_DIR/essential-packages.tsv" | wc -l | tr -d ' ')
+if (( essential_changed > 0 )); then
+  echo "install-toolchain: WARN: Essential パッケージ ${essential_changed} 件が base image の版から変わりました（依存解決。$MANIFEST_DIR/essential-packages.tsv）:" >&2
+  awk -F'\t' '$4 != "same" { print "  " $1 ": " $2 " -> " $3 " (" $4 ")" }' "$MANIFEST_DIR/essential-packages.tsv" >&2
+fi
 
 apt_lock_mode=record-only
 # CRLF で checkout された lock でも照合できるよう、行末の CR を除いてから読む
@@ -165,6 +234,8 @@ fi
   printf 'restic_binary_sha256=%s\n' "$(sha256sum /usr/local/bin/restic | cut -d' ' -f1)"
   printf 'apt_lock=%s\n' "$apt_lock_mode"
   printf 'dpkg_packages_sha256=%s\n' "$(sha256sum "$MANIFEST_DIR/dpkg-packages.tsv" | cut -d' ' -f1)"
+  printf 'essential_changed=%s\n' "$essential_changed"
+  printf 'essential_packages_sha256=%s\n' "$(sha256sum "$MANIFEST_DIR/essential-packages.tsv" | cut -d' ' -f1)"
 } > "$MANIFEST_DIR/toolchain.env"
-chmod 644 "$MANIFEST_DIR/toolchain.env" "$MANIFEST_DIR/dpkg-packages.tsv"
+chmod 644 "$MANIFEST_DIR/toolchain.env" "$MANIFEST_DIR/dpkg-packages.tsv" "$MANIFEST_DIR/essential-packages.tsv"
 echo "install-toolchain: 版一覧と固定値を記録しました: $MANIFEST_DIR"

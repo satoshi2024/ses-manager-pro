@@ -125,6 +125,26 @@ require_fresh_path() { # <path>
   [[ ! -e "$1" && ! -L "$1" ]] || die "既存のファイルを上書きしません: $1"
 }
 
+# build 後の image の実際の dpkg の版が、image 内の dpkg-packages.tsv（と toolchain.env の SHA-256）と一致することを
+# 確かめる（RB-W W-4）。一致しなければ記録を書かずに失敗する。dpkg-query は network なしの一時コンテナで実行する。
+verify_image_dpkg() { # <image ID> <取り出した image-manifest>
+  local id=$1 manifest=$2 actual recorded expected_sha
+  actual=$("$DOCKER_BIN" run --rm --network none --entrypoint dpkg-query "$id" -W \
+      '--showformat=${db:Status-Abbrev}\t${Package}\t${Version}\t${Architecture}\n' 2>/dev/null) \
+    || die "image の dpkg パッケージ一覧を取得できません（$id）"
+  actual=$(printf '%s\n' "$actual" | tr -d '\r' | awk -F'\t' '$1 ~ /^ii/ {print $2 "\t" $3 "\t" $4}' | LC_ALL=C sort)
+  [[ -n "$actual" ]] || die "image の dpkg パッケージ一覧が空です（$id）"
+  recorded=$(LC_ALL=C sort "$manifest/dpkg-packages.tsv")
+  if [[ "$actual" != "$recorded" ]]; then
+    echo "tool-image: dpkg-packages.tsv と image の実際の版の差分（< 記録 / > 実際）:" >&2
+    diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$actual") >&2 || true
+    die "image の実際の dpkg の版が dpkg-packages.tsv と一致しません（記録しません）"
+  fi
+  expected_sha=$(sed -n 's/^dpkg_packages_sha256=//p' "$manifest/toolchain.env")
+  [[ "$expected_sha" == "$(sha256sum "$manifest/dpkg-packages.tsv" | cut -d' ' -f1)" ]] \
+    || die "toolchain.env の dpkg_packages_sha256（${expected_sha:-なし}）が dpkg-packages.tsv と一致しません（記録しません）"
+}
+
 cmd_inspect() { # <tag>
   local tag=$1 content id store
   id=$(image_id_of "$tag") || die "image が見つからないか、image ID を取得できません: $tag"
@@ -154,6 +174,7 @@ cmd_record() { # <tag> <out>
   "$DOCKER_BIN" rm "$cid" > /dev/null 2>&1 || true
   [[ -s "$out/image-manifest/toolchain.env" && -s "$out/image-manifest/dpkg-packages.tsv" ]] \
     || die "image 内の版一覧が不完全です（toolchain.env / dpkg-packages.tsv）"
+  verify_image_dpkg "$id" "$out/image-manifest"
   server_version=$("$DOCKER_BIN" version --format '{{.Server.Version}}' 2>/dev/null) || server_version=unknown
   printf '%s\n' "$content" > "$out/tool-content-id.txt"
   printf '%s\n' "$id" > "$out/tool-image-id.txt"
