@@ -659,8 +659,9 @@ function submitReminder() {
                 if (window.SES && SES.toast) SES.toast.error('メール送信に失敗しました');
                 else alert('メール送信に失敗しました');
             } else {
-                if (window.SES && SES.toast) SES.toast.success(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
-                else alert(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
+                // 送信は非同期のため、成功の応答は送信の受付（QUEUED / DRY_RUN）で送信の完了ではない（RB-POSTLAUNCH E-1）
+                if (window.SES && SES.toast) SES.toast.success(SES.i18n.t('invoice.reminder.sent', '督促メールの送信を受け付けました。送信結果は督促履歴で確認できます'));
+                else alert(SES.i18n.t('invoice.reminder.sent', '督促メールの送信を受け付けました。送信結果は督促履歴で確認できます'));
             }
         } else {
             alert(data.message);

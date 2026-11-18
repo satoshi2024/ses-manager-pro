@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,9 +43,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>台帳に無い連結を足す、または台帳の箇所が無くなると失敗する（列挙の漏れと古い台帳の両方を防ぐ）。</li>
  * </ul>
  *
- * <p>限界: 変数に入れた接頭辞の連結（{@code t(prefix + 値)}）と、{@code t} / {@code SES.i18n.t} 以外の名前の関数経由の
- * 連結は検出しない。{@code common.js} の {@code SES.i18n.e}（{@code 'enum.' + group + '.' + code}）は
- * {@code EnumMessageTranslationTest} の範囲。</p>
+ * <p>RB-POSTLAUNCH E-3・P3-B で次を足した。</p>
+ * <ul>
+ *   <li>fallback は「第2引数がある」だけでなく、連結した値そのもの（{@code String(値)}・括弧は同じとみなす）であること。
+ *       値以外へ fallback する箇所は、その式を台帳（{@link Entry#fallbackTo}）に書いたものだけを認める。
+ *       第2引数が配列（文言の引数）なら fallback ではない。</li>
+ *   <li>変数に入れた接頭辞（{@code const P = 'x.'; t(P + 値)}）と、別名関数を経由した連結（{@code t} を呼ぶ小さな関数:
+ *       {@code h('x.' + 値)} のように key を渡すものと、{@code label('x.', 値)} のように接頭辞と値を渡して中で連結するもの）
+ *       も検出する。別名の fallback は関数の中の第2引数を呼出しの実引数で置き換えて比べる。</li>
+ *   <li>接頭辞を解決できない連結（関数の外から来た変数や式 + 値）は台帳で値域を持てないため、検出して失敗させる。</li>
+ * </ul>
+ *
+ * <p>限界: 別名は同じfile内の小さな関数（本体が約400文字以内）だけを見る。他のfileで定義した関数、{@code call}・
+ * {@code apply}・object の property 経由の呼出し、2段以上の関数を通して渡した接頭辞は検出しない。{@code common.js} の
+ * {@code SES.i18n.e}（{@code 'enum.' + group + '.' + code}）は {@code EnumMessageTranslationTest} の範囲。</p>
  */
 class ComposedMessageKeyCoverageTest {
 
@@ -53,40 +65,78 @@ class ComposedMessageKeyCoverageTest {
     private static final Path MAIN_JAVA = Path.of("src/main/java");
     private static final List<String> BUNDLES = List.of("messages.properties", "messages_en.properties",
             "messages_ko.properties", "messages_zh_CN.properties");
-    /** 連結の呼出し: t / this.t / SES.i18n.t の第1引数が「文字列literal + 値」。 */
-    private static final Pattern CONCAT_CALL = Pattern.compile(
-            "(?:SES\\.i18n\\.t|this\\.t|(?<![\\w.$])t)\\(\\s*(['\"])([A-Za-z][A-Za-z0-9_.]*\\.)\\1\\s*\\+\\s*");
-    /** 連結の呼出し: 第1引数が template literal で値を埋め込む。 */
-    private static final Pattern TEMPLATE_CALL = Pattern.compile(
-            "(?:SES\\.i18n\\.t|this\\.t|(?<![\\w.$])t)\\(\\s*`([^`$]*)\\$\\{");
+    /** 文言の呼出し: t / this.t / SES.i18n.t。 */
+    private static final Pattern T_CALL = Pattern.compile("(?:SES\\.i18n\\.t|this\\.t|(?<![\\w.$])t)\\(");
+    /** 接頭辞の定数: {@code const P = 'x.y.';}。 */
+    private static final Pattern PREFIX_CONSTANT = Pattern.compile(
+            "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(['\"])([A-Za-z][A-Za-z0-9_.]*\\.)\\2\\s*[;,\\n]");
+    private static final Pattern LITERAL_PREFIX = Pattern.compile(
+            "(['\"])([A-Za-z][A-Za-z0-9_.]*\\.)\\1\\s*\\+\\s*(.+)", Pattern.DOTALL);
+    private static final Pattern IDENTIFIER_PREFIX = Pattern.compile("([A-Za-z_$][\\w$]*)\\s*\\+\\s*(.+)", Pattern.DOTALL);
+    private static final Pattern PREFIX_LITERAL = Pattern.compile("(['\"])([A-Za-z][A-Za-z0-9_.]*\\.)\\1");
+    private static final Pattern TEMPLATE_KEY = Pattern.compile("`([^`$]*)\\$\\{.*", Pattern.DOTALL);
+    private static final Pattern IDENTIFIER = Pattern.compile("(?<![\\w$.])[A-Za-z_$][\\w$]*");
+    /** 別名関数の定義（function 宣言・function 式・arrow）。group(1)=名前、group(2)=引数。 */
+    private static final List<Pattern> ALIAS_DEFINITIONS = List.of(
+            Pattern.compile("function\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\{"),
+            Pattern.compile("([A-Za-z_$][\\w$]*)\\s*[:=]\\s*function\\s*\\(([^)]*)\\)\\s*\\{"),
+            Pattern.compile("([A-Za-z_$][\\w$]*)\\s*=\\s*\\(([^)]*)\\)\\s*=>"),
+            Pattern.compile("([A-Za-z_$][\\w$]*)\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*=>"));
+    /** 別名とみなす関数の本体の上限（文字数）。 */
+    private static final int ALIAS_BODY_LIMIT = 400;
     private static final Pattern MIGRATION_FILE = Pattern.compile("^V([0-9]+(?:[._][0-9]+)*)__.+\\.sql$");
 
-    /** 連結箇所（file・接頭辞・fallbackの有無・行）。 */
-    private record Site(String file, String prefix, boolean fallback, boolean template, int line) {
+    /**
+     * 連結箇所（file・接頭辞・連結した値の式・第2引数の式・template literal か・経由した別名・行）。
+     * {@code fallback} は第2引数の式（無ければ null）。
+     */
+    private record Site(String file, String prefix, String operand, String fallback, boolean template, String via,
+                        int line) {
         String key() {
             return file + "|" + prefix;
         }
+
+        String where() {
+            return file + ":" + line + (via == null ? "" : " (" + via + "() 経由)");
+        }
     }
 
-    /** 台帳の1件: 値域（values が null ならfallback扱いで reason が必須）。 */
-    private record Entry(Set<String> values, String reason) {
+    /** 台帳の1件: 値域（values が null ならfallback扱いで reason が必須）。値以外の fallback は式を書く。 */
+    private record Entry(Set<String> values, String reason, String expectedFallback) {
         static Entry domain(Set<String> values, String source) {
-            return new Entry(values, source);
+            return new Entry(values, source, null);
         }
 
+        /** 値そのものへ fallback する箇所。 */
         static Entry fallback(String reason) {
-            return new Entry(null, reason);
+            return new Entry(null, reason, null);
         }
+
+        /** 値以外（値から作る表示・入力欄の文言等）へ fallback する箇所。その式を書く。 */
+        static Entry fallbackTo(String reason, String expression) {
+            return new Entry(null, reason, expression);
+        }
+    }
+
+    /** 1 file の走査結果。 */
+    private record Scan(List<Site> sites, List<String> unresolved) {
     }
 
     @Test
     void 画面部品の連結keyはすべて台帳にあり値域のkeyは4言語にあり値域の無いものは値へfallbackする() throws Exception {
-        List<Site> sites = scan();
+        Scan scan = scan();
+        List<Site> sites = scan.sites();
         Map<String, Entry> registry = registry();
 
+        assertThat(scan.unresolved())
+                .as("接頭辞を解決できない連結（関数の外から来た変数・式 + 値）。台帳で値域を持てないため、接頭辞を文字列literalか"
+                        + "同じfileの定数にする")
+                .isEmpty();
         Set<String> scanned = new TreeSet<>();
         sites.forEach(site -> scanned.add(site.key()));
-        assertThat(sites).as("連結箇所を読めていること").hasSizeGreaterThanOrEqualTo(30);
+        assertThat(sites).as("連結箇所を読めていること").hasSizeGreaterThanOrEqualTo(50);
+        assertThat(sites.stream().filter(site -> site.via() != null).count())
+                .as("別名関数を経由した連結を読めていること").isGreaterThanOrEqualTo(15);
         assertThat(new TreeSet<>(registry.keySet()))
                 .as("連結箇所の台帳（新しい連結は値域かfallbackの理由を付けて台帳へ足す。消した連結は台帳から外す）")
                 .isEqualTo(scanned);
@@ -99,9 +149,16 @@ class ComposedMessageKeyCoverageTest {
         for (Site site : sites) {
             Entry entry = registry.get(site.key());
             assertThat(entry.reason()).as(site.key() + " の根拠").isNotBlank();
+            if (site.operand() != null && hasTopLevelPlus(site.operand())) {
+                problems.add(site.where() + " " + site.prefix() + " は値の後にも連結している（接頭辞 × 値の台帳で表せない）");
+            }
+            if (site.fallback() != null && !acceptableFallback(site, entry)) {
+                problems.add(site.where() + " " + site.prefix() + " のfallback「" + site.fallback()
+                        + "」が値そのもの（" + site.operand() + "）でも台帳の式でもない");
+            }
             if (entry.values() == null) {
-                if (!site.fallback()) {
-                    problems.add(site.file() + ":" + site.line() + " " + site.prefix()
+                if (site.fallback() == null) {
+                    problems.add(site.where() + " " + site.prefix()
                             + " は値域が無いのに第2引数のfallbackも無い（keyが欠けるとkey名が画面に出る）");
                 }
                 continue;
@@ -112,12 +169,50 @@ class ComposedMessageKeyCoverageTest {
                 bundles.forEach((bundle, properties) -> {
                     String message = properties.getProperty(key);
                     if (message == null || message.isBlank()) {
-                        problems.add(bundle + ": " + key + "（" + site.file() + ":" + site.line() + "）");
+                        problems.add(bundle + ": " + key + "（" + site.where() + "）");
                     }
                 });
             }
         }
-        assertThat(problems).as("連結keyの欠落・fallback無し").isEmpty();
+        // 台帳に書いた値以外のfallbackの式が今も使われていること（古い台帳を残さない）
+        registry.forEach((key, entry) -> {
+            if (entry.expectedFallback() != null && sites.stream().noneMatch(site -> site.key().equals(key)
+                    && site.fallback() != null
+                    && normalize(site.fallback()).equals(normalize(entry.expectedFallback())))) {
+                problems.add(key + " の台帳のfallbackの式「" + entry.expectedFallback() + "」が使われていない");
+            }
+        });
+        assertThat(problems).as("連結keyの欠落・fallback無し・値以外へのfallback").isEmpty();
+    }
+
+    /** 走査そのものの確認（別名関数・変数の接頭辞・fallbackの比較・解決できない連結）。 */
+    @Test
+    void 走査は別名関数と変数の接頭辞の連結も検出し値以外のfallbackと解決できない連結を見分ける() {
+        String code = String.join("\n",
+                "const PREFIX = 'a.b.';",
+                "function lbl(prefix, value) { return t(prefix + value, String(value)); }",
+                "const h = (k, fb) => SES.i18n.t(k, fb);",
+                "x = t(PREFIX + v, v);",
+                "y = lbl('c.d.', row.kind);",
+                "z = h('e.f.' + u, u);",
+                "w = this.t('g.h.' + s, [s]);",
+                "q = t(dynamic + '.x');",
+                "p = SES.i18n.t(`i.j.${k}`);",
+                "");
+        Scan scan = scanFile("sample.js", code);
+        Map<String, Site> byPrefix = new TreeMap<>();
+        scan.sites().forEach(site -> byPrefix.put(site.prefix(), site));
+        assertThat(byPrefix.keySet()).containsExactly("a.b.", "c.d.", "e.f.", "g.h.", "i.j.");
+        assertThat(byPrefix.get("c.d.").via()).isEqualTo("lbl");
+        assertThat(byPrefix.get("c.d.").operand()).isEqualTo("row.kind");
+        assertThat(byPrefix.get("e.f.").via()).isEqualTo("h");
+        assertThat(byPrefix.get("i.j.").template()).isTrue();
+        Entry valueFallback = Entry.fallback("値");
+        assertThat(acceptableFallback(byPrefix.get("a.b."), valueFallback)).isTrue();
+        assertThat(acceptableFallback(byPrefix.get("c.d."), valueFallback)).as("String(値) は値と同じ").isTrue();
+        assertThat(acceptableFallback(byPrefix.get("e.f."), valueFallback)).isTrue();
+        assertThat(acceptableFallback(byPrefix.get("g.h."), valueFallback)).as("配列は文言の引数でfallbackではない").isFalse();
+        assertThat(scan.unresolved()).hasSize(1).allMatch(entry -> entry.contains("dynamic"));
     }
 
     /**
@@ -161,7 +256,8 @@ class ComposedMessageKeyCoverageTest {
         // ---- 値域を台帳で持たない箇所（第2引数で値そのものへfallbackする。keyが欠けると訳されない値が出るが、key名は出ない）
         String statusFallback = "DBの状態名（日本語の値）へfallbackする。状態名の訳の網羅は本testの範囲外";
         registry.put("ai-evaluation.js|ai.evaluation.useCase.", Entry.fallback("use case のcodeへfallbackする"));
-        registry.put("ai-evaluation.js|ai.evaluation.field.", Entry.fallback("metrics のkeyの末尾要素へfallbackする"));
+        registry.put("ai-evaluation.js|ai.evaluation.field.", Entry.fallbackTo("metrics のkeyの末尾要素へfallbackする",
+                "key.split('.').pop()"));
         registry.put("contract-compliance.js|doc.title.", Entry.fallback("文書種別のcodeへfallbackする"));
         registry.put("engineer-change-requests.js|changeRequest.type.", Entry.fallback("申請種別のcodeへfallbackする"));
         registry.put("expense-management.js|expense.status.", Entry.fallback(statusFallback));
@@ -170,60 +266,293 @@ class ComposedMessageKeyCoverageTest {
         registry.put("my-payroll.js|my.payroll.calcStatus.", Entry.fallback("freeeの計算状態のcodeへfallbackする"));
         registry.put("my-payroll.js|my.payroll.category.", Entry.fallback("給与明細の区分のcodeへfallbackする"));
         registry.put("my-profile.js|my.changeRequest.type.", Entry.fallback("申請種別のcodeへfallbackする"));
-        registry.put("my-profile.js|my.changeRequest.career.", Entry.fallback("入力欄のplaceholder文言へfallbackする"));
+        registry.put("my-profile.js|my.changeRequest.career.", Entry.fallbackTo("入力欄のplaceholder文言へfallbackする",
+                "ph"));
         registry.put("my-timesheet.js|workRecord.status.", Entry.fallback(statusFallback));
         registry.put("privacy-dsar.js|privacyDsar.readiness.", Entry.fallback("readiness のcodeへfallbackする"));
         registry.put("quotation.js|quotation.status.", Entry.fallback(statusFallback));
         registry.put("work-record.js|workRecord.status.", Entry.fallback(statusFallback));
+        // privacy-dsar.js の label(prefix, value) は t(prefix + value, String(value)) で値そのものへfallbackする
+        // （RB-POSTLAUNCH E-3 で別名関数の走査を足して見えるようになった箇所）
+        for (String prefix : List.of("type.", "status.", "channel.", "hold.", "resolution.", "packageStatus.",
+                "redaction.", "manualReason.", "deliveryMethod.", "reason.", "identity.", "delivery.", "subjectType.",
+                "link.")) {
+            registry.put("privacy-dsar.js|privacyDsar." + prefix,
+                    Entry.fallback("DSARの列挙値のcodeへfallbackする（label() 経由）"));
+        }
         return registry;
     }
 
     // ---------------------------------------------------------------- scan
 
-    private static List<Site> scan() throws IOException {
+    private static Scan scan() throws IOException {
         List<Site> sites = new ArrayList<>();
+        List<String> unresolved = new ArrayList<>();
         try (Stream<Path> files = Files.list(MODULES)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".js")).sorted().toList()) {
-                String name = file.getFileName().toString();
-                String code = Files.readString(file, StandardCharsets.UTF_8);
-                Matcher concat = CONCAT_CALL.matcher(code);
-                while (concat.find()) {
-                    int end = skipOperand(code, concat.end());
-                    int next = skipSpaces(code, end);
-                    char after = next < code.length() ? code.charAt(next) : ')';
-                    sites.add(new Site(name, concat.group(2), after == ',', false, line(code, concat.start())));
+                Scan scan = scanFile(file.getFileName().toString(), Files.readString(file, StandardCharsets.UTF_8));
+                sites.addAll(scan.sites());
+                unresolved.addAll(scan.unresolved());
+            }
+        }
+        return new Scan(sites, unresolved);
+    }
+
+    /** 別名関数（t を呼ぶ小さな関数）。key を渡す引数の位置、接頭辞の連結なら値の引数、関数の中の第2引数。 */
+    private record Alias(String name, List<String> params, int keyIndex, String valueParam, String fallback) {
+    }
+
+    private static Scan scanFile(String name, String code) {
+        List<Site> sites = new ArrayList<>();
+        List<String> unresolved = new ArrayList<>();
+        Map<String, String> constants = new TreeMap<>();
+        Matcher constant = PREFIX_CONSTANT.matcher(code);
+        while (constant.find()) {
+            constants.put(constant.group(1), constant.group(3));
+        }
+
+        List<Alias> aliases = new ArrayList<>();
+        Set<Integer> aliasInternalCalls = new HashSet<>();
+        for (Pattern definition : ALIAS_DEFINITIONS) {
+            Matcher matcher = definition.matcher(code);
+            while (matcher.find()) {
+                String alias = matcher.group(1);
+                if ("t".equals(alias)) {
+                    continue; // t( の呼出しは直接走査する
                 }
-                Matcher template = TEMPLATE_CALL.matcher(code);
-                while (template.find()) {
-                    sites.add(new Site(name, template.group(1), false, true, line(code, template.start())));
+                List<String> params = new ArrayList<>();
+                for (String param : matcher.group(2).split(",")) {
+                    String cleaned = param.replaceAll("=.*$", "").replace("...", "").trim();
+                    if (!cleaned.isEmpty()) {
+                        params.add(cleaned);
+                    }
+                }
+                int bodyStart = matcher.end();
+                int bodyEnd;
+                if (code.charAt(bodyStart - 1) == '{') {
+                    bodyEnd = matchingWithin(code, bodyStart - 1);
+                } else {
+                    bodyStart = skipSpaces(code, bodyStart);
+                    if (bodyStart < code.length() && code.charAt(bodyStart) == '{') {
+                        bodyEnd = matchingWithin(code, bodyStart);
+                        bodyStart++;
+                    } else {
+                        bodyEnd = code.indexOf('\n', bodyStart);
+                        bodyEnd = bodyEnd < 0 ? code.length() : bodyEnd;
+                    }
+                }
+                if (bodyEnd < 0) {
+                    continue; // 本体が長い（別名の小さな関数ではない）
+                }
+                String body = code.substring(bodyStart, bodyEnd);
+                Matcher call = T_CALL.matcher(body);
+                while (call.find()) {
+                    List<String> args = arguments(body, call.end() - 1);
+                    if (args == null || args.isEmpty()) {
+                        continue;
+                    }
+                    String key = args.get(0);
+                    String fallback = args.size() > 1 ? args.get(1) : null;
+                    Matcher concat = IDENTIFIER_PREFIX.matcher(key);
+                    if (params.contains(key)) {
+                        aliases.add(new Alias(alias, params, params.indexOf(key), null, fallback));
+                        aliasInternalCalls.add(bodyStart + call.start());
+                    } else if (concat.matches() && params.contains(concat.group(1))
+                            && params.contains(concat.group(2).trim())) {
+                        aliases.add(new Alias(alias, params, params.indexOf(concat.group(1)), concat.group(2).trim(),
+                                fallback));
+                        aliasInternalCalls.add(bodyStart + call.start());
+                    }
                 }
             }
         }
-        return sites;
+
+        Matcher call = T_CALL.matcher(code);
+        while (call.find()) {
+            if (aliasInternalCalls.contains(call.start())) {
+                continue;
+            }
+            List<String> args = arguments(code, call.end() - 1);
+            if (args == null) {
+                unresolved.add(name + ":" + line(code, call.start()) + " 括弧が閉じていない呼出し");
+                continue;
+            }
+            analyzeKey(name, code, call.start(), args.isEmpty() ? "" : args.get(0),
+                    args.size() > 1 ? args.get(1) : null, null, constants, sites, unresolved);
+        }
+
+        for (Alias alias : aliases) {
+            Matcher use = Pattern.compile("(?<![\\w$])" + Pattern.quote(alias.name()) + "\\s*\\(").matcher(code);
+            while (use.find()) {
+                int open = use.end() - 1;
+                int close = matchingParen(code, open);
+                if (close < 0) {
+                    continue;
+                }
+                int next = skipSpaces(code, close + 1);
+                if (code.startsWith("=>", next) || (next < code.length() && code.charAt(next) == '{')) {
+                    continue; // 定義（function name(...) { / name = (...) => / name(...) {）は呼出しではない
+                }
+                List<String> args = arguments(code, open);
+                if (args == null || args.size() <= alias.keyIndex()) {
+                    continue;
+                }
+                String argument = args.get(alias.keyIndex());
+                String fallback = substitute(alias.fallback(), alias.params(), args);
+                if (alias.valueParam() == null) {
+                    analyzeKey(name, code, use.start(), argument, fallback, alias.name(), constants, sites, unresolved);
+                    continue;
+                }
+                int valueIndex = alias.params().indexOf(alias.valueParam());
+                String operand = valueIndex < args.size() ? args.get(valueIndex) : "undefined";
+                Matcher literal = PREFIX_LITERAL.matcher(argument);
+                String prefix = literal.matches() ? literal.group(2) : constants.get(argument);
+                if (prefix == null) {
+                    unresolved.add(name + ":" + line(code, use.start()) + " " + alias.name() + "(" + argument + ", ...)");
+                } else {
+                    sites.add(new Site(name, prefix, operand, fallback, false, alias.name(), line(code, use.start())));
+                }
+            }
+        }
+        return new Scan(sites, unresolved);
     }
 
-    /** 連結の右辺（識別子・member・呼出し・括弧式）を読み飛ばした位置。 */
-    private static int skipOperand(String code, int start) {
-        int index = start;
-        if (index < code.length() && code.charAt(index) == '(') {
-            return matchingParen(code, index) + 1;
+    /** key の引数を読み、連結なら台帳の箇所に、接頭辞を解決できない連結なら unresolved に足す。 */
+    private static void analyzeKey(String name, String code, int offset, String key, String fallback, String via,
+                                   Map<String, String> constants, List<Site> sites, List<String> unresolved) {
+        int line = line(code, offset);
+        Matcher template = TEMPLATE_KEY.matcher(key);
+        if (template.matches()) {
+            sites.add(new Site(name, template.group(1), null, null, true, via, line));
+            return;
         }
-        while (index < code.length()) {
-            char c = code.charAt(index);
-            if (Character.isLetterOrDigit(c) || c == '_' || c == '$' || c == '.') {
-                index++;
-            } else if (c == '(' || c == '[') {
-                index = matchingParen(code, index) + 1;
+        Matcher literal = LITERAL_PREFIX.matcher(key);
+        if (literal.matches()) {
+            sites.add(new Site(name, literal.group(2), literal.group(3).trim(), fallback, false, via, line));
+            return;
+        }
+        Matcher identifier = IDENTIFIER_PREFIX.matcher(key);
+        if (identifier.matches() && constants.containsKey(identifier.group(1))) {
+            sites.add(new Site(name, constants.get(identifier.group(1)), identifier.group(2).trim(), fallback, false,
+                    via, line));
+            return;
+        }
+        if (hasTopLevelPlus(key)) {
+            unresolved.add(name + ":" + line + " " + key.replaceAll("\\s+", " "));
+        }
+    }
+
+    /** fallback が値そのもの（String(値)・括弧は同じ）か、台帳に書いた式か。配列（文言の引数）は fallback ではない。 */
+    private static boolean acceptableFallback(Site site, Entry entry) {
+        String fallback = normalize(site.fallback());
+        if (fallback.startsWith("[")) {
+            return false;
+        }
+        return fallback.equals(normalize(site.operand()))
+                || (entry.expectedFallback() != null && fallback.equals(normalize(entry.expectedFallback())));
+    }
+
+    /** 空白を除き、全体を囲む括弧と String(...) を外す。 */
+    private static String normalize(String expression) {
+        if (expression == null) {
+            return "";
+        }
+        String value = expression.replaceAll("\\s+", "");
+        while (true) {
+            if (value.startsWith("String(") && matchingParen(value, 6) == value.length() - 1) {
+                value = value.substring(7, value.length() - 1);
+            } else if (value.startsWith("(") && matchingParen(value, 0) == value.length() - 1) {
+                value = value.substring(1, value.length() - 1);
             } else {
-                break;
+                return value;
             }
         }
-        return index;
     }
 
+    /** 別名の中の式の引数名を、呼出しの実引数（括弧付き）へ置き換える。 */
+    private static String substitute(String template, List<String> params, List<String> args) {
+        if (template == null) {
+            return null;
+        }
+        Matcher matcher = IDENTIFIER.matcher(template);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            int index = params.indexOf(matcher.group());
+            String replacement = index >= 0 && index < args.size() ? "(" + args.get(index) + ")" : matcher.group();
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    /** 呼出しの実引数（最上位の , で区切る。文字列・括弧の中の , は区切らない）。括弧が閉じなければ null。 */
+    private static List<String> arguments(String code, int open) {
+        int close = matchingParen(code, open);
+        if (close < 0) {
+            return null;
+        }
+        List<String> args = new ArrayList<>();
+        int depth = 0;
+        char quote = 0;
+        int start = open + 1;
+        for (int i = open + 1; i < close; i++) {
+            char c = code.charAt(i);
+            if (quote != 0) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                quote = c;
+            } else if (c == '(' || c == '[' || c == '{') {
+                depth++;
+            } else if (c == ')' || c == ']' || c == '}') {
+                depth--;
+            } else if (c == ',' && depth == 0) {
+                args.add(code.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        String last = code.substring(start, close).trim();
+        if (!last.isEmpty() || !args.isEmpty()) {
+            args.add(last);
+        }
+        return args;
+    }
+
+    private static boolean hasTopLevelPlus(String expression) {
+        int depth = 0;
+        char quote = 0;
+        for (int i = 0; i < expression.length(); i++) {
+            char c = expression.charAt(i);
+            if (quote != 0) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                quote = c;
+            } else if (c == '(' || c == '[' || c == '{') {
+                depth++;
+            } else if (c == ')' || c == ']' || c == '}') {
+                depth--;
+            } else if (c == '+' && depth == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 対応する閉じ括弧（( [ {）の位置。閉じなければ -1。文字列の中の括弧は数えない。 */
     private static int matchingParen(String code, int open) {
         char opening = code.charAt(open);
-        char closing = opening == '(' ? ')' : ']';
+        char closing = opening == '(' ? ')' : opening == '[' ? ']' : '}';
         int depth = 0;
         char quote = 0;
         for (int i = open; i < code.length(); i++) {
@@ -244,7 +573,12 @@ class ComposedMessageKeyCoverageTest {
                 return i;
             }
         }
-        throw new IllegalStateException("括弧が閉じていません: offset=" + open);
+        return -1;
+    }
+
+    /** 別名の本体（{@link #ALIAS_BODY_LIMIT} 文字以内で閉じるもの）の閉じ括弧の位置。閉じなければ -1。 */
+    private static int matchingWithin(String code, int open) {
+        return matchingParen(code.substring(0, Math.min(code.length(), open + ALIAS_BODY_LIMIT)), open);
     }
 
     private static int skipSpaces(String code, int index) {
