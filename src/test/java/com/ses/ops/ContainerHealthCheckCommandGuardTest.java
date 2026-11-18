@@ -70,7 +70,7 @@ class ContainerHealthCheckCommandGuardTest {
     @Test
     void 本番task定義はTRUSTED_PROXIESを持ち置換前のままでは起動しない() throws IOException {
         JsonNode taskDefinition = readJson(Path.of("infra", "ecs", "task-definition.prod.json"));
-        String value = environment(taskDefinition.path("containerDefinitions").get(0), "TRUSTED_PROXIES");
+        String value = environment(appContainer(taskDefinition), "TRUSTED_PROXIES");
 
         assertThat(value).as("TRUSTED_PROXIESのplaceholder").isNotNull().doesNotContain("127.");
         // 置換し忘れたまま配備すると、構文検査でapplicationが起動しない（fail-fast）
@@ -84,7 +84,7 @@ class ContainerHealthCheckCommandGuardTest {
         for (JsonNode container : taskDefinition.path("containerDefinitions")) {
             assertStrict200(command(container), "task-definition.local.json");
         }
-        assertThat(environment(taskDefinition.path("containerDefinitions").get(0), "TRUSTED_PROXIES")).isNotNull();
+        assertThat(environment(appContainer(taskDefinition), "TRUSTED_PROXIES")).isNotNull();
     }
 
     @Test
@@ -165,6 +165,16 @@ class ContainerHealthCheckCommandGuardTest {
         container.path("healthCheck").path("command").forEach(part -> parts.add(part.asText()));
         assertThat(parts).as("healthCheck.command").isNotEmpty();
         return String.join(" ", parts);
+    }
+
+    /** app の container を名前で取る（sidecar を足しても container の並び順に依存しない）。 */
+    private static JsonNode appContainer(JsonNode taskDefinition) {
+        for (JsonNode container : taskDefinition.path("containerDefinitions")) {
+            if (APP_CONTAINER.equals(container.path("name").asText())) {
+                return container;
+            }
+        }
+        throw new AssertionError("container " + APP_CONTAINER + " が task definition に無い");
     }
 
     private static String environment(JsonNode container, String name) {

@@ -93,6 +93,35 @@ class ProductionTaskDefinitionTemplateTest {
         assertThat(scanner.path("image").asText()).as("ClamAV の image も registry digest で固定する").endsWith("@sha256:CLAMAV_IMAGE_DIGEST");
     }
 
+    /**
+     * ClamAV の sidecar は信頼できない upload を扱うため、root filesystem を読取り専用にし、自分の bind volume だけを
+     * mount し、secret も app の設定も受け取らず、port を公開しない（RB-DEPLOY 差分復審 P3）。
+     */
+    @Test
+    void 雛形のClamAV_sidecarは読取り専用で自分のvolumeだけを持ちsecretを受け取らない() throws IOException {
+        JsonNode taskDefinition = taskDefinition();
+        JsonNode scanner = container("clamav");
+        List<String> bindVolumes = new ArrayList<>();
+        for (JsonNode volume : taskDefinition.path("volumes")) {
+            if (volume.path("efsVolumeConfiguration").isMissingNode()) {
+                bindVolumes.add(volume.path("name").asText());
+            }
+        }
+
+        assertThat(scanner.path("readonlyRootFilesystem").asBoolean()).isTrue();
+        assertThat(scanner.path("mountPoints")).as("signature・run・log・tmp の書込み先").isNotEmpty();
+        for (JsonNode mount : scanner.path("mountPoints")) {
+            String volume = mount.path("sourceVolume").asText();
+            assertThat(volume).as("clamav は自分の bind volume だけを mount する").startsWith("clamav-");
+            assertThat(bindVolumes).as("%s は EFS ではない bind volume", volume).contains(volume);
+        }
+        assertThat(scanner.path("secrets").isMissingNode() || scanner.path("secrets").isEmpty()).as("secret を渡さない").isTrue();
+        assertThat(scanner.path("environment").isMissingNode() || scanner.path("environment").isEmpty())
+                .as("app の設定を渡さない").isTrue();
+        assertThat(scanner.path("portMappings").isMissingNode() || scanner.path("portMappings").isEmpty())
+                .as("port を公開しない（app は 127.0.0.1 で clamd に届く）").isTrue();
+    }
+
     /** NF07 の trust 文書は EFS に置き、app は読取りだけで mount する（§1.6 の11。2026-11-18 決定）。第1期は file を指さない。 */
     @Test
     void 雛形はNF07_trust文書のEFSを読取り専用でmountし第1期はfileを指さない() throws IOException {
@@ -138,7 +167,8 @@ class ProductionTaskDefinitionTemplateTest {
         for (String name : List.of("APP_SCHEDULING_ENABLED", "SECURITY_BOOTSTRAP_ENABLED", "SECURITY_BOOTSTRAP_EXPIRES_AT",
                 "SECURITY_BOOTSTRAP_REOPEN_TICKET", "FILE_SCANNER_HOST", "FILE_SCANNER_PORT", "METRICS_SCRAPER_ENABLED",
                 "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "clamav",
-                "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON")) {
+                "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE", "entryPoint",
+                "management")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
         // 実値を入れた定義の検査と、repository の外への証跡出力（RB-DEPLOY、配備日確認表の #9）。

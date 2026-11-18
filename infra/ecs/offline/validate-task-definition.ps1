@@ -184,6 +184,13 @@ if ($c.portMappings[0].containerPort -ne 8080) { Fail 'port' } else { Ok 'port 8
 # A container hard limit keeps the JVM (MaxRAMPercentage=75) from sizing itself to the whole task.
 if ([string]$c.cpu -ne '1024' -or [string]$c.memory -ne '2048') { Fail 'ses-manager container cpu/memory must be 1024/2048 (hard limit)' }
 Ok 'ses-manager container cpu/memory 1024/2048 (hard limit)'
+foreach ($cd in @($c, $scanner)) {
+  if (@($cd.environmentFiles).Count -gt 0 -and $null -ne $cd.environmentFiles) { Fail "$($cd.name) must not use environmentFiles: their settings could not be checked here" }
+}
+foreach ($field in @('command', 'entryPoint')) {
+  if (@($c.$field).Count -gt 0 -and $null -ne $c.$field) { Fail "ses-manager must keep the image $field (an override can pass Spring arguments such as --app.scheduling.enabled=true past this validator)" }
+}
+Ok 'no environmentFiles; ses-manager keeps the image command and entryPoint'
 
 # ClamAV sidecar: not essential (uploads fail closed while it is down), sized, health-checked, no app volumes.
 if ($scanner.essential -ne $false) { Fail 'clamav must not be essential: the app keeps serving and uploads stay in quarantine while it is down' }
@@ -193,10 +200,22 @@ foreach ($cd in @($td.containerDefinitions)) { $containerMemory += [int]$cd.memo
 if ($containerMemory -gt [int]$td.memory) { Fail 'container memory limits exceed the task memory' }
 $scanHealth = ($scanner.healthCheck.command -join ' ')
 if (-not $scanHealth -or $scanHealth -match '/actuator/') { Fail 'clamav needs its own health check command (not the app actuator)' }
-$scannerMounts = @($scanner.mountPoints | Where-Object { $_.sourceVolume -eq 'uploads' -or $_.sourceVolume -eq $TrustVolume })
-if ($scannerMounts.Count -gt 0) { Fail 'clamav must not mount uploads or privacy-trust: files reach it over INSTREAM only' }
+# The sidecar handles untrusted uploads: read-only root filesystem, only its own bind volumes, no secrets, no app
+# settings, no published port (files reach it over INSTREAM on the loopback only).
+if ($scanner.readonlyRootFilesystem -ne $true) { Fail 'clamav must run with a read-only root filesystem (its writable paths are the clamav-* bind volumes)' }
+foreach ($m in @($scanner.mountPoints)) {
+  $vol = @($td.volumes | Where-Object { $_.name -eq $m.sourceVolume })[0]
+  if (-not ([string]$m.sourceVolume).StartsWith('clamav-') -or -not $vol -or $vol.efsVolumeConfiguration) {
+    Fail 'clamav may mount only its own clamav-* bind volumes (not uploads, privacy-trust, tmp or any EFS volume): files reach it over INSTREAM only'
+  }
+}
+if (@($scanner.secrets).Count -gt 0 -and $null -ne $scanner.secrets) { Fail 'clamav must not receive secrets' }
+$appSettingNames = @(@($c.environment) + @($c.secrets) | ForEach-Object { [string]$_.name })
+$sharedNames = @(@($scanner.environment) | ForEach-Object { [string]$_.name } | Where-Object { $appSettingNames -contains $_ })
+if ($sharedNames.Count -gt 0) { Fail ('clamav must not receive app settings: ' + ($sharedNames -join ',')) }
+if (@($scanner.portMappings).Count -gt 0 -and $null -ne $scanner.portMappings) { Fail 'clamav must not publish a port: the app reaches clamd on 127.0.0.1' }
 if ($scanner.logConfiguration.logDriver -ne 'awslogs') { Fail 'clamav awslogs driver' }
-Ok 'clamav sidecar: not essential, sized within the task, own health check, no app volumes, awslogs'
+Ok 'clamav sidecar: not essential, sized within the task, own health check, read-only root filesystem, own bind volumes only, no secrets or app settings, no port, awslogs'
 
 if ($Mode -eq 'Template') {
   if ($c.image -notmatch '@sha256:IMAGE_DIGEST$') { Fail 'IMAGE_DIGEST placeholder' }
@@ -267,6 +286,25 @@ $duplicates = @($byKey.Values | Where-Object { $_.Count -gt 1 } | ForEach-Object
 if ($duplicates.Count -gt 0) { Fail ('settings given more than once: ' + ($duplicates -join ', ')) }
 Ok 'each setting given once'
 
+# Settings judged by their value must be visible, so they belong in environment, not in the secret store.
+$mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY_BOOTSTRAP_ENABLED', 'SECURITY_BOOTSTRAP_EXPIRES_AT',
+  'SECURITY_BOOTSTRAP_REOPEN_TICKET', 'BREAK_GLASS_USERNAMES', 'TRUSTED_PROXIES', 'TZ', 'FILE_SCANNER_HOST', 'FILE_SCANNER_PORT',
+  'METRICS_SCRAPER_ENABLED', 'METRICS_SCRAPER_USERNAME', 'PRIVACY_TRUST_KMS_ANCHOR_FILE', 'FREEE_ENABLED', 'CLOUDSIGN_ENABLED',
+  'LOCAL_LOGIN_ENABLED', 'OIDC_ENABLED', 'BREAK_GLASS_LOGIN_ENABLED', 'OIDC_REQUIRE_MFA_ASSURANCE', 'MFA_ENABLED',
+  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED')
+$hidden = @($secretNames | Where-Object { $mustBeVisible -contains $_ -or $_ -match '^(FEATURE_[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED|INTEGRATION_HUB_(PUBLICAPI|PUBLIC_API|EXTERNALTRANSPORT|EXTERNAL_TRANSPORT)_ENABLED)$' })
+if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
+
+# deploy-runbook.md section 4: prod alone, and no other profile or configuration source the validator cannot read.
+$profiles = @($c.environment | Where-Object { $_.name -eq 'SPRING_PROFILES_ACTIVE' } | ForEach-Object { ([string]$_.value).Trim() })
+if ($profiles.Count -ne 1 -or $profiles[0] -ne 'prod') { Fail 'SPRING_PROFILES_ACTIVE must be exactly prod (deploy-runbook 4)' }
+$configSources = @($allNames | Where-Object {
+    $k = ($_.ToUpperInvariant() -replace '[._-]', '')
+    $k -eq 'SPRINGPROFILESINCLUDE' -or $k.StartsWith('SPRINGPROFILESGROUP') -or $k.StartsWith('SPRINGCONFIG')
+  })
+if ($configSources.Count -gt 0) { Fail ('extra profile or configuration sources must not be set: ' + ($configSources -join ',')) }
+Ok 'SPRING_PROFILES_ACTIVE=prod alone; value-checked settings in environment; no extra profile or config source'
+
 $secretOnly = @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET',
   'SESSION_HASH_KEY','MFA_ENCRYPTION_KEY','PWA_CONTEXT_SECRET','BP_BANK_ACCOUNT_ENCRYPTION_KEY',
   'CERTIFICATION_NUMBER_CRYPTO_KEYS_V1','COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1',
@@ -332,13 +370,14 @@ Ok 'no value that deploy-runbook 1.0 forbids'
 foreach ($name in @('JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS')) {
   if ($secretNames -contains $name) { Fail "$name must not come from the secret store: its contents could not be checked" }
   foreach ($value in @(EnvValues $name)) {
-    $props = @([regex]::Matches($value, '(?:^|\s)-D([^=\s]+)') | ForEach-Object { $_.Groups[1].Value })
+    if ($value -match '(^|\s)["'']?@') { Fail "$name must not read an @argfile: its contents could not be checked (deploy-runbook 1.0)" }
+    $props = @([regex]::Matches($value, '(?:^|\s)["'']?-D([^=\s"'']+)') | ForEach-Object { $_.Groups[1].Value })
     $other = @($props | Where-Object { $_ -ne 'user.timezone' })
     if ($other.Count -gt 0) { Fail ("$name sets system properties other than user.timezone: " + ($other -join ',') + ' (use environment variables; deploy-runbook 1.0)') }
   }
 }
 $guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
-  'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee')
+  'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main')
 function Get-JsonKeys([object]$node, [string]$prefix) {
   if ($node -is [System.Management.Automation.PSCustomObject]) {
     foreach ($p in $node.PSObject.Properties) {

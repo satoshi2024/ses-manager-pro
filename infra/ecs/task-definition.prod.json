@@ -158,7 +158,13 @@
       "essential": false,
       "cpu": 1024,
       "memory": 4096,
-      "readonlyRootFilesystem": false,
+      "readonlyRootFilesystem": true,
+      "mountPoints": [
+        { "sourceVolume": "clamav-db", "containerPath": "/var/lib/clamav", "readOnly": false },
+        { "sourceVolume": "clamav-run", "containerPath": "/run/clamav", "readOnly": false },
+        { "sourceVolume": "clamav-log", "containerPath": "/var/log/clamav", "readOnly": false },
+        { "sourceVolume": "clamav-tmp", "containerPath": "/tmp", "readOnly": false }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
@@ -184,6 +190,10 @@
     {
       "name": "tmp"
     },
+    { "name": "clamav-db" },
+    { "name": "clamav-run" },
+    { "name": "clamav-log" },
+    { "name": "clamav-tmp" },
     {
       "name": "uploads",
       "efsVolumeConfiguration": {
@@ -209,7 +219,7 @@
   ],
   "_offlineAcceptanceNotes": {
     "IMAGE_DIGEST": "PLACEHOLDER - replace with ECR registry digest after push; never use LOCAL_IMAGE_ID here. Decided 2026-11-18 (deploy-runbook section 1.6 item 5): the app image goes to a private ECR repository and is deployed by its registry digest; the docker save/load decision XB-10 covers the backup tool image only. Record the git SHA, the ECR tag and the digest together (runbook section 1.4)",
-    "CLAMAV_IMAGE_DIGEST": "PLACEHOLDER - the ClamAV sidecar image mirrored into ECR and pinned by its registry digest (runbook section 1.6 item 6)",
+    "CLAMAV_IMAGE_DIGEST": "PLACEHOLDER - the ClamAV sidecar image pinned by its registry digest. Mirroring it into ECR is the RB-DEPLOY initial design (SRE to confirm), not part of the 2026-11-18 decision (runbook section 1.6 item 6)",
     "ACCOUNT_ID": "PLACEHOLDER",
     "executionRoleArn": "PLACEHOLDER - OUT-OF-SCOPE until real IAM",
     "taskRoleArn": "PLACEHOLDER - OUT-OF-SCOPE until real IAM",
@@ -217,9 +227,9 @@
     "secrets": "PLACEHOLDER ARNs - no plaintext DB/OIDC secrets in environment",
     "requiredSettings": "The canonical list of the settings prod refuses to start without is .kiro/specs/production-launch/deploy-runbook.md section 1.0 (rows 1-26 always; rows 27-30 only with FREEE_ENABLED=true); this template only carries their names. Every *_PLACEHOLDER value and ARN must be replaced; left unreplaced, the app or the task refuses to start. Key-version suffixes (_V1) must match the *_CURRENT_KEY_VERSION values. COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS lists the tenants whose fingerprint keys are read from the COMPLIANCE_GATE_FINGERPRINT_KEYS_<TENANT>_* variables. BREAK_GLASS_USERNAMES stays empty for the bootstrap start and gets exactly two names at runbook section 5.5. FREEE_ENABLED=false keeps freee off; to turn it on, set FREEE_ENABLED=true and add FREEE_CLIENT_ID, FREEE_CLIENT_SECRET, FREEE_TOKEN_ENCRYPTION_KEY (secrets) and FREEE_REDIRECT_URI (HTTPS), or the app refuses to start. TZ=Asia/Tokyo is required (runbook sections 1.0 and 4; the image also sets it and -Duser.timezone): without it the JVM runs in UTC, a 30-minute account lock lasts about 9.5 hours and timestamps shift by 9 hours. If you override JAVA_TOOL_OPTIONS, keep -Duser.timezone=Asia/Tokyo. RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false until the Privacy owner and document owner sign the V197 copy-disposal policy (runbook section 4.3); switch it to true after the signature.",
     "initialStart": "This template is the FIRST start (runbook sections 4 and 4.2): APP_SCHEDULING_ENABLED=false (one task, scheduler off; SchedulingConfig treats a missing value as true, so the scheduler would run without it), SECURITY_BOOTSTRAP_ENABLED=true, SECURITY_BOOTSTRAP_EXPIRES_AT replaced by an offset ISO-8601 time no more than 24 hours after the start (left unreplaced, the app refuses to start), BREAK_GLASS_USERNAMES empty, SECURITY_BOOTSTRAP_REOPEN_TICKET and LOCAL_LOGIN_ENABLED absent, and no feature switch variables. At runbook section 5.5 remove SECURITY_BOOTSTRAP_ENABLED and SECURITY_BOOTSTRAP_EXPIRES_AT and set BREAK_GLASS_USERNAMES to exactly two names. Set APP_SCHEDULING_ENABLED=true only after the sign-offs in runbook section 4.",
-    "FILE_SCANNER": "ClamAV (clamd INSTREAM) runs as the clamav sidecar of this task (decided 2026-11-18, runbook section 1.6 item 6), so FILE_SCANNER_HOST=127.0.0.1 and FILE_SCANNER_PORT=3310 (the task shares one network namespace). The sidecar is not essential: if clamd is down the app keeps serving and uploads stay in quarantine (fail closed) until it is back. Task size 2048 CPU / 6144 MiB = app 1024 / 2048 (hard limit, so the JVM heap stays at 75% of 2048) + clamav 1024 / 4096 (clamd keeps all signatures in memory and a reload may hold two copies); measure and adjust. clamdcheck.sh is the health command of the official clamav image; confirm it exists in the mirrored image. Signature updates need egress or a mirror; see runbook section 1.6 item 6 for what SRE still has to confirm.",
+    "FILE_SCANNER": "Decided 2026-11-18 (runbook section 1.6 item 6): ClamAV (clamd INSTREAM) runs as a sidecar in this task and the task memory grows for it; so FILE_SCANNER_HOST=127.0.0.1 and FILE_SCANNER_PORT=3310 (the task shares one network namespace). Everything else about the sidecar is the RB-DEPLOY initial design that SRE confirms and measures: task 2048 CPU / 6144 MiB = app 1024 / 2048 (hard limit, so the JVM heap stays at 75% of 2048) + clamav 1024 / 4096; essential=false (the app keeps serving and uploads stay in quarantine while clamd is down; ECS does not restart a non-essential container, so detection and restart are SRE items); read-only root filesystem with the clamav-* bind volumes for the signature database, run, log and tmp; no secrets and no app settings in the sidecar; the image mirrored into ECR; clamdcheck.sh (the health script of the official image) as the health command. clamd should listen on 127.0.0.1 only (TCPAddr in clamd.conf of the mirrored image; SRE item). Uploads that arrived while clamd was down are not rescanned automatically; an administrator rescans them (runbook section 1.6 item 6).",
     "METRICS_SCRAPER": "Prometheus scrapes through the ALB over HTTPS with this machine account only (decided 2026-11-18, runbook section 1.6 item 7 and SRE-9), so METRICS_SCRAPER_ENABLED=true. METRICS_SCRAPER_USERNAME must not be admin or a break-glass name (always 401). METRICS_SCRAPER_PASSWORD comes from the secret store. The ALB listener rule / WAF restricts /actuator/prometheus to the scraper source.",
-    "PRIVACY_TRUST": "NF07 trust documents live on EFS and the app mounts them read only at /app/privacy-trust (decided 2026-11-18, runbook section 1.6 item 11). Use an access point other than the uploads one; the D-03 owner writes the file through a separate writable path (write a temporary file, then rename). PRIVACY_TRUST_KMS_ANCHOR_FILE stays empty for the first release (trust as in phase 1). When NF07 trust is opened, set it to the absolute path of the file under /app/privacy-trust/ (the NF07-TRUST section of the runbook).",
+    "PRIVACY_TRUST": "Decided 2026-11-18 (runbook section 1.6 item 11): NF07 trust documents live on EFS, the app mounts them read only, and the D-03 owner updates the file. The RB-DEPLOY initial design: mount path /app/privacy-trust and an access point other than the uploads one. The read-only mount binds the app container only and is not an IAM boundary: ECS hands the task role credentials to every container in the task, the clamav sidecar included. Security confirms (runbook section 1.6 item 11): the EFS file system policy grants the task role ClientMount only on the privacy-trust access point and ClientWrite only on the uploads access point (condition elasticfilesystem:AccessPointArn); the root directories of the two access points do not contain each other; the task role holds nothing else it does not need. PRIVACY_TRUST_KMS_ANCHOR_FILE stays empty for the first release (trust as in phase 1); when NF07 trust is opened, set it to the absolute path of the file under /app/privacy-trust/ (the NF07-TRUST section of the runbook).",
     "validation": "pwsh infra/ecs/offline/validate-task-definition.ps1 checks this template. Check the definition with real values with -Mode Actual -TaskDefinitionPath <file> (-Phase Initial for the first start; -Phase Steady -Scheduler Enabled|Disabled from runbook section 5.5); evidence goes outside the repository unless -EvidenceRoot says otherwise (runbook section 4). Remove this _offlineAcceptanceNotes block before registering: ECS rejects unknown fields and the Actual mode fails on it.",
     "TRUSTED_PROXIES": "PLACEHOLDER - replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {

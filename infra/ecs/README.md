@@ -24,8 +24,8 @@
   - §1.0 の1〜26の名前が environment か secrets に全てあること。`FREEE_ENABLED=true` のときは27〜30も。
   - secret を environment に置いていないこと。同じ設定を2回（environment と secrets の両方、または Spring が同じ property に結び付ける別の綴り）書いていないこと。
   - §1.0 の運用設定と 2026-11-18 の決定（runbook §1.6 の5〜7・11）: `FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`（ClamAV の sidecar）、`METRICS_SCRAPER_ENABLED=true` と `METRICS_SCRAPER_*`、`PRIVACY_TRUST_KMS_ANCHOR_FILE` の名前。§1.0 で禁止した値が無いこと。
-  - `JAVA_TOOL_OPTIONS`・`JDK_JAVA_OPTIONS`・`_JAVA_OPTIONS` に `-Duser.timezone` 以外の `-D` が無いこと、environment の `SPRING_APPLICATION_JSON` が検査対象の設定（scheduler・bootstrap・security・Flyway・機能スイッチ・NF07 等）を上書きしないこと（secret store から渡す `SPRING_APPLICATION_JSON` の中身は見ない）。
-  - task の形: container は app（`ses-manager`）と ClamAV の sidecar（`clamav`）の2つだけ。task は 2048 CPU / 6144 MiB、app は 1024 / 2048 の hard limit（JVM の heap が task 全体を基準にしないため）、`clamav` は essential にせず（停止中の upload は quarantine に留まる）、自前の health check を持ち、uploads・privacy-trust を mount しない。volume は uploads（読書き）と NF07 の trust 文書（`privacy-trust`、読取り専用・uploads と別の access point）の EFS で、どちらも transit encryption。
+  - 設定の経路: 値で判定する設定を secrets に置いていないこと、`SPRING_PROFILES_ACTIVE` がちょうど `prod` で `SPRING_PROFILES_INCLUDE`・`SPRING_CONFIG_*` が無いこと、`environmentFiles` が無く app の container が image の `command`・`entryPoint` を上書きしないこと、`JAVA_TOOL_OPTIONS`・`JDK_JAVA_OPTIONS`・`_JAVA_OPTIONS` に `-Duser.timezone` 以外の `-D`（引用符付きを含む）と `@argfile` が無いこと、environment の `SPRING_APPLICATION_JSON` が検査対象の設定（scheduler・bootstrap・security・Flyway・profile・config・機能スイッチ・NF07・management 等）を上書きしないこと（secret store から渡す `SPRING_APPLICATION_JSON` の中身は見ない）。正当な `-D` が要るようになったら validator の許可を変える（復審を経る）。
+  - task の形: container は app（`ses-manager`）と ClamAV の sidecar（`clamav`）の2つだけ。task は 2048 CPU / 6144 MiB、app は 1024 / 2048 の hard limit（JVM の heap が task 全体を基準にしないため）、`clamav` は essential にせず（停止中の upload は quarantine に留まる）、自前の health check を持ち、root filesystem を読取り専用にして自分の bind volume（`clamav-*`）だけを mount し、secret・app の設定・port を持たない。volume は uploads（読書き）と NF07 の trust 文書（`privacy-trust`、読取り専用・uploads と別の access point）の EFS で、どちらも transit encryption。
   - 初回起動の設定（runbook §4・§4.2）: `APP_SCHEDULING_ENABLED=false`、`SECURITY_BOOTSTRAP_ENABLED=true`、`SECURITY_BOOTSTRAP_EXPIRES_AT`、空の `BREAK_GLASS_USERNAMES`、空の `PRIVACY_TRUST_KMS_ANCHOR_FILE`、機能スイッチの環境変数（NF05 の公開API・外部送信を含む）が無いこと。
 - 検査の mode は2つある。証跡は既定で OS の一時 directory の下に新しく作り、repository には書かない（`-EvidenceRoot` で変えられる）。証跡には設定の名前と期待した状態を書き、設定の値（ID・host・ARN 等）は書き写さない。
   - `-Mode Template`（既定）: repository の雛形（placeholder のまま）を検査する。
@@ -40,9 +40,9 @@
   - `TZ=Asia/Tokyo` は必須である（runbook §1.0・§4）。image も `TZ` と `-Duser.timezone=Asia/Tokyo` を持つ。`JAVA_TOOL_OPTIONS` を上書きするときは `-Duser.timezone=Asia/Tokyo` を残す。validator はどちらが欠けても Fail する。
   - `RESUME_LEDGER_COPY_ALIGNMENT_ENABLED=false` は、V197 の署名を得るまでの値である。署名後に `true` にする（runbook §4.3）。
   - 雛形は初回起動の値である（`APP_SCHEDULING_ENABLED=false`、`SECURITY_BOOTSTRAP_ENABLED=true`、期限は placeholder）。`SchedulingConfig` は `APP_SCHEDULING_ENABLED` が無いと scheduler を動かすため、消さない。runbook §5.5 で bootstrap の2項目を外して break-glass 2名を入れ、scheduler は §4 の署名後に `true` にする。
-  - アプリ image は ECR の private repository から registry digest で配る（2026-11-18 決定。runbook §1.4・§1.6 の5）。docker save/load の決定 XB-10 は backup tool image だけの決定である。ClamAV の image も ECR へ写して digest で固定する。
-  - ClamAV は同じ task の sidecar で動かす（2026-11-18 決定。runbook §1.6 の6）。task の大きさは初期値で、clamd の memory は SRE が実測して見直す。signature の更新経路・health の command 等の SRE 確認項は runbook §1.6 の6 にある。
-  - NF07 の trust 文書は EFS に置き、app は `/app/privacy-trust` に読取り専用で mount する（2026-11-18 決定。runbook §1.6 の11）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のままにする。
+  - アプリ image は ECR の private repository から registry digest で配る（2026-11-18 決定。runbook §1.4・§1.6 の5）。docker save/load の決定 XB-10 は backup tool image だけの決定である。ClamAV の image も ECR へ写して digest で固定するのは RB-DEPLOY の初期設計で、SRE が確かめる。
+  - ClamAV を同じ task の sidecar で動かし task の memory を増やすことは 2026-11-18 の決定である（runbook §1.6 の6）。task と container の大きさ、essential にしないこと、読取り専用の root filesystem と bind volume、ECR への写しは RB-DEPLOY の初期設計で、SRE が確かめ実測で見直す。signature の更新経路・health の command・`TCPAddr 127.0.0.1`・停止中の upload の再scan等は runbook §1.6 の6 にある。
+  - NF07 の trust 文書は EFS に置き、app は読取り専用で mount する（2026-11-18 決定。runbook §1.6 の11。path `/app/privacy-trust` と別の access point は初期設計）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のままにする。読取り専用の mount は app の container だけの制約で IAM の境界ではない（task role の credential は clamav にも渡る）。EFS の file system policy（access point ごとの `ClientMount`・`ClientWrite`）と task role の最小権限は Security が確かめる（runbook §1.6 の11。validator は見ない）。
   - 登録する前に `_offlineAcceptanceNotes` を消す（ECS は未知の field を拒否し、実値の mode も FAIL にする）。
 
 ## Probe 規約
