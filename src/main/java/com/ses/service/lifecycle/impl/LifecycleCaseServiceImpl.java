@@ -653,8 +653,13 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         }
         // 一覧の進捗（完了数/総数）。詳細と同じく照会者に見えるタスクだけを数える（要員本人は本人公開タスクだけ）。
         // 以前は一覧のDTOにタスクを載せず、画面が tasks から数えていたため全件 0/0 と表示されていた（RB-POSTLAUNCH B-3）。
+        // 読む列は件数と可視判定（isTaskVisibleToUser: 本人公開・担当role・担当者）に使うものだけにする
+        // （説明・証跡JSON・完了コメント等の行全体を一覧のたびに読まない。RB-POSTLAUNCH review P3-1）。
         Map<Long, int[]> progressByCaseId = new HashMap<>();
         taskMapper.selectList(new LambdaQueryWrapper<LifecycleTask>()
+                        .select(LifecycleTask::getId, LifecycleTask::getCaseId, LifecycleTask::getStatus,
+                                LifecycleTask::getIsEngineerVisible, LifecycleTask::getAssigneeRole,
+                                LifecycleTask::getAssigneeUserId)
                         .in(LifecycleTask::getCaseId, visibleCases.stream().map(LifecycleCase::getId)
                                 .collect(Collectors.toList())))
                 .stream()

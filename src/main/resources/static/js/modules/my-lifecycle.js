@@ -351,12 +351,12 @@ SES.myLifecycle = {
         tbody.innerHTML = html;
     },
 
-    /** 二者確認タスクの操作。子スイッチOFFでモーダルが無ければ無効の表示だけ。 */
     /** 未着手タスクの操作欄（先行タスクの完了後に自動で着手可能になる）。 */
     waitingPredecessorLabel: function() {
         return `<span class="text-muted small">${SES.escapeHtml(SES.i18n.t('lifecycle.my.waitingPredecessor'))}</span>`;
     },
 
+    /** 二者確認タスクの操作。子スイッチOFFでモーダルが無ければ無効の表示だけ。 */
     dualConfirmationAction: function(task, caseStatus) {
         const inProgress = caseStatus === 'ACTIVE' && task.status === 'IN_PROGRESS';
         if (!inProgress && task.status !== 'COMPLETED') {

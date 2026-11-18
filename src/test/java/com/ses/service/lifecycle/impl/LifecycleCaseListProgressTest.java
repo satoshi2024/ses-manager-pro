@@ -47,6 +47,14 @@ class LifecycleCaseListProgressTest {
     @InjectMocks
     private LifecycleCaseServiceImpl service;
 
+    /** 一覧のタスク検索は読む列を select で絞る（MyBatis-Plus が列名を解決するため、entity の metadata を用意する）。 */
+    @org.junit.jupiter.api.BeforeEach
+    void initializeMybatisLambdaMetadata() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""), LifecycleTask.class);
+    }
+
     @Test
     void 一覧は照会者に見えるタスクの完了数と総数を案件ごとに返す() {
         SysUser engineerUser = new SysUser();
@@ -82,7 +90,14 @@ class LifecycleCaseListProgressTest {
         assertThat(second.getTotalTasks()).isZero();
         assertThat(second.getCompletedTasks()).isZero();
         assertThat(second.getProgressPercent()).isZero();
-        verify(taskMapper, times(1)).selectList(any());
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper> query =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(taskMapper, times(1)).selectList(query.capture());
+        // 読む列は件数と可視判定に使うものだけ（説明・証跡JSON・完了コメント等の行全体を読まない。review P3-1）
+        assertThat(query.getValue().getSqlSelect())
+                .contains("case_id", "status", "is_engineer_visible", "assignee_role", "assignee_user_id")
+                .doesNotContain("description", "evidence_data_json", "completion_comment", "task_name");
     }
 
     private static LifecycleCase lifecycleCase(Long id) {
