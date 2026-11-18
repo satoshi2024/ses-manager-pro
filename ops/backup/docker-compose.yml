@@ -17,6 +17,9 @@
 #     で起動する（docker compose を直接実行しない。tool-image.sh は許可した使い方だけを渡す）。
 #   - .env.backup の FLYWAY_VERSION（Flyway 形式。例: 185、185.1）、CONTENT_HASH_TABLES
 #     （内容ハッシュを記録する主要 table）を設定する。README「設定」参照。
+#   - この file は block style の YAML だけで書く（RB-W W-3）。tool-image.sh check は block style の
+#     YAML を自前で解釈して service ごとの image・pull_policy を確かめるため、flow style（{ } / [ ]）・
+#     tag・block scalar・トップレベルの x- 以外の anchor などを見つけると拒否する。
 # ============================================================
 # 要人手確認: 検証済み build の content ID を設定するまで production では使えない（fail-closed）。
 x-ses-backup-tool-content-id: "sha256:UNPINNED"
@@ -24,8 +27,11 @@ x-ses-backup-tool-content-id: "sha256:UNPINNED"
 x-backup-common: &backup-common
   image: ses-backup-tool:8.0.46
   pull_policy: never
-  env_file: [.env.backup]
-  secrets: [mysql_password, restic_password]
+  env_file:
+    - .env.backup
+  secrets:
+    - mysql_password
+    - restic_password
   volumes:
     - backup-data:/var/lib/ses-backup
     - uploads:/app/uploads:ro
@@ -41,45 +47,56 @@ services:
   # 環境契約検査（read-only）。deploy 前・障害時の事前確認に使う
   preflight:
     <<: *backup-common
-    entrypoint: ["/usr/local/bin/preflight.sh"]
-    command: ["--json"]
+    entrypoint:
+      - /usr/local/bin/preflight.sh
+    command:
+      - "--json"
 
   # 日次 full（02:00 Asia/Tokyo 想定の scheduler から実行）
   backup:
     <<: *backup-common
-    entrypoint: ["/usr/local/bin/backup-full.sh"]
+    entrypoint:
+      - /usr/local/bin/backup-full.sh
 
   # 継続 binlog archive（常駐）。初回起点は backup-full が書き出す
   # FULL_COORDINATE_FILE（.env.backup で backup-data 上の共有 path を指定）
   binlog:
     <<: *db-only
-    entrypoint: ["/usr/local/bin/archive-binlog.sh"]
+    entrypoint:
+      - /usr/local/bin/archive-binlog.sh
 
   # 15 分間隔 checkpoint（DB/uploads 整合点）
   checkpoint:
     <<: *backup-common
-    entrypoint: ["/usr/local/bin/create-checkpoint.sh"]
+    entrypoint:
+      - /usr/local/bin/create-checkpoint.sh
 
   # 閉じた binlog の immutable snapshot（checkpoint 連動）
   snapshot-binlog:
     <<: *db-only
-    entrypoint: ["/usr/local/bin/snapshot-binlog.sh"]
+    entrypoint:
+      - /usr/local/bin/snapshot-binlog.sh
 
   # watermark 監視（alert routing は外部 scheduler/monitor で受ける）
   check:
     <<: *db-only
-    entrypoint: ["/usr/local/bin/check-backup.sh"]
-    command: ["--json"]
+    entrypoint:
+      - /usr/local/bin/check-backup.sh
+    command:
+      - "--json"
 
   # 依存を壊さない retention（専用 role / maintenance 専用）
   retention:
     <<: *db-only
-    entrypoint: ["/usr/local/bin/retention.sh"]
+    entrypoint:
+      - /usr/local/bin/retention.sh
 
 secrets:
-  mysql_password: {file: ./secrets/mysql-password}
-  restic_password: {file: ./secrets/restic-password}
+  mysql_password:
+    file: ./secrets/mysql-password
+  restic_password:
+    file: ./secrets/restic-password
 
 volumes:
-  uploads: {}
-  backup-data: {}
+  uploads:
+  backup-data:

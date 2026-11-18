@@ -6,6 +6,9 @@
 #   pin と照合は image store（classic / containerd）に依存しない content ID で行う（W1-B1 r2 P2-2）。
 # - image/tool-image.sh compose: 許可した使い方（run --rm <service> / up -d binlog / ps / logs / stop）だけを渡し、
 #   -f・--pull・--build などの compose 側 option や未定義の service は docker を呼ばずに拒否する。
+# - RB-W W-3: tag は 1 回だけ image ID へ解決し、照合と起動はその image ID で行う（照合後の tag の付け替えで
+#   別の image を起動させない）。pull_policy・image は service ごとの実効値で検査し、flow style などの解釈しない
+#   YAML は理由を示して拒否する。
 # - image/tool-image.sh record / save / load: image store の種類・content ID・image ID を記録し、
 #   配布 tar は SHA-256 が一致しなければ docker load せず、読み込んだ tag の content ID で照合する。
 # - image/install-toolchain.sh: 固定値が仮置きの値なら何もダウンロードせずに失敗し、署名鍵は SHA-256・
@@ -21,6 +24,8 @@ BACKUP_ROOT="$ROOT/ops/backup"
 TOOL_IMAGE="$BACKUP_ROOT/image/tool-image.sh"
 INSTALL_TOOLCHAIN="$BACKUP_ROOT/image/install-toolchain.sh"
 PROD_COMPOSE="$BACKUP_ROOT/docker-compose.yml"
+# setup_fake_docker は TMPDIR を case 用に差し替えるため、case の作業ディレクトリは起動時の TMPDIR に作る（入れ子にしない）
+TEST_TMP_ROOT=${TMPDIR:-/tmp}
 hex64() { printf "${1}%.0s" $(seq 1 64); }
 ID_CLASSIC="sha256:$(hex64 a)"
 ID_CONTAINERD="sha256:$(hex64 b)"
@@ -30,9 +35,13 @@ STATUS_CLASSIC='[["Backing Filesystem","extfs"],["Supports d_type","true"]]'
 STATUS_CONTAINERD='[["driver-type","io.containerd.snapshotter.v1"]]'
 
 # fake docker: 呼び出しを FAKE_DOCKER_LOG に記録し、image inspect / info は FAKE_* を返す
+#   FAKE_RETAG_ID / FAKE_RETAG_LAYERS / FAKE_RETAG_DONE: tag の image ID を 1 回答えた直後に、tag を別の image
+#   （FAKE_RETAG_ID）へ付け替える第三者を再現する。image ID で問い合わせた場合はその image の内容を返す。
+#   compose -f A -f B ...: 2 つ目の -f（実行後に削除される override）の内容を FAKE_DOCKER_LOG.override に残す。
 setup_fake_docker() {
-  T=$(mktemp -d)
-  mkdir -p "$T/bin"
+  T=$(mktemp -d "$TEST_TMP_ROOT/tool-image-test.XXXXXX")
+  mkdir -p "$T/bin" "$T/tmp"
+  export TMPDIR="$T/tmp"
   cat > "$T/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
@@ -44,12 +53,27 @@ esac
 case "${1:-} ${2:-}" in
   "image inspect")
     [[ -n "${FAKE_IMAGE_ID:-}" ]] || { echo "Error: No such image" >&2; exit 1; }
+    ref=${*: -1}
+    id=$FAKE_IMAGE_ID
+    layers=$FAKE_LAYERS
+    if [[ -n "${FAKE_RETAG_ID:-}" ]]; then
+      if [[ "$ref" == "$FAKE_RETAG_ID" || ( "$ref" != "$FAKE_IMAGE_ID" && -e "$FAKE_RETAG_DONE" ) ]]; then
+        id=$FAKE_RETAG_ID
+        layers=$FAKE_RETAG_LAYERS
+      fi
+      if [[ "$ref" != "$FAKE_IMAGE_ID" && "$ref" != "$FAKE_RETAG_ID" && "$*" == *"{{.Id}}"* ]]; then
+        : > "$FAKE_RETAG_DONE"
+      fi
+    fi
     case "$*" in
-      *".RootFS.Layers"*) printf '%b' "$FAKE_LAYERS" ;;
+      *".RootFS.Layers"*) printf '%b' "$layers" ;;
       *".Config.Env"*) printf '%s\n' "$FAKE_CONFIG" ;;
-      *"{{.Id}}"*) printf '%s\n' "$FAKE_IMAGE_ID" ;;
+      *"{{.Id}}"*) printf '%s\n' "$id" ;;
       *) exit 9 ;;
     esac
+    exit 0 ;;
+  "compose -f")
+    if [[ "${4:-}" == -f && -f "${5:-}" ]]; then cat "$5" >> "$FAKE_DOCKER_LOG.override"; fi
     exit 0 ;;
   "load -i") exit 0 ;;
   "save -o") printf 'fake image tar\n' > "$3"; exit 0 ;;
@@ -70,6 +94,7 @@ MOCK
   export DOCKER_BIN="$T/bin/docker"
   export FAKE_IMAGE_ID="$ID_CLASSIC" FAKE_LAYERS="$LAYERS_DEFAULT" FAKE_CONFIG="$CONFIG_DEFAULT"
   export FAKE_DRIVER_STATUS="$STATUS_CLASSIC" FAKE_STORAGE_DRIVER=overlay2
+  unset FAKE_RETAG_ID FAKE_RETAG_LAYERS FAKE_RETAG_DONE
 }
 
 # 現行の production compose を複製し、pin 値を差し替えたものを作る
@@ -156,7 +181,7 @@ case_check_rejects_changed_content() {
   unset FAKE_IMAGE_ID
   run_tool check --compose "$T/compose.yml"
   assert_nonzero "$TOOL_RC" "ローカルに image が無ければ拒否"
-  assert_contains "$TOOL_OUT" "content ID を計算できません" "image 不在を通知"
+  assert_contains "$TOOL_OUT" "image ID を取得できません" "image 不在を通知"
 }
 
 case_check_rejects_build_and_pull() {
@@ -260,8 +285,9 @@ case_compose_runs_allowed_usage_after_check() {
   TOOL_OUT=$(bash "$copy/image/tool-image.sh" compose run --rm check --json 2>&1)
   TOOL_RC=$?
   assert_zero "$TOOL_RC" "pin と一致すれば run --rm <service> を実行"
-  assert_contains "$(cat "$FAKE_DOCKER_LOG")" "compose -f $copy/docker-compose.yml run --rm check --json" \
-    "production compose と許可した引数だけを docker compose へ渡す"
+  assert_contains "$(cat "$FAKE_DOCKER_LOG")" "compose -f $copy/docker-compose.yml -f " \
+    "production compose と image ID の override だけを docker compose へ渡す"
+  assert_contains "$(grep '^compose ' "$FAKE_DOCKER_LOG")" "image-id.yml run --rm check --json" "許可した引数だけを渡す"
 
   : > "$FAKE_DOCKER_LOG"
   export FAKE_LAYERS="sha256:$(hex64 7)\n"
@@ -279,9 +305,117 @@ case_compose_runs_allowed_usage_after_check() {
   assert_contains "$(cat "$FAKE_DOCKER_LOG")" "compose -f $copy/docker-compose.yml ps" "ps を渡す"
 }
 
+# RB-W W-3(a): tag は照合で 1 回だけ image ID へ解決し、compose はその image ID に固定した override で起動する。
+# 照合の直後に tag を別の image へ付け替えられても、照合した image だけが起動される（r2 は tag のまま exec していた）。
+case_compose_runs_checked_image_id_even_if_retagged() {
+  setup_fake_docker
+  local copy content override
+  copy="$T/repo/ops/backup"
+  mkdir -p "$copy/image"
+  cp "$TOOL_IMAGE" "$copy/image/tool-image.sh"
+  content=$(current_content_id)
+  pinned_compose "$copy/docker-compose.yml" "$content"
+  : > "$FAKE_DOCKER_LOG"
+  export FAKE_RETAG_ID="$ID_CONTAINERD" FAKE_RETAG_LAYERS="sha256:$(hex64 6)\n" FAKE_RETAG_DONE="$T/retagged"
+  TOOL_OUT=$(bash "$copy/image/tool-image.sh" compose run --rm backup 2>&1)
+  TOOL_RC=$?
+  assert_zero "$TOOL_RC" "照合した image で run する"
+  assert_file "$T/retagged" "照合の直後に tag が別の image へ付け替えられた（前提）"
+  assert_eq 1 "$(grep -c '{{.Id}} ses-backup-tool:8.0.46$' "$FAKE_DOCKER_LOG")" "tag の image ID への解決は 1 回だけ"
+  assert_contains "$(grep 'RootFS.Layers' "$FAKE_DOCKER_LOG")" "$ID_CLASSIC" "content ID は解決した image ID から計算する"
+  assert_not_contains "$(grep 'RootFS.Layers' "$FAKE_DOCKER_LOG")" "ses-backup-tool:8.0.46" "content ID の計算に tag を使わない"
+  override=$(cat "$FAKE_DOCKER_LOG.override" 2>/dev/null)
+  assert_eq 7 "$(grep -c "image: \"$ID_CLASSIC\"" <<< "$override")" "全 service の image を照合した image ID に固定する"
+  assert_not_contains "$override" "$ID_CONTAINERD" "付け替え後の image は使わない"
+  assert_contains "$(grep '^compose ' "$FAKE_DOCKER_LOG")" "run --rm backup" "許可した使い方を渡す"
+  if compgen -G "$TMPDIR/ses-backup-tool-compose.*" > /dev/null; then
+    test_fail "実行後に override を削除する" "$(ls "$TMPDIR")"
+  else
+    test_assert "実行後に override を削除する"
+  fi
+}
+
+# compose の 1 行（<after> の直後）に <line> を足した複製を作る
+compose_with_line() { # <src> <out> <after（完全一致の行）> <line>
+  awk -v after="$3" -v add="$4" '{ print } $0 == after { print add }' "$1" > "$2"
+}
+
+# 変形した compose を check し、docker を呼ばずに拒否することを確かめる
+expect_compose_rejected() { # <compose> <通知に含まれる語> <label>
+  : > "$FAKE_DOCKER_LOG"
+  run_tool check --compose "$1"
+  assert_eq 1 "$TOOL_RC" "拒否: $3"
+  assert_contains "$TOOL_OUT" "$2" "理由を通知: $3"
+  assert_eq "" "$(cat "$FAKE_DOCKER_LOG")" "image を確かめる前に拒否（docker を呼ばない）: $3"
+}
+
+# RB-W W-3(b): pull_policy・image は service ごとに（merge を解決した実効値で）検査する。
+# r2 は「pull_policy: never の行が 1 行以上あるか」しか見ず、1 つの service の pull_policy: always を見落としていた。
+case_check_requires_pull_policy_per_service() {
+  setup_fake_docker
+  local content
+  content=$(current_content_id)
+  pinned_compose "$T/base.yml" "$content"
+  run_tool check --compose "$T/base.yml"
+  assert_zero "$TOOL_RC" "全 service が never なら受理（前提）"
+  compose_with_line "$T/base.yml" "$T/override-always.yml" "  backup:" "    pull_policy: always"
+  expect_compose_rejected "$T/override-always.yml" "service backup に pull_policy: never がありません（現在: always" \
+    "1 つの service だけ pull_policy: always で上書き"
+  grep -v '^  pull_policy: never$' "$T/base.yml" > "$T/anchor-only.yml.tmp"
+  compose_with_line "$T/anchor-only.yml.tmp" "$T/one-service.yml" "  preflight:" "    pull_policy: never"
+  expect_compose_rejected "$T/one-service.yml" "pull_policy: never がありません" "1 つの service にだけ never がある"
+  compose_with_line "$T/base.yml" "$T/other-image.yml" "  check:" "    image: ses-backup-tool:other"
+  expect_compose_rejected "$T/other-image.yml" "ツールイメージ 1 種類ではありません" "1 つの service だけ別の tag"
+  compose_with_line "$T/base.yml" "$T/foreign-image.yml" "  check:" "    image: alpine:3"
+  expect_compose_rejected "$T/foreign-image.yml" "service check の image: がツールイメージの tag ではありません" "ツール以外の image"
+  compose_with_line "$T/base.yml" "$T/extra-service.yml" "services:" "  sidecar:"$'\n'"    image: ses-backup-tool:8.0.46"$'\n'"    pull_policy: never"
+  expect_compose_rejected "$T/extra-service.yml" "services がツールの service" "ツール以外の service（依存で起動され得る）"
+  compose_with_line "$T/base.yml" "$T/extends.yml" "  retention:" "    extends: check"
+  expect_compose_rejected "$T/extends.yml" "extends:" "extends で別の定義を取り込む"
+  # 引用符・行末コメントは正しく解釈して受理する
+  sed 's|^  pull_policy: never$|  pull_policy: "never"  # registry から取得しない|' "$T/base.yml" > "$T/quoted.yml"
+  run_tool check --compose "$T/quoted.yml"
+  assert_zero "$TOOL_RC" "引用符・行末コメント付きの never も解釈して受理"
+}
+
+# RB-W W-3(c): flow style などの解釈しない書き方は、明確な理由を示して fail-closed にする。
+case_check_rejects_flow_style_and_unparsed_yaml() {
+  setup_fake_docker
+  local content
+  content=$(current_content_id)
+  pinned_compose "$T/base.yml" "$content"
+  compose_with_line "$T/base.yml" "$T/flow-map.yml" "  backup:" "    environment: {RESTIC_BIN: /bin/true}"
+  expect_compose_rejected "$T/flow-map.yml" "flow style（{）の YAML は解釈しません" "service 内の flow mapping"
+  compose_with_line "$T/base.yml" "$T/flow-seq.yml" "  backup:" "    secrets: [mysql_password]"
+  expect_compose_rejected "$T/flow-seq.yml" "flow style（[）の YAML は解釈しません" "service 内の flow sequence"
+  printf 'x-ses-backup-tool-content-id: "%s"\nservices: {preflight: {image: "ses-backup-tool:8.0.46", pull_policy: always}}\n' \
+    "$content" > "$T/flow-services.yml"
+  expect_compose_rejected "$T/flow-services.yml" "flow style" "services 全体の flow style"
+  compose_with_line "$T/base.yml" "$T/dup.yml" "  pull_policy: never" "  pull_policy: always"
+  expect_compose_rejected "$T/dup.yml" "key が重複しています" "同じ mapping の key の重複"
+  compose_with_line "$T/base.yml" "$T/tab.yml" "  backup:" $'\t'"pull_policy: always"
+  expect_compose_rejected "$T/tab.yml" "indent に tab があります" "indent の tab"
+  compose_with_line "$T/base.yml" "$T/tag.yml" "  backup:" "    image: !!str ses-backup-tool:8.0.46"
+  expect_compose_rejected "$T/tag.yml" "tag・block scalar" "YAML の tag"
+  compose_with_line "$T/base.yml" "$T/block-scalar.yml" "  backup:" "    command: |"$'\n'"      sh -c true"
+  expect_compose_rejected "$T/block-scalar.yml" "tag・block scalar" "block scalar"
+  sed 's|^  backup:$|  backup: \&backup|' "$T/base.yml" > "$T/service-anchor.yml"
+  expect_compose_rejected "$T/service-anchor.yml" "anchor はトップレベルの x- key にだけ置けます" "service の anchor"
+  compose_with_line "$T/base.yml" "$T/alias.yml" "  backup:" "    image: *backup-common"
+  expect_compose_rejected "$T/alias.yml" "予約文字（*）" "<< 以外の alias"
+  { cat "$T/base.yml"; printf 'include:\n  - extra.yml\n'; } > "$T/include.yml"
+  expect_compose_rejected "$T/include.yml" "include" "別の compose ファイルの include"
+  { printf -- '---\n'; cat "$T/base.yml"; } > "$T/document.yml"
+  expect_compose_rejected "$T/document.yml" "document marker" "document marker"
+  compose_with_line "$T/base.yml" "$T/continuation.yml" "  image: ses-backup-tool:8.0.46" "    :other"
+  expect_compose_rejected "$T/continuation.yml" "indent が揃っていません" "複数行にわたる値"
+  compose_with_line "$T/base.yml" "$T/seq-map.yml" "  volumes:" "    - type: bind"
+  expect_compose_rejected "$T/seq-map.yml" "sequence の中の mapping は扱いません" "sequence の中の mapping（long syntax）"
+}
+
 # install-toolchain.sh 用の fake（apt-get / curl / gpg / dpkg）。実ネットワーク・実 apt には触れない。
 setup_fake_installer() {
-  T=$(mktemp -d)
+  T=$(mktemp -d "$TEST_TMP_ROOT/tool-image-test.XXXXXX")
   mkdir -p "$T/bin"
   cat > "$T/bin/apt-get" <<'MOCK'
 #!/usr/bin/env bash
@@ -435,6 +569,9 @@ case_static_image_contract() {
   assert_contains "$prod" "pull_policy: never" "production compose は registry から pull しない"
   assert_contains "$prod" "x-ses-backup-tool-content-id:" "production compose は store に依存しない content ID を参照する"
   assert_not_contains "$prod" "x-ses-backup-tool-image-id:" "store 依存の image ID では pin しない"
+  # RB-W W-3(c): production compose は block style だけで書く（tool-image.sh check は flow style を拒否する）
+  assert_eq "" "$(grep -nE '^[^#]*:[[:space:]]*[[{]|^[[:space:]]*-[[:space:]]*[[{]' "$PROD_COMPOSE" || true)" \
+    "production compose に flow style（{ } / [ ]）が無い"
   assert_contains "$dockerignore" "secrets" "build context から secrets/ を除く"
   assert_contains "$dockerignore" ".env.backup" "build context から .env.backup を除く"
   # 運用文書は job の起動を tool-image.sh compose 経由に統一する（docker compose の直接実行は pin 照合を迂回する）
@@ -453,6 +590,9 @@ run_case case_record_writes_store_and_refuses_overwrite
 run_case case_save_and_load_by_content_id
 run_case case_compose_rejects_unlisted_usage_without_docker
 run_case case_compose_runs_allowed_usage_after_check
+run_case case_compose_runs_checked_image_id_even_if_retagged
+run_case case_check_requires_pull_policy_per_service
+run_case case_check_rejects_flow_style_and_unparsed_yaml
 run_case case_installer_rejects_placeholders_before_download
 run_case case_installer_rejects_key_checksum_mismatch
 run_case case_installer_checks_primary_key_only

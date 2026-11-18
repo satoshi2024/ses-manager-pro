@@ -66,6 +66,20 @@ job は必ず `image/tool-image.sh compose` 経由で起動する。docker-compo
 
 `<service>` は `preflight` / `backup` / `binlog` / `checkpoint` / `snapshot-binlog` / `check` / `retention`。
 
+pin 照合（`tool-image.sh check`。RB-W W-3）の内容:
+
+- `docker-compose.yml` を自前で解釈する。扱うのは block style の YAML（`key: スカラー`・`key:` + 子 block・
+  `- スカラー`、トップレベルの `x-` key の anchor と、`x-` mapping・service 直下の `<<: *anchor`）だけで、
+  flow style（`{ }` / `[ ]`）・tag（`!`）・block scalar（`|` `>`）・それ以外の anchor / alias・引用符付き key・
+  document marker・indent の tab・key の重複・複数行の値・sequence の中の mapping は、理由を示して拒否する。
+  compose を変えるときも block style で書く。
+- service の集合が上の 7 つと一致し、**service ごとに** merge を解決した実効値で、`image` が同じツールイメージの tag、
+  `pull_policy: never`、`build` / `extends` が無いことを確かめる（トップレベルの `include` も拒否する）。
+- tag を **1 回だけ** image ID へ解決し、その image ID から content ID を計算して pin と照合する。
+  `run` / `up` は、照合した image ID を全 service の `image` に固定する一時 override（本プロセス専用の一時ディレクトリに
+  作り、終了時に削除する）を 2 つ目の `-f` として渡して起動する。照合の後に tag を別の image へ付け替えられても、
+  起動するのは照合した image だけである（image ID は内容から決まり、付け替えられない）。
+
 ```bash
 # 1. 環境契約検査（read-only）: 0 でなければ先へ進まない
 ops/backup/image/tool-image.sh compose run --rm preflight
@@ -138,7 +152,8 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    ops/backup/image/tool-image.sh check      # compose の pin とローカル image の一致確認
    ```
 
-production の `docker-compose.yml` は `build:` を持たず、`pull_policy: never` で同名 image を registry から取得させない。
+production の `docker-compose.yml` は `build:` を持たず、全 service が `pull_policy: never` で同名 image を registry から
+取得させない（`check` が service ごとに確かめる）。
 
 ## 権限分離（RQ-008）
 
