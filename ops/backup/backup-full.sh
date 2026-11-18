@@ -28,6 +28,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/manifest.sh"
 . "$LIB_DIR/metadata.sh"
 . "$LIB_DIR/content-hash.sh"
+. "$LIB_DIR/schema-fingerprint.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -215,6 +216,11 @@ main() {
         "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
       || common::fail "主要 table の内容ハッシュを計算できません（CONTENT_HASH_TABLES）"
   fi
+  # G-04（RB-W W-1）: schema fingerprint も同じ静止区間内に採取する。設定によらず常に記録し、計算できなければ
+  # full を VALID にしない（復元検証は記録の無い backup を FAIL にする）。
+  METADATA_SCHEMA_FINGERPRINT_JSON=$(schema_fingerprint::compute \
+      "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
+    || common::fail "schema fingerprint を計算できません（lib/schema-fingerprint.sh）"
 
   # 静止解除
   if ! quiesce::release; then

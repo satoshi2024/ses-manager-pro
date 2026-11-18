@@ -144,10 +144,10 @@ production の `docker-compose.yml` は `build:` を持たず、`pull_policy: ne
 
 | role | DB 権限 | repository 権限 | 用途 |
 |---|---|---|---|
-| dump role | 対象 DB read、view/trigger/event/routine の最小権限 | writer（backup 可・delete 不可） | full/checkpoint |
+| dump role | 対象 DB read、view/trigger/event/routine の最小権限（schema fingerprint のため `SHOW VIEW`・`TRIGGER`・`SHOW_ROUTINE` を含む） | writer（backup 可・delete 不可） | full/checkpoint |
 | binlog role | `REPLICATION CLIENT`（+ checkpoint 用 rotation 権限は別 account） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
-| restore target role | recovery target 新規 DB のみ（source 権限なし。`flyway_schema_history` を含む SELECT が必要） | read | restore/validate |
+| restore target role | recovery target 新規 DB のみ（source 権限なし。`flyway_schema_history` を含む SELECT が必要。schema fingerprint の照合に対象 DB の `SHOW VIEW`・`TRIGGER` と `SHOW_ROUTINE` が必要） | read | restore/validate |
 
 - repository の S3 versioning/immutability を有効化し、通常 backup credential だけで全世代を削除できないようにする。
 - 書込み静止（quiesce）は `providers/quiesce-local.sh`（version 管理された executable）のみ。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
@@ -177,6 +177,42 @@ production の `docker-compose.yml` は `build:` を持たず、`pull_policy: ne
   照合を省略する設定は無い（report の `checks.flyway_history_required` は常に `true`）。
 - checkpoint に内容ハッシュ（`content_hashes`）が記録されていれば、全 table で一致すること（`checks.content_hash`）。
   `CONTENT_HASH_TABLES` が設定されていれば、その全 table の記録があること（記録が無い・欠けている場合は FAIL）。
+- checkpoint の schema fingerprint（`schema_fingerprint`）と、復元 DB で再計算した値が一致すること
+  （`checks.schema_fingerprint`。設定によらず常に必須で、記録が無い `NOT_RECORDED`・算出方式の違い・不一致は FAIL）。
+
+### schema fingerprint（G-04）
+
+内容ハッシュは主要 table の行しか見ないため、table・列・索引・制約・trigger・routine・view の定義が backup 時と
+違う復元を検出できない。full / checkpoint は書込み静止区間内に、対象 DB の schema を information_schema から
+正規化して SHA-256 にかけ（`lib/schema-fingerprint.sh`、algorithm `mysql-information-schema-sha256-v1`）、
+metadata.json と index の `schema_fingerprint` に記録する。計算できなければ backup を VALID にしない。
+
+正規化の規則:
+
+- 対象は接続先の `DATABASE()` の schema だけで、schema 名そのものは含めない（復元先の DB 名が違ってもよい）。
+  外部キーの参照先が同じ schema なら `=` に、view 定義中の `` `<schema>`. `` は `` `=`. `` に置き換える。
+- 1 行 = 1 要素（区分名 + 項目）。各項目は `IF(x IS NULL, 'NULL', QUOTE(x))` で文字列化し（SQL の NULL と文字列
+  `'NULL'` を区別する）、行を `LC_ALL=C` の sort で並べてから、算出方式名の 1 行を先頭に置いて SHA-256 にかける。
+  server が返す順序・照合順序には依存しない。区分ごとの件数と SHA-256 も記録し、不一致時は違う区分を表示する。
+- 含めるもの: table（種別・engine・照合順序・`CREATE_OPTIONS`）、列（序数＝並び順・`COLUMN_TYPE`・NULL 可否・
+  既定値・文字集合・照合順序・`EXTRA`・生成式・`SRS_ID`）、索引（一意性・列の序数・prefix 長・昇降順・種別・関数索引の式・
+  可視性）、制約（種別・`ENFORCED`）、外部キーの列・参照先・`MATCH`/`ON UPDATE`/`ON DELETE`、CHECK の式、
+  trigger（event・timing・`ACTION_ORDER`・本体・`SQL_MODE`・`DEFINER`・client の文字集合と照合順序）、
+  routine と引数（本体・戻り値・`DETERMINISTIC`・`SQL DATA ACCESS`・`SQL SECURITY`・`SQL_MODE`・`DEFINER`・client の
+  文字集合と照合順序）、view（定義・`CHECK OPTION`・`DEFINER`・`SQL SECURITY`・client の文字集合と照合順序）。
+- 含めないもの: コメント（table・列・索引・routine）、`AUTO_INCREMENT` の現在値・行数・容量などの統計・`CARDINALITY`、
+  作成・更新日時、`PRIVILEGES`（照会した利用者の権限で変わる）、`COLUMN_KEY`（索引から導出）、schema の既定の
+  文字集合・照合順序と routine / trigger の `DATABASE_COLLATION`、`ROW_FORMAT` の実値（明示した値は `CREATE_OPTIONS` に入る）、
+  event、partition の詳細（`CREATE_OPTIONS` の `partitioned` だけ）。
+- 境界の期待値（`tests/schema-fingerprint-test.sh` と integration の実 MySQL で固定）: **列コメント・table コメントだけの
+  変更では変わらない。列の並び順の変更では変わる**（`SELECT *` や列名の無い `INSERT` の意味が変わるため。column 区分だけが
+  変わり、元に戻すと元の値に戻る）。索引の追加は index 区分、既定値の変更は column 区分だけが変わる。
+- 次の場合は計算を失敗させる（fail-closed）: table が 1 つも見えない、routine の本体が NULL（照会する利用者に
+  `SHOW_ROUTINE` が無い）、view の定義が空（対象 DB の `SHOW VIEW` が無い）、想定外の出力、mysql の失敗。
+- 次の場合も不一致として FAIL になる（fail-closed）: backup 時と復元検証時で MySQL server の版（8.0 の minor を含む）や
+  `lower_case_table_names` が違い information_schema の表示が変わる、trigger の本体などが schema 名を明示している状態で
+  別名の DB へ復元する、復元検証の利用者に `TRIGGER` 権限が無く trigger が見えない（件数の違いとして現れる）。
+  いずれも原因を直してから再検証する（照合を省略する設定は無い）。
 
 `cutover.sh` と `restore-drill.sh` も validate の report を `jq` で検査し、`state == READY_FOR_CUTOVER` に加えて
 `checks.flyway_history_required == true` かつ `checks.flyway == "PASS"` でなければ cutover / drill を失敗させる。
@@ -208,7 +244,8 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 - unit: `tests/run-unit-tests.sh`（fake CLI に対する全 script の検証、Docker 必須。ツールイメージを build するため、
   Dockerfile の固定値が仮置きの値のままだと build で失敗する）
 - integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合、
-  最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合。CI の `backup-integration` job と同一）
+  最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合、schema fingerprint 照合と
+  その正規化規則（コメントだけの変更・列の並び順・索引・既定値）の実 MySQL での確認。CI の `backup-integration` job と同一）
 - ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い

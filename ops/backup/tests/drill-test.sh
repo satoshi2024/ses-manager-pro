@@ -71,16 +71,24 @@ printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker-be
       source_lineage:"lin-012", consistency_time_utc: $t, restic_snapshot_id: $snap,
       binlog_end:{file:"binlog.000002", position:154}, uploads_snapshot_id:"up-cp",
       manifest_sha256:"m"}' > "$T/index/checkpoint-012.json"
-  # validate が読む checkpoint index（flyway/counts/uploads inventory 付き）
+  # validate が読む checkpoint index（flyway/counts/uploads inventory/schema fingerprint 付き）
   mkdir -p "$BACKUP_WORK_DIR/index"
-  local mb_sha mb_size
+  local mb_sha mb_size schema_fp
   mb_sha=$(sha256sum "$T/uploads/published/marker-before.txt" | awk '{print $1}')
   mb_size=$(stat -c %s "$T/uploads/published/marker-before.txt")
-  jq -n --arg t "$cp_ts" --arg sha "$mb_sha" --argjson sz "$mb_size" \
+  # G-04: fake mysql の既定の schema から記録値を作る（validate はこれと同じ応答で再計算する）
+  unset FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
+  schema_fp=$(
+    # shellcheck disable=SC1091
+    . "$LIB/schema-fingerprint.sh"
+    MYSQL_CLIENT_BIN="$HERE/fixtures/bin/mysql"
+    schema_fingerprint::compute fixture-db
+  )
+  jq -n --arg t "$cp_ts" --arg sha "$mb_sha" --argjson sz "$mb_size" --argjson fp "$schema_fp" \
     '{kind:"checkpoint", status:"VALID", consistency_time_utc: $t,
       flyway_max_success:"42", critical_table_counts:{marker_test:1},
       uploads:{inventory:[{path:"published/marker-before.txt",
-        sha256:$sha, size:$sz}]}}' \
+        sha256:$sha, size:$sz}]}, schema_fingerprint: $fp}' \
     > "$BACKUP_WORK_DIR/index/checkpoint-012.json"
 
   # fake CLI（PATH の fixtures を利用）+ validate 用 env

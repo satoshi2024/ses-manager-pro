@@ -49,7 +49,8 @@ setup_full() {
   export FAKE_GET_LOCK_HOLD=1
   export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
-    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
+    FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
 
   # scheduler / replica ack fixture（background）
   (
@@ -370,9 +371,53 @@ run_case case_backup_full_uploads_symlink
 run_case case_backup_full_restic_failure
 run_case case_backup_full_failure_releases_quiesce
 run_case case_backup_full_no_secret_leak
+# G-04（RB-W W-1）: schema fingerprint は設定によらず静止区間内に採取し、metadata（manifest 対象）と index に
+# 記録する。期待値は算出方式名の 1 行 + LC_ALL=C で並べた行の SHA-256（lib を使わずに計算する）。
+case_backup_full_records_schema_fingerprint() {
+  setup_full
+  export FAKE_SCHEMA_ROWS="column\t'sys_use'\t'2'\t'name'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\ntable\t'sys_use'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'sys_use'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\n"
+  local out="" code expected idx
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_zero "$code" "schema fingerprint 付き full backup 成功"
+  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v1 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
+    | sha256sum | awk '{print $1}')
+  idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
+  assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "index に schema fingerprint を記録"
+  assert_eq "mysql-information-schema-sha256-v1" "$(jq -r '.schema_fingerprint.algorithm // empty' "$idx" 2>/dev/null)" \
+    "算出方式を記録"
+  assert_eq "2" "$(jq -r '.schema_fingerprint.sections.column.count // empty' "$idx" 2>/dev/null)" "区分ごとの件数を記録"
+  assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "ses-backup:schema-fingerprint" "information_schema から schema を取得"
+  assert_contains "$(grep 'ses-backup:schema-fingerprint' "$FAKE_ARGV_LOG" 2>/dev/null)" "ses_manager_db" "対象 DB を指定して取得"
+  unset FAKE_SCHEMA_ROWS
+  teardown_full
+}
+
+# schema fingerprint を計算できなければ full を VALID にせず、静止は解除する（fail-closed）。
+case_backup_full_schema_fingerprint_failure_fails_closed() {
+  setup_full
+  export QUIESCE_STATE_DIR="$T/quiesce-state"
+  export FAKE_SCHEMA_RC=1
+  local out="" code
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "schema fingerprint を計算できなければ非 0"
+  assert_contains "$out" "schema fingerprint を計算できません" "原因を通知"
+  if compgen -G "$T/work/index/full-*.json" > /dev/null; then
+    test_fail "schema fingerprint 失敗時は full を index 登録しない" "index が登録されています"
+  else
+    test_assert "schema fingerprint 失敗時は full を index 登録しない"
+  fi
+  assert_no_file "$QUIESCE_STATE_DIR/ddl-session.pid" "失敗後も静止を解除する"
+  unset QUIESCE_STATE_DIR FAKE_SCHEMA_RC
+  teardown_full
+}
+
 run_case case_backup_full_records_content_hash
 run_case case_backup_full_content_hash_failure_fails_closed
 run_case case_backup_full_content_hash_requires_primary_key
+run_case case_backup_full_records_schema_fingerprint
+run_case case_backup_full_schema_fingerprint_failure_fails_closed
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

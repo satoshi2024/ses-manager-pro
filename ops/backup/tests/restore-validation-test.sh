@@ -7,6 +7,7 @@
 #   hash mismatch、after marker 存在、smoke failure → FAILED_VALIDATION
 # - history table を参照できない復元 DB は常に FAIL（G-15）。照合を省略する設定は廃止（r2）
 # - 主要 table の内容ハッシュ: 一致 PASS / 不一致・取得失敗 FAIL / 記録なし NOT_RECORDED（A-NF09-5）
+# - schema fingerprint（G-04）: 一致 PASS / 不一致・取得失敗・算出方式違い FAIL / 記録なし NOT_RECORDED も FAIL
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -39,22 +40,42 @@ setup_validate() {
     FAKE_FLYWAY_VERSIONS_RC FAKE_FLYWAY_VERSIONS_EMPTY FAKE_CHECK_TABLE \
     FAKE_MARKER_BEFORE FAKE_MARKER_AFTER FAKE_REF_KEYS FAKE_COUNT FAKE_TABLE_COUNT \
     FLYWAY_HISTORY_REQUIRED FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
-    CONTENT_HASH_TABLES
+    CONTENT_HASH_TABLES FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   chmod +x "$ROOT/ops/backup/providers/approval-verifier-local.sh" 2>/dev/null || true
 }
 
-# checkpoint index（flyway / counts / uploads inventory / 内容ハッシュの出所）
+# schema fingerprint の fixture（G-04）。backup 時の schema = 主キー付きの marker_test。
+SCHEMA_ROWS_BASE="table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'2'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+# 列の並び順（序数）だけを入れ替えた schema
+SCHEMA_ROWS_REORDERED="table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'2'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'1'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+
+# 現在の FAKE_SCHEMA_ROWS（fake mysql の応答）から lib/schema-fingerprint.sh で記録値を作る
+schema_fingerprint_for() {
+  (
+    # shellcheck disable=SC1091
+    . "$LIB/schema-fingerprint.sh"
+    MYSQL_CLIENT_BIN="$FIXTURES/mysql"
+    schema_fingerprint::compute fixture-db
+  )
+}
+
+# checkpoint index（flyway / counts / uploads inventory / 内容ハッシュ / schema fingerprint の出所）
 # 第 4 引数（content_hashes の JSON）を省略した場合は content_hashes を持たない（従来の metadata）。
-make_ckpt_index() { # flyway counts_json uploads_inv_json [content_hashes_json]
+# 第 5 引数（schema_fingerprint の JSON）を省略した場合は現在の FAKE_SCHEMA_ROWS から作り、none なら持たない。
+make_ckpt_index() { # flyway counts_json uploads_inv_json [content_hashes_json] [schema_fingerprint_json|none]
+  local fp=${5:-}
   mkdir -p "$T/work/index"
-  jq -n --arg f "$1" --argjson c "$2" --argjson u "$3" --argjson h "${4:-null}" \
+  [[ -n "$fp" ]] || fp=$(schema_fingerprint_for)
+  [[ "$fp" == none ]] && fp=null
+  jq -n --arg f "$1" --argjson c "$2" --argjson u "$3" --argjson h "${4:-null}" --argjson s "$fp" \
     '{kind:"checkpoint", status:"VALID", flyway_max_success:$f,
       critical_table_counts:$c, uploads:{inventory:$u},
       consistency_time_utc:"2026-08-14T09:15:00Z",
       source_lineage:"'"$LINEAGE"'", binlog_end:{file:"binlog.000012", position:400},
       uploads_snapshot_id:"u1", restic_snapshot_id:"s1"}
-     + (if $h == null then {} else {content_hashes: $h} end)' > "$T/work/index/checkpoint-fixture.json"
+     + (if $h == null then {} else {content_hashes: $h} end)
+     + (if $s == null then {} else {schema_fingerprint: $s} end)' > "$T/work/index/checkpoint-fixture.json"
 }
 
 # fake mysql が返す内容（FAKE_CONTENT_ROWS）の SHA-256 を記録値とする content_hashes
@@ -99,6 +120,7 @@ run_validate() {
 setup_common_fixture() {
   setup_validate
   make_uploads
+  export FAKE_SCHEMA_ROWS="$SCHEMA_ROWS_BASE"
   make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY"
   make_plan
   export VALIDATE_TABLES="marker_test"
@@ -123,6 +145,7 @@ case_validate_normal() {
   assert_contains "$VAL_OUT" '"markers": "PASS"' "markers PASS"
   assert_contains "$VAL_OUT" '"uploads_hash": "PASS"' "uploads hash PASS"
   assert_contains "$VAL_OUT" '"uploads_references": "PASS"' "references PASS"
+  assert_contains "$VAL_OUT" '"schema_fingerprint": "PASS"' "schema fingerprint PASS"
 }
 
 case_validate_decoy_checkpoint_ignored() {
@@ -366,6 +389,48 @@ case_validate_content_hash_missing_table_and_old_algorithm() {
   assert_contains "$VAL_OUT" "算出方式が異なります: marker_test" "算出方式の不一致を通知"
 }
 
+# G-04（RB-W W-1）: 件数・内容ハッシュが一致しても、schema が backup 時と違えば FAIL（列の並び順だけの違いを含む）。
+case_validate_schema_fingerprint_mismatch() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_SCHEMA_ROWS="$SCHEMA_ROWS_REORDERED"
+  run_validate
+  assert_nonzero "$VAL_RC" "schema 不一致は非 0"
+  assert_contains "$VAL_OUT" '"counts": "PASS"' "count は一致（前提）"
+  assert_contains "$VAL_OUT" '"schema_fingerprint": "FAIL"' "schema_fingerprint FAIL"
+  assert_contains "$VAL_OUT" "差異のある区分: column" "違う区分（column）だけを通知"
+  assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
+}
+
+# 記録の無い checkpoint は、設定によらず FAIL（NOT_RECORDED を report に残す）。照合を省略する設定は無い。
+case_validate_schema_fingerprint_not_recorded_fails() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" null none
+  run_validate
+  assert_nonzero "$VAL_RC" "schema fingerprint の記録なしは非 0"
+  assert_contains "$VAL_OUT" '"schema_fingerprint": "NOT_RECORDED"' "schema_fingerprint NOT_RECORDED"
+  assert_contains "$VAL_OUT" "schema fingerprint（schema_fingerprint）が記録されていません" "記録の欠落を通知"
+  assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
+}
+
+# 復元 DB の information_schema を読めない場合、算出方式の違う記録の場合も FAIL。
+case_validate_schema_fingerprint_query_error_and_old_algorithm() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_SCHEMA_RC=1
+  run_validate
+  assert_nonzero "$VAL_RC" "information_schema を読めなければ非 0"
+  assert_contains "$VAL_OUT" '"schema_fingerprint": "FAIL"' "取得失敗は FAIL"
+  assert_contains "$VAL_OUT" "information_schema を取得できません" "取得失敗を通知"
+  unset FAKE_SCHEMA_RC
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" null \
+    "$(schema_fingerprint_for | jq -c '.algorithm = "mysql-information-schema-sha256-v0"')"
+  run_validate
+  assert_nonzero "$VAL_RC" "算出方式の違う記録は非 0"
+  assert_contains "$VAL_OUT" "算出方式が異なります" "算出方式の不一致を通知"
+}
+
 case_validate_count_mismatch() {
   setup_common_fixture
   export FAKE_COUNT=999
@@ -451,6 +516,9 @@ run_case case_validate_content_hash_not_recorded_fails_when_tables_configured
 run_case case_validate_content_hash_configured_table_missing
 run_case case_validate_content_hash_requires_primary_key
 run_case case_validate_content_hash_missing_table_and_old_algorithm
+run_case case_validate_schema_fingerprint_mismatch
+run_case case_validate_schema_fingerprint_not_recorded_fails
+run_case case_validate_schema_fingerprint_query_error_and_old_algorithm
 run_case case_validate_count_mismatch
 run_case case_validate_marker_after_present
 run_case case_validate_missing_reference

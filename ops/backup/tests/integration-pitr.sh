@@ -297,6 +297,9 @@ grep -q "\"flyway_latest\": \"$INTEGRATION_FLYWAY_LATEST\"" "$EVID/validate.json
 # 主要 table の内容ハッシュ（checkpoint 記録値）と復元 DB が一致したこと
 grep -q '"content_hash": "PASS"' "$EVID/validate.json" \
   || fail "validate の内容ハッシュ照合が PASS でない（CONTENT_HASH_TABLES の記録・照合を確認）"
+# schema fingerprint（G-04。checkpoint 記録値）と復元 DB の schema が一致したこと
+grep -q '"schema_fingerprint": "PASS"' "$EVID/validate.json" \
+  || fail "validate の schema fingerprint 照合が PASS でない（lib/schema-fingerprint.sh の記録・照合を確認）"
 
 log "== 11. target の marker 状態を確認 =="
 TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" -urestore-svc \
@@ -323,6 +326,77 @@ log "== 12. source 不変 =="
 SRC_STATE=$(src_root "$MYSQL_DATABASE" -N -B \
   -e "SELECT COUNT(*), SHA2(GROUP_CONCAT(marker ORDER BY id), 256) FROM marker_test;" 2>/dev/null | tail -1)
 printf '%s\n' "$SRC_STATE" > "$EVID/source-state.txt"
+
+log "== 13. schema fingerprint の正規化規則（実 MySQL・source の使い捨て DB） =="
+# README「schema fingerprint」の規則を実 MySQL 8.0 で確かめる。PITR の対象 DB とは別の DB で行い、最後に削除する
+# （checkpoint より後の source の変更は復元・drill に影響しない）。
+#   - 列コメント・table コメントだけの変更では変わらない
+#   - 列の並び順を変えると column 区分だけが変わり、元に戻すと元の値に戻る
+#   - 索引の追加は index 区分だけ、既定値の変更は column 区分だけが変わる
+#   - trigger・routine・view・CHECK・外部キーも区分として数えられる（root は定義を読める）
+# shellcheck disable=SC1091
+. /usr/local/lib/ses-backup/schema-fingerprint.sh
+FP_PROBE_DB=ses_fp_probe
+probe_fp() {
+  (
+    MYSQL_PWD="$(cat "$SRC_PASSWORD_FILE")"
+    export MYSQL_PWD
+    MYSQL_CLIENT_BIN=mysql
+    schema_fingerprint::compute -h"$SRC_HOST" -uroot "$FP_PROBE_DB"
+  )
+}
+fp_diff() { # <fp a> <fp b> → 件数または SHA-256 の違う区分（「,」区切り。一致なら空）
+  jq -rn --argjson a "$1" --argjson b "$2" \
+    '[($a.sections | keys[]) as $k | select($a.sections[$k] != $b.sections[$k]) | $k] | join(",")'
+}
+FP_EVID="$EVID/schema-fingerprint-boundary.txt"
+src_root -e "DROP DATABASE IF EXISTS $FP_PROBE_DB; CREATE DATABASE $FP_PROBE_DB;
+    CREATE TABLE $FP_PROBE_DB.p (id BIGINT PRIMARY KEY, a VARCHAR(16) NOT NULL DEFAULT 'x', b INT NULL) ENGINE=InnoDB;
+    CREATE TABLE $FP_PROBE_DB.c (id BIGINT PRIMARY KEY, p_id BIGINT NOT NULL,
+      CONSTRAINT fk_c_p FOREIGN KEY (p_id) REFERENCES $FP_PROBE_DB.p (id) ON DELETE CASCADE,
+      CONSTRAINT ck_c_p CHECK (p_id > 0)) ENGINE=InnoDB;
+    CREATE TRIGGER $FP_PROBE_DB.trg_p BEFORE INSERT ON $FP_PROBE_DB.p FOR EACH ROW SET NEW.b = COALESCE(NEW.b, 0);
+    CREATE FUNCTION $FP_PROBE_DB.f_next(x INT) RETURNS INT DETERMINISTIC NO SQL RETURN x + 1;
+    CREATE VIEW $FP_PROBE_DB.v_p AS SELECT id, a FROM $FP_PROBE_DB.p;" \
+  || fail "schema fingerprint の確認用 DB を作成できません"
+FP_BASE=$(probe_fp) || fail "確認用 DB の schema fingerprint を計算できません"
+{
+  echo "base=$(jq -r '.sha256' <<< "$FP_BASE")"
+  jq -r '.sections | to_entries[] | "section=\(.key) count=\(.value.count)"' <<< "$FP_BASE"
+} > "$FP_EVID"
+for want in "table 3" "trigger 1" "routine 1" "parameter 2" "view 1" "check 1" "fk_column 1" "fk_rule 1"; do
+  [[ "$(jq -r --arg k "${want% *}" '.sections[$k].count' <<< "$FP_BASE")" == "${want#* }" ]] \
+    || fail "schema fingerprint の区分 ${want% *} の件数が ${want#* } ではありません（$FP_EVID）"
+done
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY a VARCHAR(16) NOT NULL DEFAULT 'x' COMMENT 'comment only', COMMENT = 'table comment';" \
+  || fail "コメントを変更できません"
+FP_NEXT=$(probe_fp) || fail "コメント変更後の schema fingerprint を計算できません"
+[[ "$(jq -r '.sha256' <<< "$FP_NEXT")" == "$(jq -r '.sha256' <<< "$FP_BASE")" ]] \
+  || fail "コメントだけの変更で schema fingerprint が変わりました（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "comment_only=unchanged" >> "$FP_EVID"
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY b INT NULL AFTER id;" || fail "列の並び順を変更できません"
+FP_NEXT=$(probe_fp) || fail "列の並び順の変更後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == column ]] \
+  || fail "列の並び順の変更で column 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "column_order=changed(column)" >> "$FP_EVID"
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY b INT NULL AFTER a;" || fail "列の並び順を戻せません"
+FP_NEXT=$(probe_fp) || fail "列の並び順を戻した後の schema fingerprint を計算できません"
+[[ "$(jq -r '.sha256' <<< "$FP_NEXT")" == "$(jq -r '.sha256' <<< "$FP_BASE")" ]] \
+  || fail "列の並び順を戻しても schema fingerprint が元に戻りません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "column_order_restored=unchanged" >> "$FP_EVID"
+src_root -e "CREATE INDEX ix_p_a ON $FP_PROBE_DB.p (a);" || fail "索引を追加できません"
+FP_NEXT=$(probe_fp) || fail "索引追加後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == index ]] \
+  || fail "索引の追加で index 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "index_added=changed(index)" >> "$FP_EVID"
+src_root -e "DROP INDEX ix_p_a ON $FP_PROBE_DB.p; ALTER TABLE $FP_PROBE_DB.p ALTER a SET DEFAULT 'y';" \
+  || fail "既定値を変更できません"
+FP_NEXT=$(probe_fp) || fail "既定値変更後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == column ]] \
+  || fail "既定値の変更で column 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "default_changed=changed(column)" >> "$FP_EVID"
+src_root -e "DROP DATABASE $FP_PROBE_DB;" || fail "確認用 DB を削除できません"
+log "schema fingerprint の正規化規則 OK（$FP_EVID）"
 
 # summary
 jq -n \

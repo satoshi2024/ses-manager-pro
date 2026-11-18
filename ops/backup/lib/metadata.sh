@@ -41,6 +41,12 @@ metadata::build() { # staging_dir out_json
   if [[ -n "${METADATA_CONTENT_HASHES_JSON:-}" ]]; then
     content_hashes=$METADATA_CONTENT_HASHES_JSON
   fi
+  # schema fingerprint（G-04 / RB-W W-1。呼び出し元が METADATA_SCHEMA_FINGERPRINT_JSON で渡す。
+  # 未指定なら null = 未記録で、復元検証は FAIL にする。lib/schema-fingerprint.sh 参照）
+  local schema_fingerprint="null"
+  if [[ -n "${METADATA_SCHEMA_FINGERPRINT_JSON:-}" ]]; then
+    schema_fingerprint=$METADATA_SCHEMA_FINGERPRINT_JSON
+  fi
 
   jq -n \
     --arg schema_version "$METADATA_SCHEMA_VERSION" \
@@ -63,6 +69,7 @@ metadata::build() { # staging_dir out_json
     --argjson uploads "$uploads_json" \
     --argjson critical_table_counts "$counts" \
     --argjson content_hashes "$content_hashes" \
+    --argjson schema_fingerprint "$schema_fingerprint" \
     '{schema_version: $schema_version,
       kind: $kind,
       status: $status,
@@ -81,7 +88,8 @@ metadata::build() { # staging_dir out_json
       quiesce: $quiesce,
       uploads: $uploads,
       critical_table_counts: $critical_table_counts,
-      content_hashes: $content_hashes}' > "$out_json"
+      content_hashes: $content_hashes,
+      schema_fingerprint: $schema_fingerprint}' > "$out_json"
   chmod 600 "$out_json"
   return 0
 }

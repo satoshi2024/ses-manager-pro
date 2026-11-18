@@ -30,6 +30,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/metadata.sh"
 . "$LIB_DIR/binlog.sh"
 . "$LIB_DIR/content-hash.sh"
+. "$LIB_DIR/schema-fingerprint.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -152,6 +153,11 @@ main() {
         "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
       || common::fail "主要 table の内容ハッシュを計算できません（CONTENT_HASH_TABLES）"
   fi
+  # G-04（RB-W W-1）: schema fingerprint（同じ静止区間 = closed coordinate 時点の schema）。設定によらず常に
+  # 記録し、計算できなければ checkpoint を VALID にしない。
+  METADATA_SCHEMA_FINGERPRINT_JSON=$(schema_fingerprint::compute \
+      "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
+    || common::fail "schema fingerprint を計算できません（lib/schema-fingerprint.sh）"
 
   # archiver 追従 + checksum
   checkpoint::wait_archiver "$closed_file" "$closed_size" "${CHECKPOINT_ARCHIVER_WAIT:-120}" \

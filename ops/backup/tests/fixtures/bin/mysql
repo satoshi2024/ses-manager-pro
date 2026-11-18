@@ -42,6 +42,15 @@ if [[ -z "${query:-}" ]]; then
 fi
 
 case "$query" in
+  # schema fingerprint（lib/schema-fingerprint.sh）。FAKE_SCHEMA_ROWS（区分名<TAB>項目… の行を printf %b 形式で。
+  # 既定は主キー付きの table 1 つ）を返す。FAKE_SCHEMA_RC=N: 出力なしで exit N（取得失敗の再現）
+  *"ses-backup:schema-fingerprint"*)
+    if [[ -n "${FAKE_SCHEMA_RC:-}" ]]; then
+      exit "$FAKE_SCHEMA_RC"
+    fi
+    printf '%b' "${FAKE_SCHEMA_ROWS:-table\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'marker_test'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\ncolumn\t'marker_test'\t'2'\t'marker'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\nconstraint\t'marker_test'\t'PRIMARY'\t'PRIMARY KEY'\t'YES'\n}"
+    exit 0
+    ;;
   # 内容ハッシュ対象の列情報（lib/content-hash.sh）。FAKE_CONTENT_COLUMNS（「列名<TAB>column_key」の行を
   # printf %b 形式で。既定は主キー id と通常列 name）を返す。
   # FAKE_CONTENT_COLUMNS_EMPTY=1: 出力なしで exit 0（table が無い状態の再現）

@@ -18,6 +18,9 @@
 # CONTENT_HASH_TABLES（backup と同じ .env.backup の値）が設定されていれば、その全 table の内容ハッシュが
 # checkpoint に記録され、かつ一致することを要求する（記録が無い = NOT_RECORDED も FAIL）。
 #
+# schema fingerprint（G-04。lib/schema-fingerprint.sh）は常に必須で、checkpoint の記録と復元 DB の
+# 再計算が一致しなければ FAIL にする（記録が無い = NOT_RECORDED も FAIL）。
+#
 # usage: validate-restore.sh --plan <plan-id> [--uploads-dir DIR]
 # ============================================================
 set -Eeuo pipefail
@@ -29,6 +32,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/common.sh"
 . "$LIB_DIR/plan.sh"
 . "$LIB_DIR/content-hash.sh"
+. "$LIB_DIR/schema-fingerprint.sh"
 . "$LIB_DIR/validate-db.sh"
 . "$LIB_DIR/validate-uploads.sh"
 . "$LIB_DIR/mysql-options.sh"
@@ -185,6 +189,21 @@ main() {
   [[ "$content_hash_required" == 1 ]] && content_hash_required_json=true
   checks_json=$(printf '%s' "$checks_json" | jq -c --argjson r "$content_hash_required_json" \
     '. + {content_hash_required: $r}')
+
+  # G-04（RB-W W-1）: schema fingerprint（表・列・索引・制約・trigger・routine・view の正規化 hash）。
+  # 設定によらず常に必須で、記録が無い（NOT_RECORDED）・算出方式が違う・一致しない場合は FAIL にする。
+  local schema_fp_json=""
+  schema_fp_json=$(jq -c '.schema_fingerprint // empty' "$ckpt_index" 2>/dev/null) || schema_fp_json=""
+  if [[ -z "$schema_fp_json" ]]; then
+    validate_db::fail "checkpoint に schema fingerprint（schema_fingerprint）が記録されていません。schema を照合できないため cutover できません" || true
+    ok=false
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {schema_fingerprint: "NOT_RECORDED"}')
+  elif schema_fingerprint::verify "$schema_fp_json" "${TARGET_OPT_ARGS[@]}"; then
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {schema_fingerprint: "PASS"}')
+  else
+    ok=false
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {schema_fingerprint: "FAIL"}')
+  fi
 
   if validate_db::markers "${VALIDATE_MARKERS_JSON:-}"; then
     checks_json=$(printf '%s' "$checks_json" | jq -c '. + {markers: "PASS"}')
