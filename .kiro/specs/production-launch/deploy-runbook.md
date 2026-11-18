@@ -169,7 +169,7 @@
 
 - **MySQL 8.4 LTS**（決定済み（2026-11-18）。§1.6 の3・DBA-4。exact 版の候補は 8.4.13。8.0 系の community support は 2026-04-30 に終わった（同日の決定の根拠））。
   - 試験の現状（事実）: `FlywayProdFreshInstallMySqlTest` は `mysql:8.0.36` で、`-Dses.flyway.fresh-install.mysql-image` で切り替えられるのはこの1 class だけである。他の MySQL 試験（124 file）は `mysql:8.0` を直に書いている。試験の image を1か所で切り替えられるようにし、8.4 で MySQL suite を CI で通すのは RB-MYSQL84 が行う（**未完**）。
-  - backup tool（MySQL 8.0.46 client・mysqlbinlog）の 8.4 への適合は第二段階で行う（**未完**）。適合を確かめるまで、8.4 の本番に対する backup・PITR は検証済みとはいえない（§1.7 の「Backup 開始の前提」）。
+  - **backup tool の 8.4 への適合は初回 backup の前提である（未合入）**。現行の backup tool は MySQL 8.0 の server だけを受け付ける: `ops/backup/preflight.sh` は server が 8.0 系でないと FAIL し（`EXIT_SERVER`）、client（8.0.46）と server の major.minor の一致も求める。`restore.sh` は 8.4 で削られた `RESET MASTER` を実行する。そのため 8.4 の本番では `preflight` が 0 にならず、初回 backup を取れない。適合（version 判定、8.4 の client・mysqlbinlog、8.4 の文への置換え、integration 試験の 8.4 の image）は RB-W の branch で行い、**上線の前に合入する。合入するまで §2 の5 を満たせず、§4 へ進まない**（§1.7 の「Backup 開始の前提」）。
   - recovery target（restore 先）は本番と**同じ exact 版**にする（backup tool は backup 時と復元検証時の server の版が違うと schema fingerprint が一致せず FAIL にする）。
 - **serverタイムゾーン `+09:00`**（ユーザー決定）。my.cnf / parameter groupで `default_time_zone = '+09:00'` を設定し、次で確認する。
   ```sql
@@ -279,7 +279,7 @@ job実行環境へ渡す値は環境変数の次の4つだけ。POM・Maven prop
 ### 1.4 artifactとjobの一致（SRE）
 
 - jobはsource checkoutで `compile` したclass/resourceを使う。**jobのcommit SHAと、配備するimageのSHAを一致させる**。
-- **image の配布**（決定済み（2026-11-18）。§1.6 の5）: アプリ image は ECR の private repository へ push し、task definition では registry digest（`<registry>/<repository>@sha256:<64桁>`）で指す。tag では指さない。docker save/load と digest の記録（決定 XB-10）は backup tool image だけの決定である。ClamAV の sidecar の image も ECR へ写し、digest で指す。
+- **image の配布**（決定済み（2026-11-18）。§1.6 の5）: アプリ image は ECR の private repository へ push し、task definition では registry digest（`<registry>/<repository>@sha256:<64桁>`）で指す。tag では指さない。docker save/load と digest の記録（決定 XB-10）は backup tool image だけの決定である。ClamAV の sidecar の image も ECR へ写して digest で指すのは、RB-DEPLOY の初期設計である（決定には含まれない。SRE が確かめる。§1.6 の6）。
   - 配備記録には、次を1行にまとめて残す: 配備する commit SHA（`git rev-parse HEAD`）、`infra/ecs/image-lock.json` の `gitRevision`・`jarSha256`、ECR の repository と tag（commit SHA を tag にする）、push 後の registry digest、ClamAV の image の digest、登録した task definition の revision。
   - 照合: task definition の image の digest が記録の digest と同じで、ECR でその digest に commit SHA の tag が付いていること（クラウドの管理画面／CLI で、repository の image 一覧から digest と tag を見る）。tag の付け替えを防ぐため、repository の tag の不変（immutable）の設定を SRE が確かめる。
   ```bash
@@ -304,17 +304,72 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 
 1. **初回起動のbootstrap**: **決定済み（方式A: 期限付きbootstrap mode。完了後の再開は承認ticket必須。管理者5名）**。空DBにはadmin 1件だけでMFA・IdP・外部identityも無く、通常のprod設定では最初の1人がログインできない（`ProductionSecurityConfigurationValidator` もbreak-glass管理者2件・MFA登録済みを起動条件にしている）。期限付きで初期adminのlocal loginだけを開け、bootstrapに必要な入口だけを使わせる（§4・§5）。管理者の人数と役割は§5.0、完了後の再開は§5.7。
 2. §1.2のmigrator権限・trigger/binlog・DEFINERの扱い（DBA。§1.7 の DBA-1）。
-3. MySQLの版・collation・parameter group（DBA。DBA-4）。**版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13）**。試験側（RB-MYSQL84）と backup tool 側（第二段階）の適合は**未完**（§1.1）。collation・parameter group は DBA-4 で確定する。
+3. MySQLの版・collation・parameter group（DBA。DBA-4）。**版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13）**。試験側（RB-MYSQL84）の適合は**未完**。backup tool 側の適合（RB-W の branch）は初回 backup の前提で、**上線の前に合入する（未合入）**（§1.1）。collation・parameter group は DBA-4 で確定する。
 4. job実行環境（Maven・JDK・依存取得経路。§1.5のlocal repositoryの準備方法）（SRE。SRE-11）。
 5. **アプリ image の配布経路**（SRE）: **決定済み（2026-11-18）**。ECR の private repository と registry digest で配る（Fargate）。docker save/load の XB-10 は backup tool image だけに適用する。記録と照合の方法は §1.4。ECR は新しく作る基盤である（それまでは private registry が無かった）。
-6. **ClamAV の置き方**（SRE）: **決定済み（2026-11-18）**。同じ task の sidecar（`clamav`）で動かし、`FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`。task は 2048 CPU / 6144 MiB（app 1024 / 2048 の hard limit、clamav 1024 / 4096）にし、sidecar は essential にしない（clamd が止まっている間、app は動き続け、upload は quarantine に留まる）。`infra/ecs/task-definition.prod.json`・`validate-task-definition.ps1`・`ContainerHealthCheckCommandGuardTest` がこの形を検査する。
-   - 分かっていること: clamd は signature を全て memory に載せ、再読込の間は新旧の2組を持ち得る。signature の取得（freshclam）には、ClamAV の配布元か社内 mirror への外向きの経路が要る。task の再起動で signature は消え、起動のたびに取り直す（取り終わるまで upload は quarantine のまま）。clamd の INSTREAM は暗号化されないが、sidecar では task の中の loopback だけを通る。
-   - **SRE が確かめること（未取得）**: signature の取得経路（NAT・proxy・社内 mirror）と更新の頻度、clamav の memory の実測と task の大きさの見直し、起動から signature を読み終わるまでの時間（health check の `startPeriod` 600秒で足りるか）、写した image に health の command（`clamdcheck.sh`、公式 image が持つ script）があること、clamd が止まったまま戻らないときの検知と再起動の方法（essential でない container は ECS が自動で再起動しない）、image（engine）の更新の頻度と ECR への写し方、root filesystem を読取り専用にできるか（書込み先の確認）。
+6. **ClamAV の置き方**（SRE）: **決定済み（2026-11-18）: 同じ task の sidecar（`clamav`）で動かし、task の memory を増やす**。そのため `FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`。`infra/ecs/task-definition.prod.json`・`validate-task-definition.ps1`・`ContainerHealthCheckCommandGuardTest`・`ProductionTaskDefinitionTemplateTest` が下の形を検査する。
+   - **RB-DEPLOY の初期設計（決定には含まれない。SRE が確かめ、実測で見直す）**: task 2048 CPU / 6144 MiB（app 1024 / 2048 の hard limit、clamav 1024 / 4096）。sidecar は essential にしない（clamd が止まっている間、app は動き続け、upload は quarantine に留まる）。clamav の root filesystem は読取り専用で、書込み先は自分の bind volume（`clamav-db` = `/var/lib/clamav`、`clamav-run` = `/run/clamav`、`clamav-log` = `/var/log/clamav`、`clamav-tmp` = `/tmp`。Fargate の ephemeral storage）だけ。uploads・privacy-trust・app の `tmp` は mount しない。secret と app の設定を渡さず、port を公開しない。image は ECR へ写して digest で指し、health の command は `clamdcheck.sh`（公式 image の script）。
+   - 分かっていること: clamd は signature を全て memory に載せ、再読込の間は新旧の2組を持ち得る。signature の取得（freshclam）には、ClamAV の配布元か社内 mirror への外向きの経路が要る。task の再起動で signature は消え、起動のたびに取り直す（取り終わるまで upload は quarantine のまま）。clamd の INSTREAM は暗号化されないため、clamd は task の中の loopback だけで受ける。
+   - **clamd が止まっていた間の upload は、復旧しても自動では再scanされない**。clamd の復旧（signature の読込み完了）の後、管理者が quarantine の file を再scanする（`POST /api/files/{storedName}/rescan`。権限は管理者だけ（`file.scan.retry`）。server が生成した file は対象外で、生成し直す）。対象は次で一覧する（DBA の確認SQLの範囲の SELECT）。
+     ```sql
+     SELECT stored_name, file_kind, created_at FROM t_file_security_metadata
+      WHERE tenant_id = 'default' AND storage_state = 'QUARANTINED' AND scan_status = 'UNAVAILABLE' AND deleted_flag = 0
+      ORDER BY created_at;
+     ```
+     画面は無いため、管理者の session の開発者 console で `await SES.api.post('/api/files/' + encodeURIComponent(<stored_name>) + '/rescan', {})` を1件ずつ実行する（`SES.api` が CSRF token を付ける）。
+   - **SRE が確かめること（未取得）**: 上の初期設計の値（memory の実測と task の大きさ、essential にしないこと）、signature の取得経路（NAT・proxy・社内 mirror）と更新の頻度、起動から signature を読み終わるまでの時間（health check の `startPeriod` 600秒で足りるか）、写した image に health の command があること、写した image の `clamd.conf` で `TCPAddr 127.0.0.1` に固定すること（既定は全 interface で受ける。task の security group は ALB からの 8080 だけを通すため外からは届かないが、固定する）、読取り専用の root filesystem と上の4つの書込み先で clamd・freshclam が起動すること（他に書込み先があれば起動に失敗する）、clamd が止まったまま戻らないときの検知と再起動の方法（essential でない container は ECS が自動で再起動しない）、image（engine）の更新の頻度と ECR への写し方。
 7. **Prometheus の scrape 経路**（SRE。SRE-7 の(4)・SRE-9）: **決定済み（2026-11-18）**。ALB 経由の HTTPS で scraper 口座（`METRICS_SCRAPER_*`）を使う。設定する項目は SRE-9。sidecar の経路は使わない。
 8. **`LOCK_CONFLICT` の alert の閾値と通知先**（SRE。SRE-8）: **決定済み（2026-11-18）**。CloudWatch Logs の metric filter で件数を数え、5分間に5件以上で運用担当へ通知し、日次で集計する。運用2週間後に実測で閾値を見直す。通知先（SNS topic 等）は SRE の配備項目。設定の例は SRE-8。
 9. **アプリ account の password rotation の方式**（DBA。§1.2）: **決定済み（2026-11-18）**。手動の single-user rotation と MySQL の二重 password（`RETAIN CURRENT PASSWORD` → secret を替えて全 task を再起動 → `DISCARD OLD PASSWORD`）。保守の時間帯に release の節目に合わせて行う。手順の SQL は §1.2。
 10. **RPO 15分・RTO 4時間の署名**（DBA-5）: **決定済み（2026-11-18）**。配備日に目標値として署名し、達成は restore drill の実測待ちと注記する。署名そのものは**未取得**。
-11. **NF07 の trust 文書の置き方**（SRE・D-03 owner）: **決定済み（2026-11-18）**。EFS の volume に置き、app は `/app/privacy-trust` に読取り専用で mount する（task definition の `privacy-trust`。uploads と別の access point）。file は D-03 owner が更新する（app からは書かない）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のまま配備する。開ける時は、その mount の下の file の絶対 path を設定する（NF07-TRUST の手順と設定の正本は NF07-TRUST の節）。**SRE と D-03 owner が確かめること（未取得）**: D-03 owner が書くための別の経路（書込みのできる access point と、そこへ届く管理用の端末）、書くときは一時 file に書いてから rename で置き換えること、EFS の backup の扱い。
+11. **NF07 の trust 文書の置き方**（SRE・D-03 owner）: **決定済み（2026-11-18）**。EFS の volume に置き、app は `/app/privacy-trust` に読取り専用で mount する（task definition の `privacy-trust`。uploads と別の access point）。file は D-03 owner が更新する（app からは書かない）。第1期は `PRIVACY_TRUST_KMS_ANCHOR_FILE` を空のまま配備する。開ける時は、その mount の下の file の絶対 path を設定する（NF07-TRUST の手順と設定の正本は NF07-TRUST の節）。mount の path（`/app/privacy-trust`）と uploads と別の access point にすることは RB-DEPLOY の初期設計である。
+   - **SRE と D-03 owner が確かめること（未取得）**: D-03 owner が書くための別の経路（書込みのできる access point と、そこへ届く管理用の端末）、書くときは一時 file に書いてから rename で置き換えること、EFS の backup の扱い。Fargate の EFS volume で NFS の mount option（`soft`・`timeo` 等）を指定できるかを確かめ、指定できない場合は、EFS の障害時に trust 文書と uploads の読取りが止まり得ることと `PRIVACY_TRUST_KMS_RELOAD_INTERVAL` の扱いを評価する（NF07-TRUST の節の mount option の確認項と合わせる）。
+   - **Security が確かめること（未取得）**: app の読取り専用の mount は app の container だけの制約で、IAM の境界ではない。ECS は task role の credential を task の中の全 container（信頼できない upload を扱う clamav の sidecar を含む）へ渡し、trust 文書は EFS に書ける者が anchor を足せる。そのため次を確かめる。
+     - (a) EFS の file system policy で、`elasticfilesystem:AccessPointArn` を条件に、task role には privacy-trust の access point へ `ClientMount` だけ、`ClientWrite` は uploads の access point へだけを許す。task role の identity policy にも file system 全体への `ClientWrite` を付けない（同じ account では identity policy 側の Allow でも通り得るため、両方を見る）。
+     - (b) 2つの access point の root directory が互いを含まない（例: uploads は `/ses-manager/uploads`、trust は `/ses-manager/privacy-trust`）。
+     - (c) task role は最小の権限にする（app は AWS の API を呼ばない。上の EFS の権限の他に要るものは、使う場合の ECS Exec 等に限る）。
+     - file system policy の例（ARN・ID は placeholder。D-03 owner の書込み用の principal は別に決める）:
+       ```json
+       {
+         "Version": "2012-10-17",
+         "Statement": [
+           {
+             "Sid": "TaskMountsTrustReadOnly",
+             "Effect": "Allow",
+             "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<ecsTaskRole>" },
+             "Action": "elasticfilesystem:ClientMount",
+             "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
+             "Condition": {
+               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-privacy-trust>" },
+               "Bool": { "aws:SecureTransport": "true" }
+             }
+           },
+           {
+             "Sid": "TaskWritesUploads",
+             "Effect": "Allow",
+             "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<ecsTaskRole>" },
+             "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+             "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
+             "Condition": {
+               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-uploads>" },
+               "Bool": { "aws:SecureTransport": "true" }
+             }
+           },
+           {
+             "Sid": "TrustWriterOnly",
+             "Effect": "Allow",
+             "Principal": { "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<D-03 owner の書込み用 role>" },
+             "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+             "Resource": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:file-system/<fs-id>",
+             "Condition": {
+               "StringEquals": { "elasticfilesystem:AccessPointArn": "arn:aws:elasticfilesystem:<region>:<ACCOUNT_ID>:access-point/<fsap-privacy-trust-writer>" },
+               "Bool": { "aws:SecureTransport": "true" }
+             }
+           }
+         ]
+       }
+       ```
+     - uploads の access point も同じ policy で守られる（task role 以外に `ClientWrite` を与えない）。
 
 ### 1.7 配備前提と、機能スイッチをONにする前の署名（一覧。X3-4）
 
@@ -346,7 +401,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - binlog が STATEMENT だと、InnoDB は READ COMMITTED の transaction の書込みを拒否する（ERROR 1665）。そのため、これらの操作が全て失敗する。
   - MySQL 8 の既定は ROW である。§1.2 の一時表の条件（`enforce_gtid_consistency = ON` のとき binlog_format=ROW 等）とあわせて DBA が確かめる。
   - 確認: `SELECT @@global.binlog_format;  -- 'ROW'`
-- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1・§1.6 の3）。版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13。recovery target も同じ exact 版）。試験側と backup tool 側の適合は**未完**（§1.1）。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
+- **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1・§1.6 の3）。版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13。recovery target も同じ exact 版）。試験側の適合は**未完**、backup tool 側の適合は初回 backup の前提で**上線の前に合入する（未合入）**（§1.1）。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
 - **Backup・PITR**:
   - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）の署名。署名の方法は決定済み（2026-11-18。§1.6 の10）: 配備日に目標値として署名し、達成は restore drill の実測待ちと注記する。DBA Lead と Operations の署名は**未取得**（PENDING）。
   - **DBA-6**: prodの `.env.backup` の `CONTENT_HASH_TABLES` の本番値を決める（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
@@ -365,7 +420,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み。security owner）、007（代表 profile。RTO の実測に使う。production owner）。
 - 初回 backup の前の手順（`ops/backup/README.md`「ツールイメージの build・配布」と「実行」）: backup tool image の content ID（v2。RB-W）で compose の pin をし直し、配布先で `tool-image.sh load` → `tool-image.sh check` が一致し、`tool-image.sh compose run --rm preflight` が 0 で終わること。
 - 解除の条件: 項目ごとに owner の証跡を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力）、DBA がまとめた記録を確かめた時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。
-- MySQL 8.4 で backup tool の適合（第二段階）が済むまで、001 の証跡（8.4 の本番に対する `preflight`）は取れても、backup・PITR 全体は 8.4 で検証済みとはいえない（§1.1。**未完**）。
+- **MySQL 8.4 の本番では、backup tool の 8.4 への適合（RB-W の branch。未合入）を合入するまで `preflight` が 0 にならない**（現行の `ops/backup/preflight.sh` は 8.0 の server だけを受け付ける。§1.1）。001 の証跡も初回 backup も取れないため、適合は上線の前に合入し、合入するまで §4 へ進まない。
 - 正本: `.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値・owner・確定に要る証跡）、`ops/backup/README.md`。
 
 **初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
@@ -665,10 +720,11 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   powershell -NoProfile -ExecutionPolicy Bypass -File infra/ecs/offline/validate-task-definition.ps1 -Mode Actual -Phase Initial -TaskDefinitionPath <登録するJSON> -EvidenceRoot <repository外のdirectory>
   # 雛形（repository の infra/ecs/task-definition.prod.json）だけを検査する場合は引数なし（-Mode Template）
   ```
-  - 実値の mode が見るもの: §1.0 の1〜26（freee を使うなら27〜30）と運用設定の名前、同じ設定を2回（environment と secrets の両方、別の綴りを含む）書いていないこと、secret を environment に置いていないこと、§1.0 で禁止した値が無いこと、`JAVA_TOOL_OPTIONS` 等に `-Duser.timezone` 以外の `-D` が無く environment の `SPRING_APPLICATION_JSON` が検査対象の設定を上書きしないこと、placeholder が残っていないこと、2つの image が registry digest で固定されていること、task の形（app と ClamAV の sidecar だけ、task と container の大きさ、sidecar は essential でない）、`FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`、`METRICS_SCRAPER_ENABLED=true`、EFS の ID と2つの volume（uploads は読書き、`privacy-trust` は読取り専用で別の access point）、`TZ`、scraper 口座が `admin`・break-glass 名でないこと。
+  - 実値の mode が見るもの: §1.0 の1〜26（freee を使うなら27〜30）と運用設定の名前、同じ設定を2回（environment と secrets の両方、別の綴りを含む）書いていないこと、secret を environment に置いていないこと、§1.0 で禁止した値が無いこと、値で判定する設定（scheduler・bootstrap・機能スイッチ・禁止値の対象等）を secrets に置いていないこと、`SPRING_PROFILES_ACTIVE` がちょうど `prod` で `SPRING_PROFILES_INCLUDE`・`SPRING_CONFIG_*` が無いこと、`environmentFiles` が無く app の container が image の `command`・`entryPoint` を上書きしないこと、`JAVA_TOOL_OPTIONS` 等に `-Duser.timezone` 以外の `-D`（引用符付きを含む）と `@argfile` が無く environment の `SPRING_APPLICATION_JSON` が検査対象の設定（`management` を含む）を上書きしないこと、placeholder が残っていないこと、2つの image が registry digest で固定されていること、task の形（app と ClamAV の sidecar だけ、task と container の大きさ、sidecar は essential でなく、root filesystem が読取り専用で、自分の bind volume だけを mount し、secret・app の設定・port を持たない）、`FILE_SCANNER_HOST=127.0.0.1`・`FILE_SCANNER_PORT=3310`、`METRICS_SCRAPER_ENABLED=true`、EFS の ID と2つの volume（uploads は読書き、`privacy-trust` は読取り専用で別の access point）、`TZ`、scraper 口座が `admin`・break-glass 名でないこと。
     - `-Phase Initial` は加えて `APP_SCHEDULING_ENABLED=false`・`SECURITY_BOOTSTRAP_ENABLED=true`・期限（offset 付き ISO-8601 で、現在から24時間以内の未来）・空の `BREAK_GLASS_USERNAMES`・空の `PRIVACY_TRUST_KMS_ANCHOR_FILE`・機能スイッチの環境変数（NF05 を含む）が無いこと。
     - `-Phase Steady` は bootstrap の設定が外れ、`BREAK_GLASS_USERNAMES` がちょうど2名、`APP_SCHEDULING_ENABLED` が `-Scheduler` の期待どおり（Disabled は `false` だけ、Enabled は `true` か未設定）、`PRIVACY_TRUST_KMS_ANCHOR_FILE` が空か読取り専用の mount の下の file であること。
-  - 見ないもの: secret の値（起動時の validator が見る）、secret store から渡す `SPRING_APPLICATION_JSON` の中身、ALB・security group、service の desired count と deployment の設定（SRE-5）。§5.7 の bootstrap 再開は対象外。
+  - 見ないもの: secret の値（起動時の validator が見る）、secret store から渡す `SPRING_APPLICATION_JSON` の中身、ALB・security group、EFS の file system policy と task role の権限（§1.6 の11）、service の desired count と deployment の設定（SRE-5）。§5.7 の bootstrap 再開は対象外。
+  - `-D` は `-Duser.timezone` 以外を全て FAIL にする（設定は環境変数で渡す）。`-Dfile.encoding` 等の正当な JVM の設定が必要になったら、validator の許可を変える（変更は復審を経る）。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
   - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
