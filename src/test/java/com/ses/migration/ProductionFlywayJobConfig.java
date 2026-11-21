@@ -21,9 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 初期管理者パスワードhashを環境変数（{@code FLYWAY_*}）で上書きする。testも同じfileを同じparser
  * （Flyway Maven pluginが使う {@link ConfigUtils#loadConfigurationFile}）で読み、同じkeyへ値を入れて
  * {@link FluentConfiguration#configuration(Map)} に渡す。testの側でFlyway設定を書き直さないことで、
- * jobとtestの等価性を構造的に保つ（W1-B3 review §9'）。
+ * jobとtestの等価性を構造的に保つ（W1-B3 review §9'）。他の package の試験（{@code com.ses.config} の DDL 凍結の
+ * callback の MySQL 試験）からも使うため public にする。
  */
-final class ProductionFlywayJobConfig {
+public final class ProductionFlywayJobConfig {
 
     static final Path CONFIG_FILE = Path.of("ops", "flyway", "flyway-prod.conf");
 
@@ -35,13 +36,13 @@ final class ProductionFlywayJobConfig {
     }
 
     /** 設定fileのkey/value（Flyway Maven pluginと同じparser）。 */
-    static Map<String, String> load() {
+    public static Map<String, String> load() {
         File file = CONFIG_FILE.toFile();
         assertTrue(file.isFile(), "本番Flyway jobの設定fileが存在すること: " + CONFIG_FILE);
         return new LinkedHashMap<>(ConfigUtils.loadConfigurationFile(file, "UTF-8", true));
     }
 
-    static List<String> locations(Map<String, String> conf) {
+    public static List<String> locations(Map<String, String> conf) {
         return Arrays.stream(conf.getOrDefault("flyway.locations", "").split(","))
                 .map(String::trim)
                 .filter(location -> !location.isEmpty())
@@ -53,7 +54,7 @@ final class ProductionFlywayJobConfig {
      *
      * @param adminHash 初期管理者パスワードhash。{@code null} なら placeholder を設定しない（環境変数未設定）
      */
-    static FluentConfiguration configure(String url, String user, String password, String adminHash) {
+    public static FluentConfiguration configure(String url, String user, String password, String adminHash) {
         Map<String, String> conf = load();
         if (adminHash != null) {
             conf.put(ADMIN_HASH_KEY, adminHash);

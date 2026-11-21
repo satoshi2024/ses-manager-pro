@@ -161,6 +161,9 @@
   - **失敗/rollback:** prod の試験が止まる場合は `@MockBean` の付け漏れを直す（validator を弱めない）。
 
 - [ ] **BWQ-008 — Flyway job の DDL 凍結 callback**
+  - **状態:** 実装・fast の試験は済み（第 2 段階 2c）。MySQL の試験と Demo は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2c）:** `ProductionBackupDdlFreezeFlywayCallback`（`BEFORE_MIGRATE`・`BEFORE_REPAIR` で専用の接続の `GET_LOCK('ses_backup_ddl_freeze', 120)`、1 以外は日本語の message で失敗、`AFTER_MIGRATE`・`AFTER_MIGRATE_ERROR`・repair の対で `RELEASE_LOCK` と接続の close）。Flyway は callback を名前の昇順で動かすため、名前 `BackupDdlFreezeLock` で初期管理者 hash の検査の後・`LegacyDatabaseFlywayCallback` の前にした（`design.md` §8 の実装の記録）。`ProductionFlywayJobConfig`（試験の helper）を `com.ses.config` の MySQL 試験から使うため public にした。runbook §3.3・§3.5 に lock と失敗時の対応を書いた。**Runner 待ち**: `ProductionBackupDdlFreezeFlywayCallbackMySqlTest`（mysql shard 3）、`FlywayProdFreshInstallMySqlTest`（job 設定に callback が増えた）と Demo。
 
   - **依存:** BWQ-001
   - **対応要求:** BWQ-RQ-006

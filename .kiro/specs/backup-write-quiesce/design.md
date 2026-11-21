@@ -533,6 +533,8 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - `BEFORE_MIGRATE`（と `BEFORE_REPAIR`）: 構成の DataSource から専用の接続を開き、`SELECT GET_LOCK('ses_backup_ddl_freeze', 120)` を実行する。1 でなければ「backup が実行中のため migration を始めません（ses_backup_ddl_freeze）。backup の timer が止まっていることを確かめて再実行してください」で失敗する。
   - `AFTER_MIGRATE`・`AFTER_MIGRATE_ERROR`（と repair の対）: `RELEASE_LOCK` を実行して接続を閉じる。process が落ちれば MySQL が lock を返す。
   - 待ち時間 120 秒は code の定数（job の環境変数は `FLYWAY_*` の 4 つに限る。§1.3）。
+  - 実装の記録（第 2 段階 2c）: Flyway は同じ event の callback を `getCallbackName()` の昇順で動かす（`flyway.callbacks` の並びではない）。名前を `BackupDdlFreezeLock` にし、DB に触れない初期管理者 hash の検査（`AdminInitialPasswordHashCheck`）の後、補償の DDL を行い得る `LegacyDatabaseFlywayCallback` の前に動かす（`flyway.callbacks` もこの順に書く）。「先頭」は DB に触れる callback の先頭の意味とした。hash の検査を先にするのは、Flyway 10.10 が `BEFORE_MIGRATE` を migration の try の外で呼び、`BEFORE_MIGRATE` の後の callback が失敗しても `AFTER_MIGRATE_ERROR` を呼ばないため（lock を取った後に hash の検査で失敗すると、同じ JVM の中では process の終わりまで lock が残る）。この場合と `FlywayException` 以外の失敗では、job の process の終わりで接続が閉じて lock が返る。同じ instance で解放が呼ばれずに次の migrate が始まったら、前の接続を閉じてから取り直す。lock を確かめられない失敗（接続・SQL）も migration を始めない（fail-closed。message は別）。
+  - 既知の制約: Flyway は履歴表の無い DB では migrate の前（`BEFORE_MIGRATE` より前）に `flyway_schema_history` を作る（validate・baseline もその前）。これは初回の空の DB だけで起き、業務の表には触れない。初回は §2 の0 で timer を止めて行う。
 - provider（保持 process）は静止を求める前に lock を取る。
 
 ## 9. app 停止の確認（Q7）

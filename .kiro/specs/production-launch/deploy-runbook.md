@@ -693,7 +693,9 @@ mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
 - 実行順: V1〜V202（versioned 201件。SQL 200件＋Java migration `V74_3` 1件。V199 は欠番）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
-- callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
+- callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `ProductionBackupDdlFreezeFlywayCallback`（backup の DDL 凍結の lock）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
+- **backup の DDL 凍結の lock（RB-QUIESCE BWQ-008。U-5）**: migrate（と repair）の前に、job は専用の DB 接続で `SELECT GET_LOCK('ses_backup_ddl_freeze', 120)` を実行し、backup の保持 process が同じ lock を持っていれば最長 120 秒待つ。取れなければ `backup が実行中のため migration を始めません（ses_backup_ddl_freeze）` で始まる message で失敗し、migration は1件も適用しない（§3.5）。lock は job の終わり（成功と migration の失敗のどちらでも）で返し、job の process が落ちた場合は MySQL が返す。待ち時間はコードの定数で、環境変数では変えない。§2 の初めに backup の timer を止めていれば待たずに取れる（timer の停止の手順は RB-QUIESCE の文書の task（BWQ-013）で §2 に足す）。
+- 注意: Flyway は履歴表（`flyway_schema_history`）が無い DB では、migrate の前（lock を取る前）に履歴表を作る。これは初回の空の DB だけで起き、業務の表には触れない。
 
 ### 3.4 適用結果の確認（DBA立会い）
 
@@ -837,6 +839,7 @@ SELECT event_object_table, COUNT(*) FROM information_schema.triggers WHERE trigg
 
 ### 3.5 jobが失敗した場合
 
+- **backup の DDL 凍結の lock を取れずに失敗した場合**（`backup が実行中のため migration を始めません（ses_backup_ddl_freeze）`）: migration は1件も適用されていない（初回の空の DB では履歴表だけが空のまま在り得る）。backup の timer が止まり、実行中の backup job が終わったこと（`tool-image.sh compose ps`）を確かめてから §3.3 を再実行する。`flyway repair` は不要。`lock（ses_backup_ddl_freeze）を確かめられないため` で始まる message は DB の接続・権限の失敗で、接続を直してから再実行する。DBA の手作業の DDL も、同じ lock を先に取ってから行う（`SELECT GET_LOCK('ses_backup_ddl_freeze', 0);` が 1 を返すこと。backup-write-quiesce design.md §8）。
 - **hash検査・placeholder未設定で失敗した場合**: migrationは1件も実行されていない（履歴表は空、またはそもそも無い）。環境変数を直して§3.3を再実行する。`flyway repair` は不要。
 - **migrationの途中で失敗した場合（初回導入）**: MySQLのDDLはtransactionで戻らないため、失敗行（`success = 0`）と途中までのschemaが残る。初回は業務dataが無いので、`flyway repair` で続行せず、**DBAがschemaを削除して空で作り直し**、原因を直してから§3.3を最初からやり直す。`flyway clean` は使わない（設定で拒否している）。
 - **2回目以降のreleaseで失敗した場合**: §2.5で取得したbackupから戻すことを基本とする。`CLAUDE.md` のrepair手順はlocal開発DB向けであり、本番では許可済みscriptの確認・backup・DBA承認を経てだけ使う。
