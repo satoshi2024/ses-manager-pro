@@ -198,6 +198,8 @@ case_restore_requires_recorded_database_collation() {
   assert_nonzero "$rc" "DB の既定値の記録が無い full は復元しない"
   assert_contains "$out" "DB の既定の文字集合・照合順序（schema_fingerprint.database）がありません" "理由を通知"
   assert_not_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "CREATE DATABASE" "server の既定で DB を作らない"
+  # RB-W P3-4: 入力の検査で止まるときは target を一切変えない（RESET BINARY LOGS AND GTIDS も発行しない）
+  assert_not_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "RESET BINARY LOGS AND GTIDS" "記録が無ければ target の GTID 状態も変えない"
 }
 
 case_restore_reset_master_fail() {

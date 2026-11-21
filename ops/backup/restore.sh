@@ -118,15 +118,9 @@ main() {
   approval::collect_and_verify "$plan_path" "$target_uuid" "$CLAIM1" "$CLAIM2" \
     || restore::fail "承認が不足または不正です"
 
-  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
-  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
-  # target guard が source と同一 UUID を拒否済み）。
-  # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
-  # RB-W 8.4 対応: MySQL 8.4 では RESET MASTER が削除されたため、8.2 以降の RESET BINARY LOGS AND GTIDS を使う。
-  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "RESET BINARY LOGS AND GTIDS;" 2>/dev/null; then
-    restore::fail "target の GTID 状態をリセットできません（RESET BINARY LOGS AND GTIDS）。再 restore の正しさを保証できません"
-  fi
+  # target を変える最初の操作（RESET BINARY LOGS AND GTIDS）は、snapshot の取得・manifest と binlog の SHA の照合・
+  # full の metadata.json の DB の既定値の確認がすべて済んだ後（下の 4) の直前）に行う（RB-W P3-4。以前は承認の直後に
+  # 行っており、記録の欠けた backup でも target を変えてから失敗していた）。
 
   # staging（失敗時は read-only に隔離）
   STAGE_DIR="$STAGING_ROOT/$(basename "$plan_path" .json)-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -197,6 +191,18 @@ main() {
   if [[ ! "$db_charset" =~ ^[A-Za-z0-9_]{1,64}$ || ! "$db_collation" =~ ^[A-Za-z0-9_]{1,64}$ ]]; then
     restore::fail "full の metadata.json に DB の既定の文字集合・照合順序（schema_fingerprint.database）がありません。backup 時と同じ照合順序で復元 DB を作れないため復元しません"
   fi
+
+  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
+  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
+  # target guard が source と同一 UUID を拒否済み）。
+  # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
+  # RB-W P3-4: 復元に要る入力の検査（snapshot・manifest・binlog の SHA・DB の既定値の記録）がすべて済んでから実行する。
+  # RB-W 8.4 対応: MySQL 8.4 では RESET MASTER が削除されたため、8.2 以降の RESET BINARY LOGS AND GTIDS を使う。
+  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
+    --execute "RESET BINARY LOGS AND GTIDS;" 2>/dev/null; then
+    restore::fail "target の GTID 状態をリセットできません（RESET BINARY LOGS AND GTIDS）。再 restore の正しさを保証できません"
+  fi
+
   "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" --binary-mode \
     --execute "CREATE DATABASE IF NOT EXISTS \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation; ALTER DATABASE \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation;" 2>/dev/null \
     || restore::fail "target DB を backup 時の文字集合・照合順序（$db_charset / $db_collation）で作成できません"

@@ -295,6 +295,13 @@ metadata.json と index の `schema_fingerprint` に記録する。計算でき�
 あわせて DB の既定の文字集合・照合順序（`schema_fingerprint.database`）と、診断用に server の版・`lower_case_table_names`
 （`schema_fingerprint.server`。hash には入れない）を記録する。`restore.sh` は復元 DB を `database` の値で作り
 （`CREATE DATABASE … CHARACTER SET … COLLATE …` と、既にある空の DB への `ALTER DATABASE`）、記録が無い full は復元しない。
+この確認は target を変える最初の操作（`RESET BINARY LOGS AND GTIDS`）より前に行い、記録が無ければ target を一切変えずに
+止まる（RB-W P3-4。snapshot の取得・manifest と binlog の SHA の照合も同じく先に済ませる）。
+mysqldump は、routine・trigger の `DATABASE_COLLATION` が DB の既定と違うと、その定義の前後に元の DB 名を書いた
+`` ALTER DATABASE `<backup 時の DB 名>` … `` を出力する。`TARGET_DATABASE` が backup 時の DB 名と違うと、この文は
+存在しない DB を指して import が失敗する（fail-closed）。この文が出るのは、source で routine・trigger を作った後に DB の
+既定を変えた場合に限る（repository の migration に `ALTER DATABASE` / `ALTER SCHEMA` は無い）。復元先は backup 時と同じ
+DB 名にする。
 v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない）の記録は「算出方式が異なります」で FAIL になる
 （production に v1 の記録は無い。開発・試験の v1 の backup は取り直す）。
 
