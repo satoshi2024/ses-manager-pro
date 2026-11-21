@@ -39,11 +39,11 @@ production 環境への接続・復元は行わないこと。初回本番配備
   `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外した。preflight は
   変数があり ROW でなければ exit 12 で止まる（変数そのものが無い版では判定しない。RB-W P3-6）。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
   integration を走査する）。mysqldump 8.4.13 が `--source-data=2` で 8.4 の server に発行する構文（`SHOW BINARY LOG STATUS`
-  の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認する（未取得）。
+  の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認した（2026-11-21。full と checkpoint が起点を読めて PASS）。
   preflight の server の変数は `SHOW GLOBAL VARIABLES` で 1 つずつ有無を見て、無い変数は名前を挙げて失敗する。
   TLS は `@@have_ssl`（8.4 で残るかは CI で確認）を使わず、この接続の `Ssl_cipher` で判定する。
   mysqlbinlog の `--read-from-remote-server --raw --stop-never` と `MYSQL_PWD`（integration の root 操作だけが使う）が 8.4 でも
-  使えることは CI（実 MySQL 8.4.13）で確認する（未取得）。
+  使えることは CI（実 MySQL 8.4.13）で確認した（2026-11-21。binlog の archive と restore の replay が PASS）。
 - MySQL サーバの時刻帯（2026-11-13 決定）: production の source と、復元先（recovery target）の MySQL サーバは
   いずれも **`time_zone = '+09:00'`**（DBA が設定）とする。復元先が異なる時刻帯だと、cutover 後のアプリの
   `NOW()` / `CURRENT_DATE` と TIMESTAMP 列の表示が変わるため、復元前に `SELECT @@global.time_zone;` で確認する。
