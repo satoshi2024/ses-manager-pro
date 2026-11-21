@@ -99,7 +99,7 @@ binlog_archive::resolve_start() {
     fi
     if [[ -f "$BINLOG_RAW_DIR/$STATE_LAST_FILE" ]]; then
       local want
-      want=$(printf '%s\n' "$logs" | awk -v f="$STATE_LAST_FILE" '$1 == f {print $2; exit}')
+      want=$(binlog::size_from_logs "$logs" "$STATE_LAST_FILE")
       local have
       have=$(stat -c %s "$BINLOG_RAW_DIR/$STATE_LAST_FILE" 2>/dev/null || echo 0)
       if [[ -n "$want" && "$have" -lt "$want" ]]; then
@@ -169,7 +169,7 @@ binlog_archive::prune_incomplete_raw() {
     local rel
     rel=$(basename "$raw_file")
     local want
-    want=$(printf '%s\n' "$logs" | awk -v f="$rel" '$1 == f {print $2; exit}')
+    want=$(binlog::size_from_logs "$logs" "$rel")
     [[ -n "$want" ]] || continue
     local have
     have=$(stat -c %s "$raw_file" 2>/dev/null || echo 0)

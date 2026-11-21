@@ -1,9 +1,12 @@
 # ============================================================
-# HFP-03 バックアップツールイメージ（Oracle MySQL 8 client + restic）
+# HFP-03 バックアップツールイメージ（Oracle MySQL 8.4 LTS client + restic）
 # - `# syntax=` 行は置かない（build のたびに docker/dockerfile:1 の floating tag の frontend image を
 #   registry から取得させないため。本 Dockerfile は builtin frontend の機能だけを使う）。
-# - base image は digest 固定（debian bookworm-slim）。tar / util-linux 等の Essential パッケージは
-#   再インストールせず base image の版のまま使う（base digest で固定）。
+# - base image は digest 固定（debian bookworm-slim）。tar / util-linux 等の Essential パッケージは明示的には
+#   導入・再インストールしないが、MySQL client 等の依存解決で base image の版から更新され得る（RB-W W-4）。
+#   実際の版は image 内の dpkg-packages.tsv が正本で、Essential の変化は essential-packages.tsv に記録される。
+#   最後の RUN（install-toolchain.sh --verify-manifest）が、image の実際の dpkg の版と dpkg-packages.tsv の
+#   一致を確かめ、一致しなければ build を失敗させる。
 # - MySQL client は Oracle MySQL APT repo から exact version で固定導入する。
 #   Alpine の汎用 mysql-client（MariaDB 系: HFP-03-BL-013）は使用しない。
 # - Oracle MySQL APT repo の署名鍵は SHA-256 と full fingerprint で検証し、apt source を直接定義する。
@@ -22,10 +25,13 @@ ARG BASE_IMAGE=debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048
 FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE
-ARG MYSQL_CLIENT_VERSION=8.0.46
+# MySQL 8.4 LTS（production の server と同じ系列。RB-W 8.4 対応）。版は 2026-11-18 に repo.mysql.com の
+# apt/debian/dists/bookworm/mysql-8.4-lts/binary-amd64/Packages で mysql-community-client と
+# mysql-community-server-core がともに 8.4.13-1debian12 であることを確認した値
+ARG MYSQL_CLIENT_VERSION=8.4.13
 ARG MYSQL_DEB_REVISION=1debian12
 ARG MYSQL_APT_SUITE=bookworm
-ARG MYSQL_APT_COMPONENT=mysql-8.0
+ARG MYSQL_APT_COMPONENT=mysql-8.4-lts
 ARG MYSQL_REPO_KEY_URL=https://repo.mysql.com/RPM-GPG-KEY-mysql-2025
 # RPM-GPG-KEY-mysql-2025 の SHA-256。2026-11-13 に https://repo.mysql.com/RPM-GPG-KEY-mysql-2025（3175 bytes）を
 # 取得して確認した値。gpg --show-keys の結果は primary key（pub）1 つ、primary fingerprint は下記
@@ -33,7 +39,7 @@ ARG MYSQL_REPO_KEY_URL=https://repo.mysql.com/RPM-GPG-KEY-mysql-2025
 # 有効期限を過ぎると build は失敗する（install-toolchain.sh が期限を検査する）。期限前に新しい鍵ファイルを
 # 同じ手順（SHA-256・pub が 1 つ・primary fingerprint・有効期限）で確認して、この値を更新すること。
 ARG MYSQL_REPO_KEY_SHA256=a4bcd9f16a53cc763f87b9955dbcdced33c7aa90296b157eb6ceef0f156f4327
-# MySQL Release Engineering <mysql-build@oss.oracle.com>（MySQL 8.0 Reference Manual「Signature Checking Using GnuPG」）
+# MySQL Release Engineering <mysql-build@oss.oracle.com>（MySQL Reference Manual「Signature Checking Using GnuPG」。mysql-8.4-lts の component もこの鍵で検証できることは初回 build で確かめる（Runner、未取得））
 ARG MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
 ARG RESTIC_VERSION=0.17.3
 # restic v0.17.3 公式 SHA256SUMS の restic_0.17.3_linux_amd64.bz2 の値
@@ -48,5 +54,7 @@ COPY providers/ /usr/local/lib/ses-backup/providers/
 COPY *.sh /usr/local/bin/
 COPY tests/integration-pitr.sh /usr/local/bin/
 RUN chmod 700 /usr/local/bin/*.sh /usr/local/lib/ses-backup/providers/*.sh
+# 最後の層: image の実際の dpkg の版が記録した dpkg-packages.tsv と一致することを確かめる（RB-W W-4）
+RUN bash /usr/local/share/ses-backup/image-build/install-toolchain.sh --verify-manifest
 
 WORKDIR /var/lib/ses-backup

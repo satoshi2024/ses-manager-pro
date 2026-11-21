@@ -34,9 +34,12 @@ setup_drill() {
   local full_payload="$T/full-payload" ckpt_payload="$T/ckpt-payload"
   mkdir -p "$full_payload/db" "$full_payload/uploads/published" "$ckpt_payload/uploads/published"
   printf '%s\n' "-- MySQL dump (source-data=2)" \
-    "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000001', MASTER_LOG_POS=4;" \
+    "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000001', SOURCE_LOG_POS=4;" \
     "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);" > "$full_payload/db/database.sql"
 printf 'marker-before-full\n' > "$full_payload/uploads/published/marker.txt"
+# RB-W P2-1: full の metadata.json の DB の既定値（restore.sh が復元 DB をこの値で作る）
+printf '%s\n' '{"kind":"full","schema_fingerprint":{"database":{"character_set":"utf8mb4","collation":"utf8mb4_unicode_ci"}}}' \
+  > "$full_payload/metadata.json"
 printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker-before.txt"
   make_manifest "$full_payload"
   make_manifest "$ckpt_payload"
@@ -71,16 +74,24 @@ printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker-be
       source_lineage:"lin-012", consistency_time_utc: $t, restic_snapshot_id: $snap,
       binlog_end:{file:"binlog.000002", position:154}, uploads_snapshot_id:"up-cp",
       manifest_sha256:"m"}' > "$T/index/checkpoint-012.json"
-  # validate が読む checkpoint index（flyway/counts/uploads inventory 付き）
+  # validate が読む checkpoint index（flyway/counts/uploads inventory/schema fingerprint 付き）
   mkdir -p "$BACKUP_WORK_DIR/index"
-  local mb_sha mb_size
+  local mb_sha mb_size schema_fp
   mb_sha=$(sha256sum "$T/uploads/published/marker-before.txt" | awk '{print $1}')
   mb_size=$(stat -c %s "$T/uploads/published/marker-before.txt")
-  jq -n --arg t "$cp_ts" --arg sha "$mb_sha" --argjson sz "$mb_size" \
+  # G-04: fake mysql の既定の schema から記録値を作る（validate はこれと同じ応答で再計算する）
+  unset FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
+  schema_fp=$(
+    # shellcheck disable=SC1091
+    . "$LIB/schema-fingerprint.sh"
+    MYSQL_CLIENT_BIN="$HERE/fixtures/bin/mysql"
+    schema_fingerprint::compute fixture-db
+  )
+  jq -n --arg t "$cp_ts" --arg sha "$mb_sha" --argjson sz "$mb_size" --argjson fp "$schema_fp" \
     '{kind:"checkpoint", status:"VALID", consistency_time_utc: $t,
       flyway_max_success:"42", critical_table_counts:{marker_test:1},
       uploads:{inventory:[{path:"published/marker-before.txt",
-        sha256:$sha, size:$sz}]}}' \
+        sha256:$sha, size:$sz}]}, schema_fingerprint: $fp}' \
     > "$BACKUP_WORK_DIR/index/checkpoint-012.json"
 
   # fake CLI（PATH の fixtures を利用）+ validate 用 env
@@ -317,6 +328,31 @@ EOF
   assert_no_file "$T/drill-report/cutover.log" "cutover リハーサルへ進まない"
 }
 
+# G-04（RB-W P3-3）: validate が READY_FOR_CUTOVER で Flyway 照合も PASS でも、schema fingerprint の照合が PASS でなければ
+# drill を失敗させる（validate の state だけに頼らない多重の防御）。validate-restore.sh だけを差し替えた複製で確かめる。
+case_drill_requires_schema_fingerprint_pass() {
+  setup_drill
+  prebuild_plan > /dev/null
+  local pid bk saved_drill=$DRILL
+  pid=$(ls "$PLANS_DIR"/*.json | head -1 | xargs -r basename | sed "s/.json$//")
+  bk="$T/backup-copy"
+  mkdir -p "$bk"
+  cp -a "$ROOT/ops/backup/"*.sh "$bk/"
+  cp -a "$ROOT/ops/backup/lib" "$ROOT/ops/backup/providers" "$bk/"
+  cat > "$bk/validate-restore.sh" <<'EOF'
+#!/usr/bin/env bash
+# schema fingerprint の照合を通っていない validator を模す（state と Flyway 照合は PASS）
+printf '%s\n' '{"state": "READY_FOR_CUTOVER", "plan_id": "stub", "checks": {"flyway_history_required": true, "flyway": "PASS", "schema_fingerprint": "FAIL"}}'
+EOF
+  chmod +x "$bk"/*.sh "$bk/providers"/*.sh
+  DRILL="$bk/restore-drill.sh"
+  run_drill "$pid"
+  DRILL=$saved_drill
+  assert_nonzero "$RC" "schema fingerprint の PASS を確認できない validate 結果では drill は非 0"
+  assert_contains "$OUT" "validate の schema fingerprint 照合" "理由を表示"
+  assert_no_file "$T/drill-report/cutover.log" "cutover リハーサルへ進まない"
+}
+
 run_case case_drill_success
 run_case case_drill_target_plan_mismatch
 run_case case_drill_plan_fail
@@ -326,6 +362,7 @@ run_case case_drill_ping_only_rejected
 run_case case_drill_rto_exceeded
 run_case case_drill_write_enable_refused
 run_case case_drill_requires_flyway_history_check
+run_case case_drill_requires_schema_fingerprint_pass
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

@@ -45,7 +45,7 @@ drill は以下の順に実 script を実行する:
 - `rto_ok == true`（total_seconds <= RTO_SECONDS、既定 4h）
 - `rpo_ok == true`（plan の rpo_seconds <= RPO_MAX_SECONDS、既定 15m）
 - segments が 5 つ（plan / integrity / restore / validate / cutover）
-- validate の report で `checks.flyway_history_required == true`・`checks.flyway == "PASS"`
+- validate の report で `checks.flyway_history_required == true`・`checks.flyway == "PASS"`・`checks.schema_fingerprint == "PASS"`
   （`restore-drill.sh` が `jq` で検査し、満たさなければ cutover リハーサルへ進まずに失敗する）
 - いずれか失敗・skip・evidence 欠如・目標超過で非 0 終了
 

@@ -30,6 +30,8 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/metadata.sh"
 . "$LIB_DIR/binlog.sh"
 . "$LIB_DIR/content-hash.sh"
+. "$LIB_DIR/schema-fingerprint.sh"
+. "$LIB_DIR/uploads-pointer.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -58,9 +60,11 @@ checkpoint::source_logs() {
     --execute "SHOW BINARY LOGS;" "$MYSQL_DATABASE" 2>/dev/null
 }
 
-# 指定 file の source 側 size（SHOW BINARY LOGS から）
+# 指定 file の source 側 size（SHOW BINARY LOGS から。一覧はパイプで渡さない。RB-W P1-1、lib/binlog.sh 参照）
 checkpoint::source_size() { # file
-  checkpoint::source_logs | awk -v f="$1" '$1 == f {print $2; exit}'
+  local logs
+  logs=$(checkpoint::source_logs) || return 1
+  binlog::size_from_logs "$logs" "$1"
 }
 
 # archiver の追従を bounded wait（closed file が source size に達するまで）
@@ -89,7 +93,8 @@ main() {
   common::require_env MYSQL_PASSWORD_FILE
   common::require_env MYSQL_DATABASE
   common::require_env BACKUP_WORK_DIR
-  common::require_env UPLOADS_DIR
+  # RB-W 追加修正 C: uploads は根（UPLOADS_ROOT）と pointer（UPLOADS_POINTER）で指定する（廃止した UPLOADS_DIR が残っていれば失敗）
+  uploads_pointer::check_env || common::fail "uploads の設定が不正です（UPLOADS_ROOT・UPLOADS_POINTER）"
   common::require_env UPLOADS_STAGING_PARENT
   common::require_env REPLICA_HEARTBEAT_DIR
   common::require_env SCHEDULER_ACK_DIR
@@ -152,6 +157,11 @@ main() {
         "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
       || common::fail "主要 table の内容ハッシュを計算できません（CONTENT_HASH_TABLES）"
   fi
+  # G-04（RB-W W-1）: schema fingerprint（同じ静止区間 = closed coordinate 時点の schema）。設定によらず常に
+  # 記録し、計算できなければ checkpoint を VALID にしない。
+  METADATA_SCHEMA_FINGERPRINT_JSON=$(schema_fingerprint::compute \
+      "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" "$MYSQL_DATABASE") \
+    || common::fail "schema fingerprint を計算できません（lib/schema-fingerprint.sh）"
 
   # archiver 追従 + checksum
   checkpoint::wait_archiver "$closed_file" "$closed_size" "${CHECKPOINT_ARCHIVER_WAIT:-120}" \
@@ -160,14 +170,18 @@ main() {
   binlog::size_ok "$raw_file" "$closed_size" || common::fail "closed file が truncated"
   binlog::verify_checksum "$raw_file" || common::fail "closed file の checksum 検証に失敗"
 
-  # uploads snapshot（同一静止区間）
+  # uploads snapshot（同一静止区間。pointer が指す版の directory）
   local uploads_snap="$work/uploads-snapshot.json"
-  if ! "$PROVIDERS_DIR/uploads-local.sh" snapshot "$UPLOADS_DIR" "$UPLOADS_STAGING_PARENT" "$uploads_snap"; then
+  if ! "$PROVIDERS_DIR/uploads-local.sh" snapshot "$UPLOADS_ROOT" "$UPLOADS_POINTER" "$UPLOADS_STAGING_PARENT" "$uploads_snap"; then
     common::fail "uploads snapshot に失敗しました"
   fi
   UPLOADS_SNAPSHOT_ID=$(jq -r '.snapshot_id // empty' "$uploads_snap")
   UPLOADS_STAGING_DIR=$(jq -r '.staging_dir // empty' "$uploads_snap")
+  # snapshot した pointer の名前と版（metadata.json と checkpoint index の uploads_pointer に記録する。RB-W 追加修正 C）
+  UPLOADS_POINTER_NAME=$(jq -r '.pointer // empty' "$uploads_snap")
+  UPLOADS_POINTER_TARGET=$(jq -r '.pointer_target // empty' "$uploads_snap")
   [[ -n "$UPLOADS_SNAPSHOT_ID" ]] || common::fail "uploads snapshot ID を取得できません"
+  [[ -n "$UPLOADS_POINTER_NAME" && -n "$UPLOADS_POINTER_TARGET" ]] || common::fail "uploads の pointer と版を取得できません"
 
   # 静止解除
   if ! quiesce::release; then
@@ -241,10 +255,13 @@ main() {
     --arg binlog_position "$closed_size" \
     --arg manifest_sha256 "$(cat "$payload/manifest.sha256")" \
     --arg uploads_snapshot_id "$UPLOADS_SNAPSHOT_ID" \
+    --arg uploads_pointer "$UPLOADS_POINTER_NAME" \
+    --arg uploads_version "$UPLOADS_POINTER_TARGET" \
     '{kind: $kind, status: $status, consistency_time_utc: $consistency_time_utc,
       restic_snapshot_id: $restic_snapshot_id,
       binlog_end: {file: $binlog_file, position: ($binlog_position|tonumber)},
-      manifest_sha256: $manifest_sha256, uploads_snapshot_id: $uploads_snapshot_id}'
+      manifest_sha256: $manifest_sha256, uploads_snapshot_id: $uploads_snapshot_id,
+      uploads_pointer: {name: $uploads_pointer, target: $uploads_version}}'
   return 0
 }
 
@@ -253,7 +270,7 @@ case "${1:---run}" in
   --help|-h) cat <<'EOF'
 Usage: create-checkpoint.sh [--help]
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_USER,
-MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_DIR,
+MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_ROOT, UPLOADS_POINTER（既定 current）,
 UPLOADS_STAGING_PARENT, REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR,
 BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR, APP_COMMIT, FLYWAY_VERSION, CONTENT_HASH_TABLES
 EOF

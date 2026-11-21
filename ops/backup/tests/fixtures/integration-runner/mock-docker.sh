@@ -139,7 +139,7 @@ state_lines() {
   printf 'health_start=2026-11-12T00:00:10Z health_exit=%s health_output=mysqladmin connect failed pw=%s' "$code" "${INTEGRATION_TGT_PW:-}"
   template_newline "$fmt"
   printf 'health_start=2026-11-12T00:00:12Z health_exit=%s health_output=%s-health-second' "$code" "$svc"
-  printf '|mysql:8.0.36'
+  printf '|mysql:8.4.13'
   template_newline "$fmt"
   printf 'mount_type=volume source=/var/lib/docker/volumes/%s destination=/var/lib/mysql rw=true' "$svc"
   printf '\n'

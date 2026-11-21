@@ -18,17 +18,20 @@ FAKE_UUID='11111111-2222-3333-4444-555555555555'
 FAKE_PW='S3cr3t-Value-XYZ-001'
 
 reset_fake() {
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   export FAKE_MYSQL_ENGINES=$'InnoDB\t5'
-  export FAKE_CLIENT_VERSION_LINE='mysql  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)'
-  export FAKE_MYSQLBINLOG_VERSION_LINE='mysqlbinlog  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)'
-  export FAKE_MYSQLDUMP_VERSION_LINE='mysqldump  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)'
+  export FAKE_CLIENT_VERSION_LINE='mysql  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)'
+  export FAKE_MYSQLBINLOG_VERSION_LINE='mysqlbinlog  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)'
+  export FAKE_MYSQLDUMP_VERSION_LINE='mysqldump  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)'
 }
 
 setup_env() {
   T=$(mktemp -d)
-  export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads"
-  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_DIR" "$T/tmp" "$T/capath"
+  # RB-W 追加修正 C: uploads の根の下に版 v0 と current -> v0（production の配置）。廃止した UPLOADS_DIR は使わない
+  export BACKUP_WORK_DIR="$T/work" UPLOADS_ROOT="$T/uploads" UPLOADS_POINTER=current
+  unset UPLOADS_DIR UPLOADS_STAGING_PARENT
+  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_ROOT/v0" "$T/tmp" "$T/capath"
+  ln -s v0 "$UPLOADS_ROOT/current"
   printf '%s\n' "$FAKE_PW" > "$T/pw"
   # hashed CA の fixture（内容は何でも良い。実 connect はしない）
   printf '%s\n' '-----BEGIN CERTIFICATE-----' 'FAKECA' '-----END CERTIFICATE-----' > "$T/capath/fd95d540.0"
@@ -38,7 +41,7 @@ setup_env() {
   export PREFLIGHT_MIN_FREE_BYTES=1
   export TMPDIR="$T/tmp"
   export FAKE_ARGV_LOG="$T/argv.log"
-  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK
+  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_MISSING_VARIABLES
   reset_fake
 }
 
@@ -57,14 +60,17 @@ case_preflight_normal() {
   assert_zero "$code" "正常系 exit 0"
   assert_contains "$out" '"status": "OK"' "status OK"
   assert_contains "$out" '"server_uuid": "'"$FAKE_UUID"'"' "server_uuid 出力"
-  assert_contains "$out" '"mysql_client_version": "8.0.36"' "client version 出力"
-  assert_contains "$out" '"server_version": "8.0.36"' "server version 出力"
+  assert_contains "$out" '"mysql_client_version": "8.4.13"' "client version 出力"
+  assert_contains "$out" '"server_version": "8.4.13"' "server version 出力"
   assert_contains "$out" '"binlog_on": true' "log_bin ON"
   assert_contains "$out" '"binlog_checksum": "CRC32"' "checksum 出力"
   assert_contains "$out" '"gtid_mode": "ON"' "GTID 出力"
   assert_contains "$out" '"tls_ok": true' "TLS OK"
   assert_contains "$out" '"all_tables_innodb": true' "InnoDB 判定"
   assert_contains "$out" 'sha256:test-digest-001' "tool digest 出力"
+  # RB-W 追加修正 C: pointer を解決し、指す版を出力する
+  assert_contains "$out" '"pointer": "current"' "uploads の pointer の名前を出力"
+  assert_contains "$out" '"version": "v0"' "uploads の pointer が指す版を出力"
   assert_not_contains "$out" '127.0.0.1' "host を出力しない"
   assert_not_contains "$out" 'ses_manager_db' "DB 名を出力しない"
   assert_not_contains "$out" 'bkp-user-7x9' "user を出力しない"
@@ -95,17 +101,60 @@ case_preflight_client_57() {
   assert_no_secret "$out"
 }
 
-case_preflight_server_84() {
+# RB-W 8.4 対応: production は MySQL 8.4 LTS だけ。8.0 の server は exit 11。
+case_preflight_server_80() {
+  setup_env
+  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  run_preflight
+  assert_eq 11 "$code" "server 8.0 は exit 11"
+  assert_contains "$out" "MySQL 8.4 ではありません" "対応系列でないことを通知"
+  assert_no_secret "$out"
+}
+
+# 同じ 8.4 系列なら patch の違う server（8.4.1）は受け付ける（client と同じ major.minor）
+case_preflight_server_same_series_other_patch() {
   setup_env
   export FAKE_MYSQL_STATUS_ROW=$'8.4.1\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   run_preflight
-  assert_eq 11 "$code" "server 8.4 は exit 11"
-  assert_no_secret "$out"
+  assert_zero "$code" "server 8.4.1 と client 8.4.13 は同じ系列で exit 0"
+}
+
+# mysql・mysqlbinlog・mysqldump はどれも server と同じ 8.4 系列であること（server が 8.4 でも、どれか 1 つが 8.0 なら exit 10）
+case_preflight_tool_series_mismatch() {
+  setup_env
+  export FAKE_MYSQLDUMP_VERSION_LINE='mysqldump  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_eq 10 "$code" "mysqldump 8.0 は exit 10"
+  assert_contains "$out" "mysqldump が MySQL 8.4 ではありません" "理由を通知"
+  setup_env
+  export FAKE_MYSQLBINLOG_VERSION_LINE='mysqlbinlog  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_eq 10 "$code" "mysqlbinlog 8.0 は exit 10"
+  assert_contains "$out" "mysqlbinlog が MySQL 8.4 ではありません" "理由を通知（mysqlbinlog）"
+  setup_env
+  export FAKE_CLIENT_VERSION_LINE='mysql  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_eq 10 "$code" "mysql client 8.0 は exit 10"
+  assert_contains "$out" "mysql client が MySQL 8.4 ではありません" "理由を通知（mysql client）"
+}
+
+# RB-W 8.4 対応: server の変数は SHOW GLOBAL VARIABLES で読み、無い変数は名前を挙げて失敗する（1 つの SELECT 全体の
+# 失敗にしない）。判定に使わない変数（binlog_format 等。8.4 で非推奨）が無いだけなら失敗しない。
+case_preflight_missing_server_variable() {
+  setup_env
+  export FAKE_MISSING_VARIABLES="binlog_checksum"
+  run_preflight
+  assert_eq 11 "$code" "判定に要る変数が無ければ exit 11"
+  assert_contains "$out" "server の変数を取得できません: binlog_checksum" "無い変数の名前を通知"
+  export FAKE_MISSING_VARIABLES="binlog_format binlog_transaction_compression"
+  run_preflight
+  assert_zero "$code" "判定に使わない変数が無いだけなら exit 0"
+  unset FAKE_MISSING_VARIABLES
 }
 
 case_preflight_logbin_off() {
   setup_env
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t0\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t0\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   run_preflight
   assert_eq 12 "$code" "log_bin OFF は exit 12"
   assert_contains "$out" '"binlog_on": false' "log_bin false 出力"
@@ -114,7 +163,7 @@ case_preflight_logbin_off() {
 
 case_preflight_checksum_off() {
   setup_env
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tOFF\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tOFF\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   run_preflight
   assert_eq 13 "$code" "checksum OFF は exit 13"
   assert_no_secret "$out"
@@ -131,19 +180,92 @@ case_preflight_noninnodb() {
 
 case_preflight_tls_off() {
   setup_env
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tNO\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tNO\t/var/lib/mysql/binlog.000001\t2592000'
   run_preflight
   assert_eq 15 "$code" "TLS 無効は exit 15"
   assert_contains "$out" '"tls_ok": false' "TLS false 出力"
   assert_no_secret "$out"
 }
 
+# RB-W 追加修正 C: UPLOADS_ROOT の pointer を provider と同じ規則で解決できなければ exit 16。廃止した UPLOADS_DIR が
+# 残っていても exit 16（版の directory や根を pointer を介さずに backup しない）
 case_preflight_uploads_missing() {
   setup_env
-  export UPLOADS_DIR="$T/not-exists"
+  export UPLOADS_ROOT="$T/not-exists"
   run_preflight
-  assert_eq 16 "$code" "uploads 不在は exit 16"
+  assert_eq 16 "$code" "uploads の根が無ければ exit 16"
+  assert_contains "$out" "uploads の根が実 directory ではありません" "理由を通知: 根が無い"
   assert_no_secret "$out"
+
+  setup_env
+  rm "$UPLOADS_ROOT/current"
+  run_preflight
+  assert_eq 16 "$code" "pointer が無ければ exit 16"
+  assert_contains "$out" "current がありません" "理由を通知: pointer が無い"
+  assert_contains "$out" '"status": "pointer-unresolved"' "uploads の状態を出力"
+
+  setup_env
+  rm "$UPLOADS_ROOT/current"
+  ln -s "$UPLOADS_ROOT/v0" "$UPLOADS_ROOT/current"
+  run_preflight
+  assert_eq 16 "$code" "絶対 path の pointer は exit 16"
+  assert_contains "$out" "1 段の名前ではありません" "理由を通知: 絶対 path"
+
+  setup_env
+  export UPLOADS_DIR="$T/uploads/v0"
+  run_preflight
+  unset UPLOADS_DIR
+  assert_eq 16 "$code" "廃止した UPLOADS_DIR が残っていれば exit 16"
+  assert_contains "$out" "UPLOADS_DIR は廃止しました" "理由を通知: 廃止した設定"
+  assert_contains "$out" '"status": "deprecated-key"' "uploads の状態を出力: 廃止した設定"
+}
+
+# RB-W 追加修正 C: UPLOADS_STAGING_PARENT も指定されていれば、pointer の指す版と staging の親が同じ mount（st_dev が同じ）で
+# あることを provider と同じ stat -L -c %d で確かめる。違う・取れなければ exit 16（初回 backup の前に配置の誤りを見つける）
+case_preflight_uploads_staging_same_mount() {
+  local real_dev
+  setup_env
+  mkdir -p "$T/staging"
+  export UPLOADS_STAGING_PARENT="$T/staging"
+  run_preflight
+  assert_zero "$code" "uploads の版と同じ mount の staging なら exit 0"
+  assert_contains "$out" '"staging_same_filesystem": true' "同じ mount であることを記録"
+
+  # stat の stub で staging の st_dev だけを違う値にする（別々に mount した access point を再現）
+  real_dev=$(stat -L -c %d "$T/staging")
+  mkdir -p "$T/bin"
+  cat > "$T/bin/stat" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == "-L -c %d $T/staging" ]]; then echo $((real_dev + 1)); exit 0; fi
+exec "$(command -v stat)" "\$@"
+EOF
+  chmod +x "$T/bin/stat"
+  out=$(PATH="$T/bin:$PATH" BACKUP_TOOL_IMAGE_DIGEST='sha256:test-digest-001' "$PREFLIGHT" --json 2>&1)
+  code=$?
+  assert_eq 16 "$code" "staging が別の mount なら exit 16"
+  assert_contains "$out" "同じ mount ではありません" "理由を通知: 別の mount"
+  assert_contains "$out" '"staging_same_filesystem": false' "別の mount であることを記録"
+
+  export UPLOADS_STAGING_PARENT="$T/no-staging"
+  run_preflight
+  assert_eq 16 "$code" "staging の親が無ければ exit 16"
+  assert_contains "$out" "filesystem（st_dev）を取得できません" "理由を通知: staging の親が無い"
+  unset UPLOADS_STAGING_PARENT
+  assert_no_secret "$out"
+}
+
+# RB-W P3-6: binlog_format の変数があり ROW でなければ exit 12（DBA の前提は ROW）。変数そのものが無い版は判定しない
+# （case_preflight_missing_server_variable）
+case_preflight_binlog_format_not_row() {
+  local fmt
+  for fmt in MIXED STATEMENT; do
+    setup_env
+    export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\t'"$fmt"$'\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+    run_preflight
+    assert_eq 12 "$code" "binlog_format が $fmt なら exit 12"
+    assert_contains "$out" "binlog_format が ROW ではありません: $fmt" "理由を通知: $fmt"
+    assert_no_secret "$out"
+  done
 }
 
 case_preflight_disk_full() {
@@ -218,13 +340,18 @@ run_case case_preflight_normal
 run_case case_preflight_optionfile_contains_capath
 run_case case_preflight_mariadb_client
 run_case case_preflight_client_57
-run_case case_preflight_server_84
+run_case case_preflight_server_80
+run_case case_preflight_server_same_series_other_patch
+run_case case_preflight_tool_series_mismatch
+run_case case_preflight_missing_server_variable
 run_case case_preflight_logbin_off
 run_case case_preflight_checksum_off
 run_case case_preflight_noninnodb
 run_case case_preflight_empty_db_engines
 run_case case_preflight_tls_off
 run_case case_preflight_uploads_missing
+run_case case_preflight_uploads_staging_same_mount
+run_case case_preflight_binlog_format_not_row
 run_case case_preflight_disk_full
 run_case case_preflight_mysql_pwd_env
 run_case case_preflight_tls_config_missing

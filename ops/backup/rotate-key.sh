@@ -89,7 +89,8 @@ main() {
   keys=$(RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
     "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key list --json 2>/dev/null || echo "[]")
   local old_id
-  old_id=$(printf '%s' "$keys" | jq -r '.[] | select(.current == false) | .id' 2>/dev/null | head -1)
+  # 先頭の 1 件は jq の first で取る（| head にしない。pipefail + errexit 下で jq の SIGPIPE が rotation を止めないように。RB-W P1-1）
+  old_id=$(printf '%s' "$keys" | jq -r 'first(.[] | select(.current == false) | .id) // empty' 2>/dev/null)
   if [[ -n "$old_id" ]]; then
     if ! RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
       "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key remove "$old_id" > /dev/null 2>&1; then

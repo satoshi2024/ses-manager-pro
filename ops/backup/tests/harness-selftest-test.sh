@@ -22,6 +22,9 @@
 #     退避分の剪除方針（削除を表示・失敗診断と本 harness 以外のディレクトリは残す）、PID 再利用の扱い
 #   - 固定名の事前確認を WORK 判定より前に行うこと（P3-N1）、別の PID 名前空間の前回 run は終了記録が
 #     無ければ退避しないこと（P3-N2）、所有マーカーの排他作成（P3-S1）
+#   - 排他作成に事前検査と open の間の窓が無いこと（RB-W W-2。dd の conv=excl = O_CREAT|O_EXCL の 1 回の open）、
+#     その前提（dd の conv=excl・iflag=nonblock、mktemp）を満たさない環境は BLOCKED（2）で止まること
+#   - 前回 run の生存判定は owner= / session= も一致するときだけ kill -0 で行い、EPERM を生存とすること（RB-W W-6）
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
 # 実行方式: case 1〜3 は fresh な bash -c 子プロセスで実行する（source 済み関数は子 bash へ継承されないため、
@@ -107,7 +110,7 @@ case_failing_backup_command_is_nonzero() {
   local out code
   # 必須 env を与えず実行する。common::require_env → common::fail で早期に exit 1。
   out=$(env -u BACKUP_REPOSITORY -u MYSQL_HOST -u MYSQL_USER -u MYSQL_PASSWORD_FILE \
-    -u MYSQL_DATABASE -u BACKUP_WORK_DIR -u UPLOADS_DIR \
+    -u MYSQL_DATABASE -u BACKUP_WORK_DIR -u UPLOADS_DIR -u UPLOADS_ROOT -u UPLOADS_POINTER \
     bash "$ROOT/ops/backup/backup-full.sh" 2>&1)
   code=$?
   assert_nonzero "$code" "必須 env 欠落で backup-full が非 0"
@@ -196,6 +199,7 @@ MOCK
 #   RUNNER_SELF_PID_MARKER_DIR を設定すると、runner 自身の PID（exec で引き継ぐ）を run= に持つ
 #   所有マーカーをそのディレクトリへ書いてから起動する（PID 再利用＝旧 PID が自分自身の検証用）。
 #   RUNNER_SELF_PID_MARKER_NS を併せて設定すると、そのマーカーに pidns= 行を加える。
+#   RUNNER_SELF_PID_MARKER_EXTRA を設定すると、その内容（owner= / session= の行など）をマーカーの末尾に加える。
 runner_mock_run() {
   local temp=$1 scenario=$2 work=$3 runner=${RUNNER_UNDER_TEST:-$RUNNER}
   local -a work_env env_args
@@ -223,6 +227,9 @@ runner_mock_run() {
         > "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
       if [[ -n "${RUNNER_SELF_PID_MARKER_NS:-}" ]]; then
         printf 'pidns=%s\n' "$RUNNER_SELF_PID_MARKER_NS" >> "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
+      fi
+      if [[ -n "${RUNNER_SELF_PID_MARKER_EXTRA:-}" ]]; then
+        printf '%s\n' "$RUNNER_SELF_PID_MARKER_EXTRA" >> "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
       fi
       printf '%s\n' "$BASHPID" > "$temp/self-pid"
       exec env "${env_args[@]}" bash "$runner"
@@ -315,6 +322,15 @@ runner_runtime_ns() { # <temp> → stdout: pidns=
   marker_pidns "$probe"
 }
 
+# RB-W W-6: runner 自身が所有マーカーへ書く owner= / session= の行（この環境の利用者・session の識別子）を得る。
+runner_runtime_owner_session() { # <temp> → stdout: owner=...（改行）session=...
+  local temp=$1 probe="$1/allowed/owner-probe-$RANDOM" saved_runner=${RUNNER_UNDER_TEST:-}
+  RUNNER_UNDER_TEST=""
+  runner_mock_run "$temp" up-fail "$probe"
+  RUNNER_UNDER_TEST=$saved_runner
+  grep -E '^(owner|session)=' "$probe/.ses-pitr-run-owner" 2>/dev/null
+}
+
 # 6) 失敗証跡フローの静的契約（挙動は以降の mock シナリオで検証する）。
 case_integration_failure_capture_contract() {
   local runner
@@ -349,7 +365,10 @@ case_integration_failure_capture_contract() {
     "$(first_line_no "$RUNNER" 'if ! prepare_work_dir; then')" "固定名の事前確認をWORKの作成・退避より前に行う"
   assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
     "$(first_line_no "$RUNNER" 'if ! validate_work_path; then')" "固定名の事前確認をWORKの判定（前回runの生存判定）より前に行う（P3-N1）"
-  assert_contains "$runner" 'set -o noclobber' "所有マーカーと合成secretはnoclobber（O_EXCL）で排他作成する（P3-S1）"
+  assert_contains "$runner" 'conv=excl' "所有マーカーと合成secretは dd の conv=excl（O_EXCL）で排他作成する（P3-S1 / RB-W W-2）"
+  assert_not_contains "$runner" 'set -o noclobber' "事前検査と open の間に窓のある noclobber を使わない（RB-W W-2）"
+  assert_contains "$runner" 'owner=%s\nsession=%s' "所有マーカーに利用者と session の識別子を記録する（RB-W W-6）"
+  assert_contains "$runner" '! pid_is_gone "$old_pid"' "前回 run の生存は ESRCH だけを終了済みとする pid_is_gone で判定する（RB-W W-6）"
   assert_not_contains "$runner" '> "$WORK/.ses-pitr-run-owner"' "所有マーカーを追従・上書きするリダイレクトで書かない（P3-S1）"
   assert_contains "$runner" 'pidns=%s' "所有マーカーにPID名前空間の識別子を記録する（P3-N2）"
   assert_contains "$runner" '.ses-pitr-run-ended' "終了処理の最後に終了記録を残す（P3-N2）"
@@ -853,8 +872,11 @@ case_integration_missing_inputs_fail_safe() {
   curated="$temp/curated-bin"
   mkdir -p "$curated"
   cp "$temp/bin/docker" "$temp/bin/cygpath" "$temp/bin/chmod" "$curated/"
+  # 検証用 PATH は timeout だけを欠き、runner の実行環境の前提は満たす。dd・mktemp・rmdir は所有マーカー等の
+  # 排他作成の事前確認（RB-W W-2。満たさなければ BLOCKED=2 で止まる）、uname は session の識別（RB-W W-6）に使う。
+  # W-2 で前提が増えたときにこの一覧を直さず、timeout 不在の経路に入る前に BLOCKED で止まっていた（RB-W 追加修正 C）。
   make_tool_wrappers "$curated" bash env dirname basename date id mkdir find grep cat wc head tail cut awk \
-    rm cp mv tee sha256sum sleep tr ls touch sed sort kill
+    rm cp mv tee sha256sum sleep tr ls touch sed sort kill dd mktemp rmdir uname
   timeout_found=$(PATH="$curated"; command -v timeout 2>/dev/null || true)
   assert_eq "" "$timeout_found" "検証用PATHにtimeoutが存在しない（前提）"
   work="$temp/allowed/work-no-timeout"
@@ -862,6 +884,7 @@ case_integration_missing_inputs_fail_safe() {
   runner_mock_run "$temp" no-timeout "$work"
   RUNNER_PATH=""
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_not_contains "$RUNNER_OUT" "BLOCKED:" "検証用PATHでもrunnerは実行環境の前提検査を通る（前提）"
   assert_eq 1 "$RUNNER_RC" "timeout不在でもrunner終了コードは1"
   assert_contains "$diag_content" "native_exit=17" "timeout不在でもnative終了コードを記録"
   assert_contains "$diag_content" "collector=bounded timeout command unavailable; Docker diagnostics omitted" "timeout不在ではDocker診断を省略"
@@ -885,6 +908,7 @@ MOCK
   RUNNER_PATH=""
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
   fake_calls=$(grep -v -x -F -- '--version' "$temp/fake-timeout.log" 2>/dev/null || true)
+  assert_not_contains "$RUNNER_OUT" "BLOCKED:" "GNU以外のtimeoutのPATHでもrunnerは実行環境の前提検査を通る（前提）"
   assert_contains "$diag_content" "collector=bounded timeout command unavailable" "GNU以外のtimeout（System32のtimeout.exe相当）は採用しない"
   assert_eq "" "$fake_calls" "GNU以外のtimeoutで診断コマンドを包まない（--version確認だけ）"
   assert_not_contains "$diag_content" "redaction/secret scan failed" "GNU以外のtimeoutでも最終scanは直接実行で完了"
@@ -1213,9 +1237,12 @@ case_integration_default_work_pid_reuse_is_not_alive() {
   printf 'previous evidence\n' > "$default/previous.txt"
   RUNNER_SELF_PID_MARKER_DIR="$default"
   RUNNER_SELF_PID_MARKER_NS="$ns"
+  # RB-W W-6: 同じ利用者・session で書かれたマーカーとする（kill -0 による判定の対象）
+  RUNNER_SELF_PID_MARKER_EXTRA=$(runner_runtime_owner_session "$temp")
   runner_mock_run "$temp" up-fail "-"
   RUNNER_SELF_PID_MARKER_DIR=""
   RUNNER_SELF_PID_MARKER_NS=""
+  RUNNER_SELF_PID_MARKER_EXTRA=""
   self_pid=$(cat "$temp/self-pid" 2>/dev/null)
   new_run=$(marker_run_id "$default")
   new_run=${new_run#*-}
@@ -1255,8 +1282,9 @@ case_integration_default_work_marker_mismatch_rejected() {
   expect_work_rejected "$temp" "-" "所有マーカー .ses-pitr-run-owner がありません" "所有マーカー無し（73aa時代の残り）"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "マーカー無し時は既存内容を変更しない"
 
-  # 同じ PID 名前空間で書かれ、終了記録の無い前回 run の PID（この selftest 自身）が生存している
-  printf 'run=1700000000-%s-1\nwork=%s\npidns=%s\n' "$$" "$default" "$ns" > "$default/.ses-pitr-run-owner"
+  # 同じ PID 名前空間・同じ利用者・同じ session で書かれ、終了記録の無い前回 run の PID（この selftest 自身）が生存している
+  printf 'run=1700000000-%s-1\nwork=%s\npidns=%s\n%s\n' "$$" "$default" "$ns" "$(runner_runtime_owner_session "$temp")" \
+    > "$default/.ses-pitr-run-owner"
   expect_work_rejected "$temp" "-" "実行中の可能性があります" "前回runのPIDが生存"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "前回run生存時は退避しない"
 
@@ -1473,8 +1501,8 @@ case_integration_default_work_foreign_namespace_requires_end_record() {
 
 # 35) 所有マーカーは排他作成する（P3-S1）。既存ディレクトリを引き継ぐ場合（controller）に、準備段階の
 #     空確認の後で .ses-pitr-run-owner の名前へ symlink が置かれても、追従して書かずに拒否する。
-#     W1-B1 r2: write_exclusive_file の事前確認は「通常ファイル以外」だけを拒否するため、通常ファイルを指す
-#     symlink と宛先の無い symlink は noclobber（O_EXCL）そのものが拒否する。set -o noclobber を外すと
+#     RB-W W-2: write_exclusive_file は事前検査をせず dd の conv=excl（O_CREAT|O_EXCL）だけで作成するため、
+#     通常ファイルを指す symlink と宛先の無い symlink は O_EXCL そのものが拒否する。conv=excl を外すと
 #     (a) では victim が上書きされ、(b) では宛先のファイルが作られてこの case が失敗する。
 run_owner_marker_plant_case() { # <temp> <name> <plant_target> → RUNNER_* と PLANT_WORK を設定
   local temp=$1 name=$2 target=$3 parent
@@ -1533,6 +1561,207 @@ MOCK
   rm -rf "$temp"
 }
 
+# 36) RB-W W-2: write_exclusive_file は事前検査をせず、dd の conv=excl（1 回の open(O_CREAT|O_EXCL)）で作成する。
+#     宛先の名前に FIFO・FIFO を指す symlink・device を指す symlink・通常ファイルを指す symlink・宛先の無い
+#     symlink・directory・通常ファイルがあれば、止まらずに（timeout 内に）失敗し、何も書き換えない。
+#     conv=excl を外す（O_EXCL なしで開く）と FIFO で止まり、symlink の先を書き換えてこの case が失敗する。
+WEX_FN=""
+WEX_RC=0
+wex() { # <path> <content> → WEX_RC（124 = timeout まで止まった）
+  timeout 10 bash -c '. "$1"; write_exclusive_file "$2" "$3"' _ "$WEX_FN" "$1" "$2" > /dev/null 2>&1
+  WEX_RC=$?
+}
+
+wex_link() { # <target> <link>（Git for Windows でも実体の symlink を作る）
+  MSYS=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null
+  if [[ -L "$2" ]]; then
+    test_assert "symlink fixture を作成（前提: ${2##*/}）"
+  else
+    test_fail "symlink fixture を作成（前提: ${2##*/}）" "この環境では symlink を作成できません"
+  fi
+}
+
+case_integration_exclusive_create_has_no_check_open_window() {
+  local temp
+  temp=$(mktemp -d)
+  WEX_FN="$temp/write-exclusive.sh"
+  sed -n '/^write_exclusive_file() {/,/^}/p' "$RUNNER" > "$WEX_FN"
+  if grep -q 'dd of="$path" conv=excl' "$WEX_FN" && grep -q 'iflag=nonblock' "$WEX_FN" \
+      && ! grep -q 'noclobber' "$WEX_FN" && ! grep -qE '\[\[ -e ' "$WEX_FN"; then
+    test_assert "作成は conv=excl の 1 回の open だけで行い、事前検査・noclobber を使わない（静的）"
+  else
+    test_fail "作成は conv=excl の 1 回の open だけで行い、事前検査・noclobber を使わない（静的）" "$(cat "$WEX_FN")"
+  fi
+
+  wex "$temp/new.txt" "owner-content"
+  assert_zero "$WEX_RC" "存在しない名前には作成できる"
+  assert_eq "owner-content" "$(cat "$temp/new.txt" 2>/dev/null)" "内容を書く"
+  wex "$temp/empty.pem" ""
+  assert_zero "$WEX_RC" "空の内容でも作成できる"
+  assert_file "$temp/empty.pem" "空のファイルを作成"
+  wex "$temp/new.txt" "overwrite"
+  assert_nonzero "$WEX_RC" "既存の通常ファイルには書かない"
+  assert_eq "owner-content" "$(cat "$temp/new.txt" 2>/dev/null)" "既存の通常ファイルを上書きしない"
+
+  mkfifo "$temp/fifo"
+  wex "$temp/fifo" "x"
+  assert_nonzero "$WEX_RC" "FIFO の名前には作成しない"
+  assert_eq "no-block" "$( (( WEX_RC == 124 )) && echo blocked || echo no-block)" "FIFO で止まらない"
+  wex_link "$temp/fifo" "$temp/link-fifo"
+  wex "$temp/link-fifo" "x"
+  assert_nonzero "$WEX_RC" "FIFO を指す symlink の名前には作成しない"
+  assert_eq "no-block" "$( (( WEX_RC == 124 )) && echo blocked || echo no-block)" "FIFO を指す symlink で止まらない"
+  wex_link /dev/null "$temp/link-device"
+  wex "$temp/link-device" "x"
+  assert_nonzero "$WEX_RC" "device を指す symlink の名前には作成しない"
+  printf 'victim original\n' > "$temp/victim.txt"
+  wex_link "$temp/victim.txt" "$temp/link-victim"
+  wex "$temp/link-victim" "x"
+  assert_nonzero "$WEX_RC" "通常ファイルを指す symlink の名前には作成しない"
+  assert_eq "victim original" "$(cat "$temp/victim.txt" 2>/dev/null)" "symlink の先を書き換えない"
+  wex_link "$temp/dangling-target.txt" "$temp/link-dangling"
+  wex "$temp/link-dangling" "x"
+  assert_nonzero "$WEX_RC" "宛先の無い symlink の名前には作成しない"
+  assert_no_file "$temp/dangling-target.txt" "宛先の無い symlink を辿って作成しない"
+  mkdir "$temp/dir"
+  wex "$temp/dir" "x"
+  assert_nonzero "$WEX_RC" "directory の名前には作成しない"
+  rm -rf "$temp"
+}
+
+# 37) RB-W W-6: 同じ PID 名前空間でも、前回 run の所有マーカーの owner= / session= が本 run と違う（別の利用者・
+#     別の session。MSYS では昇格状態を含む）か記録が無い（r2 までの形式）なら、PID が終了済みに見えても退避しない。
+#     終了記録があれば退避する。
+case_integration_default_work_foreign_owner_or_session_requires_end_record() {
+  local temp tests_dir default dead_pid old_run ns own own_lines variant
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  ns=$(runner_runtime_ns "$temp")
+  own=$(runner_runtime_owner_session "$temp")
+  if [[ "$own" == *"owner="* && "$own" == *"session="* && "$own" != *unknown* ]]; then
+    test_assert "この環境の利用者・session を識別できる（前提）"
+  else
+    test_fail "この環境の利用者・session を識別できる（前提）" "[$own]"
+  fi
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  ( exit 0 ) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null
+  old_run="1700000000-$dead_pid-1"
+  mkdir -p "$default"
+  printf 'previous evidence\n' > "$default/previous.txt"
+  for variant in foreign-owner foreign-session no-owner-session; do
+    case "$variant" in
+      foreign-owner) own_lines=$(printf '%s\n' "$own" | sed 's/^owner=.*/owner=uid:4294967294/') ;;
+      foreign-session) own_lines=$(printf '%s\n' "$own" | sed 's/^session=.*/session=win:99:local/') ;;
+      no-owner-session) own_lines="" ;;
+    esac
+    printf 'run=%s\nwork=%s\nproject=selftest\npidns=%s\n%s\n' "$old_run" "$default" "$ns" "$own_lines" \
+      > "$default/.ses-pitr-run-owner"
+    expect_work_rejected "$temp" "-" "生存を確認できません" "同じPID名前空間で終了記録の無い前回run（$variant）"
+    assert_contains "$(cat "$default/previous.txt" 2>/dev/null)" "previous evidence" "判定できない前回runの既定WORKを変更しない（$variant）"
+    assert_no_file "$tests_dir/.integration-work.prev-$old_run" "判定できない前回runの既定WORKを退避しない（$variant）"
+  done
+
+  printf 'run=%s\n' "$old_run" > "$default/.ses-pitr-run-ended"
+  runner_mock_run "$temp" up-fail "-"
+  RUNNER_UNDER_TEST=""
+  assert_contains "$RUNNER_OUT" "前回の既定作業ディレクトリを退避しました" "終了記録があれば別の利用者・sessionの前回runも退避する"
+  assert_file "$tests_dir/.integration-work.prev-$old_run/previous.txt" "前回の内容を退避先に保全"
+  rm -rf "$temp"
+}
+
+# 38) RB-W W-6: pid_is_gone は kill -0 の ESRCH（No such process）だけを終了済みとし、EPERM（別の利用者の
+#     プロセスは存在する）・翻訳された文言・判定できない値は生存として扱う（fail-closed）。r2 は kill -0 の失敗を
+#     すべて終了済みとしていた。
+case_integration_pid_is_gone_treats_eperm_as_alive() {
+  local temp fn dead_pid
+  temp=$(mktemp -d)
+  fn="$temp/pid-is-gone.sh"
+  sed -n '/^pid_is_gone() {/,/^}/p' "$RUNNER" > "$fn"
+  pig() { # <kill の振る舞い（real / eperm / esrch / localized）> <pid> → PIG_RC
+    bash -c '
+      . "$1"
+      case "$2" in
+        eperm) kill() { echo "bash: kill: ($3) - Operation not permitted" >&2; return 1; } ;;
+        esrch) kill() { echo "bash: kill: ($3) - No such process" >&2; return 1; } ;;
+        localized) kill() { echo "bash: kill: ($3) - そのようなプロセスはありません" >&2; return 1; } ;;
+      esac
+      pid_is_gone "$3"' _ "$fn" "$1" "$2" > /dev/null 2>&1
+    PIG_RC=$?
+  }
+  pig eperm 4242
+  assert_eq 1 "$PIG_RC" "kill -0 の EPERM は生存（終了済みとしない）"
+  pig esrch 4242
+  assert_eq 0 "$PIG_RC" "kill -0 の ESRCH は終了済み"
+  pig localized 4242
+  assert_eq 1 "$PIG_RC" "翻訳された文言は ESRCH と見なさず生存側に倒す"
+  pig real "$$"
+  assert_eq 1 "$PIG_RC" "生存中の PID（この selftest）は生存"
+  ( exit 0 ) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null
+  pig real "$dead_pid"
+  assert_eq 0 "$PIG_RC" "終了済みの PID は（C locale の ESRCH で）終了済み"
+  pig real "not-a-pid"
+  assert_eq 1 "$PIG_RC" "PID でない値は生存側（判定できない）"
+  rm -rf "$temp"
+}
+
+# 39) RB-W W-2 の前提（dd の conv=excl・iflag=nonblock、mktemp）を満たさなければ、Docker にも WORK にも触れず
+#     BLOCKED（2）で終了する（case 32 の mv と同じ扱い）。conv=excl を受け付けない dd に加え、受け付けたふりをして
+#     既存の file を上書きする dd（排他作成にならない）も拒否する。mktemp が無い環境（事前確認の私有 directory を
+#     作れない）も同じ。RB-W 追加修正 C: この前提検査を加えた W-2 で case 19 の検証用 PATH を直さず、timeout 不在の
+#     経路に入る前に BLOCKED で止まっていた（CI の 6 件の失敗）。前提検査そのものの試験はこの case が持つ。
+case_integration_runner_blocks_without_exclusive_dd() {
+  local temp work variant
+  for variant in no-excl ignores-excl no-mktemp; do
+    temp=$(mktemp -d)
+    runner_mock_init "$temp"
+    case "$variant" in
+      no-excl)
+        cat > "$temp/bin/dd" <<'MOCK'
+#!/usr/bin/env bash
+for a in "$@"; do
+  [[ "$a" == conv=excl ]] && { echo "dd: invalid conversion: 'excl'" >&2; exit 1; }
+done
+exit 1
+MOCK
+        ;;
+      ignores-excl)
+        # conv=excl を無視して of= を上書きする（2 回目の作成も成功してしまう）
+        cat > "$temp/bin/dd" <<'MOCK'
+#!/usr/bin/env bash
+of="" if_=""
+for a in "$@"; do
+  case "$a" in of=*) of=${a#of=} ;; if=*) if_=${a#if=} ;; esac
+done
+if [[ -n "$of" ]]; then cat > "$of"; exit 0; fi
+if [[ -n "$if_" ]]; then cat -- "$if_"; exit 0; fi
+cat
+MOCK
+        ;;
+      no-mktemp)
+        cat > "$temp/bin/mktemp" <<'MOCK'
+#!/usr/bin/env bash
+echo "mktemp: command not found（試験）" >&2
+exit 127
+MOCK
+        ;;
+    esac
+    "$REAL_CHMOD" +x "$temp/bin/"*
+    work="$temp/allowed/work-$variant"
+    runner_mock_run "$temp" success "$work"
+    assert_eq 2 "$RUNNER_RC" "排他作成の前提を満たさなければBLOCKED(2): $variant"
+    assert_contains "$RUNNER_OUT" "BLOCKED: dd の conv=excl と iflag=nonblock が必要です" "前提不足の理由を通知: $variant"
+    assert_eq "" "$RUNNER_DOCKER_LOG" "BLOCKED時はDockerに一切触れない: $variant"
+    assert_no_file "$work" "BLOCKED時はWORKを作らない: $variant"
+    rm -rf "$temp"
+  done
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1568,5 +1797,9 @@ run_case case_integration_runner_blocks_without_coreutils_mv
 run_case case_integration_fixed_name_checked_before_work_judgement
 run_case case_integration_default_work_foreign_namespace_requires_end_record
 run_case case_integration_owner_marker_exclusive_create
+run_case case_integration_exclusive_create_has_no_check_open_window
+run_case case_integration_default_work_foreign_owner_or_session_requires_end_record
+run_case case_integration_pid_is_gone_treats_eperm_as_alive
+run_case case_integration_runner_blocks_without_exclusive_dd
 
 test_summary "ACC-OPS-P2 harness self-tests"

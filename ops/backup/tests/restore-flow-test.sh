@@ -63,15 +63,25 @@ make_manifest() { # di
 local full_payload="$T/full-payload"
 mkdir -p "$full_payload/db" "$full_payload/uploads/published"
 printf '%s\n' "-- MySQL dump (source-data=2)" \
-  "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000010', MASTER_LOG_POS=154;" \
+  "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000010', SOURCE_LOG_POS=154;" \
   "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);" > "$full_payload/db/database.sql"
 printf 'marker-before-full\n' > "$full_payload/uploads/published/marker.txt"
+# RB-W P2-1: full の metadata.json の DB の既定値（restore.sh が復元 DB をこの値で作る）。
+# FIXTURE_NO_DB_DEFAULTS=1 で記録の無い full を再現する。
+if [[ -z "${FIXTURE_NO_DB_DEFAULTS:-}" ]]; then
+  printf '%s\n' '{"kind":"full","schema_fingerprint":{"database":{"character_set":"utf8mb4","collation":"utf8mb4_unicode_ci"}}}' \
+    > "$full_payload/metadata.json"
+else
+  printf '%s\n' '{"kind":"full"}' > "$full_payload/metadata.json"
+fi
 make_manifest "$full_payload"
 
 # checkpoint payload（uploads のみ）
 local ckpt_payload="$T/ckpt-payload"
 mkdir -p "$ckpt_payload/uploads/published"
 printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker.txt"
+# RB-W 追加修正 C: checkpoint の metadata.json は backup した pointer と版を持つ（restore の出力に載る）
+printf '%s\n' '{"kind":"checkpoint","uploads_pointer":{"name":"current","target":"v0"}}' > "$ckpt_payload/metadata.json"
 make_manifest "$ckpt_payload"
 
   export RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE"
@@ -149,6 +159,9 @@ case_restore_normal_flow() {
   # uploads staging に marker が展開されている
   local up
   up=$(echo "$out" | jq -r '.uploads_ready')
+  # RB-W 追加修正 C: checkpoint に記録した pointer と版を出力に載せる
+  assert_eq "current/v0" "$(jq -r '"\(.uploads_backup_pointer.name)/\(.uploads_backup_pointer.target)"' <<< "$out" 2>/dev/null)" \
+    "backup した時の pointer と版を出力する"
   assert_file "$up/published/marker.txt" "uploads staging に marker"
   assert_contains "$(cat "$up/published/marker.txt")" "marker-before-checkpoint" "marker 内容"
   # replay の mysql connection は 1 回（CREATE 1 + import 1 + replay 1 = --binary-mode 3 回）
@@ -164,24 +177,46 @@ case_restore_normal_flow() {
   assert_contains "$mb_line" "binlog.000010" "binlog 1"
   assert_contains "$mb_line" "binlog.000011" "binlog 2"
   assert_contains "$mb_line" "binlog.000012" "binlog 3"
-  # R1 P0-01: import 前に RESET MASTER（GTID リセット）が発行されること
-  if grep -q "RESET MASTER" "$FAKE_ARGV_LOG"; then
-    test_assert "RESET MASTER を発行（再 restore の沈黙スキップ防止）"
+  # RB-W P2-1: 復元 DB を backup 時の DB の既定の文字集合・照合順序で作り、既存の空 DB も揃える
+  assert_contains "$(cat "$FAKE_ARGV_LOG")" \
+    'CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; ALTER DATABASE `ses_manager_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' \
+    "復元 DB を backup 時の照合順序で作る"
+  # R1 P0-01: import 前に RESET BINARY LOGS AND GTIDS（GTID リセット）が発行されること
+  if grep -q "RESET BINARY LOGS AND GTIDS" "$FAKE_ARGV_LOG"; then
+    test_assert "RESET BINARY LOGS AND GTIDS を発行（再 restore の沈黙スキップ防止）"
   else
-    test_fail "RESET MASTER を発行（再 restore の沈黙スキップ防止）" "argv log に RESET MASTER がない"
+    test_fail "RESET BINARY LOGS AND GTIDS を発行（再 restore の沈黙スキップ防止）" "argv log に RESET BINARY LOGS AND GTIDS がない"
   fi
+}
+
+# RB-W P2-1: full の metadata.json に DB の既定値の記録が無ければ、server の既定で作らずに復元を止める
+# （r2 までは CHARACTER SET utf8mb4 だけで作り、照合順序が server の既定 utf8mb4_0900_ai_ci になっていた）。
+case_restore_requires_recorded_database_collation() {
+  setup_restore
+  export FIXTURE_NO_DB_DEFAULTS=1
+  build_backup_fixture
+  unset FIXTURE_NO_DB_DEFAULTS
+  make_claims
+  local out rc
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  rc=$?
+  assert_nonzero "$rc" "DB の既定値の記録が無い full は復元しない"
+  assert_contains "$out" "DB の既定の文字集合・照合順序（schema_fingerprint.database）がありません" "理由を通知"
+  assert_not_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "CREATE DATABASE" "server の既定で DB を作らない"
+  # RB-W P3-4: 入力の検査で止まるときは target を一切変えない（RESET BINARY LOGS AND GTIDS も発行しない）
+  assert_not_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "RESET BINARY LOGS AND GTIDS" "記録が無ければ target の GTID 状態も変えない"
 }
 
 case_restore_reset_master_fail() {
   setup_restore
   build_backup_fixture
   make_claims
-  # RESET MASTER を失敗させると restore は中断（fail closed）
+  # RESET BINARY LOGS AND GTIDS を失敗させると restore は中断（fail closed）
   export FAKE_RESET_MASTER_RC=1
   local out=""
   out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
-  assert_nonzero "$?" "RESET MASTER 失敗は非 0"
-  assert_contains "$out" "RESET MASTER" "理由"
+  assert_nonzero "$?" "RESET BINARY LOGS AND GTIDS 失敗は非 0"
+  assert_contains "$out" "RESET BINARY LOGS AND GTIDS" "理由"
   unset FAKE_RESET_MASTER_RC
 }
 
@@ -289,6 +324,7 @@ case_restore_count_fail_closed() {
 }
 
 run_case case_restore_normal_flow
+run_case case_restore_requires_recorded_database_collation
 run_case case_restore_reset_master_fail
 run_case case_restore_tls_disabled_rejected
 run_case case_restore_binlog_sha_mismatch

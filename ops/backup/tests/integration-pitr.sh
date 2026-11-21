@@ -10,7 +10,7 @@
 #
 # 環境変数: SRC_HOST, TGT_HOST, SRC_PASSWORD_FILE, TGT_PASSWORD_FILE,
 # WORK_DIR, REPOSITORY 系（BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE,
-# RESTIC_REPOSITORY）, UPLOADS_DIR, BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR,
+# RESTIC_REPOSITORY）, UPLOADS_ROOT（uploads の根。UPLOADS_POINTER の既定は current）, BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR,
 # REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR, QUIESCE_*, APP_COMMIT,
 # FLYWAY_VERSION（fixture の history 最新 42 と一致必須）, CRITICAL_TABLES,
 # CONTENT_HASH_TABLES, PLANS_DIR, INDEX_DIR 等
@@ -29,7 +29,8 @@ require_env TGT_PASSWORD_FILE
 require_env WORK_DIR
 require_env BACKUP_REPOSITORY
 require_env RESTIC_PASSWORD_FILE
-require_env UPLOADS_DIR
+require_env UPLOADS_ROOT
+export UPLOADS_POINTER=${UPLOADS_POINTER:-current}
 
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
 export RESTIC_REPOSITORY=${RESTIC_REPOSITORY:-$BACKUP_REPOSITORY}
@@ -46,11 +47,27 @@ tgt_root() { # mysql args...（target の root で実行）
   MYSQL_PWD="$(cat "$TGT_PASSWORD_FILE")" mysql -h"$TGT_HOST" -uroot "$@"
 }
 
+# RB-W 追加修正 C: uploads の根の下に版 v0 と相対・1 段の pointer current -> v0 を置く（production の配置。app の初回の
+# 起動前に作るものに当たる）。preflight・full・checkpoint は pointer を解決して v0 を backup する。
+UPLOADS_V0="$UPLOADS_ROOT/v0"
+mkdir -p "$UPLOADS_V0"
+if [[ ! -L "$UPLOADS_ROOT/$UPLOADS_POINTER" ]]; then
+  ln -s v0 "$UPLOADS_ROOT/$UPLOADS_POINTER" || fail "uploads の pointer（$UPLOADS_POINTER -> v0）を作れません"
+fi
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "uploads の pointer が v0 を指していません"
+
 log "== 1. preflight =="
 /usr/local/bin/preflight.sh --json > "$EVID/preflight.json" 2>&1 \
   || fail "preflight が失敗しました"
 grep -q '"status": "OK"' "$EVID/preflight.json" || fail "preflight が OK でない"
 log "preflight OK"
+
+log "== 1.5 MySQL server の版（RB-W 8.4 対応。production と同じ 8.4 系列で検証したことを evidence に残す） =="
+SRC_VERSION=$(src_root -N -B -e "SELECT VERSION();" 2>/dev/null) || fail "source の版を取得できません"
+TGT_VERSION=$(tgt_root -N -B -e "SELECT VERSION();" 2>/dev/null) || fail "target の版を取得できません"
+printf 'source=%s\ntarget=%s\n' "$SRC_VERSION" "$TGT_VERSION" > "$EVID/server-versions.txt"
+[[ "$SRC_VERSION" == 8.4.* && "$TGT_VERSION" == 8.4.* ]] \
+  || fail "integration の MySQL server が 8.4 系列ではありません（source=$SRC_VERSION target=$TGT_VERSION）"
 
 log "== 2. fixture（marker テーブル + before marker + 最小の flyway_schema_history） =="
 # 復元検証の Flyway 照合（history table の存在・成功行の版番号順の最大）を実 MySQL で通すため、
@@ -59,6 +76,11 @@ log "== 2. fixture（marker テーブル + before marker + 最小の flyway_sche
 INTEGRATION_FLYWAY_LATEST=42
 [[ "${FLYWAY_VERSION:-}" == "$INTEGRATION_FLYWAY_LATEST" ]] \
   || fail "FLYWAY_VERSION（${FLYWAY_VERSION:-未設定}）が fixture の flyway_schema_history の最新 version（$INTEGRATION_FLYWAY_LATEST）と一致しません"
+# RB-W P2-1: source DB の既定の照合順序を production と同じ utf8mb4_unicode_ci にする（server の既定は
+# utf8mb4_0900_ai_ci）。復元 DB が server の既定で作られると schema fingerprint の schema 区分が一致しないため、
+# restore.sh が記録値で DB を作ることをこの往復で確かめる。
+src_root -e "ALTER DATABASE \`$MYSQL_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
+  || fail "source DB の既定の照合順序を設定できません"
 src_root "$MYSQL_DATABASE" \
   -e "CREATE TABLE IF NOT EXISTS flyway_schema_history (
         installed_rank INT NOT NULL PRIMARY KEY, version VARCHAR(50), description VARCHAR(200) NOT NULL,
@@ -128,13 +150,54 @@ src_root "$MYSQL_DATABASE" \
       INSERT INTO t_report_delivery (id, run_id, document_id, document_version_no, notification_outbox_id, delivery_status)
         VALUES (91007, 91001, 91004, 1, 91006, 'ENQUEUED');" \
   || fail "fixture 作成に失敗しました"
-mkdir -p "$UPLOADS_DIR/published"
-printf 'marker-before-checkpoint\n' > "$UPLOADS_DIR/published/marker-before.txt"
-printf 'report-restore\n' > "$UPLOADS_DIR/published/report-restore.pdf"
+# RB-W P2-2: production と同じく、migrator 相当の root 以外の利用者（DEFINER = その利用者）が trigger・view・
+# function・外部キー・CHECK を作る。restore-svc は README の restore target role の権限だけで、DEFINER を保ったまま
+# 復元し、schema fingerprint が一致することをこの往復で確かめる。binlog が有効な server で root 以外が function・
+# trigger を作るため log_bin_trust_function_creators を ON にする（production では DBA が設定する前提）。
+FIXTURE_MIGRATOR=ses-migrator
+FIXTURE_MIGRATOR_PW=ses-migrator-pw
+src_root -e "SET GLOBAL log_bin_trust_function_creators = 1;
+    CREATE USER IF NOT EXISTS '$FIXTURE_MIGRATOR'@'%' IDENTIFIED BY '$FIXTURE_MIGRATOR_PW';
+    GRANT ALL ON \`$MYSQL_DATABASE\`.* TO '$FIXTURE_MIGRATOR'@'%';" \
+  || fail "migrator 相当の利用者を作成できません"
+MYSQL_PWD="$FIXTURE_MIGRATOR_PW" mysql -h"$SRC_HOST" -u "$FIXTURE_MIGRATOR" "$MYSQL_DATABASE" \
+  -e "CREATE TABLE IF NOT EXISTS t_fp_parent (id BIGINT PRIMARY KEY, name VARCHAR(32) NOT NULL) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_fp_child (
+        id BIGINT PRIMARY KEY, parent_id BIGINT NOT NULL, qty INT NOT NULL DEFAULT 0,
+        CONSTRAINT fk_fp_child_parent FOREIGN KEY (parent_id) REFERENCES t_fp_parent (id) ON DELETE CASCADE,
+        CONSTRAINT ck_fp_child_qty CHECK (qty >= 0)
+      ) ENGINE=InnoDB;
+      DROP TRIGGER IF EXISTS trg_fp_child_bi;
+      CREATE TRIGGER trg_fp_child_bi BEFORE INSERT ON t_fp_child FOR EACH ROW SET NEW.qty = GREATEST(NEW.qty, 0);
+      DROP FUNCTION IF EXISTS f_fp_next;
+      CREATE FUNCTION f_fp_next(x INT) RETURNS INT DETERMINISTIC NO SQL RETURN x + 1;
+      CREATE OR REPLACE VIEW v_fp_child AS SELECT id, parent_id, qty FROM t_fp_child;
+      DELETE FROM t_fp_child;
+      DELETE FROM t_fp_parent;
+      INSERT INTO t_fp_parent (id, name) VALUES (1, 'parent-1');
+      INSERT INTO t_fp_child (id, parent_id, qty) VALUES (1, 1, 3);" \
+  || fail "migrator 相当の利用者で trigger・view・function・外部キー・CHECK を作成できません"
+# 復元後の比較のため、source の DEFINER を記録する
+definer_list() { # <root 実行関数> → 「種別 名前 DEFINER」の行（並びは固定）
+  "$1" -N -B -e "SELECT CONCAT('trigger ', trigger_name, ' ', definer) FROM information_schema.triggers WHERE trigger_schema = '$MYSQL_DATABASE'
+      UNION ALL SELECT CONCAT('routine ', routine_name, ' ', definer) FROM information_schema.routines WHERE routine_schema = '$MYSQL_DATABASE'
+      UNION ALL SELECT CONCAT('view ', table_name, ' ', definer) FROM information_schema.views WHERE table_schema = '$MYSQL_DATABASE'
+      ORDER BY 1;" 2>/dev/null
+}
+SRC_DEFINERS=$(definer_list src_root) || fail "source の DEFINER を取得できません"
+printf '%s\n' "$SRC_DEFINERS" > "$EVID/source-definers.txt"
+[[ "$SRC_DEFINERS" == "routine f_fp_next $FIXTURE_MIGRATOR@%"$'\n'"trigger trg_fp_child_bi $FIXTURE_MIGRATOR@%"$'\n'"view v_fp_child $FIXTURE_MIGRATOR@%" ]] \
+  || fail "source の trigger・routine・view の DEFINER が migrator 相当の利用者ではありません（$EVID/source-definers.txt）"
+mkdir -p "$UPLOADS_V0/published"
+printf 'marker-before-checkpoint\n' > "$UPLOADS_V0/published/marker-before.txt"
+printf 'report-restore\n' > "$UPLOADS_V0/published/report-restore.pdf"
 export REPORT_RESTORE_EVIDENCE="$EVID/report-restore-contract.txt"
 
 log "== 3. backup-full =="
 /usr/local/bin/backup-full.sh > "$EVID/backup-full.log" 2>&1 || fail "backup-full が失敗しました"
+# RB-W 追加修正 C: full は pointer を解決して backup した版（v0）を記録する
+grep -q '"target": "v0"' "$EVID/backup-full.log" \
+  || fail "full の結果に backup した uploads の版（uploads_pointer.target=v0）がありません"
 log "backup-full OK"
 
 log "== 3.5 中間 DML（full と checkpoint の間の更新。replay 検証用） =="
@@ -163,7 +226,7 @@ log "== 6. after marker 注入（source のみ） =="
 src_root "$MYSQL_DATABASE" \
   -e "INSERT INTO marker_test (marker) VALUES ('marker-after-checkpoint');" \
   || fail "after marker 注入に失敗しました"
-printf 'marker-after-checkpoint\n' > "$UPLOADS_DIR/published/marker-after.txt"
+printf 'marker-after-checkpoint\n' > "$UPLOADS_V0/published/marker-after.txt"
 
 kill "$ARCHIVER_PID" 2>/dev/null || true
 
@@ -176,13 +239,18 @@ tgt_root \
       CREATE TABLE IF NOT EXISTS ses_recovery_control.targets (
         uuid VARCHAR(64) PRIMARY KEY, allowlist_ref VARCHAR(64), plan_id VARCHAR(64), provisioned_at DATETIME
       ) ENGINE=InnoDB;
+      SET GLOBAL log_bin_trust_function_creators = 1;
+      CREATE USER IF NOT EXISTS '$FIXTURE_MIGRATOR'@'%' IDENTIFIED BY '$FIXTURE_MIGRATOR_PW';
+      GRANT ALL ON \`$MYSQL_DATABASE\`.* TO '$FIXTURE_MIGRATOR'@'%';
       CREATE USER IF NOT EXISTS 'restore-svc'@'%' IDENTIFIED BY 'restore-svc-pw';
-      GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO 'restore-svc'@'%';
-      GRANT REPLICATION_APPLIER ON *.* TO 'restore-svc'@'%';
-      GRANT RELOAD ON *.* TO 'restore-svc'@'%';   -- RESET MASTER（GTID リセット）に必要
+      GRANT SYSTEM_VARIABLES_ADMIN, REPLICATION_APPLIER, RELOAD, SHOW_ROUTINE, SET_ANY_DEFINER ON *.* TO 'restore-svc'@'%';
       GRANT ALL ON ses_recovery_control.* TO 'restore-svc'@'%';
-      GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, CREATE VIEW, TRIGGER, EXECUTE, EVENT, LOCK TABLES ON $MYSQL_DATABASE.* TO 'restore-svc'@'%';" \
+      GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER,
+        CREATE ROUTINE, ALTER ROUTINE, EXECUTE, EVENT, LOCK TABLES ON \`$MYSQL_DATABASE\`.* TO 'restore-svc'@'%';" \
   || fail "target provision に失敗しました"
+# RB-W P2-2: restore-svc の権限は README の restore target role と同じ（RELOAD は GTID のリセット、SHOW_ROUTINE・
+# SHOW VIEW・TRIGGER は schema fingerprint、SET_ANY_DEFINER（MySQL 8.4）は dump の DEFINER の再現、REFERENCES は外部キー、
+# CREATE ROUTINE / ALTER ROUTINE は function）。DEFINER の account（migrator 相当）は復元先に用意する（DBA の前提）。
 printf 'restore-svc-pw\n' > "$WORK_DIR/restore-svc-pw"
 
 log "== 8. plan + 承認 claim =="
@@ -297,6 +365,9 @@ grep -q "\"flyway_latest\": \"$INTEGRATION_FLYWAY_LATEST\"" "$EVID/validate.json
 # 主要 table の内容ハッシュ（checkpoint 記録値）と復元 DB が一致したこと
 grep -q '"content_hash": "PASS"' "$EVID/validate.json" \
   || fail "validate の内容ハッシュ照合が PASS でない（CONTENT_HASH_TABLES の記録・照合を確認）"
+# schema fingerprint（G-04。checkpoint 記録値）と復元 DB の schema が一致したこと
+grep -q '"schema_fingerprint": "PASS"' "$EVID/validate.json" \
+  || fail "validate の schema fingerprint 照合が PASS でない（lib/schema-fingerprint.sh の記録・照合を確認）"
 
 log "== 11. target の marker 状態を確認 =="
 TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" -urestore-svc \
@@ -305,6 +376,17 @@ TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" 
 printf '%s\n' "$TGT_MARKERS" > "$EVID/target-markers.txt"
 grep -qx 'marker-before-checkpoint' "$EVID/target-markers.txt" \
   || fail "target に before marker がありません"
+# RB-W P2-1: 復元 DB の既定の照合順序が source（production と同じ utf8mb4_unicode_ci）と同じであること
+TGT_DB_DEFAULTS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" -urestore-svc -N -B \
+  -e "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.schemata WHERE schema_name = '$MYSQL_DATABASE';" 2>/dev/null)
+printf '%s\n' "$TGT_DB_DEFAULTS" > "$EVID/target-db-defaults.txt"
+[[ "$TGT_DB_DEFAULTS" == $'utf8mb4\tutf8mb4_unicode_ci' ]] \
+  || fail "復元 DB の既定の文字集合・照合順序が source と違います（$TGT_DB_DEFAULTS）"
+# RB-W P2-2: trigger・routine・view が DEFINER を保ったまま復元されたこと（restore-svc は README の権限だけ）
+TGT_DEFINERS=$(definer_list tgt_root) || fail "target の DEFINER を取得できません"
+printf '%s\n' "$TGT_DEFINERS" > "$EVID/target-definers.txt"
+[[ "$TGT_DEFINERS" == "$SRC_DEFINERS" ]] \
+  || fail "復元後の trigger・routine・view の DEFINER が source と違います（$EVID/target-definers.txt）"
 # 中間 DML が replay されていること（R1 P2: replay 不在の検出）
 grep -qx 'marker-mid' "$EVID/target-markers.txt" \
   || fail "target に中間 DML（marker-mid）がありません（binlog replay が実行されていません）"
@@ -319,10 +401,122 @@ if grep -qx 'marker-after.txt' "$EVID/uploads-markers.txt"; then
   fail "uploads staging に after marker があります"
 fi
 
+log "== 11.5 uploads の版の切替え（uploads-cutover.sh。RB-W 追加修正 C） =="
+# 復元した uploads を新しい版 v1-restore として stage し（今の版 v0 と pointer は変えない）、pointer を 1 回の rename で
+# 切り替え、逆向きの switch で rollback する。v0 には checkpoint の後に書いた after marker があり、復元した版には無い。
+UPLOADS_CUTOVER_LOG="$EVID/uploads-cutover.txt"
+/usr/local/bin/uploads-cutover.sh stage --from "$UPLOADS_READY" --root "$UPLOADS_ROOT" --version v1-restore \
+  > "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "復元した uploads を新しい版として stage できません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "stage が pointer を変えました"
+/usr/local/bin/uploads-cutover.sh switch --root "$UPLOADS_ROOT" --to v1-restore --expect v0 \
+  >> "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "pointer を新しい版へ切り替えられません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v1-restore ]] || fail "switch の後の pointer が新しい版を指していません"
+[[ -f "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-before.txt" ]] \
+  || fail "切替え後の pointer から before marker を読めません"
+[[ ! -e "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-after.txt" ]] \
+  || fail "切替え後の版に after marker があります（復旧点より後の file）"
+/usr/local/bin/uploads-cutover.sh switch --root "$UPLOADS_ROOT" --to v0 --expect v1-restore \
+  >> "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "rollback（逆向きの switch）ができません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "rollback の後の pointer が旧版を指していません"
+[[ -f "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-after.txt" ]] || fail "rollback の後の旧版の内容が変わっています"
+/usr/local/bin/uploads-cutover.sh status --root "$UPLOADS_ROOT" >> "$UPLOADS_CUTOVER_LOG" 2>&1 \
+  || fail "uploads の pointer の状態を確認できません（$UPLOADS_CUTOVER_LOG）"
+log "uploads の版の切替え OK（stage → switch → rollback）"
+
 log "== 12. source 不変 =="
 SRC_STATE=$(src_root "$MYSQL_DATABASE" -N -B \
   -e "SELECT COUNT(*), SHA2(GROUP_CONCAT(marker ORDER BY id), 256) FROM marker_test;" 2>/dev/null | tail -1)
 printf '%s\n' "$SRC_STATE" > "$EVID/source-state.txt"
+
+log "== 13. schema fingerprint の正規化規則（実 MySQL・source の使い捨て DB） =="
+# README「schema fingerprint」の規則を実 MySQL（8.4）で確かめる。PITR の対象 DB とは別の DB で行い、最後に削除する
+# （checkpoint より後の source の変更は復元・drill に影響しない）。
+#   - 列コメント・table コメントだけの変更では変わらない
+#   - 列の並び順を変えると column 区分だけが変わり、元に戻すと元の値に戻る
+#   - 索引の追加は index 区分だけ、既定値の変更は column 区分だけが変わる
+#   - trigger・routine・view・CHECK・外部キーも区分として数えられる（root は定義を読める）
+# shellcheck disable=SC1091
+. /usr/local/lib/ses-backup/schema-fingerprint.sh
+FP_PROBE_DB=ses_fp_probe
+probe_fp() {
+  (
+    MYSQL_PWD="$(cat "$SRC_PASSWORD_FILE")"
+    export MYSQL_PWD
+    MYSQL_CLIENT_BIN=mysql
+    schema_fingerprint::compute -h"$SRC_HOST" -uroot "$FP_PROBE_DB"
+  )
+}
+fp_diff() { # <fp a> <fp b> → 件数または SHA-256 の違う区分（「,」区切り。一致なら空）
+  jq -rn --argjson a "$1" --argjson b "$2" \
+    '[($a.sections | keys[]) as $k | select($a.sections[$k] != $b.sections[$k]) | $k] | join(",")'
+}
+FP_EVID="$EVID/schema-fingerprint-boundary.txt"
+src_root -e "DROP DATABASE IF EXISTS $FP_PROBE_DB; CREATE DATABASE $FP_PROBE_DB;
+    CREATE TABLE $FP_PROBE_DB.p (id BIGINT PRIMARY KEY, a VARCHAR(16) NOT NULL DEFAULT 'x', b INT NULL) ENGINE=InnoDB;
+    CREATE TABLE $FP_PROBE_DB.c (id BIGINT PRIMARY KEY, p_id BIGINT NOT NULL,
+      CONSTRAINT fk_c_p FOREIGN KEY (p_id) REFERENCES $FP_PROBE_DB.p (id) ON DELETE CASCADE,
+      CONSTRAINT ck_c_p CHECK (p_id > 0)) ENGINE=InnoDB;
+    CREATE TRIGGER $FP_PROBE_DB.trg_p BEFORE INSERT ON $FP_PROBE_DB.p FOR EACH ROW SET NEW.b = COALESCE(NEW.b, 0);
+    CREATE FUNCTION $FP_PROBE_DB.f_next(x INT) RETURNS INT DETERMINISTIC NO SQL RETURN x + 1;
+    CREATE VIEW $FP_PROBE_DB.v_p AS SELECT id, a FROM $FP_PROBE_DB.p;" \
+  || fail "schema fingerprint の確認用 DB を作成できません"
+FP_BASE=$(probe_fp) || fail "確認用 DB の schema fingerprint を計算できません"
+{
+  echo "base=$(jq -r '.sha256' <<< "$FP_BASE")"
+  jq -r '.sections | to_entries[] | "section=\(.key) count=\(.value.count)"' <<< "$FP_BASE"
+} > "$FP_EVID"
+for want in "table 3" "trigger 1" "routine 1" "parameter 2" "view 1" "check 1" "fk_column 1" "fk_rule 1"; do
+  [[ "$(jq -r --arg k "${want% *}" '.sections[$k].count' <<< "$FP_BASE")" == "${want#* }" ]] \
+    || fail "schema fingerprint の区分 ${want% *} の件数が ${want#* } ではありません（$FP_EVID）"
+done
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY a VARCHAR(16) NOT NULL DEFAULT 'x' COMMENT 'comment only', COMMENT = 'table comment';" \
+  || fail "コメントを変更できません"
+FP_NEXT=$(probe_fp) || fail "コメント変更後の schema fingerprint を計算できません"
+[[ "$(jq -r '.sha256' <<< "$FP_NEXT")" == "$(jq -r '.sha256' <<< "$FP_BASE")" ]] \
+  || fail "コメントだけの変更で schema fingerprint が変わりました（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "comment_only=unchanged" >> "$FP_EVID"
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY b INT NULL AFTER id;" || fail "列の並び順を変更できません"
+FP_NEXT=$(probe_fp) || fail "列の並び順の変更後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == column ]] \
+  || fail "列の並び順の変更で column 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "column_order=changed(column)" >> "$FP_EVID"
+src_root -e "ALTER TABLE $FP_PROBE_DB.p MODIFY b INT NULL AFTER a;" || fail "列の並び順を戻せません"
+FP_NEXT=$(probe_fp) || fail "列の並び順を戻した後の schema fingerprint を計算できません"
+[[ "$(jq -r '.sha256' <<< "$FP_NEXT")" == "$(jq -r '.sha256' <<< "$FP_BASE")" ]] \
+  || fail "列の並び順を戻しても schema fingerprint が元に戻りません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "column_order_restored=unchanged" >> "$FP_EVID"
+src_root -e "CREATE INDEX ix_p_a ON $FP_PROBE_DB.p (a);" || fail "索引を追加できません"
+FP_NEXT=$(probe_fp) || fail "索引追加後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == index ]] \
+  || fail "索引の追加で index 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "index_added=changed(index)" >> "$FP_EVID"
+src_root -e "DROP INDEX ix_p_a ON $FP_PROBE_DB.p; ALTER TABLE $FP_PROBE_DB.p ALTER a SET DEFAULT 'y';" \
+  || fail "既定値を変更できません"
+FP_NEXT=$(probe_fp) || fail "既定値変更後の schema fingerprint を計算できません"
+[[ "$(fp_diff "$FP_BASE" "$FP_NEXT")" == column ]] \
+  || fail "既定値の変更で column 区分だけが変わっていません（差異: $(fp_diff "$FP_BASE" "$FP_NEXT")）"
+echo "default_changed=changed(column)" >> "$FP_EVID"
+# RB-W P3-4: 件数だけでなく定義の変更も該当区分だけを変えること（直前の状態と比べる）
+fp_expect_change() { # <説明> <期待する区分> <SQL>
+  local prev next
+  prev=$(probe_fp) || fail "$1 の前の schema fingerprint を計算できません"
+  src_root -e "$3" || fail "$1 を実行できません"
+  next=$(probe_fp) || fail "$1 の後の schema fingerprint を計算できません"
+  [[ "$(fp_diff "$prev" "$next")" == "$2" ]] \
+    || fail "$1 で $2 区分だけが変わっていません（差異: $(fp_diff "$prev" "$next")）"
+  echo "$1=changed($2)" >> "$FP_EVID"
+}
+fp_expect_change trigger_body trigger \
+  "DROP TRIGGER $FP_PROBE_DB.trg_p; CREATE TRIGGER $FP_PROBE_DB.trg_p BEFORE INSERT ON $FP_PROBE_DB.p FOR EACH ROW SET NEW.b = COALESCE(NEW.b, 1);"
+fp_expect_change view_definition view \
+  "CREATE OR REPLACE VIEW $FP_PROBE_DB.v_p AS SELECT id, a FROM $FP_PROBE_DB.p WHERE id > 0;"
+fp_expect_change fk_on_delete fk_rule \
+  "ALTER TABLE $FP_PROBE_DB.c DROP FOREIGN KEY fk_c_p; ALTER TABLE $FP_PROBE_DB.c ADD CONSTRAINT fk_c_p FOREIGN KEY (p_id) REFERENCES $FP_PROBE_DB.p (id) ON DELETE RESTRICT;"
+# RB-W P2-1: DB の既定の照合順序の変更は schema 区分だけを変える（既存の table・routine の照合順序は変わらない）
+fp_expect_change database_collation schema \
+  "ALTER DATABASE $FP_PROBE_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
+src_root -e "DROP DATABASE $FP_PROBE_DB;" || fail "確認用 DB を削除できません"
+log "schema fingerprint の正規化規則 OK（$FP_EVID）"
 
 # summary
 jq -n \

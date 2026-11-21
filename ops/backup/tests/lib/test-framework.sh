@@ -103,6 +103,26 @@ capture_exit() { # var_name cmd...
   eval "$var=$rc"
 }
 
+# symlink を作れる環境でなければ、前提の失敗を記録して suite をここで終える（以降の case を実行しない）。
+# Git for Windows の既定では ln -s が symlink の代わりに複製を作り、`ln -s .. <名前>` は親を再帰的に複製して
+# 終わらない（RB-W 追加修正 C。uploads の pointer の試験で起きた）。TEST_FILTER の指定にかかわらず必ず確かめる。
+require_symlink_capable_environment() { # <suite の label>
+  local t ok=0
+  t=$(mktemp -d)
+  mkdir "$t/v0"
+  if ln -s v0 "$t/link" 2>/dev/null && [[ -L "$t/link" && "$(readlink "$t/link")" == v0 ]]; then
+    ok=1
+  fi
+  rm -rf "$t"
+  if (( ok == 1 )); then
+    test_assert "前提: symlink を作れる環境で実行している"
+  else
+    test_fail "前提: symlink を作れる環境で実行している" \
+      "ln -s が symlink を作りません（Git for Windows では MSYS=winsymlinks:sys を設定する）。以降の case は実行しない"
+    test_summary "$1"
+  fi
+}
+
 # case 関数を実行する。失敗しても全体は続行する。
 run_case() { # case_fn
   local fn=$1

@@ -95,7 +95,17 @@ main() {
     fi
     printf '%s\n' "$plan_out" > "$report_dir/plan.log"
     PLAN_ID=$(printf '%s\n' "$plan_out" | sed -n 's/^plan_id=//p' | tail -n1)
-    [[ -n "$PLAN_ID" ]] || PLAN_ID=$(ls "$PLANS_DIR"/*.json 2>/dev/null | head -1 | xargs -r basename | sed 's/\.json$//')
+    # 先頭の plan を glob で選ぶ（ls | head にしない。plan が多いと pipefail + errexit 下で ls の SIGPIPE が
+    # drill を止めるため。RB-W P1-1）
+    if [[ -z "$PLAN_ID" ]]; then
+      local first_plan
+      for first_plan in "$PLANS_DIR"/*.json; do
+        if [[ -f "$first_plan" ]]; then
+          PLAN_ID=$(basename "$first_plan" .json)
+          break
+        fi
+      done
+    fi
     [[ -n "$PLAN_ID" ]] || drill::fail "plan_id を取得できません"
     plan_path="$PLANS_DIR/$PLAN_ID.json"
     plan::verify "$plan_path" || drill::fail "plan の検証に失敗しました"
@@ -163,6 +173,11 @@ main() {
   if ! sed -n '/^{/,$p' "$validate_log" 2>/dev/null \
       | jq -e '.checks.flyway_history_required == true and .checks.flyway == "PASS"' > /dev/null 2>&1; then
     drill::fail "validate の Flyway 照合（checks.flyway_history_required=true かつ checks.flyway=PASS）を確認できません"
+  fi
+  # G-04（RB-W P3-3）: schema fingerprint の照合に PASS したことも drill の成功条件にする
+  if ! sed -n '/^{/,$p' "$validate_log" 2>/dev/null \
+      | jq -e '.checks.schema_fingerprint == "PASS"' > /dev/null 2>&1; then
+    drill::fail "validate の schema fingerprint 照合（checks.schema_fingerprint=PASS）を確認できません"
   fi
   drill::require_evidence "$validate_log" "validate"
   drill::segment_end validate

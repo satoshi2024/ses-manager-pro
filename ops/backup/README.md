@@ -24,9 +24,26 @@ production 環境への接続・復元は行わないこと。初回本番配備
 
 ## 前提
 
-- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.0.46 client + mysqlbinlog + mysqldump + restic 0.17.3。
+- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.4 LTS（8.4.13）client + mysqlbinlog + mysqldump + restic 0.17.3。
+  production の MySQL server は 8.4 LTS だけで（2026-11-13 決定）、`preflight.sh` は client・mysqlbinlog・mysqldump と
+  server がすべて 8.4 系列であることを求める（RB-W 8.4 対応）。`image/install-toolchain.sh` は client の版と repo の
+  component を列挙した値（`8.4.13`・`mysql-8.4-lts`）だけ受け付け、8.0・列挙していない patch・innovation 系では何も
+  ダウンロードせずに失敗する。patch を上げるときは repo の `Packages` で client と server-core の版を確かめ、Dockerfile の
+  ARG と同じ変更で列挙に足す。
   private registry は使わず、検証済み build の content ID（image store に依存しない識別子）を記録して
   `docker save` / `docker load` で配布する（「ツールイメージの build・配布」参照）。
+- MySQL 8.4 で変わった点への対応（RB-W 8.4 対応）: mysqldump の `--source-data=2` が書く
+  `CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE=…, SOURCE_LOG_POS=…` から full の起点を読む。8.0 の旧形式
+  `CHANGE MASTER TO … MASTER_LOG_FILE` は受け付けない（production は 8.4 だけで、8.4 の server・mysqldump 8.4.13 は旧形式を
+  使わない。旧形式だけの dump は起点を取れずに backup が失敗する = fail-closed）。復元前の GTID・binlog のリセットは `RESET BINARY LOGS AND GTIDS`（8.4 で `RESET MASTER` は削除）。
+  `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外した。preflight は
+  変数があり ROW でなければ exit 12 で止まる（変数そのものが無い版では判定しない。RB-W P3-6）。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
+  integration を走査する）。mysqldump 8.4.13 が `--source-data=2` で 8.4 の server に発行する構文（`SHOW BINARY LOG STATUS`
+  の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認する（未取得）。
+  preflight の server の変数は `SHOW GLOBAL VARIABLES` で 1 つずつ有無を見て、無い変数は名前を挙げて失敗する。
+  TLS は `@@have_ssl`（8.4 で残るかは CI で確認）を使わず、この接続の `Ssl_cipher` で判定する。
+  mysqlbinlog の `--read-from-remote-server --raw --stop-never` と `MYSQL_PWD`（integration の root 操作だけが使う）が 8.4 でも
+  使えることは CI（実 MySQL 8.4.13）で確認する（未取得）。
 - MySQL サーバの時刻帯（2026-11-13 決定）: production の source と、復元先（recovery target）の MySQL サーバは
   いずれも **`time_zone = '+09:00'`**（DBA が設定）とする。復元先が異なる時刻帯だと、cutover 後のアプリの
   `NOW()` / `CURRENT_DATE` と TIMESTAMP 列の表示が変わるため、復元前に `SELECT @@global.time_zone;` で確認する。
@@ -36,7 +53,8 @@ production 環境への接続・復元は行わないこと。初回本番配備
 - `secrets/mysql-password`（0600）: MySQL パスワード
 - `secrets/restic-password`（0600）: restic repository パスワード
 - `secrets/mysql-capath/` : hashed CA ディレクトリ（`openssl rehash` / `c_rehash` 済み）
-  ※ MySQL 8.0.46 client は `--ssl-ca` + VERIFY_* が使えない（research.md §4 実測）。
+  ※ MySQL 8.0.46 client は `--ssl-ca` + VERIFY_* が使えなかった（research.md §4 実測）。8.4 client で同じかは未確認のため
+  （CI で確認）、引き続き capath を使う。
   CA は hashed capath で提供し、`MYSQL_SSL_CAPATH` で指定する。
 
 ## 設定（`.env.backup`）
@@ -46,14 +64,53 @@ production 環境への接続・復元は行わないこと。初回本番配備
 | `FLYWAY_VERSION` | 適用済みの最新 Flyway version を **Flyway 形式**（`V`・`_` を使わない。例: `185`、`185.1`）で設定する。checkpoint metadata の `flyway_max_success` になり、復元検証で `flyway_schema_history` の成功行の版番号順の最大と照合する。未設定（`unknown`）の checkpoint は復元検証を通らない |
 | `CONTENT_HASH_TABLES` | 内容ハッシュ（`lib/content-hash.sh`。主キー順に並べた全列を、SQL の NULL と文字列 `'NULL'` を区別して SHA-256）を記録する主要 table を `,` 区切りで指定する。**主キーの無い table は指定できない**（指定すると backup が失敗する）。full / checkpoint の書込み静止区間内に計算するため、静止時間が延びすぎない範囲に絞る（`flyway_schema_history` を含めることを推奨）。指定した table を 1 つでも計算できなければ backup を VALID にしない。復元検証も同じ値を参照し、指定 table の記録が checkpoint に無ければ（`NOT_RECORDED` を含む）FAIL にする |
 | `CRITICAL_TABLES` | full 時に件数を記録する主要 table（従来どおり） |
+| `UPLOADS_ROOT` | uploads の根（container 内の path。production は `/app/uploads`）。その下に版の directory（`v0`、`v1`、…）と pointer の symlink がある（下の「uploads の配置と mount」）。full / checkpoint は必須、preflight は任意（指定すると pointer を解決できることを確かめる） |
+| `UPLOADS_POINTER` | pointer の名前（既定 `current`）。`current -> v<n>` の相対・1 段の symlink であること |
+| `UPLOADS_STAGING_PARENT` | uploads snapshot の staging の親（production は `/var/lib/ses-uploads-staging`）。`UPLOADS_ROOT` と同じ mount（`stat -L -c %d` の st_dev が同じ）でなければ provider が拒否する（preflight も pointer の指す版と比べ、違えば exit 16）。`backup-data`（`/var/lib/ses-backup`）の下に置かない（別の filesystem） |
 
 `FLYWAY_HISTORY_REQUIRED` は廃止した（W1-B1 r2）。`flyway_schema_history` の照合は常に必須で、
 この変数が 1 以外の値で残っていると `validate-restore.sh` は検証を始めずに失敗する。
+`UPLOADS_DIR` は廃止した（RB-W 追加修正 C）。残っていると full・checkpoint・preflight は失敗する（版の directory や根を
+pointer を介さずに backup しないため）。`UPLOADS_ROOT` と `UPLOADS_POINTER` に置き換える。
+
+### uploads の配置と mount（RB-W 追加修正 C。2026-11-18 利用者決定: 方式 A・同じ uid）
+
+- **配置**: uploads の access point の根（app の container では `/app/uploads`）の下に、版の directory `v0`、`v1`、… と、
+  相対・1 段の symlink `current -> v<n>` を置く。app は `UPLOAD_BASE_PATH=/app/uploads/current` を使う。app の初回の起動前に
+  `v0` と `current -> v0` を作る（`current` が無いと app が実 directory として作り、pointer が効かなくなる。手順は deploy-runbook）。
+- **pointer の解決**（`lib/uploads-pointer.sh`）: backup は `current` を `find` にも host の mount にも辿らせない。uploads の根を
+  `:ro` で bind した container の中で `readlink`（`-f` なし）で値だけを読み、`^[A-Za-z0-9][A-Za-z0-9._-]*$` の 1 段の名前だけを
+  受け付けて `<根>/<名前>` を snapshot の src にする。根が symlink・pointer が無い・pointer が実 directory や file・指す先が
+  絶対 path・`/` や `..` を含む・無い・symlink・file の場合は失敗する（fail-closed）。file が 1 つも無い版は inventory を `[]` と
+  して成功する（初回 deploy 直後の空の uploads）。
+- **記録**: snapshot の JSON（`pointer`・`pointer_target`）、full / checkpoint の `metadata.json`・index・結果 JSON の
+  `uploads_pointer: {name, target}` に、どの版を backup したかを残す。
+- **host の mount と bind**: backup host は backup 用の access point（根に `uploads/` と `backup-staging/` がある。trust は
+  含めない）を **1 回だけ** `/mnt/ses-files` に mount する。`docker-compose.yml` はその `uploads/` を `/app/uploads` に
+  `:ro` で、`backup-staging/` を `/var/lib/ses-uploads-staging` に bind する。`.env.backup` は `UPLOADS_ROOT=/app/uploads`・
+  `UPLOADS_POINTER=current`・`UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging`。
+- **「同一 filesystem」の意味**: provider は src と staging の st_dev（`stat -L -c %d`）を比べる。同じ host mount の bind 同士は
+  同じ値になる。同じ EFS でも access point ごとに別々に mount したもの（efs-utils の TLS mount を含む）は st_dev が違い、
+  拒否される（backup が止まる。fail-closed）。uploads と staging を別の mount にしない。`:ro` の bind は mount の
+  属性だけを変え、st_dev は変えない（provider は pointer の指す版の directory と staging の親を比べる）。
+- **SRE の確認方法**（backup host。初回 backup の前と、mount を変えたとき）:
+  1. host で `stat -L -c %d /mnt/ses-files/uploads/current /mnt/ses-files/backup-staging` の 2 行が同じ値であること
+     （`current` は pointer。`-L` で指す版の directory の値になる）。
+  2. container の中でも同じであること: `ops/backup/image/tool-image.sh compose run --rm preflight` の JSON の
+     `checks.uploads` が `status: "ok"`、`version` が今の版（初回は `v0`）、`staging_same_filesystem: true` であること。
+     preflight は `UPLOADS_STAGING_PARENT` が設定されていると、pointer の指す版と staging の親の st_dev を provider と同じ
+     `stat -L -c %d` で比べ、違う・取れない場合は exit 16 で止まる。
+  値が違う・exit 16 の場合は backup を始めない（mount を 1 回にまとめる。pointer が無ければ deploy-runbook の手順で作る）。
+- **uid の模型**: backup の access point と app の access point は同じ POSIX uid/gid を使う（2026-11-18 利用者決定）。
+  backup による uploads の改変を防ぐのは compose の `:ro` bind だけである（Security の受理事項）。同じ uid のため、app が 0600 で
+  作る file（取込センターの台帳・隔離中の file）も backup が読め、`cp -a` の所有者の保持は同じ uid への変更（no-op）になり、
+  ops/backup の script の `umask 077` で restore が作る 0700 の directory も app が読み書きできる。mode の正規化はしない
+  （uid が分かれると成り立たない。分ける場合は provider・restore の所有者と mode の扱いを見直す）。
 
 ## 実行
 
 job は必ず `image/tool-image.sh compose` 経由で起動する。docker-compose.yml の
-`x-ses-backup-tool-content-id` とローカルの `ses-backup-tool:8.0.46` の content ID が一致しない
+`x-ses-backup-tool-content-id` とローカルの `ses-backup-tool:8.4.13` の content ID が一致しない
 （または未 pin の）場合は起動を拒否する。`tool-image.sh compose` が渡すのは次の使い方だけで、
 `-f`・`-p`・`--pull`・`--build`・`--entrypoint`・`-e`・`-v` などの compose 側 option、別の compose ファイル、
 未定義の service は拒否する（終了コード 2）。
@@ -65,6 +122,20 @@ job は必ず `image/tool-image.sh compose` 経由で起動する。docker-compo
 | `ps [<service>]`・`logs [--tail N] <service>`・`stop <service>` | しない（image を起動しない状態確認・停止） |
 
 `<service>` は `preflight` / `backup` / `binlog` / `checkpoint` / `snapshot-binlog` / `check` / `retention`。
+
+pin 照合（`tool-image.sh check`。RB-W W-3）の内容:
+
+- `docker-compose.yml` を自前で解釈する。扱うのは block style の YAML（`key: スカラー`・`key:` + 子 block・
+  `- スカラー`、トップレベルの `x-` key の anchor と、`x-` mapping・service 直下の `<<: *anchor`）だけで、
+  flow style（`{ }` / `[ ]`）・tag（`!`）・block scalar（`|` `>`）・それ以外の anchor / alias・引用符付き key・
+  document marker・indent の tab・key の重複・複数行の値・sequence の中の mapping は、理由を示して拒否する。
+  compose を変えるときも block style で書く。
+- service の集合が上の 7 つと一致し、**service ごとに** merge を解決した実効値で、`image` が同じツールイメージの tag、
+  `pull_policy: never`、`build` / `extends` が無いことを確かめる（トップレベルの `include` も拒否する）。
+- tag を **1 回だけ** image ID へ解決し、その image ID から content ID を計算して pin と照合する。
+  `run` / `up` は、照合した image ID を全 service の `image` に固定する一時 override（本プロセス専用の一時ディレクトリに
+  作り、終了時に削除する）を 2 つ目の `-f` として渡して起動する。照合の後に tag を別の image へ付け替えられても、
+  起動するのは照合した image だけである（image ID は内容から決まり、付け替えられない）。
 
 ```bash
 # 1. 環境契約検査（read-only）: 0 でなければ先へ進まない
@@ -95,9 +166,19 @@ ops/backup/image/tool-image.sh compose run --rm check --json
   image index / manifest の digest になり、store の異なるホスト間で `docker save` / `docker load` すると一致しない。
   そのため image ID と image store の種類（`docker info` の `DriverStatus` に `io.containerd.snapshotter` があれば
   containerd、無ければ classic）は**記録だけ**に使う。
-- **pin と照合には content ID を使う。** RootFS の layer diff ID 列（非圧縮 layer の digest）と image config の
-  実行に関わる項目（Env / Entrypoint / Cmd / WorkingDir / User / Labels）から計算した SHA-256 で、image store に
-  依存しない。build 機と配布先の image store が異なっても照合できる（`load` は違いを通知したうえで content ID で照合する）。
+- **pin と照合には content ID を使う。** os / arch、RootFS の layer diff ID 列（非圧縮 layer の digest）と image config の
+  実行に関わる項目（Env / Entrypoint / Cmd / Shell / OnBuild / WorkingDir / User / StopSignal / Volumes / ExposedPorts /
+  Labels / Healthcheck。RB-W W-7）から計算した SHA-256 で、image store に依存しない。build 機と配布先の image store が
+  異なっても照合できる（`load` は違いを通知したうえで content ID で照合する）。算出方式は `ses-backup-tool-content-id-v2`。
+- content ID の正規化: 1 回の `docker image inspect` で項目を 1 行ずつ描画する。文字列は要素ごとに `{{json}}`
+  （Go の encoding/json で改行等を escape し、Docker の版で変わらない）、list は要素を順序どおり、map（Volumes・
+  ExposedPorts・Labels）は Go template が key の昇順で回す。`null` と空の list / map は同じ（行を出さない）。
+  Config 全体を 1 つの json にする出力は使わない（Docker の版で Hostname などの項目が増減するため）。Id・Created・
+  RepoTags・RepoDigests・GraphDriver・Metadata・DockerVersion など、内容に関わらず store や版で変わる項目も使わない。
+  描画結果の CR（Windows の docker.exe）は除く。
+- なお fail-closed になる場合: Docker の版が古く（または新しく）上の項目のどれかを描画できない、描画に想定外の行・
+  単一項目の重複・途中の空行がある、layer が無い。いずれも content ID を計算できず `check` / `load` / `record` が失敗する。
+  v1（r2 まで）の content ID で pin した値は v2 と一致しないため、pin し直す（production の compose は未 pin）。
 
 ### 手順
 
@@ -121,10 +202,21 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    - `mysql-apt-config` deb は使わない（旧版 0.8.33-1 の SHA-256 を一次資料で確認できないため）。
      fingerprint を確認した鍵だけで keyring を作り、apt source を直接定義する。
    - MySQL client / server-core は exact version、base image は digest で固定する。tar / util-linux などの
-     Essential パッケージは明示的には再インストールしない。lock が空なら Debian パッケージ版は記録だけを行う（build ログに WARN）。
+     Essential パッケージは明示的には導入・再インストールしないが、**依存解決で base image の版から更新されることがある**
+     （「base image の版を保つ」とは限らない。RB-W W-4）。実際の版は image 内の `dpkg-packages.tsv` が正本で、Essential の
+     base image からの変化は `essential-packages.tsv`（パッケージ名・base の版・導入後の版・same/changed/added/removed）に
+     記録され、変化があれば build ログに WARN が出る。Essential を含む全パッケージの版を固定するのは lock で、
+     lock が空なら Debian パッケージ版は記録だけを行う（build ログに WARN）。
+   - lock の照合（記載あり = enforced・不一致は失敗・空 = record-only）は `tests/tool-image-test.sh` が、keyring・apt source・
+     restic・apt lists を書く system path を `INSTALL_TOOLCHAIN_SYSROOT`（単体試験だけが一時ディレクトリを指定する。既定は空 =
+     実際の path で、Dockerfile は設定しない）で一時ディレクトリへ向けて、導入経路の最後まで通して確かめる（RB-W W-5）。
+   - 機械的な照合: Dockerfile の最後の RUN（`install-toolchain.sh --verify-manifest`）が image の実際の dpkg の版と
+     `dpkg-packages.tsv`・`toolchain.env` の SHA-256 を照合し、一致しなければ build が失敗する。`record` も build 後の image で
+     network なしの一時コンテナの `dpkg-query` を実行して同じ照合を行い、一致しなければ何も記録しない。
    - `<evidence-dir-2>` に `tool-content-id.txt`（content ID）、`tool-image-id.txt`（image ID。記録のみ）、
      `tool-image-record.txt`（content ID・image ID・image store の種類・storage driver・Docker version）、
-     `image-manifest/`（image 内の `toolchain.env` = 固定値、`dpkg-packages.tsv` = 全パッケージ版）を書く。既存の記録は上書きしない。
+     `image-manifest/`（image 内の `toolchain.env` = 固定値、`dpkg-packages.tsv` = 全パッケージ版、`essential-packages.tsv` =
+     Essential の base image からの変化）を書く。既存の記録は上書きしない。
 3. **pin**: `docker-compose.yml` の `x-ses-backup-tool-content-id` を 2. の `tool-content-id.txt` の値に書き換えて commit する
    （compose は image に COPY されないため、この commit で image は変わらない）。
 4. **配布 tar の作成**（2. の build 機で）:
@@ -138,16 +230,69 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    ops/backup/image/tool-image.sh check      # compose の pin とローカル image の一致確認
    ```
 
-production の `docker-compose.yml` は `build:` を持たず、`pull_policy: never` で同名 image を registry から取得させない。
+production の `docker-compose.yml` は `build:` を持たず、全 service が `pull_policy: never` で同名 image を registry から
+取得させない（`check` が service ごとに確かめる）。
 
 ## 権限分離（RQ-008）
 
 | role | DB 権限 | repository 権限 | 用途 |
 |---|---|---|---|
-| dump role | 対象 DB read、view/trigger/event/routine の最小権限 | writer（backup 可・delete 不可） | full/checkpoint |
-| binlog role | `REPLICATION CLIENT`（+ checkpoint 用 rotation 権限は別 account） | writer | archive/snapshot |
+| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`） | writer（backup 可・delete 不可） | full/checkpoint |
+| binlog role | 下の「source 側の account の権限」のうち archive・snapshot・check の行（`REPLICATION SLAVE`・`REPLICATION CLIENT`） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
-| restore target role | recovery target 新規 DB のみ（source 権限なし。`flyway_schema_history` を含む SELECT が必要） | read | restore/validate |
+| restore target role | recovery target 新規 DB のみ（source 権限なし）。下の「restore target role の権限」を全部持つこと | read | restore/validate |
+
+#### source 側の account の権限（RB-W。script が source に発行する文と mysqldump の option から）
+
+| 権限 | 範囲 | 使う job | 依拠する文・option |
+|---|---|---|---|
+| `SELECT` | 対象 DB（`<db>.*`） | full・checkpoint・preflight | mysqldump の table の読み取り、`CRITICAL_TABLES` の `COUNT(*)`（backup-full）、内容ハッシュ（`lib/content-hash.sh`）。schema fingerprint と preflight の engine の検査は information_schema を読み、見える範囲はこの権限で決まる |
+| `SHOW VIEW` | 対象 DB | full・checkpoint | mysqldump の view（`SHOW CREATE VIEW`）、schema fingerprint の view 定義 |
+| `TRIGGER` | 対象 DB | full・checkpoint | mysqldump `--triggers`、schema fingerprint の trigger |
+| `EVENT` | 対象 DB | full | mysqldump `--events`（このアプリは event を使わないが、option を付けているため） |
+| `SHOW_ROUTINE` | global | full・checkpoint | mysqldump `--routines` の `SHOW CREATE FUNCTION / PROCEDURE`、schema fingerprint の routine 本体。mysqldump の文書は `--routines` に global の `SELECT` を挙げるため、`SHOW_ROUTINE` だけで足りるかは本番相当の権限での実測で確かめる（未取得。integration は root のため CI では確かめられない） |
+| `RELOAD` | global | full・checkpoint | mysqldump `--source-data=2`（起点を取る間の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`）、create-checkpoint の `FLUSH BINARY LOGS` |
+| `REPLICATION CLIENT` | global | full・checkpoint・archive・snapshot・check | mysqldump `--source-data=2` が 8.4 で発行する `SHOW BINARY LOG STATUS`、`SHOW BINARY LOGS`（create-checkpoint・archive-binlog・snapshot-binlog・check-backup） |
+| `REPLICATION SLAVE` | global | archive | `mysqlbinlog --read-from-remote-server`（source から binlog を受け取る） |
+
+要らないもの: `PROCESS`（mysqldump に `--no-tablespaces` を付けるため不要。付けないと mysqldump 8.0.21 以降は tablespace の情報を
+読むのに `PROCESS` が要る。2026-11-18 利用者決定で上線前に付けた）、`LOCK TABLES`（`--single-transaction` のため table lock を
+取らない）、`SUPER`、DDL 凍結の `GET_LOCK`（権限不要）、`SELECT @@server_uuid`・`SHOW GLOBAL VARIABLES`・`SHOW SESSION STATUS`
+（権限不要）。
+
+- `--no-tablespaces` の前提: production に入る migration（`src/main/resources/db/migration`・`db/migration-prod` の SQL と
+  `src/main/java/db/migration` の Java migration）は `CREATE TABLESPACE` などの general tablespace を使わない
+  （`tests/script-contract-test.sh` の `case_migrations_do_not_use_tablespace` が `TABLESPACE` の不在を確かめ、
+  `case_mysqldump_invocations_use_no_tablespaces` が本番 script の mysqldump がすべて `--no-tablespaces` を付けることを
+  確かめる）。使い始めるときは dump の option と source 側の account の権限を見直す（`--no-tablespaces` のままだと tablespace の
+  定義が dump に入らず、復元先に同じ tablespace が無ければ import が失敗する）。`--no-tablespaces` と `--single-transaction`・
+  `--source-data=2`・`--routines`・`--triggers`・`--events` の組合せを mysqldump 8.4.13 が受け付けることは CI（backup
+  integration）で確認する（未取得）。
+- dump role と binlog role の分離（account を分ける）は上線後に行う（2026-11-18 利用者決定）。現状は一つの account が上の表の
+  全権限を持つ（`docker-compose.yml` の全 service が同じ `.env.backup` の `MYSQL_USER` を使う。分けるには service ごとの env が要る）。
+- preflight は権限を検査しない。不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は source 側を
+  root で動かすため、この表で足りることは CI でも確かめられない（**本番相当の権限での実測は未取得**。DBA が本番の account で
+  初回の full・checkpoint・archive を流して確かめる）。
+
+#### restore target role の権限（RB-W P2-2。integration の `restore-svc` はこれだけで復元・検証する）
+
+| 範囲 | 権限 | 理由 |
+|---|---|---|
+| 対象 DB（`<db>.*`） | `CREATE`・`DROP`・`ALTER`・`INDEX`・`REFERENCES`・`SELECT`・`INSERT`・`UPDATE`・`DELETE`・`LOCK TABLES` | dump の import（`REFERENCES` は外部キーの作成）、`ALTER DATABASE` による既定の照合順序の設定、復元検証 |
+| 対象 DB | `CREATE VIEW`・`SHOW VIEW`・`TRIGGER`・`CREATE ROUTINE`・`ALTER ROUTINE`・`EXECUTE`・`EVENT` | dump の view・trigger・routine の再現。`SHOW VIEW`・`TRIGGER` は schema fingerprint で定義を読むためにも要る |
+| `ses_recovery_control.*` | `ALL` | target guard の marker |
+| global | `RELOAD` | 復元前の GTID・binlog のリセット |
+| global | `SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER` | binlog replay（session 変数・GTID の適用） |
+| global | `SHOW_ROUTINE` | schema fingerprint で routine の本体を読む（無いと計算が失敗する） |
+| global | DEFINER の再現: `SET_ANY_DEFINER`（MySQL 8.4。8.0 の `SET_USER_ID` は使わない。DEFINER の account が復元先に無い場合は `ALLOW_NONEXISTENT_DEFINER` も） | dump の `CREATE DEFINER=… TRIGGER / VIEW / FUNCTION` を元の DEFINER のまま作る。DEFINER を外して復元すると schema fingerprint が一致しない（DEFINER は照合の対象） |
+| global | `SYSTEM_USER`（DEFINER の account が `SYSTEM_USER` を持つ場合だけ） | `SYSTEM_USER` を持つ account を DEFINER にした stored object を作るには、作る側も `SYSTEM_USER` が要る（MySQL の文書の規則からの推断。**実測は未取得**）。restore role に `SYSTEM_USER` を与えると system account を操作できるようになるため、DEFINER の account（migrator）には `SYSTEM_USER` を与えないことを推奨する |
+
+前提（DBA が復元先で用意する。**DBA の確認は未取得**）: 復元先で binlog が有効なら `log_bin_trust_function_creators = ON`（restore role は
+SUPER を持たないため。stored function と trigger の作成に要る）。DEFINER の account（production では migrator）を復元先に作るか、
+`ALLOW_NONEXISTENT_DEFINER` を与える（account が無い trigger・view は実行時に失敗するため、作ることを推奨）。DEFINER の
+account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が要る（上の表。持たせないことを推奨）。
+復元先の MySQL server は backup 元と同じ版（patch を含む）・同じ `lower_case_table_names` にする（違うと schema fingerprint が
+一致しない場合がある）。
 
 - repository の S3 versioning/immutability を有効化し、通常 backup credential だけで全世代を削除できないようにする。
 - 書込み静止（quiesce）は `providers/quiesce-local.sh`（version 管理された executable）のみ。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
@@ -164,10 +309,49 @@ production の `docker-compose.yml` は `build:` を持たず、`pull_policy: ne
 # apply は target guard と二者承認を通過した plan だけ
 ./restore.sh   --plan <plan-id> --approval <file1> --approval <file2>
 ./validate-restore.sh --plan <plan-id> --uploads-dir <staging> --smoke <script>
+# uploads: 検証した staging を新しい版として本番の uploads の根へ複製する（今の版と pointer は変えない）
+./uploads-cutover.sh stage --from <staging> --root <uploads の根> --version <新しい版>
+# ここから先は app と scheduler を止めてから。順序の正本は runbooks/restore-cutover.md §4.5.1
+# uploads: pointer を 1 回の rename で切り替え、status で確かめる（cutover.sh の前）
+./uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>
+./uploads-cutover.sh status --root <uploads の根>
+# DB: read-only smoke は新しい DB と新しい版の組合せで行われる
 ./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
-# rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）
+# write-enable 前に戻すとき（手順は runbooks/restore-cutover.md §4.5.1 の 5）:
+#  - cutover.sh が read-only smoke の失敗で exit 3（state=rolled-back）のときは rollback-cutover.sh を実行せず、
+#    逆向きの switch だけを行い、OLD_ENV_SMOKE_SCRIPT を手で実行して旧環境を確かめる
+#  - cutover.sh が state を書く前に失敗した（CUTOVER_STATE_FILE が無い）ときは DB は切り替わっていないので、
+#    rollback-cutover.sh は使わず逆向きの switch だけを行う
+#  - それ以外（staged / read-only-smoke-passed / single-writer）から戻すときは、次の 2 つを必ず対で行う
 ./rollback-cutover.sh --plan <plan-id>
+./uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
+# app と scheduler を起動する前に、DB（CUTOVER_STATE_FILE の state・plan_id）と pointer（status）の対を確かめる
 ```
+
+### uploads の版の切替え（`uploads-cutover.sh`。RB-W 追加修正 C）
+
+- **stage**: `restore.sh` の `uploads_ready`（`validate-restore.sh` が hash と DB の参照を照合した staging）を、uploads の根の
+  下の新しい版の directory（例 `v1`）に複製する。今の版・pointer・既にある名前は変えない（既にある名前は拒否）。複製は
+  `lib/safe-extract.sh` の規則で根の下の一時 directory（`.stage-<版>.XXXXXX`）へ行い、全 entry の相対 path と SHA-256 が
+  複製元と一致してから 1 回の rename で `<根>/<版>` にする。失敗したら一時 directory を消し、作りかけの版は現れない。
+  `restore.sh` の出力の `uploads_backup_pointer` は backup した時の pointer と版で、新しい版はこれと別の名前にする。
+- **switch**: pointer が `--expect` の版を指していることを確かめてから、切替え先を指す相対・1 段の一時 symlink を作り、
+  `mv -T`（rename(2) 1 回）で pointer と置き換える。pointer は前後とも必ずどちらかの版を指し、無い瞬間は無い。app を止めて
+  から行う（app は起動時に pointer の下の directory を作るため、切替えの途中で起動させない）。
+- **rollback**: 逆向きの switch（`--to <旧版> --expect <新しい版>`）。旧版は消さないため 1 回の rename で戻る。switch が
+  成功すると、そのまま使える rollback の command（`rollback=`）を出力する。`status` で pointer の指す版・版の一覧・
+  残った一時 directory を確かめる（読むだけ）。
+- **実行する主体**: restore 主体（uploads の access point を app と同じ uid で読み書きで mount する。backup の container は
+  `:ro` のため実行できない）。umask 077 のため新しい directory は 0700 になるが、app と同じ uid のため読み書きできる。
+- **残る窓**: stage の直前の確認と rename の間に、同じ名前の空の directory を作られると rename がそれを置き換える
+  （directory の rename は、宛先が中身のある directory なら ENOTEMPTY、file・symlink なら ENOTDIR で失敗する）。switch の
+  `--expect` の確認と rename の間に別の主体が pointer を変えると後の rename が勝つ。どちらも同じ change の中で 1 名が
+  実行する前提で受け入れ、切替え後に `status` で確かめる。
+- **順序**: DB の cutover・rollback と uploads の switch の順序、app・scheduler の停止、起動前の DB と pointer の対の確認は
+  `runbooks/restore-cutover.md` §4.5.1 を正本とする（deploy-runbook §1.6 の11 (f) もそこを引く）。switch は `cutover.sh` の前、
+  rollback は `rollback-cutover.sh` と逆向きの switch を対で行い、`write-enabled` の後は uploads も戻さない。
+- **旧版と残りの削除**: `uploads-cutover.sh` は何も消さない。旧版の directory（`v<n>`）と `.stage-*`・`.<pointer>.switch-*` の
+  削除は人手の物理削除で、deploy-runbook §4.4 の D15 の手順（保持・hold・DSAR の扱い）に従う。
 
 `validate-restore.sh` は、従来の項目に加えて次を満たさなければ `READY_FOR_CUTOVER` を返さない:
 
@@ -177,9 +361,63 @@ production の `docker-compose.yml` は `build:` を持たず、`pull_policy: ne
   照合を省略する設定は無い（report の `checks.flyway_history_required` は常に `true`）。
 - checkpoint に内容ハッシュ（`content_hashes`）が記録されていれば、全 table で一致すること（`checks.content_hash`）。
   `CONTENT_HASH_TABLES` が設定されていれば、その全 table の記録があること（記録が無い・欠けている場合は FAIL）。
+- checkpoint の schema fingerprint（`schema_fingerprint`）と、復元 DB で再計算した値が一致すること
+  （`checks.schema_fingerprint`。設定によらず常に必須で、記録が無い `NOT_RECORDED`・算出方式の違い・不一致は FAIL）。
+
+### schema fingerprint（G-04）
+
+内容ハッシュは主要 table の行しか見ないため、table・列・索引・制約・trigger・routine・view の定義や DB の既定の
+照合順序が backup 時と違う復元を検出できない。full / checkpoint は書込み静止区間内に、対象 DB の schema を
+information_schema から正規化して SHA-256 にかけ（`lib/schema-fingerprint.sh`、algorithm `mysql-information-schema-sha256-v2`）、
+metadata.json と index の `schema_fingerprint` に記録する。計算できなければ backup を VALID にしない。
+あわせて DB の既定の文字集合・照合順序（`schema_fingerprint.database`）と、診断用に server の版・`lower_case_table_names`
+（`schema_fingerprint.server`。hash には入れない）を記録する。`restore.sh` は復元 DB を `database` の値で作り
+（`CREATE DATABASE … CHARACTER SET … COLLATE …` と、既にある空の DB への `ALTER DATABASE`）、記録が無い full は復元しない。
+この確認は target を変える最初の操作（`RESET BINARY LOGS AND GTIDS`）より前に行い、記録が無ければ target を一切変えずに
+止まる（RB-W P3-4。snapshot の取得・manifest と binlog の SHA の照合も同じく先に済ませる）。
+mysqldump は、routine・trigger の `DATABASE_COLLATION` が DB の既定と違うと、その定義の前後に元の DB 名を書いた
+`` ALTER DATABASE `<backup 時の DB 名>` … `` を出力する。`TARGET_DATABASE` が backup 時の DB 名と違うと、この文は
+存在しない DB を指して import が失敗する（fail-closed）。この文が出るのは、source で routine・trigger を作った後に DB の
+既定を変えた場合に限る（repository の migration に `ALTER DATABASE` / `ALTER SCHEMA` は無い）。復元先は backup 時と同じ
+DB 名にする。
+v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない）の記録は「算出方式が異なります」で FAIL になる
+（production に v1 の記録は無い。開発・試験の v1 の backup は取り直す）。
+
+正規化の規則:
+
+- 対象は接続先の `DATABASE()` の schema だけで、schema 名そのものは含めない（復元先の DB 名が違ってもよい）。
+  外部キーの参照先が同じ schema なら `=` に、view 定義中の `` `<schema>`. `` は `` `=`. `` に置き換える。
+- 1 行 = 1 要素（区分名 + 項目）。各項目は `IF(x IS NULL, 'NULL', QUOTE(x))` で文字列化し（SQL の NULL と文字列
+  `'NULL'` を区別する）、行を `LC_ALL=C` の sort で並べてから、算出方式名の 1 行を先頭に置いて SHA-256 にかける。
+  server が返す順序・照合順序には依存しない。区分ごとの件数と SHA-256 も記録し、不一致時は違う区分を表示する。
+- 含めるもの: DB の既定の文字集合・照合順序（schema 区分。後から文字集合を書かずに作る table・routine が使う）、
+  table（種別・engine・照合順序・`CREATE_OPTIONS`）、列（序数＝並び順・`COLUMN_TYPE`・NULL 可否・
+  既定値・文字集合・照合順序・`EXTRA`・生成式・`SRS_ID`）、索引（一意性・列の序数・prefix 長・昇降順・種別・関数索引の式・
+  可視性）、制約（種別・`ENFORCED`）、外部キーの列・参照先・`MATCH`/`ON UPDATE`/`ON DELETE`、CHECK の式、
+  trigger（event・timing・`ACTION_ORDER`・本体・`SQL_MODE`・`DEFINER`・client の文字集合と照合順序・`DATABASE_COLLATION`）、
+  routine と引数（本体・戻り値・`DETERMINISTIC`・`SQL DATA ACCESS`・`SQL SECURITY`・`SQL_MODE`・`DEFINER`・client の
+  文字集合と照合順序・`DATABASE_COLLATION`）、view（定義・`CHECK OPTION`・`DEFINER`・`SQL SECURITY`・client の文字集合と照合順序）。
+- 含めないもの: コメント（table・列・索引・routine）、`AUTO_INCREMENT` の現在値（`information_schema_stats_expiry` の
+  cache で古い値が見え得る）・行数・容量などの統計・`CARDINALITY`、作成・更新日時、`PRIVILEGES`（照会した利用者の権限で
+  変わる）、`COLUMN_KEY`（索引から導出）、`ROW_FORMAT` の実値（明示した値は `CREATE_OPTIONS` に入る）、
+  event と partition の詳細（このアプリは event も table の partition も使わない。migration に `CREATE EVENT` と
+  `PARTITION BY`（window 関数以外）は無い。`CREATE_OPTIONS` の `partitioned` は入る。使い始めるときは区分を足す）、
+  利用者と権限（server 単位の設定で、DB の schema ではない）。
+- 境界の期待値（`tests/schema-fingerprint-test.sh` と integration の実 MySQL で固定）: **列コメント・table コメントだけの
+  変更では変わらない。列の並び順の変更では変わる**（`SELECT *` や列名の無い `INSERT` の意味が変わるため。column 区分だけが
+  変わり、元に戻すと元の値に戻る）。索引の追加は index 区分、既定値の変更は column 区分、trigger の本体は trigger 区分、
+  view の定義は view 区分、外部キーの `ON DELETE` は fk_rule 区分、DB の既定の照合順序は schema 区分だけが変わる。
+- 次の場合は計算を失敗させる（fail-closed）: table が 1 つも見えない、DB の既定値が 1 行でない、routine の本体が NULL
+  （照会する利用者に `SHOW_ROUTINE` が無い）、view の定義が空（対象 DB の `SHOW VIEW` が無い）、想定外の出力、mysql の失敗。
+- 不一致の通知には、違う区分と、記録時と現在の server の版・`lower_case_table_names`・DB の既定値を並べて出す。
+- 次の場合も不一致として FAIL になる（fail-closed）: backup 時と復元検証時で MySQL server の版（8.4 の patch を含む）や
+  `lower_case_table_names` が違い information_schema の表示が変わる、trigger の本体などが schema 名を明示している状態で
+  別名の DB へ復元する、復元検証の利用者に `TRIGGER` 権限が無く trigger が見えない（件数の違いとして現れる）。
+  いずれも原因を直してから再検証する（照合を省略する設定は無い）。
 
 `cutover.sh` と `restore-drill.sh` も validate の report を `jq` で検査し、`state == READY_FOR_CUTOVER` に加えて
-`checks.flyway_history_required == true` かつ `checks.flyway == "PASS"` でなければ cutover / drill を失敗させる。
+`checks.flyway_history_required == true` かつ `checks.flyway == "PASS"`、および `checks.schema_fingerprint == "PASS"`
+（RB-W P3-3）でなければ cutover / drill を失敗させる。
 
 **禁止:** 稼働中 DB への in-place import、`CONFIRM_RESTORE=YES` 固定文字列での実行、
 `--target` 表示のみの検証完了扱い、復元先 MySQL の時刻帯を確認しないままの cutover。
@@ -196,7 +434,7 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   （report 再計算で一致確認 → 二者承認 → maintenance lock → forget --prune）
 - `RETENTION_ROLE=retention|admin` 以外では実行不可（writer は削除できない）
 - archiver の初回起点 `FULL_COORDINATE_FILE` は `backup-full` が書き出す（.env.backup で backup-data 上の共有 path を指定。欠如時は archiver が fail する）
-- restore target の provision には `RELOAD`（RESET MASTER）・`SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER`・`LOCK TABLES` が必要
+- restore target の provision に要る権限は「権限分離」の「restore target role の権限」の表を参照（DEFINER の再現と schema fingerprint の分を含む）
 - key rotation は `rotate-key.sh --new-key-file <file>`（旧・新の両キーで restore verify 成功時のみ切替え）。手順は `runbooks/key-rotation.md`
 
 ## 演習（restore drill）
@@ -207,9 +445,33 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 
 - unit: `tests/run-unit-tests.sh`（fake CLI に対する全 script の検証、Docker 必須。ツールイメージを build するため、
   Dockerfile の固定値が仮置きの値のままだと build で失敗する）
-- integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合、
-  最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合。CI の `backup-integration` job と同一）
+- integration: `tests/run-integration.sh`（digest 固定の実 MySQL 8.4.13 ×2 コンテナで実 PITR、before/after marker 照合、
+  最小の `flyway_schema_history` による history 存在・version 照合、内容ハッシュ照合、schema fingerprint 照合と
+  その正規化規則（コメントだけの変更・列の並び順・索引・既定値・trigger の本体・view の定義・外部キーの `ON DELETE`・
+  DB の既定の照合順序）の実 MySQL での確認、migrator 相当の利用者が作った trigger・view・routine・外部キー・CHECK を
+  restore role の権限だけで DEFINER ごと復元できること。CI の `backup-integration` job と同一）
 - ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`
+- unit の fake の限界（RB-W P3-4・P3-7）: fake の mysql は schema fingerprint の SQL を解釈せず、fake の docker は
+  content ID の template を解釈しない。そのため「SQL から列（例: `column_default`）を消す」「template から項目
+  （例: `.Config.Volumes`）を消す」変更は、unit では静的な検査（`case_schema_fp_sql_rule`・`case_static_image_contract`）
+  だけが検出する。実際の挙動は integration の step 13（実 MySQL）と、実 Docker で VOLUME・EXPOSE・HEALTHCHECK・
+  STOPSIGNAL だけを足した派生 image の content ID が変わることの確認（Runner。手動）で確かめる。
+- script を書くときの規則（`tests/script-contract-test.sh` が本番の script・lib・providers・image を走査する。RB-W P1-1）:
+  本番 script は `set -Eeuo pipefail` で動くため、パイプの後段に途中で読むのをやめ得る command（`grep -q`・`grep -m`・
+  `head`・`exit` を含む awk・sed の `q`・`read`・`cmp`）を置かない。入力が pipe の容量（Linux 64 KiB）を超えると前段が
+  SIGPIPE で終わり、パイプ全体が失敗に見える（例: binlog の一覧が長いと archive / checkpoint が止まる）。入力は
+  here-string（`<<< "$x"`）で渡すか、読み切る command（`jq` の `first`、`tail` 等）を使う。
+  行末の `|` で次の行に読み手を書く形、`| while … done` の中の `break`・`return`・`exit`、読み手の前の
+  `LC_ALL=C` 等の代入・`command`・`env`、`|&`、`dd` の `count=`・`xxd -l` も同じ扱いで検出する（RB-W P3-1）。
+  `common::trap_add` で登録した EXIT の handler は `common::trap_remove` で外し、`trap - EXIT` は書かない（RB-W P3-2。
+  dispatcher だけが外れ、配列に残った handler が後の `trap_add` で戻るため）。
+- uploads の pointer と版の切替えの試験（`tests/uploads-pointer-test.sh`・`tests/uploads-cutover-test.sh`）は symlink を
+  作れる環境が要る。Linux（tool image）ではそのまま動き、Git for Windows では `MSYS=winsymlinks:sys` を設定して実行する
+  （設定しないと `ln -s` が複製を作り、`ln -s ..` は親を再帰的に複製して終わらない。そのため両 suite は最初に
+  `require_symlink_capable_environment`（`tests/lib/test-framework.sh`）で確かめ、満たさなければ以降の case を実行せずに失敗する）。
+  `quiesce-lock-test.sh`・`full-backup-test.sh`・`binlog-checkpoint-test.sh`・`preflight-test.sh` も uploads の fixture に
+  `ln -s v0 current` を使うため symlink が要る（この 4 つは前提を確かめず、symlink を作れない環境では pointer の解決の失敗として
+  落ちる。止まりはしない。jq も要るため、通常は tool image の中で動かす）。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 
@@ -218,10 +480,17 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 
 - 退避するのは、所有マーカー（`.ses-pitr-run-owner`）の `work=` が既定パスと一致し、前回 run の終了を確認できた場合だけ。
   前回 run が終了処理の最後に書く `.ses-pitr-run-ended` があれば、どの実行環境の run でも終了済みと判定する。
-  無い場合は、所有マーカーの `pidns=`（PID 名前空間の識別子）が本 run と同じときだけ `kill -0` で判定し、
-  別の実行環境（コンテナ・WSL・別の MSYS 等）で作られた・識別子の無い旧形式のマーカーは判定できないため退避しない
-  （表示される復旧手順に従って手動で退避する）。**W1-B1 より前の harness が残した既定 WORK は旧形式のため、
-  更新後の最初の実行で 1 回だけ手動の退避が必要になる。**
+  無い場合は、所有マーカーの `pidns=`（PID 名前空間の識別子）・`owner=`（`uid:<id -u>`）・`session=`（Linux は `n/a`、
+  Git for Windows / Cygwin は `win:<Windows の session ID>:<global|local>`）がすべて本 run と同じときだけ `kill -0` で判定する。
+  Cygwin のプロセス表は Windows の session と昇格状態（`SeCreateGlobalPrivilege` の有無）で分かれ得るため、別の利用者・
+  session・昇格状態の run の PID は `kill -0` で見えないことがある（RB-W W-6）。`kill -0` の失敗は `ESRCH`（C locale の
+  `No such process`）だけを終了済みとし、`EPERM`（別の利用者のプロセスは存在する）やそれ以外の失敗は実行中として扱う。
+  別の実行環境（コンテナ・WSL・別の MSYS・別の利用者・別の session 等）で作られた・識別子の無い旧形式のマーカーは
+  判定できないため退避しない（表示される復旧手順に従って手動で退避する）。**RB-W より前の harness が残した既定 WORK は
+  `owner=` / `session=` の無い旧形式のため、終了記録が無い場合は更新後の最初の実行で 1 回だけ手動の退避が必要になる。**
 - 固定名のコンテナ（`ses-bkup-int-*`）が残っている場合は、WORK を判定・変更する前に失敗する。
+- 所有マーカー・終了記録・合成 secret は、事前検査をせず `dd` の `conv=excl`（1 回の `open(O_CREAT|O_EXCL)`）で
+  排他作成する。名前に何か（通常ファイル・symlink・FIFO・device・directory）があれば辿らず・止まらずに失敗するため、
+  検査と作成の間の窓は無い（RB-W W-2）。`conv=excl` と `iflag=nonblock` を持つ `dd`（GNU coreutils）が無い環境では BLOCKED（2）。
 - 失敗診断（`evidence/failure-diagnostics.txt`）を含まない退避分は直近 3 件を残して自動削除し、削除したディレクトリを表示する。
   失敗診断を含む退避分と、本 harness のマーカーを持たないディレクトリ（`.integration-work.manual-*` など）は自動削除しない。

@@ -24,12 +24,14 @@ FAKE_UUID='11111111-2222-3333-4444-555555555555'
 setup_full() {
   T=$(mktemp -d)
   export TMPDIR="$T/tmp"
-  mkdir -p "$TMPDIR" "$T/capath" "$T/work" "$T/uploads/sub" "$T/staging" \
+  # RB-W 追加修正 C: uploads の根の下に版 v0 と current -> v0（production の配置）
+  mkdir -p "$TMPDIR" "$T/capath" "$T/work" "$T/uploads/v0/sub" "$T/staging" \
     "$T/replicas" "$T/scheduler" "$T/repo"
+  ln -s v0 "$T/uploads/current"
   printf '%s\n' "$FAKE_PW" > "$T/pw"
   printf '%s\n' '-----BEGIN CERTIFICATE-----' 'FAKECA' '-----END CERTIFICATE-----' > "$T/capath/fd95d540.0"
-  printf 'hello world\n' > "$T/uploads/a.txt"
-  printf '日本語データ\n' > "$T/uploads/sub/b.txt"
+  printf 'hello world\n' > "$T/uploads/v0/a.txt"
+  printf '日本語データ\n' > "$T/uploads/v0/sub/b.txt"
   touch "$T/replicas/app1.heartbeat"
 
   export MYSQL_PASSWORD_FILE="$T/pw" MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 \
@@ -39,7 +41,8 @@ setup_full() {
   export RESTIC_BIN="$FIXTURES/restic" RESTIC_REAL_BIN=/usr/local/bin/restic
   export RESTIC_ARGV_LOG="$T/restic-argv.log" FAKE_ARGV_LOG="$T/argv.log"
   export RESTIC_PASSWORD_FILE="$T/pw" BACKUP_REPOSITORY="$T/repo"
-  export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads" UPLOADS_STAGING_PARENT="$T/staging"
+  export BACKUP_WORK_DIR="$T/work" UPLOADS_ROOT="$T/uploads" UPLOADS_POINTER=current UPLOADS_STAGING_PARENT="$T/staging"
+  unset UPLOADS_DIR
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export PREFLIGHT_MIN_FREE_BYTES=1 QUIESCE_DEADLINE_SECONDS=20 QUIESCE_STALE_SECONDS=60
   export APP_COMMIT=test-commit-abc FLYWAY_VERSION=42 CRITICAL_TABLES=sys_use
@@ -47,9 +50,10 @@ setup_full() {
   # R1 P1-06: full coordinate は必須（archiver の初回起点）
   export FULL_COORDINATE_FILE="$T/full-coordinate"
   export FAKE_GET_LOCK_HOLD=1
-  export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+  export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
-    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
+    FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
 
   # scheduler / replica ack fixture（background）
   (
@@ -79,6 +83,19 @@ case_backup_full_normal() {
   assert_contains "$out" '"status": "VALID"' "result status VALID"
   assert_contains "$out" 'binlog.000010' "coordinate file は metadata と一致"
   assert_contains "$out" '"position": 154' "coordinate position"
+  # RB-W（2026-11-18 利用者決定）: mysqldump に --no-tablespaces を渡す（dump account に PROCESS を要らなくする）
+  local dump_argv=""
+  dump_argv=$(grep -e '--source-data=2' "$FAKE_ARGV_LOG" 2>/dev/null || true)
+  assert_contains "$dump_argv" "--no-tablespaces" "mysqldump に --no-tablespaces を渡す"
+  assert_contains "$dump_argv" "--single-transaction" "mysqldump に --single-transaction を渡す"
+  # RB-W 追加修正 C: どの版（pointer の指す先）を backup したかを結果・index・metadata に記録する
+  assert_contains "$out" '"uploads_pointer": {' "結果 JSON に pointer と版を記録"
+  assert_contains "$out" '"target": "v0"' "結果 JSON に backup した版を記録"
+  local fidx
+  fidx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
+  assert_eq "current/v0" "$(jq -r '"\(.uploads_pointer.name)/\(.uploads_pointer.target)"' "$fidx" 2>/dev/null)" \
+    "index（= metadata.json）に pointer と版を記録"
+  assert_eq "v0" "$(jq -r '.uploads.pointer_target // empty' "$fidx" 2>/dev/null)" "uploads の snapshot JSON にも版を記録"
   # R1 P1-06: full coordinate file が書き出されていること
   if [[ -f "$FULL_COORDINATE_FILE" ]] && grep -qx 'binlog.000010' "$FULL_COORDINATE_FILE"; then
     test_assert "FULL_COORDINATE_FILE を書き出し（archiver の初回起点）"
@@ -214,6 +231,33 @@ case_backup_full_coord_parse_failure() {
   teardown_full
 }
 
+# RB-W 8.4 対応: 8.4 の mysqldump が書く CHANGE REPLICATION SOURCE TO の coordinate を読み、旧形式（CHANGE MASTER TO。
+# 8.4 の server には無い）だけの dump は coordinate を取れずに失敗する（fail-closed）。
+case_backup_full_coord_source_syntax() {
+  setup_full
+  printf '%s\n' "-- MySQL dump 10.13  Distrib 8.4.13, for Linux (x86_64)" \
+    "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='binlog.000123', SOURCE_LOG_POS=4567;" > "$T/source-dump.sql"
+  export FAKE_DUMP_FILE="$T/source-dump.sql"
+  local out="" code idx
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_zero "$code" "CHANGE REPLICATION SOURCE TO の dump で full backup 成功"
+  idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
+  assert_eq "binlog.000123/4567" "$(jq -r '"\(.binlog_start.file)/\(.binlog_start.position)"' "$idx" 2>/dev/null)" \
+    "SOURCE_LOG_FILE / SOURCE_LOG_POS を記録"
+  teardown_full
+
+  setup_full
+  printf '%s\n' "-- MySQL dump" "-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000123', MASTER_LOG_POS=4567;" > "$T/master-dump.sql"
+  export FAKE_DUMP_FILE="$T/master-dump.sql"
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "旧形式（CHANGE MASTER TO）だけの dump は coordinate を取れずに失敗"
+  assert_contains "$out" "coordinate" "理由を通知"
+  unset FAKE_DUMP_FILE
+  teardown_full
+}
+
 case_backup_full_quiesce_failure() {
   setup_full
   # replica を全部 stale にする
@@ -230,9 +274,35 @@ case_backup_full_quiesce_failure() {
   teardown_full
 }
 
+# RB-W 追加修正 C: 廃止した UPLOADS_DIR が残っている設定・pointer を解決できない配置では backup しない（fail-closed）
+case_backup_full_rejects_old_uploads_setting_and_unresolved_pointer() {
+  local out="" code
+  setup_full
+  export UPLOADS_DIR="$T/uploads/v0"
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  unset UPLOADS_DIR
+  assert_nonzero "$code" "廃止した UPLOADS_DIR が残っていれば非 0"
+  assert_contains "$out" "UPLOADS_DIR は廃止しました" "廃止を通知"
+  teardown_full
+
+  setup_full
+  rm "$T/uploads/current"
+  ln -s "$T/uploads/v0" "$T/uploads/current"
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "絶対 path の pointer では非 0"
+  assert_not_contains "$out" '"status": "VALID"' "VALID を出さない"
+  local count
+  count=$(RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+    /usr/local/bin/restic snapshots --json 2>/dev/null | jq 'length')
+  assert_eq 0 "${count:-0}" "snapshot を発行しない"
+  teardown_full
+}
+
 case_backup_full_uploads_symlink() {
   setup_full
-  ln -s a.txt "$T/uploads/link.txt"
+  ln -s a.txt "$T/uploads/v0/link.txt"
   local out=""
   out=$("$BACKUP_FULL" 2>&1)
   local code=$?
@@ -365,14 +435,64 @@ run_case case_manifest_corrupt_one_byte
 run_case case_manifest_extra_file
 run_case case_manifest_absolute_path
 run_case case_backup_full_coord_parse_failure
+run_case case_backup_full_coord_source_syntax
 run_case case_backup_full_quiesce_failure
+run_case case_backup_full_rejects_old_uploads_setting_and_unresolved_pointer
 run_case case_backup_full_uploads_symlink
 run_case case_backup_full_restic_failure
 run_case case_backup_full_failure_releases_quiesce
 run_case case_backup_full_no_secret_leak
+# G-04（RB-W W-1）: schema fingerprint は設定によらず静止区間内に採取し、metadata（manifest 対象）と index に
+# 記録する。期待値は算出方式名の 1 行 + LC_ALL=C で並べた行の SHA-256（lib を使わずに計算する）。
+case_backup_full_records_schema_fingerprint() {
+  setup_full
+  export FAKE_SCHEMA_ROWS="schema\t'utf8mb4'\t'utf8mb4_unicode_ci'\ncolumn\t'sys_use'\t'2'\t'name'\t'varchar(64)'\t'YES'\tNULL\t'utf8mb4'\t'utf8mb4_0900_ai_ci'\t''\t''\tNULL\ntable\t'sys_use'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\ncolumn\t'sys_use'\t'1'\t'id'\t'bigint'\t'NO'\tNULL\tNULL\tNULL\t'auto_increment'\t''\tNULL\n"
+  local out="" code expected idx
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_zero "$code" "schema fingerprint 付き full backup 成功"
+  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v2 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
+    | sha256sum | awk '{print $1}')
+  idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
+  assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "index に schema fingerprint を記録"
+  assert_eq "mysql-information-schema-sha256-v2" "$(jq -r '.schema_fingerprint.algorithm // empty' "$idx" 2>/dev/null)" \
+    "算出方式を記録"
+  assert_eq "2" "$(jq -r '.schema_fingerprint.sections.column.count // empty' "$idx" 2>/dev/null)" "区分ごとの件数を記録"
+  # RB-W P2-1: DB の既定の文字集合・照合順序を記録する（restore.sh が復元 DB をこの値で作る）
+  assert_eq "utf8mb4/utf8mb4_unicode_ci" \
+    "$(jq -r '"\(.schema_fingerprint.database.character_set)/\(.schema_fingerprint.database.collation)"' "$idx" 2>/dev/null)" \
+    "DB の既定の文字集合・照合順序を記録"
+  assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "ses-backup:schema-fingerprint" "information_schema から schema を取得"
+  assert_contains "$(grep 'ses-backup:schema-fingerprint' "$FAKE_ARGV_LOG" 2>/dev/null)" "ses_manager_db" "対象 DB を指定して取得"
+  unset FAKE_SCHEMA_ROWS
+  teardown_full
+}
+
+# schema fingerprint を計算できなければ full を VALID にせず、静止は解除する（fail-closed）。
+case_backup_full_schema_fingerprint_failure_fails_closed() {
+  setup_full
+  export QUIESCE_STATE_DIR="$T/quiesce-state"
+  export FAKE_SCHEMA_RC=1
+  local out="" code
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "schema fingerprint を計算できなければ非 0"
+  assert_contains "$out" "schema fingerprint を計算できません" "原因を通知"
+  if compgen -G "$T/work/index/full-*.json" > /dev/null; then
+    test_fail "schema fingerprint 失敗時は full を index 登録しない" "index が登録されています"
+  else
+    test_assert "schema fingerprint 失敗時は full を index 登録しない"
+  fi
+  assert_no_file "$QUIESCE_STATE_DIR/ddl-session.pid" "失敗後も静止を解除する"
+  unset QUIESCE_STATE_DIR FAKE_SCHEMA_RC
+  teardown_full
+}
+
 run_case case_backup_full_records_content_hash
 run_case case_backup_full_content_hash_failure_fails_closed
 run_case case_backup_full_content_hash_requires_primary_key
+run_case case_backup_full_records_schema_fingerprint
+run_case case_backup_full_schema_fingerprint_failure_fails_closed
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

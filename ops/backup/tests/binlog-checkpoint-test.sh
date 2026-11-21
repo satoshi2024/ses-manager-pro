@@ -37,7 +37,7 @@ setup_common() {
   # 前 case の fake 制御 env が漏れないようにする
   unset FAKE_BINLOG_VERIFY_RC FAKE_ARCHIVE_RC FAKE_FLUSH_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
     FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID FAKE_RESTIC_BACKUP_RC \
-    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
   unset MYSQL_PWD
 }
 
@@ -70,12 +70,15 @@ start_quiesce_fixtures() {
 
 setup_checkpoint_env() {
   setup_binlog_env
-  export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads" UPLOADS_STAGING_PARENT="$T/staging"
+  # RB-W 追加修正 C: uploads の根の下に版 v0 と current -> v0（production の配置）
+  export BACKUP_WORK_DIR="$T/work" UPLOADS_ROOT="$T/uploads" UPLOADS_POINTER=current UPLOADS_STAGING_PARENT="$T/staging"
+  unset UPLOADS_DIR
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export APP_COMMIT=test FLYWAY_VERSION=42 MYSQL_DATABASE=ses_manager_db
   export CHECKPOINT_ARCHIVER_WAIT=3
-  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_DIR/sub" "$UPLOADS_STAGING_PARENT"
-  printf 'uploads-data\n' > "$UPLOADS_DIR/sub/f.txt"
+  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_ROOT/v0/sub" "$UPLOADS_STAGING_PARENT"
+  ln -s v0 "$UPLOADS_ROOT/current"
+  printf 'uploads-data\n' > "$UPLOADS_ROOT/v0/sub/f.txt"
   start_quiesce_fixtures
 }
 
@@ -317,6 +320,41 @@ case_checkpoint_records_content_hash() {
   kill "$FIX_PID" 2>/dev/null || true
 }
 
+# G-04（RB-W W-1）: checkpoint も設定によらず静止区間内（closed coordinate 時点）の schema fingerprint を記録し、
+# 計算できなければ VALID にしない。
+case_checkpoint_records_schema_fingerprint() {
+  setup_checkpoint_env
+  head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+  export FAKE_SCHEMA_ROWS="schema\t'utf8mb4'\t'utf8mb4_unicode_ci'\ntable\t'marker_test'\t'BASE TABLE'\t'InnoDB'\t'utf8mb4_0900_ai_ci'\t''\nindex\t'marker_test'\t'PRIMARY'\t'0'\t'1'\t'id'\tNULL\t'A'\t'BTREE'\tNULL\t'YES'\n"
+  local out="" code expected idx
+  out=$("$CHECKPOINT" 2>&1)
+  code=$?
+  assert_zero "$code" "schema fingerprint 付き checkpoint 成功"
+  expected=$(printf '%s\n%s\n' mysql-information-schema-sha256-v2 "$(printf '%b' "$FAKE_SCHEMA_ROWS" | LC_ALL=C sort)" \
+    | sha256sum | awk '{print $1}')
+  idx=$(ls "$BACKUP_WORK_DIR"/index/checkpoint-*.json 2>/dev/null | head -n 1)
+  assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "checkpoint index に schema fingerprint を記録"
+  # RB-W 追加修正 C: checkpoint も backup した版（pointer の指す先）を記録する（復元時にどの版かを示す）
+  assert_eq "current/v0" "$(jq -r '"\(.uploads_pointer.name)/\(.uploads_pointer.target)"' "$idx" 2>/dev/null)" \
+    "checkpoint index に pointer と版を記録"
+  kill "$FIX_PID" 2>/dev/null || true
+
+  setup_checkpoint_env
+  head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+  export FAKE_SCHEMA_RC=1
+  out=$("$CHECKPOINT" 2>&1)
+  code=$?
+  assert_nonzero "$code" "schema fingerprint を計算できなければ checkpoint は非 0"
+  assert_contains "$out" "schema fingerprint を計算できません" "原因を通知"
+  if compgen -G "$BACKUP_WORK_DIR/index/checkpoint-*.json" > /dev/null; then
+    test_fail "schema fingerprint 失敗時は checkpoint を index 登録しない" "index が登録されています"
+  else
+    test_assert "schema fingerprint 失敗時は checkpoint を index 登録しない"
+  fi
+  unset FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
+  kill "$FIX_PID" 2>/dev/null || true
+}
+
 case_checkpoint_truncated_reject() {
   setup_checkpoint_env
   printf 'short\n' > "$BINLOG_RAW_DIR/binlog.000002"
@@ -371,6 +409,7 @@ run_case case_snapshot_restic_fail_keeps_raw
 run_case case_continuity_gap
 run_case case_checkpoint_normal
 run_case case_checkpoint_records_content_hash
+run_case case_checkpoint_records_schema_fingerprint
 run_case case_checkpoint_truncated_reject
 run_case case_checkpoint_checksum_reject
 run_case case_checkpoint_rotation_twice

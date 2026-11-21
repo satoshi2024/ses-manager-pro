@@ -118,14 +118,9 @@ main() {
   approval::collect_and_verify "$plan_path" "$target_uuid" "$CLAIM1" "$CLAIM2" \
     || restore::fail "承認が不足または不正です"
 
-  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
-  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
-  # target guard が source と同一 UUID を拒否済み）。
-  # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
-  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "RESET MASTER;" 2>/dev/null; then
-    restore::fail "target の GTID 状態をリセットできません（RESET MASTER）。再 restore の正しさを保証できません"
-  fi
+  # target を変える最初の操作（RESET BINARY LOGS AND GTIDS）は、snapshot の取得・manifest と binlog の SHA の照合・
+  # full の metadata.json の DB の既定値の確認がすべて済んだ後（下の 4) の直前）に行う（RB-W P3-4。以前は承認の直後に
+  # 行っており、記録の欠けた backup でも target を変えてから失敗していた）。
 
   # staging（失敗時は read-only に隔離）
   STAGE_DIR="$STAGING_ROOT/$(basename "$plan_path" .json)-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -185,9 +180,32 @@ main() {
   local dump_file
   dump_file=$(find "$full_root" -name '*.sql' -type f -print -quit 2>/dev/null)
   [[ -n "$dump_file" ]] || restore::fail "dump が見つかりません"
+  # RB-W P2-1: 復元 DB は backup 時の DB の既定の文字集合・照合順序で作る（dump は --databases を使わないため
+  # CREATE DATABASE を含まない）。server の既定（utf8mb4_0900_ai_ci）で作ると、cutover 後に文字集合を書かずに作る
+  # table・routine の照合順序が production と変わる。値は manifest で検証した full の metadata.json の
+  # schema_fingerprint.database から読む。既に作られた空の DB（target guard で確認済み）も ALTER で揃える。
+  # full より後の ALTER DATABASE は binlog replay が再現する。
+  local db_charset db_collation
+  db_charset=$(jq -r '.schema_fingerprint.database.character_set // empty' "$full_root/metadata.json" 2>/dev/null || true)
+  db_collation=$(jq -r '.schema_fingerprint.database.collation // empty' "$full_root/metadata.json" 2>/dev/null || true)
+  if [[ ! "$db_charset" =~ ^[A-Za-z0-9_]{1,64}$ || ! "$db_collation" =~ ^[A-Za-z0-9_]{1,64}$ ]]; then
+    restore::fail "full の metadata.json に DB の既定の文字集合・照合順序（schema_fingerprint.database）がありません。backup 時と同じ照合順序で復元 DB を作れないため復元しません"
+  fi
+
+  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
+  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
+  # target guard が source と同一 UUID を拒否済み）。
+  # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
+  # RB-W P3-4: 復元に要る入力の検査（snapshot・manifest・binlog の SHA・DB の既定値の記録）がすべて済んでから実行する。
+  # RB-W 8.4 対応: MySQL 8.4 では RESET MASTER が削除されたため、8.2 以降の RESET BINARY LOGS AND GTIDS を使う。
+  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
+    --execute "RESET BINARY LOGS AND GTIDS;" 2>/dev/null; then
+    restore::fail "target の GTID 状態をリセットできません（RESET BINARY LOGS AND GTIDS）。再 restore の正しさを保証できません"
+  fi
+
   "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" --binary-mode \
-    --execute "CREATE DATABASE IF NOT EXISTS \`$TARGET_DATABASE\` CHARACTER SET utf8mb4;" 2>/dev/null \
-    || restore::fail "target DB を作成できません"
+    --execute "CREATE DATABASE IF NOT EXISTS \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation; ALTER DATABASE \`$TARGET_DATABASE\` CHARACTER SET $db_charset COLLATE $db_collation;" 2>/dev/null \
+    || restore::fail "target DB を backup 時の文字集合・照合順序（$db_charset / $db_collation）で作成できません"
   "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" --binary-mode "$TARGET_DATABASE" < "$dump_file" \
     || restore::fail "dump import に失敗しました"
 
@@ -220,9 +238,18 @@ main() {
   fi
 
   # 6) uploads staging を安全展開（production path は変更しない）
+  # 本番の uploads へは uploads-cutover.sh stage が新しい版の directory として複製し、switch が pointer（current）を
+  # 1 回の rename で切り替える（RB-W 追加修正 C。今の版は上書きしない）。
   local uploads_src="$ckpt_root/uploads"
   local uploads_stage="$STAGE_DIR/uploads-ready"
   safe_extract::copy "$uploads_src" "$uploads_stage" || restore::fail "uploads の安全展開に失敗しました"
+  # backup した時の pointer と版（checkpoint の metadata.json の uploads_pointer。記録の無い checkpoint は null）。
+  # 新しい版の名前を決めるときの参考に出す（復元先の版の名前はこの値と別にする）
+  local uploads_backup_pointer="null"
+  if [[ -f "$ckpt_root/metadata.json" ]]; then
+    uploads_backup_pointer=$(jq -c '.uploads_pointer // null' "$ckpt_root/metadata.json" 2>/dev/null) || uploads_backup_pointer="null"
+    [[ -n "$uploads_backup_pointer" ]] || uploads_backup_pointer="null"
+  fi
 
   RESTORE_STATE="RESTORED"
   jq -n \
@@ -232,13 +259,14 @@ main() {
     --arg target_database "$TARGET_DATABASE" \
     --arg staging_dir "$STAGE_DIR" \
     --arg uploads_ready "$uploads_stage" \
+    --argjson uploads_backup_pointer "$uploads_backup_pointer" \
     --arg start_position "$start_pos" \
     --arg stop_position "$stop_pos" \
     --arg binlog_count "$binlog_count" \
     --arg replay_log "$STAGE_DIR/replay.log" \
     '{state: $state, plan_id: $plan_id, target_uuid: $target_uuid,
       target_database: $target_database, staging_dir: $staging_dir,
-      uploads_ready: $uploads_ready,
+      uploads_ready: $uploads_ready, uploads_backup_pointer: $uploads_backup_pointer,
       replay: {start_position: ($start_position|tonumber), stop_position: ($stop_position|tonumber),
                binlog_count: ($binlog_count|tonumber), log: $replay_log}}'
   return 0

@@ -6,31 +6,29 @@
 # - closed file の end position（SHOW BINARY LOGS の File_size）照合
 # ============================================================
 
-# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）
+# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）。backup-full.sh が使う唯一の実装
+# （RB-W P3-7 で backup-full.sh の同じ実装を消し、ここへまとめた）。
+# MySQL 8.4 の mysqldump は CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='…', SOURCE_LOG_POS=…; を書く
+# （8.4 の server は CHANGE MASTER TO を持たない）。production は 8.4 だけのため 8.0 の旧形式（CHANGE MASTER TO）は読まない。
+# 旧形式だけの dump は coordinate を取れずに失敗する（fail-closed）。パイプを使わず bash の正規表現で取り出す（P1-1）。
 binlog::parse_dump_coords() { # dump_file
-  local dump=$1
+  local dump=$1 line
+  local re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
   BINLOG_START_FILE=""
   BINLOG_START_POSITION=""
   while IFS= read -r line; do
-    case "$line" in
-      *"CHANGE MASTER TO"*)
-        local f="" p=""
-        f=$(printf '%s' "$line" | grep -oE "MASTER_LOG_FILE='[^']+'" | head -n1 | sed "s/MASTER_LOG_FILE='//;s/'//")
-        p=$(printf '%s' "$line" | grep -oE "MASTER_LOG_POS=[0-9]+" | head -n1 | sed 's/MASTER_LOG_POS=//')
-        if [[ -n "$f" && -n "$p" ]]; then
-          BINLOG_START_FILE=$f
-          BINLOG_START_POSITION=$p
-          return 0
-        fi
-        ;;
-    esac
+    if [[ "$line" =~ $re ]]; then
+      BINLOG_START_FILE=${BASH_REMATCH[1]}
+      BINLOG_START_POSITION=${BASH_REMATCH[2]}
+      return 0
+    fi
   done < "$dump"
   return 1
 }
 
 # dump 内の GTID 状態（GTID_EXECUTED を設定）
 binlog::parse_dump_gtid() { # dump_file
-  local dump=$1
+  local dump=$1 line
   GTID_EXECUTED=""
   while IFS= read -r line; do
     case "$line" in
@@ -104,6 +102,14 @@ binlog::files_continuous() { # dir start_file end_file
     fi
   done < <(binlog::files_in_range "$start" "$end") || return 1
   return 0
+}
+
+# SHOW BINARY LOGS の出力（「file 名 File_size …」の行）から指定 file の File_size を出力する（無ければ何も出さない）。
+# 一覧は here-string で渡す（パイプにしない。RB-W P1-1）。checkpoint ごとの FLUSH BINARY LOGS で、binlog の保持期間内の
+# 一覧は pipe の容量（Linux 64 KiB）を超え得る。パイプの後段の awk が該当行で exit すると、残りを書く前段の printf が
+# SIGPIPE（141）で終わり、呼び出し側（set -Eeuo pipefail）の archive / snapshot / checkpoint が止まっていた。
+binlog::size_from_logs() { # <SHOW BINARY LOGS の出力> <file>
+  awk -v f="$2" '$1 == f { print $2; exit }' <<< "$1"
 }
 
 # truncation 検査: local file の size が期待値以上（source File_size）であること
