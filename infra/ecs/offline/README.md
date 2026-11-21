@@ -3,6 +3,8 @@
 **NOT real AWS.** No ECR push, no ECS deploy, no AWS API.
 This is an **offline AWS / local ECS-like simulation**, not a substitute for AWS actual acceptance.
 
+`validate-task-definition.ps1` と `test-validate-task-definition.ps1` は、Windows PowerShell 5.1 が BOM の無い file を ANSI で読むため ASCII だけで書く（日本語の例外。`ProductionTaskDefinitionTemplateTest` が検査する）。
+
 ## Probe convention (REV-ECS-P1-001)
 
 | Probe | Path | Use |
@@ -23,6 +25,7 @@ pwsh infra/ecs/build-image.ps1
 
 ```powershell
 pwsh infra/ecs/offline/validate-task-definition.ps1
+pwsh infra/ecs/offline/test-validate-task-definition.ps1
 pwsh infra/ecs/offline/verify-offline-sim.ps1 -EgressNegativeSelfTestOnly
 pwsh infra/ecs/offline/verify-offline-sim.ps1
 ```
