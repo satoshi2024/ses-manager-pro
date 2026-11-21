@@ -317,7 +317,10 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
 ./uploads-cutover.sh status --root <uploads の根>
 # DB: read-only smoke は新しい DB と新しい版の組合せで行われる
 ./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
-# rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）は、逆向きの switch と必ず対で行う
+# write-enable 前に戻すとき（手順は runbooks/restore-cutover.md §4.5.1 の 5）:
+#  - cutover.sh が read-only smoke の失敗で exit 3（state=rolled-back）のときは rollback-cutover.sh を実行せず、
+#    逆向きの switch だけを行い、OLD_ENV_SMOKE_SCRIPT を手で実行して旧環境を確かめる
+#  - それ以外（staged / read-only-smoke-passed / single-writer）から戻すときは、次の 2 つを必ず対で行う
 ./rollback-cutover.sh --plan <plan-id>
 ./uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
 # app と scheduler を起動する前に、DB（CUTOVER_STATE_FILE の state・plan_id）と pointer（status）の対を確かめる

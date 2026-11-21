@@ -106,11 +106,18 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
    `uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>` の後、
    `uploads-cutover.sh status --root <uploads の根>` が rc 0 で `target=<新しい版>` を出し、`leftover=` と `error=` が
    無いことを確かめる。出力の `rollback=` の command を change ticket に控える。
-4. **`cutover.sh`**（§3）: read-only smoke は、新しい DB と 3 で切り替えた新しい版の組合せで行われる。
-5. **write-enable の前に戻すとき**（read-only smoke の失敗で `cutover.sh` が `rolled-back`・exit 3 で止まった場合を含む）:
-   `rollback-cutover.sh`（§4）と逆向きの switch（`--to <旧版> --expect <新しい版>`。3 で控えた `rollback=`）を
-   **必ず対で**行い、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。どちらか一方だけで
-   app・scheduler を起動しない。
+4. **`cutover.sh`**（§3）: read-only smoke は、新しい DB と 3 で切り替えた新しい版の組合せで行われる。smoke に使う app は
+   scheduler・Flyway・mail・外部 API・cleanup を止めて起動し（`validate-restore.sh` の前提）、upload root は
+   `UPLOAD_BASE_PATH=/app/uploads/current` を使う。
+5. **write-enable の前に戻すとき**: 場合によって DB 側の操作が違う。
+   - read-only smoke の失敗で `cutover.sh` が `rolled-back`・exit 3 で止まった場合: DB の状態は `cutover.sh` が既に
+     `rolled-back` にしているので、`rollback-cutover.sh` は実行しない（「すでに rolled-back 済み」で拒否される）。
+     逆向きの switch（`--to <旧版> --expect <新しい版>`。3 で控えた `rollback=`）を行い、`OLD_ENV_SMOKE_SCRIPT` を
+     手で実行して旧環境が健全であることを確かめる。
+   - `staged`・`read-only-smoke-passed`・`single-writer` から人の判断で戻す場合: `rollback-cutover.sh`（§4）と
+     逆向きの switch を**必ず対で**行う。
+   どちらの場合も、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。DB と pointer の
+   どちらか一方だけを戻した状態で app・scheduler を起動しない。
 6. **`write-enabled` の後**は uploads も戻さない（DB と同じ。§2 の「`write-enabled` からの rollback は禁止」）。旧版は
    消さずに残す（削除は deploy-runbook §4.4 の D15 の手順だけ）。
 7. **app と scheduler を起動する前に、DB と pointer が一対であることを確かめて記録する**:
@@ -125,7 +132,8 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
 
    期待: `state=write-enabled` なら `target=<新しい版>`（その plan の `uploads_ready` から stage した版）、
    `state=rolled-back` なら `target=<旧版>`。plan-id・checkpoint・版の名前・`status` の出力を対として change ticket と
-   配備記録に残す。一致しなければ起動しない。
+   配備記録に残す。一致しなければ起動しない。`state` がそれ以外（`staged`・`read-only-smoke-passed`・`single-writer`）
+   のときも起動しない。write-enable の前なので、5 に従って戻すか、§3 に従って write-enable まで進めてから 7 をやり直す。
 
 ### 4.5.2 各 command の性質
 
