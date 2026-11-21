@@ -1,6 +1,6 @@
 # backup の書込み静止（app 内の静止応答）要件
 
-- 状態: **草案（第 1 段階: spec のみ。第 3 版: `32733d28` の review、`c2e18127` の差分 review、2026-11-21 の利用者の決定 U-1〜U-14 を反映）**。独立 review の PASS 後に、別の指示で実装する。本書の段階では実装・試験の実行は無い。
+- 状態: **草案（第 1 段階: spec のみ。第 3 版: `32733d28` の review、`c2e18127` の差分 review、2026-11-21 の利用者の決定 U-1〜U-14、`9b8cc0a5` の差分 review を反映した第 4 版）**。独立 review の PASS 後に、別の指示で実装する。本書の段階では実装・試験の実行は無い。
 - branch: `codex/snf-rb-quiesce-20261121`（起点 main `5ddddc2b`）。
 - 関連する正本: `.kiro/specs/database-backup-recovery/`（HFP-03。RQ-002 と design §5）、`ops/backup/`、`.kiro/specs/production-launch/deploy-runbook.md`。
 - 設計は `design.md`、実装の手順は `tasks.md`。利用者の決定は `design.md` §16（U-1〜U-14、全て決定済み）、review の指摘の対応先は `design.md` §20。
@@ -88,7 +88,7 @@
 
 - 止める対象は app の全ての DB 書込みと uploads の file の変更である: HTTP（更新の method、書込みを伴う既知の GET、bootstrap・break-glass の session、login）、`@Scheduled`（ShedLock の表を含む）、`@Async`、outbox・会計 worker、起動時の処理。
 - 静止中の新しい更新の要求には 503 を返す。API は `ApiResult` の JSON（`code=503`、`Retry-After`、`X-SES-Error-Code: BACKUP_QUIESCED`）、画面は統一エラーページ、PWA の送信は queue に残して自動で再送させる。download は 503（U-10）。外部 API（NF05）は `ExternalApiErrorWriter` の 503（retryable・Retry-After）で、監査行は書かず抑止の metric だけを数え、NF05 を開ける前に NF05 owner の受理を得る（U-6）。
-- 静止中の logout は、HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（U-8）。
+- 静止中の logout は、HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（U-8）。後で書く値（時刻・接続元の IP・correlation ID 等）は logout の時点で取っておき、解除後の書込みの間に gate がまた閉じたら捨てずに次の解除へ回す。portal の logout（`/api/portal/auth/logout`。DB の session）は U-8 の対象外で、静止中は 503 にする。
 - 参照の要求は止めない。静止中に permit の無い thread が借りる業務の DB 接続は読取り専用にする（最後の防線）。session の最終利用時刻の更新は省き、idle は gate が閉じた時刻で判定し、静止中の最終利用の時刻を解除の後へ持ち越す（U-14。緩和は最大保持時間まで）。静止中の best-effort の監査は DB へ書かず WARN の application log に残す（U-9）。
 - scheduler の job は開始を解除まで待たせる（飛ばさない。SHUTDOWN・割込みでは待たない）。async の task は、閉じる前（または permit を持つ thread）の投入を排水の対象にし、閉じた後の投入は thread を待たせずに保留して、開いた時に投入し直す。
 - permit と書込み可能な業務の接続の数は「先に増やしてから gate の状態を読む」順で扱い、gate は「先に閉じてから数を読み、確定の前に読み直す」。
@@ -105,7 +105,7 @@
 - **BWQ-AC-002-06** `MessageBundleConsistencyTest` が通り、新しい key は 4 つの bundle で別々に翻訳されている。
 - **BWQ-AC-002-07** 多数の thread が業務の接続の借り返しと `setReadOnly` の切替えを続け、gate の開閉を繰り返す負荷の中で、ack を書いた後・開く前に permit の無い thread へ書込み可能な接続が渡されない（unit と実 MySQL）。
 - **BWQ-AC-002-08** full の静止（最大保持時間が idle 期限より長い）の間に要求を続けた利用者の session が、静止の間も解除の後の最初の要求でも idle 期限の超過で失効せず、解除の後の touch で `idle_expires_at` が延びる。最大保持時間を超える緩和は無い。
-- **BWQ-AC-002-09** 静止中の logout は成功し、同じ JSESSIONID は直ちに使えなくなる。解除の後に `t_user_session` の失効と `LOGOUT` の監査が DB に書かれる。静止中の best-effort の監査は DB に入らず WARN の log に出る。
+- **BWQ-AC-002-09** 静止中の logout は成功し、同じ JSESSIONID は直ちに使えなくなる。解除の後に `t_user_session` の失効と `LOGOUT` の監査が DB に書かれる。監査の時刻・IP・correlation ID は logout の時点の値である。portal の logout は静止中 503 になる。静止中の best-effort の監査は DB に入らず WARN の log に出る。
 
 ### BWQ-RQ-003: 中断された静止を VALID にしない（安全側の自動再開）
 
@@ -136,7 +136,7 @@
 
 受入基準:
 
-- **BWQ-AC-004-01** graceful shutdown と起動の失敗のどちらでも、instance の行は業務の Hikari が閉じた後に `STOPPED` になる。停止の記録が無い instance は、状態不明の閾値（既定 60 秒）〜停止済みの閾値（既定 300 秒）の間は ack が無ければ backup を失敗させ、それより古く要求の後の heartbeat も無ければ無視される。
+- **BWQ-AC-004-01** graceful shutdown と起動の失敗のどちらでも、instance の行は業務の Hikari が閉じた後に `STOPPED` になる。停止の時に permit・書込み可能な接続が 10 秒で 0 にならなければ STOPPED は書かれない。prod と prod 以外の profile のどちらでも、破棄の順の依存が循環せず context が起動する。停止の記録が無い instance は、状態不明の閾値（既定 60 秒）〜停止済みの閾値（既定 300 秒）の間は ack が無ければ backup を失敗させ、それより古く要求の後の heartbeat も無ければ無視される。
 - **BWQ-AC-004-02** heartbeat を書けない状態を self-fence の閾値より長く続けると、gate は FENCED になり更新の要求は 503 になる。
 - **BWQ-AC-004-03** provider は、instance が申告した閾値が `QUIESCE_STALE_SECONDS`・lease と整合しない場合と、protocol の版が違う場合に失敗する。
 - **BWQ-AC-004-04** 事前の確認と要求の登録の間に登録された instance も ack を求められる。登録の後に唯一の instance が止まり必要な instance が 0 になると失敗する。要求の前からの instance が整合時刻の後に ack すると verify は失敗する。
@@ -144,14 +144,14 @@
 
 ### BWQ-RQ-005: app の停止を確かめる provider（初回 backup・保守時間）
 
-- `quiesce-app-stopped` は、APP_STOPPED の保持を先に登録して commit し、その後で信号表の instance が全て停止済みであることを確かめる。
+- `quiesce-app-stopped` は、APP_STOPPED の保持を先に登録して commit し、その後で信号表の instance が全て停止済みであることを確かめる。STOPPED でない停止口（DISABLED）の行は heartbeat の古さによらず失敗の理由にする（停止口の app は heartbeat が書けないまま書き続けている可能性があるため）。異常に止まった後は DBA が app の停止を確かめてから手の SQL でその行を STOPPED にする（RR-10 の例外の一覧に足す）。
 - 保持が有効な間に起動した app は、port を開く前に起動を中止する（停止口の app も同じ）。動いている app が保持を読んだら gate を閉じて ERROR を出す。
 - PROCESS は誰にも与えず、DBA の手の processlist の確認を runbook に残す（U-2）。
 - 誤用を防ぐ: `backup-full.sh --app-stopped`（と `create-checkpoint.sh --app-stopped`）の明示の引数でだけ使い、環境変数では選べない。provider は repository の固定 executable で、任意の `bash -c` は受け付けない（`ops/backup/README.md:298`。origin/main `42719b10` の行番号）。
 
 受入基準:
 
-- **BWQ-AC-005-01** 新しい heartbeat（停止口の instance を含む）が 1 件でもあれば `--app-stopped` の full は静止を取得せずに失敗する。信号表が空なら取得できる。
+- **BWQ-AC-005-01** 新しい heartbeat（停止口の instance を含む）が 1 件でもあれば `--app-stopped` の full は静止を取得せずに失敗する。信号表が空なら取得できる。heartbeat が 300 秒より古くても STOPPED でない停止口の行があれば失敗し、片付けの SQL の後は取得できる。
 - **BWQ-AC-005-02** APP_STOPPED の保持が有効な間に app を起動すると、ERROR の log を出して起動を中止する。保持の登録と app の登録が重なっても、どちらか一方が他方を見て失敗する。
 - **BWQ-AC-005-03** `QUIESCE_PROVIDER=quiesce-app-stopped` を環境変数で指定した場合、full・checkpoint は始まらずに失敗する。
 
@@ -220,7 +220,7 @@
 
 - **BWQ-AC-011-01** 初回 backup（§2 の5）が `--app-stopped` の full で、§3.4 の表単位の GRANT の後に書かれ、2 回目以降の配備の backup も同じ方式になっている。§2 の初めに backup の timer を止め、§4 の後に再開する手順がある。
 - **BWQ-AC-011-02** baseline の PROD-004 が 004a・004b に分かれ、「Backup 開始の前提」の解除の条件が循環しない。
-- **BWQ-AC-011-03** 欠けた full の取り直しの手順が README と監視の runbook にある。
+- **BWQ-AC-011-03** 欠けた full の取り直しの手順が README と監視の runbook にある。取り直しの期限（前日の full から 26 時間で full の CRITICAL になるため、当日のおよそ 04:00 まで）が書かれている。
 
 ### BWQ-RQ-012: 試験で固定する
 
@@ -244,10 +244,11 @@
 - **BWQ-AC-013-02** `UploadsMutationInventoryTest` が、既知の一覧に無い file の変更の呼出しを検出して失敗する。
 - **BWQ-AC-013-03** prod の profile で context が起動する（初期化の間の directory の作成が拒否されない）。
 
-### BWQ-RQ-014: full の最中の新しい instance で full を中止する（U-13）
+### BWQ-RQ-014: ONLINE の full の最中の新しい instance で full を中止する（U-13）
 
-- full の静止の間、保持 process は 5 秒ごとに要求の後に登録された instance を調べ、見つけたら要求を `ABORTED`（`NEW_INSTANCE`）にして静止を解く。新しい instance は起動の待ちを終えて起動する。その日の full は verify で失敗する。
+- `mode=ONLINE` かつ `job_kind=FULL` の静止の間だけ、保持 process は 5 秒ごとに要求の後に登録された instance を調べ、見つけたら要求を `ABORTED`（`NEW_INSTANCE`）にして静止を解く。新しい instance は起動の待ちを終えて起動する。job は中止の印を見て mysqldump を止め、早く失敗する。APP_STOPPED の full（配備の前の backup）は中止しない（保持の間に起動した task は起動を中止し続ける）。
 
 受入基準:
 
-- **BWQ-AC-014-01** full の最中に新しい instance を登録すると、10 秒以内に要求が `ABORTED`（`NEW_INSTANCE`）になり、app の gate が開き、新しい instance が起動し、`backup-full.sh` は非 0 で終わり、WARN `BACKUP_QUIESCE_FULL_ABORTED` が出る。checkpoint の最中の新しい instance は ack して checkpoint は続く。
+- **BWQ-AC-014-01** full の最中に新しい instance を登録すると、10 秒以内に要求が `ABORTED`（`NEW_INSTANCE`）になり、app の gate が開き、新しい instance が起動し、`backup-full.sh` は非 0 で終わり、WARN `BACKUP_QUIESCE_FULL_ABORTED` が出る。checkpoint の最中の新しい instance は ack して checkpoint は続く。release は ack の無い新しい instance の RESUMED を待たない（重大の誤報を出さない）。
+- **BWQ-AC-014-02** APP_STOPPED の full の最中に起動しようとした task では、要求は `ABORTED` にならず、その task は起動を中止する。

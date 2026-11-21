@@ -1,6 +1,6 @@
 # backup の書込み静止（app 内の静止応答）設計
 
-- 状態: **草案（第 1 段階: spec のみ。第 3 版）**。第 2 版は `32733d28` への review（P1〜P3）、第 3 版は `c2e18127` への差分 review（D-P2・D-P3）と、2026-11-21 の利用者の決定（U-1〜U-14）を反映した。要件は `requirements.md`、手順は `tasks.md`。
+- 状態: **草案（第 1 段階: spec のみ。第 4 版）**。第 2 版は `32733d28` への review（P1〜P3）、第 3 版は `c2e18127` への差分 review（D-P2・D-P3）と、2026-11-21 の利用者の決定（U-1〜U-14）、第 4 版は `9b8cc0a5` への差分 review（D3-P2・D3-P3）を反映した。要件は `requirements.md`、手順は `tasks.md`。
 - 本書は brief の 13 の設計問題（Q1〜Q13）に答える。答えの一覧は §2、利用者の決定は §16（全て決定済み）、review の指摘の対応先は §20。
 - 実測していない前提は §19 にまとめ、実装の時に確かめる。
 
@@ -61,7 +61,7 @@ sequenceDiagram
 | Q6 | DDL 凍結 | runbook で backup の timer を止め、Flyway job の callback が同じ GET_LOCK を取る（U-5） | §8 |
 | Q7 | app 停止の確認 | `quiesce-app-stopped`。保持を先に登録してから全 instance が停止済みであることを確かめる。STOPPED は業務 pool を閉じた後にだけ書く（DestructionAwareBeanPostProcessor、起動の失敗の経路も含む）。停止口で無効にした instance（DISABLED）があれば失敗 | §9 |
 | Q8 | 静止時間 | 上限 checkpoint 300 秒・full 60 分（U-1）。checkpoint は uploads 約 3,000〜5,000 件まで持つ見込みで、本番の前に staging の EFS で測る | §10 |
-| Q9 | 配備手順との関係 | §2 の初めに timer を止め、§2 の5 は停止確認の full、§4 の後に再開。PROD-004 は 004a・004b。full の最中に新しい instance が登録されたら full をやめて静止を解く（U-13）。欠けた full は手で取り直す | §11 |
+| Q9 | 配備手順との関係 | §2 の初めに timer を止め、§2 の5 は停止確認の full、§4 の後に再開。PROD-004 は 004a・004b。ONLINE の full の最中に新しい instance が登録されたら full をやめて静止を解く（U-13。APP_STOPPED の full は中止しない）。欠けた full は手で取り直す | §11 |
 | Q10 | 設定と fail-fast | `app.backup-quiesce.*`。prod の停止口は `BACKUP_QUIESCE_DISABLED_TICKET` と組でだけ（U-7）。停止中も登録と heartbeat を続け、backup は全て失敗する。範囲・JDBC・startPeriod・stopTimeout を §1.0・雛形・照合 script に入れる | §12 |
 | Q11 | 可観測性 | 固定の `errorCode=BACKUP_QUIESCE_*` の日本語 log、`ses_backup_quiesce_*` の metric、critical の条件 | §13 |
 | Q12 | 試験計画 | unit・H2・MVC・MySQL・shell・CI。CI は DB の protocol を話す shell の responder と Java の MySQL 契約試験（U-4） | §14、`tasks.md` |
@@ -234,7 +234,7 @@ ack の状態: なし → `QUIESCED` または `REFUSED` → `QUIESCED` から `
 | lease | 60 秒 | provider `QUIESCE_LEASE_SECONDS` | `fence_after + poll_interval < QUIESCE_LEASE_SECONDS − QUIESCE_LEASE_RENEW_SECONDS` |
 
 - **thread と接続を分ける**: heartbeat は専用の thread（`backup-quiesce-heartbeat`）と専用の接続 pool（`ses-backup-quiesce-heartbeat`、最大 1）で書く。要求の処理は別の thread（`backup-quiesce-responder`）の**塞がない状態機械**で行い、制御用 pool（`ses-backup-quiesce-control`、最大 2）を使う。状態機械は 200 ms ごとの tick で、1 tick に短い文を高々 1 つ実行し、排水の完了は memory の数で毎 tick 確かめる（待つための sleep・繰返しの loop を持たない）。結果不明の解決・RESUMED の繰返しも次の tick へ回す。full の排水（最長 600 秒）や REFUSED の INSERT の lock 待ちが heartbeat を止めて FENCED を誤って出すことは無い。
-- **短い timeout**: 両方の pool の接続は `connectionInitSql` で `SET SESSION innodb_lock_wait_timeout = 5` とし、Connector/J の `connectTimeout=5000`・`socketTimeout=10000`、`JdbcTemplate` の query timeout 5 秒を付ける。全て `fence-after − heartbeat-interval`（既定 15 秒）より短い。どちらも業務の pool の設定には影響しない。
+- **短い timeout**: 両方の pool の接続は `connectionInitSql` で `SET SESSION innodb_lock_wait_timeout = 5` とし、Connector/J の `connectTimeout=5000`・`socketTimeout=10000`、`JdbcTemplate` の query timeout 5 秒、Hikari の `connectionTimeout=3000`・`validationTimeout=2000` を付ける（D3-P3-3。Hikari の既定の 30 秒の接続待ちで thread が塞がれないため）。全て `fence-after − heartbeat-interval`（既定 15 秒）より短い。どちらも業務の pool の設定には影響しない。
 - どちらの thread も `ScheduledExecutorService` を自分で持つ（bean にしない）。`@Scheduled` を使わないため `APP_SCHEDULING_ENABLED=false` でも動く。`SchedulingDisabledDrainTest` の既知一覧に理由つきで載せる（BWQ-006）。
 - 最後の行（lease）の理由: app が DB に届かなくなったとき、最後に読めた hold 期限は少なくとも `lease − 延長間隔 − 読取り間隔` だけ先にあり、self-fence がそれより早く働けば FENCED が優先して書込みは止まったままになる（I-3 の上では多重の防御）。provider は instance が申告した値でこの式を確かめる。
 
@@ -244,8 +244,9 @@ provider は **毎回新しい transaction（autocommit の SELECT）** で inst
 
 | 分類 | 条件 | 扱い |
 |---|---|---|
-| 必要 | status ≠ STOPPED かつ（`age ≤ QUIESCE_DEAD_SECONDS` または `last_beat_at ≥ requested_at`） | この要求の QUIESCED の ack が要る。新しい（`age ≤ QUIESCE_STALE_SECONDS`）なら待つ。ack が無く状態不明なら失敗。`gate_state = 'DISABLED'` なら直ちに失敗（§12.2） |
-| 無視 | status = STOPPED、または `age > QUIESCE_DEAD_SECONDS` かつ `last_beat_at < requested_at` | 待たない。STOPPED は業務 pool を閉じた後にだけ書かれる（§6.11） |
+| 停止口 | status ≠ STOPPED かつ `gate_state = 'DISABLED'`（**heartbeat の古さによらない**。D3-P2-3） | ONLINE・APP_STOPPED のどちらも直ちに失敗（§12.2）。停止口は静止応答の不具合の時に使うため、heartbeat が書けないまま app が書き続けている可能性があり、古さで無視しない。正常に止まれば STOPPED になり外れる。異常に止まった後は DBA が §9.4 の手の SQL で STOPPED にする |
+| 必要 | status ≠ STOPPED かつ（`age ≤ QUIESCE_DEAD_SECONDS` または `last_beat_at ≥ requested_at`） | この要求の QUIESCED の ack が要る。新しい（`age ≤ QUIESCE_STALE_SECONDS`）なら待つ。ack が無く状態不明なら失敗 |
+| 無視 | status = STOPPED、または `age > QUIESCE_DEAD_SECONDS` かつ `last_beat_at < requested_at`（停止口の行を除く） | 待たない。STOPPED は業務 pool を閉じた後にだけ書かれる（§6.11） |
 
 - **順序**: provider は要求を INSERT して commit した後で分類し、app は instance を登録して commit した後で有効な要求を読む。どちらも commit の後に相手の行を新しい transaction で読むため、少なくとも一方は他方を見る。
 - **必要な instance は 1 つ以上（D-P2-4 (a)）**: ONLINE の acquire の成功と verify は、必要な instance が 1 つ以上で、その全てに QUIESCED があることを求める。登録の後に唯一の instance が止まり必要な instance が 0 になった場合は失敗する（観測の照合が空にならないため。L-4 の補い）。
@@ -301,7 +302,8 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | 経路 | 例 | 静止中（OPEN 以外） | 仕組み |
 |---|---|---|---|
 | HTTP の更新 method（GET・HEAD・OPTIONS 以外。`/logout` を除く） | 画面・API・PWA の送信・`/login`・`/password/change` | 503 | `BackupWriteGateFilter`（認証より前） |
-| `/logout`（POST） | | **U-8（決定済み）**: HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（§6.13） | filter は permit 無しで通し、logout の handler が解除後の書込みへ回す |
+| 社内の `/logout`（POST） | | **U-8（決定済み）**: HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（§6.13） | filter は permit 無しで通し、logout の handler が解除後の書込みへ回す |
+| portal の logout（`/api/portal/auth/logout`） | 外部の顧客・BP | 503（U-8 の対象外。DB の session のため失効を遅らせない。§6.13） | WRITE と同じ |
 | 書込みを伴う既知の GET | OIDC の `/oauth2/authorization/**`・`/login/oauth2/code/**`、freee の `/integrations/freee/**` | 503 | 同上 |
 | file の download（`ApiAuditFilter` の download 判定） | | **U-10（決定済み）**: 503（download の監査を欠かさない） | 同上 |
 | 外部 API `/external-api/**`（NF05。初回リリースは OFF で LB でも遮断） | | **U-6（決定済み）**: `ExternalApiErrorWriter` の 503（retryable・Retry-After）。監査行は書かず抑止の metric だけ。NF05 を開ける前に NF05 owner の受理が要る | 同上（§6.10） |
@@ -324,7 +326,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - idle 期限は「gate が閉じた時刻」で判定する（閉じた時点で有効だった session は静止の間に idle 期限を過ぎても失効させない）。最長の有効期間（`expires_at`）は今の時刻で判定する。
   - 通った要求の時刻を HTTP session の属性「静止中の最終利用」（`backupQuiesceLastUse`）に書く。
   - 解除の後の最初の要求は、`idle_expires_at` と「静止中の最終利用 + idle の長さ」の遅い方で idle を判定し、通れば通常の touch で `idle_expires_at` を延ばして属性を消す。そのため、静止の間に使い続けた利用者は解除の後も logout されない。
-  - 緩和の範囲: idle の判定が緩むのは最大保持時間（full 60 分）までである。閉じる前から使われていない session が、閉じた時点で有効なら静止の間は使える（決定済みの取舍）。
+  - 緩和の範囲: idle の判定が緩むのは最大保持時間（full 60 分）までである。閉じる前から使われていない session が、閉じた時点で有効なら静止の間は使える（決定済みの扱い）。ただし servlet の session の期限（`server.servlet.session.timeout` 30 分）は別に効くため、閉じる前から 30 分使われていない HTTP session はその期限で消え、実際の緩和はその範囲に収まる（D3-P3-6）。
   - HTTP session は memory にあり（単一 task）、process が落ちれば属性も session も消えるため、持越しの記録は残らない。
 - **最後の防線の変換**: 原因の連鎖に ERROR 1792（SQLSTATE `25006`）があり gate が OPEN でないときは 503 にする。判定は `BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。
 - **best-effort の監査（U-9 決定済み）**: `AuditLogServiceImpl.record` は gate が閉じていて permit が無いとき DB へ書かず、同じ内容（user・method・URI・status・applicationCode）を WARN の application log `errorCode=BACKUP_QUIESCE_AUDIT_DEFERRED` に出し、metric `skipped_writes{kind=best_effort_audit}` を数える。必須の監査（`recordRequired`）は例外になり要求は 503 になる。logout の監査だけは §6.13 のとおり解除の後に DB へ書く。
@@ -389,7 +391,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
    - **無し**: まだ状態機械の thread を始めていないため gate を変える者は他にいない。startup permit を取り、gate を OPEN にし、その後で状態機械と heartbeat の thread を始める。
    - **ONLINE**: startup permit を取らずに thread を始める（gate は CLOSING）。permit も書込み可能な接続も無いため、状態機械はすぐ排水を終えて ack する。main の thread は gate が OPEN に戻るのを `startup-wait-max`（既定 60 秒）まで待ち、I-4 の順で startup permit を取る。上限を超えたら `BACKUP_QUIESCE_STARTUP_ABORT` で中止する。
 4. `ApplicationReadyEvent` で instance を `RUNNING` にし、startup permit を返す。
-- **full の最中の起動（U-13 決定済み）**: full の最中に新しい instance が登録されると、保持 process が 5 秒以内に気付いて要求を `ABORTED`（`NEW_INSTANCE`）にし静止を解く（§7.6）。新しい instance の起動の待ちはその解除で終わるため、app は通常 1〜2 分で起動する。その日の full は verify で失敗して欠け、runbook の手順で取り直す（§11）。checkpoint の最中の起動は、新しい instance が待ちの間に ack して checkpoint は続く（区間が `startup-wait-max` より長ければ、新しい instance は起動を中止し ECS が起動し直す）。
+- **ONLINE の full の最中の起動（U-13 決定済み）**: ONLINE の full の最中に新しい instance が登録されると、保持 process が 5 秒以内に気付いて要求を `ABORTED`（`NEW_INSTANCE`）にし静止を解く（§7.6）。新しい instance の起動の待ちはその解除で終わるため、app は通常 1〜2 分で起動する。その日の full は verify で失敗して欠け、runbook の手順で取り直す（§11）。checkpoint の最中の起動は、新しい instance が待ちの間に ack して checkpoint は続く（区間が `startup-wait-max` より長ければ、新しい instance は起動を中止し ECS が起動し直す）。APP_STOPPED の full（配備の前の backup）の最中に起動した task は、保持を読んで起動を中止し続け、保持は解かれない（D3-P2-2）。
 - **startPeriod との関係**: 待つ間は Tomcat が動かず liveness が応答しない。照合 script が `startPeriod >= startup-wait-max + 120` を確かめる（§12.3）。通常の起動時間は **未実測**（SRE が staging で測る）。
 
 ### 6.9 排水と ack（状態機械の tick で進める）
@@ -422,8 +424,13 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 ### 6.11 停止（D-P2-1）
 
 - **SHUTDOWN に入る所は 2 つ**: (1) `ContextClosedEvent`（通常の停止。lifecycle の停止より前）、(2) `BackupQuiesceDataSourcePostProcessor.postProcessBeforeDestruction` が業務の `dataSource` bean（包む前の Hikari。Spring は破棄の callback を包む前の bean に登録するため、包みの `close()` は呼ばれない）を受けた時。(2) は refresh の失敗の経路（`destroyBeans()`。`ContextClosedEvent` は出ない）でも必ず通る。
-- **破棄の順を固定する**: `BeanFactoryPostProcessor` で、`taskExecutor` の依存に `dataSource` を足し（executor は DataSource より先に破棄され、最長 30 秒 task の終わりを待つ）、`dataSource` の依存に静止応答の bean を足す（静止応答と制御用・heartbeat 用の pool は DataSource より後に破棄される）。静止応答は DataSource に依存しない（pool は `DataSourceProperties` から作る）ため循環しない。
-- **STOPPED の書込み**: `postProcessBeforeDestruction(dataSource)` で SHUTDOWN にし、permit と書込み可能な接続が 0 になるのを最長 10 秒待ち、**Hikari を明示に `close()` し**（後で Spring が呼ぶ close は何もしない）、その後で heartbeat 用の接続で instance を STOPPED にする。制御用・heartbeat 用の pool は静止応答の破棄で最後に閉じる。登録の前に起動が失敗した場合は書く行が無い。
+- **破棄の順を固定する（D3-P2-1）**: `BeanFactoryPostProcessor`（`BackupQuiesceDestructionOrderPostProcessor`）で次の依存を足す。
+  - `taskExecutor` と Spring Boot の `taskScheduler` の依存に `dataSource`（executor・scheduler は DataSource より先に破棄され、executor は最長 30 秒 task の終わりを待ち、scheduler は先に止まる。D3-P3-1）。
+  - `dataSource` の依存に **最小の anchor の bean `BackupQuiesceLifecycleAnchor` だけ**。anchor は制御用・heartbeat 用の pool の holder、gate（依存の無い object）、STOPPED を書く部品だけを持ち、`DataSourceProperties` と `BackupQuiesceProperties` にだけ依存する。anchor と pool は DataSource より後に破棄される。
+  - 静止応答（状態機械・heartbeat の thread・起動の処理）は anchor を使うが、`dataSource` の依存には入れない。静止応答が使う `taskExecutor`・業務の service（`PersistentSessionService`・`AuditLogService`）・`MeterRegistry` は全て `ObjectProvider` で使う時に引く。そのため `taskExecutor → dataSource → anchor` の向きだけになり、depends-on の循環（`taskExecutor → dataSource → 静止応答 → taskExecutor`、`service → mapper → SqlSessionFactory → dataSource → 静止応答 → service`）は作られない。
+  - 試験: prod の profile と prod 以外の profile（`enabled=true`）の両方で context が起動する（depends-on の循環が無い）ことを確かめる（BWQ-003）。
+- **STOPPED の書込み**: `postProcessBeforeDestruction(dataSource)` で SHUTDOWN にし、呼んだ thread が持つ permit（起動の失敗の時に main の thread が持つ startup permit。D3-P3-1）を返し、permit と書込み可能な接続が 0 になるのを最長 10 秒待つ。**0 になった場合だけ**、Hikari を明示に `close()` し（後で Spring が呼ぶ close は何もしない）、その後で anchor が heartbeat 用の接続で instance を STOPPED にする。**10 秒で 0 にならなければ STOPPED を書かず**（WARN `BACKUP_QUIESCE_STOP_UNCONFIRMED`）、停止済みの閾値（300 秒）に任せる（D3-P3-1。書込み中の処理が残るかもしれない instance を STOPPED にしない）。制御用・heartbeat 用の pool は anchor の破棄で最後に閉じる。登録の前に起動が失敗した場合は書く行が無い。
+- `ContextClosedEvent` の listener も、SHUTDOWN に入る時に呼んだ thread が持つ permit を返す（`ApplicationRunner` の失敗で `SpringApplication` が main の thread で close する場合に、main の thread の startup permit が残らない）。
 - CLOSED の間に止まる場合は ack を RESUMED にしない。強制終了（SIGKILL）では STOPPED は書かれず、停止済みの閾値（300 秒）で判定する。
 - ECS の `stopTimeout`（D-P3-5）: SIGTERM の後、Tomcat の排水（`SHUTDOWN_TIMEOUT` 30 秒）と executor の待ち（30 秒）と STOPPED の書込みが終わる前に SIGKILL されないよう、app の container の `stopTimeout` を 120 秒にする（Fargate の上限。既定は 30 秒）。雛形と照合 script に足す（§12.3）。それでも STOPPED が無い場合は、§2 の5 は停止済みの閾値（300 秒）を待つ。
 - 試験: 通常の停止と refresh の失敗（DataSource の作成の後に初期化で例外を投げる bean）の両方で、STOPPED を書いた時点で業務の Hikari が閉じていて `taskExecutor` の task が終わっていること（BWQ-003）。
@@ -444,9 +451,10 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 
 - 静止中（gate が OPEN でなく permit が無い）に `/logout` の POST を受けたら、logout の handler は:
   1. HTTP session を直ちに無効にし、JSESSIONID の cookie を消す（従来どおり）。
-  2. `PersistentSessionService.revokeCurrent` の DB の書込み（`t_user_session` の失効）と、`logoutSuccessHandler` の監査（`LOGOUT`）を、`BackupQuiesceDeferredWrites`（解除後の書込みの一覧。memory、上限 10,000 件、超えたら最も古いものから WARN を出して捨てる）へ入れる。入れた時に同じ内容（user・session の hash の先頭 8 文字・時刻）を WARN の application log `errorCode=BACKUP_QUIESCE_DEFERRED_WRITE` に出す。
+  2. `PersistentSessionService.revokeCurrent` の DB の書込み（`t_user_session` の失効）と、`logoutSuccessHandler` の監査（`LOGOUT`）を、`BackupQuiesceDeferredWrites`（解除後の書込みの一覧。memory、上限 10,000 件、超えたら最も古いものから WARN を出して捨てる）へ入れる。**入れる時に、後で書く値を全て logout の時点で取っておく**（D3-P3-5）: user、tenant、session の hash、logout の時刻（監査の `createdAt` と失効の時刻に使う）、接続元の IP、correlation ID、method・URI・status・applicationCode。`AuditLogServiceImpl.record` は今の時刻と今の request から値を取るため、解除後の書込みには取っておいた値をそのまま書く method（`AuditLogService.recordCaptured`）を足して使う。入れた時に同じ内容（user・session の hash の先頭 8 文字・時刻）を WARN の application log `errorCode=BACKUP_QUIESCE_DEFERRED_WRITE` に出す。
   3. logout の完了の画面（OIDC の RP initiated logout を含む）へ進める。
-- gate が OPEN に戻ったら、状態機械が一覧を `taskExecutor` へ投入し、各書込みは「解除後の書込み」の permit を持って業務の service を通して書く（失効の時刻は logout の時刻を使う）。失敗は WARN を出して 3 回まで繰り返す。
+- gate が OPEN に戻ったら、状態機械が一覧を `taskExecutor` へ投入し、各書込みは「解除後の書込み」の permit を持って業務の service を通して書く。permit を取れない（その間に gate がまた閉じた）場合は捨てずに一覧へ戻し、次に開いた時に書く（D3-P3-5）。DB の失敗は WARN を出して 3 回まで繰り返し、それでも失敗したら WARN の log（内容つき）を残して捨てる。
+- **portal の logout は対象外**（D3-P3-5）: 外部の顧客・BP の portal の logout（`/api/portal/auth/logout`）は DB の session（`t_portal_session`。失効は DB の行で即時に効く）を使うため、失効を解除の後へ遅らせると session がその間使えてしまう。portal の logout は静止中も WRITE と同じく 503 のままにする（利用者は待って操作し直す）。
 - 安全上の意味: 静止の間も logout はでき、HTTP session は直ちに無効になるため、同じ JSESSIONID で続けて使うことはできない。`t_user_session` の行が解除まで「有効」のまま残るのは、その session hash を持つ HTTP session がもう無い状態である。
 - 制約（§17 L-14）: process が解除の前に落ちると一覧は失われ、`t_user_session` の行は idle 期限まで残り、logout の監査は application log にだけ残る（HTTP session は process とともに消えるため、残った行で session を使い続けることはできない）。
 
@@ -456,9 +464,9 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 
 1. 設定を検査する（`QUIESCE_STALE_SECONDS` < `QUIESCE_DEAD_SECONDS`、lease・延長間隔・margin・verify の観測待ちが正の整数で延長間隔 < lease、`requested_by` の形式）。
 2. 保持 process（§7.6）が DDL 凍結の lock を取ったことを state dir の印で確かめる（取れなければ要求を登録せずに失敗する）。
-3. **事前の確認（助言）**: 期限切れの有効な要求を `EXPIRED` にし、instance を §5.3 で分類する（要求が無いので「必要」は `age ≤ QUIESCE_DEAD_SECONDS` だけ）。状態不明・DISABLED が 1 つでもある・新しい instance が 0 件・protocol の版が違う・閾値の式（§5.2）を満たさない、のどれかで失敗する。新しい instance が 0 件のときは「app が停止中なら `--app-stopped` を使う」と出す。
+3. **事前の確認（助言）**: 期限切れの有効な要求を `EXPIRED` にし、instance を §5.3 で分類する（要求が無いので「必要」は `age ≤ QUIESCE_DEAD_SECONDS` だけ）。状態不明が 1 つでもある・停止口の行（STOPPED でない DISABLED。heartbeat の古さによらない）が 1 つでもある・新しい instance が 0 件・protocol の版が違う・閾値の式（§5.2）を満たさない、のどれかで失敗する。新しい instance が 0 件のときは「app が停止中なら `--app-stopped` を使う」と出す。
 4. 要求を INSERT して commit し、要求の番号を state dir に書く（保持 process が延長を始める）。一意索引に当たれば他の要求が有効なので失敗する。
-5. `QUIESCE_DEADLINE_SECONDS`（既定 checkpoint 90 秒・full 660 秒）まで 1 秒ごとに、新しい transaction で instance を分類し直し、必要な全 instance の ack を読む。**必要な instance が 1 つ以上**で全て `QUIESCED` なら成功。`REFUSED`・`RESUMED`・DISABLED が 1 つでも、ack の無い状態不明の instance があれば直ちに失敗する。
+5. `QUIESCE_DEADLINE_SECONDS`（既定 checkpoint 90 秒・full 660 秒）まで 1 秒ごとに、新しい transaction で instance を分類し直し、必要な全 instance の ack を読む。**必要な instance が 1 つ以上**で全て `QUIESCED` なら成功。`REFUSED`・`RESUMED`・停止口の行（heartbeat の古さによらない）が 1 つでも、ack の無い状態不明の instance があれば直ちに失敗する。
 6. ack を確かめる: `scheduler_state` が `PAUSED`/`DISABLED`、必要な instance の申告値が閾値の式を満たす、観測した host が ack した必要な instance の `db_client_host` に含まれる。instance の `max_hold_*` が `QUIESCE_LEASE_MAX_SECONDS` より短ければ WARN を出す（D-P3-6）。
 7. `quiesce.json` を書く: `provider`、`mode`、`request_id`、`request_token`、`requested_at_utc`、`started_at_utc`（全 ack を確かめた時刻。整合時刻。§5.3 の「整合点より前に ack」の基準）、instance ごとの ID・host・`started_at_utc`・`acked_at_utc`・`hold_until_utc`、`ddl_lock`、`released_at_utc: null`。
 - 失敗の cleanup は要求を `ABORTED` にする（app は I-3 で開く）。保持 process は job の pipe が閉じた時に終わる。
@@ -469,13 +477,13 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 - 手順:
   1. `UPDATE … SET verify_requested_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'REQUESTED'`（0 行なら要求は既に解かれている。full の `NEW_INSTANCE` を含む。失敗）。
   2. 必要な全 instance の `observed_at` が `verify_requested_at` より新しくなるまで、最長 `QUIESCE_VERIFY_OBSERVE_SECONDS`（既定 10 秒）待つ。
-  3. 新しい transaction で 1 回評価する: 要求が REQUESTED、保持 process の延長が止まった印が無い、分類し直した**必要な instance が 1 つ以上**、その全ての ack が `QUIESCED` で `UTC_TIMESTAMP(6) <= hold_until − margin`、**`started_at < requested_at` の必要な instance は `acked_at <= started_at_utc`**、DISABLED の instance が無い、観測の host が ack した必要な instance の接続元だけ。
+  3. 新しい transaction で 1 回評価する: 要求が REQUESTED、保持 process の延長が止まった印が無い、分類し直した**必要な instance が 1 つ以上**、その全ての ack が `QUIESCED` で `UTC_TIMESTAMP(6) <= hold_until − margin`、**`started_at < requested_at` の必要な instance は `acked_at <= started_at_utc`**、停止口の行（STOPPED でない DISABLED。heartbeat の古さによらない）が無い、観測の host が ack した必要な instance の接続元だけ。
 - 1 回で足りる理由: I-3 により、ack の後に gate が開いた instance は「確定した非 QUIESCED の状態」か「hold 期限の超過」のどちらかを残す。要求の前からの instance は整合点より前に ack しているため、区間の初めから静止している。要求の後に登録した instance は登録の前（UNARMED）から閉じている（prod）。
 
 ### 7.3 release
 
 - `UPDATE … SET status = 'RELEASED', released_at = UTC_TIMESTAMP(6), release_reason = ? WHERE id = ? AND status = 'REQUESTED'`（verify 済みなら `COMPLETED`、そうでなければ `ABORTED`）。その後、`quiesce::release` が保持 process の pipe を閉じ、保持 process の終わり（DDL lock の返却）を待つ。
-- `QUIESCE_RESUME_CONFIRM_SECONDS`（既定 15 秒）まで、**この時点で新しい（`age ≤ QUIESCE_STALE_SECONDS`）必要な instance** の ack が `RESUMED` になるのを待つ（D-P3-2）。ならなければ「重大: app の再開を確かめられません（instance …）」を出して exit 3。区間の中で heartbeat が止まった instance（落ちた等）は待たず WARN だけを出す。
+- `QUIESCE_RESUME_CONFIRM_SECONDS`（既定 15 秒）まで、**この要求に QUIESCED の ack を持ち、この時点で heartbeat が新しい（`age ≤ QUIESCE_STALE_SECONDS`）instance** の ack が `RESUMED` になるのを待つ（D-P3-2・D3-P3-4）。ならなければ「重大: app の再開を確かめられません（instance …）」を出して exit 3。区間の中で heartbeat が止まった instance（落ちた等）と、ack の前に要求が解かれた instance（U-13 の中止の時の新しい instance 等。ack の行が無い）は待たず、前者は WARN を出す。
 - 解除の失敗は `database-backup-recovery/design.md:122` のとおり重大な alert とする。app 側には `errorCode=BACKUP_QUIESCE_AUTO_RESUMED`（ERROR）が残る。
 
 ### 7.4 app 側の自動再開
@@ -499,18 +507,24 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | 唯一の instance の区間の中での停止 | — | 必要な instance が 0 で verify が失敗 |
 | heartbeat の停止（fence） | FENCED（閉じたまま） | ack が有効なら安全。ack が無ければ状態不明で失敗 |
 | heartbeat の無い接続元 | — | verify の前に観測し直した host の照合で失敗 |
-| 停止口（DISABLED） | gate を閉じない | DISABLED の instance があれば acquire・verify とも失敗 |
+| 停止口（DISABLED） | gate を閉じない | STOPPED でない DISABLED の行があれば、heartbeat の古さによらず acquire・verify とも失敗 |
 
 ### 7.6 保持 process（D-P2-2。U-13 の検出を含む）
 
 - **job 本体に結び付ける**: `quiesce::acquire`（job 本体の shell で動く `lib/quiesce.sh` の関数）が、provider の acquire を呼ぶ前に `exec {QUIESCE_HOLD_FD}> >("$PROVIDERS_DIR/quiesce-db.sh" hold "$QUIESCE_STATE_DIR")` で保持 process を起動する。保持 process の stdin は job 本体が持つ pipe の読み口で、job 本体が終わる（正常・異常・SIGKILL）と kernel が書き口を閉じ、保持 process は EOF を読んで終わる。PID の再利用の問題が無く、acquire・verify・release の短い process が終わっても保持 process は続く。
+- **出力と fd の扱い（D3-P3-2）**:
+  - 保持 process の stdout・stderr は state dir の `hold.log` へ向ける（job の stdout は結果の JSON なので混ぜない）。`quiesce::release` と cleanup は `hold.log` の要約を job の stderr に出す。
+  - 保持 process は起動の直後（DDL lock を取る前・取る待ちの間を含む）から 1 秒ごとに pipe を読み、EOF ならその時点で lock の session を閉じて終わる。
+  - job 本体が起動する長い子 process（mysqldump・`cp -a`・restic・mysqlbinlog 等）は `{QUIESCE_HOLD_FD}>&-` で書き口を閉じて起動する（子が書き口を持つと、container の外で job が kill されても子が終わるまで EOF にならないため）。`script-contract-test.sh` が、`lib/quiesce.sh` を読む script の長い子 process の起動にこの指定があることを確かめる。`tool-image.sh compose run` では job が container の PID 1 で、PID 1 が終われば container 内の process は全て止まる。
+  - process substitution の process を `wait` で待つには bash 4.4 以上が要る。tool image の bash（Debian bookworm の 5.2）で満たし、`tool-image-test.sh` が版を確かめる。
 - **役目**:
   1. DDL 凍結の lock の session を持つ（mysql の session の stdin へ `DO 0;` を流し続ける。保持 process が終わると session も終わり、MySQL が lock を返す）。lock を取れたら state dir に印を書く。
   2. state dir に要求の番号が書かれたら、`read -t <QUIESCE_LEASE_RENEW_SECONDS>` で pipe を待ち、時間切れのたびに lease を延ばす（EOF なら終わる）。延長の UPDATE が 0 行なら印を書いて延長を止める（verify が失敗する）。
   3. 延長の上限: `requested_at` から `min(QUIESCE_LEASE_MAX_SECONDS, 必要な instance の max_hold(job_kind))` を超えたら延長を止める。
-  4. **full の最中の新しい instance（U-13）**: job_kind が FULL のとき 5 秒ごとに、`started_at >= requested_at` で STOPPED でない instance を調べ、見つけたら要求を `ABORTED`（`release_reason='NEW_INSTANCE'`）にして延長を止め、印を書き、WARN `BACKUP_QUIESCE_FULL_ABORTED` を出す。app は要求の消失を読んで再開し、新しい instance の起動の待ちも終わる。
+  4. **ONLINE の full の最中の新しい instance（U-13）**: **`mode = 'ONLINE'` かつ `job_kind = 'FULL'` のときだけ**（D3-P2-2）、5 秒ごとに `started_at >= requested_at` で STOPPED でない instance を調べ、見つけたら要求を `ABORTED`（`release_reason='NEW_INSTANCE'`）にして延長を止め、state dir に中止の印を書き、WARN `BACKUP_QUIESCE_FULL_ABORTED` を出す。app は要求の消失を読んで再開し、新しい instance の起動の待ちも終わる。**APP_STOPPED の full（配備の前の backup）は中止しない**: 保持の間に起動した task は §6.8 のとおり起動を中止し続け、保持は解かれない（中止すると配備の途中、§3 の Flyway の前に app が起動してしまうため）。
+- **中止の後の job（D3-P3-4）**: `backup-full.sh` は mysqldump を background で動かし、5 秒ごとに中止の印を確かめ、印があれば mysqldump を止めて直ちに失敗する（repository lock を長く持たず、次の checkpoint を塞がない）。他の step の間でも `quiesce::check_aborted` で印を確かめる。
 - release は要求を RELEASED にした後で pipe を閉じ（`exec {QUIESCE_HOLD_FD}>&-`）、保持 process の終わりを待つ。
-- 試験: job 本体を kill すると保持 process が終わり lock が返る、acquire の process が終わっても保持 process は延長を続ける、full の最中の新しい instance で要求が ABORTED になる（BWQ-009）。
+- 試験: job 本体を kill すると保持 process が終わり lock が返る（mysqldump の最中を含む）、acquire の process が終わっても保持 process は延長を続ける、DDL lock の取得の待ちの間に job を kill しても保持 process が終わる、保持 process の出力が結果の JSON に混ざらない、ONLINE の full の最中の新しい instance で要求が ABORTED になり job が早く失敗する、**APP_STOPPED の full の最中に起動しようとした instance では要求が ABORTED にならず、その instance は起動を中止する**（BWQ-009・BWQ-010）。
 
 ## 8. DDL 凍結（Q6。U-5 決定済み）
 
@@ -532,9 +546,9 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 ### 9.2 判定の条件（`quiesce-app-stopped` の acquire）
 
 1. 保持 process が DDL 凍結の lock を取ったことを確かめる。
-2. 事前の確認（助言）: 期限切れの有効な要求を `EXPIRED` にし、有効な要求が残っていれば失敗する。STOPPED 以外で `age ≤ QUIESCE_DEAD_SECONDS` の instance（DISABLED を含む）が 1 つでもあれば失敗する。表が空なら通る。
+2. 事前の確認（助言）: 期限切れの有効な要求を `EXPIRED` にし、有効な要求が残っていれば失敗する。STOPPED 以外で `age ≤ QUIESCE_DEAD_SECONDS` の instance と、STOPPED 以外の停止口の行（`gate_state = 'DISABLED'`。heartbeat の古さによらない。D3-P2-3）が 1 つでもあれば失敗する。表が空なら通る。
 3. `APP_STOPPED` の要求を INSERT して commit し、番号を state dir に書く（保持 process が延長を始める）。
-4. 登録の後に新しい transaction で分類し直し、STOPPED 以外で（`age ≤ QUIESCE_DEAD_SECONDS` または `last_beat_at ≥ requested_at`）の instance が 1 つでもあれば `ABORTED` にして失敗する。
+4. 登録の後に新しい transaction で分類し直し、STOPPED 以外で（`age ≤ QUIESCE_DEAD_SECONDS` または `last_beat_at ≥ requested_at` または停止口の行）の instance が 1 つでもあれば `ABORTED` にして失敗する。
 5. `quiesce.json` を書く（`mode: APP_STOPPED`、instance は空、`started_at_utc` は手順 4 を確かめた時刻）。
 
 verify: 要求が有効で、手順 4 と同じ分類で該当する instance が 0 件であること。release は ONLINE と同じ（RESUMED を待つ instance は無い）。
@@ -552,6 +566,15 @@ verify: 要求が有効で、手順 4 と同じ分類で該当する instance �
 
 - backup の host が落ちると、保持 process も終わり、保持は lease（60 秒）で切れ、app を起動できるようになる。
 - 保持を手で終わらせる必要がある場合（runbook に SQL を書く）: `UPDATE sys_backup_quiesce_request SET status = 'ABORTED', released_at = UTC_TIMESTAMP(6), release_reason = 'ABORTED' WHERE id = <番号> AND status = 'REQUESTED';`（DBA が管理用の account で行う）。
+- **停止口の行の片付け（D3-P2-3）**: 停止口（DISABLED）で動いていた app が異常に止まり（SIGKILL・task の喪失等）、instance の行が STOPPED にならずに残ると、全ての backup が失敗し続ける（§5.3。古さで無視しないため）。DBA は、(1) ECS で該当の task が止まっていること、(2) 管理用の account の `SELECT COUNT(*) FROM information_schema.processlist WHERE user = '<アプリaccount>' AND SUBSTRING_INDEX(host, ':', 1) = '<その行の db_client_host>';` が 0 であること、を確かめてから、次の SQL でその行だけを STOPPED にする。
+  ```sql
+  UPDATE sys_backup_quiesce_instance
+     SET status = 'STOPPED', stopped_at = UTC_TIMESTAMP(6)
+   WHERE instance_id = '<instance_id>' AND gate_state = 'DISABLED' AND status <> 'STOPPED';
+  -- 1 行だけが変わること
+  ```
+  停止口を外して app を起動し直した後も、古い行を片付けるまで backup は失敗する（安全側）。
+- 上の 2 つの SQL は、`deploy-runbook.md` §1.8 の「本番DBへ手作業の変更をしない（RR-10）」の例外の一覧（本書が手順として書いたものだけ）へ足す（BWQ-013）。信号表は業務データでも認可 epoch の対象でもなく、NF01 の writer の閉包に関わらない。
 
 ### 9.5 provider の形
 
@@ -603,6 +626,7 @@ verify: 要求が有効で、手順 4 と同じ分類で該当する instance �
   - §3: Flyway job が DDL 凍結の lock を取る。§3.4 に表単位の GRANT と確認を足す。
   - §4: readiness の UP の後、instance の行（1 行、`RUNNING`、heartbeat が 10 秒以内、`gate_state=OPEN`）を確かめ、`.env.backup` の `FLYWAY_VERSION` を更新してから timer を再開する。再開後の最初の checkpoint が VALID になることを確かめ、配備記録に残す（004b）。
 - **欠けた full の取り直し（U-13）**: full が `NEW_INSTANCE` で中止された（`backup-full.sh` の失敗と WARN `BACKUP_QUIESCE_FULL_ABORTED`）日は、app の起動が落ち着いた（readiness が UP で instance が 1 つ）後に、運用担当が `tool-image.sh compose run --rm backup` を手で流す。取り直すまで、PITR の基点は前日の full のままで、RPO は checkpoint で保たれる。`backup-health-monitoring.md` に手順を書く。
+  - **期限（D3-P3-4）**: `ops/backup/lib/health.sh` の full の CRITICAL の閾値は 26 時間（`HEALTH_FULL_CRITICAL_SECONDS=93600`）で、前日の 02:00 の full から数えるため、取り直しが当日のおよそ 04:00 までに VALID にならなければ `check-backup.sh` が CRITICAL になる。runbook には「中止を知ったら 2 時間以内に取り直す。間に合わなければ CRITICAL を計画外の既知の事象として記録し、取り直しの VALID で解消を確かめる」と書く。閾値は変えない。
 - **PROD-004 の分割**: 「Backup 開始の前提」の 001〜005 は初回 backup の前に揃える条件で、初回 backup は §4 の前に取る。最初の ONLINE checkpoint は §4 の後にしか取れないため、004 を分ける。
   - **004a（初回 backup の前）**: deployment owner の inventory（ECS の desired count と deployment configuration、`stopTimeout`、DB 接続が中継を経由しないこと、app account の host の型が 1 つであること、backup host の timer の止め方と再開の仕方、静止中の 503 を利用者へ伝える方法、staging の EFS の snapshot の実測（§10.1））。
   - **004b（§4 の後）**: 最初の ONLINE checkpoint が VALID になった記録。004b が揃うまで、本番の RPO 15 分の達成を宣言しない。
@@ -692,6 +716,7 @@ app:
 | `BACKUP_QUIESCE_DEFERRED_WRITE` | WARN | logout の失効と監査を解除の後へ回した（U-8） |
 | `BACKUP_QUIESCE_READONLY_REJECTED` | WARN | 最後の防線（1792）で 503 にした（経路の型。間引いて出す） |
 | `BACKUP_QUIESCE_DISABLED` | ERROR | prod で停止口を使って起動した（ticket を含む） |
+| `BACKUP_QUIESCE_STOP_UNCONFIRMED` | WARN | 停止の時に permit・書込み可能な接続が 10 秒で 0 にならず、STOPPED を書かなかった（D3-P3-1） |
 
 - §4 の確認の手順と障害の切分け: `deploy-runbook.md` §4 に、`BACKUP_QUIESCE_STARTUP_ABORT`（有効な要求・保持の確認の SQL）、`BACKUP_QUIESCE_FENCED`（制御用・heartbeat 用の接続）、`BACKUP_QUIESCE_DISABLED` の見方を足す。
 
@@ -732,6 +757,7 @@ health indicator は作らない。
 | backup tool の shell | `ops/backup/tests/quiesce-db-test.sh`（fake の mysql。上の場合に加えて、**job 本体を kill すると保持 process が終わり lock が返る**、**acquire の process が終わっても保持 process が延長を続ける**、release が RESUMED を新しい instance にだけ求める）、`full-backup-test.sh`・`binlog-checkpoint-test.sh`（verify を解除の前に呼ぶ、verify の失敗で VALID にしない、`--app-stopped`、full の `NEW_INSTANCE` の中止）、`script-contract-test.sh`、`preflight-test.sh`（exit 19） |
 | CI の backup integration | compose の `scheduler`・`replica` の fake を DB の protocol を話す shell の `responder` に置き換え、source に V202 の file を適用し、表単位の GRANT、最初の full を `--app-stopped`、checkpoint を `quiesce-db` で取る。responder を途中で止めた負例。生成列 `active_slot` の dump・復元・schema fingerprint の往復を確かめる（D-P3-7） |
 
+- 第 4 版で足した試験（D3-P3-8）: prod と prod 以外の profile で context が起動する（depends-on の循環が無い。BWQ-003）、排水が 10 秒で終わらない停止で STOPPED を書かない（BWQ-003）、APP_STOPPED の full の最中に起動しようとした task で要求が ABORTED にならずその task が起動を中止する（BWQ-009・010・011）、heartbeat が 300 秒より古い停止口の行でも ONLINE と `--app-stopped` が失敗し、片付けの SQL の後は通る（BWQ-009・010・011）、保持 process の出力が結果の JSON に混ざらない・DDL lock の待ちの間の kill で終わる・mysqldump の最中の kill で終わる（BWQ-009）、中止の後の job が mysqldump を止めて早く失敗する（BWQ-009）、release が ack の無い新しい instance を待たない（BWQ-009）、解除後の監査が logout の時点の時刻・IP・correlation ID を持つ・gate がまた閉じたら一覧へ戻る（BWQ-005）、portal の logout が静止中 503（BWQ-005）。
 - MySQL の試験は `scripts/test-suites/mysql-shard-3.txt` に足し、実行時間を見て振り分け直す。`MySqlTestShardInventoryTest` と `MySqlTestImagesTest` が通ること。
 - 試験は各 task の対象だけを流す。全 gate の実行は統合の時に統括が決める。
 
@@ -744,6 +770,7 @@ health indicator は作らない。
 | §1.2 | backup account の表単位の権限と GRANT の時期、制御用・heartbeat 用の接続も同じ app account、host の型は 1 つ（§4） |
 | §1.7「Backup 開始の前提」・署名一覧 | 004a・004b（§11）、staging の EFS の実測、`.env.backup` の `QUIESCE_PROVIDER=quiesce-db` と閾値、tool image の pin のし直し、`FLYWAY_VERSION` を `202`、U-11 の Security・DBA の署名、NF05 の行に U-6 の NF05 owner の受理 |
 | §1.7 DBA-1 | 表単位の権限は §3.4 で行う |
+| §1.8（RR-10） | 手作業の変更の例外の一覧に、§9.4 の 2 つの SQL（保持の手での終了、停止口の行の片付け）を足す |
 | §2 | の0（timer の停止）、の4（STOPPED が無い場合の 300 秒）、の5（`--app-stopped` の full。初回は §3.4 の GRANT の後） |
 | §3・§3.4・§3.5 | callback の lock と失敗時の対応、表単位の GRANT と確認、版と件数 |
 | §4 | schema guard の log、instance の行の確認、障害の切分け |
@@ -773,7 +800,7 @@ CLAUDE.md は本 batch では変えない。
 | U-10 | download | **決定済み（2026-11-21 利用者）**: 静止中は 503 | §6.3 |
 | U-11 | backup account が書き手になること | **決定済み（2026-11-21 利用者）**: 既存の backup account に要求の表への表単位の `INSERT`・`UPDATE` だけを与え、PROD-002 に記録し、Security と DBA が署名する | §4、§15 |
 | U-12 | 信号表の保存期間 | **決定済み（2026-11-21 利用者）**: 30 日 | §3.9、§12.1 |
-| U-13 | full の最中に新しい instance が登録された時 | **決定済み（2026-11-21 利用者）**: provider が full を中止し（verify は失敗）静止を解く。その日の full は欠け、runbook の手順で取り直す | §6.8、§7.6、§11 |
+| U-13 | full の最中に新しい instance が登録された時 | **決定済み（2026-11-21 利用者）**: ONLINE の full（`mode=ONLINE` かつ `job_kind=FULL`）に限り、provider が full を中止し（verify は失敗）静止を解く。その日の full は欠け、runbook の手順で取り直す | §6.8、§7.6、§11 |
 | U-14 | 静止中の idle 期限 | **決定済み（2026-11-21 利用者）**: 静止中は idle の判定を gate が閉じた時刻で行い、静止中の最終利用の時刻を解除の後へ持ち越す（緩和は最大保持時間まで） | §6.4 |
 
 ## 17. 既知の制約・危険
@@ -795,15 +822,18 @@ CLAUDE.md は本 batch では変えない。
 | L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 抽出（約 15 class）では書く bean は無い。止まった場合は起動時の処理（startup permit の下）へ移す。fail-closed |
 | L-14 | 静止中の logout の `t_user_session` の失効と監査は、解除の前に process が落ちると失われる | U-8。HTTP session は直ちに無効で、process とともに消えるため、残った行で session を使い続けることはできない。監査は WARN の log に残る |
 | L-15 | full の最中に task が置き換わると、その日の full は欠ける | U-13。RPO は checkpoint で保たれ、full は手で取り直す |
-| L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える |
+| L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |
 | L-17 | 停止口（DISABLED）の間は backup が全て失敗する | U-7。ticket で記録し alert を出す |
+| L-18 | 停止口で動いていた app が異常に止まると、その行を DBA が手で片付けるまで全ての backup が失敗する | D3-P2-3。heartbeat の書けない停止口の app を古さで無視しないための安全側の取扱い。§9.4 の手順と RR-10 の例外 |
+| L-19 | 停止の時に 10 秒で排水が終わらなければ STOPPED は書かれず、§2 の5 は停止済みの閾値（300 秒）を待つ | D3-P3-1。書込み中かもしれない instance を STOPPED にしないため |
+| L-20 | portal の logout は静止中 503 になる | D3-P3-5。DB の session の失効を遅らせないため（U-8 の対象外） |
 
 ## 18. 変更する file と規模（見込み）
 
-- Java（main、新規 約 21）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。
+- Java（main、新規 約 22）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLifecycleAnchor`（`dataSource` が依存する最小の bean）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。
 - Java（main、変更 約 20）: `SchedulerLockConfig`・`AsyncConfig`・`SecurityConfig`（logout の handler）・`PersistentSessionServiceImpl`・`AuditLogServiceImpl`・`ApiAuditFilter`・`GlobalExceptionHandler`・`CustomErrorController`・`ImportJdbcReconnectGuard`・`ExternalApiErrorWriter`・`ExternalApiCorrelationFilter`・storage 層の約 9 class。
 - resources（約 8）、test（新規 約 22、変更 約 14）、ops/backup（新規 約 14、変更 約 10）、infra（3）、文書（約 11）。
-- 合計は約 120 file、`tasks.md` は 15 task。
+- 合計は約 122 file、`tasks.md` は 15 task。
 
 ## 19. 実装の時に実測で確かめる事項（未実測の前提）
 
@@ -816,7 +846,9 @@ CLAUDE.md は本 batch では変えない。
 | Spring は破棄の callback を包む前の bean に登録し、refresh の失敗では `ContextClosedEvent` を出さない。`DestructionAwareBeanPostProcessor` は両方の経路で呼ばれる | BWQ-003 の停止の試験 | §6.11 の入口を見直す |
 | mysqldump 8.4 の `--single-transaction --source-data=2` の lock の取り方と待ち | BWQ-012・BWQ-014 | L-6 の扱いを見直す |
 | STORED 生成列 `active_slot` の mysqldump・import・schema fingerprint の扱い（D-P3-7） | BWQ-012（integration が V202 を source に適用する） | dump の option か fingerprint の正規化を見直す |
-| bash の process substitution と `read -t` による保持 process の終わり方（job の SIGKILL で EOF） | BWQ-009 | 名前付き pipe 等に替える |
+| bash の process substitution と `read -t` による保持 process の終わり方（job の SIGKILL で EOF）、process substitution の `wait`（bash 4.4 以上）、長い子 process が書き口を閉じること | BWQ-009 | 名前付き pipe 等に替える |
+| Connector/J の query timeout は文の取消しに別の接続を開く | BWQ-003 の MySQL 試験 | 制御用 pool の大きさと取消しの扱いを見直す |
+| Spring の `DisposableBeanAdapter` と depends-on による破棄の順（anchor・`taskExecutor`・`taskScheduler`） | BWQ-003 | 破棄の順の固定の方法を見直す |
 | Fargate の `stopTimeout` の既定と上限 | SRE（004a） | 雛形の値を見直す |
 | EFS での uploads の 1 件あたりの複製の時間 | SRE が staging で測る（本番の前） | U-1 の上限に届く時期を見直す |
 | 通常の起動時間（startPeriod の余裕） | SRE が staging で測る | `startup-wait-max` と `startPeriod` を見直す |
@@ -878,3 +910,19 @@ CLAUDE.md は本 batch では変えない。
 | D-P3-7 | 生成列の dump・復元・fingerprint を §19 と integration で確かめる | §3.8、§14、§19 | BWQ-012 |
 | D-P3-8 | 外部 API の correlation ID を gate の filter が共有の方法で作る | §6.10 | BWQ-005 |
 | U-1〜U-14 | 全て決定済みとして各節へ反映 | §16 | 各 task |
+
+### 20.3 `9b8cc0a5` への差分 review（D3-P2・D3-P3）
+
+| ID | 対応 | 本書の場所 | tasks |
+|---|---|---|---|
+| D3-P2-1 | `dataSource` が依存するのは最小の anchor（pool の holder・gate・STOPPED を書く部品）だけにし、静止応答の `taskExecutor`・業務の service・`MeterRegistry` は `ObjectProvider` で引く。prod と prod 以外の profile で context が起動する試験 | §6.11 | BWQ-003 |
+| D3-P2-2 | U-13 の中止を `mode=ONLINE` かつ `job_kind=FULL` に限る。APP_STOPPED の full では起動した task が拒否され続ける負例の試験 | §6.8、§7.6、§16 | BWQ-009・010・011 |
+| D3-P2-3 | STOPPED でない DISABLED の行は heartbeat の古さによらず全ての provider を失敗させる。異常の停止の後の片付けの SQL を §9.4 に書き、RR-10 の例外へ足す | §5.3、§7.1、§7.2、§9.2、§9.4、§15、§17 L-18 | BWQ-009・010・011・013 |
+| D3-P3-1 | 排水が 10 秒で終わらなければ STOPPED を書かない、`taskScheduler` も `dataSource` の前に破棄、SHUTDOWN に入る thread の permit を返す | §6.11、§13.1、§17 L-19 | BWQ-003・004 |
+| D3-P3-2 | 保持 process の出力を `hold.log` へ、起動の直後から pipe を読む、長い子 process は書き口を閉じる、bash 4.4 以上 | §7.6、§19 | BWQ-009 |
+| D3-P3-3 | 制御用・heartbeat 用の pool に Hikari の `connectionTimeout=3000` | §5.2 | BWQ-003 |
+| D3-P3-4 | 中止の後は job が mysqldump を止めて早く失敗する、full の CRITICAL（26 時間）までの取り直しの期限を runbook に、release は QUIESCED の ack を持つ instance にだけ RESUMED を求める | §7.3、§7.6、§11 | BWQ-009・013 |
+| D3-P3-5 | 解除後の監査は logout の時点の時刻・IP・correlation ID を使う、gate がまた閉じたら一覧へ戻す、portal の logout は対象外で 503 | §6.3、§6.13、§17 L-20 | BWQ-005 |
+| D3-P3-6 | L-16 に servlet の session の期限を書く | §6.4、§17 L-16 | — |
+| D3-P3-7 | §6.4 の日本語でない 1 語（取捨の誤字）を「扱い」に直す | §6.4 | — |
+| D3-P3-8 | D3-P2-1〜3 と portal の logout の 503 の試験を tasks に足す | §14 | BWQ-003・005・009・010・011 |
