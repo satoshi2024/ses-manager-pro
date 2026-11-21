@@ -97,6 +97,8 @@
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGateFilter`（+35。WRITE・EXTERNAL は permit、LOGOUT は取れれば permit、chain 全体の 1792・`BackupWriteQuiescedException` を 503 へ）・`BackupQuiesceRequestClassifier`・`BackupWriteQuiescedException`・`BackupQuiesceRejections`（503 の header・文言・`Retry-After`）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）・`AuditedDownloadPaths`、gate の bean（`BackupQuiesceConfiguration`。破棄の callback を推定させない）。`AuditLogService.recordCaptured`（D4-P3-3: 呼出し元は `BackupQuiesceDeferredWrites` だけで `AuditLogMethodLengthGuardTest` が bytecode で固定、時刻は `[今 − 最長の保持時間 − 余裕, 今]`、余裕は 5 分＋checkpoint の最大保持時間）と `PersistentSessionService.captureCurrent`・`revokeCaptured`、U-14 の解除後の最初の touch は `UserSessionMapper.touchCarriedOver`（既存の `touch` は行の idle 期限で絞るため）。`t_audit_log` に IP の列が無いため、解除後の監査に IP は書けない（取っておく値から外した）。
 
+  - **実装の記録（第 2 段階 2c、U-15。2026-11-22 の利用者の決定）:** 静止中も portal の参照を続ける。`PortalSessionServiceImpl.resolve` は gate が書込みを許さず permit が無いとき `t_portal_session` へ書かず（`touchIfValid` も `revokeById(EXPIRED)` も）、idle は U-14 と同じ規則（gate が閉じた時刻、下限は今 − 最長の保持時間）、失効と `expires_at` は今の時刻で判定する。静止中の最終利用は行の ID を鍵とする memory の表（上限 10,000 件。溢れたら記録せず WARN、緩和は広げない）に持ち越し、解除の後の最初の要求は `PortalSessionMapper.touchCarriedOver` で touch する。portal の静的資源も同じ経路で通る。portal の GET の他の書込みは download の best-effort の監査だけ（U-10 で 503）。試験: `PortalSessionServiceImplTest`（新規）、`BackupWriteGateMockMvcTest`（静止中の portal の参照・静的資源が 200 で行が変わらず `readonly_sql` が増えない、本物の portal の session で logout が 503。2b の review P3-5）。BWQ-AC-002-10。
+
   - **依存:** BWQ-002、BWQ-004
   - **対応要求:** BWQ-RQ-002（AC-002-01・05・06・08・09）
   - **Objective:** 静止中の更新の要求を認証より前に 503 にし、参照は続け、logout は静止中も終わらせ、想定外の書込みも 503 で返す。利用者には翻訳された文言を出す。

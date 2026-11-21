@@ -89,7 +89,7 @@
 - 止める対象は app の全ての DB 書込みと uploads の file の変更である: HTTP（更新の method、書込みを伴う既知の GET、bootstrap・break-glass の session、login）、`@Scheduled`（ShedLock の表を含む）、`@Async`、outbox・会計 worker、起動時の処理。
 - 静止中の新しい更新の要求には 503 を返す。API は `ApiResult` の JSON（`code=503`、`Retry-After`、`X-SES-Error-Code: BACKUP_QUIESCED`）、画面は統一エラーページ、PWA の送信は queue に残して自動で再送させる。download は 503（U-10）。外部 API（NF05）は `ExternalApiErrorWriter` の 503（retryable・Retry-After）で、監査行は書かず抑止の metric だけを数え、NF05 を開ける前に NF05 owner の受理を得る（U-6）。
 - 静止中の logout は、HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（U-8）。後で書く値（user・tenant・session の hash・時刻・correlation ID 等。接続元の IP は `t_audit_log` に列が無いため対象外）は logout の時点で取っておき、解除後の書込みの間に gate がまた閉じたら捨てずに次の解除へ回す。portal の logout（`/api/portal/auth/logout`。DB の session）は U-8 の対象外で、静止中は 503 にする。
-- 参照の要求は止めない。静止中に permit の無い thread が借りる業務の DB 接続は読取り専用にする（最後の防線）。session の最終利用時刻の更新は省き、idle は gate が閉じた時刻で判定し、静止中の最終利用の時刻を解除の後へ持ち越す（U-14。緩和は最大保持時間まで）。静止中の best-effort の監査は DB へ書かず WARN の application log に残す（U-9）。
+- 参照の要求は止めない。静止中に permit の無い thread が借りる業務の DB 接続は読取り専用にする（最後の防線）。session の最終利用時刻の更新は省き、idle は gate が閉じた時刻で判定し、静止中の最終利用の時刻を解除の後へ持ち越す（U-14。緩和は最大保持時間まで）。portal の session（`t_portal_session`）も同じ規則で扱い、静止中も portal の参照（静的資源を含む。download を除く）を続ける（U-15。2026-11-22 決定）。静止中の best-effort の監査は DB へ書かず WARN の application log に残す（U-9）。
 - scheduler の job は開始を解除まで待たせる（飛ばさない。SHUTDOWN・割込みでは待たない）。async の task は、閉じる前（または permit を持つ thread）の投入を排水の対象にし、閉じた後の投入は thread を待たせずに保留して、開いた時に投入し直す。
 - permit と書込み可能な業務の接続の数は「先に増やしてから gate の状態を読む」順で扱い、gate は「先に閉じてから数を読み、確定の前に読み直す」。
 - 排水が上限（checkpoint 30 秒・full 600 秒。U-3）までに終わらなければ ack を拒否（REFUSED）して gate を開け直し、排水を止めた処理を log に残す。
@@ -106,6 +106,7 @@
 - **BWQ-AC-002-07** 多数の thread が業務の接続の借り返しと `setReadOnly` の切替えを続け、gate の開閉を繰り返す負荷の中で、ack を書いた後・開く前に permit の無い thread へ書込み可能な接続が渡されない（unit と実 MySQL）。
 - **BWQ-AC-002-08** full の静止（最大保持時間が idle 期限より長い）の間に要求を続けた利用者の session が、静止の間も解除の後の最初の要求でも idle 期限の超過で失効せず、解除の後の touch で `idle_expires_at` が延びる。最大保持時間を超える緩和は無い。
 - **BWQ-AC-002-09** 静止中の logout は成功し、同じ JSESSIONID は直ちに使えなくなる。解除の後に `t_user_session` の失効と `LOGOUT` の監査が DB に書かれる。監査の時刻・correlation ID は logout の時点の値である（接続元の IP は `t_audit_log` に列が無いため記録しない）。portal の logout は静止中 503 になる。静止中の best-effort の監査は DB に入らず WARN の log に出る。
+- **BWQ-AC-002-10**（U-15）静止中も portal の session を持つ参照（`/api/portal/**`・`/portal/**` の GET と portal の静的資源）は 503 にならず、`t_portal_session` の行は変わらず、`rejected_requests{kind=readonly_sql}` も増えない。閉じる前に有効だった portal の session は、静止の間に idle 期限を過ぎても有効で、解除の後の最初の要求でも失効せず touch される。最大保持時間を超える緩和は無く、失効と `expires_at` は今の時刻で判定され、静止中に期限切れと判定された session は解除の後も有効に戻らない。portal の logout と更新の要求は静止中 503 のままである。
 
 ### BWQ-RQ-003: 中断された静止を VALID にしない（安全側の自動再開）
 

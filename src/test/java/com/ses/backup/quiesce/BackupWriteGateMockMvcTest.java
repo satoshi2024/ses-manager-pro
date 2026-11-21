@@ -65,7 +65,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @Import(BackupWriteGateMockMvcTest.TestGateConfiguration.class)
 @Timeout(value = 120, unit = TimeUnit.SECONDS)
-class BackupWriteGateMockMvcTest {
+class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
+
+    @Override
+    protected JdbcTemplate jdbcTemplate() {
+        return jdbc;
+    }
 
     private static final String QUIESCED_JA =
             "バックアップを取得しているため、一時的に更新を受け付けていません。しばらく待ってから再度お試しください。";
@@ -187,19 +192,60 @@ class BackupWriteGateMockMvcTest {
     }
 
     @Test
-    void 静止中のportalの更新とlogoutは503でportalのsessionは変わらない() throws Exception {
+    void 静止中のportalの更新とlogoutは503で本物のportalのsessionは変わらない() throws Exception {
+        // 2b review P3-5: 発行した本物の portal の session（cookie）で確かめる
+        UserFixture portal = readyUser(createCustomerOrg("bq-logout-" + uniqueSuffix()),
+                "bq-logout-" + uniqueSuffix() + "@example.test");
+        Map<String, Object> before = portalSessionRow(portal);
         closeGate();
-        Integer sessions = jdbc.queryForObject("SELECT COUNT(*) FROM t_portal_session WHERE revoked_at IS NULL",
-                Integer.class);
 
-        mockMvc.perform(post("/api/portal/auth/logout").cookie(new Cookie("SES_PORTAL_SESSION", "token")))
+        mockMvc.perform(post("/api/portal/auth/logout").cookie(portal.sessionCookie()))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value(503));
         mockMvc.perform(post("/api/portal/auth/login").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isServiceUnavailable());
 
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_portal_session WHERE revoked_at IS NULL",
-                Integer.class)).isEqualTo(sessions);
+        assertThat(portalSessionRow(portal)).as("L-20: portal の logout は静止中 503 で、DB の session は失効しない")
+                .isEqualTo(before);
+        assertThat(before.get("REVOKED_AT")).isNull();
+    }
+
+    @Test
+    void 静止中もportalの参照と静的資源はsessionの行へ書かずに通りreadonly_sqlに数えない() throws Exception {
+        // RB-QUIESCE U-15: portal の参照は U-14 と同じく touch を省いて続ける
+        String suffix = uniqueSuffix();
+        UserFixture portal = readyUser(createCustomerOrg("bq-read-" + suffix), "bq-read-" + suffix + "@example.test");
+        Map<String, Object> before = portalSessionRow(portal);
+        closeGate();
+        double readOnly = counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql");
+        double skipped = counter(BackupQuiesceMetrics.SKIPPED, "kind", "session_touch");
+
+        mockMvc.perform(get("/api/portal/auth/me").cookie(portal.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value("bq-read-" + suffix + "@example.test"));
+        mockMvc.perform(get("/portal").cookie(portal.sessionCookie()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", "/portal/customer"));
+        mockMvc.perform(get("/portal/css/portal.css").cookie(portal.sessionCookie()))
+                .andExpect(status().isOk());
+
+        assertThat(portalSessionRow(portal)).as("静止中は last_seen_at・idle_expires_at を書かない").isEqualTo(before);
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql")).isEqualTo(readOnly);
+        assertThat(counter(BackupQuiesceMetrics.SKIPPED, "kind", "session_touch")).isEqualTo(skipped + 3);
+
+        BackupQuiesceTestSupport.reopen(gate, 1);
+        mockMvc.perform(get("/api/portal/auth/me").cookie(portal.sessionCookie())).andExpect(status().isOk());
+        assertThat(toLocalDateTime(portalSessionRow(portal).get("LAST_SEEN_AT")))
+                .as("解除の後は従来どおり touch する").isAfterOrEqualTo(toLocalDateTime(before.get("LAST_SEEN_AT")));
+    }
+
+    private Map<String, Object> portalSessionRow(UserFixture portal) {
+        return jdbc.queryForMap("SELECT last_seen_at, idle_expires_at, revoked_at FROM t_portal_session "
+                + "WHERE token_hash = ?", com.ses.common.util.SecurityHashUtil.sha256(portal.sessionCookie().getValue()));
+    }
+
+    private static String uniqueSuffix() {
+        return java.util.UUID.randomUUID().toString().substring(0, 8);
     }
 
     @Test

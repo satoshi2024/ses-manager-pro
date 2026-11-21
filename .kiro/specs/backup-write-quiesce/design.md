@@ -309,6 +309,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | 外部 API `/external-api/**`（NF05。初回リリースは OFF で LB でも遮断） | | **U-6（決定済み）**: `ExternalApiErrorWriter` の 503（retryable・Retry-After）。監査行は書かず抑止の metric だけ。NF05 を開ける前に NF05 owner の受理が要る | 同上（§6.10） |
 | bootstrap・break-glass の session の要求 | §5 の bootstrap 作業 | 503（毎回の監査を残せないため） | 同上 |
 | その他の GET・HEAD | 一覧・詳細・dashboard・通知の取得 | 継続。業務の接続は読取り専用。session の最終利用の更新は省き、idle は U-14 のとおり扱う（§6.4）。想定外の書込みは ERROR 1792 → 503。best-effort の監査は **U-9（決定済み）**: DB へ書かず WARN の application log | §6.4・§6.5 |
+| portal の GET・HEAD（`/portal/**`・`/api/portal/**`。portal の静的資源 `/portal/css`・`/portal/js`・`/portal/img` を含む。download を除く） | 検収・契約・請求・見積・注文請の参照、`/api/portal/auth/me` | **U-15（決定済み 2026-11-22）**: 継続。`PortalSessionFilter` の `PortalSessionServiceImpl.resolve` は `t_portal_session` へ書かず（touch も期限切れの失効も）、idle は U-14 と同じ規則で判定する（§6.4）。portal の download は U-10 のとおり 503 | §6.4 |
 | `@Scheduled`（全て `@SchedulerLock` 付き） | outbox・会計 worker・清掃・通知 | ShedLock の表へ書く前で解除まで待つ（飛ばさない）。SHUTDOWN・割込みでは待たずに戻る | `BackupQuiesceLockProvider`（§6.6） |
 | `@Async`（`SchedulingDisabledDrainTest` の `ASYNC_INVENTORY`。全て `taskExecutor`） | 取込の解析・mail・webhook・残業の通知 | 閉じる前（または permit を持つ thread）の投入は排水の対象。閉じた後の投入は保留して開いた時に投入し直す | `BackupQuiesceTaskDecorator`（§6.7） |
 | 起動時の処理（DB 書込みあり 6 件） | `LegacyUploadMigrationRunner`・`ContractDocumentBackfillRunner`・`ContractDocumentDispatchBackfill`・`ProductionSecurityConfigurationValidator`・`IntegrationHubOutboundStartupBarrier`・`ProductionBootstrapMode`（bootstrap の再開の必須監査 `BOOTSTRAP_REOPENED`。2a の review P1-1 で bean 生成時から `ApplicationRunner` へ移した） | startup permit を持つ。有効な要求がある間は permit を取らずに待つ | §6.8 |
@@ -328,6 +329,14 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - 解除の後の最初の要求は、`idle_expires_at` と「静止中の最終利用 + idle の長さ」の遅い方で idle を判定し、通れば通常の touch で `idle_expires_at` を延ばして属性を消す。そのため、静止の間に使い続けた利用者は解除の後も logout されない。
   - 緩和の範囲: idle の判定が緩むのは最大保持時間（full 60 分）までである。閉じる前から使われていない session が、閉じた時点で有効なら静止の間は使える（決定済みの扱い）。ただし servlet の session の期限（`server.servlet.session.timeout` 30 分）は別に効くため、閉じる前から 30 分使われていない HTTP session はその期限で消え、実際の緩和はその範囲に収まる（D3-P3-6）。
   - HTTP session は memory にあり（単一 task）、process が落ちれば属性も session も消えるため、持越しの記録は残らない。
+- **portal の session の idle（U-15 決定済み 2026-11-22）**: portal の session（`t_portal_session`。cookie の token で DB の行を引く）は、`PortalSessionFilter` が method と path に依らず毎回 `PortalSessionServiceImpl.resolve` を呼ぶ。gate が書込みを許さず呼出し元が permit を持たないとき、
+  - `touchIfValid` の UPDATE を省き、`SELECT` した行で判定する。失効（`revoked_at`）と最長の有効期間（`expires_at`）は今の時刻で、idle は U-14 と同じく「gate が閉じた時刻（`今 − 最長の保持時間` で下限を切る）」で判定する。
+  - 期限切れ・失効の session は `revokeById(EXPIRED)` を書かず、未認証として扱う（行は失効しないが、解除の後の要求でも今の時刻で判定するため有効に戻らない）。
+  - 通した要求の時刻を、portal の session の行の ID を鍵とする memory の表「静止中の最終利用」に持ち越す（portal は HTTP session を持たないため。単一 instance の前提、SRE-5）。上限は 10,000 件で、上限に達したら idle の長さを過ぎた持越しを捨て、それでも空かなければ記録せず WARN `errorCode=BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED` を間引いて出す（その session は解除の後に行の idle 期限で失効し得るだけで、緩和は広がらない）。metric は `skipped_writes{kind=session_touch}`（社内と共通）。
+  - 解除の後の最初の要求は、`idle_expires_at` と「静止中の最終利用 + idle の長さ」の遅い方で idle を判定する。行の idle 期限が過ぎていれば `PortalSessionMapper.touchCarriedOver`（`revoked_at IS NULL AND expires_at > now` を条件にする UPDATE）で touch して持越しを消す。緩和の範囲は U-14 と同じ（最大保持時間まで）。
+  - process が落ちれば持越しは失われ、その session は解除の後に行の idle 期限で失効し得る（安全側）。
+  - portal の GET の経路の他の書込み: download の best-effort の監査（`PortalAuditService.record`。download は U-10 で 503 のため静止中は届かない）だけで、rate limit は memory、利用者・組織・権限・規約の同意は読むだけ（第 2 段階 2c で `PortalCustomerApiController`・`PortalBpApiController`・`PortalCustomerServiceDeskApiController`・`PortalAuthApiController` の GET を確かめた。網羅ではなく、残りは §13.2 の `rejected{readonly_sql}` で見つける。L-2）。
+  - portal の logout と更新の要求は従来どおり 503（L-20）。
 - **最後の防線の変換**: 原因の連鎖に ERROR 1792（SQLSTATE `25006`）があり gate が OPEN でないときは 503 にする。判定は `BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。
 - **best-effort の監査（U-9 決定済み）**: `AuditLogServiceImpl.record` は gate が閉じていて permit が無いとき DB へ書かず、同じ内容（user・method・URI・status・applicationCode）を WARN の application log `errorCode=BACKUP_QUIESCE_AUDIT_DEFERRED` に出し、metric `skipped_writes{kind=best_effort_audit}` を数える。必須の監査（`recordRequired`）は例外になり要求は 503 になる。logout の監査だけは §6.13 のとおり解除の後に DB へ書く。
 
@@ -789,7 +798,7 @@ health indicator は作らない。
 
 CLAUDE.md は本 batch では変えない。
 
-## 16. 利用者の決定（2026-11-21。全て決定済み）
+## 16. 利用者の決定（2026-11-21・2026-11-22。全て決定済み）
 
 | # | 事項 | 決定 | 反映した節 |
 |---|---|---|---|
@@ -807,13 +816,14 @@ CLAUDE.md は本 batch では変えない。
 | U-12 | 信号表の保存期間 | **決定済み（2026-11-21 利用者）**: 30 日 | §3.9、§12.1 |
 | U-13 | full の最中に新しい instance が登録された時 | **決定済み（2026-11-21 利用者）**: ONLINE の full（`mode=ONLINE` かつ `job_kind=FULL`）に限り、provider が full を中止し（verify は失敗）静止を解く。その日の full は欠け、runbook の手順で取り直す | §6.8、§7.6、§11 |
 | U-14 | 静止中の idle 期限 | **決定済み（2026-11-21 利用者）**: 静止中は idle の判定を gate が閉じた時刻で行い、静止中の最終利用の時刻を解除の後へ持ち越す（緩和は最大保持時間まで） | §6.4 |
+| U-15 | 静止中の portal の参照 | **決定済み（2026-11-22 利用者）**: 静止中も customer portal の GET（検収・契約・請求・見積・注文請 等の参照）を続ける。社内の U-14 と同じく、gate が閉じていて permit が無ければ portal の session の最終利用の更新を省き、idle は gate が閉じた時刻で判定し、解除の後に最終利用を補う（緩和は最大保持時間まで）。portal の logout と更新の要求は 503 のまま（L-20） | §6.3、§6.4、§17 L-2・L-20 |
 
 ## 17. 既知の制約・危険
 
 | # | 内容 | 理由・扱い |
 |---|---|---|
 | L-1 | uploads の全量複製と full の mysqldump 全体が静止区間を決める | §10.4。方式の変更は本 batch の対象外 |
-| L-2 | 静止中に書く必要がある想定外の GET（locking read を含む）は 503 になる | §6.5.1。metric と log で経路を見つけ、分類か query を直す |
+| L-2 | 静止中に書く必要がある想定外の GET（locking read を含む）は 503 になる | §6.5.1。metric と log で経路を見つけ、分類か query を直す。portal の session の touch と期限切れの失効は U-15 で静止中に書かないようにした（portal の参照は続く。§6.4） |
 | L-3 | 静止中の best-effort の監査は application log にだけ残る | U-9。監査表の連続性を求める場面ではその要求を WRITE に分類する |
 | L-4 | 停止確認では「heartbeat だけが止まり長い処理を続ける instance」を機械で見つけられない | U-2。二重の故障で、DBA の手の確認で補う。ONLINE は必要な instance 1 つ以上と観測で補う |
 | L-5 | processlist の観測は観測の瞬間に在る接続だけを見る。中継を挟むと弱くなる | §5.4。verify の前に観測し直させ、中継を使わないことを 004a で確かめる |
@@ -827,7 +837,7 @@ CLAUDE.md は本 batch では変えない。
 | L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後は `InitializationWriteGuardTest`（constructor・`@PostConstruct`・`afterPropertiesSet` から辿れる業務の DB の書込みを bytecode で拒否）が固定する。fail-closed |
 | L-14 | 静止中の logout の `t_user_session` の失効と監査は、解除の前に process が落ちると失われる | U-8。HTTP session は直ちに無効で、process とともに消えるため、残った行で session を使い続けることはできない。監査は WARN の log に残る |
 | L-15 | full の最中に task が置き換わると、その日の full は欠ける | U-13。RPO は checkpoint で保たれ、full は手で取り直す |
-| L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |
+| L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14・U-15（portal の session も同じ。portal の持越しは memory の表で上限 10,000 件、溢れたら記録しない）。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |
 | L-17 | 停止口（DISABLED）の間は backup が全て失敗する | U-7。ticket で記録し alert を出す |
 | L-18 | 停止口で動いていた app が異常に止まると、その行を DBA が手で片付けるまで全ての backup が失敗する | D3-P2-3。heartbeat の書けない停止口の app を古さで無視しないための安全側の取扱い。§9.4 の手順と RR-10 の例外 |
 | L-19 | 停止の時に 10 秒で排水が終わらなければ STOPPED は書かれず、§2 の5 は停止済みの閾値（300 秒）を待つ | D3-P3-1。書込み中かもしれない instance を STOPPED にしないため |
@@ -931,3 +941,9 @@ CLAUDE.md は本 batch では変えない。
 | D3-P3-6 | L-16 に servlet の session の期限を書く | §6.4、§17 L-16 | — |
 | D3-P3-7 | §6.4 の日本語でない 1 語（取捨の誤字）を「扱い」に直す | §6.4 | — |
 | D3-P3-8 | D3-P2-1〜3 と portal の logout の 503 の試験を tasks に足す | §14 | BWQ-003・005・009・010・011 |
+
+### 20.4 利用者の追加の決定（2026-11-22）
+
+| # | 内容 | 反映した節 | task |
+|---|---|---|---|
+| U-15 | 静止中の portal の参照を続ける（portal の session の touch・期限切れの失効を書かず、idle は U-14 と同じ規則、持越しは memory の表）。2b の review 第 8 点 d の (ii) | §6.3、§6.4、§16、§17 L-2・L-16 | BWQ-005（実装の記録） |

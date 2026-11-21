@@ -1,5 +1,8 @@
 package com.ses.service.portal.impl;
 
+import com.ses.backup.quiesce.BackupQuiesceMetrics;
+import com.ses.backup.quiesce.BackupQuiesceProperties;
+import com.ses.backup.quiesce.BackupWriteGate;
 import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.config.PortalSecurityProperties;
@@ -19,6 +22,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +60,44 @@ public class PortalSessionServiceImpl implements PortalSessionService {
 
     @Value("${app.security.require-https:false}")
     private boolean requireHttps;
+
+    /**
+     * 静止中の最終利用の持越しの上限（件）。portal の session は HTTP session を持たないため、静止中に通した時刻を memory に
+     * 置く（単一 instance の前提。SRE-5）。上限に達したら持越しを記録しない（最悪でも解除の後に idle 期限で失効するだけで、
+     * 緩和を広げない）。
+     */
+    static final int QUIESCE_CARRY_MAX = 10_000;
+    /** 上限（試験だけが小さくする）。 */
+    private int quiesceCarryMax = QUIESCE_CARRY_MAX;
+    private static final long CARRY_FULL_WARN_INTERVAL_NANOS = java.time.Duration.ofSeconds(60).toNanos();
+
+    /** session の行の ID → 静止中の最終利用（RB-QUIESCE U-15。design.md §6.4）。 */
+    private final java.util.concurrent.ConcurrentMap<Long, LocalDateTime> quiesceLastUse =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong lastCarryFullWarnNanos =
+            new java.util.concurrent.atomic.AtomicLong(System.nanoTime() - CARRY_FULL_WARN_INTERVAL_NANOS);
+
+    /** backup の書込み静止の gate（RB-QUIESCE U-15）。無い context（slice の試験等）では従来どおり毎回 touch する。 */
+    private BackupWriteGate backupWriteGate;
+    private BackupQuiesceProperties backupQuiesceProperties = new BackupQuiesceProperties();
+    private BackupQuiesceMetrics backupQuiesceMetrics;
+
+    @Autowired(required = false)
+    public void setBackupWriteGate(BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceProperties(BackupQuiesceProperties backupQuiesceProperties) {
+        if (backupQuiesceProperties != null) {
+            this.backupQuiesceProperties = backupQuiesceProperties;
+        }
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceMetrics(BackupQuiesceMetrics backupQuiesceMetrics) {
+        this.backupQuiesceMetrics = backupQuiesceMetrics;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -117,19 +159,46 @@ public class PortalSessionServiceImpl implements PortalSessionService {
         }
         PortalSession session = sessionMapper.selectByTokenHash(SecurityHashUtil.sha256(rawToken));
         if (session == null || session.getRevokedAt() != null) {
+            if (session != null) {
+                quiesceLastUse.remove(session.getId());
+            }
             return null;
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        if (session.getIdleExpiresAt() == null || !session.getIdleExpiresAt().isAfter(now)
-                || session.getExpiresAt() == null || !session.getExpiresAt().isAfter(now)) {
-            revokeById(session.getId(), "EXPIRED");
+        long idleMinutes = Math.max(1, properties.getSessionIdleTimeoutMinutes());
+        LocalDateTime carriedIdleDeadline = carriedIdleDeadline(session.getId(), idleMinutes);
+        // backup の静止中（permit の無い参照）は session の行へ書かない（RB-QUIESCE U-15。design.md §6.4）
+        boolean quiesced = backupWriteGate != null && backupWriteGate.writesBlockedForCurrentThread();
+        LocalDateTime idleReference = quiesced ? quiescedIdleReference(now) : now;
+        boolean idleValid = session.getIdleExpiresAt() != null && session.getIdleExpiresAt().isAfter(idleReference)
+                || carriedIdleDeadline != null && carriedIdleDeadline.isAfter(idleReference);
+        if (!idleValid || session.getExpiresAt() == null || !session.getExpiresAt().isAfter(now)) {
+            if (!quiesced) {
+                revokeById(session.getId(), "EXPIRED");
+                quiesceLastUse.remove(session.getId());
+            }
+            // 静止中は失効を書かず未認証として扱う（行は失効していないが、解除の後の要求でも有効に戻らない）
             return null;
         }
-        // 有効判定はtouchのCASで行う（失効・期限切れは0件で負け）
-        int touched = sessionMapper.touchIfValid(session.getId(), now,
-                now.plusMinutes(Math.max(1, properties.getSessionIdleTimeoutMinutes())));
-        if (touched == 0) {
-            return null;
+        if (quiesced) {
+            // touch を省き、静止中の最終利用を memory に持ち越す（解除の後の最初の要求で touch する）
+            rememberQuiescedUse(session.getId(), now, idleMinutes);
+            if (backupQuiesceMetrics != null) {
+                backupQuiesceMetrics.skippedWrite("session_touch");
+            }
+        } else {
+            // 有効判定はtouchのCASで行う（失効・期限切れは0件で負け）
+            LocalDateTime nextIdle = now.plusMinutes(idleMinutes);
+            int touched = session.getIdleExpiresAt() != null && session.getIdleExpiresAt().isAfter(now)
+                    ? sessionMapper.touchIfValid(session.getId(), now, nextIdle)
+                    // 行の idle 期限は過ぎたが、静止中の最終利用から idle の長さの内（解除の後の最初の要求）
+                    : sessionMapper.touchCarriedOver(session.getId(), now, nextIdle);
+            if (touched == 0) {
+                return null;
+            }
+            if (carriedIdleDeadline != null) {
+                quiesceLastUse.remove(session.getId());
+            }
         }
         PortalUser user = userMapper.selectById(session.getUserId());
         if (user == null || !"ACTIVE".equals(user.getStatus())) {
@@ -213,6 +282,65 @@ public class PortalSessionServiceImpl implements PortalSessionService {
 
     /** 組織管理者権限キー（field-inventory §6.4のpermission_key契約） */
     public static final String PERMISSION_ORG_ADMIN = "org.admin";
+
+    /** 静止中の最終利用 + idle の長さ（持越しが無ければ null）。 */
+    private LocalDateTime carriedIdleDeadline(Long sessionId, long idleMinutes) {
+        LocalDateTime lastUse = sessionId == null ? null : quiesceLastUse.get(sessionId);
+        return lastUse == null ? null : lastUse.plusMinutes(idleMinutes);
+    }
+
+    /**
+     * 静止中に通した時刻を持ち越す。上限に達していれば、idle の長さを過ぎて役に立たなくなった持越しを先に捨て、それでも空かなければ
+     * 記録しない（WARN を間引いて出す）。既に持っている session は上書きする（件数は増えない）。
+     */
+    private void rememberQuiescedUse(Long sessionId, LocalDateTime now, long idleMinutes) {
+        if (sessionId == null) {
+            return;
+        }
+        if (!quiesceLastUse.containsKey(sessionId) && quiesceLastUse.size() >= quiesceCarryMax) {
+            LocalDateTime staleBefore = now.minusMinutes(idleMinutes);
+            quiesceLastUse.values().removeIf(lastUse -> !lastUse.isAfter(staleBefore));
+            if (quiesceLastUse.size() >= quiesceCarryMax) {
+                long nowNanos = System.nanoTime();
+                long last = lastCarryFullWarnNanos.get();
+                if (nowNanos - last >= CARRY_FULL_WARN_INTERVAL_NANOS && lastCarryFullWarnNanos.compareAndSet(last, nowNanos)) {
+                    log.warn("errorCode=BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED backup の静止中の portal の session の最終利用の"
+                            + "持越しが上限（{} 件）に達したため記録しません。解除の後にこれらの session は idle 期限で失効する"
+                            + "ことがあります", quiesceCarryMax);
+                }
+                return;
+            }
+        }
+        quiesceLastUse.put(sessionId, now);
+    }
+
+    /**
+     * 静止中の idle の判定の基準の時刻: gate が閉じた時刻（閉じた時点で有効だった session を静止の間は失効させない）。
+     * 緩和は静止の最長の保持時間までにし、それより前に閉じた（FENCED が続く等）なら「今 − 最長の保持時間」にする
+     * （社内の session の U-14 と同じ規則。{@code PersistentSessionServiceImpl}）。
+     */
+    private LocalDateTime quiescedIdleReference(LocalDateTime now) {
+        java.time.Instant closedSince = backupWriteGate.closedSince();
+        if (closedSince == null) {
+            return now;
+        }
+        LocalDateTime floor = now.minus(backupQuiesceProperties.longestHold());
+        LocalDateTime closedAt = LocalDateTime.ofInstant(closedSince, clock.getZone());
+        if (closedAt.isAfter(now)) {
+            return now;
+        }
+        return closedAt.isBefore(floor) ? floor : closedAt;
+    }
+
+    /** 持越しの件数（試験用）。 */
+    int quiescedUseCount() {
+        return quiesceLastUse.size();
+    }
+
+    /** 持越しの上限を変える（試験用）。 */
+    void setQuiesceCarryMax(int max) {
+        this.quiesceCarryMax = Math.max(1, max);
+    }
 
     private void revokeById(Long id, String reason) {
         com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PortalSession> update =
