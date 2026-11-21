@@ -55,6 +55,8 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
     static final int RESUME_ATTEMPTS_AFTER_DEADLINE = 30;
     private static final int HANDLED_MEMORY = 1000;
     private static final Duration THREAD_STOP_WAIT = Duration.ofSeconds(12);
+    /** 状態機械の tick の中か（{@code CallerRunsPolicy} で投入した task を状態機械の thread が実行しないため。P3-4）。 */
+    private static final ThreadLocal<Boolean> IN_TICK = new ThreadLocal<>();
 
     /** 状態機械の段階。 */
     enum Step {
@@ -270,6 +272,15 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
 
     /** 1 tick（状態機械の thread）。短い文を高々1つ実行する。 */
     void tick() {
+        IN_TICK.set(Boolean.TRUE);
+        try {
+            tickOnce();
+        } finally {
+            IN_TICK.remove();
+        }
+    }
+
+    private void tickOnce() {
         if (gate.phase() == BackupWriteGate.State.SHUTDOWN) {
             return;
         }
@@ -861,12 +872,21 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
                 return false;
             }
         }
+        // queue の空きの確認と投入の間に queue が埋まると、CallerRunsPolicy で状態機械の thread が task を実行しかける。
+        // その時は実行せず「受け付けなかった」と返す（保留のまま次の tick で投入し直す。2a review P3-4）
+        AtomicBoolean skippedOnTick = new AtomicBoolean();
         try {
-            executor.execute(task);
-            return true;
+            executor.execute(() -> {
+                if (Boolean.TRUE.equals(IN_TICK.get())) {
+                    skippedOnTick.set(true);
+                    return;
+                }
+                task.run();
+            });
         } catch (RejectedExecutionException rejected) {
             return false;
         }
+        return !skippedOnTick.get();
     }
 
     private void scheduleDeferredFlush() {

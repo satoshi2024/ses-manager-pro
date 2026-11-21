@@ -147,7 +147,10 @@ public final class BackupQuiesceDeferredWrites {
                 if (next == null) {
                     return written;
                 }
-                BackupWritePermit permit = gate.tryAcquire(BackupWritePermit.Kind.DEFERRED_WRITE, "deferred-write");
+                // flush の thread が async の permit を持つ（taskExecutor の task。BWQ-006）と、下の permit は入れ子になり閉じていても
+                // 出る。gate が書込みを許さない（また閉じた）なら、入れ子でも書かずに戻す（D3-P3-5）
+                BackupWritePermit permit = gate.allowsNewPermits()
+                        ? gate.tryAcquire(BackupWritePermit.Kind.DEFERRED_WRITE, "deferred-write") : null;
                 if (permit == null) {
                     synchronized (queue) {
                         queue.addFirst(next);

@@ -49,6 +49,8 @@ class BackupQuiesceResponderTest {
     private BackupQuiesceResponder responder;
     private SimpleMeterRegistry registry;
     private final List<Runnable> dispatched = new ArrayList<>();
+    /** true なら executor が投入した thread で task を実行する（CallerRunsPolicy の再現。P3-4）。 */
+    private boolean callerRuns;
     private int heartbeats;
     private long nextHeartbeat;
     private int maxStatementsPerTick;
@@ -79,7 +81,13 @@ class BackupQuiesceResponderTest {
         BackupQuiesceMetrics metrics = new BackupQuiesceMetrics(gate);
         registry = new SimpleMeterRegistry();
         metrics.bindTo(registry);
-        responder = new BackupQuiesceResponder(anchor, metrics, () -> dispatched::add, false);
+        responder = new BackupQuiesceResponder(anchor, metrics, () -> task -> {
+            if (callerRuns) {
+                task.run();
+            } else {
+                dispatched.add(task);
+            }
+        }, false);
     }
 
     // ---------------------------------------------------------------- 要求 → ack → 解除
@@ -439,6 +447,42 @@ class BackupQuiesceResponderTest {
         assertThat(dispatched).hasSize(2);
         dispatched.forEach(Runnable::run);
         assertThat(written).containsExactly("async", "logout");
+        assertThat(gate.deferredWrites().pending()).isZero();
+    }
+
+    /** 2a review P3-4: 投入した task を CallerRunsPolicy で状態機械の thread が実行しかけても、実行せず保留のまま次の tick へ回す。 */
+    @Test
+    void 状態機械のthreadがCallerRunsで実行しかけたtaskは実行せず保留のまま次のtickで投入し直す() {
+        started();
+        long id = acked("CHECKPOINT", 60);
+        List<String> written = new ArrayList<>();
+        gate.deferUntilOpen(() -> written.add("async"));
+        gate.deferredWrites().add(new BackupQuiesceDeferredWrites.DeferredWrite() {
+            @Override
+            public String summary() {
+                return "user=1 session=abcdef01";
+            }
+
+            @Override
+            public void write() {
+                written.add("logout");
+            }
+        });
+        callerRuns = true;
+        repository.get(id).status = "RELEASED";
+        run(Duration.ofSeconds(2));
+
+        assertThat(gate.phase()).isEqualTo(BackupWriteGate.State.OPEN);
+        assertThat(written).as("状態機械の thread では実行しない").isEmpty();
+        assertThat(gate.pendingTaskCount()).isEqualTo(1);
+        assertThat(gate.deferredWrites().pending()).isEqualTo(1);
+
+        callerRuns = false;
+        run(Duration.ofSeconds(1));
+        assertThat(dispatched).hasSize(2);
+        dispatched.forEach(Runnable::run);
+        assertThat(written).containsExactlyInAnyOrder("async", "logout");
+        assertThat(gate.pendingTaskCount()).isZero();
         assertThat(gate.deferredWrites().pending()).isZero();
     }
 

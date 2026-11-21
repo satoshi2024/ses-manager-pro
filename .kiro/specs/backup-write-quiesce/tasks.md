@@ -115,6 +115,9 @@
   - **失敗/rollback:** 既存の filter の順を変えない。503 の body が HTML になる経路があれば `CustomErrorController` の JSON 判定を見直す。
 
 - [ ] **BWQ-006 — scheduler・async・起動時処理の接続**
+  - **状態:** 実装・fast の試験は済み（commit は BWQ-006 の commit）。Demo は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2b）:** `BackupQuiesceLockProvider`（`SchedulerLockConfig` の provider を包む。待った時は lock の設定の開始時刻を取り直す。待ちの上限は gate の単調時計で最長の保持時間）・`BackupQuiesceTaskDecorator`（`AsyncConfig`。`CallerRunsPolicy` と同じ拒否の handler で、executor の停止の後に捨てた task の permit を返す）。2a review P3-4: 状態機械の tick の中で `CallerRunsPolicy` が実行しかけた投入は実行せず「受け付けなかった」として次の tick へ回す。解除後の書込みは flush の thread が async の permit を持つため、gate が書込みを許さなければ入れ子でも書かずに戻す。`SchedulingDisabledDrainTest` の走査に `SmartInitializingSingleton`・`DisposableBean`・`DestructionAwareBeanPostProcessor`（com.ses の class が callback を実装したものだけ）を足し、既存の5件（`ProductionSchemaVersionGuard`・NF07 の4件）と静止応答の4件を理由つきで登録した。
 
   - **依存:** BWQ-002、BWQ-003
   - **対応要求:** BWQ-RQ-002（AC-002-03・04）

@@ -7,7 +7,10 @@ import org.springframework.asm.ClassVisitor;
 import org.springframework.asm.Handle;
 import org.springframework.asm.MethodVisitor;
 import org.springframework.asm.SpringAsmInfo;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.DestructionAwareBeanPostProcessor;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -160,7 +163,30 @@ class SchedulingDisabledDrainTest {
             "com.ses.backup.quiesce.BackupQuiesceResponder#onApplicationReady:EventListener",
             "ApplicationReadyEvent。instance を RUNNING にし（次の heartbeat で書く）、起動の startup permit を返す",
             "com.ses.backup.quiesce.BackupQuiesceResponder#onContextClosed:EventListener",
-            "ContextClosedEvent（lifecycle の停止より前）。gate を SHUTDOWN にし、呼んだ thread の permit を返す（DB 書込なし）");
+            "ContextClosedEvent（lifecycle の停止より前）。gate を SHUTDOWN にし、呼んだ thread の permit を返す（DB 書込なし）",
+            // RB-QUIESCE BWQ-006: 起動の最後（SmartInitializingSingleton）と破棄（DisposableBean・DestructionAwareBeanPostProcessor）の
+            // hook も、app.scheduling.enabled の外で動くため棚卸しする（走査は com.ses の class が callback を実装したものだけを数え、
+            // GenericFilterBean 等の framework の基底 class から継承しただけの何もしない callback は数えない）
+            "com.ses.backup.quiesce.BackupQuiesceResponder:SmartInitializingSingleton",
+            "静止応答の起動（port を開く前）。instance を heartbeat 用の接続で登録し（信号表への書込み）、有効な要求を読み、"
+                    + "APP_STOPPED の保持なら起動を中止、無ければ startup permit を取って開き、ONLINE なら解除まで待つ（design.md §6.8）",
+            "com.ses.backup.quiesce.BackupQuiesceResponder:DisposableBean",
+            "状態機械の thread を止める（最長12秒）。業務の DB へは書かない",
+            "com.ses.backup.quiesce.BackupQuiesceLifecycleAnchor:DisposableBean",
+            "業務の DataSource の後に破棄される。heartbeat の thread を止め、制御用・heartbeat 用の pool を閉じる（書込みなし）",
+            "com.ses.backup.quiesce.BackupQuiesceDataSourcePostProcessor:DestructionAwareBeanPostProcessor",
+            "業務の dataSource の破棄の時に SHUTDOWN にし、permit と書込み可能な接続が0になるのを最長10秒待ち、Hikari を閉じてから"
+                    + " instance を STOPPED にする（信号表への書込み。design.md §6.11）",
+            "com.ses.config.ProductionSchemaVersionGuard:SmartInitializingSingleton",
+            "prod の起動時に flyway_schema_history を読んで schema の版を確かめる（読むだけ。合わなければ起動を中止）",
+            "com.ses.privacy.production.PrivacyDecisionWindowMonitor:SmartInitializingSingleton",
+            "prod profile だけ。NF07 の決定の期限の metric を登録し、状態の変化を log に出す（DB 書込なし）",
+            "com.ses.privacy.production.PrivacyProductionConfigurationValidator:SmartInitializingSingleton",
+            "prod profile だけ。NF07 の ON の時の設定を検査する（DB 書込なし）",
+            "com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier:SmartInitializingSingleton",
+            "NF07 の Journal（application DB と別の MySQL instance）の権限と migration を読んで検査する（書込みなし）",
+            "com.ses.privacy.production.retention.trust.PrivacyTrustStartupValidator:SmartInitializingSingleton",
+            "prod profile だけ。NF07 の trust 文書の設定を検査する（DB 書込なし）");
 
     /** {@code @Async} method（taskExecutor上で実行。起点はrequestまたはscheduler）。 */
     private static final Map<String, String> ASYNC_INVENTORY = inventory(
@@ -407,6 +433,15 @@ class SchedulingDisabledDrainTest {
         private static final Class<?>[] HOOK_TYPES = {
                 ApplicationRunner.class, CommandLineRunner.class, ApplicationListener.class, Lifecycle.class};
 
+        /**
+         * 起動の最後と破棄の callback（型 → callback の method 名）。com.ses の class が callback を実装した時だけ数える
+         * （{@code OncePerRequestFilter} が {@code GenericFilterBean} から継承する何もしない {@code destroy} は数えない）。
+         */
+        private static final Map<Class<?>, String> CALLBACK_TYPES = Map.of(
+                SmartInitializingSingleton.class, "afterSingletonsInstantiated",
+                DisposableBean.class, "destroy",
+                DestructionAwareBeanPostProcessor.class, "postProcessBeforeDestruction");
+
         private int scannedClasses;
         private final Set<String> scheduledMethods = new TreeSet<>();
         private final Set<String> enableSchedulingClasses = new TreeSet<>();
@@ -462,6 +497,11 @@ class SchedulingDisabledDrainTest {
                             scan.startupHooks.add(topLevel + ":" + hook.getSimpleName());
                         }
                     }
+                    for (Map.Entry<Class<?>, String> callback : CALLBACK_TYPES.entrySet()) {
+                        if (callback.getKey().isAssignableFrom(type) && implementsInApp(type, callback.getValue())) {
+                            scan.startupHooks.add(topLevel + ":" + callback.getKey().getSimpleName());
+                        }
+                    }
                     if (SchedulingConfigurer.class.isAssignableFrom(type)) {
                         scan.schedulingConfigurers.add(className);
                     }
@@ -473,6 +513,21 @@ class SchedulingDisabledDrainTest {
                 }
             }
             return scan;
+        }
+
+        /** {@code methodName} の callback を com.ses の class（自分か親）が実装しているか。 */
+        private static boolean implementsInApp(Class<?> type, String methodName) {
+            for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+                if (!current.getName().startsWith("com.ses.")) {
+                    return false;
+                }
+                for (Method method : current.getDeclaredMethods()) {
+                    if (method.getName().equals(methodName) && !method.isBridge() && !method.isSynthetic()) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         private static String topLevel(String className) {
