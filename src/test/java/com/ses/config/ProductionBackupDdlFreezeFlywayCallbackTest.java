@@ -36,7 +36,9 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
     private Connection connection;
     private PreparedStatement getLock;
     private PreparedStatement releaseLock;
+    private PreparedStatement setWaitTimeout;
     private ResultSet getLockResult;
+    private ResultSet releaseResult;
     private Context context;
 
     @BeforeEach
@@ -45,12 +47,17 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
         connection = mock(Connection.class);
         getLock = mock(PreparedStatement.class);
         releaseLock = mock(PreparedStatement.class);
+        setWaitTimeout = mock(PreparedStatement.class);
         getLockResult = mock(ResultSet.class);
+        releaseResult = mock(ResultSet.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.prepareStatement("SELECT GET_LOCK(?, ?)")).thenReturn(getLock);
         when(connection.prepareStatement("SELECT RELEASE_LOCK(?)")).thenReturn(releaseLock);
+        when(connection.prepareStatement(ProductionBackupDdlFreezeFlywayCallback.SET_WAIT_TIMEOUT_SQL))
+                .thenReturn(setWaitTimeout);
         when(getLock.executeQuery()).thenReturn(getLockResult);
-        when(releaseLock.executeQuery()).thenReturn(mock(ResultSet.class));
+        when(releaseLock.executeQuery()).thenReturn(releaseResult);
+        releaseResult(1);
         Configuration configuration = mock(Configuration.class);
         when(configuration.getDataSource()).thenReturn(dataSource);
         context = mock(Context.class);
@@ -103,6 +110,74 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
         order.verify(releaseLock).setString(1, "ses_backup_ddl_freeze");
         order.verify(releaseLock).executeQuery();
         order.verify(connection).close();
+        assertThat(callback.lastReleaseResult()).isEqualTo(1);
+        assertThat(callback.lockLostAtRelease()).as("RELEASE_LOCK=1 は lock を持ち続けていた").isFalse();
+    }
+
+    /**
+     * 2c review P3-1: lock の接続は migration の間 idle のため、GET_LOCK の前に session の wait_timeout を十分に長くする
+     * （server の wait_timeout が短いと session が閉じられて lock が返り、backup が migration の途中で lock を取れてしまう）。
+     */
+    @Test
+    void lockを取る前にsessionのwait_timeoutを長くする() throws SQLException {
+        lockResult(1);
+        ProductionBackupDdlFreezeFlywayCallback callback = new ProductionBackupDdlFreezeFlywayCallback();
+
+        callback.handle(Event.BEFORE_MIGRATE, context);
+
+        assertThat(ProductionBackupDdlFreezeFlywayCallback.SET_WAIT_TIMEOUT_SQL).isEqualTo("SET SESSION wait_timeout = 86400");
+        var order = inOrder(setWaitTimeout, getLock);
+        order.verify(setWaitTimeout).execute();
+        order.verify(getLock).executeQuery();
+        verify(setWaitTimeout).close();
+    }
+
+    @Test
+    void wait_timeoutを設定できなければlockを確かめられないとして失敗し接続を閉じる() throws SQLException {
+        when(setWaitTimeout.execute()).thenThrow(new SQLException("denied", "42000", 1227));
+        ProductionBackupDdlFreezeFlywayCallback callback = new ProductionBackupDdlFreezeFlywayCallback();
+
+        assertThatThrownBy(() -> callback.handle(Event.BEFORE_MIGRATE, context)).isInstanceOf(FlywayException.class)
+                .hasMessageContaining("確かめられないため migration を始めません").hasMessageContaining("42000");
+        assertThat(callback.holdsLock()).isFalse();
+        verify(connection).close();
+        verify(getLock, never()).executeQuery();
+    }
+
+    /**
+     * 2c review P3-1: RELEASE_LOCK が 1 でない（0 = 他の session が持つ、NULL = lock が無い）なら、この接続は migration の途中で
+     * lock を失っていた。例外にはせず（migration は終わっている）、WARN の文言で runbook §3.5 の確認を求める。
+     */
+    @Test
+    void RELEASE_LOCKが0かNULLならmigrationの途中でlockを失った可能性を示し接続を閉じる() throws SQLException {
+        for (Integer result : new Integer[]{0, null}) {
+            Connection lost = mock(Connection.class);
+            PreparedStatement lostRelease = mock(PreparedStatement.class);
+            ResultSet lostResult = mock(ResultSet.class);
+            when(lost.prepareStatement("SELECT GET_LOCK(?, ?)")).thenReturn(getLock);
+            when(lost.prepareStatement(ProductionBackupDdlFreezeFlywayCallback.SET_WAIT_TIMEOUT_SQL))
+                    .thenReturn(setWaitTimeout);
+            when(lost.prepareStatement("SELECT RELEASE_LOCK(?)")).thenReturn(lostRelease);
+            when(lostRelease.executeQuery()).thenReturn(lostResult);
+            when(lostResult.next()).thenReturn(true);
+            when(lostResult.getInt(1)).thenReturn(result == null ? 0 : result);
+            when(lostResult.wasNull()).thenReturn(result == null);
+            when(dataSource.getConnection()).thenReturn(lost);
+            lockResult(1);
+            ProductionBackupDdlFreezeFlywayCallback callback = new ProductionBackupDdlFreezeFlywayCallback();
+            callback.handle(Event.BEFORE_MIGRATE, context);
+
+            assertThatCode(() -> callback.handle(Event.AFTER_MIGRATE, context)).doesNotThrowAnyException();
+
+            assertThat(callback.lockLostAtRelease()).as("RELEASE_LOCK=" + result).isTrue();
+            assertThat(callback.lastReleaseResult()).isEqualTo(result);
+            assertThat(callback.holdsLock()).isFalse();
+            verify(lost).close();
+        }
+        assertThat(ProductionBackupDdlFreezeFlywayCallback.lockLostMessage("RELEASE_LOCK=NULL（lock が無い）"))
+                .startsWith("errorCode=BACKUP_DDL_FREEZE_LOST")
+                .contains("migration の途中で DDL 凍結の lock（ses_backup_ddl_freeze）が失われた可能性")
+                .contains("RELEASE_LOCK=NULL").contains("deploy-runbook §3.5");
     }
 
     @Test
@@ -186,6 +261,8 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
 
         assertThat(callback.holdsLock()).isFalse();
         verify(connection).close();
+        assertThat(callback.lockLostAtRelease()).as("session が既に閉じられていた可能性（lock を途中で失った可能性）を示す")
+                .isTrue();
         // 2回目の解放は何もしない
         assertThatCode(() -> callback.handle(Event.AFTER_MIGRATE, context)).doesNotThrowAnyException();
     }
@@ -196,6 +273,8 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
         PreparedStatement secondGetLock = mock(PreparedStatement.class);
         ResultSet secondResult = mock(ResultSet.class);
         when(second.prepareStatement("SELECT GET_LOCK(?, ?)")).thenReturn(secondGetLock);
+        when(second.prepareStatement(ProductionBackupDdlFreezeFlywayCallback.SET_WAIT_TIMEOUT_SQL))
+                .thenReturn(mock(PreparedStatement.class));
         when(secondGetLock.executeQuery()).thenReturn(secondResult);
         when(secondResult.next()).thenReturn(true);
         when(secondResult.getInt(1)).thenReturn(1);
@@ -228,5 +307,11 @@ class ProductionBackupDdlFreezeFlywayCallbackTest {
         when(getLockResult.next()).thenReturn(true);
         when(getLockResult.getInt(1)).thenReturn(value);
         when(getLockResult.wasNull()).thenReturn(false);
+    }
+
+    private void releaseResult(int value) throws SQLException {
+        when(releaseResult.next()).thenReturn(true);
+        when(releaseResult.getInt(1)).thenReturn(value);
+        when(releaseResult.wasNull()).thenReturn(false);
     }
 }

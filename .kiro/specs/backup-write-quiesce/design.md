@@ -548,7 +548,8 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - 待ち時間 120 秒は code の定数（job の環境変数は `FLYWAY_*` の 4 つに限る。§1.3）。
   - 実装の記録（第 2 段階 2c）: Flyway は同じ event の callback を `getCallbackName()` の昇順で動かす（`flyway.callbacks` の並びではない）。名前を `BackupDdlFreezeLock` にし、DB に触れない初期管理者 hash の検査（`AdminInitialPasswordHashCheck`）の後、補償の DDL を行い得る `LegacyDatabaseFlywayCallback` の前に動かす（`flyway.callbacks` もこの順に書く）。「先頭」は DB に触れる callback の先頭の意味とした。hash の検査を先にするのは、Flyway 10.10 が `BEFORE_MIGRATE` を migration の try の外で呼び、`BEFORE_MIGRATE` の後の callback が失敗しても `AFTER_MIGRATE_ERROR` を呼ばないため（lock を取った後に hash の検査で失敗すると、同じ JVM の中では process の終わりまで lock が残る）。この場合と `FlywayException` 以外の失敗では、job の process の終わりで接続が閉じて lock が返る。同じ instance で解放が呼ばれずに次の migrate が始まったら、前の接続を閉じてから取り直す。lock を確かめられない失敗（接続・SQL）も migration を始めない（fail-closed。message は別）。
   - 既知の制約: Flyway は履歴表の無い DB では migrate の前（`BEFORE_MIGRATE` より前）に `flyway_schema_history` を作る（validate・baseline もその前）。これは初回の空の DB だけで起き、業務の表には触れない。初回は §2 の0 で timer を止めて行う。
-- provider（保持 process）は静止を求める前に lock を取る。
+  - **lock の session を保つ（2c の review P3-1。第 2 段階 2d の fix commit D）**: lock の接続は migration の間ずっと idle のため、server の `wait_timeout`（非対話の client の既定。RDS の既定は 28800 秒）が migration より短い・idle の接続を切る中継がある場合、MySQL が session を閉じて lock を返し、backup の保持 process が migration の途中で lock を取れてしまう。そこで `GET_LOCK` の前にこの接続だけ `SET SESSION wait_timeout = 86400`（24 時間。migration は数十秒〜数分の見込みで十分に長い。server の全体の設定は変えない）にする（設定できなければ lock を確かめられないとして migration を始めない）。解放の `RELEASE_LOCK` が 1 でない（0 = 他の session が持つ、NULL = lock が無い）か文が接続の失敗で通らなければ、途中で lock を失った可能性があるため、migration の結果は変えずに WARN `errorCode=BACKUP_DDL_FREEZE_LOST`（「migration の途中で DDL 凍結の lock が失われた可能性」）を出し、`deploy-runbook.md` §3.5 の確認（その間の backup の有無と、あれば復元に使わない記録・full の取り直し）を求める。
+- provider（保持 process）は静止を求める前に lock を取る（`providers/quiesce-db.d/ddl-lock.sql`。名前は同じ `ses_backup_ddl_freeze`。§7.6）。
 
 ## 9. app 停止の確認（Q7）
 
@@ -847,6 +848,7 @@ CLAUDE.md は本 batch では変えない。
 | L-19 | 停止の時に 10 秒で排水が終わらなければ STOPPED は書かれず、§2 の5 は停止済みの閾値（300 秒）を待つ | D3-P3-1。書込み中かもしれない instance を STOPPED にしないため |
 | L-20 | portal の logout は静止中 503 になる | D3-P3-5。DB の session の失効を遅らせないため（U-8 の対象外） |
 | L-21 | 特権の session（bootstrap・break-glass）の logout も静止中は U-8 で終わり、失効と監査は解除の後に書く | 2b の review P3-1（統括の決定）。HTTP session は直ちに無効になる。process が解除の前に落ちると失効と監査は失われ、監査は WARN の log にだけ残る（L-14 と同じ） |
+| L-22 | 試験の context が静止応答の thread を共有の `testdb` で動かさないことの静的な走査は、`@SpringBootTest`（test profile か明示・prod の専用 DB と `@DirtiesContext`。注釈を除き基底 class の prod を辿る）と、`SpringApplicationBuilder` の prod の context（理由つきの一覧の中だけ）に限る | 2c の review P3-2・P3-3。`ApplicationContextRunner` と initializer（`setActiveProfiles("prod")`）で profile を決める context は走査の外。今ある該当（`BackupQuiesceContextStartTest`・`BackupQuiesceProductionValidatorTest` 等）は専用の DB を使うか、SIS の前に失敗する（review で確かめた）。足す時は専用の DB にする |
 
 ## 18. 変更する file と規模（見込み）
 
@@ -986,7 +988,7 @@ CLAUDE.md は本 batch では変えない。
 | P3-6 | `deferred{logout}` が logout 1 回に 2 | 1 回に 1（§13.2） |
 | P3-7 | `recordCaptured` に未来の時刻の幅が無い | 5 秒を許す（§6.13） |
 | P3-8 | `ImportRawTempFileStore.deleteOrReport` の静止の分岐が削除の失敗の経路と揃っていない | metric と file 名を揃え、実際には来ないことを注釈に書いた（静止中は内容も切り詰めない） |
-| P3-9 | `MySqlTestShardInventoryTest` が source の部分一致で数える | compile 済みの class の JUnit の注釈で数え、fixture の空白の工夫を外した |
+| P3-9 | `MySqlTestShardInventoryTest` が source の部分一致で数える | compile 済みの class の JUnit の注釈で数え、fixture の空白の工夫を外した。前半（`BackupQuiesceTestContextInventoryTest` が `SpringApplicationBuilder`・initializer で prod にした context を見ない）は 2c の review P3-2 で、`SpringApplicationBuilder` の prod の context を理由つきの一覧の中だけにする走査を足した（§20.8）。`ApplicationContextRunner`・initializer の profile は静的な走査の外に残る（L-22） |
 | P3-10 | spec の書き戻しの漏れ（§20・L-13・特権の logout・IP） | 本節と §20.5・L-13・L-21。IP は 2c の事実の修正の commit（§6.13・§14・§20、tasks の BWQ-005） |
 | P3-11 | 2a・2b を BWQ-007 無しで main へ入れない | PR の説明に書く（統括） |
 | 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く |
@@ -996,3 +998,15 @@ CLAUDE.md は本 batch では変えない。
 | # | 内容 | 対応（第 2 段階 2d の fix commit E） |
 |---|---|---|
 | Runner | `BackupWriteQuiesceMySqlTest` の 7 件中 3 件が失敗（MySQL 8.0.36 の container。8.0/8.4 の違いではなく driver の挙動）: Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に client 側で拒否し（SQLSTATE `S1009`、vendor code 0、「Connection is read-only. Queries leading to data modification are not allowed」）、1792 だけを見る `BackupQuiesceReadOnlyViolation.matches` が判定できなかった。静止中の書込みは 500 になり `rejected_requests{readonly_sql}` も 1792 の WARN も出なかった（書込み自体は拒否されていた）。H2 の試験の driver が 1792 を模していたため隠れていた | `matches` が client 側の形（`S1009` で message の先頭と本文が driver の文言）も読取り専用の拒否とする（任意の `S1009` は該当にしない。503 への変換は従来どおり gate が OPEN でない時だけ）。`BackupQuiesceReadOnlyViolationTest` は driver の bundle（`com.mysql.cj.Messages`）の文言で照合し、他の `S1009` が該当しないことも固定する。`ReadOnlyEnforcingH2Driver` は既定で client 側の形を模し 1792 にも切り替えられる（`MySqlReadOnlyRejections`）。filter（`BackupWriteGateFilterReadOnlyRejectionTest`）・`GlobalExceptionHandlerTest`・`BackupWriteGateMockMvcTest`・`BackupQuiesceProductionContextStartTest` は両方の形で 503・`readonly_sql`・WARN の間引きを確かめる。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない `SET SESSION TRANSACTION READ ONLY` の DML → 1792）と `@@session.transaction_read_only = 1` を別に固定する。WARN に拒否の形を出す。§6.4・§6.5.1・§13.1・§13.2・L-13・§19 に書いた |
+
+### 20.8 第 2 段階 2c の実装の review（`fea83915`）
+
+| # | 内容 | 対応（第 2 段階 2d の fix commit D） |
+|---|---|---|
+| P3-1 | Flyway job の DDL 凍結の lock の接続が migration の間に `wait_timeout` で閉じられ得て、`RELEASE_LOCK` の結果も見ていない | `GET_LOCK` の前に lock の接続の `SET SESSION wait_timeout = 86400`（設定できなければ migration を始めない）。`RELEASE_LOCK` が 1 でない・文が通らなければ WARN `errorCode=BACKUP_DDL_FREEZE_LOST`（「migration の途中で DDL 凍結の lock が失われた可能性」）。§8・`deploy-runbook.md` §3.5 |
+| P3-2 | context の棚卸しが `SpringApplicationBuilder`・initializer の prod を見ない | `SpringApplicationBuilder` で prod の context を作る試験を理由つきの一覧（`FreeeProductionStartupTest`・`BackupQuiesceResponderMySqlTest`）の中だけにする走査と fixture を足した。残りの範囲は §20.6・L-22 |
+| P3-3 | 明示の照合が注釈も数え、基底 class の prod を見ない | 注釈を除いた source で照合し（文字列・text block の中は残す）、prod の profile と `@MockBean` を基底 class へ 5 段まで辿る。fixture を足した |
+| P3-4 | U-15 の解除の後の touch の判定が touch しなくても通る | 最終利用を 1 時間前にしてから、解除の後の値が進んだことを厳しく比べる |
+| P3-5 | `BackupQuiesceProductionContextStartTest` の javadoc が古い | fix commit E（試験の driver の拒否の形を変えた commit）で直した |
+| P3-6 | 照合 script の `SHUTDOWN_TIMEOUT` の形式・置き場所の制限が §1.0 に無い | `deploy-runbook.md` §1.0 の backup の書込み静止の段に書いた（`environment` に `<整数><単位>`） |
+| P3-7 | commit message の誤記（3a5fb783 の負例の件数は 28、fea83915 の用語） | amend しない。PR の説明で直す（統括） |

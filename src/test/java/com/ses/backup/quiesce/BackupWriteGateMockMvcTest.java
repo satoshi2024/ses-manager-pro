@@ -218,7 +218,13 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
         // RB-QUIESCE U-15: portal の参照は U-14 と同じく touch を省いて続ける
         String suffix = uniqueSuffix();
         UserFixture portal = readyUser(createCustomerOrg("bq-read-" + suffix), "bq-read-" + suffix + "@example.test");
+        // 2c review P3-4: 解除の後の touch が実際に書いたことを示すため、最終利用を 1 時間前にしておく（idle 期限は変えない）。
+        // 同じ時刻のままだと、touch しなくても「前と同じか後」の判定が通ってしまう
+        java.time.LocalDateTime aged = toLocalDateTime(portalSessionRow(portal).get("LAST_SEEN_AT")).minusHours(1);
+        jdbc.update("UPDATE t_portal_session SET last_seen_at = ? WHERE token_hash = ?", aged,
+                com.ses.common.util.SecurityHashUtil.sha256(portal.sessionCookie().getValue()));
         Map<String, Object> before = portalSessionRow(portal);
+        assertThat(toLocalDateTime(before.get("LAST_SEEN_AT"))).isEqualTo(aged);
         closeGate();
         double readOnly = counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql");
         double skipped = counter(BackupQuiesceMetrics.SKIPPED, "kind", "session_touch");
@@ -239,7 +245,8 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
         BackupQuiesceTestSupport.reopen(gate, 1);
         mockMvc.perform(get("/api/portal/auth/me").cookie(portal.sessionCookie())).andExpect(status().isOk());
         assertThat(toLocalDateTime(portalSessionRow(portal).get("LAST_SEEN_AT")))
-                .as("解除の後は従来どおり touch する").isAfterOrEqualTo(toLocalDateTime(before.get("LAST_SEEN_AT")));
+                .as("解除の後は従来どおり touch する（1 時間前にした最終利用が今の時刻に進む）")
+                .isAfter(aged.plusMinutes(30));
     }
 
     private Map<String, Object> portalSessionRow(UserFixture portal) {

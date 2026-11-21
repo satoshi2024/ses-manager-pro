@@ -29,6 +29,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code enabled=false} で INERT。基底 class の {@code @ActiveProfiles} を含む）か、{@code app.backup-quiesce.enabled} の明示を
  * 持つこと。prod の profile では明示が必須で、{@code enabled=false}（停止口。ticket 無し）を明示した context は prod の起動時検査が
  * 止めるため {@code @MockBean BackupQuiesceProductionValidator} を持つこと。
+ *
+ * <p>2c review P3-3: 走査は注釈（{@code //}・{@code /* *}{@code /}）を除いた source で行い（注釈の中の明示は数えない）、prod の
+ * profile は test profile と同じく基底 class を {@value #MAX_SUPER_DEPTH} 段まで辿る（基底 class の {@code @ActiveProfiles("prod")}
+ * を継いだ context も明示を求める）。2c review P3-2: {@code @SpringBootTest} の外で prod の context を作る
+ * {@code SpringApplicationBuilder} の試験は、理由つきの一覧（{@link #PROD_BUILDER_CONTEXTS}）の中だけに置く。
+ * {@code ApplicationContextRunner} と initializer で profile を設定する context は静的な走査の外（design.md §20.6・L-22）。
  */
 class BackupQuiesceTestContextInventoryTest {
 
@@ -47,6 +53,18 @@ class BackupQuiesceTestContextInventoryTest {
     private static final Pattern MYSQL_TAG = Pattern.compile("@Tag\\s*\\(\\s*\"mysql\"\\s*\\)");
     /** 基底 class を辿る深さの上限。 */
     private static final int MAX_SUPER_DEPTH = 5;
+    private static final Pattern APPLICATION_BUILDER = Pattern.compile("\\bSpringApplicationBuilder\\b");
+    private static final Pattern BUILDER_PROD = Pattern.compile(
+            "\\.profiles\\s*\\([^)]*\"prod\"|setActiveProfiles\\s*\\([^)]*\"prod\"|spring\\.profiles\\.active=prod\\b");
+    /**
+     * {@code SpringApplicationBuilder} で prod の profile の context を作る試験と、静止応答の thread が他の試験を乱さない理由
+     * （2c review P3-2）。一覧の外に増えたら、専用の DB か {@code mysql} の tag を持たせて理由を書く。
+     */
+    static final Map<String, String> PROD_BUILDER_CONTEXTS = Map.of(
+            "com/ses/config/FreeeProductionStartupTest.java",
+            "UUID 名の専用の in-memory DB で起動し、freee の client 設定の検査で起動の途中に失敗して閉じる（静止応答は thread を残さない）",
+            "com/ses/backup/quiesce/BackupQuiesceResponderMySqlTest.java",
+            "@Tag(\"mysql\") の専用の container の DB で、ApplicationRunner の失敗で閉じる停止の順の試験（fast の共有 testdb を使わない）");
 
     @Test
     void 全てのSpringBootTestはtest_profileか静止の有効無効の明示を持ちprodの停止口はvalidatorをMockBeanにする()
@@ -143,15 +161,86 @@ class BackupQuiesceTestContextInventoryTest {
         assertThat(quiesceDeclarationViolation(prodAndTest, bases)).as("prod を含めば test profile と数えない").isNotNull();
     }
 
-    /** 規則の違反の理由（違反が無ければ null）。 */
-    static String quiesceDeclarationViolation(String source, Map<String, String> bySimpleName) {
+    /** 2c review P3-3: 注釈の中の明示は数えず、基底 class から継いだ prod の profile にも明示を求める。 */
+    @Test
+    void 注釈の中の明示は数えず基底classのprodのprofileにも明示とMockBeanを求める() {
+        Map<String, String> bases = Map.of("BaseProdContext", """
+                @ActiveProfiles("prod")
+                abstract class BaseProdContext {}
+                """, "BaseProdWithMock", """
+                @ActiveProfiles("prod")
+                abstract class BaseProdWithMock {
+                    @MockBean
+                    private BackupQuiesceProductionValidator validator;
+                }
+                """);
+        String declaredOnlyInLineComment = """
+                // @SpringBootTest(properties = "app.backup-quiesce.enabled=true")
+                @SpringBootTest
+                @ActiveProfiles("prod")
+                class A {}
+                """;
+        String declaredOnlyInBlockComment = """
+                /* app.backup-quiesce.enabled=false は書かない */
+                @SpringBootTest(properties = "spring.config.import=optional:classpath:application-test.yml")
+                class B {}
+                """;
+        String testProfileOnlyInComment = """
+                @SpringBootTest
+                // @ActiveProfiles("test")
+                class C {}
+                """;
+        String inheritedProdWithoutDeclaration = """
+                @SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:own;MODE=MySQL")
+                class D extends BaseProdContext {}
+                """;
+        String inheritedProdDisabledWithoutMock = """
+                @SpringBootTest(properties = "app.backup-quiesce.enabled=false")
+                class E extends BaseProdContext {}
+                """;
+        String inheritedProdDisabledWithInheritedMock = """
+                @SpringBootTest(properties = "app.backup-quiesce.enabled=false")
+                class F extends BaseProdWithMock {}
+                """;
+        String inheritedProdEnabled = """
+                @SpringBootTest(properties = "app.backup-quiesce.enabled=true")
+                @ActiveProfiles("test")
+                class G extends BaseProdContext {}
+                """;
+        String urlWithSlashes = """
+                @SpringBootTest(properties = {"app.backup-quiesce.enabled=true", "x.url=http://example.invalid/a"})
+                @ActiveProfiles("prod")
+                class H {}
+                """;
+
+        assertThat(quiesceDeclarationViolation(declaredOnlyInLineComment, bases)).as("行の注釈の中の明示は数えない")
+                .isNotNull();
+        assertThat(quiesceDeclarationViolation(declaredOnlyInBlockComment, bases)).as("塊の注釈の中の明示は数えない")
+                .isNotNull();
+        assertThat(quiesceDeclarationViolation(testProfileOnlyInComment, bases)).as("注釈の中の test profile は数えない")
+                .isNotNull();
+        assertThat(quiesceDeclarationViolation(inheritedProdWithoutDeclaration, bases)).as("継いだ prod にも明示を求める")
+                .isNotNull();
+        assertThat(quiesceDeclarationViolation(inheritedProdDisabledWithoutMock, bases))
+                .as("継いだ prod の enabled=false は @MockBean を求める").isNotNull();
+        assertThat(quiesceDeclarationViolation(inheritedProdDisabledWithInheritedMock, bases))
+                .as("基底 class の @MockBean も数える").isNull();
+        assertThat(quiesceDeclarationViolation(inheritedProdEnabled, bases))
+                .as("profile は継がれて合わさる（inheritProfiles）ため test を足しても prod の規則").isNull();
+        assertThat(quiesceDeclarationViolation(urlWithSlashes, bases)).as("文字列の中の // は注釈ではない").isNull();
+        assertThat(stripComments("a = \"//x\"; // c\nb = '/'; /* d */ e")).isEqualTo("a = \"//x\"; \nb = '/';  e");
+    }
+
+    /** 規則の違反の理由（違反が無ければ null）。注釈を除いた source で判定する（2c review P3-3）。 */
+    static String quiesceDeclarationViolation(String rawSource, Map<String, String> bySimpleName) {
+        String source = stripComments(rawSource);
         Matcher explicit = EXPLICIT_QUIESCE.matcher(source);
         boolean declared = explicit.find();
-        if (isProdSpringBootTest(source)) {
+        if (SPRING_BOOT_TEST.matcher(source).find() && hasProdProfile(source, bySimpleName, 0)) {
             if (!declared) {
-                return "prod の profile で app.backup-quiesce.enabled の明示が無い";
+                return "prod の profile（基底 class から継いだものを含む）で app.backup-quiesce.enabled の明示が無い";
             }
-            if ("false".equals(explicit.group(1)) && !VALIDATOR_MOCK.matcher(source).find()) {
+            if ("false".equals(explicit.group(1)) && !hasValidatorMock(source, bySimpleName, 0)) {
                 return "prod の profile の enabled=false で BackupQuiesceProductionValidator の @MockBean が無い";
             }
             return null;
@@ -162,20 +251,127 @@ class BackupQuiesceTestContextInventoryTest {
         return "test profile でも app.backup-quiesce.enabled の明示でもない";
     }
 
-    private static boolean hasTestProfile(String source, Map<String, String> bySimpleName, int depth) {
+    private static boolean hasTestProfile(String rawSource, Map<String, String> bySimpleName, int depth) {
+        String source = stripComments(rawSource);
         if (PROD_PROFILE.matcher(source).find()) {
             return false;
         }
         if (TEST_PROFILE.matcher(source).find()) {
             return true;
         }
+        String parentSource = parentSource(source, bySimpleName, depth);
+        return parentSource != null && hasTestProfile(parentSource, bySimpleName, depth + 1);
+    }
+
+    /** prod の profile を自分か基底 class（{@value #MAX_SUPER_DEPTH} 段まで）が宣言するか（2c review P3-3）。 */
+    private static boolean hasProdProfile(String rawSource, Map<String, String> bySimpleName, int depth) {
+        String source = stripComments(rawSource);
+        if (PROD_PROFILE.matcher(source).find()) {
+            return true;
+        }
+        String parentSource = parentSource(source, bySimpleName, depth);
+        return parentSource != null && hasProdProfile(parentSource, bySimpleName, depth + 1);
+    }
+
+    private static boolean hasValidatorMock(String rawSource, Map<String, String> bySimpleName, int depth) {
+        String source = stripComments(rawSource);
+        if (VALIDATOR_MOCK.matcher(source).find()) {
+            return true;
+        }
+        String parentSource = parentSource(source, bySimpleName, depth);
+        return parentSource != null && hasValidatorMock(parentSource, bySimpleName, depth + 1);
+    }
+
+    private static String parentSource(String source, Map<String, String> bySimpleName, int depth) {
         Matcher parent = EXTENDS.matcher(source);
         if (depth >= MAX_SUPER_DEPTH || !parent.find()) {
-            return false;
+            return null;
         }
         String name = parent.group(1);
-        String parentSource = bySimpleName.get(name.substring(name.lastIndexOf('.') + 1));
-        return parentSource != null && hasTestProfile(parentSource, bySimpleName, depth + 1);
+        return bySimpleName.get(name.substring(name.lastIndexOf('.') + 1));
+    }
+
+    /**
+     * Java の source から注釈（{@code //} の行末までと {@code /* … *}{@code /}）を除く。文字列・文字・text block の中は残す
+     * （{@code "http://…"} を注釈と見ない）。
+     */
+    static String stripComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int i = 0;
+        int n = source.length();
+        while (i < n) {
+            char c = source.charAt(i);
+            if (c == '"' && source.startsWith("\"\"\"", i)) {
+                int end = source.indexOf("\"\"\"", i + 3);
+                int stop = end < 0 ? n : end + 3;
+                out.append(source, i, stop);
+                i = stop;
+            } else if (c == '"' || c == '\'') {
+                int j = i + 1;
+                while (j < n && source.charAt(j) != c && source.charAt(j) != '\n') {
+                    j += source.charAt(j) == '\\' ? 2 : 1;
+                }
+                int stop = Math.min(n, j + 1);
+                out.append(source, i, stop);
+                i = stop;
+            } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '/') {
+                int end = source.indexOf('\n', i);
+                i = end < 0 ? n : end;
+            } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '*') {
+                int end = source.indexOf("*/", i + 2);
+                i = end < 0 ? n : end + 2;
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    /** 2c review P3-2: {@code SpringApplicationBuilder} で prod の context を作る試験は理由つきの一覧の中だけにある。 */
+    @Test
+    void SpringApplicationBuilderでprodのcontextを作る試験は理由つきの一覧の中だけにある() throws IOException {
+        Map<String, String> sources = testSources();
+        List<String> found = new ArrayList<>();
+        sources.forEach((path, source) -> {
+            if (!path.endsWith("/BackupQuiesceTestContextInventoryTest.java") && isProdBuilderContext(source)) {
+                found.add(path);
+            }
+        });
+
+        assertThat(found).as("SpringApplicationBuilder で prod の context を作る試験（走査の空振りを防ぐ）")
+                .contains("com/ses/config/FreeeProductionStartupTest.java");
+        assertThat(found).as("一覧（PROD_BUILDER_CONTEXTS）の外で SpringApplicationBuilder の prod の context を作る試験があります。"
+                + "専用の DB か mysql の tag を持たせ、理由を一覧に書いてください").allMatch(PROD_BUILDER_CONTEXTS::containsKey);
+        assertThat(PROD_BUILDER_CONTEXTS.keySet()).as("一覧の class は実在し、今も prod の context を作る")
+                .allMatch(found::contains);
+        assertThat(PROD_BUILDER_CONTEXTS.values()).allMatch(reason -> reason.length() > 20);
+    }
+
+    @Test
+    void SpringApplicationBuilderの規則はprodのprofileを見つけ注釈の中とprod以外は数えない() {
+        assertThat(isProdBuilderContext("""
+                SpringApplication app = new SpringApplicationBuilder(App.class).profiles("prod").build();
+                """)).isTrue();
+        assertThat(isProdBuilderContext("""
+                new org.springframework.boot.builder.SpringApplicationBuilder(App.class)
+                        .run("--spring.profiles.active=prod");
+                """)).isTrue();
+        assertThat(isProdBuilderContext("""
+                new SpringApplicationBuilder(App.class).profiles("test").build();
+                """)).isFalse();
+        assertThat(isProdBuilderContext("""
+                // new SpringApplicationBuilder(App.class).profiles("prod")
+                class A {}
+                """)).as("注釈の中は数えない").isFalse();
+        assertThat(isProdBuilderContext("""
+                context.getEnvironment().setActiveProfiles("prod");
+                """)).as("SpringApplicationBuilder の無い initializer は走査の外（L-22）").isFalse();
+    }
+
+    static boolean isProdBuilderContext(String rawSource) {
+        String source = stripComments(rawSource);
+        return APPLICATION_BUILDER.matcher(source).find() && BUILDER_PROD.matcher(source).find();
     }
 
     private static Map<String, String> testSources() throws IOException {
@@ -267,7 +463,8 @@ class BackupQuiesceTestContextInventoryTest {
         assertThat(isProdSpringBootTest(testProfile)).isFalse();
     }
 
-    static boolean isProdSpringBootTest(String source) {
+    static boolean isProdSpringBootTest(String rawSource) {
+        String source = stripComments(rawSource);
         return SPRING_BOOT_TEST.matcher(source).find() && PROD_PROFILE.matcher(source).find();
     }
 
