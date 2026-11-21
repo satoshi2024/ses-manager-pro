@@ -454,7 +454,8 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   dispatcher だけが外れ、配列に残った handler が後の `trap_add` で戻るため）。
 - uploads の pointer と版の切替えの試験（`tests/uploads-pointer-test.sh`・`tests/uploads-cutover-test.sh`）は symlink を
   作れる環境が要る。Linux（tool image）ではそのまま動き、Git for Windows では `MSYS=winsymlinks:sys` を設定して実行する
-  （設定しないと `ln -s` が複製を作るため、最初の前提の case が失敗する）。
+  （設定しないと `ln -s` が複製を作り、`ln -s ..` は親を再帰的に複製して終わらない。そのため両 suite は最初に
+  `require_symlink_capable_environment`（`tests/lib/test-framework.sh`）で確かめ、満たさなければ以降の case を実行せずに失敗する）。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 

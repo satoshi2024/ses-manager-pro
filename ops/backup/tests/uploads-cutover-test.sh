@@ -40,20 +40,6 @@ assert_no_temp_left() { # <label>
   assert_eq "" "$(find "$R" -name '.stage-*' -o -name '.current.switch-*' 2>/dev/null)" "一時の名前を残さない: $1"
 }
 
-# 前提: この環境で symlink を作れる（作れないと ln -s が複製になり、試験の意味が変わる）
-case_cutover_requires_symlink_capable_environment() {
-  local t
-  t=$(mktemp -d)
-  mkdir "$t/v0"
-  ln -s v0 "$t/link" 2>/dev/null
-  if [[ -L "$t/link" && "$(readlink "$t/link")" == v0 ]]; then
-    test_assert "前提: symlink を作れる環境で実行している"
-  else
-    test_fail "前提: symlink を作れる環境で実行している" "ln -s が symlink を作りません（Git for Windows では MSYS=winsymlinks:sys を設定する）"
-  fi
-  rm -rf "$t"
-}
-
 case_stage_creates_new_version_without_touching_current() {
   setup_tree
   run_cutover stage --from "$T/ready" --root "$R" --version v1
@@ -277,7 +263,8 @@ case_status_reports_and_writes_nothing() {
   assert_eq 2 "$CO_RC" "引数の不足は 2"
 }
 
-run_case case_cutover_requires_symlink_capable_environment
+# 前提: symlink を作れる環境（作れなければ以降の case を実行せずに失敗で終える）
+require_symlink_capable_environment "uploads の版の切替え（uploads-cutover.sh）"
 run_case case_stage_creates_new_version_without_touching_current
 run_case case_stage_rejects_and_leaves_nothing
 run_case case_stage_failure_after_copy_starts_removes_temp

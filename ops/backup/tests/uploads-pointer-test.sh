@@ -25,20 +25,6 @@ setup_root() {
   printf 'x\n' > "$T/uploads/v0/a.txt"
 }
 
-# 前提: この環境で symlink を作れる（作れないと ln -s が複製になり、試験の意味が変わる。Git for Windows では
-# MSYS=winsymlinks:sys を設定する）
-case_pointer_requires_symlink_capable_environment() {
-  setup_root
-  ln -s v0 "$T/uploads/current" 2>/dev/null
-  if [[ -L "$T/uploads/current" && "$(readlink "$T/uploads/current")" == v0 ]]; then
-    test_assert "前提: symlink を作れる環境で実行している"
-  else
-    test_fail "前提: symlink を作れる環境で実行している" "ln -s が symlink を作りません"
-  fi
-  rm -rf "$T"
-  T=""
-}
-
 resolve() { # [pointer（既定 current。空文字はそのまま渡す）] [root]
   RES_OUT=$(uploads_pointer::resolve "${2-$T/uploads}" "${1-current}" 2>"$T/err")
   RES_RC=$?
@@ -177,7 +163,8 @@ case_pointer_check_env() {
   assert_nonzero "$rc" "UPLOADS_POINTER が 1 段の名前でなければ失敗する"
 }
 
-run_case case_pointer_requires_symlink_capable_environment
+# 前提: symlink を作れる環境（作れなければ以降の case を実行せずに失敗で終える。ln -s .. の複製が終わらないため）
+require_symlink_capable_environment "uploads の pointer（current symlink）の解決"
 run_case case_pointer_accepts_single_segment_names
 run_case case_pointer_rejects_unsafe_targets
 run_case case_pointer_rejects_missing_or_replaced_pointer_and_bad_root
