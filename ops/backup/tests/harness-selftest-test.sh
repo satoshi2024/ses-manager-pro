@@ -22,7 +22,8 @@
 #     退避分の剪除方針（削除を表示・失敗診断と本 harness 以外のディレクトリは残す）、PID 再利用の扱い
 #   - 固定名の事前確認を WORK 判定より前に行うこと（P3-N1）、別の PID 名前空間の前回 run は終了記録が
 #     無ければ退避しないこと（P3-N2）、所有マーカーの排他作成（P3-S1）
-#   - 排他作成に事前検査と open の間の窓が無いこと（RB-W W-2。dd の conv=excl = O_CREAT|O_EXCL の 1 回の open）
+#   - 排他作成に事前検査と open の間の窓が無いこと（RB-W W-2。dd の conv=excl = O_CREAT|O_EXCL の 1 回の open）、
+#     その前提（dd の conv=excl・iflag=nonblock、mktemp）を満たさない環境は BLOCKED（2）で止まること
 #   - 前回 run の生存判定は owner= / session= も一致するときだけ kill -0 で行い、EPERM を生存とすること（RB-W W-6）
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
@@ -109,7 +110,7 @@ case_failing_backup_command_is_nonzero() {
   local out code
   # 必須 env を与えず実行する。common::require_env → common::fail で早期に exit 1。
   out=$(env -u BACKUP_REPOSITORY -u MYSQL_HOST -u MYSQL_USER -u MYSQL_PASSWORD_FILE \
-    -u MYSQL_DATABASE -u BACKUP_WORK_DIR -u UPLOADS_DIR \
+    -u MYSQL_DATABASE -u BACKUP_WORK_DIR -u UPLOADS_DIR -u UPLOADS_ROOT -u UPLOADS_POINTER \
     bash "$ROOT/ops/backup/backup-full.sh" 2>&1)
   code=$?
   assert_nonzero "$code" "必須 env 欠落で backup-full が非 0"
@@ -871,8 +872,11 @@ case_integration_missing_inputs_fail_safe() {
   curated="$temp/curated-bin"
   mkdir -p "$curated"
   cp "$temp/bin/docker" "$temp/bin/cygpath" "$temp/bin/chmod" "$curated/"
+  # 検証用 PATH は timeout だけを欠き、runner の実行環境の前提は満たす。dd・mktemp・rmdir は所有マーカー等の
+  # 排他作成の事前確認（RB-W W-2。満たさなければ BLOCKED=2 で止まる）、uname は session の識別（RB-W W-6）に使う。
+  # W-2 で前提が増えたときにこの一覧を直さず、timeout 不在の経路に入る前に BLOCKED で止まっていた（RB-W 追加修正 C）。
   make_tool_wrappers "$curated" bash env dirname basename date id mkdir find grep cat wc head tail cut awk \
-    rm cp mv tee sha256sum sleep tr ls touch sed sort kill
+    rm cp mv tee sha256sum sleep tr ls touch sed sort kill dd mktemp rmdir uname
   timeout_found=$(PATH="$curated"; command -v timeout 2>/dev/null || true)
   assert_eq "" "$timeout_found" "検証用PATHにtimeoutが存在しない（前提）"
   work="$temp/allowed/work-no-timeout"
@@ -880,6 +884,7 @@ case_integration_missing_inputs_fail_safe() {
   runner_mock_run "$temp" no-timeout "$work"
   RUNNER_PATH=""
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_not_contains "$RUNNER_OUT" "BLOCKED:" "検証用PATHでもrunnerは実行環境の前提検査を通る（前提）"
   assert_eq 1 "$RUNNER_RC" "timeout不在でもrunner終了コードは1"
   assert_contains "$diag_content" "native_exit=17" "timeout不在でもnative終了コードを記録"
   assert_contains "$diag_content" "collector=bounded timeout command unavailable; Docker diagnostics omitted" "timeout不在ではDocker診断を省略"
@@ -903,6 +908,7 @@ MOCK
   RUNNER_PATH=""
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
   fake_calls=$(grep -v -x -F -- '--version' "$temp/fake-timeout.log" 2>/dev/null || true)
+  assert_not_contains "$RUNNER_OUT" "BLOCKED:" "GNU以外のtimeoutのPATHでもrunnerは実行環境の前提検査を通る（前提）"
   assert_contains "$diag_content" "collector=bounded timeout command unavailable" "GNU以外のtimeout（System32のtimeout.exe相当）は採用しない"
   assert_eq "" "$fake_calls" "GNU以外のtimeoutで診断コマンドを包まない（--version確認だけ）"
   assert_not_contains "$diag_content" "redaction/secret scan failed" "GNU以外のtimeoutでも最終scanは直接実行で完了"
@@ -1704,6 +1710,58 @@ case_integration_pid_is_gone_treats_eperm_as_alive() {
   rm -rf "$temp"
 }
 
+# 39) RB-W W-2 の前提（dd の conv=excl・iflag=nonblock、mktemp）を満たさなければ、Docker にも WORK にも触れず
+#     BLOCKED（2）で終了する（case 32 の mv と同じ扱い）。conv=excl を受け付けない dd に加え、受け付けたふりをして
+#     既存の file を上書きする dd（排他作成にならない）も拒否する。mktemp が無い環境（事前確認の私有 directory を
+#     作れない）も同じ。RB-W 追加修正 C: この前提検査を加えた W-2 で case 19 の検証用 PATH を直さず、timeout 不在の
+#     経路に入る前に BLOCKED で止まっていた（CI の 6 件の失敗）。前提検査そのものの試験はこの case が持つ。
+case_integration_runner_blocks_without_exclusive_dd() {
+  local temp work variant
+  for variant in no-excl ignores-excl no-mktemp; do
+    temp=$(mktemp -d)
+    runner_mock_init "$temp"
+    case "$variant" in
+      no-excl)
+        cat > "$temp/bin/dd" <<'MOCK'
+#!/usr/bin/env bash
+for a in "$@"; do
+  [[ "$a" == conv=excl ]] && { echo "dd: invalid conversion: 'excl'" >&2; exit 1; }
+done
+exit 1
+MOCK
+        ;;
+      ignores-excl)
+        # conv=excl を無視して of= を上書きする（2 回目の作成も成功してしまう）
+        cat > "$temp/bin/dd" <<'MOCK'
+#!/usr/bin/env bash
+of="" if_=""
+for a in "$@"; do
+  case "$a" in of=*) of=${a#of=} ;; if=*) if_=${a#if=} ;; esac
+done
+if [[ -n "$of" ]]; then cat > "$of"; exit 0; fi
+if [[ -n "$if_" ]]; then cat -- "$if_"; exit 0; fi
+cat
+MOCK
+        ;;
+      no-mktemp)
+        cat > "$temp/bin/mktemp" <<'MOCK'
+#!/usr/bin/env bash
+echo "mktemp: command not found（試験）" >&2
+exit 127
+MOCK
+        ;;
+    esac
+    "$REAL_CHMOD" +x "$temp/bin/"*
+    work="$temp/allowed/work-$variant"
+    runner_mock_run "$temp" success "$work"
+    assert_eq 2 "$RUNNER_RC" "排他作成の前提を満たさなければBLOCKED(2): $variant"
+    assert_contains "$RUNNER_OUT" "BLOCKED: dd の conv=excl と iflag=nonblock が必要です" "前提不足の理由を通知: $variant"
+    assert_eq "" "$RUNNER_DOCKER_LOG" "BLOCKED時はDockerに一切触れない: $variant"
+    assert_no_file "$work" "BLOCKED時はWORKを作らない: $variant"
+    rm -rf "$temp"
+  done
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1742,5 +1800,6 @@ run_case case_integration_owner_marker_exclusive_create
 run_case case_integration_exclusive_create_has_no_check_open_window
 run_case case_integration_default_work_foreign_owner_or_session_requires_end_record
 run_case case_integration_pid_is_gone_treats_eperm_as_alive
+run_case case_integration_runner_blocks_without_exclusive_dd
 
 test_summary "ACC-OPS-P2 harness self-tests"
