@@ -24,6 +24,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -67,14 +68,14 @@ class ProductionPrivacyJournalAdapterMySqlTest {
     private static final MutableClock CLOCK = new MutableClock(T0);
 
     @Container
-    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(PrivacyJournalTestPrincipals.SCHEMA)
             .withUsername("root")
             .withPassword(ROOT_PASSWORD)
             .withCommand("--log-bin=mysql-bin", "--sync-binlog=1", "--innodb-flush-log-at-trx-commit=1");
 
     @Container
-    static final MySQLContainer<?> SYNTHETIC = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> SYNTHETIC = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(JournalTestConnectionCapability.randomDatabase())
             .withUsername("root")
             .withPassword(ROOT_PASSWORD)

@@ -12,6 +12,7 @@ import com.ses.test.InnoDbRecordLockWaits.HeldLock;
 import com.ses.test.InnoDbRecordLockWaits.PointLock;
 import com.ses.test.InnoDbRecordLockWaits.WaitEdge;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,7 +77,7 @@ class DocumentEligibilityFenceMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf01_document_eligibility")
             .withUsername("root")
             .withPassword("ses");

@@ -1,6 +1,7 @@
 package com.ses.service.ai;
 
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,7 @@ class AiRecommendationRetentionTenantIsolationMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_ai_retention_iso")
             .withUsername("root")
             .withPassword("ses");

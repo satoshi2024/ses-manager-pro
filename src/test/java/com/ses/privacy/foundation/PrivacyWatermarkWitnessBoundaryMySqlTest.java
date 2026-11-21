@@ -15,6 +15,7 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -2157,7 +2158,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
 
     private static MySQLContainer<?> mysql(String prefix) {
         String db = prefix + UUID.randomUUID().toString().replace("-", "");
-        return new MySQLContainer<>("mysql:8.0").withDatabaseName(db).withUsername("root").withPassword(PASSWORD)
+        return new MySQLContainer<>(MySqlTestImages.image()).withDatabaseName(db).withUsername("root").withPassword(PASSWORD)
                 .withCommand("--log-bin=mysql-bin", "--sync-binlog=1", "--innodb-flush-log-at-trx-commit=1");
     }
 }

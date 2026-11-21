@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -38,20 +39,20 @@ class PrivacyJournalStartupVerifierMySqlTest {
     private static final String JOURNAL_ID = "journal-a1j-01";
 
     @Container
-    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(SCHEMA)
             .withUsername("root")
             .withPassword(ROOT_PASSWORD)
             .withCommand("--log-bin=mysql-bin", "--sync-binlog=1", "--innodb-flush-log-at-trx-commit=1");
 
     @Container
-    static final MySQLContainer<?> APPLICATION = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> APPLICATION = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword(ROOT_PASSWORD);
 
     @Container
-    static final MySQLContainer<?> NO_BINLOG = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> NO_BINLOG = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(SCHEMA)
             .withUsername("root")
             .withPassword(ROOT_PASSWORD)

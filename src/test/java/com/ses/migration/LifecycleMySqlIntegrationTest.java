@@ -20,6 +20,7 @@ import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import com.ses.test.TenantTestSecurity;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -59,7 +60,7 @@ class LifecycleMySqlIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_lifecycle_mysql")
             .withUsername("root")
             .withPassword("ses");

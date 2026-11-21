@@ -8,6 +8,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -40,7 +41,7 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(properties = {"app.features.nf01.enabled=true", "app.security.oidc.tenant-id="})
 @ActiveProfiles("test")
 class ResignationRevocationOutboxMySqlTest {
-    @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_revoke_outbox").withUsername("root").withPassword("ses");
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);

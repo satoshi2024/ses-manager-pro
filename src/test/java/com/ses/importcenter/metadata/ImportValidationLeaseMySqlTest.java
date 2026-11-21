@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.service.DocumentService;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,7 @@ import static org.mockito.Mockito.when;
 class ImportValidationLeaseMySqlTest {
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("nf06_lease")
             .withUsername("root").withPassword("ses");
 

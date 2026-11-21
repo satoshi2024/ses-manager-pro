@@ -7,17 +7,21 @@
 #   - ALB Target Group → /actuator/health/readiness (MUST; never use liveness for ALB)
 services:
   mysql:
-    image: mysql:8.0.36
+    # 本番は MySQL 8.4 LTS。testの既定（src/test/java/com/ses/test/MySqlTestImages.java）と同じ固定tagを使う。
+    # 8.0系のimageしか持たない端末は SES_OFFLINE_MYSQL_IMAGE=mysql:8.0.36 のように上書きできる
+    # （その結果は8.0での確認であり、8.4の証拠にはならない）。
+    image: ${SES_OFFLINE_MYSQL_IMAGE:-mysql:8.4.13}
     container_name: ses-offline-mysql
     environment:
       MYSQL_ROOT_PASSWORD: sim-only-root-not-prod
       MYSQL_DATABASE: ses_manager_db
       MYSQL_USER: ses
       MYSQL_PASSWORD: sim-only-db-not-prod
+    # --default-authentication-plugin は MySQL 8.4 で削除された（指定するとserverが起動しない）。
+    # caching_sha2_password は 8.0・8.4 とも既定pluginなので、外しても挙動は変わらない。
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --default-authentication-plugin=caching_sha2_password
       - --log-bin-trust-function-creators=1
     volumes:
       - ses-offline-mysql-data:/var/lib/mysql

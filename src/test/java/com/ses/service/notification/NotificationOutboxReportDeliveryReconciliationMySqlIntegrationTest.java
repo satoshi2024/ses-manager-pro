@@ -7,6 +7,7 @@ import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDeliveryNotificationBridge;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,7 @@ class NotificationOutboxReportDeliveryReconciliationMySqlIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_nf10_reconciliation_mysql")
             .withUsername("root")
             .withPassword("ses");

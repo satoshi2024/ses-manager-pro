@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.env.MockEnvironment;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -43,14 +44,14 @@ class PrivacyHoldProjectionReconcilerMySqlTest {
     private PrivacyHoldTestFixture.MutableClock clock;
 
     @Container
-    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> JOURNAL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(PrivacyJournalTestPrincipals.SCHEMA)
             .withUsername("root")
             .withPassword(ROOT_PASSWORD)
             .withCommand("--log-bin=mysql-bin", "--sync-binlog=1", "--innodb-flush-log-at-trx-commit=1");
 
     @Container
-    static final com.ses.test.MySQLContainer<?> APP = new com.ses.test.MySQLContainer<>("mysql:8.0")
+    static final com.ses.test.MySQLContainer<?> APP = new com.ses.test.MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword(ROOT_PASSWORD);

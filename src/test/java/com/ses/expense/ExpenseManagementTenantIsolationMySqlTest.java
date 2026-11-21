@@ -6,6 +6,7 @@ import com.ses.entity.SysUser;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class ExpenseManagementTenantIsolationMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_expense_tenant")
             .withUsername("root")
             .withPassword("ses");
