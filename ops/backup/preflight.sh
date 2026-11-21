@@ -25,6 +25,10 @@
 #       または UPLOADS_STAGING_PARENT 指定時に pointer の指す版と staging の親が同じ mount（st_dev）でない
 #   17  空き容量が PREFLIGHT_MIN_FREE_BYTES 未満
 #   18  MYSQL_PWD の使用を検出
+#   19  書込み静止（QUIESCE_PROVIDER=quiesce-db 等の DB の provider の時だけ。RB-QUIESCE design.md §12.4）の検査に不合格:
+#       信号表（sys_backup_quiesce_request・_instance・_ack）が無い、SHOW GRANTS FOR CURRENT_USER() に要求の表への表単位の
+#       INSERT・UPDATE が無い、停止口の instance の行（STOPPED でない DISABLED。heartbeat の古さによらない）がある、
+#       新しい instance の protocol の版・閾値の式が provider の設定と合わない、QUIESCE_* の設定が不正
 #   1   上記以外（env 不足、接続失敗）
 #
 # 注意: 出力 JSON に host / user / DB 名 / パスワードは含めない。
@@ -38,6 +42,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/common.sh"
 . "$LIB_DIR/mysql-options.sh"
 . "$LIB_DIR/uploads-pointer.sh"
+. "$LIB_DIR/quiesce-db-common.sh"
 
 EXIT_CLIENT=10
 EXIT_SERVER=11
@@ -48,6 +53,7 @@ EXIT_TLS=15
 EXIT_UPLOADS=16
 EXIT_DISK=17
 EXIT_MYSQL_PWD=18
+EXIT_QUIESCE=19
 
 # 対応する MySQL の系列（major.minor）
 SUPPORTED_MYSQL_SERIES=8.4
@@ -75,12 +81,92 @@ Usage: preflight.sh [--json|--help]
 環境契約検査を実行し、結果 JSON を標準出力へ出力する。
 終了コード: 0=PASS, 10=client不正, 11=server version不整合, 12=log_bin OFF・binlog_format が ROW でない,
 13=checksum OFF, 14=非InnoDB, 15=TLS無効, 16=uploads の pointer を解決できない・staging と同じ mount でない, 17=空き容量不足,
-18=MYSQL_PWD使用検出, 1=env不足/接続失敗
+18=MYSQL_PWD使用検出, 19=書込み静止の信号表・権限・停止口・instance の検査に不合格（QUIESCE_PROVIDER=quiesce-db の時）,
+1=env不足/接続失敗
 
 環境変数: MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD_FILE,
 MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_ROOT(任意), UPLOADS_POINTER(任意。既定 current),
-UPLOADS_STAGING_PARENT(任意。UPLOADS_ROOT と同じ mount か確かめる), PREFLIGHT_MIN_FREE_BYTES
+UPLOADS_STAGING_PARENT(任意。UPLOADS_ROOT と同じ mount か確かめる), PREFLIGHT_MIN_FREE_BYTES,
+QUIESCE_PROVIDER(任意。quiesce-db なら書込み静止の検査をする), QUIESCE_*(任意)
 EOF
+}
+
+# 書込み静止の検査の結果（checks.quiesce）
+QUIESCE_CHECK_STATUS=skipped
+QUIESCE_CHECK_TABLES=""
+QUIESCE_CHECK_GRANTS=""
+QUIESCE_CHECK_VERDICT=""
+QUIESCE_CHECK_DETAIL=""
+
+# SHOW GRANTS の行（GRANTS_BEGIN〜GRANTS_END）に、要求の表への表単位の INSERT と UPDATE（または ALL PRIVILEGES）があるか
+preflight::quiesce_grants_ok() { # <結果> <DB 名>
+  local line in_grants=0 privs
+  local re='^GRANT (.+) ON `([^`]+)`\.`sys_backup_quiesce_request` TO '
+  while IFS= read -r line; do
+    case "$line" in
+      GRANTS_BEGIN) in_grants=1; continue ;;
+      GRANTS_END) in_grants=0; continue ;;
+    esac
+    (( in_grants == 1 )) || continue
+    if [[ "$line" =~ $re && "${BASH_REMATCH[2]}" == "$2" ]]; then
+      privs=",${BASH_REMATCH[1]// /},"
+      if [[ "$privs" == *",ALLPRIVILEGES,"* || ( "$privs" == *",INSERT,"* && "$privs" == *",UPDATE,"* ) ]]; then
+        return 0
+      fi
+    fi
+  done <<< "$1"
+  return 1
+}
+
+# 書込み静止の検査（RB-QUIESCE design.md §12.4。読むだけ。QUIESCE_PROVIDER が DB の provider の時だけ）。
+# 信号表の 3 表、要求の表への表単位の INSERT・UPDATE、停止口の行が無いこと、新しい instance の protocol の版と閾値の式。
+preflight::check_quiesce() {
+  local out rc=0 n errf
+  QUIESCE_CHECK_STATUS=ok
+  errf=$(mktemp "${TMPDIR:-/tmp}/ses-preflight-quiesce.XXXXXX")
+  if ! quiesce_db::load_settings CHECKPOINT 2> "$errf"; then
+    QUIESCE_CHECK_STATUS=fail
+    note_fail "$EXIT_QUIESCE" "書込み静止の設定（QUIESCE_*）が不正です: $(tr '\n' ' ' < "$errf")"
+    rm -f "$errf"
+    return 0
+  fi
+  rm -f "$errf"
+  out=$(quiesce_db::run_sql preflight "int:stale_seconds=$QDB_STALE" "int:dead_seconds=$QDB_DEAD" \
+    "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION" "int:lease_seconds=$QDB_LEASE" "int:renew_seconds=$QDB_RENEW" \
+    "int:full=0" 2>/dev/null) || rc=$?
+  n=$(quiesce_db::col "$out" TABLES 2 || true)
+  QUIESCE_CHECK_TABLES=$n
+  if [[ "$n" != 3 ]]; then
+    QUIESCE_CHECK_STATUS=fail
+    note_fail "$EXIT_QUIESCE" "書込み静止の信号表（sys_backup_quiesce_request・_instance・_ack）がありません（${n:-取得できない}/3 表。V202 の migration の後に backup を始めます）${QDB_SQL_ERROR:+: $QDB_SQL_ERROR}"
+    return 0
+  fi
+  if preflight::quiesce_grants_ok "$out" "$MYSQL_DATABASE"; then
+    QUIESCE_CHECK_GRANTS=true
+  else
+    QUIESCE_CHECK_GRANTS=false
+    QUIESCE_CHECK_STATUS=fail
+    note_fail "$EXIT_QUIESCE" "backup account に要求の表（sys_backup_quiesce_request）への表単位の INSERT・UPDATE がありません（deploy-runbook §3.4 の GRANT。restore の後は付け直す）"
+  fi
+  if (( rc != 0 )) || ! quiesce_db::read_verdict "$out" 2>/dev/null; then
+    QUIESCE_CHECK_STATUS=fail
+    note_fail "$EXIT_QUIESCE" "書込み静止の instance の検査を実行できません: ${QDB_SQL_ERROR:-rc=$rc}"
+    return 0
+  fi
+  QUIESCE_CHECK_VERDICT=$QDB_VERDICT
+  QUIESCE_CHECK_DETAIL=$QDB_DETAIL
+  case "$QDB_VERDICT" in
+    OK) : ;;
+    FAIL_DISABLED)
+      QUIESCE_CHECK_STATUS=fail
+      note_fail "$EXIT_QUIESCE" "停止口（BACKUP_QUIESCE_ENABLED=false）の instance の行があります（STOPPED でない DISABLED。停止口の間・異常に止まった後の行の片付けの前は backup が全て失敗します。design.md §9.4）: $(quiesce_db::instances_text "$out" '^DISABLED$')"
+      ;;
+    *)
+      QUIESCE_CHECK_STATUS=fail
+      note_fail "$EXIT_QUIESCE" "新しい instance の protocol の版・閾値の式が provider の設定と合いません（$QDB_VERDICT、$QDB_DETAIL）: $(quiesce_db::instances_text "$out" '^REQUIRED$')"
+      ;;
+  esac
+  return 0
 }
 
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
@@ -255,6 +341,18 @@ main() {
     note_fail "$EXIT_TLS" "TLS が無効です（この接続の Ssl_cipher が空です）"
   fi
 
+  # --- 書込み静止（RB-QUIESCE。DB の provider の時だけ。読むだけ） ---
+  case "${QUIESCE_PROVIDER:-quiesce-local}" in
+    quiesce-db|quiesce-app-stopped)
+      if (( ${#MYSQL_OPT_ARGS[@]} > 0 )); then
+        preflight::check_quiesce
+      else
+        QUIESCE_CHECK_STATUS=fail
+        note_fail "$EXIT_QUIESCE" "接続の設定が無いため書込み静止の検査を実行できません"
+      fi
+      ;;
+  esac
+
   # --- uploads topology（任意。指定されたら存在チェック） ---
   # RB-W 追加修正 C: UPLOADS_ROOT を指定したら、pointer（UPLOADS_POINTER、既定 current）を provider と同じ規則
   # （lib/uploads-pointer.sh）で解決できることを確かめる。廃止した UPLOADS_DIR が残っていれば失敗する。
@@ -352,6 +450,12 @@ main() {
     --arg uploads_same_fs "$uploads_same_fs" \
     --arg disk_free_bytes "$disk_free_bytes" \
     --arg work_dir "$BACKUP_WORK_DIR" \
+    --arg quiesce_provider "${QUIESCE_PROVIDER:-quiesce-local}" \
+    --arg quiesce_status "$QUIESCE_CHECK_STATUS" \
+    --arg quiesce_tables "$QUIESCE_CHECK_TABLES" \
+    --arg quiesce_grants "$QUIESCE_CHECK_GRANTS" \
+    --arg quiesce_verdict "$QUIESCE_CHECK_VERDICT" \
+    --arg quiesce_detail "$QUIESCE_CHECK_DETAIL" \
     '{
       schema_version: $schema_version,
       status: $status,
@@ -377,7 +481,12 @@ main() {
                   pointer: $uploads_pointer, version: $uploads_version,
                   staging_same_filesystem: (if $uploads_same_fs == "" then null else ($uploads_same_fs == "true") end)},
         disk_free_bytes: ($disk_free_bytes // ""),
-        work_dir: $work_dir
+        work_dir: $work_dir,
+        quiesce: {provider: $quiesce_provider, status: $quiesce_status,
+                  signal_tables: (if $quiesce_tables == "" then null else ($quiesce_tables | tonumber? // null) end),
+                  request_table_grant: (if $quiesce_grants == "" then null else ($quiesce_grants == "true") end),
+                  verdict: (if $quiesce_verdict == "" then null else $quiesce_verdict end),
+                  detail: (if $quiesce_detail == "" then null else $quiesce_detail end)}
       }
     }'
 

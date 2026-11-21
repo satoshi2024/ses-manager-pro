@@ -45,6 +45,9 @@ setup_full() {
   unset UPLOADS_DIR
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export PREFLIGHT_MIN_FREE_BYTES=1 QUIESCE_DEADLINE_SECONDS=20 QUIESCE_STALE_SECONDS=60
+  # PATH の preflight.sh（image に写した版）ではなく、試験する repository の preflight.sh を使う（RB-QUIESCE: image の写しは
+  # build の時点の版で、作業中の変更（checks.quiesce 等）を含まないことがある）
+  export PREFLIGHT_BIN="$PREFLIGHT"
   export APP_COMMIT=test-commit-abc FLYWAY_VERSION=42 CRITICAL_TABLES=sys_use
   export BACKUP_TOOL_IMAGE_DIGEST=sha256:unit-test-digest
   # R1 P1-06: full coordinate は必須（archiver の初回起点）
@@ -53,7 +56,8 @@ setup_full() {
   export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
     CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
-    FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
+    FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC QUIESCE_PROVIDER FAKE_QDB_DIR QUIESCE_STATE_DIR QUIESCE_LEASE_RENEW_SECONDS \
+    QUIESCE_RESUME_CONFIRM_SECONDS QUIESCE_FULL_NEW_INSTANCE_CHECK_SECONDS FAKE_DUMP_SLEEP FAKE_DUMP_PID_FILE FAKE_DUMP_RC
 
   # scheduler / replica ack fixture（background）
   (
@@ -488,6 +492,135 @@ case_backup_full_schema_fingerprint_failure_fails_closed() {
   teardown_full
 }
 
+# ------------------------------------------------------------ RB-QUIESCE BWQ-009（quiesce-db の full）
+
+# quiesce-db の設定（fake の mysql が DB の protocol に応答する。heartbeat の directory は要らない）
+setup_full_qdb() {
+  setup_full
+  kill "${FIXTURE_PID:-}" 2>/dev/null || true
+  unset REPLICA_HEARTBEAT_DIR SCHEDULER_ACK_DIR
+  export QUIESCE_PROVIDER=quiesce-db FAKE_QDB_DIR="$T/qdb" QUIESCE_STATE_DIR="$T/qstate" \
+    QUIESCE_LEASE_RENEW_SECONDS=1 QUIESCE_RESUME_CONFIRM_SECONDS=2 QUIESCE_FULL_NEW_INSTANCE_CHECK_SECONDS=1
+  mkdir -p "$FAKE_QDB_DIR"
+}
+
+# §3.7: 書込み静止の信号表は CONTENT_HASH_TABLES に指定できない（計算の前に失敗し、full を VALID にしない）
+case_backup_full_content_hash_rejects_signal_tables() {
+  setup_full
+  export CONTENT_HASH_TABLES="sys_use,sys_backup_quiesce_ack"
+  local out code
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "信号表を CONTENT_HASH_TABLES に指定すると full は非 0"
+  assert_contains "$out" "書込み静止の信号表は CONTENT_HASH_TABLES に指定できません" "理由を通知"
+  assert_not_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "sys_backup_quiesce_ack" "信号表の内容を読まない（計算の前に失敗する）"
+  assert_eq 0 "$(full_index_count)" "index に登録しない"
+  unset CONTENT_HASH_TABLES
+  teardown_full
+}
+
+full_index_count() { compgen -G "$T/work/index/full-*.json" | wc -l; }
+
+# verify は静止区間の採取（dump・uploads・count・内容ハッシュ・schema fingerprint）の後、解除の直前に呼ぶ（§7.2）。
+# mysqldump を background で動かしても正常に終われば VALID（D4-P3-4 の正常終了）
+case_backup_full_quiesce_db_verifies_before_release() {
+  setup_full_qdb
+  local out code idx steps
+  out=$("$BACKUP_FULL" 2> "$T/err.log")
+  code=$?
+  assert_zero "$code" "quiesce-db の full が成功する（heartbeat の directory は要らない）"
+  assert_eq VALID "$(jq -r .status <<< "$out" 2>/dev/null)" "結果は VALID"
+  assert_eq quiesce-db "$(jq -r .quiesce.provider <<< "$out" 2>/dev/null)" "結果に provider を記録"
+  assert_eq 7 "$(jq -r .quiesce.request_id <<< "$out" 2>/dev/null)" "結果に要求の番号を記録"
+  assert_eq 2026-11-22T00:00:06Z "$(jq -r .quiesce.verified_at_utc <<< "$out" 2>/dev/null)" "結果に verify の時刻を記録"
+  assert_eq 2026-11-22T00:00:06Z "$(jq -r .consistency_time_utc <<< "$out" 2>/dev/null)" "整合時刻は全 ack を確かめた DB の時刻"
+  idx=$(compgen -G "$T/work/index/full-*.json" | head -n 1)
+  assert_eq true "$(jq -r '.quiesce.window_seconds | type == "number"' "$idx" 2>/dev/null)" "index に静止区間の秒数を記録"
+  assert_eq ONLINE "$(jq -r '.quiesce.mode' "$idx" 2>/dev/null)" "index（metadata）に mode を記録"
+  steps=$(cut -f1 "$QUIESCE_STATE_DIR/window.steps" | tr '\n' ' ')
+  assert_eq "acquire dump uploads table_counts schema_fingerprint verify release " "$steps" \
+    "verify は静止区間の採取の後・解除の直前に呼ぶ（内訳の順）"
+  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "verify-request verify-check release resume-check" \
+    "verify の後に解除し、再開を確かめる"
+  assert_contains "$(awk -F'\t' '$2 == "release" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "reason = 'COMPLETED';" \
+    "verify 済みの解除は COMPLETED"
+  assert_contains "$(awk -F'\t' '$2 == "insert-request" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "job_kind = 'FULL';" "full の要求"
+  assert_file "$FAKE_QDB_DIR/ddl-lock.released" "DDL 凍結の lock を返す"
+  teardown_full
+}
+
+case_backup_full_quiesce_db_verify_failure_not_valid() {
+  setup_full_qdb
+  printf 'VERDICT\tFAIL_LATE_ACK\t2026-11-22T00:00:09Z\t1763769609000000\t1\tlate=1\n' > "$FAKE_QDB_DIR/verify-check.out"
+  local out code count
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "verify が失敗すれば full は非 0"
+  assert_contains "$out" "静止が途中で途切れたため VALID にしません" "理由を通知"
+  assert_eq 0 "$(full_index_count)" "verify の失敗で index に VALID を登録しない"
+  count=$(RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+    /usr/local/bin/restic snapshots --json 2>/dev/null | jq 'length')
+  assert_eq 0 "${count:-0}" "verify の失敗で snapshot を発行しない"
+  assert_contains "$(awk -F'\t' '$2 == "release" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "reason = 'VERIFY_FAILED';" \
+    "cleanup が VERIFY_FAILED で解除する"
+  assert_file "$QUIESCE_STATE_DIR/hold.exited" "失敗の後も保持 process を終わらせる"
+  teardown_full
+}
+
+# D4-P3-4: background の mysqldump の失敗は wait の終了コードで判定し、静止を解除して非 0 で終わる
+case_backup_full_quiesce_db_dump_failure() {
+  setup_full_qdb
+  export FAKE_DUMP_RC=3
+  local out code
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "mysqldump の失敗で非 0"
+  assert_contains "$out" "mysqldump が失敗しました" "mysqldump の失敗を通知"
+  assert_eq 0 "$(full_index_count)" "mysqldump の失敗で index に登録しない"
+  assert_contains "$(awk -F'\t' '$2 == "release" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "status = 'ABORTED'; reason = 'ABORTED';" \
+    "verify の前の失敗は ABORTED で解除する"
+  assert_eq 0 "$(awk -F'\t' '$2 == "verify-request" { c++ } END { print c + 0 }' "$FAKE_QDB_DIR/calls.log")" "失敗した full は verify しない"
+  unset FAKE_DUMP_RC
+  teardown_full
+}
+
+# U-13・D3-P3-4・D4-P3-4: ONLINE の full の最中に新しい instance が登録されたら、保持 process が要求を中止し、job は
+# mysqldump を止めて（kill の後に wait）10 秒以内に非 0 で終わる
+case_backup_full_new_instance_aborts_dump() {
+  setup_full_qdb
+  export FAKE_DUMP_SLEEP=60 FAKE_DUMP_PID_FILE="$T/dump.pid"
+  printf 'ABORT\t1\t1\n' > "$FAKE_QDB_DIR/full-new-instance.2.out"
+  local out code start elapsed dump_pid
+  start=$(date +%s)
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  elapsed=$(( $(date +%s) - start ))
+  assert_nonzero "$code" "full の中止で非 0"
+  assert_contains "$out" "BACKUP_QUIESCE_FULL_ABORTED" "中止の errorCode を通知"
+  assert_contains "$out" "取り直してください" "取り直しを案内する"
+  assert_contains "$out" "mysqldump を止めました" "mysqldump を止めたことを通知"
+  if (( elapsed <= 15 )); then
+    test_assert "中止を知ってから早く失敗する（全体 ${elapsed} 秒。mysqldump の完了の 60 秒を待たない）"
+  else
+    test_fail "中止を知ってから早く失敗する" "${elapsed} 秒"
+  fi
+  dump_pid=$(cat "$T/dump.pid" 2>/dev/null || true)
+  if [[ -n "$dump_pid" ]] && ! kill -0 "$dump_pid" 2>/dev/null; then
+    test_assert "mysqldump の process を止めた"
+  else
+    test_fail "mysqldump の process を止めた" "pid=${dump_pid:-なし} が残っています"
+    kill "$dump_pid" 2>/dev/null
+  fi
+  assert_eq 0 "$(full_index_count)" "中止した full を index に登録しない"
+  unset FAKE_DUMP_SLEEP FAKE_DUMP_PID_FILE
+  teardown_full
+}
+
+run_case case_backup_full_quiesce_db_verifies_before_release
+run_case case_backup_full_quiesce_db_verify_failure_not_valid
+run_case case_backup_full_quiesce_db_dump_failure
+run_case case_backup_full_new_instance_aborts_dump
+run_case case_backup_full_content_hash_rejects_signal_tables
 run_case case_backup_full_records_content_hash
 run_case case_backup_full_content_hash_failure_fails_closed
 run_case case_backup_full_content_hash_requires_primary_key

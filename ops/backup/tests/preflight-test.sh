@@ -41,8 +41,84 @@ setup_env() {
   export PREFLIGHT_MIN_FREE_BYTES=1
   export TMPDIR="$T/tmp"
   export FAKE_ARGV_LOG="$T/argv.log"
-  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_MISSING_VARIABLES
+  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_MISSING_VARIABLES QUIESCE_PROVIDER FAKE_QDB_DIR \
+    QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS
   reset_fake
+}
+
+# ------------------------------------------------------------ RB-QUIESCE BWQ-009: checks.quiesce（exit 19）
+
+setup_quiesce_env() {
+  setup_env
+  export QUIESCE_PROVIDER=quiesce-db FAKE_QDB_DIR="$T/qdb"
+  mkdir -p "$FAKE_QDB_DIR"
+}
+
+preflight_grants_without_request_table() {
+  printf 'TABLES\t3\nGRANTS_BEGIN\n'
+  printf 'GRANT USAGE ON *.* TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANT SELECT, SHOW VIEW, TRIGGER, EVENT ON `ses_manager_db`.* TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANT INSERT ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANTS_END\n'
+  printf 'VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t1\tdisabled=0,fresh=1,protocol=0,threshold=0\n'
+}
+
+case_preflight_quiesce_skipped_for_local() {
+  setup_env
+  run_preflight
+  assert_zero "$code" "quiesce-local（既定）では書込み静止の検査をしない"
+  assert_eq skipped "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は skipped"
+}
+
+case_preflight_quiesce_ok() {
+  setup_quiesce_env
+  run_preflight
+  assert_zero "$code" "信号表・表単位の権限・instance が揃えば exit 0"
+  assert_eq ok "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は ok"
+  assert_eq 3 "$(jq -r .checks.quiesce.signal_tables <<< "$out")" "信号表は 3 表"
+  assert_eq true "$(jq -r .checks.quiesce.request_table_grant <<< "$out")" "要求の表への表単位の INSERT・UPDATE がある"
+  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log")" "preflight" "読むだけの SQL（preflight.sql）を実行する"
+  assert_not_contains "$out" 'ses_manager_db' "DB 名を出力しない"
+  assert_not_contains "$out" 'bkp-user-7x9' "user を出力しない（SHOW GRANTS の行を出さない）"
+  assert_eq 0 "$(find "$T/tmp" -type f 2>/dev/null | wc -l)" "一時 file（SQL・option file）を残さない"
+}
+
+case_preflight_quiesce_failures_exit_19() {
+  local kind expect
+  for kind in grant tables disabled protocol settings; do
+    setup_quiesce_env
+    case "$kind" in
+      grant)
+        preflight_grants_without_request_table > "$FAKE_QDB_DIR/preflight.out"
+        expect="表単位の INSERT・UPDATE がありません" ;;
+      tables)
+        printf 'TABLES\t2\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+        printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+        expect="信号表" ;;
+      disabled)
+        { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+          printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+          printf 'GRANTS_END\nVERDICT\tFAIL_DISABLED\t2026-11-22T00:00:06Z\t1763769606000000\t0\tdisabled=1\n'
+          printf 'INSTANCE\tdead-0001\tDISABLED\t0\t-\t-\t-\tapp-host-9\t10.0.0.9\t2026-11-01T00:00:00.000000Z\t-\t-\t-\t0\t300000\t900000\tRUNNING\tDISABLED\n'
+        } > "$FAKE_QDB_DIR/preflight.out"
+        expect="停止口" ;;
+      protocol)
+        { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+          printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+          printf 'GRANTS_END\nVERDICT\tFAIL_PROTOCOL\t2026-11-22T00:00:06Z\t1763769606000000\t1\tprotocol=1\n'
+        } > "$FAKE_QDB_DIR/preflight.out"
+        expect="protocol の版" ;;
+      settings)
+        export QUIESCE_STALE_SECONDS=300 QUIESCE_DEAD_SECONDS=300
+        expect="QUIESCE_STALE_SECONDS" ;;
+    esac
+    run_preflight
+    assert_eq 19 "$code" "checks.quiesce の不合格（$kind）は exit 19"
+    assert_eq fail "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は fail（$kind）"
+    assert_contains "$out" "$expect" "理由を出す（$kind）"
+    assert_no_secret "$out"
+    unset QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS
+  done
 }
 
 run_preflight() {
@@ -356,6 +432,9 @@ run_case case_preflight_disk_full
 run_case case_preflight_mysql_pwd_env
 run_case case_preflight_tls_config_missing
 run_case case_preflight_help
+run_case case_preflight_quiesce_skipped_for_local
+run_case case_preflight_quiesce_ok
+run_case case_preflight_quiesce_failures_exit_19
 
 # 全 case 出力の秘密 grep（framework log 含む）
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

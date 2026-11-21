@@ -537,6 +537,150 @@ case_migrations_do_not_use_tablespace() {
     "migration は TABLESPACE を使わない（mysqldump の --no-tablespaces の前提。使うなら dump の option と権限を見直す）"
 }
 
+# ------------------------------------------------------------ RB-QUIESCE BWQ-009（書込み静止の provider）
+
+QUIESCE_SQL_DIR="$BACKUP_ROOT/providers/quiesce-db.d"
+QUIESCE_ALLOWED_PROVIDERS=(quiesce-local quiesce-db quiesce-app-stopped)
+
+# lib/quiesce.sh を読む script の「長い子 process」の起動（行末の \ で続く行をつないだ 1 つの command）が、保持 process の
+# pipe の書き口を閉じる指定 {QUIESCE_HOLD_FD}>&- を持つかを出力する（OK|NG <file>:<開始行>。design.md §7.6・D3-P3-2）。
+# 対象: mysqldump・restic・mysqlbinlog・snapshot-binlog・preflight・mysql client の "$…_BIN"、provider の "$PROVIDERS_DIR/…"、
+# cp -a、子 process を起動する lib の関数（restic::・content_hash::collect・schema_fingerprint::compute・binlog::verify_checksum・
+# manifest::build / finalize / verify）。関数の定義・代入・行全体のコメントは見ない。
+long_child_invocations() { # <file>...
+  awk '
+    function check(cmd, start,   m) {
+      m = 0
+      if (cmd ~ /"[$](MYSQLDUMP_BIN|RESTIC_BIN|MYSQLBINLOG_BIN|SNAPSHOT_BINLOG_BIN|PREFLIGHT_BIN|MYSQL_CLIENT_BIN)"[[:space:]]/) m = 1
+      if (cmd ~ /"[$]PROVIDERS_DIR\/[A-Za-z0-9_.-]+"[[:space:]]/) m = 1
+      if (cmd ~ /(^|[[:space:];&|(])cp[[:space:]]+-a[[:space:]]/) m = 1
+      if (cmd ~ /(^|[[:space:];&|($])(restic::[a-z_]+|content_hash::collect|schema_fingerprint::compute|binlog::verify_checksum|manifest::(build|finalize|verify))[[:space:]]/) m = 1
+      if (!m) return
+      if (cmd ~ /^[[:space:]]*[A-Za-z_:]+\(\)[[:space:]]*\{/) return
+      print ((cmd ~ /[{]QUIESCE_HOLD_FD[}]>&-/) ? "OK " : "NG ") FILENAME ":" start
+    }
+    FNR == 1 { if (buf != "") check(buf, bstart); buf = "" }
+    buf == "" && /^[[:space:]]*#/ { next }
+    {
+      line = $0
+      if (buf == "") bstart = FNR
+      if (line ~ /\\$/) { sub(/\\$/, "", line); buf = buf line " "; next }
+      buf = buf line
+      check(buf, bstart)
+      buf = ""
+    }
+    END { if (buf != "") check(buf, bstart) }' "$@"
+}
+
+# 本番 script のうち lib/quiesce.sh を source するもの
+quiesce_users() {
+  local f
+  while IFS= read -r f; do
+    [[ "$f" == "$LIB/quiesce.sh" ]] && continue
+    grep -q 'LIB_DIR/quiesce\.sh' "$f" 2>/dev/null && printf '%s\n' "$f"
+  done < <(production_scripts)
+  return 0
+}
+
+case_long_children_close_hold_fd() {
+  local t out f
+  local -a files=()
+  t=$(mktemp -d)
+  cat > "$t/sample.sh" <<'EOF'
+"$MYSQLDUMP_BIN" "${MYSQL_OPT_ARGS[@]}" \
+  --no-tablespaces db > out {QUIESCE_HOLD_FD}>&- &
+"$RESTIC_BIN" backup "$payload" --json
+cp -a "$a"/. "$b/"
+x=$(content_hash::collect "$t" "${args[@]}" {QUIESCE_HOLD_FD}>&-)
+manifest::verify "$r" "$r/manifest.json" \
+  || common::fail "x"
+RESTIC_BIN=${RESTIC_BIN:-restic}
+# "$RESTIC_BIN" backup はコメント
+echo "mysqldump が失敗しました: $MYSQLDUMP_BIN"
+restic::ensure_repository() {
+"$PROVIDERS_DIR/uploads-local.sh" snapshot a b c d {QUIESCE_HOLD_FD}>&-
+EOF
+  out=$(long_child_invocations "$t/sample.sh")
+  assert_contains "$out" "OK $t/sample.sh:1" "書き口を閉じた起動（行の継続を含む）を OK と判定する"
+  assert_contains "$out" "NG $t/sample.sh:3" "書き口を閉じない restic を検出する"
+  assert_contains "$out" "NG $t/sample.sh:4" "書き口を閉じない cp -a を検出する"
+  assert_contains "$out" "OK $t/sample.sh:5" "lib の関数の起動も見る"
+  assert_contains "$out" "NG $t/sample.sh:6" "書き口を閉じない manifest::verify（行の継続）を検出する"
+  assert_contains "$out" "OK $t/sample.sh:12" "provider の起動も見る"
+  assert_eq 6 "$(grep -c . <<< "$out")" "代入・コメント・文字列・関数の定義は起動として数えない"
+  rm -rf "$t"
+
+  while IFS= read -r f; do files+=("$f"); done < <(quiesce_users)
+  assert_contains "${files[*]}" "$BACKUP_ROOT/backup-full.sh" "backup-full.sh は lib/quiesce.sh を読む（前提）"
+  assert_contains "${files[*]}" "$BACKUP_ROOT/create-checkpoint.sh" "create-checkpoint.sh は lib/quiesce.sh を読む（前提）"
+  out=$(long_child_invocations "${files[@]}")
+  assert_contains "$out" "OK $BACKUP_ROOT/backup-full.sh:" "backup-full.sh の長い子 process を走査した（前提）"
+  assert_eq "" "$(grep '^NG ' <<< "$out" || true)" \
+    "lib/quiesce.sh を読む script の長い子 process は {QUIESCE_HOLD_FD}>&- で起動する（job が kill されたら保持 process が終わる）"
+}
+
+# provider は列挙した 3 つだけ（lib/quiesce.sh が振り分け、providers/ に他の quiesce の provider を置かない）
+case_quiesce_providers_are_enumerated() {
+  local f name p ok out rc=0
+  for f in "$BACKUP_ROOT"/providers/quiesce-*.sh; do
+    [[ -f "$f" ]] || continue
+    name=$(basename "$f" .sh)
+    ok=0
+    for p in "${QUIESCE_ALLOWED_PROVIDERS[@]}"; do [[ "$name" == "$p" ]] && ok=1; done
+    if (( ok == 1 )); then
+      test_assert "列挙した provider: $name"
+    else
+      test_fail "列挙した provider だけを置く" "$name は lib/quiesce.sh の列挙にありません"
+    fi
+  done
+  assert_file "$BACKUP_ROOT/providers/quiesce-local.sh" "quiesce-local がある"
+  assert_file "$BACKUP_ROOT/providers/quiesce-db.sh" "quiesce-db がある"
+  out=$(QUIESCE_PROVIDER=quiesce-evil LIB_UNDER_TEST="$LIB" bash -c \
+    '. "$LIB_UNDER_TEST/common.sh"; . "$LIB_UNDER_TEST/quiesce.sh"; quiesce::check_provider' 2>&1) || rc=$?
+  assert_nonzero "$rc" "列挙の外の provider は拒否する"
+  assert_contains "$out" "未知の provider" "列挙の外の provider を示す"
+}
+
+# 本番 script は任意の command 文字列を shell に渡さない（bash -c / sh -c を書かない。行全体のコメントは除く。README の規約）
+case_production_scripts_do_not_use_shell_c() {
+  local -a files=()
+  local f out
+  while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
+  out=$(awk '/^[[:space:]]*#/ { next } /(^|[^A-Za-z0-9_-])(bash|sh)[[:space:]]+-c([[:space:]]|$)/ { print FILENAME ":" FNR ": " $0 }' \
+    "${files[@]}")
+  assert_eq "" "$out" "本番 script は bash -c / sh -c を使わない"
+}
+
+# 信号表の SQL（providers/quiesce-db.d/*.sql）: 時刻は UTC_TIMESTAMP(6) だけ（NOW( 等を書かない。§3.10）、先頭行は fake の mysql が
+# 見分ける印、文は行末の ; で終わる（Java の MySQL 契約試験が同じ規則で文に分けて実行する。行の途中の ; と行末のコメントを書かない）
+case_quiesce_sql_files_contract() {
+  local f name first n=0 bad all
+  for f in "$QUIESCE_SQL_DIR"/*.sql; do
+    [[ -f "$f" ]] || continue
+    n=$((n + 1))
+    name=$(basename "$f" .sql)
+    first=$(head -n 1 "$f")
+    assert_eq "-- ses-backup:quiesce-db:$name" "$first" "SQL の先頭行は印（$name）"
+    bad=$(grep -niE 'NOW[[:space:]]*\(|CURRENT_TIMESTAMP|LOCALTIMESTAMP|SYSDATE|CURDATE|CURTIME|UNIX_TIMESTAMP' "$f" || true)
+    assert_eq "" "$bad" "SQL は UTC_TIMESTAMP(6) の外の時刻の関数を使わない（$name）"
+    bad=$(awk '/^[[:space:]]*--/ { next } /;/ && !/;[[:space:]]*$/ { print FNR ": " $0 } /[^-]--[[:space:]]/ { print FNR ": " $0 }' "$f")
+    assert_eq "" "$bad" "SQL の文は行末の ; で終わり、行の途中に ; と -- を書かない（$name）"
+    bad=$(grep -vE '^[[:space:]]*--' "$f" | grep -oE '@[A-Za-z_]+' | grep -vE '^@(p|v)_[a-z0-9_]+$' || true)
+    assert_eq "" "$bad" "SQL の変数は前置きの @p_ と SQL の中の @v_ だけ（$name）"
+  done
+  if (( n >= 10 )); then
+    test_assert "信号表の SQL を走査する（$n file）"
+  else
+    test_fail "信号表の SQL を走査する" "file が少なすぎます（$n）"
+  fi
+  all=$(cat "$QUIESCE_SQL_DIR"/*.sql)
+  assert_contains "$all" "GET_LOCK('ses_backup_ddl_freeze'" "DDL 凍結の lock の名前は Flyway の callback と同じ"
+}
+
+run_case case_long_children_close_hold_fd
+run_case case_quiesce_providers_are_enumerated
+run_case case_production_scripts_do_not_use_shell_c
+run_case case_quiesce_sql_files_contract
 run_case case_pipefail_scanner_detects_each_form
 run_case case_pipefail_production_scripts_have_no_early_exit_reader_after_pipe
 run_case case_pipefail_binlog_size_from_logs_with_large_list

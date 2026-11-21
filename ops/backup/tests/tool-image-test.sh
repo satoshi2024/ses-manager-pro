@@ -950,4 +950,22 @@ run_case case_installer_apt_lock_enforced_via_injected_paths
 run_case case_installer_apt_lock_mismatch_fails_via_injected_paths
 run_case case_static_image_contract
 
+# RB-QUIESCE BWQ-009（design.md §7.6）: 書込み静止の保持 process は process substitution の $! と wait を使うため bash 4.4 以上が要る。
+# unit test は tool image の中で動く（run-unit-tests.sh）ため、ここで動く bash の版が tool image の bash の版である。base は
+# Debian bookworm（bash 5.2）。provider の SQL（providers/quiesce-db.d）は COPY providers/ で image に入る。
+case_tool_image_bash_supports_hold_process() {
+  local dockerfile
+  if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+    test_assert "bash は 4.4 以上（現在 $BASH_VERSION）"
+  else
+    test_fail "bash は 4.4 以上" "現在 $BASH_VERSION"
+  fi
+  dockerfile=$(cat "$BACKUP_ROOT/Dockerfile")
+  assert_contains "$dockerfile" "ARG BASE_IMAGE=debian:bookworm-slim@" "base は bookworm（bash 5.2）"
+  assert_contains "$dockerfile" "COPY providers/ /usr/local/lib/ses-backup/providers/" "provider と SQL（quiesce-db.d）を image に入れる"
+  assert_contains "$dockerfile" "COPY lib/ /usr/local/lib/ses-backup/" "lib（quiesce-db-common.sh）を image に入れる"
+}
+
+run_case case_tool_image_bash_supports_hold_process
+
 test_summary "W1-B1 tool image reproducibility"

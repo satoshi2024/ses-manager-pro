@@ -37,7 +37,8 @@ setup_common() {
   # 前 case の fake 制御 env が漏れないようにする
   unset FAKE_BINLOG_VERIFY_RC FAKE_ARCHIVE_RC FAKE_FLUSH_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
     FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID FAKE_RESTIC_BACKUP_RC \
-    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_SCHEMA_ROWS FAKE_SCHEMA_RC \
+    QUIESCE_PROVIDER FAKE_QDB_DIR QUIESCE_STATE_DIR QUIESCE_LEASE_RENEW_SECONDS QUIESCE_RESUME_CONFIRM_SECONDS
   unset MYSQL_PWD
 }
 
@@ -76,6 +77,9 @@ setup_checkpoint_env() {
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export APP_COMMIT=test FLYWAY_VERSION=42 MYSQL_DATABASE=ses_manager_db
   export CHECKPOINT_ARCHIVER_WAIT=3
+  # PATH の snapshot-binlog.sh（image に写した版）ではなく、試験する repository の版を使う（RB-QUIESCE: image の写しは
+  # build の時点の版で、作業中の変更を含まないことがある）
+  export SNAPSHOT_BINLOG_BIN="$SNAPSHOT"
   mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_ROOT/v0/sub" "$UPLOADS_STAGING_PARENT"
   ln -s v0 "$UPLOADS_ROOT/current"
   printf 'uploads-data\n' > "$UPLOADS_ROOT/v0/sub/f.txt"
@@ -394,6 +398,58 @@ case_checkpoint_rotation_twice() {
   kill "$FIX_PID" 2>/dev/null || true
 }
 
+# ------------------------------------------------------------ RB-QUIESCE BWQ-009（quiesce-db の checkpoint）
+
+setup_checkpoint_qdb() {
+  setup_checkpoint_env
+  kill "$FIX_PID" 2>/dev/null || true
+  unset REPLICA_HEARTBEAT_DIR SCHEDULER_ACK_DIR
+  export QUIESCE_PROVIDER=quiesce-db FAKE_QDB_DIR="$T/qdb" QUIESCE_STATE_DIR="$T/qstate" \
+    QUIESCE_LEASE_RENEW_SECONDS=1 QUIESCE_RESUME_CONFIRM_SECONDS=2
+  mkdir -p "$FAKE_QDB_DIR"
+  head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+}
+
+# verify は uploads の snapshot の後、解除の直前に呼ぶ（§7.2）。heartbeat の directory（quiesce-local の設定）は要らない
+case_checkpoint_quiesce_db_verifies_before_release() {
+  setup_checkpoint_qdb
+  local out code steps idx
+  out=$("$CHECKPOINT" 2> "$T/err.log")
+  code=$?
+  assert_zero "$code" "quiesce-db の checkpoint が成功する"
+  assert_eq VALID "$(jq -r .status <<< "$out" 2>/dev/null)" "checkpoint VALID"
+  assert_eq quiesce-db "$(jq -r .quiesce.provider <<< "$out" 2>/dev/null)" "結果に provider を記録"
+  assert_eq 2026-11-22T00:00:06Z "$(jq -r .quiesce.verified_at_utc <<< "$out" 2>/dev/null)" "結果に verify の時刻を記録"
+  steps=$(cut -f1 "$QUIESCE_STATE_DIR/window.steps" | tr '\n' ' ')
+  assert_eq "acquire flush_binary_logs schema_fingerprint archiver uploads verify release " "$steps" \
+    "verify は uploads の snapshot の後・解除の直前に呼ぶ（内訳の順）"
+  idx=$(compgen -G "$BACKUP_WORK_DIR/index/checkpoint-*.json" | head -n 1)
+  assert_eq true "$(jq -r '.quiesce.window_seconds | type == "number"' "$idx" 2>/dev/null)" "index に静止区間の秒数を記録"
+  assert_contains "$(awk -F'\t' '$2 == "insert-request" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "job_kind = 'CHECKPOINT';" \
+    "checkpoint の要求"
+  assert_eq 0 "$(awk -F'\t' '$2 == "full-new-instance" { c++ } END { print c + 0 }' "$FAKE_QDB_DIR/calls.log")" \
+    "checkpoint では新しい instance で中止しない"
+}
+
+case_checkpoint_quiesce_db_verify_failure_not_valid() {
+  setup_checkpoint_qdb
+  printf 'VERDICT\tFAIL_HOLD_UNTIL\t2026-11-22T00:00:09Z\t1763769609000000\t1\thold=1\n' > "$FAKE_QDB_DIR/verify-check.out"
+  local out code
+  out=$("$CHECKPOINT" 2>&1)
+  code=$?
+  assert_nonzero "$code" "verify が失敗すれば checkpoint は非 0"
+  assert_contains "$out" "静止が途中で途切れたため VALID にしません" "理由を通知"
+  if compgen -G "$BACKUP_WORK_DIR/index/checkpoint-*.json" > /dev/null; then
+    test_fail "verify の失敗で index に VALID を登録しない" "index が登録されています"
+  else
+    test_assert "verify の失敗で index に VALID を登録しない"
+  fi
+  assert_contains "$(awk -F'\t' '$2 == "release" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "reason = 'VERIFY_FAILED';" \
+    "cleanup が VERIFY_FAILED で解除する"
+}
+
+run_case case_checkpoint_quiesce_db_verifies_before_release
+run_case case_checkpoint_quiesce_db_verify_failure_not_valid
 run_case case_archive_normal_once
 run_case case_archive_first_run_without_coordinate_fails
 run_case case_archive_restart_resume

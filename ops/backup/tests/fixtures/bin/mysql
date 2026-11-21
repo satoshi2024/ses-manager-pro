@@ -41,6 +41,136 @@ if [[ -z "${query:-}" ]]; then
   IFS= read -r query || true
 fi
 
+# ------------------------------------------------------------
+# 書込み静止の DB の provider（ops/backup/providers/quiesce-db.d/*.sql。先頭行の印 -- ses-backup:quiesce-db:<名前>）。
+# FAKE_QDB_DIR（設定時）に呼出しを記録し、応答を差し替える:
+#   calls.log            「ms<TAB>名前<TAB>前置きの SET（@p_ を外して空白でつないだもの）」を 1 行ずつ
+#   <名前>.count         呼ばれた回数（n）
+#   <名前>.<n>.out / <名前>.out   n 回目・毎回の標準出力（無ければ既定の応答 = 1 つの instance が新しく ack 済みの成功の道）
+#   <名前>.<n>.rc / <名前>.rc     終了コード（既定 0）。<名前>.err は標準エラーに出す内容
+#   <名前>.sleep         応答の前に待つ秒数
+# ddl-lock（保持 process の session）: FAKE_QDB_LOCK = 1（取れた。既定）/ 0（取れない）/ hang（GET_LOCK の待ちのまま
+#   stdin を読まない）。取れたら ddl-lock.held を作り、stdin の EOF で消して ddl-lock.released を作る（lock の返却）。
+#   PID は ddl-lock.pid。FAKE_QDB_LOCK_DIE_AFTER=N なら N 回目の DO 0; で異常終了する（session の喪失）。
+# 既定の instance: FAKE_QDB_INSTANCE_ID（既定 0b7c6a2e-1111-4a5b-9c3d-000000000001）、host 名 app-host-1、接続元 10.0.0.11
+# ------------------------------------------------------------
+fake_qdb_instance() { # <分類> <新しい> <要求の前から> <ack> <観測した接続元> <verify の後の観測>
+  printf 'INSTANCE\t%s\t%s\t%s\t%s\t%s\t-\tapp-host-1\t10.0.0.11\t2026-11-22T00:00:00.000000Z\t%s\t%s\t%s\t%s\t%s\t1200\t%s\t%s\n' \
+    "${FAKE_QDB_INSTANCE_ID:-0b7c6a2e-1111-4a5b-9c3d-000000000001}" "$1" "$2" "$3" "$4" \
+    "$( [[ "$4" == - ]] && echo - || echo 2026-11-22T00:00:05.000000Z )" \
+    "$( [[ "$4" == - ]] && echo - || echo 2026-11-22T00:01:05.000000Z )" "$5" "$6" \
+    "${FAKE_QDB_MAX_HOLD_MS:-300000}" RUNNING "$( [[ "$4" == QUIESCED ]] && echo CLOSED || echo OPEN )"
+}
+
+fake_qdb_default() { # <名前> <前置き>
+  local verdict='VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t1\tfake'
+  case "$1" in
+    precheck)
+      printf 'EXPIRED\t0\n'; printf "$verdict\n"; fake_qdb_instance REQUIRED 1 - - - 0 ;;
+    stopped-precheck)
+      printf 'EXPIRED\t0\n'; printf 'VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t0\tfake\n' ;;
+    insert-request)
+      printf 'REQUEST\t%s\t2026-11-22T00:00:01.000000Z\t2026-11-22T00:01:01.000000Z\t1763769601000000\n' \
+        "${FAKE_QDB_REQUEST_ID:-7}" ;;
+    poll-acks)
+      printf "$verdict\n"; fake_qdb_instance REQUIRED 1 1 QUIESCED 10.0.0.11=3 0 ;;
+    verify-check)
+      printf "$verdict\n"; fake_qdb_instance REQUIRED 1 1 QUIESCED 10.0.0.11=3 1 ;;
+    stopped-check)
+      printf 'VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t0\tfake\n' ;;
+    renew)
+      printf 'RENEW\t1\nLEASE\tREQUESTED\t1\t0\t300\t2026-11-22T00:01:16.000000Z\n' ;;
+    full-new-instance)
+      printf 'ABORT\t0\t0\n' ;;
+    verify-request)
+      printf 'VERIFY_REQUESTED\t1\n' ;;
+    release)
+      local status=RELEASED reason=COMPLETED
+      [[ "$2" =~ status\ =\ \'([A-Z_]+)\' ]] && status=${BASH_REMATCH[1]}
+      [[ "$2" =~ reason\ =\ \'([A-Z_]+)\' ]] && reason=${BASH_REMATCH[1]}
+      printf 'RELEASE\t1\nREQUEST_STATE\t%s\t%s\t2026-11-22T00:00:30Z\n' "$status" "$reason" ;;
+    resume-check)
+      printf 'VERDICT\tOK\t2026-11-22T00:00:31Z\t1763769631000000\t0\twaiting=0,down=0\n'
+      printf 'ACK\t%s\tRESUMED\t1\tapp-host-1\n' "${FAKE_QDB_INSTANCE_ID:-0b7c6a2e-1111-4a5b-9c3d-000000000001}" ;;
+    preflight)
+      printf 'TABLES\t3\nGRANTS_BEGIN\n'
+      printf 'GRANT USAGE ON *.* TO `bkp-user-7x9`@`%%`\n'
+      printf 'GRANT SELECT, SHOW VIEW, TRIGGER, EVENT ON `ses_manager_db`.* TO `bkp-user-7x9`@`%%`\n'
+      printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+      printf 'GRANTS_END\n'
+      printf 'VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t1\tdisabled=0,fresh=1,protocol=0,threshold=0\n'
+      fake_qdb_instance REQUIRED 1 - - - 0 ;;
+    *) echo "fake-mysql: quiesce-db の未知の SQL: $1" >&2; return 9 ;;
+  esac
+}
+
+fake_qdb_ddl_lock() { # <記録の directory>
+  local dir=$1 line lock=${FAKE_QDB_LOCK:-1} n=0
+  [[ -n "$dir" ]] && printf '%s\n' "$$" > "$dir/ddl-lock.pid"
+  while IFS= read -r line; do
+    [[ "$line" == --* ]] && continue
+    if [[ "$line" == *GET_LOCK* ]]; then
+      if [[ "$lock" == hang ]]; then
+        [[ -n "$dir" ]] && : > "$dir/ddl-lock.waiting"
+        while :; do sleep 1; done
+      fi
+      printf 'DDL_LOCK\t%s\n' "$lock"
+      [[ "$lock" == 1 && -n "$dir" ]] && : > "$dir/ddl-lock.held"
+      continue
+    fi
+    if [[ "$line" == "DO 0;" ]]; then
+      n=$((n + 1))
+      if [[ -n "${FAKE_QDB_LOCK_DIE_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_DIE_AFTER )); then
+        exit 1
+      fi
+    fi
+  done
+  if [[ -n "$dir" ]]; then
+    rm -f "$dir/ddl-lock.held"
+    : > "$dir/ddl-lock.released"
+  fi
+  exit 0
+}
+
+if [[ "$query" == "-- ses-backup:quiesce-db:"* ]]; then
+  qdb_name=${query#-- ses-backup:quiesce-db:}
+  qdb_name=${qdb_name%%[[:space:]]*}
+  qdb_dir=${FAKE_QDB_DIR:-}
+  [[ -n "$qdb_dir" ]] && mkdir -p "$qdb_dir"
+  if [[ "$qdb_name" == ddl-lock ]]; then
+    [[ -n "$qdb_dir" ]] && printf '%s\t%s\t\n' "$(date +%s%3N)" ddl-lock >> "$qdb_dir/calls.log"
+    fake_qdb_ddl_lock "$qdb_dir"
+  fi
+  qdb_params=""
+  while IFS= read -r qdb_line; do
+    [[ "$qdb_line" == "SET @p_"* ]] && qdb_params+="${qdb_line#SET @p_} "
+  done
+  qdb_n=1
+  if [[ -n "$qdb_dir" ]]; then
+    qdb_n=$(( $(cat "$qdb_dir/$qdb_name.count" 2>/dev/null || echo 0) + 1 ))
+    printf '%s\n' "$qdb_n" > "$qdb_dir/$qdb_name.count"
+    printf '%s\t%s\t%s\n' "$(date +%s%3N)" "$qdb_name" "$qdb_params" >> "$qdb_dir/calls.log"
+    [[ -f "$qdb_dir/$qdb_name.sleep" ]] && sleep "$(cat "$qdb_dir/$qdb_name.sleep")"
+  fi
+  qdb_rc=0
+  if [[ -n "$qdb_dir" && -f "$qdb_dir/$qdb_name.$qdb_n.out" ]]; then
+    cat "$qdb_dir/$qdb_name.$qdb_n.out"
+  elif [[ -n "$qdb_dir" && -f "$qdb_dir/$qdb_name.out" ]]; then
+    cat "$qdb_dir/$qdb_name.out"
+  else
+    fake_qdb_default "$qdb_name" "$qdb_params" || qdb_rc=$?
+  fi
+  if [[ -n "$qdb_dir" && -f "$qdb_dir/$qdb_name.err" ]]; then
+    cat "$qdb_dir/$qdb_name.err" >&2
+  fi
+  if [[ -n "$qdb_dir" && -f "$qdb_dir/$qdb_name.$qdb_n.rc" ]]; then
+    qdb_rc=$(cat "$qdb_dir/$qdb_name.$qdb_n.rc")
+  elif [[ -n "$qdb_dir" && -f "$qdb_dir/$qdb_name.rc" ]]; then
+    qdb_rc=$(cat "$qdb_dir/$qdb_name.rc")
+  fi
+  exit "$qdb_rc"
+fi
+
 case "$query" in
   # schema fingerprint（lib/schema-fingerprint.sh）。FAKE_SCHEMA_ROWS（区分名<TAB>項目… の行を printf %b 形式で。
   # 既定は DB の既定値・診断用の server 行と、主キー付きの table 1 つ）を返す。FAKE_SCHEMA_RC=N: 出力なしで exit N

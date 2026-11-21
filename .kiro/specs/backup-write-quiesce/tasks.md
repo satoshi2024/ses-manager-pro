@@ -183,6 +183,9 @@
   - **失敗/rollback:** lock を返さずに job が終わる経路があれば、接続の close で必ず返ることを確かめる。
 
 - [ ] **BWQ-009 — backup tool: `quiesce-db` provider・保持 process・verify**
+  - **状態:** 実装・shell の試験（tool image の中）は済み（第 2 段階 2d）。Demo（`run-unit-tests.sh`。image の build を含む）と、SQL を実 MySQL 8.4 で動かす BWQ-011・BWQ-012 は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2d）:** `providers/quiesce-db.sh`（`acquire|verify|release|hold`）・`lib/quiesce-db-common.sh`・`providers/quiesce-db.d/*.sql`（11 file）。判定（必要な instance の分類・ack・hold 期限・整合時刻・停止口）は SQL の `VERDICT` の行が出し、shell は観測した接続元の照合（文字列の分解）・時間の上限・state dir の印だけを見る（同じ SQL を BWQ-011 が実 MySQL で実行して固定するため）。SQL の引数は `int`・`hex`・`enum` の型で検査して `SET @p_…` で渡し（`requested_by` は hex にする）、string の user 変数を列と比べない（collation の衝突を避ける。要求は番号で指す）。整合時刻は `quiesce.json` の `started_at_utc`（秒、従来の書式）と `started_at_epoch_us`（DB の epoch の μ秒。verify の `acked_at <= 整合時刻` に使う）。保持 process は `quiesce::_start_hold` が `exec {QUIESCE_HOLD_FD}> >(…)` で起動し、DDL lock の session（mysql）を loop の右の pipe で持つ（`DO 0;` で idle を保ち、失えば `ddl-lock.lost`）。release は要求を解いた後に `release.requested` で保持 process を終わらせ（lock の返却）、その後で再開を確かめる。D4-P3-1 は「source の時に `exec {QUIESCE_HOLD_FD}>/dev/null` で初期化する」方式（環境変数の値は使わない）。D4-P3-4 は `backup_full::dump`（background・`if ! wait`・kill の後に wait・`{QUIESCE_HOLD_FD}>&-`）。DDL lock を待つ秒数は固定の 30 秒（`QUIESCE_DB_LOCK_WAIT_SECONDS`。§12.4 に変数を足さない）。静止区間の秒数と内訳は provider によらず `quiesce::step` で記録し、`QUIESCE_WINDOW_WARN_SECONDS` を超えたら WARN。preflight の `checks.quiesce`（exit 19）は `QUIESCE_PROVIDER` が DB の provider の時だけ。`full-backup-test.sh`・`binlog-checkpoint-test.sh` は image に写した `preflight.sh`・`snapshot-binlog.sh` ではなく repository の版を使うようにした。
 
   - **依存:** BWQ-001
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-006、BWQ-RQ-007、BWQ-RQ-010、BWQ-RQ-014
