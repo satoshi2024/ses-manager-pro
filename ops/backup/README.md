@@ -39,11 +39,11 @@ production 環境への接続・復元は行わないこと。初回本番配備
   `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外した。preflight は
   変数があり ROW でなければ exit 12 で止まる（変数そのものが無い版では判定しない。RB-W P3-6）。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
   integration を走査する）。mysqldump 8.4.13 が `--source-data=2` で 8.4 の server に発行する構文（`SHOW BINARY LOG STATUS`
-  の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認する（未取得）。
+  の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認した（2026-11-21。full が dump の起点を読み、その起点からの replay で full の後の更新が復元先に入った）。
   preflight の server の変数は `SHOW GLOBAL VARIABLES` で 1 つずつ有無を見て、無い変数は名前を挙げて失敗する。
   TLS は `@@have_ssl`（8.4 で残るかは CI で確認）を使わず、この接続の `Ssl_cipher` で判定する。
   mysqlbinlog の `--read-from-remote-server --raw --stop-never` と `MYSQL_PWD`（integration の root 操作だけが使う）が 8.4 でも
-  使えることは CI（実 MySQL 8.4.13）で確認する（未取得）。
+  使えることは CI（実 MySQL 8.4.13）で確認した（2026-11-21。binlog の archive と restore の replay が PASS）。
 - MySQL サーバの時刻帯（2026-11-13 決定）: production の source と、復元先（recovery target）の MySQL サーバは
   いずれも **`time_zone = '+09:00'`**（DBA が設定）とする。復元先が異なる時刻帯だと、cutover 後のアプリの
   `NOW()` / `CURRENT_DATE` と TIMESTAMP 列の表示が変わるため、復元前に `SELECT @@global.time_zone;` で確認する。
@@ -267,7 +267,7 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
   確かめる）。使い始めるときは dump の option と source 側の account の権限を見直す（`--no-tablespaces` のままだと tablespace の
   定義が dump に入らず、復元先に同じ tablespace が無ければ import が失敗する）。`--no-tablespaces` と `--single-transaction`・
   `--source-data=2`・`--routines`・`--triggers`・`--events` の組合せを mysqldump 8.4.13 が受け付けることは CI（backup
-  integration）で確認する（未取得）。
+  integration）で確認した（2026-11-21。この option の組合せの `backup-full.sh` の full が PASS）。
 - dump role と binlog role の分離（account を分ける）は上線後に行う（2026-11-18 利用者決定）。現状は一つの account が上の表の
   全権限を持つ（`docker-compose.yml` の全 service が同じ `.env.backup` の `MYSQL_USER` を使う。分けるには service ごとの env が要る）。
 - preflight は権限を検査しない。不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は source 側を
