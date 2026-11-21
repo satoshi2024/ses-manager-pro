@@ -39,6 +39,11 @@ class DeployRunbookMigrationCountTest {
                 "SELECT COUNT\\(\\*\\) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;[^\\n]*--\\s*(\\d+)",
                 "3.4のversioned適用件数照会末尾へ -- 件数 を記載してください");
         assertThat(Integer.parseInt(countSql.group(1))).isEqualTo(versions.size());
+        // backup の checkpoint は FLYWAY_VERSION を復元先の flyway_schema_history と照合する（古い値は復元検証で FAIL）
+        Matcher backupVersion = required(runbook,
+                "`FLYWAY_VERSION`[^\\n]*?本 release は `([0-9.]+)`",
+                "§1.7「Backup 開始の前提」の FLYWAY_VERSION に 本 release は `最新version` と記載してください");
+        assertThat(backupVersion.group(1)).as(".env.backup の FLYWAY_VERSION（§1.7「Backup 開始の前提」）").isEqualTo(latest);
     }
 
     /**
