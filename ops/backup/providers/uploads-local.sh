@@ -87,10 +87,12 @@ uploads_local::snapshot() {
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   local staging="$staging_parent/uploads-snap-$stamp-$$"
   mkdir -p "$staging"
-  # 失敗したら staging を消す（成功時は末尾の trap - EXIT で外す）。EXIT trap は関数を抜けた後に評価されるため、
+  # 失敗したら staging を消す（成功時は末尾の common::trap_remove で外す）。EXIT trap は関数を抜けた後に評価されるため、
   # 関数の local 変数（$staging）を handler に書くと set -u で unbound variable になり、staging が残っていた（RB-W）。
   # 登録時に path を展開し、printf %q で空白・引用符・改行を含む path も 1 語のまま渡す。
-  common::trap_add "rm -rf -- $(printf '%q' "$staging")"
+  local staging_handler
+  staging_handler="rm -rf -- $(printf '%q' "$staging")"
+  common::trap_add "$staging_handler"
 
   # 通常 file のみ複製（検査済み）
   local entry=""
@@ -130,7 +132,9 @@ uploads_local::snapshot() {
       file_count: ($inventory | length),
       inventory: $inventory}' > "$out_json"
   chmod 600 "$out_json"
-  trap - EXIT
+  # 成功したので staging を消す handler だけを外す（RB-W P3-2。trap - EXIT は dispatcher だけを外し、配列に残った
+  # handler が後の common::trap_add で戻ると成功した staging を消すため使わない）
+  common::trap_remove "$staging_handler"
   return 0
 }
 

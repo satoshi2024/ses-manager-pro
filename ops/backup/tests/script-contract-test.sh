@@ -11,6 +11,7 @@
 #   SET_USER_ID）を書かない（行全体のコメントは除く）。
 # - EXIT trap（RB-W）: handler は関数を抜けた後に評価されるため、単一引用符で登録する handler に関数の local 変数を
 #   書かない（set -u で unbound variable になり後始末が動かない）。登録時に printf %q で展開するか global 変数を使う。
+#   登録した handler は common::trap_remove で外し、trap - EXIT は書かない（RB-W P3-2）。
 # - mysqldump の option（2026-11-18 利用者決定）: 本番 script の mysqldump はすべて --no-tablespaces を付ける（source 側の account に
 #   PROCESS を与えない）。その前提として、production に入る migration は TABLESPACE を使わない（repository の migration を読む）。
 set -uo pipefail
@@ -34,37 +35,68 @@ production_scripts() {
 # パイプの後段に置かれた「途中で読むのをやめ得る command」を出力する（<file>:<行番号>: <理由>）。
 # 行全体のコメントは見ない。awk の program が複数行にわたるときは、閉じる ' までを 1 つの program として exit を探す
 # （END の exit も含めて禁止する。パイプの後段の awk には exit を書かず、必要なら here-string で渡す）。
+# RB-W P3-1 で次の書き方も見る（以前は見落としていた）:
+#   - 行末の | の次の行に読み手を書く（cmd | の次の行に grep -q x）: 次の行の先頭にパイプがあるものとして見る
+#   - | while / until … do … done の中の break・return・exit（ループを途中で抜けると残りを読まない）。done までを 1 つと見る
+#   - 読み手の前の環境変数の代入・command・env・exec（| LC_ALL=C awk '…exit'、| env grep -q x）
+#   - |&（標準エラーもつなぐパイプ）、読む量を固定する dd の count= と xxd -l
 early_exit_readers_after_pipe() { # <file>...
   awk -v q="'" '
     function nquote(s,   t) { t = s; return gsub(q, "", t) }
     function has_exit(s) { return s ~ /(^|[^A-Za-z_])exit([^A-Za-z_]|$)/ }
-    BEGIN {
-      pipe = "(^|[^|])[|][[:space:]]*"
-      sedq = pipe "sed[[:space:]][^|]*[0-9;/" q "[:space:]]q([;" q "[:space:]}]|$)"
+    # 語 w の出現数（語でない文字を 2 つの空白にしてから " w " を数える。隣り合う語も数え落とさない）
+    function nword(s, w,   t) { t = " " s " "; gsub(/[^A-Za-z0-9_]/, "  ", t); return gsub(" " w " ", "", t) }
+    function close_while() {
+      if (nword(wprog, "do") > 0 && nword(wprog, "done") >= nword(wprog, "do")) {
+        inwhile = 0
+        if (nword(wprog, "break") + nword(wprog, "return") + nword(wprog, "exit") > 0)
+          print FILENAME ":" wstart ": パイプの後段の while / until の中に break / return / exit がある"
+      }
     }
-    FNR == 1 { inawk = 0 }
+    BEGIN {
+      pipe = "(^|[^|])[|]&?[[:space:]]*"
+      # 読み手の前に置ける語（環境変数の代入・command・env・exec。env の option は - で始まる語として許す）
+      pfx = "(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|command|env|exec|-[A-Za-z]+)[[:space:]]+)*"
+      p = pipe pfx
+      sedq = p "sed[[:space:]][^|]*[0-9;/" q "[:space:]]q([;" q "[:space:]}]|$)"
+    }
+    FNR == 1 { inawk = 0; inwhile = 0; pend = 0 }
+    { trail = ($0 ~ /(^|[^|])[|][[:space:]]*$/) }
     inawk {
       prog = prog "\n" $0
       if (nquote($0) % 2 == 1) {
         inawk = 0
         if (has_exit(prog)) print FILENAME ":" start ": パイプの後段の awk の program に exit がある"
       }
+      pend = trail
       next
     }
+    # ループの本体の行も、ほかの書き方の検査は続ける（next しない）
+    inwhile && $0 !~ /^[[:space:]]*#/ { wprog = wprog "\n" $0; close_while() }
     /^[[:space:]]*#/ { next }
-    $0 ~ (pipe "grep[[:space:]]([^|]*[[:space:]])?-[A-Za-z]*[qlLm]") { print FILENAME ":" FNR ": パイプの後段の grep -q / -m / -l" }
-    $0 ~ (pipe "grep[[:space:]][^|]*--(quiet|silent|max-count|files-with)") { print FILENAME ":" FNR ": パイプの後段の grep --quiet 等" }
-    $0 ~ (pipe "head([[:space:]]|$|[)])") { print FILENAME ":" FNR ": パイプの後段の head" }
-    $0 ~ sedq { print FILENAME ":" FNR ": パイプの後段の sed の q" }
-    $0 ~ (pipe "(IFS=[^[:space:]]*[[:space:]]+)?read([[:space:]]|$)") { print FILENAME ":" FNR ": パイプの後段の read" }
-    $0 ~ (pipe "cmp([[:space:]]|$)") { print FILENAME ":" FNR ": パイプの後段の cmp" }
-    match($0, /(^|[^|])[|][[:space:]]*awk([[:space:]]|$)/) {
-      rest = substr($0, RSTART)
+    {
+      ln = (pend ? "| " $0 : $0)
+      pend = trail
+    }
+    ln ~ (p "grep[[:space:]]([^|]*[[:space:]])?-[A-Za-z]*[qlLm]") { print FILENAME ":" FNR ": パイプの後段の grep -q / -m / -l" }
+    ln ~ (p "grep[[:space:]][^|]*--(quiet|silent|max-count|files-with)") { print FILENAME ":" FNR ": パイプの後段の grep --quiet 等" }
+    ln ~ (p "head([[:space:]]|$|[)])") { print FILENAME ":" FNR ": パイプの後段の head" }
+    ln ~ sedq { print FILENAME ":" FNR ": パイプの後段の sed の q" }
+    ln ~ (p "read([[:space:]]|$)") { print FILENAME ":" FNR ": パイプの後段の read" }
+    ln ~ (p "cmp([[:space:]]|$)") { print FILENAME ":" FNR ": パイプの後段の cmp" }
+    ln ~ (p "dd[[:space:]][^|]*count=") { print FILENAME ":" FNR ": パイプの後段の dd の count=" }
+    ln ~ (p "xxd[[:space:]][^|]*-l") { print FILENAME ":" FNR ": パイプの後段の xxd -l" }
+    match(ln, p "awk([[:space:]]|$)") {
+      rest = substr(ln, RSTART)
       if (nquote(rest) % 2 == 1) {
         inawk = 1; prog = rest; start = FNR
       } else if (has_exit(rest)) {
         print FILENAME ":" FNR ": パイプの後段の awk の program に exit がある"
       }
+    }
+    match(ln, p "(while|until)([[:space:]]|$)") {
+      wprog = substr(ln, RSTART); wstart = FNR; inwhile = 1
+      close_while()
     }' "$@"
 }
 
@@ -97,12 +129,34 @@ h=$(cmd | awk '
   END { print n }
 ')
 i=$(cmd | sed 's/q//')
+j=$(cmd |
+  grep -q foo)
+cmd | while IFS= read -r l; do [[ "$l" == x ]] && break; done
+cmd | while read -r l; do
+  [[ -n "$l" ]] || return 1
+done
+k=$(cmd | LC_ALL=C awk '$1 == f { print; exit }')
+cmd | env grep -q x
+l=$(cmd | command head -n 1)
+cmd |& grep -q x
+m=$(cmd | dd bs=1 count=4 status=none)
+cmd | while IFS= read -r l; do printf '%s\n' "$l"; done
+n=$(cmd |
+  sort -u)
+cmd ||
+  grep -q x "$file"
+o=$(LC_ALL=C sort <<< "$x")
+cmd | while read -r l; do
+  # コメントの break は見ない
+  printf '%s\n' "$l"
+done
 EOF
   out=$(early_exit_readers_after_pipe "$t/sample.sh")
-  for expected in 1 2 3 4 5 8 9 10 11 12; do
+  # 25 行目以降は RB-W P3-1 で足した書き方（行末の |・while の break / return・前置きの代入や env・|&・dd の count=）
+  for expected in 1 2 3 4 5 8 9 10 11 12 26 27 28 31 32 33 34 35; do
     assert_contains "$out" "sample.sh:$expected: " "検出すべき書き方を検出する（見本の $expected 行目）"
   done
-  assert_eq 10 "$(grep -c . <<< "$out")" "検出すべき書き方だけを検出する（here-string・読み切る command・コメント・|| は除く）"
+  assert_eq 18 "$(grep -c . <<< "$out")" "検出すべき書き方だけを検出する（here-string・読み切る command・読み切る while・コメント・|| は除く）"
   rm -rf "$t"
 }
 
@@ -315,6 +369,83 @@ EOF
   assert_eq "" "$out" "本番 script の EXIT trap の handler は local 変数を参照しない（登録時に展開するか global 変数を使う）"
 }
 
+# RB-W P3-2: common::trap_remove は指定した handler だけを外し、ほかの handler と後から登録する handler は動く。
+# 外した handler は、後の common::trap_add で dispatcher が戻っても評価されない（trap - EXIT では配列に残って戻っていた）。
+case_common_trap_remove_keeps_other_handlers() {
+  local out rc
+  out=$(bash -c '
+    set -Eeuo pipefail
+    . "$1/common.sh"
+    common::trap_add "echo A"
+    common::trap_add "echo B"
+    common::trap_remove "echo A"
+    common::trap_add "echo C"
+    exit 0' _ "$LIB" 2>&1)
+  assert_eq $'B\nC' "$out" "外した handler だけが動かず、残りと後から登録した handler は登録順に動く"
+
+  out=$(bash -c '
+    set -Eeuo pipefail
+    . "$1/common.sh"
+    common::trap_add "echo staging-removed"
+    common::trap_remove "echo staging-removed"
+    printf "trap=[%s]\n" "$(trap -p EXIT)"
+    common::trap_add "echo later"
+    exit 0' _ "$LIB" 2>&1)
+  assert_contains "$out" "trap=[]" "handler が無くなれば dispatcher も外す"
+  assert_not_contains "$out" "staging-removed" "外した handler は後の trap_add で dispatcher が戻っても評価されない"
+  assert_contains "$out" "later" "後から登録した handler は動く"
+
+  bash -c '. "$1/common.sh"; common::trap_add "echo X"; common::trap_remove "echo Y"' _ "$LIB" > /dev/null 2>&1
+  rc=$?
+  assert_nonzero "$rc" "登録していない handler を外そうとすると失敗を返す"
+}
+
+# RB-W P3-7: dump の起点（CHANGE REPLICATION SOURCE TO の SOURCE_LOG_FILE / SOURCE_LOG_POS）と GTID_PURGED を読む実装は
+# lib/binlog.sh の 1 つだけにする（以前は backup-full.sh にも同じ実装があり、片方だけを直す恐れがあった）。
+# 行全体のコメントは見ない。backup-full.sh がその実装を呼ぶことも確かめる。
+case_dump_coordinate_parser_has_one_implementation() {
+  local f out
+  local -a files=()
+  while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
+  out=$(awk '/^[[:space:]]*#/ { next } /SOURCE_LOG_FILE|GTID_PURGED/ { print FILENAME }' "${files[@]}" | LC_ALL=C sort -u)
+  assert_eq "$LIB/binlog.sh" "$out" "dump の起点と GTID を読む実装は lib/binlog.sh だけにある"
+  if grep -q '^[^#]*binlog::parse_dump_coords "\$dump_file"' "$BACKUP_ROOT/backup-full.sh" \
+      && grep -q '^[^#]*binlog::parse_dump_gtid "\$dump_file"' "$BACKUP_ROOT/backup-full.sh"; then
+    test_assert "backup-full.sh は lib/binlog.sh の実装を呼ぶ"
+  else
+    test_fail "backup-full.sh は lib/binlog.sh の実装を呼ぶ" "binlog::parse_dump_coords / binlog::parse_dump_gtid の呼び出しがありません"
+  fi
+}
+
+# RB-W P3-2: common::trap_add を使う本番 script は trap - EXIT を書かない（dispatcher だけが外れ、配列に残った handler が
+# 後で戻るため）。common.sh（trap_remove の実装）だけを除く。行全体のコメントは見ない。
+trap_clears_outside_common() { # <file>...
+  awk '/^[[:space:]]*#/ { next }
+       /(^|[;&|[:space:]])trap[[:space:]]+(--[[:space:]]+)?-[[:space:]]+(EXIT|0)([[:space:]]|;|$)/ { print FILENAME ":" FNR }' "$@"
+}
+
+case_trap_add_users_do_not_clear_with_trap_minus_exit() {
+  local t out f
+  local -a files=()
+  t=$(mktemp -d)
+  cat > "$t/sample.sh" <<'EOF'
+  trap - EXIT
+x; trap -- - EXIT
+  # trap - EXIT
+  common::trap_remove "$h"
+  trap '' INT
+EOF
+  out=$(trap_clears_outside_common "$t/sample.sh")
+  assert_eq $'sample.sh:1\nsample.sh:2' "${out//"$t/"/}" "trap - EXIT と trap -- - EXIT を検出し、コメント・trap_remove・ほかの signal は検出しない"
+  rm -rf "$t"
+
+  while IFS= read -r f; do
+    [[ "$f" == "$LIB/common.sh" ]] || files+=("$f")
+  done < <(production_scripts)
+  out=$(trap_clears_outside_common "${files[@]}")
+  assert_eq "" "$out" "本番 script は trap - EXIT を書かず common::trap_remove で handler を外す"
+}
+
 # mysqldump の起動（"$MYSQLDUMP_BIN" / ${MYSQLDUMP_BIN} / 行頭・;・&・|・( の後の mysqldump。--version を除く）を、行末の \ で
 # 続く行をつないだ 1 つの command として見て、--no-tablespaces の有無を出力する（OK|NG <file>:<開始行>）。行全体のコメントは見ない。
 mysqldump_invocations() { # <file>...
@@ -412,6 +543,9 @@ run_case case_pipefail_binlog_size_from_logs_with_large_list
 run_case case_pipefail_validate_db_check_tables_with_large_output
 run_case case_mysql84_no_removed_syntax
 run_case case_trap_handlers_do_not_reference_function_locals
+run_case case_dump_coordinate_parser_has_one_implementation
+run_case case_common_trap_remove_keeps_other_handlers
+run_case case_trap_add_users_do_not_clear_with_trap_minus_exit
 run_case case_mysqldump_invocations_use_no_tablespaces
 run_case case_migrations_do_not_use_tablespace
 

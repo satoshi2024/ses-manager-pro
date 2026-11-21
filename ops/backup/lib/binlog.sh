@@ -6,8 +6,11 @@
 # - closed file の end position（SHOW BINARY LOGS の File_size）照合
 # ============================================================
 
-# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）。backup-full.sh の
-# backup_full::parse_dump_coords と同じ規則（MySQL 8.4 の CHANGE REPLICATION SOURCE TO だけを読む。RB-W 8.4 対応）
+# dump の --source-data=2 coordinate を抽出（BINLOG_START_FILE/POSITION を設定）。backup-full.sh が使う唯一の実装
+# （RB-W P3-7 で backup-full.sh の同じ実装を消し、ここへまとめた）。
+# MySQL 8.4 の mysqldump は CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='…', SOURCE_LOG_POS=…; を書く
+# （8.4 の server は CHANGE MASTER TO を持たない）。production は 8.4 だけのため 8.0 の旧形式（CHANGE MASTER TO）は読まない。
+# 旧形式だけの dump は coordinate を取れずに失敗する（fail-closed）。パイプを使わず bash の正規表現で取り出す（P1-1）。
 binlog::parse_dump_coords() { # dump_file
   local dump=$1 line
   local re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
@@ -25,7 +28,7 @@ binlog::parse_dump_coords() { # dump_file
 
 # dump 内の GTID 状態（GTID_EXECUTED を設定）
 binlog::parse_dump_gtid() { # dump_file
-  local dump=$1
+  local dump=$1 line
   GTID_EXECUTED=""
   while IFS= read -r line; do
     case "$line" in

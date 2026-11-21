@@ -376,6 +376,10 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   `head`・`exit` を含む awk・sed の `q`・`read`・`cmp`）を置かない。入力が pipe の容量（Linux 64 KiB）を超えると前段が
   SIGPIPE で終わり、パイプ全体が失敗に見える（例: binlog の一覧が長いと archive / checkpoint が止まる）。入力は
   here-string（`<<< "$x"`）で渡すか、読み切る command（`jq` の `first`、`tail` 等）を使う。
+  行末の `|` で次の行に読み手を書く形、`| while … done` の中の `break`・`return`・`exit`、読み手の前の
+  `LC_ALL=C` 等の代入・`command`・`env`、`|&`、`dd` の `count=`・`xxd -l` も同じ扱いで検出する（RB-W P3-1）。
+  `common::trap_add` で登録した EXIT の handler は `common::trap_remove` で外し、`trap - EXIT` は書かない（RB-W P3-2。
+  dispatcher だけが外れ、配列に残った handler が後の `trap_add` で戻るため）。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 

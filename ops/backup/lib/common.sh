@@ -49,6 +49,27 @@ common::_trap_run() {
   done
 }
 
+# common::trap_add で登録した handler を外す（同じ文字列の登録を 1 つだけ外す。見つからなければ 1 を返す）。
+# 残りが無くなれば dispatcher も外す。RB-W P3-2: 以前は呼び出し元が trap - EXIT で dispatcher だけを外しており、
+# 配列に残った handler は、後で common::trap_add が dispatcher を戻すと再び評価された（成功した staging を消す等）。
+# trap_add を使う script は trap - EXIT を書かずにこの関数を使う（script-contract-test が確かめる）。
+common::trap_remove() { # handler
+  local handler=$1 h removed=0
+  local -a kept=()
+  for h in "${_COMMON_TRAP_HANDLERS[@]}"; do
+    if (( removed == 0 )) && [[ "$h" == "$handler" ]]; then
+      removed=1
+      continue
+    fi
+    kept+=("$h")
+  done
+  _COMMON_TRAP_HANDLERS=("${kept[@]}")
+  if (( ${#_COMMON_TRAP_HANDLERS[@]} == 0 )); then
+    trap - EXIT
+  fi
+  (( removed == 1 ))
+}
+
 # 既知の秘密値パターンを redaction する（URL の userinfo、password= 等）
 common::redact() {
   sed -E \

@@ -29,6 +29,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/metadata.sh"
 . "$LIB_DIR/content-hash.sh"
 . "$LIB_DIR/schema-fingerprint.sh"
+. "$LIB_DIR/binlog.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -52,39 +53,8 @@ backup_full::cleanup() {
   repository_lock::release
 }
 
-# dump の --source-data=2 coordinate を抽出（RB-W 8.4 対応）
-# MySQL 8.4 の mysqldump は CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='…', SOURCE_LOG_POS=…; を書く
-# （8.4 の server は CHANGE MASTER TO を持たない）。production は 8.4 だけのため旧形式（CHANGE MASTER TO）は読まない。
-# 旧形式の dump は coordinate を取れずに失敗する（fail-closed）。パイプを使わず bash の正規表現で取り出す（P1-1）。
-backup_full::parse_dump_coords() { # dump_file -> BINLOG_START_FILE/BINLOG_START_POSITION
-  local dump=$1 line
-  local re="CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='([^']+)', *SOURCE_LOG_POS=([0-9]+)"
-  BINLOG_START_FILE=""
-  BINLOG_START_POSITION=""
-  while IFS= read -r line; do
-    if [[ "$line" =~ $re ]]; then
-      BINLOG_START_FILE=${BASH_REMATCH[1]}
-      BINLOG_START_POSITION=${BASH_REMATCH[2]}
-      return 0
-    fi
-  done < "$dump"
-  return 1
-}
-
-# dump 内の GTID 状態（--source-data=2 時のコメント行）
-backup_full::parse_dump_gtid() { # dump_file
-  local dump=$1
-  GTID_EXECUTED=""
-  while IFS= read -r line; do
-    case "$line" in
-      *"GTID state at the beginning"*) : ;;
-      *"SET @@GLOBAL.GTID_PURGED"*)
-        GTID_EXECUTED=$(printf '%s' "$line" | sed "s/SET @@GLOBAL.GTID_PURGED=//" | tr -d ';')
-        break
-        ;;
-    esac
-  done < "$dump"
-}
+# dump の起点（--source-data=2 の coordinate）と GTID の読み取りは lib/binlog.sh の binlog::parse_dump_coords /
+# binlog::parse_dump_gtid に 1 つにまとめた（RB-W P3-7。以前は同じ実装がこの script と lib の 2 箇所にあった）。
 
 # repository の存在確認（無ければ初期化。中身があるのに読めない場合は fail-closed）
 backup_full::ensure_repository() {
@@ -172,10 +142,10 @@ main() {
     common::fail "mysqldump が失敗しました: $(common::redact < "$work/db/mysqldump.err")"
   fi
 
-  if ! backup_full::parse_dump_coords "$dump_file"; then
+  if ! binlog::parse_dump_coords "$dump_file"; then
     common::fail "dump から binlog coordinate を抽出できません（--source-data=2 が無効?）"
   fi
-  backup_full::parse_dump_gtid "$dump_file"
+  binlog::parse_dump_gtid "$dump_file"
 
   # uploads snapshot（同一 fs staging。特殊 file は provider が拒否）
   local uploads_snap="$work/uploads-snapshot.json"
