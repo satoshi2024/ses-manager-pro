@@ -97,7 +97,7 @@
   - **失敗/rollback:** Hikari の metric・health が消えたら包み方を直す。負荷の試験で 1 件でも漏れたら I-4 の実装を見直す（試験を緩めない）。
 
 - [ ] **BWQ-005 — HTTP の分類と 503（filter・例外・エラーページ・文言・session・logout・監査・外部 API）**
-  - **状態:** 実装・fast の試験は済み（commit `b47ee2d2`）。Demo は Runner 待ち。
+  - **状態:** 実装・fast の試験は済み（commit `b47ee2d2`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket（`SECURITY_BOOTSTRAP_REOPEN_TICKET`）を付けた起動の記録（BWQ-014 か staging。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3）を含める。**未取得**。外部 API の静止中の 503 は NF05 を開ける前の受理と openapi-candidate の更新の対象（`deploy-runbook.md` §1.7 の NF05 の行の (g)・(h)。**未取得**）。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGateFilter`（+35。WRITE・EXTERNAL は permit、LOGOUT は取れれば permit、chain 全体の 1792・`BackupWriteQuiescedException` を 503 へ）・`BackupQuiesceRequestClassifier`・`BackupWriteQuiescedException`・`BackupQuiesceRejections`（503 の header・文言・`Retry-After`）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）・`AuditedDownloadPaths`、gate の bean（`BackupQuiesceConfiguration`。破棄の callback を推定させない）。`AuditLogService.recordCaptured`（D4-P3-3: 呼出し元は `BackupQuiesceDeferredWrites` だけで `AuditLogMethodLengthGuardTest` が bytecode で固定、時刻は `[今 − 最長の保持時間 − 余裕, 今]`、余裕は 5 分＋checkpoint の最大保持時間）と `PersistentSessionService.captureCurrent`・`revokeCaptured`、U-14 の解除後の最初の touch は `UserSessionMapper.touchCarriedOver`（既存の `touch` は行の idle 期限で絞るため）。`t_audit_log` に IP の列が無いため、解除後の監査に IP は書けない（取っておく値から外した）。
 
@@ -140,7 +140,7 @@
   - **失敗/rollback:** 待機が最大保持時間を超えないことを確かめる。
 
 - [ ] **BWQ-015 — uploads の最後の防線（storage 層の確認と一覧の試験）**
-  - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。
+  - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket を付けた起動の記録（BWQ-014 か staging。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3。登録の前（UNARMED）の uploads の directory の作成が assert に当たらず、実 MySQL の読取り専用の接続の下で起動の途中の書込みが拒否されないこと）を含める。**未取得**。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGate.assertUploadsMutationAllowed`（prod の UNARMED を含め、書込みを許さず permit が無ければ `BackupWriteQuiescedException`。filter の metric は `uploads`）。assert を置いた入口: `FileStorageServiceImpl`（保存・削除・再 scan）、`LocalDocumentStorage`（put・promote・delete・deleteStrict）、`ContractDocumentServiceImpl.create`（PDF）、`ImportStageReconciliationLedger`（write・remove）、`LegacyUploadMigrationService.migrate`、`FileCleanupServiceImpl.cleanupOrphanFiles`、一覧の試験で見つけた `ImportRawTempFileStore`（create は assert、deleteOrReport は「例外を投げない」契約のため静止中は消さずに孤児清掃へ委ねる）。`UploadsMutationInventoryTest` は 40 件（MUTATES 23・DIRECTORY_ONLY 9・OUTSIDE 8）を照合し、MUTATES は guard の method が gate の判定を呼ぶことも確かめる。`DocumentServiceImpl`・CloudSign の一時 file と NF01 の preflight の CLI は upload root の外。
 
@@ -189,7 +189,7 @@
   - **失敗/rollback:** lock を返さずに job が終わる経路があれば、接続の close で必ず返ることを確かめる。
 
 - [ ] **BWQ-009 — backup tool: `quiesce-db` provider・保持 process・verify**
-  - **状態:** 実装・shell の試験（tool image の中）は済み（第 2 段階 2d）。Demo（`run-unit-tests.sh`。image の build を含む）と、SQL を実 MySQL 8.4 で動かす BWQ-011・BWQ-012 は Runner 待ち。
+  - **状態:** 実装・shell の試験（tool image の中）は済み（第 2 段階 2d）。Demo（`run-unit-tests.sh`。image の build を含む）と、SQL を実 MySQL 8.4 で動かす BWQ-011・BWQ-012 は Runner 待ち。tool image の content ID の変化と配布の pin のし直しは BWQ-013 で `ops/backup/README.md`「ツールイメージの build・配布」と `deploy-runbook.md` §1.7 の「Backup 開始の前提」に書いた（第 2 段階 2e）。
 
   - **実装の記録（第 2 段階 2d）:** `providers/quiesce-db.sh`（`acquire|verify|release|hold`）・`lib/quiesce-db-common.sh`・`providers/quiesce-db.d/*.sql`（11 file）。判定（必要な instance の分類・ack・hold 期限・整合時刻・停止口）は SQL の `VERDICT` の行が出し、shell は観測した接続元の照合（文字列の分解）・時間の上限・state dir の印だけを見る（同じ SQL を BWQ-011 が実 MySQL で実行して固定するため）。SQL の引数は `int`・`hex`・`enum` の型で検査して `SET @p_…` で渡し（`requested_by` は hex にする）、string の user 変数を列と比べない（collation の衝突を避ける。要求は番号で指す）。整合時刻は `quiesce.json` の `started_at_utc`（秒、従来の書式）と `started_at_epoch_us`（DB の epoch の μ秒。verify の `acked_at <= 整合時刻` に使う）。保持 process は `quiesce::_start_hold` が `exec {QUIESCE_HOLD_FD}> >(…)` で起動し、DDL lock の session（mysql）を loop の右の pipe で持つ（`DO 0;` で idle を保ち、失えば `ddl-lock.lost`）。release は要求を解いた後に `release.requested` で保持 process を終わらせ（lock の返却）、その後で再開を確かめる。D4-P3-1 は「source の時に `exec {QUIESCE_HOLD_FD}>/dev/null` で初期化する」方式（環境変数の値は使わない）。D4-P3-4 は `backup_full::dump`（background・`if ! wait`・kill の後に wait・`{QUIESCE_HOLD_FD}>&-`）。DDL lock を待つ秒数は固定の 30 秒（`QUIESCE_DB_LOCK_WAIT_SECONDS`。§12.4 に変数を足さない）。静止区間の秒数と内訳は provider によらず `quiesce::step` で記録し、`QUIESCE_WINDOW_WARN_SECONDS` を超えたら WARN。preflight の `checks.quiesce`（exit 19）は `QUIESCE_PROVIDER` が DB の provider の時だけ。`full-backup-test.sh`・`binlog-checkpoint-test.sh` は image に写した `preflight.sh`・`snapshot-binlog.sh` ではなく repository の版を使うようにした。
 
@@ -245,6 +245,9 @@
   - **失敗/rollback:** 所要時間が大きく増えたら responder の間隔を見直す。`MySqlTestImagesTest` が integration の image の参照を拒否しないこと。
 
 - [ ] **BWQ-013 — 文書（runbook・README・監視・restore・baseline・pii-inventory）**
+  - **状態:** 文書は書いた（第 2 段階 2e）。Demo（§2〜§4 を上から読み、BWQ-014 と同じ順であることの確認）は済み（worker の報告）。checkbox は、Runner・CI の実測値の書き戻し（`design.md` §19、`deploy-runbook.md` §1.7 の BQ-5）と BWQ-014 の通しの Demo（BQ-4）の後に統括が決める。
+
+  - **実装の記録（第 2 段階 2e）:** `deploy-runbook.md`: 冒頭の一覧（RB-QUIESCE の項）、§0 の表、§1.0（停止口の行の片付けの参照）、§1.2（backup account の要求の表への表単位の `INSERT`・`UPDATE` と付ける時期・PROD-002 と署名、アプリ account の制御用・heartbeat 用の接続と host の型が 1 つ）、§1.7（DBA-1 の除外、「Backup 開始の前提」の `QUIESCE_PROVIDER=quiesce-db`・tool image の pin のし直し・preflight の `checks.quiesce`・002 の writer・004a・004b と循環しない解除の条件、新しい表 BQ-1〜BQ-5（U-11 の Security・DBA の署名、U-1 の staging の EFS の実測、MySQL 8.4 の prod の起動、BWQ-014、§19 の CI の実測）、NF05 の行の (g) U-6 の NF05 owner の受理・(h) openapi-candidate の 503）、§1.8（RR-10 の例外に §3.4 の GRANT と §4.7 の 2 つの SQL）、§2 の0（定期起動の停止）・3（STOPPED）・4（instance の行と 300 秒の待ち）・5（`--app-stopped` の full。初回は §3.4 の後）、§3.3（定期起動の停止の参照）、§3.4（表単位の GRANT と確認）、§4（`--app-stopped` の後に起動、readiness の後の確認と再開）、新しい §4.7（instance の確認・backup の再開・004b・障害の切分け・保持の手での終了・停止口の行の片付け）、§5（静止中の 503）、§6（restore の後の信号表と権限）。`ops/backup/README.md`: 「設定」に provider の表・`.env.backup` の `QUIESCE_*`・preflight・`CONTENT_HASH_TABLES` の注意と「書込み静止の記録（quiesce.json）」（置き場所・期限・ticket に貼らない投影）、「実行」に `--app-stopped` と「欠けた full の取り直し」、「ツールイメージの build・配布」に content ID の変化と pin のし直し、「権限分離」に要求の表の行・要らないもの（`DELETE`・`PROCESS`）・preflight と契約試験、origin/main `42719b10` の 298〜299 行の静止の説明、「復元」「監視」の参照、「テスト」に integration の responder・root の backup account（最小権限は BWQ-011 が確かめる）・shell の試験。`backup-health-monitoring.md`: §13.3 の条件の表と対応（CRITICAL 6・WARN 6。最後の防線の拒否は Connector/J の client 側の `S1009` と server の 1792 の両方を数える）。`restore-cutover.md`: 新しい §4.6（信号表の残り・権限の付け直し・再開の前の確認）。`baseline.md`: PROD-002 の writer、PROD-004 を 004a・004b に分けた。HFP-03 の `design.md` §5.1 の参照。`pii-inventory.md`: DB-148〜DB-150。`design.md` §19 の実測の記録。
 
   - **依存:** BWQ-001〜BWQ-012・BWQ-015（文書は各 task の内容に合わせて最後にまとめる。各 task で直した節はその task で直してよい）
   - **対応要求:** BWQ-RQ-007、BWQ-RQ-011、BWQ-RQ-014

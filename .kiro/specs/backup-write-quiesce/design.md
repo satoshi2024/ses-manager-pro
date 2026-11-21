@@ -861,15 +861,15 @@ CLAUDE.md は本 batch では変えない。
 
 | 前提 | 確かめる所 | 違った場合 |
 |---|---|---|
-| 存在しない表への表単位の GRANT は `CREATE` を含めないと通らない（MySQL 8.4） | BWQ-011 の準備、DBA の staging | 規則が無くても §3.4 の後に GRANT する順は変えない |
+| 存在しない表への表単位の GRANT は `CREATE` を含めないと通らない（MySQL 8.4） | BWQ-011 の準備（**未取得**。CI の mysql-test の shard 3 で `BackupQuiesceProviderContractMySqlTest` が試験の log に記録する予定。CI の backup integration は表を作った後に GRANT するため、ここでは取れない）、DBA の staging（**未取得**） | 規則が無くても §3.4 の後に GRANT する順は変えない |
 | 読取り専用の session で locking read が ERROR 1792 になる | BWQ-004 | 通るなら L-2 の locking read の 503 は起きない |
 | 読取り専用の業務の接続の DML を MySQL が ERROR 1792 で拒否する | BWQ-004（**`fea83915` の Runner の実測で前提が違った**。fix E） | Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に `S1009` で拒否する（vendor code 0）。1792 だけを見る判定は 503 にならず 500 で、`readonly_sql` も数えなかった（書込み自体は拒否されていた）。判定を両方の形にした（§6.5.1・§20.7）。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない読取り専用の session）を別の case で固定する |
 | Hikari は接続を返すと read-only を既定へ戻し、Connector/J は `SET SESSION TRANSACTION READ ONLY` を送る | BWQ-004 | 戻らなければ包みが返す時に戻す |
 | InnoDB の一意キーの検査の lock 待ち（REFUSED の INSERT が未確定の QUIESCED を待つ）と `innodb_lock_wait_timeout` の session 設定 | BWQ-003 の MySQL 試験 | 待ちの扱いを見直す |
 | Spring は破棄の callback を包む前の bean に登録し、refresh の失敗では `ContextClosedEvent` を出さない。`DestructionAwareBeanPostProcessor` は両方の経路で呼ばれる | BWQ-003 の停止の試験 | §6.11 の入口を見直す |
-| mysqldump 8.4 の `--single-transaction --source-data=2` の lock の取り方と待ち | BWQ-012・BWQ-014 | L-6 の扱いを見直す |
-| STORED 生成列 `active_slot` の mysqldump・import・schema fingerprint の扱い（D-P3-7） | BWQ-012（integration が V202 を source に適用する） | dump の option か fingerprint の正規化を見直す |
-| bash の process substitution と `read -t` による保持 process の終わり方（job の SIGKILL で EOF）、process substitution の `wait`（bash 4.4 以上）、長い子 process が書き口を閉じること | BWQ-009 | 名前付き pipe 等に替える |
+| mysqldump 8.4 の `--single-transaction --source-data=2` の lock の取り方と待ち | BWQ-012・BWQ-014（**未取得**。CI の backup integration で取得予定: 証跡 `full-dump-start-lock.txt`。記録だけで判定しない。統括が CI の後に書き戻す） | L-6 の扱いを見直す |
+| STORED 生成列 `active_slot` の mysqldump・import・schema fingerprint の扱い（D-P3-7） | BWQ-012（integration が V202 を source に適用する。**未取得**。CI の backup integration で取得予定: 証跡 `quiesce-generated-column.txt`。統括が CI の後に書き戻す） | dump の option か fingerprint の正規化を見直す |
+| bash の process substitution と `read -t` による保持 process の終わり方（job の SIGKILL で EOF）、process substitution の `wait`（bash 4.4 以上）、長い子 process が書き口を閉じること | BWQ-009（**第 2 段階 2d に tool image（Debian bookworm の bash 5.2）の中で成立を確かめた**: `quiesce-db-test.sh` の kill の case（mysqldump の最中と DDL lock の取得の待ちの間に job を SIGKILL すると、保持 process が 5 秒以内に終わり lock の session も終わる）、`$!` で process substitution の PID を取り `wait` できること。前提は変わらない） | 名前付き pipe 等に替える |
 | Connector/J の query timeout は文の取消しに別の接続を開く | BWQ-003 の MySQL 試験 | 制御用 pool の大きさと取消しの扱いを見直す |
 | Spring の `DisposableBeanAdapter` と depends-on による破棄の順（anchor・`taskExecutor`・`taskScheduler`） | BWQ-003 | 破棄の順の固定の方法を見直す |
 | Fargate の `stopTimeout` の既定と上限 | SRE（004a） | 雛形の値を見直す |

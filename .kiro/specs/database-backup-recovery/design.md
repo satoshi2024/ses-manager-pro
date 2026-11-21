@@ -121,6 +121,8 @@ sequenceDiagram
 
 静止中に deadline を超えた場合は解除を試み、snapshot を INVALID として隔離する。静止解除に失敗した場合は重大 alert とし、job の成功より service safety を優先する。静止区間は DB coordinate と immutable な local/volume snapshot の確定までとし、S3/restic への network upload は解除後に行ってよい。ただし upload/restore verify が完了するまで checkpoint を VALID にせず、RPO watermark も進めない。単なる可変 directory を immutable staging とみなして解除してはいけない。
 
+上の図の「書込み静止要求」と「replica 全数 + scheduler 停止証明」の本番の protocol（app の静止応答・DB の信号表・provider `quiesce-db`／`quiesce-app-stopped`・DDL 凍結の lock）の正本は `.kiro/specs/backup-write-quiesce/`（RB-QUIESCE）である。
+
 ### 5.2 full
 
 - deployment/change lock を取得し、Flyway/DDL を禁止する。
