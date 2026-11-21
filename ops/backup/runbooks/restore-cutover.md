@@ -63,8 +63,9 @@ cutover.sh \
 
 ## 4. ロールバック（rollback-cutover.sh）
 
-`write-enable 前`（initial / staged / read-only-smoke-passed / single-writer）に限り、
-旧環境へ戻せる。`write-enabled` 後の rollback は禁止。
+`write-enable 前`で、`CUTOVER_STATE_FILE` があり state が initial / staged / read-only-smoke-passed / single-writer の
+ときに限り、旧環境へ戻せる。state file が無ければ拒否する（`cutover.sh` が state を書く前に失敗した場合は DB が
+切り替わっていないので、uploads の逆向きの switch だけを行う。§4.5.1 の 5）。`write-enabled` 後の rollback は禁止。
 
 ```bash
 rollback-cutover.sh --plan <plan-id>
@@ -114,6 +115,8 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
      `rolled-back` にしているので、`rollback-cutover.sh` は実行しない（「すでに rolled-back 済み」で拒否される）。
      逆向きの switch（`--to <旧版> --expect <新しい版>`。3 で控えた `rollback=`）を行い、`OLD_ENV_SMOKE_SCRIPT` を
      手で実行して旧環境が健全であることを確かめる。
+   - `cutover.sh` が state を書く前に失敗した場合（初回で `CUTOVER_STATE_FILE` が無い）: DB は切り替わっていない。
+     `rollback-cutover.sh` は使わず（state file が無いと拒否される）、逆向きの switch だけを行う。
    - `staged`・`read-only-smoke-passed`・`single-writer` から人の判断で戻す場合: `rollback-cutover.sh`（§4）と
      逆向きの switch を**必ず対で**行う。
    どちらの場合も、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。DB と pointer の
@@ -133,7 +136,10 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
    期待: `state=write-enabled` なら `target=<新しい版>`（その plan の `uploads_ready` から stage した版）、
    `state=rolled-back` なら `target=<旧版>`。plan-id・checkpoint・版の名前・`status` の出力を対として change ticket と
    配備記録に残す。一致しなければ起動しない。`state` がそれ以外（`staged`・`read-only-smoke-passed`・`single-writer`）
-   のときも起動しない。write-enable の前なので、5 に従って戻すか、§3 に従って write-enable まで進めてから 7 をやり直す。
+   のときも起動しない。この状態から `cutover.sh` をやり直すことはできない（開始できるのは initial・staged だけ）ので、
+   5 に従って `rollback-cutover.sh` と逆向きの switch を対で行い、restore からやり直す。`CUTOVER_STATE_FILE` が無い
+   （`cutover.sh` が state を書く前に失敗した）ときは DB は旧環境のままなので、`status` が `target=<旧版>` であることを
+   確かめて記録する。
 
 ### 4.5.2 各 command の性質
 
