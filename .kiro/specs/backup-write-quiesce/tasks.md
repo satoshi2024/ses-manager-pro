@@ -14,7 +14,8 @@
 
 ## Task 一覧
 
-- [x] **BWQ-001 — 信号表の migration・H2 の schema・版番号の連動**
+- [ ] **BWQ-001 — 信号表の migration・H2 の schema・版番号の連動**
+  - **状態:** 実装・fast の試験は済み（commit `73713475`）。MySQL の試験と Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2a）:** V202・H2 の変種・`engineer-schema-h2.sql`・`LATEST=202`・`ProductionSchemaVersionGuardTest`・runbook（冒頭・§1.7・§3.3・§3.4・§4）。ack の `resume_reason` にも CHECK `ck_bq_ack_resume` を足した（「理由の値が拒否される」の対象に含めるため）。fast は `MigrationScriptIntegrityTest`・`DeployRunbookMigrationCountTest`・`ProductionSchemaVersionGuardTest`・`BackupQuiesceSchemaContractTest` が通過。**Runner 待ち**: `FlywayProdFreshInstallMySqlTest`（mysql shard 3。V202 の3表・生成列・負例を足した）と Demo（local の MySQL 8.4 の dev 起動）。
 
@@ -30,7 +31,8 @@
   - **Demo:** local の MySQL 8.4 の空の DB で `mvn spring-boot:run`（dev）を起動し、`SHOW CREATE TABLE sys_backup_quiesce_request\G` 等で 3 表と生成列を確かめ、`flyway_schema_history` の最大が 202 であることを見る。
   - **失敗/rollback:** 版番号が衝突したら上の空き番号へ振り直す（空き番号を埋めない）。適用済みの migration を書き換えない。
 
-- [x] **BWQ-002 — 書込み gate と設定（core）**
+- [ ] **BWQ-002 — 書込み gate と設定（core）**
+  - **状態:** 実装・fast の試験は済み（commit `61a846dd`）。MySQL の試験と Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2a）:** `BackupWriteGate`（状態・I-4・I-3・手元の期限・遅延評価の FENCED・保留一覧・開いた時の callback）、`BackupWritePermit`（thread への結び付け・入れ子・投入時の数えと引継ぎ）、`BackupQuiesceDeferredWrites`（上限 10,000 件・捨てる時の WARN・3 回の繰返し・閉じ直しで戻す）、`BackupQuiesceProperties`（`@Validated`）、`BackupQuiesceMetrics`（`MeterBinder`）、`application.yml`・`application-test.yml`（`enabled: false`）。手元の期限に達したと一度でも判定した後は延ばせない（参照する側が開いたと見なした後に閉じ直さないため）。gate の働き方は INERT（prod 以外の `enabled=false`）・ARMED・DISABLED（prod の停止口）の3つ。上限で捨てる WARN の errorCode は `BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED`（§13.1 に無いため足した）。fast は `BackupWriteGateTest`・`BackupQuiesceDeferredWritesTest`・`BackupQuiescePropertiesTest` が通過（Demo の状態遷移の表は `BackupWriteGateTest` の `@ParameterizedTest`）。
 
@@ -50,7 +52,8 @@
   - **Demo:** 試験の結果（状態遷移の表を `@ParameterizedTest` で出した一覧）を確かめる。
   - **失敗/rollback:** 競合の試験が 1 回でも失敗したら I-4 の順を見直す。`enabled=false` で既存の試験の挙動が変わらないことを BWQ-005 までに確かめる。
 
-- [x] **BWQ-003 — 制御用・heartbeat 用の接続・信号表の repository・静止応答（responder）・停止の順**
+- [ ] **BWQ-003 — 制御用・heartbeat 用の接続・信号表の repository・静止応答（responder）・停止の順**
+  - **状態:** 実装・fast の試験は済み（commit `47c41934`）。MySQL の試験と Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2a）:** `BackupQuiesceControlConnectionPool`（holder。DataSource の bean にしない）、`BackupQuiesceSignalRepository`（interface）と `JdbcBackupQuiesceSignalRepository`（SQL は `UTC_TIMESTAMP(6)` だけ）、`BackupQuiesceHosts`（`PROCESSLIST.HOST` だけ port を外す）、`BackupQuiesceTicker`（専用 thread）、`BackupQuiesceLifecycleAnchor`（pool・gate・登録・heartbeat・STOPPED。heartbeat の thread も anchor が持ち STOPPED の直前まで続ける。D4-P3-2 の補足）、`BackupQuiesceResponder`（塞がない状態機械・起動の3分岐・停止口・保存期間の削除・解除後の投入は executor の queue が満杯なら次の tick）、`BackupQuiesceDestructionOrderPostProcessor`（bean が無ければ何もしない。D4-P3-2）、`BackupQuiesceConfiguration`。H2 には `UTC_TIMESTAMP`・`CONNECTION_ID` の関数 alias を置いた（`com.ses.test.H2MySqlTimeFunctions`）。`SchedulingDisabledDrainTest` の既知一覧に静止応答の thread と起動・停止の hook を理由つきで足した（BWQ-006 の 3 の先取り。走査で見つかる key だけ）。STOPPED の書込みの入口は BWQ-004 の `postProcessBeforeDestruction`。fast は `BackupQuiesceResponderTest`・`BackupQuiesceControlPoolUsageTest`・`BackupQuiesceContextStartTest`（test profile の全体の context と、prod の profile の scheduling 有効・無効と停止口）・`SchedulingDisabledDrainTest`・`MySqlTestShardInventoryTest`・`MySqlTestImagesTest`・`TestIsolationAuditTest` が通過。**Runner 待ち**: `BackupQuiesceResponderMySqlTest`（mysql shard 3。STOPPED の順の3件は BWQ-004 で足す）と Demo（dev の app と MySQL の client）。
 
@@ -71,7 +74,8 @@
   - **Demo:** dev profile の app を起動し、MySQL の client で要求を手で入れ、ack の行と log（`BACKUP_QUIESCE_REQUESTED`・`ACKED`）を確かめる。延長せずに待ち、`AUTO_RESUMED` の ERROR と ack の `RESUMED`（`LEASE_EXPIRED`）を見る。app を止め、instance の行が `STOPPED` になることを見る。
   - **失敗/rollback:** `DataSource` の bean が 2 つになって自動構成が崩れたら holder の形に戻す。破棄の順の依存が循環したら、静止応答が DataSource に依存していないかを確かめる。
 
-- [x] **BWQ-004 — DataSource の最後の防線（読取り専用・接続の数え方・停止の時の STOPPED）**
+- [ ] **BWQ-004 — DataSource の最後の防線（読取り専用・接続の数え方・停止の時の STOPPED）**
+  - **状態:** 実装・fast の試験は済み（commit `d3d3c589`）。MySQL の試験と Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2a）:** `BackupQuiesceAwareDataSource`（`DelegatingDataSource`。接続は proxy で `setReadOnly`・`close` を数える）、`BackupQuiesceDataSourcePostProcessor`（static な `@Bean`。gate が INERT なら包まない。停止の時は SHUTDOWN・呼んだ thread の permit の返却・最長 10 秒の排水の待ち・Hikari を閉じてから STOPPED、閉じられなければ STOPPED を書かない）、`BackupQuiesceReadOnlyViolation`。BWQ-003 の MySQL 試験に停止の順の4件（通常の close・refresh の失敗・10 秒を超える permit・`ApplicationRunner` の失敗）を足した。fast は `BackupQuiesceAwareDataSourceTest`（H2 の Hikari の metric と `db` の health を含む）・`BackupQuiesceReadOnlyViolationTest`・`BusinessConnectionBypassGuardTest` と影響する既存の試験が通過。**Runner 待ち**: `BackupWriteQuiesceMySqlTest`・`BackupQuiesceResponderMySqlTest`（mysql shard 3。§19 の locking read と Hikari の読取り専用の戻しの記録を含む）と Demo（dev の app の静止中の一覧の表示と MySQL の general log）。
 
