@@ -105,7 +105,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-Ssl: on' https://<公�
 
 ### 3.6 VPC内からのPrometheus scrape
 
-`/actuator/prometheus` はHTTPS強制のままで、task（ECS）を直接HTTPでscrapeすると302になる。scrape経路は次のどちらかに決める: ALB経由のHTTPSでscrapeする、または同じtask内のsidecarからscrapeする（この場合も `127.0.0.1` を `TRUSTED_PROXIES` には入れない。sidecar経路の扱いは別途決める）。
+`/actuator/prometheus` はHTTPS強制のままで、task（ECS）を直接HTTPでscrapeすると302になる。scrape経路は **ALB経由のHTTPSに決定済み（2026-11-18。`deploy-runbook.md` §1.6 の7）**で、scraper 口座（`METRICS_SCRAPER_*`）を使い、設定する項目は同 §1.7 の SRE-9 にある。同じtask内のsidecarからscrapeする経路は使わない（`127.0.0.1` を `TRUSTED_PROXIES` に入れない）。
 
 ## 4. 残るリスク・既知の制約
 

@@ -69,7 +69,7 @@
 ### 3.1 初回デプロイ
 
 1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施する。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。
-2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
+2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF07_DSAR=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
 
 ### 3.2 1機能ずつONにする

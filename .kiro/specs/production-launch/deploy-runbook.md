@@ -600,7 +600,7 @@ W1-B1 で「書面での受理が要る」とされた事項である（FINAL re
 NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規則を書くとしたもの。表単位のrestoreの禁止（RR-13）は §1.7 の SRE-6 にある。
 
 - **本番DBへ手作業の変更（DML・DDL）をしない（RR-10）**。NF01 の writer の閉包は guard test（Java・注釈SQL）で守っており、手動のSQLやDBの直接操作による変更は検出できない（認可epochが進まず、確認時の判定が古い前提のまま通り得る）。
-  - 例外は、本書が手順として書いたものだけ: §3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の各手順（侵害の疑い、TOTP の喪失、break-glass 保持者の交代、`admin` の lock 解除）。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（hash 等の値は残さない）。
+  - 例外は、本書が手順として書いたものだけ: §1.2 のアプリ account の password の rotation（`ALTER USER … RETAIN CURRENT PASSWORD` / `DISCARD OLD PASSWORD`）、§3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の各手順（侵害の疑い、TOTP の喪失、break-glass 保持者の交代、`admin` の lock 解除）。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（hash 等の値は残さない）。
   - 参照（SELECT）は本書の確認SQLの範囲で行ってよい。
   - 画面・API（監査が残る）で直せないデータの誤りは、手で直さずに Owner と DBA へ上げる。
 - **権限に関わる設定を変える配備では、未確認の二者確認の提出を差し戻す（RR-2）**。`ORGANIZATION_SCOPE_ENABLED`（`organization.scope.enabled`）や機能スイッチ等の property の変更は認可epochを進めない。確認時の再評価で拒否側には効くが、2回の配備をまたいで元へ戻る変更（例: ある配備で外し、次の配備で戻す）は検出しない。

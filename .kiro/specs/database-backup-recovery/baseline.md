@@ -62,6 +62,8 @@ production 固有値を推測せず、unit/Docker 隔離での実装と検証の
 
 ## 4.1 HFP-03-001 で確定した事実（隔離環境・一次資料ベース）
 
+本節は 2026-08-14 時点（MySQL 8.0 系で検証した時点）の記録である。現行の MySQL は 8.4 LTS（候補 8.4.13）、tool image の client は 8.4.13（`ops/backup/README.md`「前提」、`deploy-runbook.md` §1.1）。
+
 | 項目 | 確定値 | 根拠 |
 |---|---|---|
 | 隔離 source イメージ | `mysql:8.0.36@sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964` | docker inspect（2026-08-14 実測） |
