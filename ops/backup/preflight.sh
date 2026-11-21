@@ -17,7 +17,7 @@
 #   0   全チェック PASS
 #   10  mysql client / mysqlbinlog / mysqldump が不正（MariaDB / 8.4 以外）
 #   11  server version が 8.4 以外、client/server の系列不整合、または判定に要る server の変数を取得できない
-#   12  log_bin = OFF
+#   12  log_bin = OFF、または binlog_format の変数があり ROW でない（RB-W P3-6）
 #   13  binlog checksum が OFF
 #   14  対象 DB に非 InnoDB table がある
 #   15  TLS が無効
@@ -71,7 +71,7 @@ usage() {
 Usage: preflight.sh [--json|--help]
 
 環境契約検査を実行し、結果 JSON を標準出力へ出力する。
-終了コード: 0=PASS, 10=client不正, 11=server version不整合, 12=log_bin OFF,
+終了コード: 0=PASS, 10=client不正, 11=server version不整合, 12=log_bin OFF・binlog_format が ROW でない,
 13=checksum OFF, 14=非InnoDB, 15=TLS無効, 16=uploads不在, 17=空き容量不足,
 18=MYSQL_PWD使用検出, 1=env不足/接続失敗
 
@@ -217,6 +217,12 @@ main() {
   case "$binlog_checksum" in
     ""|OFF|NONE) note_fail "$EXIT_CHECKSUM" "binlog checksum が無効です: ${binlog_checksum:-OFF}" ;;
   esac
+
+  # binlog_format（RB-W P3-6）: 8.4 で非推奨だが変数は残る。DBA の前提は ROW。変数があり ROW でなければ失敗する
+  # （変数そのものが無い版では判定しない。その場合も記録は空のまま）。
+  if [[ -n "${server_vars[binlog_format]+set}" && "$binlog_format" != ROW ]]; then
+    note_fail "$EXIT_BINLOG" "binlog_format が ROW ではありません: ${binlog_format:-空}"
+  fi
 
   if [[ -n "$server_uuid" ]]; then
     : # UUID は JSON へ出力（secret ではない）

@@ -189,6 +189,20 @@ case_preflight_uploads_missing() {
   assert_no_secret "$out"
 }
 
+# RB-W P3-6: binlog_format の変数があり ROW でなければ exit 12（DBA の前提は ROW）。変数そのものが無い版は判定しない
+# （case_preflight_missing_server_variable）
+case_preflight_binlog_format_not_row() {
+  local fmt
+  for fmt in MIXED STATEMENT; do
+    setup_env
+    export FAKE_MYSQL_STATUS_ROW=$'8.4.13\t'"$FAKE_UUID"$'\t1\t'"$fmt"$'\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
+    run_preflight
+    assert_eq 12 "$code" "binlog_format が $fmt なら exit 12"
+    assert_contains "$out" "binlog_format が ROW ではありません: $fmt" "理由を通知: $fmt"
+    assert_no_secret "$out"
+  done
+}
+
 case_preflight_disk_full() {
   setup_env
   export PREFLIGHT_MIN_FREE_BYTES=9999999999999999
@@ -271,6 +285,7 @@ run_case case_preflight_noninnodb
 run_case case_preflight_empty_db_engines
 run_case case_preflight_tls_off
 run_case case_preflight_uploads_missing
+run_case case_preflight_binlog_format_not_row
 run_case case_preflight_disk_full
 run_case case_preflight_mysql_pwd_env
 run_case case_preflight_tls_config_missing
