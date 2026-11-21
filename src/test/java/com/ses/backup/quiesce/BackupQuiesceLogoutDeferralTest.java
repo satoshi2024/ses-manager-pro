@@ -110,7 +110,8 @@ class BackupQuiesceLogoutDeferralTest {
         verify(sessions, never()).revokeCurrent(any(), any(), any());
         verify(audit, never()).record(any(), any(), any(), anyInt(), any(), anyBoolean());
         assertThat(gate.deferredWrites().pending()).isEqualTo(2);
-        assertThat(registry.get(BackupQuiesceMetrics.DEFERRED).tag("kind", "logout").counter().count()).isEqualTo(2.0);
+        assertThat(registry.get(BackupQuiesceMetrics.DEFERRED).tag("kind", "logout").counter().count())
+                .as("logout 1 回に 1 つ（失効と監査の2件を後回しにしても。2b review P3-6）").isEqualTo(1.0);
 
         // 解除の後（executor の thread。logout の時の文脈は無い）
         CorrelationContext.clear();

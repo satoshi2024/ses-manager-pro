@@ -57,6 +57,8 @@
 
   - **実装の記録（第 2 段階 2a）:** `BackupQuiesceControlConnectionPool`（holder。DataSource の bean にしない）、`BackupQuiesceSignalRepository`（interface）と `JdbcBackupQuiesceSignalRepository`（SQL は `UTC_TIMESTAMP(6)` だけ）、`BackupQuiesceHosts`（`PROCESSLIST.HOST` だけ port を外す）、`BackupQuiesceTicker`（専用 thread）、`BackupQuiesceLifecycleAnchor`（pool・gate・登録・heartbeat・STOPPED。heartbeat の thread も anchor が持ち STOPPED の直前まで続ける。D4-P3-2 の補足）、`BackupQuiesceResponder`（塞がない状態機械・起動の3分岐・停止口・保存期間の削除・解除後の投入は executor の queue が満杯なら次の tick）、`BackupQuiesceDestructionOrderPostProcessor`（bean が無ければ何もしない。D4-P3-2）、`BackupQuiesceConfiguration`。H2 には `UTC_TIMESTAMP`・`CONNECTION_ID` の関数 alias を置いた（`com.ses.test.H2MySqlTimeFunctions`）。`SchedulingDisabledDrainTest` の既知一覧に静止応答の thread と起動・停止の hook を理由つきで足した（BWQ-006 の 3 の先取り。走査で見つかる key だけ）。STOPPED の書込みの入口は BWQ-004 の `postProcessBeforeDestruction`。fast は `BackupQuiesceResponderTest`・`BackupQuiesceControlPoolUsageTest`・`BackupQuiesceContextStartTest`（test profile の全体の context と、prod の profile の scheduling 有効・無効と停止口）・`SchedulingDisabledDrainTest`・`MySqlTestShardInventoryTest`・`MySqlTestImagesTest`・`TestIsolationAuditTest` が通過。**Runner 待ち**: `BackupQuiesceResponderMySqlTest`（mysql shard 3。STOPPED の順の3件は BWQ-004 で足す）と Demo（dev の app と MySQL の client）。
 
+  - **実装の記録（第 2 段階 2c、2b の review の fix C）:** P3-4: 停止口（DISABLED の mode）の instance は heartbeat でも停止の途中でも `gate_state` に `DISABLED` を書き、STOPPED にする時も `DISABLED` のまま残す（`design.md` §3.9）。試験は `BackupQuiesceResponderTest`・`JdbcBackupQuiesceSignalRepositoryPurgeTest`。
+
   - **依存:** BWQ-001、BWQ-002
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-002、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-005、BWQ-RQ-008
   - **Objective:** app が信号表を通じて要求を受け、塞がない状態機械で排水・ack（結果不明の解決を含む）・hold 期限の延長・再開・自動再開を行い、heartbeat を別の thread で書き続け、起動と停止（起動の失敗を含む）の順を守り、停止口の動きと保存期間の削除を行う。
@@ -99,6 +101,8 @@
 
   - **実装の記録（第 2 段階 2c、U-15。2026-11-22 の利用者の決定）:** 静止中も portal の参照を続ける。`PortalSessionServiceImpl.resolve` は gate が書込みを許さず permit が無いとき `t_portal_session` へ書かず（`touchIfValid` も `revokeById(EXPIRED)` も）、idle は U-14 と同じ規則（gate が閉じた時刻、下限は今 − 最長の保持時間）、失効と `expires_at` は今の時刻で判定する。静止中の最終利用は行の ID を鍵とする memory の表（上限 10,000 件。溢れたら記録せず WARN、緩和は広げない）に持ち越し、解除の後の最初の要求は `PortalSessionMapper.touchCarriedOver` で touch する。portal の静的資源も同じ経路で通る。portal の GET の他の書込みは download の best-effort の監査だけ（U-10 で 503）。試験: `PortalSessionServiceImplTest`（新規）、`BackupWriteGateMockMvcTest`（静止中の portal の参照・静的資源が 200 で行が変わらず `readonly_sql` が増えない、本物の portal の session で logout が 503。2b の review P3-5）。BWQ-AC-002-10。
 
+  - **実装の記録（第 2 段階 2c、2b の review の fix C）:** P2-1: `/api/**` の controller の中の拒否も `BackupQuiesceRejectionRecorder`（filter と共有）で `rejected_requests{kind}` を数え 1792 の WARN を間引く。P3-1（統括の決定）: bootstrap・break-glass の session の `POST /logout` も U-8（`design.md` L-21）。P3-2: NF05 の公開 API が OFF なら外部 API は静止中も平時の 404。P3-6: `deferred{logout}` は logout 1 回に 1。P3-7: 解除後の監査の時刻は未来 5 秒まで許す。試験は `GlobalExceptionHandlerTest`・`BackupWriteGateMockMvcTest`・`BackupQuiesceRequestClassifierTest`・`BackupQuiesceLogoutDeferralTest`・`AuditLogServiceImplTest`。
+
   - **依存:** BWQ-002、BWQ-004
   - **対応要求:** BWQ-RQ-002（AC-002-01・05・06・08・09）
   - **Objective:** 静止中の更新の要求を認証より前に 503 にし、参照は続け、logout は静止中も終わらせ、想定外の書込みも 503 で返す。利用者には翻訳された文言を出す。
@@ -137,6 +141,8 @@
   - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGate.assertUploadsMutationAllowed`（prod の UNARMED を含め、書込みを許さず permit が無ければ `BackupWriteQuiescedException`。filter の metric は `uploads`）。assert を置いた入口: `FileStorageServiceImpl`（保存・削除・再 scan）、`LocalDocumentStorage`（put・promote・delete・deleteStrict）、`ContractDocumentServiceImpl.create`（PDF）、`ImportStageReconciliationLedger`（write・remove）、`LegacyUploadMigrationService.migrate`、`FileCleanupServiceImpl.cleanupOrphanFiles`、一覧の試験で見つけた `ImportRawTempFileStore`（create は assert、deleteOrReport は「例外を投げない」契約のため静止中は消さずに孤児清掃へ委ねる）。`UploadsMutationInventoryTest` は 40 件（MUTATES 23・DIRECTORY_ONLY 9・OUTSIDE 8）を照合し、MUTATES は guard の method が gate の判定を呼ぶことも確かめる。`DocumentServiceImpl`・CloudSign の一時 file と NF01 の preflight の CLI は upload root の外。
+
+  - **実装の記録（第 2 段階 2c、2b の review の fix C）:** P3-3: `BackupQuiesceProductionContextStartTest` を、読取り専用の接続の DML を 1792 で拒否する試験の driver（`com.ses.test.ReadOnlyEnforcingH2Driver`）で起動し、登録の前に業務の pool で DML を実行した bean が無いことを確かめる（`spring.sql.init` だけ外す。`design.md` L-13）。P3-8: `ImportRawTempFileStore.deleteOrReport` の静止の分岐を削除の失敗と同じ metric と file 名の log に揃えた（内容は切り詰めない）。
 
   - **実行順:** BWQ-006 の後・BWQ-007 の前
   - **依存:** BWQ-002、BWQ-006

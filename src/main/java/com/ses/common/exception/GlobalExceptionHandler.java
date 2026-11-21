@@ -1,5 +1,6 @@
 package com.ses.common.exception;
 
+import com.ses.backup.quiesce.BackupQuiesceRejectionRecorder;
 import com.ses.backup.quiesce.BackupQuiesceRejections;
 import com.ses.backup.quiesce.BackupWriteGate;
 import com.ses.backup.quiesce.BackupWriteQuiescedException;
@@ -44,6 +45,25 @@ public class GlobalExceptionHandler {
         this.backupWriteGate = backupWriteGate;
     }
 
+    /** 静止による拒否の数え方と 1792 の WARN の間引き（filter と共有。無い context では数えずに WARN を出す）。 */
+    private BackupQuiesceRejectionRecorder rejectionRecorder;
+
+    @Autowired(required = false)
+    public void setBackupQuiesceRejectionRecorder(BackupQuiesceRejectionRecorder rejectionRecorder) {
+        this.rejectionRecorder = rejectionRecorder;
+    }
+
+    /** 今の要求の method と path（log 用。個人データを含めない形）。要求の外なら {@code -}。 */
+    private static String currentRoute() {
+        if (org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes attributes) {
+            jakarta.servlet.http.HttpServletRequest request = attributes.getRequest();
+            return request.getMethod() + " "
+                    + com.ses.common.util.RequestPaths.forAudit(com.ses.common.util.RequestPaths.pathWithinApplication(request));
+        }
+        return "-";
+    }
+
     /**
      * backup の書込み静止の間に permit なしで書こうとした（必須の監査・uploads の変更等）。再試行できる 503 で返す
      * （design.md §6.10。{@code Retry-After}・{@code X-SES-Error-Code: BACKUP_QUIESCED}）。
@@ -64,13 +84,17 @@ public class GlobalExceptionHandler {
     private ResponseEntity<ApiResult<Void>> quiescedResponse(Throwable e) {
         CorrelationContext.put(CorrelationContext.ERROR_CODE, BackupQuiesceRejections.ERROR_CODE);
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
-        boolean explicit = BackupQuiesceRejections.findQuiescedException(e) != null;
-        if (explicit) {
-            log.info("backup の静止中のため書込みを 503 にしました: exceptionClass={} {}",
-                    LogRedaction.exceptionType(e), contextFields());
-        } else {
+        // controller の中の拒否は filter まで届かないため、ここで filter と同じ部品で数えて 1792 の WARN を間引く
+        // （rejected_requests{readonly_sql|uploads|api}。2b review P2-1。§13.1〜§13.3）
+        BackupQuiesceRejectionRecorder recorder = rejectionRecorder;
+        if (recorder != null) {
+            recorder.record(e, false, true, currentRoute() + " " + contextFields(), "api-handler");
+        } else if (BackupQuiesceRejections.findQuiescedException(e) == null) {
             log.warn("errorCode=BACKUP_QUIESCE_READONLY_REJECTED backup の静止中に読取り専用の接続へ書こうとした要求を 503 に"
                     + "しました: exceptionClass={} {}", LogRedaction.exceptionType(e), contextFields());
+        } else if (log.isDebugEnabled()) {
+            log.debug("backup の静止中のため書込みを 503 にしました: exceptionClass={} {}", LogRedaction.exceptionType(e),
+                    contextFields());
         }
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(BackupQuiesceRejections.RETRY_AFTER_HEADER,

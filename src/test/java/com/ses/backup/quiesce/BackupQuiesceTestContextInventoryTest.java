@@ -247,10 +247,9 @@ class BackupQuiesceTestContextInventoryTest {
                 @org.springframework.test.annotation.DirtiesContext(classMode = AFTER_CLASS)
                 class D {}
                 """;
-        // 括弧の内側に空白を入れた tag（規則は空白を許す）。空白の無い形は source に tag を探す MySqlTestShardInventoryTest が
-        // この class を mysql の試験と数えるため使わない
+        // MySqlTestShardInventoryTest は compile 済みの class の注釈で数えるため、text block の中の tag は数えない（2b review P3-9）
         String prodMysql = """
-                @Tag( "mysql" )
+                @Tag("mysql")
                 @SpringBootTest(properties = "spring.profiles.active=prod")
                 class E {}
                 """;

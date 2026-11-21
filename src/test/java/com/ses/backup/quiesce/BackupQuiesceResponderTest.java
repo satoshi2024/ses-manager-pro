@@ -401,6 +401,20 @@ class BackupQuiesceResponderTest {
     }
 
     @Test
+    void 停止口のheartbeatは停止の途中もgate_stateをDISABLEDのまま書く() {
+        // 2b review P3-4: SHUTDOWN を書くと停止口の行が §5.3 の分類と保存期間の削除の除外から外れる
+        build(BackupWriteGate.Mode.DISABLED, true);
+        responder.afterSingletonsInstantiated();
+        gate.shutdown();
+        assertThat(gate.state()).isEqualTo(BackupWriteGate.State.SHUTDOWN);
+
+        anchor.heartbeatOnce();
+
+        assertThat(repository.lastHeartbeatGateState).isEqualTo("DISABLED");
+        assertThat(anchor.reportedGateState()).isEqualTo("DISABLED");
+    }
+
+    @Test
     void 停止口でもAPP_STOPPEDの保持中は起動を中止する() {
         build(BackupWriteGate.Mode.DISABLED, true);
         repository.request("APP_STOPPED", "FULL", 60);

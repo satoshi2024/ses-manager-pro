@@ -55,6 +55,12 @@ public class BackupQuiesceConfiguration {
         return new BackupQuiesceMetrics(anchor.gate());
     }
 
+    /** 静止による拒否の数え方と 1792 の WARN の間引き（filter と API の handler で共有。2b review P2-1）。 */
+    @Bean
+    static BackupQuiesceRejectionRecorder backupQuiesceRejectionRecorder(BackupQuiesceMetrics metrics) {
+        return new BackupQuiesceRejectionRecorder(metrics);
+    }
+
     /**
      * prod の起動時検査（BWQ-007。§12.2）。静止応答は instance の登録の前にこの検査を呼ぶ。prod の profile で
      * {@code application-test.yml}（{@code enabled=false}）を import する全体の context の試験は {@code @MockBean} で置き換える。

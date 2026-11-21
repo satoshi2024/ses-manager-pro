@@ -352,4 +352,51 @@ class GlobalExceptionHandlerTest {
             CorrelationContext.clear();
         }
     }
+
+    /**
+     * 2b review P2-1: API の controller の中の拒否も filter と同じ部品で数え（{@code rejected_requests{kind}}）、1792 の WARN を
+     * 間引く。数え方は 1792 → {@code readonly_sql}、uploads の明示 → {@code uploads}、その他の明示 → {@code api}。
+     */
+    @Test
+    void 静止による503はkindごとに数え1792のWARNは間引く() {
+        com.ses.backup.quiesce.BackupWriteGate gate = closingGate();
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        com.ses.backup.quiesce.BackupQuiesceMetrics metrics = new com.ses.backup.quiesce.BackupQuiesceMetrics(gate);
+        metrics.bindTo(registry);
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        handler.setBackupWriteGate(gate);
+        handler.setBackupQuiesceRejectionRecorder(new com.ses.backup.quiesce.BackupQuiesceRejectionRecorder(metrics));
+        Logger logger = (Logger) LoggerFactory.getLogger(com.ses.backup.quiesce.BackupQuiesceRejectionRecorder.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertEquals(503, handler.handleException(new IllegalStateException(readOnlyViolation()))
+                    .getStatusCode().value());
+            assertEquals(503, handler.handleBusinessException(new BusinessException(500, "x", readOnlyViolation()))
+                    .getStatusCode().value());
+            assertEquals(503, handler.handleBackupWriteQuiesced(
+                    new com.ses.backup.quiesce.BackupWriteQuiescedException("uploads:file-storage.store"))
+                    .getStatusCode().value());
+            assertEquals(503, handler.handleBackupWriteQuiesced(
+                    new com.ses.backup.quiesce.BackupWriteQuiescedException("required-audit")).getStatusCode().value());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+            CorrelationContext.clear();
+        }
+
+        assertEquals(2.0, rejected(registry, "readonly_sql"));
+        assertEquals(1.0, rejected(registry, "uploads"));
+        assertEquals(1.0, rejected(registry, "api"));
+        assertEquals(1, appender.list.stream().filter(event -> event.getFormattedMessage()
+                .startsWith("errorCode=BACKUP_QUIESCE_READONLY_REJECTED")).count(), "2 件目の 1792 の WARN は間引く");
+    }
+
+    private static double rejected(io.micrometer.core.instrument.MeterRegistry registry, String kind) {
+        io.micrometer.core.instrument.Counter counter = registry.find("ses.backup.quiesce.rejected.requests")
+                .tag("kind", kind).counter();
+        return counter == null ? 0 : counter.count();
+    }
 }

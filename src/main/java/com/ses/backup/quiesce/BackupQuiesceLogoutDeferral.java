@@ -54,7 +54,7 @@ public final class BackupQuiesceLogoutDeferral {
                 sessions.captureCurrent(request, authentication, REVOKE_REASON);
         if (captured != null) {
             current.deferredWrites().add(BackupQuiesceDeferredWrites.logoutRevocation(sessions, captured));
-            countDeferred();
+            // metric の deferred{logout} は logout 1 回に 1 つ（監査の側で数える。2b review P3-6）
         }
     }
 
@@ -71,6 +71,7 @@ public final class BackupQuiesceLogoutDeferral {
         current.deferredWrites().add(BackupQuiesceDeferredWrites.logoutAudit(audit, userId, username,
                 LOGOUT_AUDIT_METHOD, LOGOUT_AUDIT_URI, LOGOUT_AUDIT_STATUS, LOGOUT_AUDIT_CODE, true,
                 AuditLogService.CapturedContext.capture()));
+        // logout 1 回に 1 つ数える（success handler は logout ごとに必ず 1 回呼ばれる。失効の後回しは数えない）
         countDeferred();
     }
 

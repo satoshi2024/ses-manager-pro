@@ -73,6 +73,27 @@ class ImportRawTempFileStoreTest {
     }
 
     @Test
+    void 静止中にpermitが無ければ削除も切詰めもせず削除の失敗と同じmetricとfile名を残す() throws Exception {
+        // RB-QUIESCE BWQ-015・2b review P3-8: 実際の呼出元は permit を持つが、来た場合も孤児清掃で回収できる形に揃える
+        Path directory = uploadRoot.resolve("quarantine");
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        ImportRawTempFileStore store = new ImportRawTempFileStore(directory, registry, Files::deleteIfExists);
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        store.setBackupWriteGate(gate);
+        Path file = store.create();
+        Files.writeString(file, "id,name\n1,raw", StandardCharsets.UTF_8);
+        com.ses.backup.quiesce.BackupQuiesceTestSupport.beginClosing(gate, 1);
+
+        assertFalse(store.deleteOrReport(file));
+
+        assertTrue(Files.exists(file));
+        assertEquals("id,name\n1,raw", Files.readString(file, StandardCharsets.UTF_8), "静止中は内容も切り詰めない");
+        assertEquals(1.0, registry.get(ImportRawTempFileStore.CLEANUP_FAILURE_METRIC).counter().count());
+    }
+
+    @Test
     void deleteFailureWithoutTruncationOrMeterRegistryIsStillReportedWithoutThrowing() {
         Path directory = uploadRoot.resolve("quarantine");
         ImportRawTempFileStore store = new ImportRawTempFileStore(directory, null, file -> {

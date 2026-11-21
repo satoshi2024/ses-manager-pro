@@ -80,11 +80,12 @@ class BackupQuiesceRequestClassifierTest {
     @CsvSource({
             "GET,  /dashboard,      PRIVILEGED_SESSION",
             "GET,  /api/engineers,  PRIVILEGED_SESSION",
-            "POST, /logout,         PRIVILEGED_SESSION",
+            "POST, /logout,         LOGOUT",
+            "POST, /logout/x,       PRIVILEGED_SESSION",
             "GET,  /css/common.css, STATIC_RESOURCE",
             "GET,  /actuator/health, ACTUATOR"
     })
-    void bootstrapとbreak_glassのsessionは静的資源とactuator以外を書込みとして扱う(String method, String path,
+    void bootstrapとbreak_glassのsessionは静的資源とactuatorとlogout以外を書込みとして扱う(String method, String path,
                                                                         Classification expected) {
         assertThat(BackupQuiesceRequestClassifier.classify(method, path, path, false, true)).isEqualTo(expected);
     }

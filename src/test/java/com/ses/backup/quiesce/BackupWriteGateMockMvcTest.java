@@ -63,7 +63,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
-@Import(BackupWriteGateMockMvcTest.TestGateConfiguration.class)
+@Import({BackupWriteGateMockMvcTest.TestGateConfiguration.class,
+        com.ses.controller.api.BackupQuiesceRejectionProbeConfiguration.class})
 @Timeout(value = 120, unit = TimeUnit.SECONDS)
 class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
 
@@ -94,6 +95,8 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
     private MeterRegistry registry;
     @Autowired
     private PersistentSessionService persistentSessionService;
+    @Autowired
+    private com.ses.config.integrationhub.IntegrationHubExternalApiProperties externalApiProperties;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -250,6 +253,119 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
 
     @Test
     void 静止中の外部APIはExternalApiErrorWriterの503で監査行を書かず抑止のmetricを数える() throws Exception {
+        // NF05 の公開 API を開けた状態（OFF の間は平時と同じ 404。下の試験）
+        Boolean previous = externalApiProperties.getPublicApi().getEnabled();
+        externalApiProperties.getPublicApi().setEnabled(true);
+        try {
+            externalApiQuiescedAsOpened();
+        } finally {
+            externalApiProperties.getPublicApi().setEnabled(previous);
+        }
+    }
+
+    @Test
+    void NF05の公開APIがOFFなら静止中も平時と同じ404で抑止はPUBLIC_API_DISABLEDに数える() throws Exception {
+        // 2b review P3-2: §6.4「OFF の機能は静止中も 404」。公開 API の有無と backup の実行を応答から区別させない
+        assertThat(externalApiProperties.getPublicApi().getEnabled()).as("試験の設定は OFF").isNotEqualTo(Boolean.TRUE);
+        closeGate();
+        double disabled = counter("integration_hub_external_api_audit_suppressed_total", "reason", "PUBLIC_API_DISABLED");
+        double quiesced = counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED");
+        double external = counter(BackupQuiesceMetrics.REJECTED, "kind", "external");
+
+        MvcResult result = mockMvc.perform(get("/external-api/v1/projects"))
+                .andExpect(status().isNotFound())
+                .andExpect(header().doesNotExist("Retry-After"))
+                .andReturn();
+
+        assertThat(json.readTree(result.getResponse().getContentAsString()).get("code").asText())
+                .isEqualTo("RESOURCE_NOT_FOUND");
+        assertThat(counter("integration_hub_external_api_audit_suppressed_total", "reason", "PUBLIC_API_DISABLED"))
+                .isEqualTo(disabled + 1);
+        assertThat(counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED"))
+                .isEqualTo(quiesced);
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "external")).isEqualTo(external);
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 静止中のAPIのcontrollerの中の拒否もkindごとに数え1792のWARNを間引く() throws Exception {
+        // 2b review P2-1: /api/** の controller の中の 1792・明示の拒否は GlobalExceptionHandler が 503 にするため filter に届かない
+        closeGate();
+        double readOnly = counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql");
+        double uploads = counter(BackupQuiesceMetrics.REJECTED, "kind", "uploads");
+        double api = counter(BackupQuiesceMetrics.REJECTED, "kind", "api");
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(
+                BackupQuiesceRejectionRecorder.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        String base = com.ses.controller.api.BackupQuiesceRejectionProbeConfiguration.BASE;
+        try {
+            for (int i = 0; i < 2; i++) {
+                mockMvc.perform(get(base + "/readonly"))
+                        .andExpect(status().isServiceUnavailable())
+                        .andExpect(header().string("X-SES-Error-Code", "BACKUP_QUIESCED"))
+                        .andExpect(jsonPath("$.code").value(503));
+            }
+            mockMvc.perform(get(base + "/uploads")).andExpect(status().isServiceUnavailable());
+            mockMvc.perform(get(base + "/required-audit")).andExpect(status().isServiceUnavailable());
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql")).isEqualTo(readOnly + 2);
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "uploads")).isEqualTo(uploads + 1);
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "api")).isEqualTo(api + 1);
+        assertThat(appender.list.stream().filter(event -> event.getFormattedMessage()
+                .startsWith("errorCode=BACKUP_QUIESCE_READONLY_REJECTED")))
+                .as("1792 の WARN は 60 秒に 1 回へ間引く").hasSizeLessThanOrEqualTo(1);
+    }
+
+    @Test
+    void 静止中の特権のsessionのlogoutもU8で終わり同じsessionは使えず失効と監査は解除の後に回す() throws Exception {
+        // 2b review P3-1（統括の決定）: break-glass・bootstrap の session も静止の間に直ちに終えられる
+        UsernamePasswordAuthenticationToken token = adminToken();
+        MockHttpSession session = registeredSession(token);
+        session.setAttribute(com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE, "INC-1");
+        closeGate();
+        int pending = gate.deferredWrites().pending();
+
+        mockMvc.perform(post("/logout").session(session).with(authentication(token)).with(csrf()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", "/login?logout"));
+
+        assertThat(session.isInvalid()).as("HTTP session は直ちに無効").isTrue();
+        assertThat(gate.deferredWrites().pending()).as("失効と LOGOUT の監査を解除の後へ回した").isEqualTo(pending + 2);
+
+        // 解除の後に書いて一覧を空に戻す（試験の transaction の中で書き、rollback される。他の試験の件数に残さない）
+        BackupQuiesceTestSupport.reopen(gate, 1);
+        assertThat(gate.deferredWrites().flush(gate)).isEqualTo(pending + 2);
+        assertThat(gate.deferredWrites().pending()).isZero();
+    }
+
+    private UsernamePasswordAuthenticationToken adminToken() {
+        Map<String, Object> admin = jdbc.queryForMap("SELECT id, username FROM sys_user WHERE username = 'admin'");
+        SysUser user = new SysUser();
+        user.setId(((Number) admin.get("ID")).longValue());
+        user.setUsername("admin");
+        user.setStatus(1);
+        return new UsernamePasswordAuthenticationToken(
+                new LoginUser(user, List.of(new SimpleGrantedAuthority("ROLE_管理者"))), null,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+    }
+
+    private MockHttpSession registeredSession(UsernamePasswordAuthenticationToken token) {
+        MockHttpSession session = new MockHttpSession();
+        MockHttpServletRequest login = new MockHttpServletRequest();
+        login.setSession(session);
+        SecurityContextHolder.getContext().setAuthentication(token);
+        persistentSessionService.register(login, token);
+        SecurityContextHolder.clearContext();
+        return session;
+    }
+
+    private void externalApiQuiescedAsOpened() throws Exception {
         closeGate();
         Integer audits = jdbc.queryForObject("SELECT COUNT(*) FROM t_external_api_audit", Integer.class);
         double suppressed = counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED");

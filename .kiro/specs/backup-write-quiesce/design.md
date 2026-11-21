@@ -189,7 +189,7 @@ ack の状態: なし → `QUIESCED` または `REFUSED` → `QUIESCED` から `
 ### 3.9 保存期間と個人データ
 
 - 個人データは持たない（host 名・接続元の IP・job 名・時刻だけ）。`requested_by` に人の名前を書かせない。
-- **保存期間は 30 日（U-12。決定済み）**。app が 1 日 1 回、有効な要求が無い時に、30 日より古い RELEASED/ABORTED/EXPIRED の要求（ack は CASCADE）と `last_beat_at` が 30 日より古い instance を消す。ただし停止口で動いていた行（`gate_state = 'DISABLED'` かつ `status <> 'STOPPED'`）は消さない（§5.3・§9.4。DBA が確かめて手で STOPPED にするまで backup を失敗させ続ける行で、古さで消すと停止口の app の異常停止を見落とす。2a の review P3-7）。
+- **保存期間は 30 日（U-12。決定済み）**。app が 1 日 1 回、有効な要求が無い時に、30 日より古い RELEASED/ABORTED/EXPIRED の要求（ack は CASCADE）と `last_beat_at` が 30 日より古い instance を消す。ただし停止口で動いていた行（`gate_state = 'DISABLED'` かつ `status <> 'STOPPED'`）は消さない（§5.3・§9.4。DBA が確かめて手で STOPPED にするまで backup を失敗させ続ける行で、古さで消すと停止口の app の異常停止を見落とす。2a の review P3-7）。停止口の instance は、heartbeat でも停止の途中（gate が SHUTDOWN）でも `gate_state` に常に `DISABLED` を書き、STOPPED にする時も `DISABLED` のまま残す（2b の review P3-4。SHUTDOWN を書くと、停止が確かめられずに残った行がこの除外と §5.3 の停止口の分類から外れていた）。
 - 個人データを消す経路ではないため、NF07 の保全 hold の gate（`deploy-runbook.md` §4.4）には接続しない。review で求められれば §4.4 の除外の行に理由つきで足す。
 - `privacy-retention-dsar/pii-inventory.md` に DB-148〜DB-150 として 3 表を足す（構造の記録。個人データなし）。
 - privacy catalog の seed 行は足さない。この 3 表は個人データも provider も持たず、行を足すと catalog の未分類の件数が意味なく増える。`CATALOG_MISSING` は provider が宣言した data element だけが対象（`PrivacyCoverageReport`）なので、行が無くても欠落として報告されない。
@@ -302,12 +302,12 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | 経路 | 例 | 静止中（OPEN 以外） | 仕組み |
 |---|---|---|---|
 | HTTP の更新 method（GET・HEAD・OPTIONS 以外。`/logout` を除く） | 画面・API・PWA の送信・`/login`・`/password/change` | 503 | `BackupWriteGateFilter`（認証より前） |
-| 社内の `/logout`（POST） | | **U-8（決定済み）**: HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（§6.13） | filter は permit 無しで通し、logout の handler が解除後の書込みへ回す |
+| 社内の `/logout`（POST。bootstrap・break-glass の session を含む） | | **U-8（決定済み）**: HTTP session を直ちに無効にして logout を終え、`t_user_session` の失効と logout の監査は解除の後に書く（§6.13）。特権の session の logout も同じ（第 2 段階 2c。2b の review P3-1 の統括の決定。§17 L-21） | filter は permit 無しで通し、logout の handler が解除後の書込みへ回す |
 | portal の logout（`/api/portal/auth/logout`） | 外部の顧客・BP | 503（U-8 の対象外。DB の session のため失効を遅らせない。§6.13） | WRITE と同じ |
 | 書込みを伴う既知の GET | OIDC の `/oauth2/authorization/**`・`/login/oauth2/code/**`、freee の `/integrations/freee/**` | 503 | 同上 |
 | file の download（`ApiAuditFilter` の download 判定） | | **U-10（決定済み）**: 503（download の監査を欠かさない） | 同上 |
 | 外部 API `/external-api/**`（NF05。初回リリースは OFF で LB でも遮断） | | **U-6（決定済み）**: `ExternalApiErrorWriter` の 503（retryable・Retry-After）。監査行は書かず抑止の metric だけ。NF05 を開ける前に NF05 owner の受理が要る | 同上（§6.10） |
-| bootstrap・break-glass の session の要求 | §5 の bootstrap 作業 | 503（毎回の監査を残せないため） | 同上 |
+| bootstrap・break-glass の session の要求（`/logout` の POST を除く） | §5 の bootstrap 作業 | 503（毎回の監査を残せないため） | 同上 |
 | その他の GET・HEAD | 一覧・詳細・dashboard・通知の取得 | 継続。業務の接続は読取り専用。session の最終利用の更新は省き、idle は U-14 のとおり扱う（§6.4）。想定外の書込みは ERROR 1792 → 503。best-effort の監査は **U-9（決定済み）**: DB へ書かず WARN の application log | §6.4・§6.5 |
 | portal の GET・HEAD（`/portal/**`・`/api/portal/**`。portal の静的資源 `/portal/css`・`/portal/js`・`/portal/img` を含む。download を除く） | 検収・契約・請求・見積・注文請の参照、`/api/portal/auth/me` | **U-15（決定済み 2026-11-22）**: 継続。`PortalSessionFilter` の `PortalSessionServiceImpl.resolve` は `t_portal_session` へ書かず（touch も期限切れの失効も）、idle は U-14 と同じ規則で判定する（§6.4）。portal の download は U-10 のとおり 503 | §6.4 |
 | `@Scheduled`（全て `@SchedulerLock` 付き） | outbox・会計 worker・清掃・通知 | ShedLock の表へ書く前で解除まで待つ（飛ばさない）。SHUTDOWN・割込みでは待たずに戻る | `BackupQuiesceLockProvider`（§6.6） |
@@ -337,7 +337,8 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - process が落ちれば持越しは失われ、その session は解除の後に行の idle 期限で失効し得る（安全側）。
   - portal の GET の経路の他の書込み: download の best-effort の監査（`PortalAuditService.record`。download は U-10 で 503 のため静止中は届かない）だけで、rate limit は memory、利用者・組織・権限・規約の同意は読むだけ（第 2 段階 2c で `PortalCustomerApiController`・`PortalBpApiController`・`PortalCustomerServiceDeskApiController`・`PortalAuthApiController` の GET を確かめた。網羅ではなく、残りは §13.2 の `rejected{readonly_sql}` で見つける。L-2）。
   - portal の logout と更新の要求は従来どおり 503（L-20）。
-- **最後の防線の変換**: 原因の連鎖に ERROR 1792（SQLSTATE `25006`）があり gate が OPEN でないときは 503 にする。判定は `BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。
+- **最後の防線の変換**: 原因の連鎖に ERROR 1792（SQLSTATE `25006`）があり gate が OPEN でないときは 503 にする。判定は `BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。 どちらで 503 にした拒否も同じ部品 `BackupQuiesceRejectionRecorder` で `rejected_requests{kind}`（1792 は `readonly_sql`、uploads の明示は `uploads`、その他の明示は `api`・`page`・`external`）を数え、1792 の WARN `BACKUP_QUIESCE_READONLY_REJECTED` を 60 秒に 1 回へ間引く（第 2 段階 2c。2b の review P2-1: `/api/**` の controller の中の拒否は filter に届かず数えられていなかった）。
+- **NF05 が OFF の外部 API**（第 2 段階 2c。2b の review P3-2）: 公開 API（`integration.hub.public-api.enabled`）が OFF の間は、`/external-api/**` を EXTERNAL でなく READ として permit を取らずに通し、平時と同じ `ExternalApiDisabledFilter` の 404（DB へ書かず `audit_suppressed{PUBLIC_API_DISABLED}` だけを数える）を返す。公開 API の有無と backup の実行を応答から区別させない。
 - **best-effort の監査（U-9 決定済み）**: `AuditLogServiceImpl.record` は gate が閉じていて permit が無いとき DB へ書かず、同じ内容（user・method・URI・status・applicationCode）を WARN の application log `errorCode=BACKUP_QUIESCE_AUDIT_DEFERRED` に出し、metric `skipped_writes{kind=best_effort_audit}` を数える。必須の監査（`recordRequired`）は例外になり要求は 503 になる。logout の監査だけは §6.13 のとおり解除の後に DB へ書く。
 
 ### 6.5 DataSource の最後の防線
@@ -465,6 +466,8 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 - gate が OPEN に戻ったら、状態機械が一覧を `taskExecutor` へ投入し、各書込みは「解除後の書込み」の permit を持って業務の service を通して書く。permit を取れない（その間に gate がまた閉じた）場合は捨てずに一覧へ戻し、次に開いた時に書く（D3-P3-5）。DB の失敗は WARN を出して 3 回まで繰り返し、それでも失敗したら WARN の log（内容つき）を残して捨てる。
 - **portal の logout は対象外**（D3-P3-5）: 外部の顧客・BP の portal の logout（`/api/portal/auth/logout`）は DB の session（`t_portal_session`。失効は DB の行で即時に効く）を使うため、失効を解除の後へ遅らせると session がその間使えてしまう。portal の logout は静止中も WRITE と同じく 503 のままにする（利用者は待って操作し直す）。
 - 安全上の意味: 静止の間も logout はでき、HTTP session は直ちに無効になるため、同じ JSESSIONID で続けて使うことはできない。`t_user_session` の行が解除まで「有効」のまま残るのは、その session hash を持つ HTTP session がもう無い状態である。
+- **特権の session の logout**（第 2 段階 2c。2b の review P3-1 の統括の決定）: bootstrap・break-glass の session の `POST /logout` も、上と同じく HTTP session を直ちに無効にし、失効と `LOGOUT` の監査を解除の後に書く（分類は特権の session より先に `/logout` を見る）。U-8 に例外は無く、特権の session を静止の間も直ちに終えられる方が安全なため。現行の logout の filter は `ApiAuditFilter` より前に動き、特権の session の logout の監査は元々 `LOGOUT` の1行だけなので、後回しでも監査の上で普通の session と同じになる（§17 L-21）。
+- **解除後の監査の時刻の範囲**: `recordCaptured` は `[今 − 最長の保持時間 − 余裕, 今 + 5 秒]` の時刻だけを書く。未来の 5 秒は logout の後に NTP が時計を少し戻した場合に監査を失わないための幅で、利用者の操作の順を監査の上で入れ替えるほどには大きくない（第 2 段階 2c。2b の review P3-7）。
 - 制約（§17 L-14）: process が解除の前に落ちると一覧は失われ、`t_user_session` の行は idle 期限まで残り、logout の監査は application log にだけ残る（HTTP session は process とともに消えるため、残った行で session を使い続けることはできない）。
 
 ## 7. provider の手順と安全（Q5）
@@ -743,7 +746,7 @@ app:
 | `ses_backup_quiesce_drain_seconds` / `hold_seconds` | timer | `job_kind` |
 | `ses_backup_quiesce_resumed_total` | counter | `reason` |
 | `ses_backup_quiesce_rejected_requests_total` | counter | `kind`（`api`・`page`・`download`・`session`・`external`・`readonly_sql`・`uploads`） |
-| `ses_backup_quiesce_deferred_total` | counter | `kind`（`scheduler`・`async`・`startup`・`logout`） |
+| `ses_backup_quiesce_deferred_total` | counter | `kind`（`scheduler`・`async`・`startup`・`logout`。`logout` は logout 1 回に 1（失効と監査の 2 件を後回しにしても。2b の review P3-6）） |
 | `ses_backup_quiesce_skipped_writes_total` | counter | `kind`（`session_touch`・`best_effort_audit`） |
 | `ses_backup_quiesce_deferred_writes_pending` | gauge | —（解除後の書込みの未処理の件数） |
 | `ses_backup_quiesce_oldest_permit_seconds` | gauge | `kind` |
@@ -834,7 +837,7 @@ CLAUDE.md は本 batch では変えない。
 | L-10 | 多 instance（sticky session 構成）でも protocol は働くが、本番は単一 task で多 instance の実測はしない | SRE-5 |
 | L-11 | prod 以外は登録の前（UNARMED）に書ける | §6.2。prod 以外は本番の backup の対象ではない |
 | L-12 | NF07 の Journal の接続は gate の外 | §6.3。別 instance で application DB の restore の対象外 |
-| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後は `InitializationWriteGuardTest`（constructor・`@PostConstruct`・`afterPropertiesSet` から辿れる業務の DB の書込みを bytecode で拒否）が固定する。fail-closed |
+| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後の検出は 2 つで補い合う（第 2 段階 2c。2b の review P3-3）: (1) `InitializationWriteGuardTest`（静的な bytecode の走査）は、constructor・`@PostConstruct`・`afterPropertiesSet` を入口に、main の具体 class の method を辿って業務の DB の書込み（mapper の更新系・監査・`JdbcTemplate` の更新系・`*Service` の save・update・remove）を拒否する。interface の method は実装へ展開せず、invokedynamic（lambda）も辿らず、`@Bean` の factory method・BPP・`SmartInitializingSingleton` は入口に含まない。(2) `BackupQuiesceProductionContextStartTest` は、prod の profile の全体の context を、読取り専用の接続の DML を 1792 で拒否する試験の driver（`com.ses.test.ReadOnlyEnforcingH2Driver`）で起動し、登録の前（UNARMED）に業務の pool で DML を実行した bean があれば起動が止まるか拒否の記録に残ることを確かめる（interface・lambda・`@Bean`・SIS の経由を含む。試験の準備の `spring.sql.init` だけを外す）。(2) は H2 の上の判定のため、MySQL に固有の挙動（locking read・DDL）は含まない（§19）。fail-closed |
 | L-14 | 静止中の logout の `t_user_session` の失効と監査は、解除の前に process が落ちると失われる | U-8。HTTP session は直ちに無効で、process とともに消えるため、残った行で session を使い続けることはできない。監査は WARN の log に残る |
 | L-15 | full の最中に task が置き換わると、その日の full は欠ける | U-13。RPO は checkpoint で保たれ、full は手で取り直す |
 | L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14・U-15（portal の session も同じ。portal の持越しは memory の表で上限 10,000 件、溢れたら記録しない）。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |
@@ -842,10 +845,11 @@ CLAUDE.md は本 batch では変えない。
 | L-18 | 停止口で動いていた app が異常に止まると、その行を DBA が手で片付けるまで全ての backup が失敗する | D3-P2-3。heartbeat の書けない停止口の app を古さで無視しないための安全側の取扱い。§9.4 の手順と RR-10 の例外 |
 | L-19 | 停止の時に 10 秒で排水が終わらなければ STOPPED は書かれず、§2 の5 は停止済みの閾値（300 秒）を待つ | D3-P3-1。書込み中かもしれない instance を STOPPED にしないため |
 | L-20 | portal の logout は静止中 503 になる | D3-P3-5。DB の session の失効を遅らせないため（U-8 の対象外） |
+| L-21 | 特権の session（bootstrap・break-glass）の logout も静止中は U-8 で終わり、失効と監査は解除の後に書く | 2b の review P3-1（統括の決定）。HTTP session は直ちに無効になる。process が解除の前に落ちると失効と監査は失われ、監査は WARN の log にだけ残る（L-14 と同じ） |
 
 ## 18. 変更する file と規模（見込み）
 
-- Java（main、新規 約 22）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLifecycleAnchor`（`dataSource` が依存する最小の bean）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。実装で足した（spec の外の）class: `JdbcBackupQuiesceSignalRepository`（repository の interface と JDBC の実装を分けた。fake の試験のため）・`BackupQuiesceHosts`（host の解釈の純粋な関数）・`BackupQuiesceTicker`（2 つの専用 thread の包み）・`BackupQuiesceRejections`（503 の header・文言・判定の共通部品）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）、test の `com.ses.test.H2MySqlTimeFunctions`（H2 の `UTC_TIMESTAMP`・`CONNECTION_ID`）。
+- Java（main、新規 約 22）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLifecycleAnchor`（`dataSource` が依存する最小の bean）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。実装で足した（spec の外の）class: `JdbcBackupQuiesceSignalRepository`（repository の interface と JDBC の実装を分けた。fake の試験のため）・`BackupQuiesceHosts`（host の解釈の純粋な関数）・`BackupQuiesceTicker`（2 つの専用 thread の包み）・`BackupQuiesceRejections`（503 の header・文言・判定の共通部品）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）、test の `com.ses.test.H2MySqlTimeFunctions`（H2 の `UTC_TIMESTAMP`・`CONNECTION_ID`）。第 2 段階 2c で足した: main の `BackupQuiesceRejectionRecorder`（静止による拒否の数え方と 1792 の WARN の間引き。filter と `GlobalExceptionHandler` で共有）、test の `com.ses.test.ReadOnlyEnforcingH2Driver`（読取り専用の接続の DML を 1792 で拒否する H2 の包み）と `com.ses.controller.api.BackupQuiesceRejectionProbeConfiguration`（API の controller の中の拒否を起こす試験だけの API）。
 - Java（main、変更 約 20）: `SchedulerLockConfig`・`AsyncConfig`・`SecurityConfig`（logout の handler）・`PersistentSessionServiceImpl`・`AuditLogServiceImpl`・`ApiAuditFilter`・`GlobalExceptionHandler`・`CustomErrorController`・`ImportJdbcReconnectGuard`・`ExternalApiErrorWriter`・`ExternalApiCorrelationFilter`・storage 層の約 9 class。
 - resources（約 8）、test（新規 約 22、変更 約 14）、ops/backup（新規 約 14、変更 約 10）、infra（3）、文書（約 11）。
 - 合計は約 122 file、`tasks.md` は 15 task。
@@ -947,3 +951,40 @@ CLAUDE.md は本 batch では変えない。
 | # | 内容 | 反映した節 | task |
 |---|---|---|---|
 | U-15 | 静止中の portal の参照を続ける（portal の session の touch・期限切れの失効を書かず、idle は U-14 と同じ規則、持越しは memory の表）。2b の review 第 8 点 d の (ii) | §6.3、§6.4、§16、§17 L-2・L-16 | BWQ-005（実装の記録） |
+
+### 20.5 第 2 段階 2a の実装の review（`d3d3c589`）
+
+| # | 内容 | 対応 | commit |
+|---|---|---|---|
+| P1-1 | bootstrap の再開の必須監査を `@PostConstruct`（UNARMED）で書いていた | `ApplicationRunner`（startup permit の下）へ移し、`InitializationWriteGuardTest` を足した。§6.3・L-13 | `8bd93e24` |
+| P2-1 | Runner・Demo の前に checkbox を `[x]` にしていた | `[ ]` に戻し「状態」の行を足した | `63012b97` |
+| P2-2 | 2a だけを先に本番へ出すと停止の時に書込みが一律に読取り専用になる | 2a・2b・BWQ-007 を一緒に統合する（PR の説明に書く。統括） | — |
+| P3-1 | 入れ子の permit の fail-open | 「数えて閉じていない permit」が在る時だけ持つと判定する | `8bd93e24` |
+| P3-2 | REFUSED（ERROR）の一つの経路が errorCode を出さない | `refuse()` で ERROR にも出す | `ff0fff29` |
+| P3-3 | 信号表が無い時の起動の中止の message が誤解を招く | 1146・42S02 を見分け §3.4 と schema guard を示す | `ff0fff29` |
+| P3-4 | 状態機械の tick の中で CallerRunsPolicy が投入を実行する | 実行せず次の tick へ回す | `3ee708cd` |
+| P3-5 | prod の profile の試験の context が共有の testdb で thread を動かす | 専用の H2 と `@DirtiesContext`、`BackupQuiesceTestContextInventoryTest`（BWQ-007 で全ての `@SpringBootTest` の明示を足した） | `8bd93e24`・BWQ-007 |
+| P3-6 | `BackupQuiesceAwareDataSourceTest` の 20 通りが模型の検証 | 注釈で明示（実の I-4 は競合の試験と MySQL の負荷の試験） | `ff0fff29` |
+| P3-7 | 保存期間の削除が停止口の行を消す | 除外の条件を足した（§3.9） | `ff0fff29` |
+| P3-8 | RESUMED の log の件数を開けた後に読む | 開ける前に読む | `ff0fff29` |
+| P3-9 | 制御用の接続の timeout と fence の関係を socket だけで見ていた | 接続の取得 3 秒 + socket 10 秒の和で検査する | `ff0fff29` |
+| P3-10 | `BusinessConnectionBypassGuardTest` の粒度 | 対応しない（統括の指示）。既知の例外は class 単位のまま | — |
+| P3-11 | spec と実装のずれ（`ck_bq_ack_resume`・errorCode・spec の外の file） | §3.1・§13.1・§13.3・§18 に書いた。§19 の実測は Runner の後 | `ff0fff29` |
+
+### 20.6 第 2 段階 2b の実装の review（`e6f3c3af`）
+
+| # | 内容 | 対応（第 2 段階 2c の fix commit C） |
+|---|---|---|
+| P2-1 | `/api/**` の controller の中の 1792・明示の拒否が `rejected_requests` に数えられず、WARN が間引かれない | `BackupQuiesceRejectionRecorder` を filter と `GlobalExceptionHandler` で共有（§6.4） |
+| P3-1 | 特権の session の `POST /logout` が 503 で U-8 に入らない | 統括の決定で U-8 に入れる（§6.3・§6.13・L-21） |
+| P3-2 | NF05 が OFF でも外部 API が静止中 503 になる | OFF の間は READ として通し平時の 404（§6.4） |
+| P3-3 | `InitializationWriteGuardTest` の盲点 | prod の context の起動の試験に読取り専用を強制する H2 の driver を足し、L-13 の書き方を直した |
+| P3-4 | 停止口の行が停止の途中に `gate_state=SHUTDOWN` になる | DISABLED の mode は常に `DISABLED` を書く（§3.9） |
+| P3-5 | portal の logout の試験の cookie が偽物 | U-15 の commit で本物の portal の session にした |
+| P3-6 | `deferred{logout}` が logout 1 回に 2 | 1 回に 1（§13.2） |
+| P3-7 | `recordCaptured` に未来の時刻の幅が無い | 5 秒を許す（§6.13） |
+| P3-8 | `ImportRawTempFileStore.deleteOrReport` の静止の分岐が削除の失敗の経路と揃っていない | metric と file 名を揃え、実際には来ないことを注釈に書いた（静止中は内容も切り詰めない） |
+| P3-9 | `MySqlTestShardInventoryTest` が source の部分一致で数える | compile 済みの class の JUnit の注釈で数え、fixture の空白の工夫を外した |
+| P3-10 | spec の書き戻しの漏れ（§20・L-13・特権の logout・IP） | 本節と §20.5・L-13・L-21。IP は 2c の事実の修正の commit（§6.13・§14・§20、tasks の BWQ-005） |
+| P3-11 | 2a・2b を BWQ-007 無しで main へ入れない | PR の説明に書く（統括） |
+| 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く |

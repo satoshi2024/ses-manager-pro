@@ -136,7 +136,7 @@ public class BackupQuiesceLifecycleAnchor implements DisposableBean {
                 new BackupQuiesceSignalRepository.InstanceRegistration(instanceId, hostName, "unknown",
                         properties.getPollInterval().toMillis(), properties.getHeartbeatInterval().toMillis(),
                         properties.getFenceAfter().toMillis(), properties.getMaxHoldCheckpoint().toMillis(),
-                        properties.getMaxHoldFull().toMillis(), schedulingEnabled, gate.state().name()));
+                        properties.getMaxHoldFull().toMillis(), schedulingEnabled, reportedGateState()));
         dbClientHost = result.dbClientHost();
         gate.recordHeartbeatSuccess();
         registered = true;
@@ -157,7 +157,7 @@ public class BackupQuiesceLifecycleAnchor implements DisposableBean {
         }
         boolean written;
         try {
-            written = repository.heartbeat(instanceId, instanceStatus, gate.state().name());
+            written = repository.heartbeat(instanceId, instanceStatus, reportedGateState());
         } catch (RuntimeException failure) {
             log.debug("backup の書込み静止の heartbeat を書けませんでした", failure);
             written = false;
@@ -180,6 +180,15 @@ public class BackupQuiesceLifecycleAnchor implements DisposableBean {
             log.warn("backup の書込み静止の heartbeat を書けませんでした（instance={}、失敗の累計={}）", instanceId,
                     gate.heartbeatFailureCount());
         }
+    }
+
+    /**
+     * 信号表に書く gate の状態。停止口（DISABLED の mode）は停止の途中（SHUTDOWN）を含め常に {@code DISABLED} を書き、行が §5.3 の
+     * 「停止口」の分類と保存期間の削除の除外（{@code gate_state = 'DISABLED' AND status <> 'STOPPED'}）に留まるようにする
+     * （2b review P3-4。停止が確かめられずに残った行を古さで無視させない。§9.4）。
+     */
+    String reportedGateState() {
+        return gate.mode() == BackupWriteGate.Mode.DISABLED ? BackupWriteGate.State.DISABLED.name() : gate.state().name();
     }
 
     /** 起動の完了（{@code ApplicationReadyEvent}）: 次の heartbeat から RUNNING を書く。 */

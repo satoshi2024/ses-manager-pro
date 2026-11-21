@@ -60,11 +60,59 @@ class MySqlTestShardInventoryTest {
         return tests;
     }
 
+    /**
+     * source に対応する compile 済みの試験の class が JUnit の {@code @Tag("mysql")} を持つか（注釈を reflection で読む）。
+     * 以前は source の文字列の {@code contains} で見ていたため、text block の fixture の注釈まで数えていた（RB-QUIESCE 2b review
+     * P3-9）。class は初期化しない（Testcontainers の container の static field を作らない）。{@code @Tag} は {@code @Inherited}
+     * なので、基底 class から受け継いだ tag も JUnit の選択と同じく数える。抽象 class は JUnit が実行しないため数えない。
+     */
     private boolean hasMySqlTag(Path source) {
-        try {
-            return Files.readString(source).contains("@Tag(\"mysql\")");
-        } catch (IOException e) {
-            throw new IllegalStateException("test sourceを読み込めません: " + source, e);
+        String relative = TEST_SOURCE_ROOT.relativize(source).toString().replace('\\', '/');
+        if (relative.endsWith("package-info.java") || relative.endsWith("module-info.java")) {
+            return false;
         }
+        String className = relative.substring(0, relative.length() - ".java".length()).replace('/', '.');
+        Class<?> type;
+        try {
+            type = Class.forName(className, false, getClass().getClassLoader());
+        } catch (ClassNotFoundException | LinkageError e) {
+            throw new IllegalStateException("試験の class を読み込めません（test-compile の後に流す）: " + className, e);
+        }
+        if (java.lang.reflect.Modifier.isAbstract(type.getModifiers())) {
+            return false;
+        }
+        return taggedMySql(type);
+    }
+
+    /**
+     * class・その method・JUnit が実行する入れ子の class（{@code @Nested} の static でない内部 class）のどれかに mysql の tag が
+     * あるか。fixture の static な入れ子の class（{@code ContainerBoundContextCloseListenerTest} 等）は JUnit が実行しないため数えない。
+     */
+    private static boolean taggedMySql(Class<?> type) {
+        if (containsMySql(type.getAnnotationsByType(org.junit.jupiter.api.Tag.class))) {
+            return true;
+        }
+        // method の単位の tag（例: 1件だけ実 MySQL の並行の試験を持つ class）も、従来どおり class を shard に載せる
+        for (java.lang.reflect.Method method : type.getDeclaredMethods()) {
+            if (containsMySql(method.getAnnotationsByType(org.junit.jupiter.api.Tag.class))) {
+                return true;
+            }
+        }
+        for (Class<?> nested : type.getDeclaredClasses()) {
+            if (nested.isAnnotationPresent(org.junit.jupiter.api.Nested.class)
+                    && !java.lang.reflect.Modifier.isStatic(nested.getModifiers()) && taggedMySql(nested)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsMySql(org.junit.jupiter.api.Tag[] tags) {
+        for (org.junit.jupiter.api.Tag tag : tags) {
+            if ("mysql".equals(tag.value())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

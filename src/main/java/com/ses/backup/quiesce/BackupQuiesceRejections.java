@@ -105,4 +105,23 @@ public final class BackupQuiesceRejections {
     public static String writeUnavailableMessage(MessageSource source, Locale locale) {
         return message(WRITE_UNAVAILABLE_KEY, WRITE_UNAVAILABLE_FALLBACK, source, locale);
     }
+
+    /** 最後の防線（ERROR 1792）で 503 にした拒否の metric の kind（§13.2）。 */
+    public static final String KIND_READONLY_SQL = "readonly_sql";
+
+    /**
+     * 静止による拒否の metric の kind（§13.2 の {@code rejected_requests{kind}}）: 明示の例外が無ければ 1792 の
+     * {@code readonly_sql}、uploads の変更は {@code uploads}、それ以外の明示の拒否は外部 API なら {@code external}、JSON なら
+     * {@code api}、画面なら {@code page}。filter と API の handler で同じ規則にする（2b review P2-1）。
+     */
+    public static String rejectionKind(Throwable failure, boolean external, boolean json) {
+        BackupWriteQuiescedException explicit = findQuiescedException(failure);
+        if (explicit == null) {
+            return KIND_READONLY_SQL;
+        }
+        if (explicit.operation() != null && explicit.operation().startsWith(BackupWriteGate.UPLOADS_OPERATION_PREFIX)) {
+            return "uploads";
+        }
+        return external ? "external" : json ? "api" : "page";
+    }
 }

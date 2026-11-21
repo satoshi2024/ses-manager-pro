@@ -38,6 +38,12 @@ public class AuditLogServiceImpl implements AuditLogService {
      * 次の checkpoint の静止が始まり残りが次の解除へ回る場合（D3-P3-5）にその checkpoint の最大保持時間。
      */
     static final Duration CAPTURED_MARGIN_BASE = Duration.ofMinutes(5);
+    /**
+     * 解除後の監査の時刻が今より「未来」に見えても許す幅（2b review P3-7）。logout の時点から書くまでの間に NTP が時計を少し戻すと、
+     * 取っておいた時刻が今より後になり監査を失う。NTP の通常の補正（数十 ms〜1 秒程度）を十分に覆い、利用者の操作の順を
+     * 監査の上で入れ替えるほどには大きくない 5 秒にする。これを超える未来の時刻は従来どおり書かずに WARN を残す。
+     */
+    static final Duration CAPTURED_FUTURE_TOLERANCE = Duration.ofSeconds(5);
 
     private BackupWriteGate backupWriteGate;
     private BackupQuiesceProperties backupQuiesceProperties = new BackupQuiesceProperties();
@@ -107,7 +113,8 @@ public class AuditLogServiceImpl implements AuditLogService {
      * 解除後の書込みの一覧が、静止中の logout の監査を logout の時点の値で書く（U-8。design.md §6.13。D4-P3-3）。
      *
      * <p>取っておいた時刻は {@link #record} と同じ時計（JVM の時刻帯の {@link LocalDateTime#now()}）で
-     * {@code [今 − 静止の最長の保持時間 − 余裕, 今]} に収まる場合だけ書く。範囲の外（古すぎる・未来）は書かずに内容つきの WARN を
+     * {@code [今 − 静止の最長の保持時間 − 余裕, 今 + 5 秒]} に収まる場合だけ書く（未来の 5 秒は時計の補正の幅。
+     * {@link #CAPTURED_FUTURE_TOLERANCE}）。範囲の外（古すぎる・未来）は書かずに内容つきの WARN を
      * 残す（過去の時刻の監査の行を任意に作れないようにする）。余裕は {@link #CAPTURED_MARGIN_BASE} と checkpoint の最大保持時間。
      * DB の失敗は例外で返す（呼出し元が繰り返す）。
      */
@@ -118,10 +125,11 @@ public class AuditLogServiceImpl implements AuditLogService {
         LocalDateTime createdAt = context == null ? null : context.createdAt();
         LocalDateTime oldest = now.minus(backupQuiesceProperties.longestHold())
                 .minus(CAPTURED_MARGIN_BASE).minus(backupQuiesceProperties.getMaxHoldCheckpoint());
-        if (createdAt == null || createdAt.isAfter(now) || createdAt.isBefore(oldest)) {
+        LocalDateTime newest = now.plus(CAPTURED_FUTURE_TOLERANCE);
+        if (createdAt == null || createdAt.isAfter(newest) || createdAt.isBefore(oldest)) {
             log.warn("errorCode=BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED 解除後の監査の時刻が許す範囲（{} 〜 {}）の外のため書きません: "
                             + "user={} method={} uri={} status={} applicationCode={} createdAt={}",
-                    oldest, now, username == null ? "-" : username, method, uri, status, applicationCode, createdAt);
+                    oldest, newest, username == null ? "-" : username, method, uri, status, applicationCode, createdAt);
             return;
         }
         AuditLog entry = newEntry(username, method, uri, status, applicationCode, successFlag);

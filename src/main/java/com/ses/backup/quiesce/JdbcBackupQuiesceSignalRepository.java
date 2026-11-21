@@ -97,7 +97,8 @@ final class JdbcBackupQuiesceSignalRepository implements BackupQuiesceSignalRepo
 
     @Override
     public boolean markStopped(String instanceId) {
-        return heartbeat.update("UPDATE sys_backup_quiesce_instance SET status = 'STOPPED', gate_state = 'SHUTDOWN', "
+        return heartbeat.update("UPDATE sys_backup_quiesce_instance SET status = 'STOPPED', "
+                + "gate_state = CASE WHEN gate_state = 'DISABLED' THEN 'DISABLED' ELSE 'SHUTDOWN' END, "
                 + "stopped_at = UTC_TIMESTAMP(6), last_beat_at = UTC_TIMESTAMP(6) "
                 + "WHERE instance_id = ? AND status <> 'STOPPED'", instanceId) == 1;
     }

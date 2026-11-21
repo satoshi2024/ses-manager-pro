@@ -80,8 +80,12 @@ public class ImportRawTempFileStore {
         Throwable failure;
         com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
         if (gate != null && gate.writesBlockedForCurrentThread()) {
-            // 静止中（permit なし）は upload root の file を変えない。例外は投げず、孤児清掃の回収に委ねる（BWQ-015）
-            log.warn("[取込] backup の静止中のため一時ファイルを削除せず、孤児清掃の回収に委ねます");
+            // 静止中（permit なし）は upload root の file を変えない（削除も内容の切詰めもしない）。例外は投げず、孤児清掃の回収に
+            // 委ねる（BWQ-015）。唯一の呼出元（ImportCsvIngestionService）は permit を持つ upload の要求の中で呼ぶため、実際には
+            // ここへ来ない。来た場合は削除の失敗と同じく metric を数え、file 名を log に残す（2b review P3-8）
+            countCleanupFailure();
+            log.warn("[取込] backup の静止中のため raw CSV一時ファイルを削除せず、孤児ファイル清掃で回収されるまで残します: "
+                    + "tempFile={}", file.getFileName());
             return false;
         }
         try {
@@ -91,22 +95,28 @@ public class ImportRawTempFileStore {
             failure = deleteFailure;
         }
         boolean truncated = truncateQuietly(file);
-        if (meterRegistry != null) {
-            try {
-                Counter.builder(CLEANUP_FAILURE_METRIC)
-                        .description("raw CSV取込一時ファイルの削除失敗件数（孤児ファイル清掃で回収）")
-                        .register(meterRegistry)
-                        .increment();
-            } catch (RuntimeException metricFailure) {
-                log.warn("[取込] raw CSV一時ファイル削除失敗metricの記録に失敗しました: exceptionType={}",
-                        LogRedaction.exceptionType(metricFailure));
-            }
-        }
+        countCleanupFailure();
         // 例外messageには絶対pathが入るため出さない。file名は乱数由来でPIIを含まない。
         log.error("[取込] raw CSV一時ファイルの削除に失敗しました。孤児ファイル清掃で回収されるまで残存します: "
                         + "tempFile={} contentTruncated={} exceptionType={}",
                 file.getFileName(), truncated, LogRedaction.exceptionType(failure));
         return false;
+    }
+
+    /** 削除できなかった一時ファイルの件数（孤児ファイル清掃で回収）を数える。 */
+    private void countCleanupFailure() {
+        if (meterRegistry == null) {
+            return;
+        }
+        try {
+            Counter.builder(CLEANUP_FAILURE_METRIC)
+                    .description("raw CSV取込一時ファイルの削除失敗件数（孤児ファイル清掃で回収）")
+                    .register(meterRegistry)
+                    .increment();
+        } catch (RuntimeException metricFailure) {
+            log.warn("[取込] raw CSV一時ファイル削除失敗metricの記録に失敗しました: exceptionType={}",
+                    LogRedaction.exceptionType(metricFailure));
+        }
     }
 
     /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */

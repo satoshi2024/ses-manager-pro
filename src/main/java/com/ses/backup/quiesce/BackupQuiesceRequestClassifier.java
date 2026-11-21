@@ -18,8 +18,8 @@ import java.util.List;
  *       （GET・HEAD）・error dispatch。静止中も permit なしで通す。</li>
  *   <li>{@link Kind#READ}: その他の GET・HEAD・OPTIONS。permit なしで通す（業務の接続は読取り専用）。</li>
  *   <li>{@link Kind#WRITE}: 更新の method、書込みを伴う既知の GET（OIDC・freee の連携）、file の download（U-10）、
- *       bootstrap・break-glass の session の要求（毎回の監査を残せないため）。portal の logout もここ（U-8 の対象外）。</li>
- *   <li>{@link Kind#LOGOUT}: 社内の {@code POST /logout}（U-8）。</li>
+ *       bootstrap・break-glass の session の要求（毎回の監査を残せないため。logout を除く）。portal の logout もここ（U-8 の対象外）。</li>
+ *   <li>{@link Kind#LOGOUT}: 社内の {@code POST /logout}（U-8）。bootstrap・break-glass の session の logout も含む（2b review P3-1）。</li>
  *   <li>{@link Kind#EXTERNAL}: 外部 API {@code /external-api/**}（U-6。全 method が監査行を書く）。</li>
  * </ul>
  * 判定の path は復号・正規化済みのアプリ内 path（{@link RequestPaths#pathWithinApplication}。認可・監査と同じ）。外部 API の
@@ -96,12 +96,16 @@ public final class BackupQuiesceRequestClassifier {
         if (readOnlyMethod && isAlwaysActuator(normalized)) {
             return Classification.ACTUATOR;
         }
+        // 社内の logout は特権の session（bootstrap・break-glass）でも U-8 で終わらせる（HTTP session を直ちに無効にし、失効と
+        // 監査を解除の後に書く。特権の session を静止の間も直ちに終えられる方が安全。2b review P3-1・統括の決定）
+        if ("POST".equalsIgnoreCase(method) && "/logout".equals(normalized)) {
+            return Classification.LOGOUT;
+        }
         if (privilegedSession) {
             return Classification.PRIVILEGED_SESSION;
         }
         if (!safe) {
-            return "POST".equalsIgnoreCase(method) && "/logout".equals(normalized)
-                    ? Classification.LOGOUT : Classification.UPDATE_METHOD;
+            return Classification.UPDATE_METHOD;
         }
         if (readOnlyMethod && WRITING_GET_PREFIXES.stream().anyMatch(prefix -> normalized.startsWith(prefix)
                 || normalized.equals(prefix.substring(0, prefix.length() - 1)))) {

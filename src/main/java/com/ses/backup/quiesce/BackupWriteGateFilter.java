@@ -5,6 +5,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.common.util.RequestPaths;
 import com.ses.config.integrationhub.ExternalApiErrorWriter;
 import com.ses.config.integrationhub.ExternalApiMetricsRecorder;
+import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,8 +24,6 @@ import org.springframework.web.servlet.LocaleResolver;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * backup の書込み静止の HTTP の入口（design.md §6.4・§6.10）。
@@ -54,7 +53,6 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(BackupWriteGateFilter.class);
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final long READONLY_LOG_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(60);
     private static final int OWNER_MAX_LENGTH = 160;
 
     private final ObjectProvider<BackupWriteGate> gateProvider;
@@ -63,21 +61,32 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
     private final ObjectProvider<MessageSource> messageSourceProvider;
     private final ObjectProvider<LocaleResolver> localeResolverProvider;
     private final ObjectProvider<ObjectMapper> objectMapperProvider;
-    private final AtomicLong lastReadOnlyLogNanos = new AtomicLong(System.nanoTime() - READONLY_LOG_INTERVAL_NANOS);
-    private final AtomicLong suppressedReadOnlyLogs = new AtomicLong();
+    private final ObjectProvider<BackupQuiesceRejectionRecorder> rejectionRecorderProvider;
+    private final ObjectProvider<IntegrationHubExternalApiProperties> externalApiPropertiesProvider;
 
     public BackupWriteGateFilter(ObjectProvider<BackupWriteGate> gateProvider,
                                  ObjectProvider<BackupQuiesceMetrics> metricsProvider,
                                  ObjectProvider<ExternalApiMetricsRecorder> externalMetricsProvider,
                                  ObjectProvider<MessageSource> messageSourceProvider,
                                  ObjectProvider<LocaleResolver> localeResolverProvider,
-                                 ObjectProvider<ObjectMapper> objectMapperProvider) {
+                                 ObjectProvider<ObjectMapper> objectMapperProvider,
+                                 ObjectProvider<BackupQuiesceRejectionRecorder> rejectionRecorderProvider,
+                                 ObjectProvider<IntegrationHubExternalApiProperties> externalApiPropertiesProvider) {
         this.gateProvider = gateProvider;
         this.metricsProvider = metricsProvider;
         this.externalMetricsProvider = externalMetricsProvider;
         this.messageSourceProvider = messageSourceProvider;
         this.localeResolverProvider = localeResolverProvider;
         this.objectMapperProvider = objectMapperProvider;
+        this.rejectionRecorderProvider = rejectionRecorderProvider;
+        this.externalApiPropertiesProvider = externalApiPropertiesProvider;
+    }
+
+    /** NF05 の公開 API（inbound）が有効か（{@code ExternalApiDisabledFilter} と同じ判定。設定が無ければ無効）。 */
+    private boolean publicApiEnabled() {
+        IntegrationHubExternalApiProperties properties = externalApiPropertiesProvider.getIfAvailable();
+        return properties != null && properties.getPublicApi() != null
+                && Boolean.TRUE.equals(properties.getPublicApi().getEnabled());
     }
 
     @Override
@@ -89,8 +98,14 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
             return;
         }
         BackupQuiesceRequestClassifier.Classification classification = BackupQuiesceRequestClassifier.classify(request);
+        BackupQuiesceRequestClassifier.Kind kind = classification.kind();
+        if (kind == BackupQuiesceRequestClassifier.Kind.EXTERNAL && !publicApiEnabled()) {
+            // NF05 の公開 API が OFF の間は、静止中も平時と同じ 404（ExternalApiDisabledFilter。DB へ書かず
+            // audit_suppressed{PUBLIC_API_DISABLED} だけを数える）を返す（§6.4「OFF の機能は静止中も 404」。2b review P3-2）
+            kind = BackupQuiesceRequestClassifier.Kind.READ;
+        }
         BackupWritePermit permit = null;
-        switch (classification.kind()) {
+        switch (kind) {
             case WRITE, EXTERNAL -> {
                 permit = gate.tryAcquire(BackupWritePermit.Kind.HTTP, owner(request));
                 if (permit == null) {
@@ -163,18 +178,14 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
     private void convertToRejection(HttpServletRequest request, HttpServletResponse response, BackupWriteGate gate,
                                     BackupQuiesceRequestClassifier.Classification classification, Throwable failure)
             throws IOException {
-        BackupQuiesceMetrics metrics = metricsProvider.getIfAvailable();
-        BackupWriteQuiescedException explicit = BackupQuiesceRejections.findQuiescedException(failure);
         String path = RequestPaths.pathWithinApplication(request);
         boolean external = classification == BackupQuiesceRequestClassifier.Classification.EXTERNAL_API;
         boolean json = BackupQuiesceRejections.isJsonRequest(request, path);
-        if (metrics != null) {
-            metrics.rejected(explicit == null ? "readonly_sql"
-                    : explicit.operation().startsWith(BackupWriteGate.UPLOADS_OPERATION_PREFIX) ? "uploads"
-                    : external ? "external" : json ? "api" : "page");
-        }
-        if (explicit == null) {
-            logReadOnlyRejection(request, classification, failure);
+        // 数え方と 1792 の WARN の間引きは API の handler と共有する（2b review P2-1）
+        BackupQuiesceRejectionRecorder recorder = rejectionRecorderProvider.getIfAvailable();
+        if (recorder != null) {
+            recorder.record(failure, external, json,
+                    request.getMethod() + " " + RequestPaths.forAudit(path) + "、分類=" + classification, "filter");
         }
         response.resetBuffer();
         int retryAfter = BackupQuiesceRejections.retryAfterSeconds(gate);
@@ -203,21 +214,6 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         }
         request.setAttribute(BackupWriteGate.REJECTED_ATTRIBUTE, Boolean.TRUE);
         response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-    }
-
-    /** 最後の防線で 503 にした経路を WARN に出す（経路の型だけ。60 秒に 1 回へ間引く）。 */
-    private void logReadOnlyRejection(HttpServletRequest request,
-                                      BackupQuiesceRequestClassifier.Classification classification, Throwable failure) {
-        long now = System.nanoTime();
-        long last = lastReadOnlyLogNanos.get();
-        if (now - last < READONLY_LOG_INTERVAL_NANOS || !lastReadOnlyLogNanos.compareAndSet(last, now)) {
-            suppressedReadOnlyLogs.incrementAndGet();
-            return;
-        }
-        log.warn("errorCode=BACKUP_QUIESCE_READONLY_REJECTED backup の静止中に読取り専用の接続へ書こうとした要求を 503 にしました"
-                        + "（{} {}、分類={}、例外={}、この間に省いた同じ log={}件）", request.getMethod(),
-                RequestPaths.forAudit(RequestPaths.pathWithinApplication(request)), classification,
-                failure.getClass().getSimpleName(), suppressedReadOnlyLogs.getAndSet(0));
     }
 
     private Locale resolveLocale(HttpServletRequest request) {

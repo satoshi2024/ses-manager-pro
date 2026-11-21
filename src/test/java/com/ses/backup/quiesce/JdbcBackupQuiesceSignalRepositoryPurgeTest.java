@@ -46,6 +46,31 @@ class JdbcBackupQuiesceSignalRepositoryPurgeTest {
         assertThat(remaining).containsExactlyInAnyOrder(id("old-disabled-live"), id("own-old"), id("recent"));
     }
 
+    @Test
+    void STOPPEDにする時も停止口の行はgate_stateをDISABLEDのまま残し他はSHUTDOWNにする() {
+        // 2b review P3-4: 停止口の行を SHUTDOWN に書き換えない（§9.4 の手の片付けの SQL も gate_state を変えない）
+        DriverManagerDataSource dataSource = new DriverManagerDataSource("jdbc:h2:mem:bq_stopped_"
+                + UUID.randomUUID().toString().replace("-", "")
+                + ";MODE=MySQL;DB_CLOSE_DELAY=-1;INIT=RUNSCRIPT FROM 'classpath:sql/schema-backup-quiesce-h2.sql'",
+                "sa", "");
+        dataSource.setDriverClassName("org.h2.Driver");
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        JdbcBackupQuiesceSignalRepository repository = new JdbcBackupQuiesceSignalRepository(jdbc, jdbc,
+                new BackupQuiesceProperties());
+        insert(jdbc, "disabled", "RUNNING", "DISABLED", "2026-11-22 00:00:00");
+        insert(jdbc, "armed", "RUNNING", "OPEN", "2026-11-22 00:00:00");
+
+        assertThat(repository.markStopped(id("disabled"))).isTrue();
+        assertThat(repository.markStopped(id("armed"))).isTrue();
+
+        assertThat(jdbc.queryForObject("SELECT gate_state FROM sys_backup_quiesce_instance WHERE instance_id = ?",
+                String.class, id("disabled"))).isEqualTo("DISABLED");
+        assertThat(jdbc.queryForObject("SELECT gate_state FROM sys_backup_quiesce_instance WHERE instance_id = ?",
+                String.class, id("armed"))).isEqualTo("SHUTDOWN");
+        assertThat(jdbc.queryForList("SELECT status FROM sys_backup_quiesce_instance", String.class))
+                .containsOnly("STOPPED");
+    }
+
     private static void insert(JdbcTemplate jdbc, String id, String status, String gateState, String lastBeat) {
         jdbc.update("INSERT INTO sys_backup_quiesce_instance (instance_id, host_name, db_client_host, db_connection_id, "
                         + "app_commit, protocol_version, poll_interval_ms, heartbeat_interval_ms, fence_after_ms, "

@@ -183,6 +183,28 @@ class AuditLogServiceImplTest {
     }
 
     @Test
+    void recordCaptured_時計の補正で数秒先に見える時刻は書き5秒を超える未来は書かない() {
+        // 2b review P3-7: logout の後に NTP が時計を少し戻しても監査を失わない（許す幅は 5 秒）
+        assertThat(AuditLogServiceImpl.CAPTURED_FUTURE_TOLERANCE).isEqualTo(Duration.ofSeconds(5));
+        when(auditLogMapper.insert(any(AuditLog.class))).thenReturn(1);
+        ListAppender<ILoggingEvent> appender = captureLog();
+        try {
+            service.recordCaptured("admin", "AUTH", "/logout", 302, "LOGOUT", true,
+                    new AuditLogService.CapturedContext(LocalDateTime.now().plusSeconds(2), "SYSTEM", "SCHEDULER_POLL",
+                            null, "c", null, null, null, null, null, null, null));
+            service.recordCaptured("admin", "AUTH", "/logout", 302, "LOGOUT", true,
+                    new AuditLogService.CapturedContext(LocalDateTime.now().plusSeconds(30), "SYSTEM", "SCHEDULER_POLL",
+                            null, "c", null, null, null, null, null, null, null));
+        } finally {
+            detach(appender);
+        }
+
+        verify(auditLogMapper, times(1)).insert(any(AuditLog.class));
+        assertThat(appender.list).singleElement().satisfies(event ->
+                assertThat(event.getFormattedMessage()).contains("errorCode=BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED"));
+    }
+
+    @Test
     void recordCaptured_DBへ書けなければ例外を返し解除後の書込みに繰り返させる() {
         when(auditLogMapper.insert(any(AuditLog.class))).thenThrow(new RuntimeException("DB down"));
 
