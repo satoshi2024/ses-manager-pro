@@ -31,6 +31,11 @@ public final class BackupQuiesceTestSupport {
         return new BackupWriteGate(BackupWriteGate.Mode.ARMED, prodProfile, FENCE_AFTER, 10_000, nanoClock, wallClock);
     }
 
+    /** 登録の前（UNARMED）に静止応答が main の thread で取る startup permit（§6.8）を、呼んだ thread に取る。 */
+    public static BackupWritePermit startupPermit(BackupWriteGate gate) {
+        return gate.acquireStartupPermitWhileUnarmed("startup");
+    }
+
     /** 排水の途中（CLOSING）にする。 */
     public static void beginClosing(BackupWriteGate gate, long requestId) {
         if (!gate.beginClosing(requestId)) {

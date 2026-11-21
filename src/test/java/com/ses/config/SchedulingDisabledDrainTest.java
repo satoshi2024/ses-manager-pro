@@ -146,6 +146,9 @@ class SchedulingDisabledDrainTest {
             "app.upload.legacy-migration-enabled（未設定=有効）。旧uploadを起動時に移行する（file移動・DB書込あり）",
             "com.ses.config.ProductionSecurityConfigurationValidator:ApplicationRunner",
             "prod profileだけ。設定検証と、完全な検査の初回通過時だけbootstrap完了markerを書く（DB書込あり・冪等）",
+            "com.ses.config.ProductionBootstrapMode:ApplicationRunner",
+            "prodで完了済みのbootstrapを承認ticketつきで再開する時だけ、必須監査BOOTSTRAP_REOPENEDを書いてから再開を有効にする"
+                    + "（DB書込あり。bean生成時から移した。RB-QUIESCE 2a review P1-1）。それ以外は何もしない",
             "com.ses.service.migration.DocumentMigrationScript:CommandLineRunner",
             "起動引数 --migrate-documents のときだけ文書台帳移行を行う",
             "com.ses.config.LegalEntityReadinessStartupValidator#validate:EventListener",

@@ -109,6 +109,11 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     }
 
     public void validate() {
+        // 完了済みのbootstrapの再開は、必須監査を書いてから有効になる（ProductionBootstrapMode の runner。冪等）。
+        // runner の順に依らず、有効・無効を判定する前に書かせる（RB-QUIESCE 2a review P1-1）
+        if (productionBootstrapMode != null) {
+            productionBootstrapMode.completePendingReopen();
+        }
         boolean bootstrap = productionBootstrapMode != null && productionBootstrapMode.isActive();
         List<String> errors = new ArrayList<>();
         if (!oidcProperties.isEnabled()) {

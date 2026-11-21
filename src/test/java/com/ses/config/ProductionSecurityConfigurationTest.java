@@ -60,10 +60,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     // （本番既定OFFは FeatureSwitchDefaultsTest、前提検査は PrivacyProductionConfigurationValidatorTest が検証する）。
     ,"privacy.retention.enabled=false"
     ,"privacy.dsar.enabled=false"
+    // prod の profile では backup の書込み静止が停止口（DISABLED）で instance を登録し、heartbeat・要求の読取り・保存期間の
+    // 削除の thread を動かす。共有の testdb へ書かないよう class 専用の H2 にし、class の後に context を閉じて thread を止める
+    // （RB-QUIESCE 2a review P3-5。BackupQuiesceTestContextInventoryTest が固定する）。
+    ,"spring.datasource.url=jdbc:h2:mem:prod_security_configuration;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("prod")
 @Transactional
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class ProductionSecurityConfigurationTest {
 
     @MockBean

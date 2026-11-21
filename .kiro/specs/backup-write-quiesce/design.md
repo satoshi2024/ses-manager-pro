@@ -311,7 +311,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | その他の GET・HEAD | 一覧・詳細・dashboard・通知の取得 | 継続。業務の接続は読取り専用。session の最終利用の更新は省き、idle は U-14 のとおり扱う（§6.4）。想定外の書込みは ERROR 1792 → 503。best-effort の監査は **U-9（決定済み）**: DB へ書かず WARN の application log | §6.4・§6.5 |
 | `@Scheduled`（全て `@SchedulerLock` 付き） | outbox・会計 worker・清掃・通知 | ShedLock の表へ書く前で解除まで待つ（飛ばさない）。SHUTDOWN・割込みでは待たずに戻る | `BackupQuiesceLockProvider`（§6.6） |
 | `@Async`（`SchedulingDisabledDrainTest` の `ASYNC_INVENTORY`。全て `taskExecutor`） | 取込の解析・mail・webhook・残業の通知 | 閉じる前（または permit を持つ thread）の投入は排水の対象。閉じた後の投入は保留して開いた時に投入し直す | `BackupQuiesceTaskDecorator`（§6.7） |
-| 起動時の処理（DB 書込みあり 5 件） | `LegacyUploadMigrationRunner`・`ContractDocumentBackfillRunner`・`ContractDocumentDispatchBackfill`・`ProductionSecurityConfigurationValidator`・`IntegrationHubOutboundStartupBarrier` | startup permit を持つ。有効な要求がある間は permit を取らずに待つ | §6.8 |
+| 起動時の処理（DB 書込みあり 6 件） | `LegacyUploadMigrationRunner`・`ContractDocumentBackfillRunner`・`ContractDocumentDispatchBackfill`・`ProductionSecurityConfigurationValidator`・`IntegrationHubOutboundStartupBarrier`・`ProductionBootstrapMode`（bootstrap の再開の必須監査 `BOOTSTRAP_REOPENED`。2a の review P1-1 で bean 生成時から `ApplicationRunner` へ移した） | startup permit を持つ。有効な要求がある間は permit を取らずに待つ | §6.8 |
 | uploads の file の変更 | 保存・公開・削除・移行・台帳 | storage 層で permit の無い変更を拒否（directory の作成だけは除く） | §6.12 |
 | 信号表 | heartbeat・ack・観測 | 継続 | 制御用・heartbeat 用の接続（§5.2） |
 | NF07 の Journal の接続（`PrivacyJournalConnections`） | hold の journal | 対象外 | Journal は application DB と別の MySQL instance で、application DB の restore の対象に含めず別に backup する（`privacy-retention-dsar/journal-witness-grant-design.md:58`）。初回リリースは hold の開始が未開放で使わない |
@@ -819,7 +819,7 @@ CLAUDE.md は本 batch では変えない。
 | L-10 | 多 instance（sticky session 構成）でも protocol は働くが、本番は単一 task で多 instance の実測はしない | SRE-5 |
 | L-11 | prod 以外は登録の前（UNARMED）に書ける | §6.2。prod 以外は本番の backup の対象ではない |
 | L-12 | NF07 の Journal の接続は gate の外 | §6.3。別 instance で application DB の restore の対象外 |
-| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 抽出（約 15 class）では書く bean は無い。止まった場合は起動時の処理（startup permit の下）へ移す。fail-closed |
+| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後は `InitializationWriteGuardTest`（constructor・`@PostConstruct`・`afterPropertiesSet` から辿れる業務の DB の書込みを bytecode で拒否）が固定する。fail-closed |
 | L-14 | 静止中の logout の `t_user_session` の失効と監査は、解除の前に process が落ちると失われる | U-8。HTTP session は直ちに無効で、process とともに消えるため、残った行で session を使い続けることはできない。監査は WARN の log に残る |
 | L-15 | full の最中に task が置き換わると、その日の full は欠ける | U-13。RPO は checkpoint で保たれ、full は手で取り直す |
 | L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |

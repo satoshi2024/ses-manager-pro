@@ -302,10 +302,18 @@ public final class BackupWriteGate {
         permits.decrementAndGet();
     }
 
+    /**
+     * この thread に結び付いた permit（返したものを除く）。数えた permit が1つも残っていなければ、入れ子の permit（数えない）
+     * だけでは「持っている」とみなさず、結び付きを全て外す（2a review P3-1）。外側の permit を先に返した・入れ子の permit を
+     * 返し損ねた pool の thread が、静止中に書込み可能な接続を得る（I-1 を破る）のを防ぐ。
+     */
     private ArrayDeque<BackupWritePermit> boundStack() {
         ArrayDeque<BackupWritePermit> stack = bound.get();
         if (!stack.isEmpty()) {
             stack.removeIf(BackupWritePermit::isClosed);
+            if (stack.stream().noneMatch(BackupWritePermit::isCounted)) {
+                stack.clear();
+            }
         }
         return stack;
     }

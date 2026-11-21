@@ -517,6 +517,62 @@ class BackupWriteGateTest {
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
     }
 
+    // ---------------------------------------------------------------- 入れ子の permit の fail-closed（2a review P3-1）
+
+    @Test
+    void 外側のpermitを先に返すと入れ子のpermitだけでは持っているとみなさない() {
+        BackupWriteGate gate = open();
+        BackupWritePermit outer = gate.tryAcquire(BackupWritePermit.Kind.HTTP, "outer");
+        BackupWritePermit nested = gate.tryAcquire(BackupWritePermit.Kind.ASYNC, "nested");
+        assertThat(nested.isCounted()).isFalse();
+
+        outer.close();
+
+        assertThat(gate.currentThreadHoldsPermit()).isFalse();
+        assertThat(gate.permitCount()).isZero();
+        assertThat(gate.beginClosing(1)).isTrue();
+        assertThat(gate.tryRegisterWritableConnection()).as("閉じた後に書込み可能な接続を渡さない").isFalse();
+        assertThat(gate.tryAcquire(BackupWritePermit.Kind.HTTP, "again")).as("新しい permit も出ない").isNull();
+        nested.close();
+        assertThat(gate.permitCount()).isZero();
+        assertThat(gate.writableConnectionCount()).isZero();
+    }
+
+    @Test
+    void 返し損ねた入れ子のpermitはpoolのthreadに持越されず次の要求はI4の順で数える() {
+        BackupWriteGate gate = open();
+        BackupWritePermit outer = gate.tryAcquire(BackupWritePermit.Kind.HTTP, "request-1");
+        gate.tryAcquire(BackupWritePermit.Kind.SCHEDULER, "leaked");
+        outer.close();
+
+        // 同じ thread の次の要求（pool の thread の再利用）
+        BackupWritePermit next = gate.tryAcquire(BackupWritePermit.Kind.HTTP, "request-2");
+        assertThat(next.isCounted()).as("漏れた入れ子の上の入れ子にならず、数える permit になる").isTrue();
+        assertThat(gate.permitCount()).isEqualTo(1);
+        next.close();
+
+        assertThat(gate.beginClosing(2)).isTrue();
+        assertThat(gate.currentThreadHoldsPermit()).isFalse();
+        assertThat(gate.writesBlockedForCurrentThread()).isTrue();
+        assertThat(gate.tryRegisterWritableConnection()).isFalse();
+    }
+
+    @Test
+    void 数えたpermitが残っている間の入れ子は従来どおり待たずに出る() {
+        BackupWriteGate gate = open();
+        BackupWritePermit outer = gate.tryAcquire(BackupWritePermit.Kind.HTTP, "outer");
+        assertThat(gate.beginClosing(3)).isTrue();
+
+        BackupWritePermit nested = gate.tryAcquire(BackupWritePermit.Kind.ASYNC, "nested");
+        assertThat(nested).isNotNull();
+        nested.close();
+        assertThat(gate.currentThreadHoldsPermit()).as("外側は残る").isTrue();
+        assertThat(gate.tryRegisterWritableConnection()).isTrue();
+        gate.releaseWritableConnection();
+        outer.close();
+        assertThat(gate.currentThreadHoldsPermit()).isFalse();
+    }
+
     // ---------------------------------------------------------------- helper
 
     BackupWriteGate open() {

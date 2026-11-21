@@ -250,7 +250,7 @@ class ProductionBootstrapModeTest {
     }
 
     @Test
-    void 完了済みでも承認ticketがあれば再開を必須監査してから起動する() {
+    void 完了済みでも承認ticketがあれば起動の最後のrunnerで再開を必須監査してから有効にする() {
         ProductionBootstrapCompletionLatch latch = completedLatch();
         prodRunner(latch)
                 .withPropertyValues("app.security.bootstrap.enabled=true",
@@ -259,14 +259,22 @@ class ProductionBootstrapModeTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     ProductionBootstrapMode mode = context.getBean(ProductionBootstrapMode.class);
+                    // bean 生成時（@PostConstruct）には監査を書かず、書けるまで再開は有効にならない（RB-QUIESCE review P1-1）
+                    verify(latch, never()).recordReopened(any(), any(), any());
+                    assertThat(mode.isRequested()).isTrue();
+                    assertThat(mode.isActive()).isFalse();
+                    assertThat(mode.getReopenTicket()).isNull();
+
+                    mode.run(null);
                     assertThat(mode.isActive()).isTrue();
                     assertThat(mode.getReopenTicket()).isEqualTo("SEC-1234");
+                    mode.completePendingReopen();
                 });
         verify(latch).recordReopened("SEC-1234", Instant.parse("2026-11-13T11:00:00Z"), COMPLETED_AT);
     }
 
     @Test
-    void 再開の必須監査を永続化できなければ起動を拒否する() {
+    void 再開の必須監査を永続化できなければ起動を拒否し再開は有効にならない() {
         ProductionBootstrapCompletionLatch latch = completedLatch();
         doThrow(new IllegalStateException("audit unavailable")).when(latch).recordReopened(any(), any(), any());
         prodRunner(latch)
@@ -274,9 +282,60 @@ class ProductionBootstrapModeTest {
                         "app.security.bootstrap.expires-at=2026-11-13T20:00:00+09:00",
                         "app.security.bootstrap.reopen-ticket=CHG0012345")
                 .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure()).hasStackTraceContaining("BOOTSTRAP_REOPENED");
+                    assertThat(context).hasNotFailed();
+                    ProductionBootstrapMode mode = context.getBean(ProductionBootstrapMode.class);
+                    assertThatThrownBy(() -> mode.run(null))
+                            .isInstanceOf(IllegalStateException.class)
+                            .hasMessageContaining("BOOTSTRAP_REOPENED");
+                    assertThat(mode.isActive()).isFalse();
+                    assertThat(mode.getReopenTicket()).isNull();
                 });
+    }
+
+    /**
+     * RB-QUIESCE 2a review P1-1: prod の profile で backup の書込み静止を有効にすると、静止応答の登録の前（UNARMED）は
+     * permit の無い書込みが拒否される。再開の必須監査は bean 生成時には書かず、startup permit を持つ main の thread の runner で
+     * 書けること。permit の無い thread からでは書けず、起動を拒否すること（fail-closed）。
+     */
+    @Test
+    void prodで静止の登録の前は再開の監査を書かずstartup_permitの下のrunnerで書く() {
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.unarmedGate(
+                true, () -> 0L, Clock.systemUTC());
+        com.ses.mapper.AuditLogMapper auditLogMapper = mock(com.ses.mapper.AuditLogMapper.class);
+        when(auditLogMapper.insert(any(com.ses.entity.AuditLog.class))).thenReturn(1);
+        com.ses.service.impl.AuditLogServiceImpl audit = new com.ses.service.impl.AuditLogServiceImpl(auditLogMapper);
+        audit.setBackupWriteGate(gate);
+        com.ses.mapper.SystemConfigMapper configs = mock(com.ses.mapper.SystemConfigMapper.class);
+        when(configs.selectById(ProductionBootstrapCompletionLatch.CONFIG_KEY)).thenReturn(
+                new com.ses.entity.SystemConfig(ProductionBootstrapCompletionLatch.CONFIG_KEY, COMPLETED_AT, "x"));
+        ProductionBootstrapCompletionLatch latch = new ProductionBootstrapCompletionLatch(configs, audit,
+                Clock.fixed(NOW, ZoneId.of("Asia/Tokyo")));
+        ProductionBootstrapProperties properties = new ProductionBootstrapProperties();
+        properties.setEnabled(true);
+        properties.setExpiresAt("2026-11-13T20:00:00+09:00");
+        properties.setReopenTicket("SEC-1234");
+
+        ProductionBootstrapMode withoutPermit = new ProductionBootstrapMode(properties, true,
+                Clock.fixed(NOW, ZoneId.of("Asia/Tokyo")), latch);
+        withoutPermit.validateAtStartup();
+        assertThat(withoutPermit.isActive()).isFalse();
+        assertThatThrownBy(withoutPermit::completePendingReopen)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("BOOTSTRAP_REOPENED")
+                .hasRootCauseInstanceOf(com.ses.backup.quiesce.BackupWriteQuiescedException.class);
+        assertThat(withoutPermit.isActive()).isFalse();
+        verify(auditLogMapper, never()).insert(any(com.ses.entity.AuditLog.class));
+
+        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, true,
+                Clock.fixed(NOW, ZoneId.of("Asia/Tokyo")), latch);
+        mode.validateAtStartup();
+        try (com.ses.backup.quiesce.BackupWritePermit permit =
+                     com.ses.backup.quiesce.BackupQuiesceTestSupport.startupPermit(gate)) {
+            mode.run(null);
+        }
+        assertThat(mode.isActive()).isTrue();
+        assertThat(mode.getReopenTicket()).isEqualTo("SEC-1234");
+        verify(auditLogMapper).insert(any(com.ses.entity.AuditLog.class));
     }
 
     @Test
