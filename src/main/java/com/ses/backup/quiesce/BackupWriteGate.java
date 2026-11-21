@@ -260,6 +260,22 @@ public final class BackupWriteGate {
         return !allowsNewPermits() && !currentThreadHoldsPermit();
     }
 
+    /** uploads の変更の拒否の {@link BackupWriteQuiescedException#operation()} の接頭辞（metric の {@code uploads} の判定）。 */
+    public static final String UPLOADS_OPERATION_PREFIX = "uploads:";
+
+    /**
+     * upload root の下の file を変えてよいか（design.md §6.12。RB-QUIESCE BWQ-015）。gate が書込みを許さず（OPEN・DISABLED で
+     * なく、prod の UNARMED を含む）、呼んだ thread が permit を持たなければ {@link BackupWriteQuiescedException} を投げる。
+     * file を変える storage の入口が、変える前に呼ぶ（directory の作成だけは呼ばない）。
+     *
+     * @param operation 操作の種類（例: {@code file-storage.store}。path・個人データを含めない）
+     */
+    public void assertUploadsMutationAllowed(String operation) {
+        if (writesBlockedForCurrentThread()) {
+            throw new BackupWriteQuiescedException(UPLOADS_OPERATION_PREFIX + operation);
+        }
+    }
+
     /** 呼んだ thread が持つ permit を全て返す（停止の入口。§6.11）。 */
     public int releaseCurrentThreadPermits() {
         List<BackupWritePermit> held = new ArrayList<>(bound.get());

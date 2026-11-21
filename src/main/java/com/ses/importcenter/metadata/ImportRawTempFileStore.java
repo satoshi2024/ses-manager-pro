@@ -65,6 +65,7 @@ public class ImportRawTempFileStore {
      * POSIXではowner限定権限、Windowsではdirectory ACLの継承となる。file名は乱数由来でPIIを含まない。
      */
     Path create() throws IOException {
+        assertUploadsWritable("import-raw-temp.create");
         Files.createDirectories(directory);
         return Files.createTempFile(directory, PREFIX, SUFFIX);
     }
@@ -77,6 +78,12 @@ public class ImportRawTempFileStore {
     boolean deleteOrReport(Path file) {
         if (file == null) return true;
         Throwable failure;
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null && gate.writesBlockedForCurrentThread()) {
+            // 静止中（permit なし）は upload root の file を変えない。例外は投げず、孤児清掃の回収に委ねる（BWQ-015）
+            log.warn("[取込] backup の静止中のため一時ファイルを削除せず、孤児清掃の回収に委ねます");
+            return false;
+        }
         try {
             deleter.delete(file);
             return true;
@@ -100,6 +107,22 @@ public class ImportRawTempFileStore {
                         + "tempFile={} contentTruncated={} exceptionType={}",
                 file.getFileName(), truncated, LogRedaction.exceptionType(failure));
         return false;
+    }
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
     }
 
     Path directory() {

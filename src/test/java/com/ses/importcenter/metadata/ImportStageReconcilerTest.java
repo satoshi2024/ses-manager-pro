@@ -293,4 +293,38 @@ class ImportStageReconcilerTest {
     private static String key() {
         return UUID.randomUUID().toString().replace("-", "") + "/" + UUID.randomUUID();
     }
+
+    /**
+     * RB-QUIESCE BWQ-015（design.md §6.12）: 台帳と stage の file は DB に書かずに消すため、backup の静止中は scheduler の permit の
+     * 下でだけ消せる。permit の無い thread からの削除は拒否され、台帳は残る（次の実行で照合し直す）。
+     */
+    @Test
+    void 静止中の台帳の削除はschedulerのpermitの下で動きpermitが無ければ台帳を残す() throws Exception {
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, Clock.systemUTC());
+        ledger.setBackupWriteGate(gate);
+        String storageKey = key();
+        jdbc.update("INSERT INTO t_document_version (id, tenant_id, storage_key, deleted_flag) VALUES (1, ?, ?, 0)",
+                "tenant-a", storageKey);
+        ledger.recordRetained("tenant-a", ImportStageReconciliationLedgerTest.staged(storageKey, UUID.randomUUID().toString()));
+        com.ses.backup.quiesce.BackupWritePermit scheduler = gate.tryAcquire(
+                com.ses.backup.quiesce.BackupWritePermit.Kind.SCHEDULER, "importStageReconcile");
+        com.ses.backup.quiesce.BackupQuiesceTestSupport.close(gate, 1, java.time.Duration.ofMinutes(5));
+
+        ImportStageReconciler.Result withoutPermit = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW)).reconcileDue())
+                .get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(1, withoutPermit.failed(), "permit の無い thread は静止中に台帳を消さない");
+        assertEquals(1, ledger.entries().size());
+
+        try {
+            ImportStageReconciler.Result result = reconcilerAt(RECORDED.plus(ImportStageReconciler.SAFETY_WINDOW))
+                    .reconcileDue();
+            assertEquals(1, result.committed());
+        } finally {
+            scheduler.close();
+        }
+        assertEquals(List.of(), ledger.entries());
+        verify(documents, never()).discardImportStage(any());
+    }
 }

@@ -63,6 +63,22 @@ public class FileStorageServiceImpl implements FileStorageService {
         this.metadataMapper = metadataMapper;
     }
 
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
+    }
     private Path baseDir() {
         return Paths.get(uploadProperties.getBasePath()).toAbsolutePath().normalize();
     }
@@ -122,6 +138,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         String storedName = UUID.randomUUID().toString().replace("-", "") + "." + extension.toLowerCase();
         Path quarantine = quarantineDir().resolve(storedName).normalize();
         Path published = publishedDir().resolve(storedName).normalize();
+        assertUploadsWritable("file-storage.store");
         boolean scanRejectionRecorded = false;
         FileSecurityMetadata metadata = null;
         try {
@@ -285,6 +302,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (!published.startsWith(publishedDir()) || !quarantine.startsWith(quarantineDir())) {
             throw BusinessException.of("error.file.invalidPath");
         }
+        assertUploadsWritable("file-storage.delete");
         try {
             Files.deleteIfExists(published);
             Files.deleteIfExists(quarantine);
@@ -348,6 +366,7 @@ public class FileStorageServiceImpl implements FileStorageService {
                     result, result == null ? "scanner returned no result" : result.reason());
             return false;
         }
+        assertUploadsWritable("file-storage.rescan");
         try {
             Files.createDirectories(publishedDir());
             Files.move(quarantine, published);

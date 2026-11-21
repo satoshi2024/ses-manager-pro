@@ -81,6 +81,7 @@ public class LegacyUploadMigrationService {
         int skipped = 0;
         // 走査はupload root直下のみ。published/quarantineは対象外であり、
         // FileCleanupServiceImplの非再帰走査と同じ範囲に揃える。
+        assertUploadsWritable("legacy-upload.migrate");
         try (Stream<Path> files = Files.list(base)) {
             for (Path file : files.filter(Files::isRegularFile).toList()) {
                 String storedName = file.getFileName().toString();
@@ -125,6 +126,22 @@ public class LegacyUploadMigrationService {
                     published, quarantined, skipped);
         }
         return new Result(published, quarantined, skipped);
+    }
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
     }
 
     /** CLEANならpublishedへ移して公開する。それ以外はquarantineへ残し結果だけ記録する。 */

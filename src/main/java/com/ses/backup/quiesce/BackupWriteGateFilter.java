@@ -169,7 +169,9 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         boolean external = classification == BackupQuiesceRequestClassifier.Classification.EXTERNAL_API;
         boolean json = BackupQuiesceRejections.isJsonRequest(request, path);
         if (metrics != null) {
-            metrics.rejected(explicit == null ? "readonly_sql" : external ? "external" : json ? "api" : "page");
+            metrics.rejected(explicit == null ? "readonly_sql"
+                    : explicit.operation().startsWith(BackupWriteGate.UPLOADS_OPERATION_PREFIX) ? "uploads"
+                    : external ? "external" : json ? "api" : "page");
         }
         if (explicit == null) {
             logReadOnlyRejection(request, classification, failure);

@@ -49,6 +49,22 @@ public class FileCleanupServiceImpl implements FileCleanupService {
         this.tenantAwareBatchRunner = tenantAwareBatchRunner;
     }
 
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
+    }
+
     @Override
     public int cleanupOrphanFiles() {
         Path base = Paths.get(uploadProperties.getBasePath()).toAbsolutePath().normalize();
@@ -60,6 +76,7 @@ public class FileCleanupServiceImpl implements FileCleanupService {
         Instant safeBefore = Instant.now().minus(uploadProperties.getCleanupSafetyHours(), ChronoUnit.HOURS);
         int deleted = 0;
 
+        assertUploadsWritable("file-cleanup.orphans");
         try (Stream<Path> roots = Stream.of(base, base.resolve("quarantine"), base.resolve("published"))) {
             List<Path> directories = roots.filter(Files::isDirectory).toList();
             for (Path directory : directories) {

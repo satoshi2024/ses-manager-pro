@@ -132,6 +132,9 @@
   - **失敗/rollback:** 待機が最大保持時間を超えないことを確かめる。
 
 - [ ] **BWQ-015 — uploads の最後の防線（storage 層の確認と一覧の試験）**
+  - **状態:** 実装・fast の試験は済み（commit は BWQ-015 の commit）。Demo は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2b）:** `BackupWriteGate.assertUploadsMutationAllowed`（prod の UNARMED を含め、書込みを許さず permit が無ければ `BackupWriteQuiescedException`。filter の metric は `uploads`）。assert を置いた入口: `FileStorageServiceImpl`（保存・削除・再 scan）、`LocalDocumentStorage`（put・promote・delete・deleteStrict）、`ContractDocumentServiceImpl.create`（PDF）、`ImportStageReconciliationLedger`（write・remove）、`LegacyUploadMigrationService.migrate`、`FileCleanupServiceImpl.cleanupOrphanFiles`、一覧の試験で見つけた `ImportRawTempFileStore`（create は assert、deleteOrReport は「例外を投げない」契約のため静止中は消さずに孤児清掃へ委ねる）。`UploadsMutationInventoryTest` は 40 件（MUTATES 23・DIRECTORY_ONLY 9・OUTSIDE 8）を照合し、MUTATES は guard の method が gate の判定を呼ぶことも確かめる。`DocumentServiceImpl`・CloudSign の一時 file と NF01 の preflight の CLI は upload root の外。
 
   - **実行順:** BWQ-006 の後・BWQ-007 の前
   - **依存:** BWQ-002、BWQ-006

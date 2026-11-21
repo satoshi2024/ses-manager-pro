@@ -42,6 +42,22 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     
     @Value("${app.upload.base-path:./uploads}")
     private String uploadBase;
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
+    }
     
     @Override
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
@@ -78,6 +94,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         d.setRecipientName(name);
         d.setRecipientEmail(email);
         
+        assertUploadsWritable("contract-document.pdf");
         try {
             Path dir = Paths.get(uploadBase, "contracts", String.valueOf(contractId));
             Files.createDirectories(dir);

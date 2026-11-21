@@ -156,11 +156,28 @@ public class ImportStageReconciliationLedger {
     /** 照合を終えた一件を台帳から外す。 */
     void remove(Entry entry) throws IOException {
         if (entry == null || entry.file() == null) return;
+        assertUploadsWritable("import-ledger.remove");
         Path file = entry.file().toAbsolutePath().normalize();
         if (!directory.equals(file.getParent())) {
             throw new IOException("stage照合台帳の外にあるfileは削除しません");
         }
         Files.deleteIfExists(file);
+    }
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
     }
 
     Path directory() {
@@ -189,6 +206,7 @@ public class ImportStageReconciliationLedger {
                 properties.setProperty(COMMIT_SERVER_UUID, commitServerUuid.toLowerCase(java.util.Locale.ROOT));
             }
         }
+        assertUploadsWritable("import-ledger.write");
         Path temp = null;
         try {
             Files.createDirectories(directory);
