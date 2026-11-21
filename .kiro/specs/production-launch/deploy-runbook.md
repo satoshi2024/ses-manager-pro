@@ -28,6 +28,7 @@
   - NF01 二者確認の NF07 catalog 登録（RB-NF01）: `V198__nf01_dual_confirmation_privacy_catalog.sql`（`m_pii_data_element` に、B0 の7表と自由記述2列（`business_comment`・`decision_comment`）の9件を `sys_user` に存在する tenant ごとに入れる。V196 と同じく構造行だけで、provider は未登録（NULL）、`subject_attribution`・owner・データ分類・inventory 状態は UNKNOWN、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` の文書以外の catalog 行は36件（V196 の27件＋9件）になる。値の正本は `privacy-retention-dsar/pii-inventory.md` の DB-141〜DB-147 で、保存期間等の値は D-02 の署名で確定する（署名は未取得。§1.7）。DSAR の検索ではこの9件が「要手動確認」（`PROVIDER_UNREGISTERED`）として出る。分類が UNKNOWN のため、NF07 hold 画面の「未分類の data element」（`unclassifiedElements`）と coverage report の未分類件数（`PrivacyCoverageReport` の `unknownAttributionCount`）にもこの9件が加わり、D-02 で分類を決めるまで0にならない（回帰ではない。B0 は hold の gate に接続する破壊的経路を持たないため、他の経路の判定は変わらない）。
   - NF-06 取込 stage 照合の索引（RB-NF05、FINAL review b-14）: `V200__nf06_document_version_storage_key_index.sql`（`t_document_version.storage_key` に非一意の索引 `idx_dv_storage_key` を足す。V1・V67 は変えない。行は変えない）。照合 batch（`ImportStageReconcileScheduler`、NF06 の OFF でも動く）は台帳1件ごとに同じ storage key の版を数えるため、従来は全件走査だった。V199 は欠番（RB で使わなかった予約番号）。
   - NF07 F1 の状態の CHECK（RB-NF07-HOLD）: `V201__nf07_privacy_status_check_constraints.sql`（`t_privacy_request` の `status`（`PrivacyCaseState` の全値）・`channel`・`delivery_method`（NULL 可）と `t_legal_hold.hold_kind`（D-05 で種類が決まるまで `UNKNOWN` だけ）に、コードの enum と同じ値の集合の CHECK を足す。行は作らない）。表は新規導入で空のため適用は失敗しない。V199 は欠番。
+  - backup の書込み静止の信号表（RB-QUIESCE BWQ-001）: `V202__backup_write_quiesce_signal.sql`（静止要求 `sys_backup_quiesce_request`・app の instance `sys_backup_quiesce_instance`・応答 `sys_backup_quiesce_ack` の3表。行・trigger・routine は作らない。時刻の列は全て UTC の `DATETIME(6)` で、DEFAULT に `CURRENT_TIMESTAMP` を使わない。同時に有効な要求を1件に限る生成列 `active_slot`（STORED）と一意索引 `uk_bq_request_active` を持つ。tenant 列・個人データは持たない）。表は新規導入で空のため適用は失敗しない。backup account の表単位の権限（要求の表への `INSERT`・`UPDATE`）は V202 の適用の後に付ける（RB-QUIESCE の後の batch で §1.2・§3.4 に手順を足す）。設計は `.kiro/specs/backup-write-quiesce/`。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -528,7 +529,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 署名一覧の DBA-6 とは別の項目である。`ops/backup/README.md` は、production 固有値（HFP-03-PROD-001〜008。`.kiro/specs/database-backup-recovery/baseline.md` §4）が未確定の間、production への接続・復元を BLOCKED としている。各値は baseline §4 の owner が確定して証跡を出し、DBA がまとめて配備記録に残す（SRE・DBA を兼ねる場合も、006・008 は Security・運用組織の事項である）。
 - `.env.backup`（形式は `ops/backup/README.md` の「前提」「設定」）:
   - `CONTENT_HASH_TABLES`（DBA-6）。
-  - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
+  - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `202`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
   - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER`。password は `secrets/` の 0600 の file（MySQL と restic）、CA は hashed CA の directory（`secrets/mysql-capath/`）。
   - uploads: `UPLOADS_ROOT=/app/uploads`・`UPLOADS_POINTER=current`・`UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging`（§1.6 の11 (d)。compose の bind 先と同じ値）。`UPLOADS_DIR` は書かない（廃止した。残っていると full・checkpoint・preflight が失敗する）。
 - 確定する時点と owner（baseline §4 の「確定に必要な証跡」の欄）:
@@ -663,7 +664,7 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V201（versioned 200件。SQL 199件＋Java migration `V74_3` 1件。V199 は欠番）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- 実行順: V1〜V202（versioned 201件。SQL 200件＋Java migration `V74_3` 1件。V199 は欠番）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
 - callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
 
 ### 3.4 適用結果の確認（DBA立会い）
@@ -680,9 +681,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '201'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '202'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 200
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 201
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -784,6 +785,17 @@ SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schem
 SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
    AND table_name = 't_document_version' AND index_name = 'idx_dv_storage_key'
    AND column_name = 'storage_key' AND non_unique = 1;                                         -- 1
+-- backup の書込み静止の信号表（V202）: 3表があり空で、有効枠 active_slot は STORED の生成列で一意索引を持つ
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
+ ('sys_backup_quiesce_request', 'sys_backup_quiesce_instance', 'sys_backup_quiesce_ack');   -- 3
+SELECT (SELECT COUNT(*) FROM sys_backup_quiesce_request) + (SELECT COUNT(*) FROM sys_backup_quiesce_instance)
+     + (SELECT COUNT(*) FROM sys_backup_quiesce_ack);                                         -- 0
+SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE()
+   AND table_name = 'sys_backup_quiesce_request' AND column_name = 'active_slot'
+   AND extra LIKE '%STORED GENERATED%';                                                        -- 1
+SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
+   AND table_name = 'sys_backup_quiesce_request' AND index_name = 'uk_bq_request_active'
+   AND column_name = 'active_slot' AND non_unique = 0;                                         -- 1
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
@@ -857,7 +869,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - `-D` は `-Duser.timezone` 以外を全て FAIL にする（設定は環境変数で渡す）。`-Dfile.encoding` 等の正当な JVM の設定が必要になったら、validator の許可を変える（変更は復審を経る）。
   - validator を変えたときは、`infra/ecs/offline/test-validate-task-definition.ps1` で規則ごとの正例・負例を pwsh と Windows PowerShell 5.1 の両方で流し、`0 mismatched` を確かめる（AWS・Docker 不要。CI では動かない）。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V202 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。UPであれば §1.0 の18 の鍵検査も通っている（検査に失敗した起動はUPにならずに停止する）。

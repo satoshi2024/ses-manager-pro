@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.config.ProductionSchemaVersionGuard;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlConstraintRejections;
 import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
@@ -139,6 +140,7 @@ class FlywayProdFreshInstallMySqlTest {
             assertNoSampleReferenceRemains(st);
             assertInitialRepairAndLedgerTables(st);
             assertNf07PrivacyFreshInstall(st);
+            assertBackupQuiesceSignalTables(st);
             assertEquals(List.of(), rows(st, "SELECT routine_name FROM information_schema.routines "
                             + "WHERE routine_schema = DATABASE() ORDER BY routine_name"),
                     "migration用のhelper procedure（V102_1の残置分・admin scriptの一時procedureを含む）が残らないこと");
@@ -569,6 +571,133 @@ class FlywayProdFreshInstallMySqlTest {
                 + "AND NOT EXISTS (SELECT 1 FROM t_permission_group_action d WHERE d.tenant_id = g.tenant_id "
                 + "AND d.group_id = g.id AND d.action_key = 'privacy.*' AND d.deny_flag = 1 AND d.deleted_flag = 0)"),
                 "prod起動検査のprivacy deny不変条件を満たすこと");
+    }
+
+    /**
+     * V202（RB-QUIESCE BWQ-001）: backup の書込み静止の信号表3表が空で作られ、有効枠 {@code active_slot} が STORED の生成列で
+     * 一意索引を持つこと。負例: 有効な要求の2件目は一意索引で拒否され、{@code active_slot} へ値を書く INSERT・UPDATE は
+     * 拒否され（error 3105）、REQUESTED で {@code active_slot} が NULL の行は作れず、RELEASED にすると次の要求を登録でき、
+     * CHECK の外の状態・理由の値は拒否される（error 3819）。最後に入れた行を消す（後の schema fingerprint は行を見ない）。
+     */
+    private void assertBackupQuiesceSignalTables(Statement st) throws Exception {
+        for (String table : List.of("sys_backup_quiesce_request", "sys_backup_quiesce_instance", "sys_backup_quiesce_ack")) {
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table), "V202 の信号表は空で作られる: " + table);
+        }
+        assertEquals("STORED GENERATED", queryString(st, "SELECT extra FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = 'sys_backup_quiesce_request' "
+                + "AND column_name = 'active_slot'"), "active_slot は STORED の生成列");
+        assertEquals(0L, scalar(st, "SELECT non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() "
+                + "AND table_name = 'sys_backup_quiesce_request' AND index_name = 'uk_bq_request_active'"));
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                + "AND table_name LIKE 'sys\\_backup\\_quiesce\\_%' AND column_default IS NOT NULL"),
+                "信号表の列は DEFAULT を持たない（CURRENT_TIMESTAMP を使わない）");
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                + "AND table_name LIKE 'sys\\_backup\\_quiesce\\_%' AND column_name = 'tenant_id'"), "tenant 列を持たない");
+
+        try {
+            st.executeUpdate(quiesceRequest("00000000000000000000000000000001", "ONLINE", "CHECKPOINT", "REQUESTED"));
+            assertEquals(1L, scalar(st, "SELECT active_slot FROM sys_backup_quiesce_request "
+                    + "WHERE request_token = '00000000000000000000000000000001'"), "REQUESTED の行の active_slot は 1");
+            assertSqlError(1062, () -> st.executeUpdate(
+                    quiesceRequest("00000000000000000000000000000002", "ONLINE", "FULL", "REQUESTED")),
+                    "有効な要求の2件目は uk_bq_request_active で拒否される");
+            assertSqlError(3105, () -> st.executeUpdate("INSERT INTO sys_backup_quiesce_request (request_token, mode, "
+                    + "job_kind, status, active_slot, lease_seconds, requested_by, protocol_version, requested_at, "
+                    + "lease_expires_at) VALUES ('00000000000000000000000000000003', 'ONLINE', 'FULL', 'RELEASED', 1, 60, "
+                    + "'fresh-install-test', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"), "active_slot へ値を書く INSERT");
+            assertSqlError(3105, () -> st.executeUpdate("INSERT INTO sys_backup_quiesce_request (request_token, mode, "
+                    + "job_kind, status, active_slot, lease_seconds, requested_by, protocol_version, requested_at, "
+                    + "lease_expires_at) VALUES ('00000000000000000000000000000004', 'ONLINE', 'FULL', 'REQUESTED', NULL, "
+                    + "60, 'fresh-install-test', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))"),
+                    "REQUESTED で active_slot が NULL の行は作れない");
+            assertSqlError(3105, () -> st.executeUpdate("UPDATE sys_backup_quiesce_request SET active_slot = NULL"),
+                    "active_slot へ値を書く UPDATE");
+            st.executeUpdate("UPDATE sys_backup_quiesce_request SET status = 'RELEASED', released_at = UTC_TIMESTAMP(6), "
+                    + "release_reason = 'COMPLETED' WHERE request_token = '00000000000000000000000000000001'");
+            assertEquals(1, st.executeUpdate(
+                    quiesceRequest("00000000000000000000000000000005", "APP_STOPPED", "FULL", "REQUESTED")),
+                    "RELEASED にすると次の要求を登録できる");
+            assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM sys_backup_quiesce_request WHERE active_slot = 1"));
+
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(
+                    quiesceRequest("00000000000000000000000000000006", "ONLINE", "FULL", "PENDING")),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_request_status");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(
+                    quiesceRequest("00000000000000000000000000000007", "OFFLINE", "FULL", "RELEASED")),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_request_mode");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(
+                    quiesceRequest("00000000000000000000000000000008", "ONLINE", "DIFF", "RELEASED")),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_request_kind");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE sys_backup_quiesce_request "
+                    + "SET release_reason = 'MANUAL' WHERE request_token = '00000000000000000000000000000001'"),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_request_reason");
+
+            st.executeUpdate(quiesceInstance("00000000-0000-4000-8000-000000000001", "STARTING", "UNARMED"));
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(
+                    quiesceInstance("00000000-0000-4000-8000-000000000002", "LOST", "OPEN")),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_instance_status");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate(
+                    quiesceInstance("00000000-0000-4000-8000-000000000003", "RUNNING", "PAUSED")),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_instance_gate");
+
+            long requestId = scalar(st, "SELECT id FROM sys_backup_quiesce_request "
+                    + "WHERE request_token = '00000000000000000000000000000005'");
+            st.executeUpdate(quiesceAck(requestId, "QUIESCED", "PAUSED", "NULL", "NULL"));
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE sys_backup_quiesce_ack "
+                    + "SET state = 'OPENED' WHERE request_id = " + requestId),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_ack_state");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE sys_backup_quiesce_ack "
+                    + "SET scheduler_state = 'RUNNING' WHERE request_id = " + requestId),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_ack_scheduler");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE sys_backup_quiesce_ack "
+                    + "SET refuse_reason = 'BUSY' WHERE request_id = " + requestId),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_ack_refuse");
+            MySqlConstraintRejections.assertRejectedBy(() -> st.executeUpdate("UPDATE sys_backup_quiesce_ack "
+                    + "SET resume_reason = 'MANUAL' WHERE request_id = " + requestId),
+                    MySqlConstraintRejections.CHECK_VIOLATION, "ck_bq_ack_resume");
+            st.executeUpdate("DELETE FROM sys_backup_quiesce_request WHERE id = " + requestId);
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM sys_backup_quiesce_ack"), "要求の削除で ack も消える（CASCADE）");
+        } finally {
+            st.executeUpdate("DELETE FROM sys_backup_quiesce_ack");
+            st.executeUpdate("DELETE FROM sys_backup_quiesce_instance");
+            st.executeUpdate("DELETE FROM sys_backup_quiesce_request");
+        }
+    }
+
+    private static String quiesceRequest(String token, String mode, String jobKind, String status) {
+        return "INSERT INTO sys_backup_quiesce_request (request_token, mode, job_kind, status, lease_seconds, requested_by, "
+                + "protocol_version, requested_at, lease_expires_at) VALUES ('" + token + "', '" + mode + "', '" + jobKind
+                + "', '" + status + "', 60, 'fresh-install-test', 1, UTC_TIMESTAMP(6), "
+                + "TIMESTAMPADD(SECOND, 60, UTC_TIMESTAMP(6)))";
+    }
+
+    private static String quiesceInstance(String instanceId, String status, String gateState) {
+        return "INSERT INTO sys_backup_quiesce_instance (instance_id, host_name, db_client_host, db_connection_id, "
+                + "app_commit, protocol_version, poll_interval_ms, heartbeat_interval_ms, fence_after_ms, "
+                + "max_hold_checkpoint_ms, max_hold_full_ms, scheduling_enabled, status, gate_state, started_at, "
+                + "last_beat_at) VALUES ('" + instanceId + "', 'fresh-install-host', '10.0.0.1', 1, 'unknown', 1, 1000, "
+                + "5000, 20000, 300000, 3600000, 0, '" + status + "', '" + gateState + "', UTC_TIMESTAMP(6), "
+                + "UTC_TIMESTAMP(6))";
+    }
+
+    private static String quiesceAck(long requestId, String state, String schedulerState, String refuseReason,
+                                     String resumeReason) {
+        return "INSERT INTO sys_backup_quiesce_ack (request_id, instance_id, state, scheduler_state, drain_millis, "
+                + "hold_until, observed_app_hosts, observed_at, refuse_reason, acked_at, resume_reason) VALUES ("
+                + requestId + ", '00000000-0000-4000-8000-000000000001', '" + state + "', '" + schedulerState
+                + "', 0, UTC_TIMESTAMP(6), '10.0.0.1=1', UTC_TIMESTAMP(6), " + refuseReason + ", UTC_TIMESTAMP(6), "
+                + resumeReason + ")";
+    }
+
+    /** JDBC の文が、指定した MySQL の error code で拒否されることを確かめる。 */
+    private static void assertSqlError(int errorCode, SqlAction action, String message) {
+        SQLException failure = assertThrows(SQLException.class, action::run, message);
+        assertEquals(errorCode, failure.getErrorCode(), message + ": " + failure.getMessage());
+    }
+
+    @FunctionalInterface
+    private interface SqlAction {
+        void run() throws SQLException;
     }
 
     // ---------------------------------------------------------------------

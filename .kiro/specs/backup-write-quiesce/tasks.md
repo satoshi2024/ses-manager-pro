@@ -14,7 +14,9 @@
 
 ## Task 一覧
 
-- [ ] **BWQ-001 — 信号表の migration・H2 の schema・版番号の連動**
+- [x] **BWQ-001 — 信号表の migration・H2 の schema・版番号の連動**
+
+  - **実装の記録（第 2 段階 2a）:** V202・H2 の変種・`engineer-schema-h2.sql`・`LATEST=202`・`ProductionSchemaVersionGuardTest`・runbook（冒頭・§1.7・§3.3・§3.4・§4）。ack の `resume_reason` にも CHECK `ck_bq_ack_resume` を足した（「理由の値が拒否される」の対象に含めるため）。fast は `MigrationScriptIntegrityTest`・`DeployRunbookMigrationCountTest`・`ProductionSchemaVersionGuardTest`・`BackupQuiesceSchemaContractTest` が通過。**Runner 待ち**: `FlywayProdFreshInstallMySqlTest`（mysql shard 3。V202 の3表・生成列・負例を足した）と Demo（local の MySQL 8.4 の dev 起動）。
 
   - **依存:** なし
   - **対応要求:** BWQ-RQ-001
