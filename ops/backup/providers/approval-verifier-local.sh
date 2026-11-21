@@ -16,8 +16,14 @@ verifier::verify() { # claim pubkey
   local claim=$1 pubkey=$2
   local sig="$claim$APPROVAL_SIG_SUFFIX"
   [[ -f "$sig" ]] || { echo "approval-verifier: 署名 file がありません: $sig" >&2; return 1; }
-  # canonical 化した claim に対して署名を検証する（改変検出）
-  jq -S -c . "$claim" > "$claim.canonical"
+  # canonical 化した claim に対して署名を検証する（改変検出）。JSON として読めない claim（改変・破損）は、jq の
+  # 解析 error をそのまま出して errexit で抜けるのではなく、理由を書いて拒否し canonical の一時 file も残さない
+  # （RB-W 追加修正 C。以前は jq の「parse error: Invalid numeric literal」だけが log に出て .canonical が残っていた）
+  if ! jq -S -c . "$claim" > "$claim.canonical" 2> /dev/null; then
+    echo "approval-verifier: claim を JSON として読めません（改変または破損）: $claim" >&2
+    rm -f "$claim.canonical"
+    return 1
+  fi
   if ! openssl dgst -sha256 -verify "$pubkey" -signature "$sig" "$claim.canonical" > /dev/null 2>&1; then
     echo "approval-verifier: 署名検証に失敗しました: $claim" >&2
     rm -f "$claim.canonical"

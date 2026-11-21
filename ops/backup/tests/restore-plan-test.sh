@@ -272,10 +272,23 @@ case_approval_verify() {
   cp "$T/pub1.pem" "$T/pubkeys/heidi.pem"
   approval::collect_and_verify "$plan_path" target-uuid-001 "$T/claim-g.json" "$T/claim-h.json"
   assert_nonzero "$?" "同一鍵 2 名分は拒否"
-  # 署名対象の改変
+  # 署名対象の改変（JSON として読めなくなる改変。整形した claim の 2 行目の先頭近くを x にする）
   printf 'x' | dd of="$T/claim-a.json" bs=1 seek=3 conv=notrunc 2>/dev/null
-  approval::verify_claim "$T/claim-a.json" "$T/pub1.pem"
-  assert_nonzero "$?" "署名対象の改変は拒否"
+  local tamper_out tamper_rc
+  tamper_out=$(approval::verify_claim "$T/claim-a.json" "$T/pub1.pem" 2>&1)
+  tamper_rc=$?
+  assert_nonzero "$tamper_rc" "署名対象の改変は拒否"
+  # RB-W 追加修正 C: jq の解析 error（parse error: Invalid numeric literal …）を出して抜けるのではなく、理由を書いて拒否し、
+  # canonical の一時 file を残さない（CI の log に出ていた parse error はこの負例のもの）
+  assert_contains "$tamper_out" "claim を JSON として読めません" "JSON として読めない claim は理由を書いて拒否する"
+  assert_not_contains "$tamper_out" "parse error" "jq の解析 error をそのまま出さない"
+  assert_no_file "$T/claim-a.json.canonical" "canonical の一時 file を残さない"
+  # JSON としては読めるが署名対象の値を変えた claim も拒否する
+  jq '.actor = "mallory"' "$T/claim-b.json" > "$T/claim-b2.json"
+  cp "$T/claim-b.json.sig" "$T/claim-b2.json.sig"
+  approval::verify_claim "$T/claim-b2.json" "$T/pub2.pem" 2>/dev/null
+  assert_nonzero "$?" "署名対象の値の改変は拒否"
+  assert_no_file "$T/claim-b2.json.canonical" "値の改変の拒否でも canonical の一時 file を残さない"
 }
 
 case_plan_nondefault_basename() {
