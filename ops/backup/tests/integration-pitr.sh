@@ -401,6 +401,28 @@ if grep -qx 'marker-after.txt' "$EVID/uploads-markers.txt"; then
   fail "uploads staging に after marker があります"
 fi
 
+log "== 11.5 uploads の版の切替え（uploads-cutover.sh。RB-W 追加修正 C） =="
+# 復元した uploads を新しい版 v1-restore として stage し（今の版 v0 と pointer は変えない）、pointer を 1 回の rename で
+# 切り替え、逆向きの switch で rollback する。v0 には checkpoint の後に書いた after marker があり、復元した版には無い。
+UPLOADS_CUTOVER_LOG="$EVID/uploads-cutover.txt"
+/usr/local/bin/uploads-cutover.sh stage --from "$UPLOADS_READY" --root "$UPLOADS_ROOT" --version v1-restore \
+  > "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "復元した uploads を新しい版として stage できません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "stage が pointer を変えました"
+/usr/local/bin/uploads-cutover.sh switch --root "$UPLOADS_ROOT" --to v1-restore --expect v0 \
+  >> "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "pointer を新しい版へ切り替えられません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v1-restore ]] || fail "switch の後の pointer が新しい版を指していません"
+[[ -f "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-before.txt" ]] \
+  || fail "切替え後の pointer から before marker を読めません"
+[[ ! -e "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-after.txt" ]] \
+  || fail "切替え後の版に after marker があります（復旧点より後の file）"
+/usr/local/bin/uploads-cutover.sh switch --root "$UPLOADS_ROOT" --to v0 --expect v1-restore \
+  >> "$UPLOADS_CUTOVER_LOG" 2>&1 || fail "rollback（逆向きの switch）ができません（$UPLOADS_CUTOVER_LOG）"
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "rollback の後の pointer が旧版を指していません"
+[[ -f "$UPLOADS_ROOT/$UPLOADS_POINTER/published/marker-after.txt" ]] || fail "rollback の後の旧版の内容が変わっています"
+/usr/local/bin/uploads-cutover.sh status --root "$UPLOADS_ROOT" >> "$UPLOADS_CUTOVER_LOG" 2>&1 \
+  || fail "uploads の pointer の状態を確認できません（$UPLOADS_CUTOVER_LOG）"
+log "uploads の版の切替え OK（stage → switch → rollback）"
+
 log "== 12. source 不変 =="
 SRC_STATE=$(src_root "$MYSQL_DATABASE" -N -B \
   -e "SELECT COUNT(*), SHA2(GROUP_CONCAT(marker ORDER BY id), 256) FROM marker_test;" 2>/dev/null | tail -1)

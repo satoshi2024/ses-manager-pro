@@ -309,10 +309,36 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
 # apply は target guard と二者承認を通過した plan だけ
 ./restore.sh   --plan <plan-id> --approval <file1> --approval <file2>
 ./validate-restore.sh --plan <plan-id> --uploads-dir <staging> --smoke <script>
+# uploads: 検証した staging を新しい版として本番の uploads の根へ複製する（今の版と pointer は変えない）
+./uploads-cutover.sh stage --from <staging> --root <uploads の根> --version <新しい版>
 ./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
+# uploads: app の停止中に pointer を 1 回の rename で切り替える（DB の cutover と同じ change の中）
+./uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>
 # rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）
 ./rollback-cutover.sh --plan <plan-id>
+# uploads の rollback: 逆向きの switch（switch が出力した rollback= の command）
+./uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
 ```
+
+### uploads の版の切替え（`uploads-cutover.sh`。RB-W 追加修正 C）
+
+- **stage**: `restore.sh` の `uploads_ready`（`validate-restore.sh` が hash と DB の参照を照合した staging）を、uploads の根の
+  下の新しい版の directory（例 `v1`）に複製する。今の版・pointer・既にある名前は変えない（既にある名前は拒否）。複製は
+  `lib/safe-extract.sh` の規則で根の下の一時 directory（`.stage-<版>.XXXXXX`）へ行い、全 entry の相対 path と SHA-256 が
+  複製元と一致してから 1 回の rename で `<根>/<版>` にする。失敗したら一時 directory を消し、作りかけの版は現れない。
+  `restore.sh` の出力の `uploads_backup_pointer` は backup した時の pointer と版で、新しい版はこれと別の名前にする。
+- **switch**: pointer が `--expect` の版を指していることを確かめてから、切替え先を指す相対・1 段の一時 symlink を作り、
+  `mv -T`（rename(2) 1 回）で pointer と置き換える。pointer は前後とも必ずどちらかの版を指し、無い瞬間は無い。app を止めて
+  から行う（app は起動時に pointer の下の directory を作るため、切替えの途中で起動させない）。
+- **rollback**: 逆向きの switch（`--to <旧版> --expect <新しい版>`）。旧版は消さないため 1 回の rename で戻る。switch が
+  成功すると、そのまま使える rollback の command（`rollback=`）を出力する。`status` で pointer の指す版・版の一覧・
+  残った一時 directory を確かめる（読むだけ）。
+- **実行する主体**: restore 主体（uploads の access point を app と同じ uid で読み書きで mount する。backup の container は
+  `:ro` のため実行できない）。umask 077 のため新しい directory は 0700 になるが、app と同じ uid のため読み書きできる。
+- **残る窓**: stage の直前の確認と rename の間に、同じ名前の空の directory か symlink を作られると rename がそれを置き換える
+  （中身のある directory・file なら rename は失敗する）。switch の `--expect` の確認と rename の間に別の主体が pointer を
+  変えると後の rename が勝つ。どちらも同じ change の中で 1 名が実行する前提で受け入れ、切替え後に `status` で確かめる。
+- 手順の順序（DB の cutover と uploads の switch をどこで行い、どう確かめるか）は deploy-runbook（RB-DEPLOY）が書く。
 
 `validate-restore.sh` は、従来の項目に加えて次を満たさなければ `READY_FOR_CUTOVER` を返さない:
 
@@ -426,6 +452,9 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   `LC_ALL=C` 等の代入・`command`・`env`、`|&`、`dd` の `count=`・`xxd -l` も同じ扱いで検出する（RB-W P3-1）。
   `common::trap_add` で登録した EXIT の handler は `common::trap_remove` で外し、`trap - EXIT` は書かない（RB-W P3-2。
   dispatcher だけが外れ、配列に残った handler が後の `trap_add` で戻るため）。
+- uploads の pointer と版の切替えの試験（`tests/uploads-pointer-test.sh`・`tests/uploads-cutover-test.sh`）は symlink を
+  作れる環境が要る。Linux（tool image）ではそのまま動き、Git for Windows では `MSYS=winsymlinks:sys` を設定して実行する
+  （設定しないと `ln -s` が複製を作るため、最初の前提の case が失敗する）。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 

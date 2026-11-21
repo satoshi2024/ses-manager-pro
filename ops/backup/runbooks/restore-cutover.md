@@ -79,6 +79,32 @@ rollback-cutover.sh --plan <plan-id>
 3. 旧環境の read-only smoke（`OLD_ENV_SMOKE_SCRIPT`）が PASS すること
 4. `state=rolled-back` を書く（新環境は activation されない）
 
+## 4.5 uploads の版の切替え（uploads-cutover.sh。RB-W 追加修正 C）
+
+production の uploads は、uploads の根の下の版の directory（`v0`、`v1`、…）と、相対・1 段の pointer
+`current -> v<n>` で構成する（app は `UPLOAD_BASE_PATH=/app/uploads/current`。README「uploads の配置と mount」）。
+復元した uploads は今の版を上書きせず、新しい版として置いてから pointer を切り替える。restore 主体（uploads の access
+point を app と同じ uid で読み書きで mount する）が実行する。
+
+```bash
+# validate-restore.sh が READY_FOR_CUTOVER を返した後（app は動いていてよい。今の版と pointer は変えない）
+uploads-cutover.sh stage --from <restore.sh の uploads_ready> --root <uploads の根> --version <新しい版>
+# app の停止中、DB の cutover と同じ change の中で（1 回の rename。pointer は前後とも必ずどちらかの版を指す）
+uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>
+# 確認（読むだけ）
+uploads-cutover.sh status --root <uploads の根>
+# rollback: 逆向きの switch（switch が出力した rollback= の command。旧版は消していない）
+uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
+```
+
+- `stage` は、既にある名前（今の版を含む）・pointer の名前・1 段でない名前、symlink や特殊 file を含む複製元を拒否する。
+  複製は一時 directory に行い、内容（相対 path と SHA-256）が一致してから 1 回の rename で版にするため、失敗しても
+  作りかけの版は残らない。
+- `switch` は pointer が `--expect` と違う・解決できない（無い・実 directory に置き換わっている・絶対 path 等）、または
+  切替え先が実 directory でなければ何も変えずに失敗する。
+- DB と uploads の切替え・rollback の順序と、cutover の状態機械（`CUTOVER_STATE_FILE`）との対応は deploy-runbook
+  （RB-DEPLOY）の手順に従う。`cutover.sh` と `rollback-cutover.sh` は uploads の pointer に触れない。
+
 ## 5. 判定早見表
 
 | 状況 | 対応 | コマンド |

@@ -238,9 +238,18 @@ main() {
   fi
 
   # 6) uploads staging を安全展開（production path は変更しない）
+  # 本番の uploads へは uploads-cutover.sh stage が新しい版の directory として複製し、switch が pointer（current）を
+  # 1 回の rename で切り替える（RB-W 追加修正 C。今の版は上書きしない）。
   local uploads_src="$ckpt_root/uploads"
   local uploads_stage="$STAGE_DIR/uploads-ready"
   safe_extract::copy "$uploads_src" "$uploads_stage" || restore::fail "uploads の安全展開に失敗しました"
+  # backup した時の pointer と版（checkpoint の metadata.json の uploads_pointer。記録の無い checkpoint は null）。
+  # 新しい版の名前を決めるときの参考に出す（復元先の版の名前はこの値と別にする）
+  local uploads_backup_pointer="null"
+  if [[ -f "$ckpt_root/metadata.json" ]]; then
+    uploads_backup_pointer=$(jq -c '.uploads_pointer // null' "$ckpt_root/metadata.json" 2>/dev/null) || uploads_backup_pointer="null"
+    [[ -n "$uploads_backup_pointer" ]] || uploads_backup_pointer="null"
+  fi
 
   RESTORE_STATE="RESTORED"
   jq -n \
@@ -250,13 +259,14 @@ main() {
     --arg target_database "$TARGET_DATABASE" \
     --arg staging_dir "$STAGE_DIR" \
     --arg uploads_ready "$uploads_stage" \
+    --argjson uploads_backup_pointer "$uploads_backup_pointer" \
     --arg start_position "$start_pos" \
     --arg stop_position "$stop_pos" \
     --arg binlog_count "$binlog_count" \
     --arg replay_log "$STAGE_DIR/replay.log" \
     '{state: $state, plan_id: $plan_id, target_uuid: $target_uuid,
       target_database: $target_database, staging_dir: $staging_dir,
-      uploads_ready: $uploads_ready,
+      uploads_ready: $uploads_ready, uploads_backup_pointer: $uploads_backup_pointer,
       replay: {start_position: ($start_position|tonumber), stop_position: ($stop_position|tonumber),
                binlog_count: ($binlog_count|tonumber), log: $replay_log}}'
   return 0

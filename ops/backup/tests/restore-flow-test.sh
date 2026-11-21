@@ -80,6 +80,8 @@ make_manifest "$full_payload"
 local ckpt_payload="$T/ckpt-payload"
 mkdir -p "$ckpt_payload/uploads/published"
 printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker.txt"
+# RB-W 追加修正 C: checkpoint の metadata.json は backup した pointer と版を持つ（restore の出力に載る）
+printf '%s\n' '{"kind":"checkpoint","uploads_pointer":{"name":"current","target":"v0"}}' > "$ckpt_payload/metadata.json"
 make_manifest "$ckpt_payload"
 
   export RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE"
@@ -157,6 +159,9 @@ case_restore_normal_flow() {
   # uploads staging に marker が展開されている
   local up
   up=$(echo "$out" | jq -r '.uploads_ready')
+  # RB-W 追加修正 C: checkpoint に記録した pointer と版を出力に載せる
+  assert_eq "current/v0" "$(jq -r '"\(.uploads_backup_pointer.name)/\(.uploads_backup_pointer.target)"' <<< "$out" 2>/dev/null)" \
+    "backup した時の pointer と版を出力する"
   assert_file "$up/published/marker.txt" "uploads staging に marker"
   assert_contains "$(cat "$up/published/marker.txt")" "marker-before-checkpoint" "marker 内容"
   # replay の mysql connection は 1 回（CREATE 1 + import 1 + replay 1 = --binary-mode 3 回）

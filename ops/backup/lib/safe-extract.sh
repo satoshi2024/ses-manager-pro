@@ -30,20 +30,23 @@ safe_extract::check_entries() { # src_dir
   return 0
 }
 
-# src の内容を dest へ安全に複製（検査済み entry のみ）
+# src の内容を dest へ安全に複製（検査済み entry のみ）。
+# mkdir・cp の失敗は明示して 1 を返す（RB-W 追加修正 C）。呼び出し元は `safe_extract::copy … || fail` と書くため、
+# この関数の中では set -e が効かず、以前は cp が失敗しても最後の return 0 で成功を返していた
+# （restore.sh の uploads staging が欠けたまま RESTORED になり得た。uploads-cutover-test の cp 失敗の case で見つけた）。
 safe_extract::copy() { # src_dir dest_dir
   local src=$1 dest=$2
   safe_extract::check_entries "$src" || return 1
-  mkdir -p "$dest"
+  mkdir -p "$dest" || return 1
   local p=""
   while IFS= read -r -d '' p; do
     local rel
     rel=${p#"$src"/}
     if [[ -d "$p" ]]; then
-      mkdir -p "$dest/$rel"
+      mkdir -p "$dest/$rel" || return 1
     else
-      mkdir -p "$dest/$(dirname "$rel")"
-      cp -a -- "$p" "$dest/$rel"
+      mkdir -p "$dest/$(dirname "$rel")" || return 1
+      cp -a -- "$p" "$dest/$rel" || return 1
     fi
   done < <(find "$src" -mindepth 1 -print0 2>/dev/null)
   return 0
