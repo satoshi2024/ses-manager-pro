@@ -3719,6 +3719,8 @@ ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_d
 ALTER TABLE t_legal_hold ADD CONSTRAINT IF NOT EXISTS chk_legal_hold_kind CHECK (hold_kind IN ('UNKNOWN'));
 
 -- V202（backup の書込み静止の信号表。RB-QUIESCE BWQ-001）。schema-backup-quiesce-h2.sql と同じ定義（ack → instance → request の順に消して作り直す）。
+CREATE ALIAS IF NOT EXISTS UTC_TIMESTAMP FOR 'com.ses.test.H2MySqlTimeFunctions.utcTimestamp';
+CREATE ALIAS IF NOT EXISTS CONNECTION_ID FOR 'com.ses.test.H2MySqlTimeFunctions.connectionId';
 DROP TABLE IF EXISTS sys_backup_quiesce_ack CASCADE;
 DROP TABLE IF EXISTS sys_backup_quiesce_instance CASCADE;
 DROP TABLE IF EXISTS sys_backup_quiesce_request CASCADE;

@@ -115,7 +115,22 @@ class SchedulingDisabledDrainTest {
                     + "fileのstat・読込みだけでDB書込み・周期実行は無い",
             "com.ses.privacy.production.retention.trust.KmsPrivacyTrustSource:Thread.start",
             "上の検査threadの起動。I/Oが止まり打ち切るとthreadは残りうるが、起動検査の失敗として起動を中止する"
-                    + "（daemonのためJVMの終了は妨げない）");
+                    + "（daemonのためJVMの終了は妨げない）",
+            // RB-QUIESCE BWQ-003: backup の書込み静止の2つの専用 thread（heartbeat・状態機械）。@Scheduled を使わないため
+            // APP_SCHEDULING_ENABLED=false でも動く（静止の要求に応答するため。design.md §5.2）。ScheduledExecutorService は bean にしない
+            "com.ses.backup.quiesce.BackupQuiesceTicker:Executors.newSingleThreadScheduledExecutor",
+            "静止応答の heartbeat（5秒ごと、heartbeat 用の接続で信号表の1行を UPDATE）と状態機械（200ms の tick、1 tick に短い文を"
+                    + "高々1つ）の専用 daemon thread。app.backup-quiesce.enabled=false の prod 以外では作らない",
+            "com.ses.backup.quiesce.BackupQuiesceTicker:Thread.<init>",
+            "上の2つの thread（backup-quiesce-heartbeat・backup-quiesce-responder）。daemon で JVM の終了を妨げない",
+            "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.scheduleWithFixedDelay",
+            "上の周期実行。処理の例外は捕まえて次の周期へ回す（周期が黙って止まらない）",
+            "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.isShutdown",
+            "上の thread が動いているかの確認（診断用）",
+            "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.shutdownNow",
+            "停止。状態機械は静止応答の破棄で、heartbeat は STOPPED を書く前と anchor の破棄（業務の DataSource の後）で止める",
+            "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.awaitTermination",
+            "停止の待ち（最長12秒。実行中の文は socket の timeout 10秒までに終わる）");
 
     /** 起動時に一度だけ動くhook（{@code app.scheduling.enabled} の外。各自の条件で起動する）。 */
     private static final Map<String, String> STARTUP_HOOK_INVENTORY = inventory(
@@ -136,7 +151,13 @@ class SchedulingDisabledDrainTest {
             "com.ses.config.LegalEntityReadinessStartupValidator#validate:EventListener",
             "ApplicationReadyEvent。公開API（inbound）/外部transport（outbound）/Copilotのどれかが有効な時だけ法人readinessを読取検証する（DB書込なし）",
             "com.ses.service.impl.BpCompanyServiceImpl#validateBankKeyConfig:EventListener",
-            "ApplicationReadyEvent。prodの口座暗号化key設定を検証するだけ");
+            "ApplicationReadyEvent。prodの口座暗号化key設定を検証するだけ",
+            // RB-QUIESCE BWQ-003: 静止応答の起動と停止の hook（design.md §6.8・§6.11）。登録・有効な要求の読取り・startup permit の
+            // 取得は SmartInitializingSingleton（port を開く前）、破棄は DisposableBean（状態機械の thread を止める）で行う
+            "com.ses.backup.quiesce.BackupQuiesceResponder#onApplicationReady:EventListener",
+            "ApplicationReadyEvent。instance を RUNNING にし（次の heartbeat で書く）、起動の startup permit を返す",
+            "com.ses.backup.quiesce.BackupQuiesceResponder#onContextClosed:EventListener",
+            "ContextClosedEvent（lifecycle の停止より前）。gate を SHUTDOWN にし、呼んだ thread の permit を返す（DB 書込なし）");
 
     /** {@code @Async} method（taskExecutor上で実行。起点はrequestまたはscheduler）。 */
     private static final Map<String, String> ASYNC_INVENTORY = inventory(

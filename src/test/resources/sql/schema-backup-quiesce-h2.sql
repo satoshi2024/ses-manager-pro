@@ -3,6 +3,10 @@
 -- 生成式・主キー・一意 key・索引・CHECK・FK を置く（H2 は生成列の STORED 指定を解釈しない）。
 -- 共有H2（DB_CLOSE_DELAY=-1）は context ごとに schema-locations を再実行するため、表・索引とも IF NOT EXISTS で冪等にする。
 -- engineer-schema-h2.sql も同じ定義を持つ。V202 との一致は BackupQuiesceSchemaContractTest が固定する。
+-- 信号表の SQL（JdbcBackupQuiesceSignalRepository）は時刻を UTC_TIMESTAMP(6) で書き、登録の診断に CONNECTION_ID() を使うため、
+-- H2 にも同じ名前の関数 alias を置く（com.ses.test.H2MySqlTimeFunctions）。
+CREATE ALIAS IF NOT EXISTS UTC_TIMESTAMP FOR 'com.ses.test.H2MySqlTimeFunctions.utcTimestamp';
+CREATE ALIAS IF NOT EXISTS CONNECTION_ID FOR 'com.ses.test.H2MySqlTimeFunctions.connectionId';
 CREATE TABLE IF NOT EXISTS sys_backup_quiesce_request (
     id                  BIGINT       NOT NULL AUTO_INCREMENT,
     request_token       CHAR(32)     NOT NULL,

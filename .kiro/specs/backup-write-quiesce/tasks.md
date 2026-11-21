@@ -50,7 +50,9 @@
   - **Demo:** 試験の結果（状態遷移の表を `@ParameterizedTest` で出した一覧）を確かめる。
   - **失敗/rollback:** 競合の試験が 1 回でも失敗したら I-4 の順を見直す。`enabled=false` で既存の試験の挙動が変わらないことを BWQ-005 までに確かめる。
 
-- [ ] **BWQ-003 — 制御用・heartbeat 用の接続・信号表の repository・静止応答（responder）・停止の順**
+- [x] **BWQ-003 — 制御用・heartbeat 用の接続・信号表の repository・静止応答（responder）・停止の順**
+
+  - **実装の記録（第 2 段階 2a）:** `BackupQuiesceControlConnectionPool`（holder。DataSource の bean にしない）、`BackupQuiesceSignalRepository`（interface）と `JdbcBackupQuiesceSignalRepository`（SQL は `UTC_TIMESTAMP(6)` だけ）、`BackupQuiesceHosts`（`PROCESSLIST.HOST` だけ port を外す）、`BackupQuiesceTicker`（専用 thread）、`BackupQuiesceLifecycleAnchor`（pool・gate・登録・heartbeat・STOPPED。heartbeat の thread も anchor が持ち STOPPED の直前まで続ける。D4-P3-2 の補足）、`BackupQuiesceResponder`（塞がない状態機械・起動の3分岐・停止口・保存期間の削除・解除後の投入は executor の queue が満杯なら次の tick）、`BackupQuiesceDestructionOrderPostProcessor`（bean が無ければ何もしない。D4-P3-2）、`BackupQuiesceConfiguration`。H2 には `UTC_TIMESTAMP`・`CONNECTION_ID` の関数 alias を置いた（`com.ses.test.H2MySqlTimeFunctions`）。`SchedulingDisabledDrainTest` の既知一覧に静止応答の thread と起動・停止の hook を理由つきで足した（BWQ-006 の 3 の先取り。走査で見つかる key だけ）。STOPPED の書込みの入口は BWQ-004 の `postProcessBeforeDestruction`。fast は `BackupQuiesceResponderTest`・`BackupQuiesceControlPoolUsageTest`・`BackupQuiesceContextStartTest`（test profile の全体の context と、prod の profile の scheduling 有効・無効と停止口）・`SchedulingDisabledDrainTest`・`MySqlTestShardInventoryTest`・`MySqlTestImagesTest`・`TestIsolationAuditTest` が通過。**Runner 待ち**: `BackupQuiesceResponderMySqlTest`（mysql shard 3。STOPPED の順の3件は BWQ-004 で足す）と Demo（dev の app と MySQL の client）。
 
   - **依存:** BWQ-001、BWQ-002
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-002、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-005、BWQ-RQ-008
