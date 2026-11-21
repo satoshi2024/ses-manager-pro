@@ -615,6 +615,7 @@ class BackupQuiesceResponderTest {
         Supplier<RuntimeException> refusedFailure = () -> null;
         Supplier<RuntimeException> holdFailure = () -> null;
         Supplier<RuntimeException> resumeFailure = () -> null;
+        Supplier<RuntimeException> observeFailure = () -> null;
 
         FakeRepository(AtomicLong clock) {
             this.clock = clock;
@@ -698,6 +699,7 @@ class BackupQuiesceResponderTest {
         @Override
         public Observation observeAppHosts() {
             statements++;
+            fail(observeFailure);
             return new Observation(BackupQuiesceHosts.aggregate(List.of("10.0.0.1:50001", "10.0.0.1:50002")),
                     dbTime(clock.get()));
         }
@@ -799,5 +801,59 @@ class BackupQuiesceResponderTest {
             purgeOwnInstance = ownInstanceId;
             return 0;
         }
+    }
+
+    // ---------------------------------------------------------------- 2a review の指摘（P3-2・P3-3・P3-8）
+
+    /** P3-2: 排水の後の準備が排水の上限まで失敗し続けた REFUSED（ERROR）も、固定の errorCode と最後の失敗の型を WARN に出す。 */
+    @Test
+    void 準備の失敗が排水の上限まで続いたREFUSED_ERRORは固定のerrorCodeと最後の失敗の型をWARNに出す() {
+        started();
+        repository.observeFailure = () -> new QueryTimeoutException("observe");
+        long id = repository.request("ONLINE", "CHECKPOINT", 120);
+        run(properties.getDrainTimeoutCheckpoint().plusSeconds(2));
+
+        assertThat(repository.ack(id)).isNotNull();
+        assertThat(repository.ack(id).state).isEqualTo("REFUSED");
+        assertThat(gate.state()).isEqualTo(BackupWriteGate.State.OPEN);
+        assertThat(messages(Level.WARN)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_REFUSED")
+                && m.contains("REFUSED（ERROR）") && m.contains("QueryTimeoutException"));
+    }
+
+    /** P3-3: 信号表が無い（1146・42S02）ために登録できなければ、§3.4 と schema guard を指して起動を中止する。 */
+    @Test
+    void 信号表が無いため登録できなければmigrationとschema_guardを指して起動を中止する() {
+        repository.registerFailure = new org.springframework.jdbc.BadSqlGrammarException("register", "INSERT ...",
+                new java.sql.SQLSyntaxErrorException("Table 'ses.sys_backup_quiesce_instance' doesn't exist", "42S02", 1146));
+
+        assertThatThrownBy(responder::afterSingletonsInstantiated).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("信号表").hasMessageContaining("§3.4").hasMessageContaining("schema guard");
+        assertThat(BackupQuiesceResponder.missingSignalTable(new RuntimeException(
+                new java.sql.SQLException("x", "42S02", 42102)))).as("H2 の表が無い").isTrue();
+        assertThat(BackupQuiesceResponder.missingSignalTable(new QueryTimeoutException("db down"))).isFalse();
+    }
+
+    /** P3-8: 解除の log の件数は、開いて投入し直す前の値を出す。 */
+    @Test
+    void 解除のlogの保留と解除後の書込みの件数は開く前の値を出す() {
+        started();
+        long id = acked("CHECKPOINT", 60);
+        gate.deferUntilOpen(() -> { });
+        gate.deferUntilOpen(() -> { });
+        gate.deferredWrites().add(new BackupQuiesceDeferredWrites.DeferredWrite() {
+            @Override
+            public String summary() {
+                return "user=1 session=abcdef01";
+            }
+
+            @Override
+            public void write() {
+            }
+        });
+        repository.get(id).status = "RELEASED";
+        run(Duration.ofSeconds(2));
+
+        assertThat(messages(Level.INFO)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_RESUMED")
+                && m.contains("保留した非同期の処理 2 件") && m.contains("解除後の書込み 1 件"));
     }
 }

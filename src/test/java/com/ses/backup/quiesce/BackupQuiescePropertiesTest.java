@@ -97,8 +97,9 @@ class BackupQuiescePropertiesTest {
             "app.backup-quiesce.poll-interval=100ms",
             "app.backup-quiesce.heartbeat-interval=20s",
             "app.backup-quiesce.fence-after=31s",
-            // 制御用の接続の timeout（10 秒）< fence-after − heartbeat-interval
+            // 制御用の接続の1つの文の上限（接続の取得 3 秒＋socket 10 秒 = 13 秒）< fence-after − heartbeat-interval（2a review P3-9）
             "app.backup-quiesce.fence-after=15s",
+            "app.backup-quiesce.fence-after=18s",
             // 範囲
             "app.backup-quiesce.max-hold-checkpoint=29s",
             "app.backup-quiesce.max-hold-checkpoint=901s",

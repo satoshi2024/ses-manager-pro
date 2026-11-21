@@ -37,8 +37,12 @@ public class BackupQuiesceProperties {
     public static final Duration CONTROL_POOL_CONNECTION_TIMEOUT = Duration.ofSeconds(3);
     /** Hikari の {@code validationTimeout}。 */
     public static final Duration CONTROL_POOL_VALIDATION_TIMEOUT = Duration.ofSeconds(2);
-    /** 1つの文が thread を塞ぐ時間の上限（上の固定値の最大。socket の読み待ち）。 */
-    public static final Duration CONTROL_STATEMENT_BLOCKING_MAX = CONTROL_SOCKET_TIMEOUT;
+    /**
+     * 1つの文が thread を塞ぐ時間の上限: pool の接続の取得の待ち（{@link #CONTROL_POOL_CONNECTION_TIMEOUT}）と socket の読み待ち
+     * （{@link #CONTROL_SOCKET_TIMEOUT}）の和（2a review P3-9。遅いが成功した heartbeat を FENCED にしない）。
+     */
+    public static final Duration CONTROL_STATEMENT_BLOCKING_MAX =
+            CONTROL_POOL_CONNECTION_TIMEOUT.plus(CONTROL_SOCKET_TIMEOUT);
 
     private boolean enabled = true;
     /** prod で {@code enabled=false} を許す変更 ticket（U-7。形式の検査は prod の起動時検査が行う）。 */
@@ -79,7 +83,8 @@ public class BackupQuiesceProperties {
                 && fenceAfter.compareTo(Duration.ofSeconds(30)) <= 0;
     }
 
-    @AssertTrue(message = "制御用の接続の timeout（10 秒）が fence-after − heartbeat-interval より短くなるようにしてください")
+    @AssertTrue(message = "制御用の接続の1つの文が塞ぐ時間の上限（接続の取得 3 秒＋socket 10 秒）が fence-after − heartbeat-interval より"
+            + "短くなるようにしてください")
     public boolean isControlTimeoutWithinFence() {
         if (heartbeatInterval == null || fenceAfter == null) {
             return true;

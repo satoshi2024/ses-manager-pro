@@ -170,6 +170,11 @@ class BackupQuiesceAwareDataSourceTest {
      * 借りる側の手順（数を増やす → 状態と permit を読む → 閉じていれば数を戻す）と gate の側の手順（CLOSING にする → 数を読む →
      * もう一度読む）の交互の順を全て並べ（20 通り）、「gate が排水の完了を確定したのに、借りる側が書込み可能な接続を得た」順が
      * 1つも無いことを確かめる。
+     *
+     * <p><b>これは手順の模型の検証である</b>（2a review P3-6）。20 通りは試験の中の数と状態の変数で I-4 の手順を再現して並べた
+     * もので、実の {@link BackupWriteGate} の code を各 step で止めて駆動してはいない（gate の操作はそれぞれ1つの呼出しで、間に
+     * 割り込む口が無い）。実の gate は最後に1つの順だけを再現する。実の code の I-4 の実証は {@code BackupWriteGateTest} の
+     * 100 thread の競合と、実 MySQL の負荷の試験（{@code BackupWriteQuiesceMySqlTest}。Runner 待ち）が担う。
      */
     @Test
     void 借りるthreadと閉じるthreadの交互の順を全て並べても排水の確定と書込み可能な接続が両立しない() {

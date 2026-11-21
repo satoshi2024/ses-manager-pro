@@ -82,6 +82,8 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         boolean observeDue;
         LocalDateTime lastVerifySeen;
         String refuseReason;
+        /** QUIESCED を試みる前の最後の失敗の例外の型（REFUSED（ERROR）の log 用。2a review P3-2）。 */
+        String lastFailure;
         String resumeReason;
         int resumeAttempts;
         boolean reopened;
@@ -163,7 +165,11 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         try {
             anchor.register();
         } catch (RuntimeException failure) {
-            throw abort("最初の heartbeat（instance の登録）を書けません", failure);
+            throw abort(missingSignalTable(failure)
+                    ? "最初の heartbeat（instance の登録）を書けません: 信号表（V202 の sys_backup_quiesce_instance 等）がありません。"
+                    + "Flyway の migration（deploy-runbook §3.4）と起動時の schema guard（ProductionSchemaVersionGuard）の結果を"
+                    + "確かめてください"
+                    : "最初の heartbeat（instance の登録）を書けません", failure);
         }
         Optional<RequestView> found;
         try {
@@ -219,6 +225,18 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
                 throw abort("起動の待ちが割り込まれました", interrupted);
             }
         }
+    }
+
+    /** 表が無い（MySQL の 1146・SQLSTATE 42S02）ことによる失敗か（2a review P3-3）。 */
+    static boolean missingSignalTable(Throwable failure) {
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Throwable current = failure; current != null && seen.add(current); current = current.getCause()) {
+            if (current instanceof java.sql.SQLException sql
+                    && (sql.getErrorCode() == 1146 || "42S02".equals(sql.getSQLState()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private IllegalStateException abort(String reason, Throwable cause) {
@@ -511,6 +529,7 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
     /** QUIESCED を試みる前の失敗: 排水の上限を過ぎていれば拒否し（試していないので開いてよい）、そうでなければ次の tick で繰り返す。 */
     private void failedBeforeAck(long now, RuntimeException failure) {
         log.debug("backup の静止の応答の準備で失敗しました（番号 {}）", work.id(), failure);
+        work.lastFailure = failure.getClass().getSimpleName();
         if (now - work.drainDeadlineNanos >= 0) {
             beginRefuse("ERROR");
         }
@@ -741,6 +760,9 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
     }
 
     private void reopenAndFinish(String reason, boolean resumedWritten) {
+        // 件数は開く前に読む（開くと保留した処理と解除後の書込みが直ちに投入される。2a review P3-8）
+        int pendingTasks = gate.pendingTaskCount();
+        int pendingWrites = gate.deferredWrites().pending();
         boolean opened = work.reopened || gate.reopen(work.id());
         if (!opened) {
             log.warn("backup の静止の解除の条件（I-3）を満たさないため、まだ開けません（番号 {}）", work.id());
@@ -756,7 +778,7 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
             } else if ("RELEASED".equals(reason)) {
                 log.info("errorCode=BACKUP_QUIESCE_RESUMED backup の静止の解除で更新を再開しました（番号 {}、保持 {} 秒、"
                                 + "保留した非同期の処理 {} 件、解除後の書込み {} 件）", work.id(), held.getSeconds(),
-                        gate.pendingTaskCount(), gate.deferredWrites().pending());
+                        pendingTasks, pendingWrites);
                 metrics.resumed(reason);
             } else {
                 log.error("errorCode=BACKUP_QUIESCE_AUTO_RESUMED backup の解除を待たずに更新を再開しました（番号 {}、理由 {}、"
@@ -792,6 +814,12 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         } else if ("UNSUPPORTED_PROTOCOL".equals(work.refuseReason)) {
             log.warn("errorCode=BACKUP_QUIESCE_REFUSED protocol の版が違うため backup の静止を拒否しました（番号 {}、版 {}）",
                     work.id(), work.request.protocolVersion());
+        } else if ("ERROR".equals(work.refuseReason)) {
+            // 排水の後の準備（hold 期限の読取り・観測）が排水の上限まで失敗し続けた（2a review P3-2。§13.3 の warning の対象）
+            log.warn("errorCode=BACKUP_QUIESCE_REFUSED 静止の応答の準備が排水の上限（{} 秒）までに終わらないため、backup の静止を"
+                            + "拒否しました（番号 {}、REFUSED（ERROR）、最後の失敗 {}）",
+                    properties.drainTimeout(work.request.full()).getSeconds(), work.id(),
+                    work.lastFailure == null ? "-" : work.lastFailure);
         }
         metrics.requestResult(work.jobKind(), "refused_" + work.refuseReason.toLowerCase(Locale.ROOT));
         if (gate.holdingRequestId() == work.id()) {

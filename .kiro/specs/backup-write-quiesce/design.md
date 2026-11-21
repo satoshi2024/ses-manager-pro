@@ -131,7 +131,7 @@ sequenceDiagram
 | `resumed_at` | DATETIME(6) NULL | UTC |
 | `resume_reason` | VARCHAR(32) NULL | `RELEASED` / `LEASE_EXPIRED` / `MAX_HOLD` / `REQUEST_GONE` / `SHUTDOWN` |
 
-PK `(request_id, instance_id)`。制約 `ck_bq_ack_state`・`ck_bq_ack_scheduler`・`ck_bq_ack_refuse`。
+PK `(request_id, instance_id)`。制約 `ck_bq_ack_state`・`ck_bq_ack_scheduler`・`ck_bq_ack_refuse`・`ck_bq_ack_resume`（`resume_reason` の値の集合。第 2 段階 2a で足した。BWQ-001 の「CHECK の外の理由の値が拒否される」の対象）。
 
 ### 3.2 書く者と状態遷移
 
@@ -189,7 +189,7 @@ ack の状態: なし → `QUIESCED` または `REFUSED` → `QUIESCED` から `
 ### 3.9 保存期間と個人データ
 
 - 個人データは持たない（host 名・接続元の IP・job 名・時刻だけ）。`requested_by` に人の名前を書かせない。
-- **保存期間は 30 日（U-12。決定済み）**。app が 1 日 1 回、有効な要求が無い時に、30 日より古い RELEASED/ABORTED/EXPIRED の要求（ack は CASCADE）と `last_beat_at` が 30 日より古い instance を消す。
+- **保存期間は 30 日（U-12。決定済み）**。app が 1 日 1 回、有効な要求が無い時に、30 日より古い RELEASED/ABORTED/EXPIRED の要求（ack は CASCADE）と `last_beat_at` が 30 日より古い instance を消す。ただし停止口で動いていた行（`gate_state = 'DISABLED'` かつ `status <> 'STOPPED'`）は消さない（§5.3・§9.4。DBA が確かめて手で STOPPED にするまで backup を失敗させ続ける行で、古さで消すと停止口の app の異常停止を見落とす。2a の review P3-7）。
 - 個人データを消す経路ではないため、NF07 の保全 hold の gate（`deploy-runbook.md` §4.4）には接続しない。review で求められれば §4.4 の除外の行に理由つきで足す。
 - `privacy-retention-dsar/pii-inventory.md` に DB-148〜DB-150 として 3 表を足す（構造の記録。個人データなし）。
 - privacy catalog の seed 行は足さない。この 3 表は個人データも provider も持たず、行を足すと catalog の未分類の件数が意味なく増える。`CATALOG_MISSING` は provider が宣言した data element だけが対象（`PrivacyCoverageReport`）なので、行が無くても欠落として報告されない。
@@ -714,6 +714,7 @@ app:
 | `BACKUP_QUIESCE_STOPPED_HOLD_SEEN` | ERROR | 動いている instance が APP_STOPPED の保持を読み、gate を閉じた |
 | `BACKUP_QUIESCE_AUDIT_DEFERRED` | WARN | 静止中に best-effort の監査を DB へ書かなかった（内容を log に残す。U-9） |
 | `BACKUP_QUIESCE_DEFERRED_WRITE` | WARN | logout の失効と監査を解除の後へ回した（U-8） |
+| `BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED` | WARN | 解除後の書込みを書かずに捨てた（上限 10,000 件を超えた最も古いもの、3 回失敗したもの、解除後の監査の時刻が許す範囲の外のもの。内容を log に残す。第 2 段階 2a・2b で足した） |
 | `BACKUP_QUIESCE_READONLY_REJECTED` | WARN | 最後の防線（1792）で 503 にした（経路の型。間引いて出す） |
 | `BACKUP_QUIESCE_DISABLED` | ERROR | prod で停止口を使って起動した（ticket を含む） |
 | `BACKUP_QUIESCE_STOP_UNCONFIRMED` | WARN | 停止の時に permit・書込み可能な接続が 10 秒で 0 にならず、STOPPED を書かなかった（D3-P3-1） |
@@ -742,7 +743,7 @@ health indicator は作らない。
 ### 13.3 alert（routing は HFP-03-PROD-008 で BLOCKED。条件だけ決める）
 
 - critical: `BACKUP_QUIESCE_AUTO_RESUMED`・`BACKUP_QUIESCE_FENCED`・`BACKUP_QUIESCE_STOPPED_HOLD_SEEN`・`BACKUP_QUIESCE_DISABLED` のどれかが 1 件でも出た、`gate_state` が CLOSING/CLOSED のまま最大保持時間＋60 秒を超えた、`oldest_permit_seconds` が最大保持時間を超えた、`disabled` が 1。
-- warning: `BACKUP_QUIESCE_REFUSED` が 30 分に 2 件以上、`BACKUP_QUIESCE_ACK_UNKNOWN`、`BACKUP_QUIESCE_FULL_ABORTED`（その日の full を取り直す）、静止区間の秒数が `QUIESCE_WINDOW_WARN_SECONDS` を超えた、`rejected_requests{kind=readonly_sql}` の増加、`deferred_writes_pending` が解除の後 5 分を過ぎても 0 にならない。
+- warning: `BACKUP_QUIESCE_REFUSED` が 30 分に 2 件以上、`BACKUP_QUIESCE_ACK_UNKNOWN`、`BACKUP_QUIESCE_FULL_ABORTED`（その日の full を取り直す）、静止区間の秒数が `QUIESCE_WINDOW_WARN_SECONDS` を超えた、`rejected_requests{kind=readonly_sql}` の増加、`deferred_writes_pending` が解除の後 5 分を過ぎても 0 にならない、`BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED` が 1 件でも出た（logout の失効・監査を失った）。
 - 既存: checkpoint の失敗と RPO 不達は `check-backup.sh`。`backup-health-monitoring.md` に「CRITICAL: 書込み静止の自動再開・FENCED・解除の失敗・停止口」と「WARN: full の中止の取り直し」の対応手順を足す。
 
 ## 14. 試験計画（Q12。U-4 決定済み）
@@ -830,7 +831,7 @@ CLAUDE.md は本 batch では変えない。
 
 ## 18. 変更する file と規模（見込み）
 
-- Java（main、新規 約 22）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLifecycleAnchor`（`dataSource` が依存する最小の bean）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。
+- Java（main、新規 約 22）: `com.ses.backup.quiesce` の `BackupQuiesceProperties`・`BackupQuiesceConfiguration`・`BackupWriteGate`・`BackupWritePermit`・`BackupQuiesceResponder`・`BackupQuiesceSignalRepository`・`BackupQuiesceControlConnectionPool`・`BackupQuiesceDeferredWrites`・`BackupWriteGateFilter`・`BackupQuiesceRequestClassifier`・`BackupQuiesceAwareDataSource`・`BackupQuiesceDataSourcePostProcessor`（DestructionAware を含む）・`BackupQuiesceDestructionOrderPostProcessor`（BeanFactoryPostProcessor）・`BackupQuiesceLifecycleAnchor`（`dataSource` が依存する最小の bean）・`BackupQuiesceLockProvider`・`BackupQuiesceTaskDecorator`・`BackupWriteQuiescedException`・`BackupQuiesceReadOnlyViolation`・`BackupQuiesceMetrics`・`BackupQuiesceProductionValidator`、`com.ses.config.ProductionBackupDdlFreezeFlywayCallback`、`com.ses.common.util.AuditedDownloadPaths`、`com.ses.common.jdbc.ConnectorJUrl`。実装で足した（spec の外の）class: `JdbcBackupQuiesceSignalRepository`（repository の interface と JDBC の実装を分けた。fake の試験のため）・`BackupQuiesceHosts`（host の解釈の純粋な関数）・`BackupQuiesceTicker`（2 つの専用 thread の包み）・`BackupQuiesceRejections`（503 の header・文言・判定の共通部品）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）、test の `com.ses.test.H2MySqlTimeFunctions`（H2 の `UTC_TIMESTAMP`・`CONNECTION_ID`）。
 - Java（main、変更 約 20）: `SchedulerLockConfig`・`AsyncConfig`・`SecurityConfig`（logout の handler）・`PersistentSessionServiceImpl`・`AuditLogServiceImpl`・`ApiAuditFilter`・`GlobalExceptionHandler`・`CustomErrorController`・`ImportJdbcReconnectGuard`・`ExternalApiErrorWriter`・`ExternalApiCorrelationFilter`・storage 層の約 9 class。
 - resources（約 8）、test（新規 約 22、変更 約 14）、ops/backup（新規 約 14、変更 約 10）、infra（3）、文書（約 11）。
 - 合計は約 122 file、`tasks.md` は 15 task。

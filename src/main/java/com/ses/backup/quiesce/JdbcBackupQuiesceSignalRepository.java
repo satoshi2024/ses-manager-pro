@@ -191,8 +191,11 @@ final class JdbcBackupQuiesceSignalRepository implements BackupQuiesceSignalRepo
 
     @Override
     public int purgeInstances(Duration retention, String ownInstanceId) {
+        // 停止口で動いていた行（DISABLED で STOPPED でない）は古さで消さない。DBA が確かめて手で STOPPED にするまで backup を
+        // 失敗させ続ける行のため（design.md §3.9・§5.3・§9.4。2a review P3-7）
         return control.update("DELETE FROM sys_backup_quiesce_instance WHERE last_beat_at < TIMESTAMPADD(SECOND, "
-                + (-retention.getSeconds()) + ", UTC_TIMESTAMP(6)) AND instance_id <> ?", ownInstanceId);
+                + (-retention.getSeconds()) + ", UTC_TIMESTAMP(6)) AND instance_id <> ? "
+                + "AND NOT (gate_state = 'DISABLED' AND status <> 'STOPPED')", ownInstanceId);
     }
 
     private static int queryTimeoutSeconds() {
