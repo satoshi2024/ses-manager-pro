@@ -11,7 +11,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Enumeration;
-import java.util.UUID;
 
 /** 公開APIのresponse correlation IDを全成功/error/rejectへ付与する。 */
 @Component
@@ -27,9 +26,7 @@ public class ExternalApiCorrelationFilter extends OncePerRequestFilter {
             return;
         }
         try {
-            String correlationId = UUID.randomUUID().toString();
-            request.setAttribute(ExternalApiErrorWriter.CORRELATION_ATTRIBUTE, correlationId);
-            response.setHeader("X-Correlation-ID", correlationId);
+            String correlationId = ExternalApiErrorWriter.assignCorrelationId(request, response);
             String supplied = singleHeader(request, "X-Correlation-ID");
             if (supplied != null && (supplied.length() < 16 || supplied.length() > 128
                     || !supplied.matches("[A-Za-z0-9._~-]+"))) {

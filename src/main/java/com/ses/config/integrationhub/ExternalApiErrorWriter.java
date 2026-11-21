@@ -1,6 +1,7 @@
 package com.ses.config.integrationhub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** 公開APIのallow-list error body。内部ApiResult、stack、SQLを再利用しない。 */
 public final class ExternalApiErrorWriter {
@@ -17,6 +19,18 @@ public final class ExternalApiErrorWriter {
     public static final String PRINCIPAL_ATTRIBUTE = "external.principal";
 
     private ExternalApiErrorWriter() {
+    }
+
+    /**
+     * 公開APIのcorrelation IDを新しく作り、request属性 {@link #CORRELATION_ATTRIBUTE} と応答header {@code X-Correlation-ID} へ
+     * 付ける。{@link ExternalApiCorrelationFilter} と、それより前で503を返すbackupの書込み静止のfilter（RB-QUIESCE D-P3-8）が
+     * 同じ作り方を使う。
+     */
+    public static String assignCorrelationId(HttpServletRequest request, HttpServletResponse response) {
+        String correlationId = UUID.randomUUID().toString();
+        request.setAttribute(CORRELATION_ATTRIBUTE, correlationId);
+        response.setHeader("X-Correlation-ID", correlationId);
+        return correlationId;
     }
 
     public static void write(HttpServletResponse response, ObjectMapper objectMapper,
@@ -67,6 +81,7 @@ public final class ExternalApiErrorWriter {
             case "RATE_LIMITED" -> "Rate limit exceeded";
             case "INBOUND_PAYLOAD_CONFLICT" -> "Inbound payload conflict";
             case "REQUEST_INVALID", "CURSOR_INVALID" -> "Invalid request";
+            case "BACKUP_QUIESCED" -> "Temporarily unavailable during backup";
             default -> "Request failed";
         };
     }

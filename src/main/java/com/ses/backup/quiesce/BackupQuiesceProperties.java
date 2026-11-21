@@ -132,6 +132,14 @@ public class BackupQuiesceProperties {
         return fullBackup ? drainTimeoutFull : drainTimeoutCheckpoint;
     }
 
+    /**
+     * 1 回の静止が続き得る最長（full と checkpoint の最大保持時間の長い方）。job の種類を知らない側（session の idle の緩和・
+     * scheduler の待ち・解除後の監査の時刻の検査）の上限に使う。
+     */
+    public Duration longestHold() {
+        return maxHoldFull.compareTo(maxHoldCheckpoint) >= 0 ? maxHoldFull : maxHoldCheckpoint;
+    }
+
     // ---------------------------------------------------------------- accessor
 
     public boolean isEnabled() {

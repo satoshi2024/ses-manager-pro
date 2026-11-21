@@ -1,5 +1,8 @@
 package com.ses.common.exception;
 
+import com.ses.backup.quiesce.BackupQuiesceRejections;
+import com.ses.backup.quiesce.BackupWriteGate;
+import com.ses.backup.quiesce.BackupWriteQuiescedException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
@@ -33,6 +36,50 @@ public class GlobalExceptionHandler {
     @Autowired
     private MessageSource messageSource;
 
+    /** backup の書込み静止の gate（RB-QUIESCE §6.4）。無い context では静止による 503 の変換をしない。 */
+    private BackupWriteGate backupWriteGate;
+
+    @Autowired(required = false)
+    public void setBackupWriteGate(BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /**
+     * backup の書込み静止の間に permit なしで書こうとした（必須の監査・uploads の変更等）。再試行できる 503 で返す
+     * （design.md §6.10。{@code Retry-After}・{@code X-SES-Error-Code: BACKUP_QUIESCED}）。
+     */
+    @ExceptionHandler(BackupWriteQuiescedException.class)
+    public ResponseEntity<ApiResult<Void>> handleBackupWriteQuiesced(BackupWriteQuiescedException e) {
+        return quiescedResponse(e);
+    }
+
+    /**
+     * 静止による拒否（{@link BackupWriteQuiescedException}、gate が書込みを許さない間の ERROR 1792）を 503 の応答にする。
+     * 静止による拒否でなければ null。業務例外・行 lock の競合・予期しない例外の handler の前で呼ぶ（最後の防線の変換）。
+     */
+    private ResponseEntity<ApiResult<Void>> quiescedResponseIfApplicable(Throwable e) {
+        return BackupQuiesceRejections.isQuiesceRejection(e, backupWriteGate) ? quiescedResponse(e) : null;
+    }
+
+    private ResponseEntity<ApiResult<Void>> quiescedResponse(Throwable e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, BackupQuiesceRejections.ERROR_CODE);
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
+        boolean explicit = BackupQuiesceRejections.findQuiescedException(e) != null;
+        if (explicit) {
+            log.info("backup の静止中のため書込みを 503 にしました: exceptionClass={} {}",
+                    LogRedaction.exceptionType(e), contextFields());
+        } else {
+            log.warn("errorCode=BACKUP_QUIESCE_READONLY_REJECTED backup の静止中に読取り専用の接続へ書こうとした要求を 503 に"
+                    + "しました: exceptionClass={} {}", LogRedaction.exceptionType(e), contextFields());
+        }
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(BackupQuiesceRejections.RETRY_AFTER_HEADER,
+                        Integer.toString(BackupQuiesceRejections.retryAfterSeconds(backupWriteGate)))
+                .header(BackupQuiesceRejections.ERROR_CODE_HEADER, BackupQuiesceRejections.ERROR_CODE)
+                .body(ApiResult.<Void>error(503,
+                        BackupQuiesceRejections.writeUnavailableMessage(messageSource, LocaleContextHolder.getLocale())));
+    }
+
     /**
      * 業務例外のハンドリング
      *
@@ -41,6 +88,10 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResult<Void>> handleBusinessException(BusinessException e) {
+        ResponseEntity<ApiResult<Void>> quiesced = quiescedResponseIfApplicable(e);
+        if (quiesced != null) {
+            return quiesced;
+        }
         int code = SafeErrorPolicy.safeHttpCode(e == null ? 500 : e.getCode());
         String message = SafeErrorPolicy.resolveBusinessMessage(e, messageSource, LocaleContextHolder.getLocale());
         // 相関IDのない単体呼出しでは、前回処理のMDC値を引き継がない。
@@ -82,6 +133,10 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(PessimisticLockingFailureException.class)
     public ResponseEntity<ApiResult<Void>> handleLockConflict(PessimisticLockingFailureException e) {
+        ResponseEntity<ApiResult<Void>> quiesced = quiescedResponseIfApplicable(e);
+        if (quiesced != null) {
+            return quiesced;
+        }
         CorrelationContext.put(CorrelationContext.ERROR_CODE, "LOCK_CONFLICT");
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
         log.warn("行lockの競合により処理を中断しました（再試行可能）: category=SYSTEM exceptionClass={} {}",
@@ -135,6 +190,10 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResult<Void>> handleException(Exception e) {
+        ResponseEntity<ApiResult<Void>> quiesced = quiescedResponseIfApplicable(e);
+        if (quiesced != null) {
+            return quiesced;
+        }
         CorrelationContext.put(CorrelationContext.ERROR_CODE, "SYSTEM_UNEXPECTED");
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
         log.error("システムエラー: category=SYSTEM exceptionClass={} detail={} {}",

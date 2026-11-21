@@ -93,6 +93,9 @@
   - **失敗/rollback:** Hikari の metric・health が消えたら包み方を直す。負荷の試験で 1 件でも漏れたら I-4 の実装を見直す（試験を緩めない）。
 
 - [ ] **BWQ-005 — HTTP の分類と 503（filter・例外・エラーページ・文言・session・logout・監査・外部 API）**
+  - **状態:** 実装・fast の試験は済み（commit は BWQ-005 の commit）。Demo は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2b）:** `BackupWriteGateFilter`（+35。WRITE・EXTERNAL は permit、LOGOUT は取れれば permit、chain 全体の 1792・`BackupWriteQuiescedException` を 503 へ）・`BackupQuiesceRequestClassifier`・`BackupWriteQuiescedException`・`BackupQuiesceRejections`（503 の header・文言・`Retry-After`）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）・`AuditedDownloadPaths`、gate の bean（`BackupQuiesceConfiguration`。破棄の callback を推定させない）。`AuditLogService.recordCaptured`（D4-P3-3: 呼出し元は `BackupQuiesceDeferredWrites` だけで `AuditLogMethodLengthGuardTest` が bytecode で固定、時刻は `[今 − 最長の保持時間 − 余裕, 今]`、余裕は 5 分＋checkpoint の最大保持時間）と `PersistentSessionService.captureCurrent`・`revokeCaptured`、U-14 の解除後の最初の touch は `UserSessionMapper.touchCarriedOver`（既存の `touch` は行の idle 期限で絞るため）。`t_audit_log` に IP の列が無いため、解除後の監査に IP は書けない（取っておく値から外した）。
 
   - **依存:** BWQ-002、BWQ-004
   - **対応要求:** BWQ-RQ-002（AC-002-01・05・06・08・09）

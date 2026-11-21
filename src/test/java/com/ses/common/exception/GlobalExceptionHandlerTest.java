@@ -275,4 +275,81 @@ class GlobalExceptionHandlerTest {
             CorrelationContext.clear();
         }
     }
+
+    // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-005）
+
+    private static com.ses.backup.quiesce.BackupWriteGate closingGate() {
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        com.ses.backup.quiesce.BackupQuiesceTestSupport.beginClosing(gate, 1);
+        return gate;
+    }
+
+    private static java.sql.SQLException readOnlyViolation() {
+        return new java.sql.SQLException("The MySQL server is running with the --read-only option", "25006", 1792);
+    }
+
+    @Test
+    void 静止中にBusinessExceptionに包まれた1792は再試行できる503にする() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        handler.setBackupWriteGate(closingGate());
+        org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", bundledMessageSource());
+        try {
+            var response = handler.handleBusinessException(
+                    new BusinessException(500, "保存に失敗しました", new RuntimeException(readOnlyViolation())));
+
+            assertEquals(503, response.getStatusCode().value());
+            assertEquals(503, response.getBody().getCode());
+            assertEquals("BACKUP_QUIESCED", response.getHeaders().getFirst("X-SES-Error-Code"));
+            assertEquals("10", response.getHeaders().getFirst("Retry-After"));
+            assertEquals("バックアップを取得しているため、一時的に更新を受け付けていません。しばらく待ってから再度お試しください。",
+                    response.getBody().getMessage());
+            assertEquals("BACKUP_QUIESCED", CorrelationContext.get(CorrelationContext.ERROR_CODE));
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void 静止中の1792は予期しない例外と行lockの競合の前でも503にし開いた後は従来どおり() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        com.ses.backup.quiesce.BackupWriteGate gate = closingGate();
+        handler.setBackupWriteGate(gate);
+        try {
+            assertEquals(503, handler.handleException(new IllegalStateException(readOnlyViolation()))
+                    .getStatusCode().value());
+            assertEquals(503, handler.handleLockConflict(new org.springframework.dao.CannotAcquireLockException(
+                    "lock", readOnlyViolation())).getStatusCode().value());
+
+            com.ses.backup.quiesce.BackupQuiesceTestSupport.reopen(gate, 1);
+            assertEquals(500, handler.handleException(new IllegalStateException(readOnlyViolation()))
+                    .getStatusCode().value());
+            assertEquals(500, handler.handleBusinessException(
+                    new BusinessException(500, "x", readOnlyViolation())).getStatusCode().value());
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void 静止の例外は包まれていてもgateが無くても503にし文言は利用者のlocaleに従う() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", bundledMessageSource());
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.ENGLISH);
+        try {
+            var direct = handler.handleBackupWriteQuiesced(
+                    new com.ses.backup.quiesce.BackupWriteQuiescedException("required-audit"));
+            assertEquals(503, direct.getStatusCode().value());
+            assertEquals("A backup is in progress, so updates are temporarily unavailable. Please wait a moment and try again.",
+                    direct.getBody().getMessage());
+
+            var wrapped = handler.handleException(new RuntimeException(
+                    new com.ses.backup.quiesce.BackupWriteQuiescedException("required-audit")));
+            assertEquals(503, wrapped.getStatusCode().value());
+            assertEquals("BACKUP_QUIESCED", wrapped.getHeaders().getFirst("X-SES-Error-Code"));
+        } finally {
+            org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+            CorrelationContext.clear();
+        }
+    }
 }

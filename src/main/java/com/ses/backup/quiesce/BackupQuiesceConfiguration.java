@@ -29,6 +29,15 @@ public class BackupQuiesceConfiguration {
         return new BackupQuiesceLifecycleAnchor(dataSourceProperties, properties, environment);
     }
 
+    /**
+     * gate を参照する側（HTTP の filter・監査・session・logout・scheduler・async・storage）が引く bean。実体は anchor の gate。
+     * gate の {@code shutdown()} を破棄の callback として推定させない（SHUTDOWN に入る所は §6.11 の 2 つだけ）。
+     */
+    @Bean(destroyMethod = "")
+    static BackupWriteGate backupWriteGate(BackupQuiesceLifecycleAnchor anchor) {
+        return anchor.gate();
+    }
+
     @Bean
     static BackupQuiesceDestructionOrderPostProcessor backupQuiesceDestructionOrderPostProcessor() {
         return new BackupQuiesceDestructionOrderPostProcessor();

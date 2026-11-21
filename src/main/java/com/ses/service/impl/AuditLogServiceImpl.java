@@ -2,22 +2,27 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.backup.quiesce.BackupQuiesceMetrics;
+import com.ses.backup.quiesce.BackupQuiesceProperties;
+import com.ses.backup.quiesce.BackupWriteGate;
+import com.ses.backup.quiesce.BackupWriteQuiescedException;
 import com.ses.common.audit.ActorType;
 import com.ses.common.audit.ActorAttribution;
 import com.ses.common.audit.ConfirmationSource;
 import com.ses.entity.AuditLog;
-import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
 import com.ses.mapper.AuditLogMapper;
 import com.ses.service.AuditLogService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -27,6 +32,35 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     private final AuditLogMapper auditLogMapper;
 
+    /**
+     * 解除後の監査（{@link #recordCaptured}）の時刻の検査の余裕。静止の最長の保持時間に足す: 解除の後に一覧を executor へ
+     * 投入するまでの待ち・DB の失敗の 3 回の繰返し（接続の取得の待ちは最長 30 秒）・時計の補正に 5 分、書いている途中で
+     * 次の checkpoint の静止が始まり残りが次の解除へ回る場合（D3-P3-5）にその checkpoint の最大保持時間。
+     */
+    static final Duration CAPTURED_MARGIN_BASE = Duration.ofMinutes(5);
+
+    private BackupWriteGate backupWriteGate;
+    private BackupQuiesceProperties backupQuiesceProperties = new BackupQuiesceProperties();
+    private BackupQuiesceMetrics backupQuiesceMetrics;
+
+    /** backup の書込み静止の gate（RB-QUIESCE U-9）。無い context（slice の試験等）では常に書く。 */
+    @Autowired(required = false)
+    public void setBackupWriteGate(BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceProperties(BackupQuiesceProperties backupQuiesceProperties) {
+        if (backupQuiesceProperties != null) {
+            this.backupQuiesceProperties = backupQuiesceProperties;
+        }
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceMetrics(BackupQuiesceMetrics backupQuiesceMetrics) {
+        this.backupQuiesceMetrics = backupQuiesceMetrics;
+    }
+
     @Override
     public void record(String username, String method, String uri, int status) {
         record(username, method, uri, status, "ses-manager", status >= 200 && status < 400);
@@ -34,17 +68,19 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public void record(String username, String method, String uri, int status, String applicationCode, boolean successFlag) {
+        if (writesBlocked()) {
+            // backup の書込み静止の間（permit の無い thread）は DB へ書かず、同じ内容を WARN に残す（U-9。design.md §6.4）
+            log.warn("errorCode=BACKUP_QUIESCE_AUDIT_DEFERRED backup の静止中のため監査ログを DB へ書かず log に残しました: "
+                            + "user={} method={} uri={} status={} applicationCode={} success={}",
+                    username == null ? "-" : username, method, uri, status, applicationCode, successFlag);
+            if (backupQuiesceMetrics != null) {
+                backupQuiesceMetrics.skippedWrite("best_effort_audit");
+            }
+            return;
+        }
         try {
-            AuditLog entry = new AuditLog();
-            entry.setUsername(username);
-            entry.setMethod(method);
-            entry.setUri(uri);
-            entry.setStatus(status);
-            entry.setApplicationCode(applicationCode);
-            entry.setSuccessFlag(successFlag);
-            applyRequestAttribution(entry);
-            applyContext(entry);
-            entry.setCreatedAt(LocalDateTime.now());
+            AuditLog entry = newEntry(username, method, uri, status, applicationCode, successFlag);
+            AuditLogService.CapturedContext.capture().applyTo(entry);
             auditLogMapper.insert(entry);
         } catch (Exception e) {
             // 監査ログの永続化失敗は本来のAPI処理に影響させない
@@ -56,6 +92,47 @@ public class AuditLogServiceImpl implements AuditLogService {
     @Override
     public void recordRequired(String username, String method, String uri, int status,
                                String applicationCode, boolean successFlag) {
+        if (writesBlocked()) {
+            // 必須の監査は書けなければ操作も止める。静止中は 503 にする（design.md §6.4）
+            throw new BackupWriteQuiescedException("required-audit");
+        }
+        AuditLog entry = newEntry(username, method, uri, status, applicationCode, successFlag);
+        AuditLogService.CapturedContext.capture().applyTo(entry);
+        if (auditLogMapper.insert(entry) != 1) {
+            throw new IllegalStateException("重要security監査を永続化できません");
+        }
+    }
+
+    /**
+     * 解除後の書込みの一覧が、静止中の logout の監査を logout の時点の値で書く（U-8。design.md §6.13。D4-P3-3）。
+     *
+     * <p>取っておいた時刻は {@link #record} と同じ時計（JVM の時刻帯の {@link LocalDateTime#now()}）で
+     * {@code [今 − 静止の最長の保持時間 − 余裕, 今]} に収まる場合だけ書く。範囲の外（古すぎる・未来）は書かずに内容つきの WARN を
+     * 残す（過去の時刻の監査の行を任意に作れないようにする）。余裕は {@link #CAPTURED_MARGIN_BASE} と checkpoint の最大保持時間。
+     * DB の失敗は例外で返す（呼出し元が繰り返す）。
+     */
+    @Override
+    public void recordCaptured(String username, String method, String uri, int status, String applicationCode,
+                               boolean successFlag, AuditLogService.CapturedContext context) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime createdAt = context == null ? null : context.createdAt();
+        LocalDateTime oldest = now.minus(backupQuiesceProperties.longestHold())
+                .minus(CAPTURED_MARGIN_BASE).minus(backupQuiesceProperties.getMaxHoldCheckpoint());
+        if (createdAt == null || createdAt.isAfter(now) || createdAt.isBefore(oldest)) {
+            log.warn("errorCode=BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED 解除後の監査の時刻が許す範囲（{} 〜 {}）の外のため書きません: "
+                            + "user={} method={} uri={} status={} applicationCode={} createdAt={}",
+                    oldest, now, username == null ? "-" : username, method, uri, status, applicationCode, createdAt);
+            return;
+        }
+        AuditLog entry = newEntry(username, method, uri, status, applicationCode, successFlag);
+        context.applyTo(entry);
+        if (auditLogMapper.insert(entry) != 1) {
+            throw new IllegalStateException("解除後の監査を永続化できません");
+        }
+    }
+
+    private static AuditLog newEntry(String username, String method, String uri, int status, String applicationCode,
+                                     boolean successFlag) {
         AuditLog entry = new AuditLog();
         entry.setUsername(username);
         entry.setMethod(method);
@@ -63,12 +140,12 @@ public class AuditLogServiceImpl implements AuditLogService {
         entry.setStatus(status);
         entry.setApplicationCode(applicationCode);
         entry.setSuccessFlag(successFlag);
-        applyRequestAttribution(entry);
-        applyContext(entry);
-        entry.setCreatedAt(LocalDateTime.now());
-        if (auditLogMapper.insert(entry) != 1) {
-            throw new IllegalStateException("重要security監査を永続化できません");
-        }
+        return entry;
+    }
+
+    private boolean writesBlocked() {
+        BackupWriteGate gate = backupWriteGate;
+        return gate != null && gate.writesBlockedForCurrentThread();
     }
 
     @Override
@@ -110,15 +187,6 @@ public class AuditLogServiceImpl implements AuditLogService {
         recordDomainEventRequired(entry);
     }
 
-    private void applyRequestAttribution(AuditLog entry) {
-        ActorAttribution actor = com.ses.common.audit.ExecutionActorContext.resolve();
-        entry.setActorType(actor.actorType().name());
-        entry.setConfirmationSource(actor.confirmationSource().name());
-        entry.setHumanUserId(actor.humanUserId());
-        entry.setCorrelationId(actor.correlationId());
-        entry.setIdempotencyKey(actor.idempotencyKey());
-    }
-
     @Override
     public Page<AuditLog> page(long current, long size, String username, String method) {
         Page<AuditLog> page = new Page<>(current, size);
@@ -131,19 +199,5 @@ public class AuditLogServiceImpl implements AuditLogService {
         }
         qw.orderByDesc(AuditLog::getCreatedAt);
         return auditLogMapper.selectPage(page, qw);
-    }
-
-    private void applyContext(AuditLog entry) {
-        String correlationId = CorrelationContext.get(CorrelationContext.CORRELATION_ID);
-        if (correlationId != null) entry.setCorrelationId(correlationId);
-        if (entry.getIdempotencyKey() == null) {
-            entry.setIdempotencyKey(CorrelationContext.get(CorrelationContext.PROVIDER_OPERATION_ID));
-        }
-        entry.setInvoiceId(CorrelationContext.get(CorrelationContext.INVOICE_ID));
-        entry.setDigitalInvoiceId(CorrelationContext.get(CorrelationContext.DIGITAL_INVOICE_ID));
-        entry.setJobId(CorrelationContext.get(CorrelationContext.JOB_ID));
-        entry.setProviderOperationId(CorrelationContext.get(CorrelationContext.PROVIDER_OPERATION_ID));
-        entry.setErrorCode(CorrelationContext.get(CorrelationContext.ERROR_CODE));
-        entry.setErrorCategory(CorrelationContext.get(CorrelationContext.ERROR_CATEGORY));
     }
 }

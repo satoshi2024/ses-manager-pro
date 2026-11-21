@@ -1,5 +1,7 @@
 package com.ses.backup.quiesce;
 
+import com.ses.service.AuditLogService;
+import com.ses.service.security.PersistentSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +40,51 @@ public final class BackupQuiesceDeferredWrites {
     private final Deque<DeferredWrite> queue = new ArrayDeque<>();
     private final AtomicBoolean flushing = new AtomicBoolean();
     private final AtomicLong dropped = new AtomicLong();
+
+    /**
+     * 静止中の logout の {@code t_user_session} の失効（U-8）。値は logout の時点で取っておいたもの
+     * （{@link PersistentSessionService#captureCurrent}）。
+     */
+    public static DeferredWrite logoutRevocation(PersistentSessionService sessions,
+                                                 PersistentSessionService.CapturedRevocation captured) {
+        Objects.requireNonNull(sessions, "sessions");
+        Objects.requireNonNull(captured, "captured");
+        return new DeferredWrite() {
+            @Override
+            public String summary() {
+                return captured.summary();
+            }
+
+            @Override
+            public void write() {
+                sessions.revokeCaptured(captured);
+            }
+        };
+    }
+
+    /**
+     * 静止中の logout の監査（{@code LOGOUT}。U-8）。{@link AuditLogService#recordCaptured} を呼ぶのはこの一覧だけ
+     * （{@code AuditLogMethodLengthGuardTest} が呼出し元を固定する）。値は logout の時点で取っておいたもの。
+     *
+     * @param userId log の要約に出す利用者の ID（login ID・氏名は出さない）
+     */
+    public static DeferredWrite logoutAudit(AuditLogService audit, Long userId, String username, String method,
+                                            String uri, int status, String applicationCode, boolean successFlag,
+                                            AuditLogService.CapturedContext context) {
+        Objects.requireNonNull(audit, "audit");
+        Objects.requireNonNull(context, "context");
+        return new DeferredWrite() {
+            @Override
+            public String summary() {
+                return "logout の監査（user=" + (userId == null ? "-" : userId) + "、時刻=" + context.createdAt() + "）";
+            }
+
+            @Override
+            public void write() {
+                audit.recordCaptured(username, method, uri, status, applicationCode, successFlag, context);
+            }
+        };
+    }
 
     public BackupQuiesceDeferredWrites(int capacity) {
         if (capacity < 1) {

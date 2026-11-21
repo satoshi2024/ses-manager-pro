@@ -1,0 +1,301 @@
+package com.ses.backup.quiesce;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.LoginUser;
+import com.ses.config.ProductionBootstrapMode;
+import com.ses.config.feature.FeatureSwitchFilter;
+import com.ses.entity.SysUser;
+import com.ses.service.security.PersistentSessionService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * RB-QUIESCE BWQ-005（BWQ-AC-002-01・05・06・08・09）: backup の書込み静止の間の HTTP の扱いを、全体の context と全ての filter
+ * chain（社内・portal・外部 API）で確かめる。
+ *
+ * <p>gate は試験の gate（{@link Primary}。ARMED・prod 以外、時計を止めて FENCED にしない）に置き換え、信号表を通さずに試験が
+ * 開閉する。業務の DataSource の読取り専用（BWQ-004）は試験の対象外（静止応答の anchor は test profile の INERT のまま）。
+ * 解除後の書込みは、状態機械の代わりに試験の thread で流す（試験の transaction の中で書く）。
+ */
+@SpringBootTest(properties = "app.features.nf10.enabled=false")
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+@Transactional
+@Import(BackupWriteGateMockMvcTest.TestGateConfiguration.class)
+@Timeout(value = 120, unit = TimeUnit.SECONDS)
+class BackupWriteGateMockMvcTest {
+
+    private static final String QUIESCED_JA =
+            "バックアップを取得しているため、一時的に更新を受け付けていません。しばらく待ってから再度お試しください。";
+
+    @TestConfiguration
+    static class TestGateConfiguration {
+        @Bean(destroyMethod = "")
+        @Primary
+        BackupWriteGate testBackupWriteGate() {
+            return BackupQuiesceTestSupport.openGate(false, () -> 0L, Clock.systemUTC());
+        }
+    }
+
+    @Autowired
+    private MockMvc mockMvc;
+    @Autowired
+    private BackupWriteGate gate;
+    @Autowired
+    private JdbcTemplate jdbc;
+    @Autowired
+    private MeterRegistry registry;
+    @Autowired
+    private PersistentSessionService persistentSessionService;
+
+    private final ObjectMapper json = new ObjectMapper();
+
+    @AfterEach
+    void reopenGate() {
+        long held = gate.holdingRequestId();
+        if (held >= 0) {
+            BackupQuiesceTestSupport.reopen(gate, held);
+        }
+        SecurityContextHolder.clearContext();
+    }
+
+    private void closeGate() {
+        BackupQuiesceTestSupport.close(gate, 1, Duration.ofMinutes(5));
+    }
+
+    private double counter(String name, String tag, String value) {
+        Counter counter = registry.find(name).tag(tag, value).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    @Test
+    void filterの順はFeatureSwitchFilterの後でSpringSecurityより前() {
+        assertThat(BackupWriteGateFilter.ORDER).isEqualTo(FeatureSwitchFilter.ORDER + 5)
+                .isLessThan(SecurityProperties.DEFAULT_FILTER_ORDER);
+        assertThat(gate.mode()).isEqualTo(BackupWriteGate.Mode.ARMED);
+    }
+
+    @Test
+    void 静止中のAPIの更新は認証より前に503のJSONとheaderになり業務の表は変わらない() throws Exception {
+        closeGate();
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM t_engineer", Integer.class);
+
+        mockMvc.perform(post("/api/engineers").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"静止\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("X-SES-Error-Code", "BACKUP_QUIESCED"))
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.code").value(503))
+                .andExpect(jsonPath("$.message").value(QUIESCED_JA));
+        mockMvc.perform(post("/api/engineers").cookie(new Cookie("SES_LOCALE", "en"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value(
+                        "A backup is in progress, so updates are temporarily unavailable. Please wait a moment and try again."));
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_engineer", Integer.class)).isEqualTo(before);
+        int retryAfter = Integer.parseInt(mockMvc.perform(post("/api/engineers").content("{}"))
+                .andReturn().getResponse().getHeader("Retry-After"));
+        assertThat(retryAfter).isBetween(5, 60);
+    }
+
+    @Test
+    void 静止中の画面の更新は503のエラーページへ委ねdownloadとbootstrapのsessionも503にする() throws Exception {
+        closeGate();
+        double downloads = counter(BackupQuiesceMetrics.REJECTED, "kind", "download");
+
+        mockMvc.perform(post("/engineer/save").header("Accept", "text/html").param("name", "x"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(request().attribute(BackupWriteGate.REJECTED_ATTRIBUTE, Boolean.TRUE))
+                .andExpect(header().string("X-SES-Error-Code", "BACKUP_QUIESCED"));
+        mockMvc.perform(get("/api/files/report.pdf"))
+                .andExpect(status().isServiceUnavailable());
+        MockHttpSession bootstrap = new MockHttpSession();
+        bootstrap.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+        mockMvc.perform(get("/dashboard").session(bootstrap).header("Accept", "text/html"))
+                .andExpect(status().isServiceUnavailable());
+
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "download")).isEqualTo(downloads + 1);
+    }
+
+    @Test
+    void 静止中のloginのPOSTは失敗の回数を数える前に503になる() throws Exception {
+        closeGate();
+        Integer before = jdbc.queryForObject("SELECT failed_count FROM sys_user WHERE username = 'admin'", Integer.class);
+
+        mockMvc.perform(post("/login").param("username", "admin").param("password", "wrong-password")
+                        .header("Accept", "text/html"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(request().attribute(BackupWriteGate.REJECTED_ATTRIBUTE, Boolean.TRUE));
+
+        assertThat(jdbc.queryForObject("SELECT failed_count FROM sys_user WHERE username = 'admin'", Integer.class))
+                .isEqualTo(before);
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 静止中も参照と静的資源とactuatorは通る() throws Exception {
+        closeGate();
+
+        mockMvc.perform(get("/api/engineers")).andExpect(status().isOk());
+        mockMvc.perform(get("/css/common.css")).andExpect(status().isOk());
+        assertThat(mockMvc.perform(get("/actuator/health/readiness")).andReturn().getResponse().getStatus())
+                .isNotEqualTo(503);
+        assertThat(mockMvc.perform(get("/actuator/prometheus")).andReturn().getResponse().getStatus())
+                .isNotEqualTo(503);
+    }
+
+    @Test
+    void 静止中のportalの更新とlogoutは503でportalのsessionは変わらない() throws Exception {
+        closeGate();
+        Integer sessions = jdbc.queryForObject("SELECT COUNT(*) FROM t_portal_session WHERE revoked_at IS NULL",
+                Integer.class);
+
+        mockMvc.perform(post("/api/portal/auth/logout").cookie(new Cookie("SES_PORTAL_SESSION", "token")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503));
+        mockMvc.perform(post("/api/portal/auth/login").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isServiceUnavailable());
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_portal_session WHERE revoked_at IS NULL",
+                Integer.class)).isEqualTo(sessions);
+    }
+
+    @Test
+    void 静止中の外部APIはExternalApiErrorWriterの503で監査行を書かず抑止のmetricを数える() throws Exception {
+        closeGate();
+        Integer audits = jdbc.queryForObject("SELECT COUNT(*) FROM t_external_api_audit", Integer.class);
+        double suppressed = counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED");
+
+        MvcResult result = mockMvc.perform(get("/external-api/v1/projects"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().exists("Retry-After"))
+                .andReturn();
+
+        JsonNode body = json.readTree(result.getResponse().getContentAsString());
+        assertThat(body.get("code").asText()).isEqualTo("BACKUP_QUIESCED");
+        assertThat(body.get("retryable").asBoolean()).isTrue();
+        assertThat(body.get("correlationId").asText()).isEqualTo(result.getResponse().getHeader("X-Correlation-ID"))
+                .hasSizeGreaterThanOrEqualTo(16);
+        assertThat(body.has("data")).isFalse();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_external_api_audit", Integer.class)).isEqualTo(audits);
+        assertThat(counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED"))
+                .isEqualTo(suppressed + 1);
+    }
+
+    @Test
+    void OFFの機能は静止中も404のまま() throws Exception {
+        closeGate();
+
+        mockMvc.perform(post("/api/management-reports").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 開いたgateでは従来どおりCSRFと認証に進む() throws Exception {
+        // 静止していなければ 503 にせず、従来どおり CSRF（認証より前）・認証の判定に進む
+        mockMvc.perform(post("/api/engineers").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/files/report.pdf")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 静止中のlogoutは302で終わり同じsessionは使えず解除の後にlogoutの時点の値で失効と監査を書く() throws Exception {
+        Map<String, Object> admin = jdbc.queryForMap("SELECT id, username FROM sys_user WHERE username = 'admin'");
+        SysUser user = new SysUser();
+        user.setId(((Number) admin.get("ID")).longValue());
+        user.setUsername("admin");
+        user.setStatus(1);
+        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(
+                new LoginUser(user, List.of(new SimpleGrantedAuthority("ROLE_管理者"))), null,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        MockHttpSession session = new MockHttpSession();
+        MockHttpServletRequest login = new MockHttpServletRequest();
+        login.setSession(session);
+        SecurityContextHolder.getContext().setAuthentication(token);
+        persistentSessionService.register(login, token);
+        SecurityContextHolder.clearContext();
+        String hash = (String) session.getAttribute(PersistentSessionService.SESSION_HASH_ATTRIBUTE);
+        assertThat(hash).isNotBlank();
+
+        closeGate();
+        LocalDateTime before = LocalDateTime.now().minusSeconds(1);
+        MvcResult logout = mockMvc.perform(post("/logout").session(session).with(authentication(token)).with(csrf()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", "/login?logout"))
+                .andReturn();
+        LocalDateTime after = LocalDateTime.now().plusSeconds(1);
+        String correlationId = logout.getResponse().getHeader("X-Correlation-ID");
+
+        assertThat(session.isInvalid()).as("HTTP session は直ちに無効").isTrue();
+        mockMvc.perform(get("/api/engineers").session(session)).andExpect(status().isUnauthorized());
+        assertThat(jdbc.queryForObject("SELECT revoked_at FROM t_user_session WHERE session_id_hash = ?",
+                LocalDateTime.class, hash)).as("静止中は失効を書かない").isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_audit_log WHERE application_code = 'LOGOUT' "
+                + "AND correlation_id = ?", Integer.class, correlationId)).isZero();
+        assertThat(gate.deferredWrites().pending()).isEqualTo(2);
+
+        Thread.sleep(2100);
+        BackupQuiesceTestSupport.reopen(gate, 1);
+        assertThat(gate.deferredWrites().flush(gate)).isEqualTo(2);
+
+        Map<String, Object> revoked = jdbc.queryForMap(
+                "SELECT revoked_at, revoke_reason FROM t_user_session WHERE session_id_hash = ?", hash);
+        assertThat(revoked.get("REVOKE_REASON")).isEqualTo("LOGOUT");
+        assertThat(toLocalDateTime(revoked.get("REVOKED_AT"))).isBetween(before, after);
+        Map<String, Object> audit = jdbc.queryForMap("SELECT created_at, username, method, status FROM t_audit_log "
+                + "WHERE application_code = 'LOGOUT' AND correlation_id = ?", correlationId);
+        assertThat(toLocalDateTime(audit.get("CREATED_AT"))).as("監査の時刻は logout の時点").isBetween(before, after);
+        assertThat(audit.get("USERNAME")).isEqualTo("admin");
+        assertThat(audit.get("METHOD")).isEqualTo("AUTH");
+        assertThat(((Number) audit.get("STATUS")).intValue()).isEqualTo(302);
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof LocalDateTime time) {
+            return time;
+        }
+        return ((java.sql.Timestamp) value).toLocalDateTime();
+    }
+}

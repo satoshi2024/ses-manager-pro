@@ -43,6 +43,12 @@ public final class BackupWriteGate {
 
     private static final Logger log = LoggerFactory.getLogger(BackupWriteGate.class);
 
+    /**
+     * 静止中の画面の要求を 503 にした印の request 属性（§6.10）。{@code CustomErrorController} は、この属性があれば静止中の
+     * 文言と icon でエラーページを描く。
+     */
+    public static final String REJECTED_ATTRIBUTE = BackupWriteGate.class.getName() + ".REJECTED";
+
     /** gate の状態（instance の行の {@code gate_state}、metric {@code ses_backup_quiesce_gate_state} の値）。 */
     public enum State {
         UNARMED(0), OPEN(1), CLOSING(2), CLOSED(3), FENCED(4), SHUTDOWN(5), DISABLED(6);
@@ -243,6 +249,15 @@ public final class BackupWriteGate {
 
     public boolean currentThreadHoldsPermit() {
         return !boundStack().isEmpty();
+    }
+
+    /**
+     * 呼んだ thread が今書いてはならないか（gate が OPEN・DISABLED でなく、この thread が permit を持たない）。prod 以外の
+     * UNARMED と INERT（test profile）では false。session の最終利用の省略・best-effort の監査の省略・logout の後回し・
+     * 必須の監査の拒否の判定に使う（§6.4・§6.13）。
+     */
+    public boolean writesBlockedForCurrentThread() {
+        return !allowsNewPermits() && !currentThreadHoldsPermit();
     }
 
     /** 呼んだ thread が持つ permit を全て返す（停止の入口。§6.11）。 */

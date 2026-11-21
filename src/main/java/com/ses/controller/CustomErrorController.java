@@ -1,8 +1,14 @@
 package com.ses.controller;
 
+import com.ses.backup.quiesce.BackupQuiesceRejections;
+import com.ses.backup.quiesce.BackupWriteGate;
 import com.ses.common.result.ApiResult;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.stereotype.Controller;
@@ -21,21 +27,44 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @Controller
 public class CustomErrorController implements ErrorController {
 
+    private final ObjectProvider<MessageSource> messageSource;
+
+    /** 単体試験用（静止中の文言は日本語の固定文言になる）。 */
+    public CustomErrorController() {
+        this(null);
+    }
+
+    @Autowired
+    public CustomErrorController(ObjectProvider<MessageSource> messageSource) {
+        this.messageSource = messageSource;
+    }
+
     @RequestMapping("/error")
     public Object handleError(HttpServletRequest request, Model model) {
         int status = resolveStatus(request);
         String requestUri = attr(request, RequestDispatcher.ERROR_REQUEST_URI);
-        String message = messageFor(status);
+        // backup の書込み静止で 503 にした画面の要求（RB-QUIESCE §6.10）は、静止中の文言を利用者の locale で出す
+        boolean quiesced = status == 503 && Boolean.TRUE.equals(request.getAttribute(BackupWriteGate.REJECTED_ATTRIBUTE));
+        MessageSource source = messageSource == null ? null : messageSource.getIfAvailable();
+        String message = quiesced
+                ? BackupQuiesceRejections.message(BackupQuiesceRejections.PAGE_MESSAGE_KEY,
+                        BackupQuiesceRejections.PAGE_MESSAGE_FALLBACK, source, LocaleContextHolder.getLocale())
+                : messageFor(status);
 
         // API / AJAX にはJSONを返す
         if (isJsonRequest(request, requestUri)) {
-            return ResponseEntity.status(status).body(ApiResult.error(status, message));
+            return ResponseEntity.status(status).body(ApiResult.error(status, quiesced
+                    ? BackupQuiesceRejections.writeUnavailableMessage(source, LocaleContextHolder.getLocale())
+                    : message));
         }
 
         model.addAttribute("status", status);
-        model.addAttribute("title", titleFor(status));
+        model.addAttribute("title", quiesced
+                ? BackupQuiesceRejections.message(BackupQuiesceRejections.PAGE_TITLE_KEY,
+                        BackupQuiesceRejections.PAGE_TITLE_FALLBACK, source, LocaleContextHolder.getLocale())
+                : titleFor(status));
         model.addAttribute("message", message);
-        model.addAttribute("icon", iconFor(status));
+        model.addAttribute("icon", quiesced ? BackupQuiesceRejections.PAGE_ICON : iconFor(status));
         return "error";
     }
 
