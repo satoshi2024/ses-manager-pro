@@ -34,6 +34,11 @@ public final class BackupQuiesceLockProvider implements LockProvider {
     private static final Logger log = LoggerFactory.getLogger(BackupQuiesceLockProvider.class);
     /** gate の状態を見直す間隔の上限（{@link BackupWriteGate#awaitWritable} は手元の期限・heartbeat の回復を通知しない）。 */
     private static final Duration WAIT_SLICE = Duration.ofSeconds(1);
+    /**
+     * 待った後の lock の設定の開始時刻。@SchedulerLock の設定と同じ ShedLock の JVM の時計（ミリ秒に切り捨て）。SQL の時刻の関数では
+     * ない（信号表の SQL の時刻の規則 {@code BackupQuiesceControlPoolUsageTest} の対象外）。
+     */
+    private static final java.util.function.Supplier<java.time.Instant> LOCK_CLOCK = ClockProvider::now;
 
     private final LockProvider delegate;
     private final Supplier<BackupWriteGate> gate;
@@ -66,7 +71,7 @@ public final class BackupQuiesceLockProvider implements LockProvider {
             if (permit == null) {
                 return Optional.empty();
             }
-            effective = new LockConfiguration(ClockProvider.now(), configuration.getName(),
+            effective = new LockConfiguration(LOCK_CLOCK.get(), configuration.getName(),
                     configuration.getLockAtMostFor(), configuration.getLockAtLeastFor());
         }
         try {
