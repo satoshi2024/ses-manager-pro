@@ -93,7 +93,7 @@
   - **失敗/rollback:** Hikari の metric・health が消えたら包み方を直す。負荷の試験で 1 件でも漏れたら I-4 の実装を見直す（試験を緩めない）。
 
 - [ ] **BWQ-005 — HTTP の分類と 503（filter・例外・エラーページ・文言・session・logout・監査・外部 API）**
-  - **状態:** 実装・fast の試験は済み（commit は BWQ-005 の commit）。Demo は Runner 待ち。
+  - **状態:** 実装・fast の試験は済み（commit `b47ee2d2`）。Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGateFilter`（+35。WRITE・EXTERNAL は permit、LOGOUT は取れれば permit、chain 全体の 1792・`BackupWriteQuiescedException` を 503 へ）・`BackupQuiesceRequestClassifier`・`BackupWriteQuiescedException`・`BackupQuiesceRejections`（503 の header・文言・`Retry-After`）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）・`AuditedDownloadPaths`、gate の bean（`BackupQuiesceConfiguration`。破棄の callback を推定させない）。`AuditLogService.recordCaptured`（D4-P3-3: 呼出し元は `BackupQuiesceDeferredWrites` だけで `AuditLogMethodLengthGuardTest` が bytecode で固定、時刻は `[今 − 最長の保持時間 − 余裕, 今]`、余裕は 5 分＋checkpoint の最大保持時間）と `PersistentSessionService.captureCurrent`・`revokeCaptured`、U-14 の解除後の最初の touch は `UserSessionMapper.touchCarriedOver`（既存の `touch` は行の idle 期限で絞るため）。`t_audit_log` に IP の列が無いため、解除後の監査に IP は書けない（取っておく値から外した）。
 
@@ -115,7 +115,7 @@
   - **失敗/rollback:** 既存の filter の順を変えない。503 の body が HTML になる経路があれば `CustomErrorController` の JSON 判定を見直す。
 
 - [ ] **BWQ-006 — scheduler・async・起動時処理の接続**
-  - **状態:** 実装・fast の試験は済み（commit は BWQ-006 の commit）。Demo は Runner 待ち。
+  - **状態:** 実装・fast の試験は済み（commit `3ee708cd`、走査の規則に当たった時計の呼出しの修正 `8fc0b1a3`）。Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2b）:** `BackupQuiesceLockProvider`（`SchedulerLockConfig` の provider を包む。待った時は lock の設定の開始時刻を取り直す。待ちの上限は gate の単調時計で最長の保持時間）・`BackupQuiesceTaskDecorator`（`AsyncConfig`。`CallerRunsPolicy` と同じ拒否の handler で、executor の停止の後に捨てた task の permit を返す）。2a review P3-4: 状態機械の tick の中で `CallerRunsPolicy` が実行しかけた投入は実行せず「受け付けなかった」として次の tick へ回す。解除後の書込みは flush の thread が async の permit を持つため、gate が書込みを許さなければ入れ子でも書かずに戻す。`SchedulingDisabledDrainTest` の走査に `SmartInitializingSingleton`・`DisposableBean`・`DestructionAwareBeanPostProcessor`（com.ses の class が callback を実装したものだけ）を足し、既存の5件（`ProductionSchemaVersionGuard`・NF07 の4件）と静止応答の4件を理由つきで登録した。
 
@@ -132,7 +132,7 @@
   - **失敗/rollback:** 待機が最大保持時間を超えないことを確かめる。
 
 - [ ] **BWQ-015 — uploads の最後の防線（storage 層の確認と一覧の試験）**
-  - **状態:** 実装・fast の試験は済み（commit は BWQ-015 の commit）。Demo は Runner 待ち。
+  - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGate.assertUploadsMutationAllowed`（prod の UNARMED を含め、書込みを許さず permit が無ければ `BackupWriteQuiescedException`。filter の metric は `uploads`）。assert を置いた入口: `FileStorageServiceImpl`（保存・削除・再 scan）、`LocalDocumentStorage`（put・promote・delete・deleteStrict）、`ContractDocumentServiceImpl.create`（PDF）、`ImportStageReconciliationLedger`（write・remove）、`LegacyUploadMigrationService.migrate`、`FileCleanupServiceImpl.cleanupOrphanFiles`、一覧の試験で見つけた `ImportRawTempFileStore`（create は assert、deleteOrReport は「例外を投げない」契約のため静止中は消さずに孤児清掃へ委ねる）。`UploadsMutationInventoryTest` は 40 件（MUTATES 23・DIRECTORY_ONLY 9・OUTSIDE 8）を照合し、MUTATES は guard の method が gate の判定を呼ぶことも確かめる。`DocumentServiceImpl`・CloudSign の一時 file と NF01 の preflight の CLI は upload root の外。
 
