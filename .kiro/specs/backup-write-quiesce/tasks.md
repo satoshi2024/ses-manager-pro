@@ -30,7 +30,9 @@
   - **Demo:** local の MySQL 8.4 の空の DB で `mvn spring-boot:run`（dev）を起動し、`SHOW CREATE TABLE sys_backup_quiesce_request\G` 等で 3 表と生成列を確かめ、`flyway_schema_history` の最大が 202 であることを見る。
   - **失敗/rollback:** 版番号が衝突したら上の空き番号へ振り直す（空き番号を埋めない）。適用済みの migration を書き換えない。
 
-- [ ] **BWQ-002 — 書込み gate と設定（core）**
+- [x] **BWQ-002 — 書込み gate と設定（core）**
+
+  - **実装の記録（第 2 段階 2a）:** `BackupWriteGate`（状態・I-4・I-3・手元の期限・遅延評価の FENCED・保留一覧・開いた時の callback）、`BackupWritePermit`（thread への結び付け・入れ子・投入時の数えと引継ぎ）、`BackupQuiesceDeferredWrites`（上限 10,000 件・捨てる時の WARN・3 回の繰返し・閉じ直しで戻す）、`BackupQuiesceProperties`（`@Validated`）、`BackupQuiesceMetrics`（`MeterBinder`）、`application.yml`・`application-test.yml`（`enabled: false`）。手元の期限に達したと一度でも判定した後は延ばせない（参照する側が開いたと見なした後に閉じ直さないため）。gate の働き方は INERT（prod 以外の `enabled=false`）・ARMED・DISABLED（prod の停止口）の3つ。上限で捨てる WARN の errorCode は `BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED`（§13.1 に無いため足した）。fast は `BackupWriteGateTest`・`BackupQuiesceDeferredWritesTest`・`BackupQuiescePropertiesTest` が通過（Demo の状態遷移の表は `BackupWriteGateTest` の `@ParameterizedTest`）。
 
   - **依存:** BWQ-001
   - **対応要求:** BWQ-RQ-002、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-008、BWQ-RQ-010

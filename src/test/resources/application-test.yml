@@ -169,6 +169,10 @@ app:
   # scheduler専用テスト以外では定期実行を止め、テスト中のDB更新と非決定性を防ぐ。
   scheduling:
     enabled: false
+  # backup の書込み静止の応答は test profile では動かさない（登録・heartbeat の背景 thread を作らず、gate は常に OPEN）。
+  # 静止応答を確かめる試験は専用の context で明示に有効にする（design.md §12.1）。
+  backup-quiesce:
+    enabled: false
   scheduler:
     lock:
       # H2/unknown DB productでShedLock usingDbTime()の警告・例外を発生させない。
