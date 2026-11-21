@@ -109,7 +109,13 @@ class SchedulingDisabledDrainTest {
             "com.ses.service.integrationhub.IntegrationHubReplayTlsPreflight:Thread.<init>",
             "replay期限を守るdaemon一thread。closeで停止し最大二秒待つ",
             "com.ses.service.skillgap.AiLearningCandidateServiceImpl:CompletableFuture.supplyAsync",
-            "request内のAI呼出をcommonPoolでtimeout付き実行する。timeout後もtaskは継続しうるがshutdown待ちは無い");
+            "request内のAI呼出をcommonPoolでtimeout付き実行する。timeout後もtaskは継続しうるがshutdown待ちは無い",
+            "com.ses.privacy.production.retention.trust.KmsPrivacyTrustSource:Thread.<init>",
+            "NF07 trust文書の起動時検査（prod・flag ON・KMS設定時に起動ごと一度）をinspectTimeout（20秒）で打ち切るdaemon一thread。"
+                    + "fileのstat・読込みだけでDB書込み・周期実行は無い",
+            "com.ses.privacy.production.retention.trust.KmsPrivacyTrustSource:Thread.start",
+            "上の検査threadの起動。I/Oが止まり打ち切るとthreadは残りうるが、起動検査の失敗として起動を中止する"
+                    + "（daemonのためJVMの終了は妨げない）");
 
     /** 起動時に一度だけ動くhook（{@code app.scheduling.enabled} の外。各自の条件で起動する）。 */
     private static final Map<String, String> STARTUP_HOOK_INVENTORY = inventory(

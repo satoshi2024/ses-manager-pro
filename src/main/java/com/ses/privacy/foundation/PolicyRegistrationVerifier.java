@@ -13,7 +13,8 @@ public interface PolicyRegistrationVerifier {
      *
      * @param callerTenant 登録者・有効化者の tenant（envelope の tenant と完全一致しなければ拒否）
      * @param canonical    envelope の canonical bytes（{@link ApprovalEnvelopeCanonicalizer} の v1 形式）
-     * @param signature    canonical bytes への署名
+     * @param signature    canonical bytes の digest 声明（{@link PolicyEnvelopeSigningStatement}）への Ed25519 署名（本番は
+     *                     この形だけを受け付け、canonical bytes そのものへの署名は拒否する）
      * @throws PolicyRegistrationRejectedException 拒否（理由は固定 code）
      * @throws SecurityException                   prod profile ではない
      */
@@ -30,9 +31,12 @@ public interface PolicyRegistrationVerifier {
     java.time.Instant signedIssuedAt(byte[] canonical, byte[] signature);
 
     /**
-     * 登録・有効化を受け付けられる trust の状態か（開放の gate）。trust anchor が1件以上登録され、そのうち1件以上の失効状態が
-     * {@link RevocationStatus#ACTIVE} と確認できること。失効 provider が UNKNOWN を返す・例外・未設定なら false（第1期は
-     * registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。
+     * 登録・有効化を受け付けられる trust の状態か（開放の gate）。trust anchor が1件以上登録され、そのうち1件以上が、verifier と
+     * 同じ clock の時刻に有効期間内で、{@code tenantId} を範囲に含み、失効状態が {@link RevocationStatus#ACTIVE} と確認できること
+     * （RB-NF07-REG delta review P3-1。期限切れ・tenant 外の anchor しか無ければ開かない）。失効 provider が UNKNOWN を返す・例外・
+     * 未設定なら false（第1期は registry が空・失効 provider が常に UNKNOWN のため常に false）。判定できなければ false。
+     *
+     * @param tenantId 授権 tenant（権限評価の設定 tenant。登録者・有効化者の tenant はこれと一致しなければ403になる）
      */
-    boolean trustReady();
+    boolean trustReady(String tenantId);
 }

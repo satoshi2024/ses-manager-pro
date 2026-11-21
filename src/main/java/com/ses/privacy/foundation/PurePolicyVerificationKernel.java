@@ -87,6 +87,36 @@ final class PurePolicyVerificationKernel {
         }
     }
 
+    /**
+     * 本番の policy envelope の署名（NF07-TRUST。D-03 = AWS KMS）。canonical bytes の digest 声明
+     * （{@link PolicyEnvelopeSigningStatement}。KMS の RAW の上限 4096 bytes を超える envelope でも署名できる固定長の形）への
+     * 純粋な Ed25519 署名だけを受け付ける（RB-NF07-TRUST-KMS review P3-2）。canonical bytes そのものへの署名は、4096 bytes 以下なら
+     * KMS で作れても超えると作れない運用の罠になり、受け付ける message を1つにするため本番では拒否する（合成の
+     * {@link ApprovalEnvelopeVerifier} は従来どおり canonical bytes への署名を検証する）。Ed25519ph（prehash）の署名は検証に
+     * 通らない。通らなければ {@code SIGNATURE_INVALID}。
+     */
+    static void verifyProductionPolicySignature(TrustedAuthority anchor, byte[] canonical, byte[] signature)
+            throws PolicySecurityException {
+        if (canonical == null || canonical.length == 0 || signature == null || signature.length == 0) {
+            throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名の対象または署名がありません");
+        }
+        if (ed25519Verifies(anchor, PolicyEnvelopeSigningStatement.of(canonical), signature)) {
+            return;
+        }
+        throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名が正しくありません");
+    }
+
+    private static boolean ed25519Verifies(TrustedAuthority anchor, byte[] payload, byte[] signature) {
+        try {
+            Signature verifier = Signature.getInstance("Ed25519");
+            verifier.initVerify(anchor.publicKey());
+            verifier.update(payload);
+            return verifier.verify(signature);
+        } catch (GeneralSecurityException | RuntimeException exception) {
+            return false;
+        }
+    }
+
     // --- Policy-only 専用ヘルパー ---
     static void verifyPolicySoD(ApprovalEnvelopeMetadata metadata) throws PolicySecurityException {
         if (metadata.requesterId().equals(metadata.approverId())) {

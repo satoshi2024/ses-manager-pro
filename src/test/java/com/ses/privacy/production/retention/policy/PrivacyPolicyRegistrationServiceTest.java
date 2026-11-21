@@ -225,7 +225,8 @@ class PrivacyPolicyRegistrationServiceTest {
         // 登録済みの authority を名乗る別の鍵（同じ authority・key ID の未登録の鍵）
         PolicyEnvelopeTestSigner.Signed genuine = signer.sign(POLICY_ID, "r1");
         PolicyEnvelopeTestSigner.Signed foreignKey = new PolicyEnvelopeTestSigner.Signed(genuine.canonical(),
-                PolicyEnvelopeTestSigner.sign(PolicyEnvelopeTestSigner.generate().getPrivate(), genuine.canonical()));
+                PolicyEnvelopeTestSigner.sign(PolicyEnvelopeTestSigner.generate().getPrivate(),
+                        com.ses.privacy.foundation.PolicyEnvelopeSigningStatement.of(genuine.canonical())));
         assertBusiness(() -> service.register(foreignKey.request()), 403, "error.privacy.policyEnvelopeRejected");
         assertThat(rows()).isZero();
     }
@@ -465,13 +466,13 @@ class PrivacyPolicyRegistrationServiceTest {
         prod.setActiveProfiles("prod");
         PolicyRegistrationVerifier phaseOne = ProductionPrivacyComponents.policyRegistrationVerifier(prod,
                 ConfiguredPolicyTrustRegistry.empty(), new UnknownRevocationStatusProvider(), clock);
-        assertThat(phaseOne.trustReady()).isFalse();
+        assertThat(phaseOne.trustReady(tenant)).isFalse();
         assertNotFound(() -> serviceWith(phaseOne).register(signer.sign(POLICY_ID, "r1").request()));
 
         // anchor が登録されても（D-03 の方式の決定前に誤って登録された場合）、失効状態が常に UNKNOWN の間は開かない
         PolicyRegistrationVerifier unknownRevocation = ProductionPrivacyComponents.policyRegistrationVerifier(prod,
                 signer.registry(), new UnknownRevocationStatusProvider(), clock);
-        assertThat(unknownRevocation.trustReady()).isFalse();
+        assertThat(unknownRevocation.trustReady(tenant)).isFalse();
 
         for (String[] profiles : List.of(new String[]{"test"}, new String[]{}, new String[]{"dev"})) {
             MockEnvironment other = new MockEnvironment();

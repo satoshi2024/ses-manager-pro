@@ -61,10 +61,12 @@ final class ProductionPolicyRegistrationVerifier implements PolicyRegistrationVe
     }
 
     @Override
-    public boolean trustReady() {
+    public boolean trustReady(String tenantId) {
         try {
             Map<String, TrustedAuthority> anchors = registry == null ? null : registry.anchors();
-            return anchors != null && PrivacyTrustReadiness.activePolicyAnchors(anchors, revocations, 1) >= 1;
+            // 有効期間は検証（verifySigned）と同じ clock で判定する（RB-NF07-REG delta review P3-1）
+            return anchors != null
+                    && PrivacyTrustReadiness.activePolicyAnchors(anchors, revocations, 1, clock.instant(), tenantId) >= 1;
         } catch (RuntimeException e) {
             return false;
         }

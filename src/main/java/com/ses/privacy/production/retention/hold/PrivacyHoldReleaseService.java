@@ -45,10 +45,12 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>D-05（hold の種類と権限者）と D-03（署名鍵）の決定ID が、署名日・失効・placeholder を含めて有効（呼出しごとに評価）。</li>
  *   <li>verifier がある（{@code ProductionPrivacyComponents.holdReleaseVerifier} は prod profile でしか生成できない）。</li>
- *   <li>解除 authority の trust anchor が1件以上登録されている（第1期の registry は空。実 registry は D-03 の方式の
- *       {@code PrivacyTrustSource} の adapter）。</li>
- *   <li>失効 provider が、発行者と承認者に要る2件以上の anchor を ACTIVE と答える（{@code HoldReleaseVerifier#trustReady}。
- *       第1期の失効 provider は常に UNKNOWN のため開かない。REL review P3-9）。</li>
+ *   <li>解除 authority の trust anchor が1件以上登録されている（trust 文書（D-03 = AWS KMS の adapter
+ *       {@code KmsPrivacyTrustSource}）を設定するまでは registry が空）。</li>
+ *   <li>発行者と承認者の組（authority・主体・鍵を共有しない）の両方が、verifier と同じ clock の時刻に有効期間内で、授権 tenant
+ *       （{@code OIDC_TENANT_ID}、未設定なら {@code default}）を範囲に含み、失効 provider が ACTIVE と答える
+ *       （{@code HoldReleaseVerifier#trustReady(String)}。trust 文書を設定するまでは失効 provider が常に UNKNOWN のため開かない。
+ *       REL review P3-9、RB-NF07-REG delta review P3-1）。</li>
  * </ul>
  * 開放の後も、要求ごとに verifier が両 anchor の失効状態を確かめる（{@code REVOCATION_UNKNOWN} / {@code REVOKED}）。
  *
@@ -564,17 +566,23 @@ public class PrivacyHoldReleaseService {
     /** 失効 provider が発行者と承認者に要る anchor を ACTIVE と答えるか（verifier の判定。判定できなければ false）。 */
     private boolean trustReady() {
         try {
-            return verifier != null && verifier.trustReady();
+            // gate は授権 tenant（要求者の tenant はこれと一致しなければ403）を範囲に含む anchor の組だけを数える
+            return verifier != null && verifier.trustReady(authorizationTenant());
         } catch (RuntimeException e) {
             return false;
         }
     }
 
+    /** 権限評価の設定 tenant（{@code OIDC_TENANT_ID}、未設定なら {@code default}）。 */
+    private String authorizationTenant() {
+        return oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
+                ? oidcProperties.getTenantId() : "default";
+    }
+
     /** 照会者の tenant（principal に束縛された値）。権限評価の設定 tenant と一致しなければ403。 */
     private String requireCallerTenant(PrivacyHoldService.Actor actor) {
         String callerTenant = actor == null ? null : actor.tenantId();
-        String authorizationTenant = oidcProperties != null && StringUtils.hasText(oidcProperties.getTenantId())
-                ? oidcProperties.getTenantId() : "default";
+        String authorizationTenant = authorizationTenant();
         if (!StringUtils.hasText(callerTenant) || !authorizationTenant.equals(callerTenant)) {
             throw BusinessException.of(403, "error.accessDenied");
         }
