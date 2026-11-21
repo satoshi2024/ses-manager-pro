@@ -119,7 +119,7 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
      `rollback-cutover.sh` は使わず（state file が無いと拒否される）、逆向きの switch だけを行う。
    - `staged`・`read-only-smoke-passed`・`single-writer` から人の判断で戻す場合: `rollback-cutover.sh`（§4）と
      逆向きの switch を**必ず対で**行う。
-   どちらの場合も、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。DB と pointer の
+   いずれの場合も、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。DB と pointer の
    どちらか一方だけを戻した状態で app・scheduler を起動しない。
 6. **`write-enabled` の後**は uploads も戻さない（DB と同じ。§2 の「`write-enabled` からの rollback は禁止」）。旧版は
    消さずに残す（削除は deploy-runbook §4.4 の D15 の手順だけ）。

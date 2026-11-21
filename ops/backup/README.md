@@ -320,6 +320,8 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
 # write-enable 前に戻すとき（手順は runbooks/restore-cutover.md §4.5.1 の 5）:
 #  - cutover.sh が read-only smoke の失敗で exit 3（state=rolled-back）のときは rollback-cutover.sh を実行せず、
 #    逆向きの switch だけを行い、OLD_ENV_SMOKE_SCRIPT を手で実行して旧環境を確かめる
+#  - cutover.sh が state を書く前に失敗した（CUTOVER_STATE_FILE が無い）ときは DB は切り替わっていないので、
+#    rollback-cutover.sh は使わず逆向きの switch だけを行う
 #  - それ以外（staged / read-only-smoke-passed / single-writer）から戻すときは、次の 2 つを必ず対で行う
 ./rollback-cutover.sh --plan <plan-id>
 ./uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
