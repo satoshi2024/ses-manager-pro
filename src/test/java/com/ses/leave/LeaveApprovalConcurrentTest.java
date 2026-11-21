@@ -11,6 +11,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.leave.LeaveApprovalAdapter;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -57,7 +58,7 @@ class LeaveApprovalConcurrentTest {
 
     @Container
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");

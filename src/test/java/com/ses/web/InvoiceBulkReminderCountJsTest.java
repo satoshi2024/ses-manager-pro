@@ -130,4 +130,34 @@ class InvoiceBulkReminderCountJsTest {
             Files.deleteIfExists(temp);
         }
     }
+
+    /**
+     * RB-POSTLAUNCH E-1: 単件督促も送信は非同期のため、成功の応答は送信の受付（QUEUED / DRY_RUN）である。
+     * 成功の文言は「送信しました」ではなく受付を示し、4言語で翻訳され、画面の既定文言は ja の bundle と同じ。
+     */
+    @Test
+    void 単件督促の成功文言は送信の完了ではなく受付を示す() throws IOException {
+        java.util.Map<String, String> expected = java.util.Map.of(
+                "messages.properties", "受け付け",
+                "messages_en.properties", "accepted",
+                "messages_ko.properties", "접수",
+                "messages_zh_CN.properties", "受理");
+        String ja = null;
+        for (java.util.Map.Entry<String, String> bundle : expected.entrySet()) {
+            java.util.Properties properties = new java.util.Properties();
+            try (java.io.Reader reader = Files.newBufferedReader(Path.of("src/main/resources", bundle.getKey()),
+                    StandardCharsets.UTF_8)) {
+                properties.load(reader);
+            }
+            String value = properties.getProperty("invoice.reminder.sent");
+            assertTrue(value != null && value.contains(bundle.getValue()), bundle.getKey() + ": " + value);
+            if ("messages.properties".equals(bundle.getKey())) {
+                ja = value;
+            }
+        }
+        String invoiceJs = Files.readString(Path.of("src/main/resources/static/js/modules/invoice.js"),
+                StandardCharsets.UTF_8);
+        assertTrue(invoiceJs.contains("SES.i18n.t('invoice.reminder.sent', '" + ja + "')"), "既定文言は ja の bundle と同じ");
+        assertTrue(!invoiceJs.contains("督促メールを送信しました"), "送信完了の文言を残さない");
+    }
 }

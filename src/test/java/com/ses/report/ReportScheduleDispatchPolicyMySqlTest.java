@@ -33,6 +33,7 @@ import com.ses.service.scheduler.ManagementReportScheduler;
 import com.ses.service.scheduler.ReportScheduleClaimService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -126,7 +127,7 @@ class ReportScheduleDispatchPolicyMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf10_dispatch_policy")
             .withUsername("root")
             .withPassword("ses");

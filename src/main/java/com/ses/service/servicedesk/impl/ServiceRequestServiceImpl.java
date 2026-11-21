@@ -135,10 +135,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public ServiceRequest createRequest(ServiceRequestCreateRequest req, boolean isPortal, Long portalUserId,
                                         ServiceDeskExecutionContext executionContext) {
         if (!VALID_CATEGORIES.contains(req.getCategory())) {
-            throw BusinessException.of(400, "無効なカテゴリです: " + req.getCategory());
+            throw BusinessException.of(400, "error.serviceDesk.invalidCategory");
         }
         if (!VALID_PRIORITIES.contains(req.getPriority())) {
-            throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
+            throw BusinessException.of(400, "error.serviceDesk.invalidPriority");
         }
 
         requireExecutionContext(executionContext);
@@ -155,7 +155,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         } else {
             effectiveChannel = StringUtils.hasText(req.getChannel()) ? req.getChannel().trim() : "INTERNAL";
             if (!VALID_CHANNELS.contains(effectiveChannel)) {
-                throw BusinessException.of(400, "無効なチャネルです: " + effectiveChannel);
+                throw BusinessException.of(400, "error.serviceDesk.invalidChannel");
             }
         }
 
@@ -163,7 +163,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 ? tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId())
                 : customerMapper.selectById(req.getCustomerId());
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
-            throw BusinessException.of(404, "指定された顧客が見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.customerNotFound");
         }
 
         if (!isPortal) {
@@ -171,7 +171,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
 
         validateLinkedEntities(tenantId, req.getCustomerId(), req.getContactId(), req.getContractId(),
-                req.getProjectId(), req.getEngineerId());
+                req.getProjectId(), req.getEngineerId(), isPortal);
 
         // 担当者検証 (ポータル起票時は常にnull、内部起票時は存在・有効・適格ロール検証)
         Long effectiveOwnerUserId = isPortal ? null : req.getOwnerUserId();
@@ -182,7 +182,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         // SLA ポリシー取得（存在しない場合は起票トランザクションを即時fail-closedロールバック）
         ServiceSlaPolicy policy = getActivePolicy(req.getPriority());
         if (policy == null) {
-            throw BusinessException.of(400, "優先度 " + req.getPriority() + " に対応する有効なSLAポリシーが見つかりません");
+            throw BusinessException.of(400, "error.serviceDesk.slaPolicyNotFound");
         }
 
         LocalDateTime now = executionContext.occurredAt().atZone(executionContext.zoneId()).toLocalDateTime();
@@ -282,7 +282,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public ServiceRequestDto getInternalDetail(Long id) {
         ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (req == null || !currentTenant().equals(req.getTenantId())) {
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
         assertInternalCustomerAllowed(req.getCustomerId());
 
@@ -296,7 +296,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)
                 || !isPortalVisible(req)) {
             // 他社・存在しない・portalへ出さない範囲（初回リリース中の社内登録分等）は同じ404で秘匿
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
 
         return convertToPortalDto(req);
@@ -357,7 +357,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public Page<PortalServiceRequestDto> searchPortalRequests(int page, int size, String keyword, String status, Long customerId) {
         if (customerId == null) {
-            throw BusinessException.of(400, "顧客組織情報が必要です");
+            throw BusinessException.of(400, "error.serviceDesk.customerOrganizationRequired");
         }
 
         Page<ServiceRequest> mpPage = com.ses.common.util.PageUtils.safePage(page, size);
@@ -391,23 +391,23 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void updateRequest(Long id, ServiceRequestUpdateRequest req) {
         if (req == null || req.getVersion() == null) {
-            throw BusinessException.of(400, "サービスリクエストversionは必須です");
+            throw BusinessException.of(400, "error.serviceDesk.versionRequired");
         }
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
         assertInternalCustomerAllowed(existing.getCustomerId());
 
         if (!VALID_CATEGORIES.contains(req.getCategory())) {
-            throw BusinessException.of(400, "無効なカテゴリです: " + req.getCategory());
+            throw BusinessException.of(400, "error.serviceDesk.invalidCategory");
         }
         if (!VALID_PRIORITIES.contains(req.getPriority())) {
-            throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
+            throw BusinessException.of(400, "error.serviceDesk.invalidPriority");
         }
 
         validateLinkedEntities(currentTenant(), existing.getCustomerId(), req.getContactId(), req.getContractId(),
-                req.getProjectId(), req.getEngineerId());
+                req.getProjectId(), req.getEngineerId(), false);
         validateOwnerUser(req.getOwnerUserId());
 
         int expectedVersion = req.getVersion();
@@ -428,7 +428,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .set(ServiceRequest::getUpdatedAt, LocalDateTime.now(clock))
                 .set(ServiceRequest::getVersion, expectedVersion + 1));
         if (updated != 1) {
-            throw BusinessException.of(409, "サービスリクエストが更新済みです。再読込してください");
+            throw BusinessException.of(409, "error.serviceDesk.staleReload");
         }
     }
 
@@ -437,7 +437,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req, Long actorId, String actorType, String actorName) {
         // 既存のservice直呼び出し互換でも、クライアントのexpectedVersionを省略した更新は許可しない。
         if (req == null || req.getVersion() == null) {
-            throw BusinessException.of(400, "サービスリクエストversionは必須です");
+            throw BusinessException.of(400, "error.serviceDesk.versionRequired");
         }
         changeStatus(id, req, legacyContext(actorId, "PORTAL_USER".equals(actorType), actorId,
                 actorType, actorName, null, null));
@@ -448,12 +448,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req,
                              ServiceDeskExecutionContext executionContext) {
         if (req == null || req.getVersion() == null) {
-            throw BusinessException.of(400, "サービスリクエストversionは必須です");
+            throw BusinessException.of(400, "error.serviceDesk.versionRequired");
         }
         requireExecutionContext(executionContext);
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
         // クライアント指定の法人は受理せず、顧客・契約から解決した法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
@@ -464,19 +464,19 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         String fromStatus = existing.getStatus();
         String requestedStatus = req.getToStatus();
         if (!isAllowedTransition(fromStatus, requestedStatus)) {
-            throw BusinessException.of(409, "許可されていないステータス遷移です: " + fromStatus + " -> " + requestedStatus);
+            throw BusinessException.of(409, "error.serviceDesk.transitionNotAllowed");
         }
         // 同一状態への再送は成功扱いにせず、状態機械の辺として明示的に拒否する。
         // REOPENED は保存値が IN_PROGRESS になるため、正規化前に判定する必要がある。
         if (Objects.equals(fromStatus, requestedStatus)) {
-            throw BusinessException.of(409, "同一ステータスへの遷移は許可されていません: " + fromStatus);
+            throw BusinessException.of(409, "error.serviceDesk.sameStatusTransition");
         }
         String toStatus = "REOPENED".equals(requestedStatus) ? "IN_PROGRESS" : requestedStatus;
 
         int expectedVersion = req.getVersion();
         int currentVersion = existing.getVersion() != null ? existing.getVersion() : 0;
         if (expectedVersion != currentVersion) {
-            throw BusinessException.of(409, "サービスリクエストが更新済みです。再読込してください");
+            throw BusinessException.of(409, "error.serviceDesk.staleReload");
         }
 
         LocalDateTime now = executionContext.occurredAt().atZone(executionContext.zoneId()).toLocalDateTime();
@@ -556,7 +556,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     // 新規ラウンド SLA クロック作成
                     ServiceSlaPolicy policy = getActivePolicy(existing.getPriority());
                     if (policy == null) {
-                        throw BusinessException.of(400, "優先度 " + existing.getPriority() + " に対応する有効なSLAポリシーが見つかりません");
+                        throw BusinessException.of(400, "error.serviceDesk.slaPolicyNotFound");
                     }
                     LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResponseTimeHours(), policy, executionContext.organizationId(),
@@ -590,7 +590,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 break;
 
             default:
-                throw BusinessException.of(400, "無効なステータスです: " + toStatus);
+                throw BusinessException.of(400, "error.serviceDesk.invalidStatus");
         }
 
         existing.setStatus(toStatus);
@@ -611,7 +611,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .set(ServiceRequest::getUpdatedAt, existing.getUpdatedAt())
                 .set(ServiceRequest::getVersion, expectedVersion + 1);
         if (serviceRequestMapper.update(null, requestUpdate) != 1) {
-            throw BusinessException.of(409, "サービスリクエストが更新済みです。状態イベントは記録されません");
+            throw BusinessException.of(409, "error.serviceDesk.staleStateEvent");
         }
         existing.setVersion(expectedVersion + 1);
 
@@ -634,7 +634,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .set(ServiceSlaClock::getUpdatedAt, clockRow.getUpdatedAt())
                     .set(ServiceSlaClock::getVersion, clockVersion + 1);
             if (slaClockMapper.update(null, clockUpdate) != 1) {
-                throw BusinessException.of(409, "SLAクロックが更新済みです。状態イベントは記録されません");
+                throw BusinessException.of(409, "error.serviceDesk.slaClockStaleStateEvent");
             }
             clockRow.setVersion(clockVersion + 1);
         }
@@ -674,7 +674,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || (isPortal && !isPortalVisible(existing))) {
             // portalからの返信は、portalへ出してよい範囲の問い合わせだけに限る（controllerの自社scope検証に加えた防御）
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
         // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
@@ -716,7 +716,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .set(ServiceRequest::getUpdatedAt, now)
                     .set(ServiceRequest::getVersion, requestVersion + 1));
             if (requestUpdated != 1) {
-                throw BusinessException.of(409, "サービスリクエストが更新済みです。コメントは記録されません");
+                throw BusinessException.of(409, "error.serviceDesk.staleComment");
             }
             existing.setVersion(requestVersion + 1);
 
@@ -742,7 +742,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                         .set(ServiceSlaClock::getUpdatedAt, clockRow.getUpdatedAt())
                         .set(ServiceSlaClock::getVersion, clockVersion + 1));
                 if (clockUpdated != 1) {
-                    throw BusinessException.of(409, "SLAクロックが更新済みです。コメントは記録されません");
+                    throw BusinessException.of(409, "error.serviceDesk.slaClockStaleComment");
                 }
             }
         }
@@ -779,11 +779,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)
                 || !isPortalVisible(existing)) {
-            throw BusinessException.of(404, "指定されたリクエストが見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.requestNotFound");
         }
 
         if (!"RESOLVED".equals(existing.getStatus()) && !"CLOSED".equals(existing.getStatus())) {
-            throw BusinessException.of(400, "CSAT回答は解決または完了済みのリクエストのみ可能です");
+            throw BusinessException.of(400, "error.serviceDesk.csatNotResolved");
         }
 
         CustomerCsat csat = CustomerCsat.builder()
@@ -801,7 +801,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             // 事前selectは競合防止に使わず、uk_csat_requestを最終防線とする。
             csatMapper.insert(csat);
         } catch (org.springframework.dao.DuplicateKeyException duplicate) {
-            throw BusinessException.of(409, "このリクエストに対するCSAT回答は既に提出済みです");
+            throw BusinessException.of(409, "error.serviceDesk.csatAlreadySubmitted");
         }
     }
 
@@ -835,7 +835,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
     private void requireExecutionContext(ServiceDeskExecutionContext context) {
         if (context == null || context.tenantId() == null || context.tenantId().isBlank()) {
-            throw BusinessException.of(400, "サービスデスクの実行コンテキストが必要です");
+            throw BusinessException.of(400, "error.serviceDesk.executionContextRequired");
         }
         String explicitTenantId = currentTenant();
         if (!explicitTenantId.equals(context.tenantId().trim())) {
@@ -850,11 +850,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         Long resolvedLegalEntityId = resolveLegalEntityId(customerId, contractId);
         if (base.legalEntityId() != null && resolvedLegalEntityId != null
                 && !Objects.equals(base.legalEntityId(), resolvedLegalEntityId)) {
-            throw BusinessException.of(403, "指定された法人は当該顧客・契約のカレンダー範囲と一致しません");
+            throw BusinessException.of(403, "error.serviceDesk.legalEntityCalendarMismatch");
         }
         if (base.organizationId() != null) {
             // 法人既定カレンダーのみを使う。組織スコープのクライアント指定は受け入れない。
-            throw BusinessException.of(403, "サービスデスクSLAは法人既定カレンダーのみを使用します");
+            throw BusinessException.of(403, "error.serviceDesk.defaultCalendarOnly");
         }
         Long legalEntityId = resolvedLegalEntityId != null ? resolvedLegalEntityId : base.legalEntityId();
         return new ServiceDeskExecutionContext(
@@ -936,41 +936,58 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
     }
 
-    /** 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。 */
+    /**
+     * 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。
+     *
+     * <p>ポータルからの起票（{@code isPortal}）では、各対象を「存在しない」と「自社のものではない」で区別しない
+     * （同じ status・key）。社外の利用者に他社や社内の業務対象のIDが存在するかを判別させないため
+     * （RB-POSTLAUNCH review P2-1。controller の検証と同じ key で、service 境界でも同じ秘匿を保つ）。</p>
+     */
     private void validateLinkedEntities(String tenantId, Long customerId, Long contactId, Long contractId,
-                                        Long projectId, Long engineerId) {
+                                        Long projectId, Long engineerId, boolean isPortal) {
         if (contactId != null) {
             CustomerContact contact = contactMapper.selectByIdForTenant(contactId, customerId, tenantId);
             if (contact == null || !Objects.equals(customerId, contact.getCustomerId())) {
-                throw BusinessException.of(400, "指定された顧客担当者は顧客と一致しません");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalContactNotOwned"
+                        : "error.serviceDesk.contactCustomerMismatch");
             }
         }
         Contract contract = null;
         if (contractId != null) {
             contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, tenantId);
             if (contract == null || !Objects.equals(customerId, contract.getCustomerId())) {
-                throw BusinessException.of(400, "指定された契約は顧客と一致しません");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalContractNotOwned"
+                        : "error.serviceDesk.contractCustomerMismatch");
             }
         }
         if (projectId != null) {
             Project project = projectMapper.selectByIdForCustomerAndTenant(projectId, customerId, tenantId);
             if (project == null || !Objects.equals(customerId, project.getCustomerId())) {
-                throw BusinessException.of(400, "指定された案件は顧客と一致しません");
+                throw BusinessException.of(400, isPortal ? "error.serviceDesk.portalProjectNotOwned"
+                        : "error.serviceDesk.projectCustomerMismatch");
             }
             if (contract != null && !Objects.equals(projectId, contract.getProjectId())) {
-                throw BusinessException.of(400, "指定された案件は契約と一致しません");
+                throw BusinessException.of(400, "error.serviceDesk.projectContractMismatch");
             }
         }
         if (engineerId != null) {
             Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
-            if (engineer == null) {
-                throw BusinessException.of(400, "指定された要員が見つかりません");
+            if (isPortal) {
+                // 存在しない要員と自社の契約に無い要員を同じ key にする（自社の契約に居ることを確かめてから、
+                // 指定された契約との一致を見る。一致しない場合はどちらも自社の業務対象なので区別してよい）
+                Long ownContracts = contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId);
+                if (engineer == null || ownContracts == null || ownContracts == 0) {
+                    throw BusinessException.of(400, "error.serviceDesk.portalEngineerNotOnOwnContract");
+                }
+            } else if (engineer == null) {
+                throw BusinessException.of(400, "error.serviceDesk.engineerNotFound");
             }
             if (contract != null && !Objects.equals(engineerId, contract.getEngineerId())) {
-                throw BusinessException.of(400, "指定された要員は契約と一致しません");
+                throw BusinessException.of(400, "error.serviceDesk.engineerContractMismatch");
             }
-            if (contract == null && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
-                throw BusinessException.of(400, "指定された要員は顧客の契約に紐付いていません");
+            if (!isPortal && contract == null
+                    && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
+                throw BusinessException.of(400, "error.serviceDesk.engineerNotOnCustomerContract");
             }
         }
     }
@@ -987,11 +1004,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         String tenantId = executionTenantId.trim();
         seqMapper.ensureRow(tenantId, month);
         if (seqMapper.incrementIfAvailable(tenantId, month) != 1) {
-            throw BusinessException.of(400, "月間リクエスト採番上限（9999件）を超過しました");
+            throw BusinessException.of(400, "error.serviceDesk.monthlySequenceExceeded");
         }
         Integer next = seqMapper.selectLastNumber(tenantId, month);
         if (next == null || next < 1 || next > 9999) {
-            throw BusinessException.of(409, "リクエスト採番状態が不正です");
+            throw BusinessException.of(409, "error.serviceDesk.sequenceStateInvalid");
         }
         return String.format("REQ-%s-%04d", month, next);
     }
@@ -1006,10 +1023,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (user == null || !tenantId.equals(user.getTenantId())
                 || !Integer.valueOf(1).equals(user.getStatus())
                 || !Integer.valueOf(0).equals(user.getDeletedFlag())) {
-            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
+            throw BusinessException.of(400, "error.serviceDesk.assigneeNotAllowed");
         }
         if (!Set.of("管理者", "営業", "マネージャー").contains(user.getRole())) {
-            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
+            throw BusinessException.of(400, "error.serviceDesk.assigneeNotAllowed");
         }
     }
 
@@ -1035,7 +1052,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     private void assertInternalCustomerAllowed(Long customerId) {
         String tenantId = currentTenant();
         if (tenantOwnershipResolver.selectCustomer(tenantId, customerId) == null) {
-            throw BusinessException.of(404, "指定された顧客が見つかりません");
+            throw BusinessException.of(404, "error.serviceDesk.customerNotFound");
         }
         if (SecurityUtils.currentRole() == null) return;
         if (customerScopeResolver == null) {

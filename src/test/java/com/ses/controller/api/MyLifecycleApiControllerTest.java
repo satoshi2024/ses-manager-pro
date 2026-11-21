@@ -255,7 +255,10 @@ class MyLifecycleApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].id").value(case1Id))
-                .andExpect(jsonPath("$.data[0].title").value("要員1入社手続き"));
+                .andExpect(jsonPath("$.data[0].title").value("要員1入社手続き"))
+                // RB-POSTLAUNCH B-3: 一覧の進捗は本人公開タスクだけを数える（社内専用タスクは数えない。以前は全件 0/0）
+                .andExpect(jsonPath("$.data[0].totalTasks").value(1))
+                .andExpect(jsonPath("$.data[0].completedTasks").value(0));
 
         mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id).with(asEngineer(engineerUser1)))
                 .andExpect(status().isOk())

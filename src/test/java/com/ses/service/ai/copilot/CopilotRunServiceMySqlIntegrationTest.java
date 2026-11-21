@@ -12,6 +12,7 @@ import com.ses.service.ai.copilot.summary.DispatchOutcome;
 import com.ses.service.ai.copilot.summary.SummaryCostEvidence;
 import com.ses.service.ai.copilot.summary.SummaryResponse;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
@@ -74,7 +75,7 @@ import static org.mockito.Mockito.verify;
 class CopilotRunServiceMySqlIntegrationTest {
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");

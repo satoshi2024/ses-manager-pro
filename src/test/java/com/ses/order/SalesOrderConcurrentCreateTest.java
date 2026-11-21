@@ -13,6 +13,7 @@ import com.ses.mapper.QuotationMapper;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.SalesOrderService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,7 +46,7 @@ class SalesOrderConcurrentCreateTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_order_quotation")
             .withUsername("root")
             .withPassword("ses");

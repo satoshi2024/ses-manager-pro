@@ -5,6 +5,7 @@ import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -50,7 +51,7 @@ class FlywayV80RepairSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_v80_repair")
             .withUsername("root")
             .withPassword("ses");

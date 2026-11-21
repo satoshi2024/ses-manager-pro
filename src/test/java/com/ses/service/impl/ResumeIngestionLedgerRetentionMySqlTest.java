@@ -12,6 +12,7 @@ import com.ses.service.storage.DocumentStorage;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.InnoDbRecordLockWaits.PointLock;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.zaxxer.hikari.HikariDataSource;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -96,7 +97,7 @@ class ResumeIngestionLedgerRetentionMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf07_resume_ledger_retention")
             .withUsername("root")
             .withPassword("ses");

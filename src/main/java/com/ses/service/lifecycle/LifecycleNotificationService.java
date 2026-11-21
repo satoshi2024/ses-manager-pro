@@ -32,8 +32,10 @@ public interface LifecycleNotificationService {
 
     /**
      * 二者確認の確認待ちの通知（NF01 W3-21a。提出のcommit後に呼ぶ）。業務comment・文書titleは含めない。
+     * 提出者本人は自分の提出を確認できないため宛先から除く（RB-POSTLAUNCH D-3）。
      */
-    void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId);
+    void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId,
+                                         long submitterUserId);
 
     /**
      * 二者確認の確認・差戻しの結果を提出者へ通知する（NF01 W3-21a。判断のcommit後に呼ぶ）。業務comment・文書titleは含めない。

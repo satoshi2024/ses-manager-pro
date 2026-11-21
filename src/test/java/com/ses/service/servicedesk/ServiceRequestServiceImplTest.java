@@ -10,6 +10,7 @@ import com.ses.dto.servicedesk.ServiceRequestDto;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.dto.servicedesk.ServiceRequestUpdateRequest;
 import com.ses.entity.Customer;
+import com.ses.entity.Engineer;
 import com.ses.entity.CustomerCsat;
 import com.ses.entity.ServiceRequest;
 import com.ses.entity.ServiceRequestSequence;
@@ -18,6 +19,7 @@ import com.ses.entity.ServiceSlaPolicy;
 import com.ses.entity.SysUser;
 import com.ses.mapper.CustomerCsatMapper;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceRequestSequenceMapper;
@@ -78,6 +80,9 @@ class ServiceRequestServiceImplTest {
 
     @Autowired
     private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
 
     private Customer testCustomer;
 
@@ -449,7 +454,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("無効なチャネルです"));
+        assertEquals("error.serviceDesk.invalidChannel", ex.getMessage());
     }
 
     @Test
@@ -492,7 +497,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("有効なSLAポリシー"));
+        assertEquals("error.serviceDesk.slaPolicyNotFound", ex.getMessage());
 
         Long countReq = serviceRequestMapper.selectCount(
                 new LambdaQueryWrapper<ServiceRequest>().eq(ServiceRequest::getSubject, "SLAポリシー未定義テスト")
@@ -530,7 +535,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(req2, 100L, false, null));
         assertEquals(400, ex.getCode());
-        assertTrue(ex.getMessage().contains("月間リクエスト採番上限（9999件）を超過しました"));
+        assertEquals("error.serviceDesk.monthlySequenceExceeded", ex.getMessage());
     }
 
     @Test
@@ -548,7 +553,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex1 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqNonexistent, 100L, false, null));
         assertEquals(400, ex1.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", ex1.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", ex1.getMessage());
 
         // 2. 無効化されたユーザー (status = 0)
         SysUser inactiveUser = SysUser.builder()
@@ -571,7 +576,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex2 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqInactive, 100L, false, null));
         assertEquals(400, ex2.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", ex2.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", ex2.getMessage());
 
         // 3. 対象外ロール (HR)
         SysUser hrUser = SysUser.builder()
@@ -636,7 +641,7 @@ class ServiceRequestServiceImplTest {
         BusinessException createError = assertThrows(BusinessException.class,
                 () -> serviceRequestService.createRequest(create, 100L, false, null));
         assertEquals(400, createError.getCode());
-        assertEquals("指定された担当ユーザーを設定できません", createError.getMessage());
+        assertEquals("error.serviceDesk.assigneeNotAllowed", createError.getMessage());
         assertTrue(!createError.getMessage().contains("DO-NOT-LEAK"));
         assertEquals(0L, serviceRequestMapper.selectCount(new LambdaQueryWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getSubject, "tenant境界create")));
@@ -655,5 +660,41 @@ class ServiceRequestServiceImplTest {
         assertEquals("update対象", unchanged.getSubject());
         assertEquals(saved.getVersion(), unchanged.getVersion());
         assertNull(unchanged.getOwnerUserId());
+    }
+
+    /**
+     * RB-POSTLAUNCH review P2-1: ポータル起票（isPortal）では、存在しない要員と顧客の契約に就いていない要員を同じ key で
+     * 拒否し、社外の利用者に要員IDの存在を判別させない（controller の検証を通らない経路でも service 境界で同じ秘匿を保つ）。
+     * 社内起票は従来どおり理由を区別する。
+     */
+    @Test
+    @DisplayName("ポータル起票では存在しない要員と自社契約の無い要員を同じkeyで拒否し社内起票は区別する")
+    void testPortalCreateDoesNotRevealEngineerExistence() {
+        Engineer noContract = Engineer.builder().tenantId("default").fullName("契約の無い要員")
+                .status("稼動中").employmentType("正社員").build();
+        engineerMapper.insert(noContract);
+        long missingId = noContract.getId() + 1_000_000L;
+
+        BusinessException missing = assertThrows(BusinessException.class,
+                () -> serviceRequestService.createRequest(engineerRequest(missingId), 100L, true, 1L));
+        BusinessException notOwn = assertThrows(BusinessException.class,
+                () -> serviceRequestService.createRequest(engineerRequest(noContract.getId()), 100L, true, 1L));
+        assertEquals(400, missing.getCode());
+        assertEquals(missing.getCode(), notOwn.getCode());
+        assertEquals("error.serviceDesk.portalEngineerNotOnOwnContract", missing.getMessageKey());
+        assertEquals(missing.getMessageKey(), notOwn.getMessageKey());
+
+        BusinessException internalMissing = assertThrows(BusinessException.class,
+                () -> serviceRequestService.createRequest(engineerRequest(missingId), 100L, false, null));
+        BusinessException internalNotOnContract = assertThrows(BusinessException.class,
+                () -> serviceRequestService.createRequest(engineerRequest(noContract.getId()), 100L, false, null));
+        assertEquals("error.serviceDesk.engineerNotFound", internalMissing.getMessageKey());
+        assertEquals("error.serviceDesk.engineerNotOnCustomerContract", internalNotOnContract.getMessageKey());
+    }
+
+    private ServiceRequestCreateRequest engineerRequest(long engineerId) {
+        return ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId()).category("SYSTEM").priority("P2")
+                .subject("要員について").description("test").engineerId(engineerId).build();
     }
 }

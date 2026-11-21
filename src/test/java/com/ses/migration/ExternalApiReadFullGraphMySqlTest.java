@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.mapper.ExternalApiReadMapper;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +36,7 @@ class ExternalApiReadFullGraphMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_nf05_full_graph")
             .withUsername("root")
             .withPassword("ses");

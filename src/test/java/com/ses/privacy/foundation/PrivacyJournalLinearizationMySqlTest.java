@@ -14,6 +14,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.privacy.foundation.PrivacyJournalPort.CommandType;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalCommand;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalPartition;
@@ -59,7 +60,7 @@ class PrivacyJournalLinearizationMySqlTest {
     private static final MutableClock CLOCK = new MutableClock(Instant.parse("2026-10-02T00:00:00Z"));
     private static final String PASS = UUID.randomUUID().toString();
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(JournalTestConnectionCapability.randomDatabase())
             .withUsername("root")
             .withPassword(PASS)

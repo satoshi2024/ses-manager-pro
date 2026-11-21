@@ -1,6 +1,7 @@
 package com.ses.migration;
 
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class FlywayV194DispatchClaimLedgerMySqlTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("nf08_v194").withUsername("root").withPassword("ses");
     static JdbcTemplate jdbc;
     static long legacyA;

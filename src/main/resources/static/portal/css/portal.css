@@ -72,6 +72,24 @@
     white-space: nowrap;
 }
 
+/*
+ * header のログアウトボタン（RB-POSTLAUNCH B-5）。Bootstrap の btn-outline-secondary（#6c757d）は header の
+ * 背景 #1a3a5c に対して約2.4:1で WCAG AA（4.5:1）に届かないため、文字と枠を header の文字色に合わせる。
+ * bootstrap.min.css が後から読まれるため、class 2つの特異度で Bootstrap の変数を上書きする。
+ * 文字 #ffffff / 背景 #1a3a5c = 約11.6:1、hover時は反転（文字 #1a3a5c / 背景 #ffffff）。
+ */
+.portal-header .portal-header-logout {
+    --bs-btn-color: #ffffff;
+    --bs-btn-border-color: #d8e2ee;
+    --bs-btn-hover-color: #1a3a5c;
+    --bs-btn-hover-bg: #ffffff;
+    --bs-btn-hover-border-color: #ffffff;
+    --bs-btn-active-color: #1a3a5c;
+    --bs-btn-active-bg: #d8e2ee;
+    --bs-btn-active-border-color: #d8e2ee;
+    --bs-btn-focus-shadow-rgb: 216, 226, 238;
+}
+
 .portal-container {
     max-width: 720px;
     margin: 0 auto;

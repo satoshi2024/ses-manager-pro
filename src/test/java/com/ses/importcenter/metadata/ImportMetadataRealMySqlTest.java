@@ -24,6 +24,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.storage.DocumentStorage;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -113,7 +114,7 @@ class ImportMetadataRealMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(NF06_DATABASE_NAME)
             .withUsername("root")
             .withPassword("ses");

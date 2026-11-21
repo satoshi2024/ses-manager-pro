@@ -14,6 +14,7 @@ import com.ses.service.document.DocumentEvidenceStorageVerifier;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import com.ses.service.lifecycle.dual.DualConfirmationMySqlFixtures.Fixture;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -84,7 +85,7 @@ class DualConfirmationCoordinatorRetryMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf01_dual_retry")
             .withUsername("root")
             .withPassword("ses");

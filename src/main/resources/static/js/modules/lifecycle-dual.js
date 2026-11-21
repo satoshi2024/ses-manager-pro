@@ -140,6 +140,23 @@ SES.lifecycleDual = {
         return `<span class="text-muted">${SES.escapeHtml(this.t('lifecycle.dual.comment.none'))}</span>`;
     },
 
+    /**
+     * 提出者・確認者の表示（RB-POSTLAUNCH D-2。以前は「ユーザーID N」だけだった）。名前はサーバーが表示範囲を判定して返す:
+     * 社内画面では利用者の氏名、本人画面では本人の名前だけ。本人画面で名前が無い他の利用者は「社内の担当者」と出し、
+     * 社内画面で名前が無い（削除済み等）場合だけ従来のID表示にする。
+     */
+    personLabel: function(name, userId) {
+        if (name !== null && name !== undefined && String(name).trim() !== '') {
+            return String(name);
+        }
+        if (userId === null || userId === undefined) {
+            return '-';
+        }
+        return document.getElementById('dualDecisionSection')
+            ? this.t('lifecycle.dual.label.userValue', [String(userId)])
+            : this.t('lifecycle.dual.label.internalStaff');
+    },
+
     row: function(labelKey, valueHtml) {
         return `<dt class="col-12 col-sm-4 text-muted fw-normal">${SES.escapeHtml(this.t(labelKey))}</dt>`
             + `<dd class="col-12 col-sm-8 mb-2">${valueHtml}</dd>`;
@@ -159,8 +176,7 @@ SES.lifecycleDual = {
                 : '-';
             html += this.row('lifecycle.dual.label.document', SES.escapeHtml(documentValue));
             html += this.row('lifecycle.dual.label.submittedAt', SES.escapeHtml(this.formatDateTime(v.submittedAt)));
-            html += this.row('lifecycle.dual.label.submitter',
-                SES.escapeHtml(this.t('lifecycle.dual.label.userValue', [String(v.submitterUserId || '-')])));
+            html += this.row('lifecycle.dual.label.submitter', SES.escapeHtml(this.personLabel(v.submitterName, v.submitterUserId)));
             html += this.row('lifecycle.dual.label.submissionComment',
                 this.commentHtml(v.submissionComment, v.submissionCommentPresent));
         }
@@ -168,8 +184,7 @@ SES.lifecycleDual = {
             html += this.row('lifecycle.dual.label.decision',
                 SES.escapeHtml(this.t('lifecycle.dual.decision.' + v.decision)));
             html += this.row('lifecycle.dual.label.decidedAt', SES.escapeHtml(this.formatDateTime(v.decidedAt)));
-            html += this.row('lifecycle.dual.label.confirmer',
-                SES.escapeHtml(this.t('lifecycle.dual.label.userValue', [String(v.confirmerUserId || '-')])));
+            html += this.row('lifecycle.dual.label.confirmer', SES.escapeHtml(this.personLabel(v.confirmerName, v.confirmerUserId)));
             html += this.row('lifecycle.dual.label.decisionComment',
                 this.commentHtml(v.decisionComment, v.decisionCommentPresent));
         }

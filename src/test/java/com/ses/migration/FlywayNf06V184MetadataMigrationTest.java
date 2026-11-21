@@ -1,6 +1,7 @@
 package com.ses.migration;
 
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.junit.jupiter.api.Tag;
@@ -58,7 +59,7 @@ class FlywayNf06V184MetadataMigrationTest {
     static final MySQLContainer<?> UPGRADE = mysql("ses_nf06_v184_upgrade");
 
     private static MySQLContainer<?> mysql(String database) {
-        return new MySQLContainer<>("mysql:8.0")
+        return new MySQLContainer<>(MySqlTestImages.image())
                 .withDatabaseName(database)
                 .withUsername("root")
                 .withPassword("ses");

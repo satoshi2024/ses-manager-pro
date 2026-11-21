@@ -35,6 +35,11 @@ public class DualConfirmationViewDto {
     private Integer submissionRevision;
     private String evidenceSha256;
     private Long submitterUserId;
+    /**
+     * 提出者の表示名（氏名、無ければusername）。社内の入口では返し、本人の入口では照会者自身が提出者の時だけ返す
+     * （RB-POSTLAUNCH D-2。他の利用者の名前を本人画面へ広げない）。見つからなければnull。
+     */
+    private String submitterName;
     private LocalDateTime submittedAt;
     private Long documentId;
     private Long documentVersionId;
@@ -48,6 +53,8 @@ public class DualConfirmationViewDto {
     /** projectionの提出に対する確認・差戻しの記録（無ければnull）。 */
     private String decision;
     private Long confirmerUserId;
+    /** 確認者の表示名（{@link #submitterName} と同じ表示範囲）。 */
+    private String confirmerName;
     private LocalDateTime decidedAt;
     /** 確認・差戻しcommentの本文（表示範囲外ならnull）。 */
     private String decisionComment;

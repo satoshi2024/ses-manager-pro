@@ -6,6 +6,7 @@ import com.ses.service.EngineerSkillService;
 import com.ses.service.ProjectSkillService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,7 @@ class EngineerProjectSkillTenantConcurrencyMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_skill_tenant")
             .withUsername("root")
             .withPassword("ses");

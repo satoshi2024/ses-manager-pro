@@ -906,6 +906,20 @@ input[type="date"]::-webkit-datetime-edit-text {
 .modal.show .modal-dialog {
     transform: scale(1);
 }
+/*
+ * Toast（RB-POSTLAUNCH D-1）: SES.toast は bg-{type} bg-opacity-10（背景の不透明度10%）で描くため、右上の header
+ * （「新規作成」ボタン・アイコン）が透けて文言と重なり読めなかった。重なり順（toast-container 1060 > header 1020）は
+ * 正しく、原因は背景の透過。面の色で不透明にし、種別の色は同じ10%を面の上に重ねて見た目を保つ。
+ */
+#toast-container .toast {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary);
+}
+#toast-container .toast.border-success { background-image: linear-gradient(rgba(var(--bs-success-rgb), .1), rgba(var(--bs-success-rgb), .1)); }
+#toast-container .toast.border-danger { background-image: linear-gradient(rgba(var(--bs-danger-rgb), .1), rgba(var(--bs-danger-rgb), .1)); }
+#toast-container .toast.border-warning { background-image: linear-gradient(rgba(var(--bs-warning-rgb), .1), rgba(var(--bs-warning-rgb), .1)); }
+#toast-container .toast.border-info { background-image: linear-gradient(rgba(var(--bs-info-rgb), .1), rgba(var(--bs-info-rgb), .1)); }
+
 /* 浅色 Modal/Toast: btn-close-white は白アイコンのままでは見えないため反転 */
 [data-bs-theme="light"] .modal-header .btn-close-white,
 [data-bs-theme="light"] .toast .btn-close-white {

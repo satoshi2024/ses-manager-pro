@@ -4,6 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -35,14 +36,14 @@ class FlywayContractDocumentDispatchSchemaSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> FRESH = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> FRESH = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_cd_fresh")
             .withUsername("root")
             .withPassword("ses");
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> LEGACY = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> LEGACY = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_cd_legacy")
             .withUsername("root")
             .withPassword("ses");
