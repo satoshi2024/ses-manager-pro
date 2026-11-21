@@ -30,6 +30,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/content-hash.sh"
 . "$LIB_DIR/schema-fingerprint.sh"
 . "$LIB_DIR/binlog.sh"
+. "$LIB_DIR/uploads-pointer.sh"
 
 PROVIDERS_DIR="$LIB_DIR/providers"
 [[ -d "$PROVIDERS_DIR" ]] || PROVIDERS_DIR=$(cd "$LIB_DIR/../providers" && pwd)
@@ -67,7 +68,8 @@ Usage: backup-full.sh [--help]
 
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_PORT,
 MYSQL_USER, MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR,
-UPLOADS_DIR, UPLOADS_STAGING_PARENT（uploads と同一 filesystem 必須）,
+UPLOADS_ROOT（uploads の根）, UPLOADS_POINTER（既定 current）,
+UPLOADS_STAGING_PARENT（uploads と同一 filesystem = 同じ mount 必須）,
 REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR, APP_COMMIT, FLYWAY_VERSION,
 CRITICAL_TABLES, CONTENT_HASH_TABLES, BACKUP_TOOL_IMAGE_DIGEST
 EOF
@@ -81,13 +83,16 @@ main() {
   common::require_env MYSQL_PASSWORD_FILE
   common::require_env MYSQL_DATABASE
   common::require_env BACKUP_WORK_DIR
-  common::require_env UPLOADS_DIR
+  # RB-W 追加修正 C: uploads は根（UPLOADS_ROOT）と pointer（UPLOADS_POINTER）で指定する（廃止した UPLOADS_DIR が残っていれば失敗）
+  uploads_pointer::check_env || common::fail "uploads の設定が不正です（UPLOADS_ROOT・UPLOADS_POINTER）"
   common::require_env UPLOADS_STAGING_PARENT
   common::require_env REPLICA_HEARTBEAT_DIR
   common::require_env SCHEDULER_ACK_DIR
   MYSQL_PORT=${MYSQL_PORT:-3306}
 
   export RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE
+  # preflight（子 process）にも同じ uploads の設定を渡す
+  export UPLOADS_ROOT UPLOADS_POINTER
 
   if ! mysql_options::init; then
     common::fail "mysql option file を作成できません（接続設定を確認してください）"
@@ -147,14 +152,18 @@ main() {
   fi
   binlog::parse_dump_gtid "$dump_file"
 
-  # uploads snapshot（同一 fs staging。特殊 file は provider が拒否）
+  # uploads snapshot（pointer が指す版の directory を同一 fs の staging へ。特殊 file は provider が拒否）
   local uploads_snap="$work/uploads-snapshot.json"
-  if ! "$PROVIDERS_DIR/uploads-local.sh" snapshot "$UPLOADS_DIR" "$UPLOADS_STAGING_PARENT" "$uploads_snap"; then
+  if ! "$PROVIDERS_DIR/uploads-local.sh" snapshot "$UPLOADS_ROOT" "$UPLOADS_POINTER" "$UPLOADS_STAGING_PARENT" "$uploads_snap"; then
     common::fail "uploads snapshot に失敗しました"
   fi
   UPLOADS_SNAPSHOT_ID=$(jq -r '.snapshot_id // empty' "$uploads_snap")
   UPLOADS_STAGING_DIR=$(jq -r '.staging_dir // empty' "$uploads_snap")
+  # snapshot した pointer の名前と版（metadata.json と index の uploads_pointer に記録する。RB-W 追加修正 C）
+  UPLOADS_POINTER_NAME=$(jq -r '.pointer // empty' "$uploads_snap")
+  UPLOADS_POINTER_TARGET=$(jq -r '.pointer_target // empty' "$uploads_snap")
   [[ -n "$UPLOADS_SNAPSHOT_ID" ]] || common::fail "uploads snapshot ID を取得できません"
+  [[ -n "$UPLOADS_POINTER_NAME" && -n "$UPLOADS_POINTER_TARGET" ]] || common::fail "uploads の pointer と版を取得できません"
 
   # R2 P2-06: 主要 table count は静止区間内（解除前）に採取する
   # （dump と同じ静止区間の値として metadata に載せる。失敗しても metadata は書ける）
@@ -292,11 +301,14 @@ main() {
     --arg binlog_position "$BINLOG_START_POSITION" \
     --arg manifest_sha "$(cat "$payload/manifest.sha256")" \
     --arg uploads_snapshot_id "$UPLOADS_SNAPSHOT_ID" \
+    --arg uploads_pointer "$UPLOADS_POINTER_NAME" \
+    --arg uploads_version "$UPLOADS_POINTER_TARGET" \
     --arg quiesce_started "$(quiesce::status_json | jq -r '.started_at_utc // ""')" \
     --arg quiesce_released "$(quiesce::status_json | jq -r '.released_at_utc // ""')" \
     '{kind: $kind, status: $status, consistency_time_utc: $consistency_time_utc,
       restic_snapshot_id: $restic_snapshot_id, binlog_start: {file: $binlog_file, position: ($binlog_position | tonumber?)},
       manifest_sha256: $manifest_sha, uploads_snapshot_id: $uploads_snapshot_id,
+      uploads_pointer: {name: $uploads_pointer, target: $uploads_version},
       quiesce: {started_at_utc: $quiesce_started, released_at_utc: $quiesce_released}}')
   printf '%s\n' "$result"
   return 0

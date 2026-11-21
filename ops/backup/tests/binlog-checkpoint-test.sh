@@ -70,12 +70,15 @@ start_quiesce_fixtures() {
 
 setup_checkpoint_env() {
   setup_binlog_env
-  export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads" UPLOADS_STAGING_PARENT="$T/staging"
+  # RB-W 追加修正 C: uploads の根の下に版 v0 と current -> v0（production の配置）
+  export BACKUP_WORK_DIR="$T/work" UPLOADS_ROOT="$T/uploads" UPLOADS_POINTER=current UPLOADS_STAGING_PARENT="$T/staging"
+  unset UPLOADS_DIR
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export APP_COMMIT=test FLYWAY_VERSION=42 MYSQL_DATABASE=ses_manager_db
   export CHECKPOINT_ARCHIVER_WAIT=3
-  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_DIR/sub" "$UPLOADS_STAGING_PARENT"
-  printf 'uploads-data\n' > "$UPLOADS_DIR/sub/f.txt"
+  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_ROOT/v0/sub" "$UPLOADS_STAGING_PARENT"
+  ln -s v0 "$UPLOADS_ROOT/current"
+  printf 'uploads-data\n' > "$UPLOADS_ROOT/v0/sub/f.txt"
   start_quiesce_fixtures
 }
 
@@ -331,6 +334,9 @@ case_checkpoint_records_schema_fingerprint() {
     | sha256sum | awk '{print $1}')
   idx=$(ls "$BACKUP_WORK_DIR"/index/checkpoint-*.json 2>/dev/null | head -n 1)
   assert_eq "$expected" "$(jq -r '.schema_fingerprint.sha256 // empty' "$idx" 2>/dev/null)" "checkpoint index に schema fingerprint を記録"
+  # RB-W 追加修正 C: checkpoint も backup した版（pointer の指す先）を記録する（復元時にどの版かを示す）
+  assert_eq "current/v0" "$(jq -r '"\(.uploads_pointer.name)/\(.uploads_pointer.target)"' "$idx" 2>/dev/null)" \
+    "checkpoint index に pointer と版を記録"
   kill "$FIX_PID" 2>/dev/null || true
 
   setup_checkpoint_env

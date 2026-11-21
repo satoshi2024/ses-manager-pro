@@ -20,6 +20,13 @@
 #   - この file は block style の YAML だけで書く（RB-W W-3）。tool-image.sh check は block style の
 #     YAML を自前で解釈して service ごとの image・pull_policy を確かめるため、flow style（{ } / [ ]）・
 #     tag・block scalar・トップレベルの x- 以外の anchor などを見つけると拒否する。
+#   - uploads と staging（RB-W 追加修正 C。README「uploads の配置と mount」）: backup host は backup 用の access point を
+#     1 回だけ /mnt/ses-files に mount する（その根に uploads/ と backup-staging/ がある。trust は含めない）。
+#     同じ host mount から uploads/ を /app/uploads に :ro で、backup-staging/ を /var/lib/ses-uploads-staging に bind する
+#     （同じ mount の bind 同士は st_dev が同じで、provider の「同一 filesystem」判定を通る。staging を backup-data の
+#     下に置かない）。.env.backup は UPLOADS_ROOT=/app/uploads、UPLOADS_POINTER=current、
+#     UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging にする。host に mount が無いまま起動すると docker が空の
+#     directory を作るが、pointer（current）が無いため uploads snapshot と preflight が失敗する（fail-closed）。
 # ============================================================
 # 要人手確認: 検証済み build の content ID を設定するまで production では使えない（fail-closed）。
 x-ses-backup-tool-content-id: "sha256:UNPINNED"
@@ -34,7 +41,9 @@ x-backup-common: &backup-common
     - restic_password
   volumes:
     - backup-data:/var/lib/ses-backup
-    - uploads:/app/uploads:ro
+    # uploads の根（版の directory と current）は読み取り専用。staging は同じ host mount の別の directory
+    - /mnt/ses-files/uploads:/app/uploads:ro
+    - /mnt/ses-files/backup-staging:/var/lib/ses-uploads-staging
     - ./secrets/mysql-capath:/etc/mysql-ssl-ca:ro
 
 x-db-only: &db-only
@@ -98,5 +107,4 @@ secrets:
     file: ./secrets/restic-password
 
 volumes:
-  uploads:
   backup-data:

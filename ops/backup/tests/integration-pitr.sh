@@ -10,7 +10,7 @@
 #
 # 環境変数: SRC_HOST, TGT_HOST, SRC_PASSWORD_FILE, TGT_PASSWORD_FILE,
 # WORK_DIR, REPOSITORY 系（BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE,
-# RESTIC_REPOSITORY）, UPLOADS_DIR, BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR,
+# RESTIC_REPOSITORY）, UPLOADS_ROOT（uploads の根。UPLOADS_POINTER の既定は current）, BINLOG_RAW_DIR, BINLOG_IMMUTABLE_DIR,
 # REPLICA_HEARTBEAT_DIR, SCHEDULER_ACK_DIR, QUIESCE_*, APP_COMMIT,
 # FLYWAY_VERSION（fixture の history 最新 42 と一致必須）, CRITICAL_TABLES,
 # CONTENT_HASH_TABLES, PLANS_DIR, INDEX_DIR 等
@@ -29,7 +29,8 @@ require_env TGT_PASSWORD_FILE
 require_env WORK_DIR
 require_env BACKUP_REPOSITORY
 require_env RESTIC_PASSWORD_FILE
-require_env UPLOADS_DIR
+require_env UPLOADS_ROOT
+export UPLOADS_POINTER=${UPLOADS_POINTER:-current}
 
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
 export RESTIC_REPOSITORY=${RESTIC_REPOSITORY:-$BACKUP_REPOSITORY}
@@ -45,6 +46,15 @@ src_root() { # mysql args...（source の root で実行）
 tgt_root() { # mysql args...（target の root で実行）
   MYSQL_PWD="$(cat "$TGT_PASSWORD_FILE")" mysql -h"$TGT_HOST" -uroot "$@"
 }
+
+# RB-W 追加修正 C: uploads の根の下に版 v0 と相対・1 段の pointer current -> v0 を置く（production の配置。app の初回の
+# 起動前に作るものに当たる）。preflight・full・checkpoint は pointer を解決して v0 を backup する。
+UPLOADS_V0="$UPLOADS_ROOT/v0"
+mkdir -p "$UPLOADS_V0"
+if [[ ! -L "$UPLOADS_ROOT/$UPLOADS_POINTER" ]]; then
+  ln -s v0 "$UPLOADS_ROOT/$UPLOADS_POINTER" || fail "uploads の pointer（$UPLOADS_POINTER -> v0）を作れません"
+fi
+[[ "$(readlink "$UPLOADS_ROOT/$UPLOADS_POINTER")" == v0 ]] || fail "uploads の pointer が v0 を指していません"
 
 log "== 1. preflight =="
 /usr/local/bin/preflight.sh --json > "$EVID/preflight.json" 2>&1 \
@@ -178,13 +188,16 @@ SRC_DEFINERS=$(definer_list src_root) || fail "source の DEFINER を取得で�
 printf '%s\n' "$SRC_DEFINERS" > "$EVID/source-definers.txt"
 [[ "$SRC_DEFINERS" == "routine f_fp_next $FIXTURE_MIGRATOR@%"$'\n'"trigger trg_fp_child_bi $FIXTURE_MIGRATOR@%"$'\n'"view v_fp_child $FIXTURE_MIGRATOR@%" ]] \
   || fail "source の trigger・routine・view の DEFINER が migrator 相当の利用者ではありません（$EVID/source-definers.txt）"
-mkdir -p "$UPLOADS_DIR/published"
-printf 'marker-before-checkpoint\n' > "$UPLOADS_DIR/published/marker-before.txt"
-printf 'report-restore\n' > "$UPLOADS_DIR/published/report-restore.pdf"
+mkdir -p "$UPLOADS_V0/published"
+printf 'marker-before-checkpoint\n' > "$UPLOADS_V0/published/marker-before.txt"
+printf 'report-restore\n' > "$UPLOADS_V0/published/report-restore.pdf"
 export REPORT_RESTORE_EVIDENCE="$EVID/report-restore-contract.txt"
 
 log "== 3. backup-full =="
 /usr/local/bin/backup-full.sh > "$EVID/backup-full.log" 2>&1 || fail "backup-full が失敗しました"
+# RB-W 追加修正 C: full は pointer を解決して backup した版（v0）を記録する
+grep -q '"target": "v0"' "$EVID/backup-full.log" \
+  || fail "full の結果に backup した uploads の版（uploads_pointer.target=v0）がありません"
 log "backup-full OK"
 
 log "== 3.5 中間 DML（full と checkpoint の間の更新。replay 検証用） =="
@@ -213,7 +226,7 @@ log "== 6. after marker 注入（source のみ） =="
 src_root "$MYSQL_DATABASE" \
   -e "INSERT INTO marker_test (marker) VALUES ('marker-after-checkpoint');" \
   || fail "after marker 注入に失敗しました"
-printf 'marker-after-checkpoint\n' > "$UPLOADS_DIR/published/marker-after.txt"
+printf 'marker-after-checkpoint\n' > "$UPLOADS_V0/published/marker-after.txt"
 
 kill "$ARCHIVER_PID" 2>/dev/null || true
 

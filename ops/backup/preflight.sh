@@ -21,7 +21,8 @@
 #   13  binlog checksum が OFF
 #   14  対象 DB に非 InnoDB table がある
 #   15  TLS が無効
-#   16  UPLOADS_DIR 指定だが存在しない
+#   16  UPLOADS_ROOT 指定だが pointer（UPLOADS_POINTER、既定 current）を解決できない、廃止した UPLOADS_DIR が残っている、
+#       または UPLOADS_STAGING_PARENT 指定時に pointer の指す版と staging の親が同じ mount（st_dev）でない
 #   17  空き容量が PREFLIGHT_MIN_FREE_BYTES 未満
 #   18  MYSQL_PWD の使用を検出
 #   1   上記以外（env 不足、接続失敗）
@@ -36,6 +37,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 [[ -d "$LIB_DIR" ]] || LIB_DIR=/usr/local/lib/ses-backup
 . "$LIB_DIR/common.sh"
 . "$LIB_DIR/mysql-options.sh"
+. "$LIB_DIR/uploads-pointer.sh"
 
 EXIT_CLIENT=10
 EXIT_SERVER=11
@@ -72,11 +74,12 @@ Usage: preflight.sh [--json|--help]
 
 環境契約検査を実行し、結果 JSON を標準出力へ出力する。
 終了コード: 0=PASS, 10=client不正, 11=server version不整合, 12=log_bin OFF・binlog_format が ROW でない,
-13=checksum OFF, 14=非InnoDB, 15=TLS無効, 16=uploads不在, 17=空き容量不足,
+13=checksum OFF, 14=非InnoDB, 15=TLS無効, 16=uploads の pointer を解決できない・staging と同じ mount でない, 17=空き容量不足,
 18=MYSQL_PWD使用検出, 1=env不足/接続失敗
 
 環境変数: MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD_FILE,
-MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_DIR(任意), PREFLIGHT_MIN_FREE_BYTES
+MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_ROOT(任意), UPLOADS_POINTER(任意。既定 current),
+UPLOADS_STAGING_PARENT(任意。UPLOADS_ROOT と同じ mount か確かめる), PREFLIGHT_MIN_FREE_BYTES
 EOF
 }
 
@@ -253,16 +256,40 @@ main() {
   fi
 
   # --- uploads topology（任意。指定されたら存在チェック） ---
+  # RB-W 追加修正 C: UPLOADS_ROOT を指定したら、pointer（UPLOADS_POINTER、既定 current）を provider と同じ規則
+  # （lib/uploads-pointer.sh）で解決できることを確かめる。廃止した UPLOADS_DIR が残っていれば失敗する。
+  # UPLOADS_STAGING_PARENT も指定されていれば、pointer の指す版の directory と staging の親が同じ mount（st_dev が同じ）で
+  # あることを provider と同じ方法（stat -L -c %d）で確かめる。違う・取れない場合は失敗する（初回 backup の前に、mount を
+  # 1 回にまとめていない配置を見つける。README「uploads の配置と mount」の SRE の確認方法）。
   local uploads_status="not-configured"
-  local uploads_fs="" uploads_free=""
+  local uploads_fs="" uploads_free="" uploads_pointer="" uploads_version="" pointer_out=""
+  local uploads_same_fs="" uploads_dev="" staging_dev=""
   if [[ -n "${UPLOADS_DIR:-}" ]]; then
-    if [[ -d "$UPLOADS_DIR" ]]; then
+    uploads_status="deprecated-key"
+    note_fail "$EXIT_UPLOADS" "UPLOADS_DIR は廃止しました（UPLOADS_ROOT と UPLOADS_POINTER を設定する。README「設定」）"
+  elif [[ -n "${UPLOADS_ROOT:-}" ]]; then
+    uploads_pointer=${UPLOADS_POINTER:-current}
+    if pointer_out=$(uploads_pointer::resolve "$UPLOADS_ROOT" "$uploads_pointer" 2>&1); then
       uploads_status="ok"
-      uploads_fs=$(stat -f -c %T "$UPLOADS_DIR" 2>/dev/null || echo unknown)
-      uploads_free=$(df -P -B1 "$UPLOADS_DIR" | awk 'NR==2 {print $4}')
+      uploads_version=$pointer_out
+      uploads_fs=$(stat -f -c %T "$UPLOADS_ROOT/$uploads_version" 2>/dev/null || echo unknown)
+      uploads_free=$(df -P -B1 "$UPLOADS_ROOT/$uploads_version" | awk 'NR==2 {print $4}')
+      if [[ -n "${UPLOADS_STAGING_PARENT:-}" ]]; then
+        uploads_dev=$(stat -L -c %d "$UPLOADS_ROOT/$uploads_version" 2>/dev/null) || uploads_dev=""
+        staging_dev=$(stat -L -c %d "$UPLOADS_STAGING_PARENT" 2>/dev/null) || staging_dev=""
+        if [[ ! "$uploads_dev" =~ ^[0-9]+$ || ! "$staging_dev" =~ ^[0-9]+$ ]]; then
+          uploads_same_fs=false
+          note_fail "$EXIT_UPLOADS" "uploads の版と staging の親（UPLOADS_STAGING_PARENT）の filesystem（st_dev）を取得できません（uploads=${uploads_dev:-なし} staging=${staging_dev:-なし}）"
+        elif [[ "$uploads_dev" != "$staging_dev" ]]; then
+          uploads_same_fs=false
+          note_fail "$EXIT_UPLOADS" "uploads の版と staging の親（UPLOADS_STAGING_PARENT）が同じ mount ではありません（st_dev: uploads=$uploads_dev staging=$staging_dev。mount を 1 回にまとめる）"
+        else
+          uploads_same_fs=true
+        fi
+      fi
     else
-      uploads_status="missing"
-      note_fail "$EXIT_UPLOADS" "UPLOADS_DIR が存在しません: $UPLOADS_DIR"
+      uploads_status="pointer-unresolved"
+      note_fail "$EXIT_UPLOADS" "$pointer_out"
     fi
   fi
 
@@ -320,6 +347,9 @@ main() {
     --arg uploads_status "$uploads_status" \
     --arg uploads_fs "$uploads_fs" \
     --arg uploads_free_bytes "$uploads_free" \
+    --arg uploads_pointer "$uploads_pointer" \
+    --arg uploads_version "$uploads_version" \
+    --arg uploads_same_fs "$uploads_same_fs" \
     --arg disk_free_bytes "$disk_free_bytes" \
     --arg work_dir "$BACKUP_WORK_DIR" \
     '{
@@ -343,7 +373,9 @@ main() {
         log_bin_basename: $log_bin_basename,
         tool_image_digest: $tool_image_digest,
         binlog_expire_seconds: ($binlog_expire_seconds // ""),
-        uploads: {status: $uploads_status, filesystem: $uploads_fs, free_bytes: ($uploads_free_bytes // "")},
+        uploads: {status: $uploads_status, filesystem: $uploads_fs, free_bytes: ($uploads_free_bytes // ""),
+                  pointer: $uploads_pointer, version: $uploads_version,
+                  staging_same_filesystem: (if $uploads_same_fs == "" then null else ($uploads_same_fs == "true") end)},
         disk_free_bytes: ($disk_free_bytes // ""),
         work_dir: $work_dir
       }

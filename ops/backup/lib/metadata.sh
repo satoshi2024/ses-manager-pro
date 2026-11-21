@@ -41,6 +41,8 @@ metadata::build() { # staging_dir out_json
   if [[ -n "${METADATA_CONTENT_HASHES_JSON:-}" ]]; then
     content_hashes=$METADATA_CONTENT_HASHES_JSON
   fi
+  # uploads の pointer の名前と snapshot した版（RB-W 追加修正 C。呼び出し元が UPLOADS_POINTER_NAME /
+  # UPLOADS_POINTER_TARGET で渡す。未指定なら null）。uploads 全体の snapshot JSON（uploads）にも同じ値がある。
   # schema fingerprint（G-04 / RB-W W-1。呼び出し元が METADATA_SCHEMA_FINGERPRINT_JSON で渡す。
   # 未指定なら null = 未記録で、復元検証は FAIL にする。lib/schema-fingerprint.sh 参照）
   local schema_fingerprint="null"
@@ -65,6 +67,8 @@ metadata::build() { # staging_dir out_json
     --arg mysql_client_version "${MYSQL_CLIENT_VERSION:-unknown}" \
     --arg tool_image_digest "${BACKUP_TOOL_IMAGE_DIGEST:-unknown}" \
     --arg uploads_snapshot_id "${UPLOADS_SNAPSHOT_ID:-}" \
+    --arg uploads_pointer_name "${UPLOADS_POINTER_NAME:-}" \
+    --arg uploads_pointer_target "${UPLOADS_POINTER_TARGET:-}" \
     --argjson quiesce "$quiesce" \
     --argjson uploads "$uploads_json" \
     --argjson critical_table_counts "$counts" \
@@ -85,6 +89,8 @@ metadata::build() { # staging_dir out_json
       mysql_client_version: $mysql_client_version,
       tool_image_digest: $tool_image_digest,
       uploads_snapshot_id: $uploads_snapshot_id,
+      uploads_pointer: (if $uploads_pointer_name == "" then null
+                        else {name: $uploads_pointer_name, target: $uploads_pointer_target} end),
       quiesce: $quiesce,
       uploads: $uploads,
       critical_table_counts: $critical_table_counts,

@@ -27,8 +27,11 @@ reset_fake() {
 
 setup_env() {
   T=$(mktemp -d)
-  export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads"
-  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_DIR" "$T/tmp" "$T/capath"
+  # RB-W 追加修正 C: uploads の根の下に版 v0 と current -> v0（production の配置）。廃止した UPLOADS_DIR は使わない
+  export BACKUP_WORK_DIR="$T/work" UPLOADS_ROOT="$T/uploads" UPLOADS_POINTER=current
+  unset UPLOADS_DIR UPLOADS_STAGING_PARENT
+  mkdir -p "$BACKUP_WORK_DIR" "$UPLOADS_ROOT/v0" "$T/tmp" "$T/capath"
+  ln -s v0 "$UPLOADS_ROOT/current"
   printf '%s\n' "$FAKE_PW" > "$T/pw"
   # hashed CA の fixture（内容は何でも良い。実 connect はしない）
   printf '%s\n' '-----BEGIN CERTIFICATE-----' 'FAKECA' '-----END CERTIFICATE-----' > "$T/capath/fd95d540.0"
@@ -65,6 +68,9 @@ case_preflight_normal() {
   assert_contains "$out" '"tls_ok": true' "TLS OK"
   assert_contains "$out" '"all_tables_innodb": true' "InnoDB 判定"
   assert_contains "$out" 'sha256:test-digest-001' "tool digest 出力"
+  # RB-W 追加修正 C: pointer を解決し、指す版を出力する
+  assert_contains "$out" '"pointer": "current"' "uploads の pointer の名前を出力"
+  assert_contains "$out" '"version": "v0"' "uploads の pointer が指す版を出力"
   assert_not_contains "$out" '127.0.0.1' "host を出力しない"
   assert_not_contains "$out" 'ses_manager_db' "DB 名を出力しない"
   assert_not_contains "$out" 'bkp-user-7x9' "user を出力しない"
@@ -181,11 +187,70 @@ case_preflight_tls_off() {
   assert_no_secret "$out"
 }
 
+# RB-W 追加修正 C: UPLOADS_ROOT の pointer を provider と同じ規則で解決できなければ exit 16。廃止した UPLOADS_DIR が
+# 残っていても exit 16（版の directory や根を pointer を介さずに backup しない）
 case_preflight_uploads_missing() {
   setup_env
-  export UPLOADS_DIR="$T/not-exists"
+  export UPLOADS_ROOT="$T/not-exists"
   run_preflight
-  assert_eq 16 "$code" "uploads 不在は exit 16"
+  assert_eq 16 "$code" "uploads の根が無ければ exit 16"
+  assert_contains "$out" "uploads の根が実 directory ではありません" "理由を通知: 根が無い"
+  assert_no_secret "$out"
+
+  setup_env
+  rm "$UPLOADS_ROOT/current"
+  run_preflight
+  assert_eq 16 "$code" "pointer が無ければ exit 16"
+  assert_contains "$out" "current がありません" "理由を通知: pointer が無い"
+  assert_contains "$out" '"status": "pointer-unresolved"' "uploads の状態を出力"
+
+  setup_env
+  rm "$UPLOADS_ROOT/current"
+  ln -s "$UPLOADS_ROOT/v0" "$UPLOADS_ROOT/current"
+  run_preflight
+  assert_eq 16 "$code" "絶対 path の pointer は exit 16"
+  assert_contains "$out" "1 段の名前ではありません" "理由を通知: 絶対 path"
+
+  setup_env
+  export UPLOADS_DIR="$T/uploads/v0"
+  run_preflight
+  unset UPLOADS_DIR
+  assert_eq 16 "$code" "廃止した UPLOADS_DIR が残っていれば exit 16"
+  assert_contains "$out" "UPLOADS_DIR は廃止しました" "理由を通知: 廃止した設定"
+  assert_contains "$out" '"status": "deprecated-key"' "uploads の状態を出力: 廃止した設定"
+}
+
+# RB-W 追加修正 C: UPLOADS_STAGING_PARENT も指定されていれば、pointer の指す版と staging の親が同じ mount（st_dev が同じ）で
+# あることを provider と同じ stat -L -c %d で確かめる。違う・取れなければ exit 16（初回 backup の前に配置の誤りを見つける）
+case_preflight_uploads_staging_same_mount() {
+  local real_dev
+  setup_env
+  mkdir -p "$T/staging"
+  export UPLOADS_STAGING_PARENT="$T/staging"
+  run_preflight
+  assert_zero "$code" "uploads の版と同じ mount の staging なら exit 0"
+  assert_contains "$out" '"staging_same_filesystem": true' "同じ mount であることを記録"
+
+  # stat の stub で staging の st_dev だけを違う値にする（別々に mount した access point を再現）
+  real_dev=$(stat -L -c %d "$T/staging")
+  mkdir -p "$T/bin"
+  cat > "$T/bin/stat" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == "-L -c %d $T/staging" ]]; then echo $((real_dev + 1)); exit 0; fi
+exec "$(command -v stat)" "\$@"
+EOF
+  chmod +x "$T/bin/stat"
+  out=$(PATH="$T/bin:$PATH" BACKUP_TOOL_IMAGE_DIGEST='sha256:test-digest-001' "$PREFLIGHT" --json 2>&1)
+  code=$?
+  assert_eq 16 "$code" "staging が別の mount なら exit 16"
+  assert_contains "$out" "同じ mount ではありません" "理由を通知: 別の mount"
+  assert_contains "$out" '"staging_same_filesystem": false' "別の mount であることを記録"
+
+  export UPLOADS_STAGING_PARENT="$T/no-staging"
+  run_preflight
+  assert_eq 16 "$code" "staging の親が無ければ exit 16"
+  assert_contains "$out" "filesystem（st_dev）を取得できません" "理由を通知: staging の親が無い"
+  unset UPLOADS_STAGING_PARENT
   assert_no_secret "$out"
 }
 
@@ -285,6 +350,7 @@ run_case case_preflight_noninnodb
 run_case case_preflight_empty_db_engines
 run_case case_preflight_tls_off
 run_case case_preflight_uploads_missing
+run_case case_preflight_uploads_staging_same_mount
 run_case case_preflight_binlog_format_not_row
 run_case case_preflight_disk_full
 run_case case_preflight_mysql_pwd_env

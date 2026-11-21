@@ -3,8 +3,14 @@
 # uploads snapshot provider（ローカル volume 向け・version 管理された executable）
 #
 # usage:
-#   uploads-local.sh snapshot <src_dir> <staging_parent> <out_json>
+#   uploads-local.sh snapshot <uploads_root> <pointer> <staging_parent> <out_json>
 #
+# - uploads の根（<uploads_root>。production では uploads を :ro で bind した /app/uploads）の pointer（既定 current）を
+#   lib/uploads-pointer.sh の規則で解決し、指す版の directory（<uploads_root>/<版>）を src にする（RB-W 追加修正 C。
+#   2026-11-18 利用者決定: 方式 A）。pointer そのものを find に渡さない（起点の symlink は辿られず空になる）。
+#   pointer の名前と指す版を JSON（pointer・pointer_target）に記録する。
+# - src は実 directory であること（symlink・directory でないものは拒否。RB-W X-1）。file が 1 つも無い版は
+#   inventory を [] として成功する（初回 deploy 直後の空の uploads。RB-W X-1）。
 # - 書込み静止中に、同一 filesystem の staging へ複製する（cp -a）。
 # - symlink / hardlink / device / FIFO / socket / path traversal を拒否する
 #   （RQ-002: "snapshot 中の symlink、hardlink、device、FIFO、socket、
@@ -19,6 +25,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LIB_DIR="$SCRIPT_DIR/../lib"
 [[ -d "$LIB_DIR" ]] || LIB_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 . "$LIB_DIR/common.sh"
+. "$LIB_DIR/uploads-pointer.sh"
 
 uploads_local::check_safe() { # src_dir
   local src_dir=$1
@@ -38,6 +45,8 @@ uploads_local::check_safe() { # src_dir
     rel=${p#"$src_dir"/}
     case "$rel" in
       *'/'../*|../*|*'/..') echo "uploads-local: path traversal を拒否: $rel" >&2; return 1 ;;
+      # 改行・tab を含む名前は inventory（1 行 = 1 file、tab 区切り）を壊すため拒否する
+      *$'\n'*|*$'\t'*) echo "uploads-local: 改行・tab を含む名前を拒否" >&2; return 1 ;;
     esac
     if [[ -f "$p" ]]; then
       local links=0
@@ -52,9 +61,19 @@ uploads_local::check_safe() { # src_dir
 }
 
 uploads_local::snapshot() {
-  local src_dir=$1 staging_parent=$2 out_json=$3
-  [[ -d "$src_dir" ]] || { echo "uploads-local: src がありません: $src_dir" >&2; return 1; }
+  local uploads_root=$1 pointer=$2 staging_parent=$3 out_json=$4
   [[ -d "$staging_parent" ]] || { echo "uploads-local: staging_parent がありません: $staging_parent" >&2; return 1; }
+
+  # pointer（current -> v<n>）を解決して版の directory を src にする（lib/uploads-pointer.sh）
+  local version src_dir
+  version=$(uploads_pointer::resolve "$uploads_root" "$pointer") || return 1
+  src_dir="$uploads_root/$version"
+  # RB-W X-1: src は実 directory に限る。find は起点の symlink を辿らないため、symlink を src にすると file が 0 件の
+  # snapshot になり、空の inventory を受け付けるようにした今は黙って空の backup になる（resolve でも確かめている）。
+  if [[ -L "$src_dir" || ! -d "$src_dir" ]]; then
+    echo "uploads-local: src が実 directory ではありません（symlink・directory でない）: $src_dir" >&2
+    return 1
+  fi
 
   uploads_local::check_safe "$src_dir" || return 1
 
@@ -71,6 +90,9 @@ uploads_local::snapshot() {
   # 別の fs なら別の値になる。symlink は辿る（-L。実際に読み書きする場所を比べる）。btrfs の subvolume は同じ fs でも
   # st_dev が違うため拒否する（fail-closed）。Git Bash（MSYS）の st_dev は Windows の volume から作られる値で、
   # network drive での挙動は未確認（本番は Linux の container 内で動く）。値を取れない・数値でない場合も拒否する。
+  # したがって「同一 filesystem」は「同じ mount（superblock）」の意味になる。production は backup host が 1 つの access point を
+  # 1 回だけ mount し、その下の uploads/ と backup-staging/ を別々に bind する（README「uploads の配置と mount」）。同じ EFS でも
+  # access point ごとに別々に mount すると st_dev が違い、ここで拒否される（backup が止まる。fail-closed）。
   local src_fs staging_fs
   src_fs=$(stat -L -c %d "$src_dir" 2>/dev/null) || src_fs=""
   staging_fs=$(stat -L -c %d "$staging_parent" 2>/dev/null) || staging_fs=""
@@ -113,8 +135,11 @@ uploads_local::snapshot() {
     printf '%s\t%s\t%s\n' "$rel" "$size" "$sha"
   done)
 
+  # RB-W X-1: file が 0 件なら inventory は []（以前は空行から不正な JSON を作り jq が失敗し、空の uploads の初回 backup が
+  # 必ず失敗していた）。JSON は jq で組み立てる（path の引用符なども正しく escape する。並びと形は以前と同じ）。
   local inv_json
-  inv_json=$(printf '%s\n' "$inv" | awk -F'\t' '{printf "{\"path\": \"%s\", \"size\": %s, \"sha256\": \"%s\"}\n", $1, $2, $3}' | jq -s .)
+  inv_json=$(jq -R -s 'split("\n") | map(select(length > 0) | split("\t")
+      | {path: .[0], size: (.[1] | tonumber), sha256: .[2]})' <<< "$inv")
   local snapshot_id
   snapshot_id=$(printf '%s' "$inv_json" | sha256sum | awk '{print $1}')
 
@@ -124,10 +149,14 @@ uploads_local::snapshot() {
     --arg snapshot_id "$snapshot_id" \
     --arg started_at_utc "$started" \
     --arg ended_at_utc "$ended" \
+    --arg uploads_root "$uploads_root" \
+    --arg pointer "$pointer" \
+    --arg pointer_target "$version" \
     --arg src_dir "$src_dir" \
     --arg staging_dir "$staging" \
     --argjson inventory "$inv_json" \
     '{snapshot_id: $snapshot_id, started_at_utc: $started_at_utc, ended_at_utc: $ended_at_utc,
+      uploads_root: $uploads_root, pointer: $pointer, pointer_target: $pointer_target,
       src_dir: $src_dir, staging_dir: $staging_dir,
       file_count: ($inventory | length),
       inventory: $inventory}' > "$out_json"
@@ -141,11 +170,11 @@ uploads_local::snapshot() {
 cmd=${1:-}
 case "$cmd" in
   snapshot)
-    [[ $# -eq 4 ]] || { echo "Usage: uploads-local.sh snapshot <src_dir> <staging_parent> <out_json>" >&2; exit 2; }
-    uploads_local::snapshot "$2" "$3" "$4"
+    [[ $# -eq 5 ]] || { echo "Usage: uploads-local.sh snapshot <uploads_root> <pointer> <staging_parent> <out_json>" >&2; exit 2; }
+    uploads_local::snapshot "$2" "$3" "$4" "$5"
     ;;
   *)
-    echo "Usage: uploads-local.sh snapshot <src_dir> <staging_parent> <out_json>" >&2
+    echo "Usage: uploads-local.sh snapshot <uploads_root> <pointer> <staging_parent> <out_json>" >&2
     exit 2
     ;;
 esac

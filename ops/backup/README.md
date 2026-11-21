@@ -64,9 +64,48 @@ production 環境への接続・復元は行わないこと。
 | `FLYWAY_VERSION` | 適用済みの最新 Flyway version を **Flyway 形式**（`V`・`_` を使わない。例: `185`、`185.1`）で設定する。checkpoint metadata の `flyway_max_success` になり、復元検証で `flyway_schema_history` の成功行の版番号順の最大と照合する。未設定（`unknown`）の checkpoint は復元検証を通らない |
 | `CONTENT_HASH_TABLES` | 内容ハッシュ（`lib/content-hash.sh`。主キー順に並べた全列を、SQL の NULL と文字列 `'NULL'` を区別して SHA-256）を記録する主要 table を `,` 区切りで指定する。**主キーの無い table は指定できない**（指定すると backup が失敗する）。full / checkpoint の書込み静止区間内に計算するため、静止時間が延びすぎない範囲に絞る（`flyway_schema_history` を含めることを推奨）。指定した table を 1 つでも計算できなければ backup を VALID にしない。復元検証も同じ値を参照し、指定 table の記録が checkpoint に無ければ（`NOT_RECORDED` を含む）FAIL にする |
 | `CRITICAL_TABLES` | full 時に件数を記録する主要 table（従来どおり） |
+| `UPLOADS_ROOT` | uploads の根（container 内の path。production は `/app/uploads`）。その下に版の directory（`v0`、`v1`、…）と pointer の symlink がある（下の「uploads の配置と mount」）。full / checkpoint は必須、preflight は任意（指定すると pointer を解決できることを確かめる） |
+| `UPLOADS_POINTER` | pointer の名前（既定 `current`）。`current -> v<n>` の相対・1 段の symlink であること |
+| `UPLOADS_STAGING_PARENT` | uploads snapshot の staging の親（production は `/var/lib/ses-uploads-staging`）。`UPLOADS_ROOT` と同じ mount（`stat -L -c %d` の st_dev が同じ）でなければ provider が拒否する（preflight も pointer の指す版と比べ、違えば exit 16）。`backup-data`（`/var/lib/ses-backup`）の下に置かない（別の filesystem） |
 
 `FLYWAY_HISTORY_REQUIRED` は廃止した（W1-B1 r2）。`flyway_schema_history` の照合は常に必須で、
 この変数が 1 以外の値で残っていると `validate-restore.sh` は検証を始めずに失敗する。
+`UPLOADS_DIR` は廃止した（RB-W 追加修正 C）。残っていると full・checkpoint・preflight は失敗する（版の directory や根を
+pointer を介さずに backup しないため）。`UPLOADS_ROOT` と `UPLOADS_POINTER` に置き換える。
+
+### uploads の配置と mount（RB-W 追加修正 C。2026-11-18 利用者決定: 方式 A・同じ uid）
+
+- **配置**: uploads の access point の根（app の container では `/app/uploads`）の下に、版の directory `v0`、`v1`、… と、
+  相対・1 段の symlink `current -> v<n>` を置く。app は `UPLOAD_BASE_PATH=/app/uploads/current` を使う。app の初回の起動前に
+  `v0` と `current -> v0` を作る（`current` が無いと app が実 directory として作り、pointer が効かなくなる。手順は deploy-runbook）。
+- **pointer の解決**（`lib/uploads-pointer.sh`）: backup は `current` を `find` にも host の mount にも辿らせない。uploads の根を
+  `:ro` で bind した container の中で `readlink`（`-f` なし）で値だけを読み、`^[A-Za-z0-9][A-Za-z0-9._-]*$` の 1 段の名前だけを
+  受け付けて `<根>/<名前>` を snapshot の src にする。根が symlink・pointer が無い・pointer が実 directory や file・指す先が
+  絶対 path・`/` や `..` を含む・無い・symlink・file の場合は失敗する（fail-closed）。file が 1 つも無い版は inventory を `[]` と
+  して成功する（初回 deploy 直後の空の uploads）。
+- **記録**: snapshot の JSON（`pointer`・`pointer_target`）、full / checkpoint の `metadata.json`・index・結果 JSON の
+  `uploads_pointer: {name, target}` に、どの版を backup したかを残す。
+- **host の mount と bind**: backup host は backup 用の access point（根に `uploads/` と `backup-staging/` がある。trust は
+  含めない）を **1 回だけ** `/mnt/ses-files` に mount する。`docker-compose.yml` はその `uploads/` を `/app/uploads` に
+  `:ro` で、`backup-staging/` を `/var/lib/ses-uploads-staging` に bind する。`.env.backup` は `UPLOADS_ROOT=/app/uploads`・
+  `UPLOADS_POINTER=current`・`UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging`。
+- **「同一 filesystem」の意味**: provider は src と staging の st_dev（`stat -L -c %d`）を比べる。同じ host mount の bind 同士は
+  同じ値になる。同じ EFS でも access point ごとに別々に mount したもの（efs-utils の TLS mount を含む）は st_dev が違い、
+  拒否される（backup が止まる。fail-closed）。uploads と staging を別の mount にしない。`:ro` の bind は mount の
+  属性だけを変え、st_dev は変えない（provider は pointer の指す版の directory と staging の親を比べる）。
+- **SRE の確認方法**（backup host。初回 backup の前と、mount を変えたとき）:
+  1. host で `stat -L -c %d /mnt/ses-files/uploads/current /mnt/ses-files/backup-staging` の 2 行が同じ値であること
+     （`current` は pointer。`-L` で指す版の directory の値になる）。
+  2. container の中でも同じであること: `ops/backup/image/tool-image.sh compose run --rm preflight` の JSON の
+     `checks.uploads` が `status: "ok"`、`version` が今の版（初回は `v0`）、`staging_same_filesystem: true` であること。
+     preflight は `UPLOADS_STAGING_PARENT` が設定されていると、pointer の指す版と staging の親の st_dev を provider と同じ
+     `stat -L -c %d` で比べ、違う・取れない場合は exit 16 で止まる。
+  値が違う・exit 16 の場合は backup を始めない（mount を 1 回にまとめる。pointer が無ければ deploy-runbook の手順で作る）。
+- **uid の模型**: backup の access point と app の access point は同じ POSIX uid/gid を使う（2026-11-18 利用者決定）。
+  backup による uploads の改変を防ぐのは compose の `:ro` bind だけである（Security の受理事項）。同じ uid のため、app が 0600 で
+  作る file（取込センターの台帳・隔離中の file）も backup が読め、`cp -a` の所有者の保持は同じ uid への変更（no-op）になり、
+  ops/backup の script の `umask 077` で restore が作る 0700 の directory も app が読み書きできる。mode の正規化はしない
+  （uid が分かれると成り立たない。分ける場合は provider・restore の所有者と mode の扱いを見直す）。
 
 ## 実行
 

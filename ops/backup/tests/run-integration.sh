@@ -1497,7 +1497,7 @@ docker run --rm --network "$NET" \
   -e BACKUP_REPOSITORY=/work/repo -e RESTIC_PASSWORD_FILE=/work/repo-password \
   -e RESTIC_REPOSITORY=/work/repo \
   -e FULL_COORDINATE_FILE=/work/full-coordinate \
-  -e BACKUP_WORK_DIR=/work/work -e PLANS_DIR=/work/plans -e UPLOADS_DIR=/work/uploads \
+  -e BACKUP_WORK_DIR=/work/work -e PLANS_DIR=/work/plans -e UPLOADS_ROOT=/work/uploads -e UPLOADS_POINTER=current \
   -e UPLOADS_STAGING_PARENT=/work/staging \
   -e REPLICA_HEARTBEAT_DIR=/work/heartbeats -e SCHEDULER_ACK_DIR=/work/scheduler \
   -e QUIESCE_DEADLINE_SECONDS=60 -e QUIESCE_STALE_SECONDS=60 \
