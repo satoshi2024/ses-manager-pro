@@ -33,13 +33,10 @@ class MySqlTestImagesTest {
     private static final String EVIDENCE_STEP = "Verify MySQL tests ran on the default image";
 
     /**
-     * CIのjobが使うfileのうち、既定以外のMySQL imageを使ってよいもの（key: path、value: 理由）。
-     * ここに無いfileで既定以外のimageを使うと失敗する。例外が不要になったら（既定imageだけになったら）消す。
+     * CI の backup-integration job が起動する source/target の MySQL（実 PITR）。backup tool の MySQL 8.4 対応（RB-W）で
+     * 既定 image と同じ 8.4.13 にしたため、例外なく既定 image を求める（以前は 8.0.36 の例外があった）。
      */
-    private static final Map<String, String> NON_DEFAULT_IMAGE_EXCEPTIONS = Map.of(
-            "ops/backup/tests/docker-compose.integration.yml",
-            "CI backup-integration の source/target。backup tool（MySQL 8.0.46 client）を 8.4 へ対応させる第2段階までは"
-                    + " 8.0.36 で PITR を検証する。このjobのgreenは 8.4 の証拠ではない");
+    private static final Path BACKUP_INTEGRATION_COMPOSE = Path.of("ops/backup/tests/docker-compose.integration.yml");
 
     /** workflow・script・pom で MySQL image の上書きとみなす書き方。 */
     private static final List<Pattern> OVERRIDES = List.of(
@@ -245,7 +242,7 @@ class MySqlTestImagesTest {
     }
 
     @Test
-    void CIが使うfileは例外として挙げたもの以外で既定以外のMySQL_imageを使わない() throws IOException {
+    void CIが使うfileは既定以外のMySQL_imageを使わない() throws IOException {
         String defaultTag = defaultTag();
         List<String> offenders = new ArrayList<>();
         for (Path file : ciFiles()) {
@@ -257,16 +254,25 @@ class MySqlTestImagesTest {
                 }
             }
         }
-        assertTrue(offenders.isEmpty(), "CIのworkflow・scriptで既定以外のMySQL imageを使っています: " + offenders);
+        assertTrue(offenders.isEmpty(),
+                "CIのworkflow・script・backup-integration の compose で既定以外のMySQL imageを使っています: " + offenders);
+    }
 
-        for (Map.Entry<String, String> exception : NON_DEFAULT_IMAGE_EXCEPTIONS.entrySet()) {
-            Path file = Path.of(exception.getKey());
-            assertTrue(Files.isRegularFile(file), "例外に挙げたfileがありません: " + file);
-            boolean stillNeeded = IMAGE_IN_TEXT.matcher(read(file)).results()
-                    .map(result -> result.group(1))
-                    .anyMatch(tag -> !tag.equals(defaultTag));
-            assertTrue(stillNeeded, file + " は既定imageだけになったので NON_DEFAULT_IMAGE_EXCEPTIONS から外してください（理由: "
-                    + exception.getValue() + "）");
+    @Test
+    void backup_integrationのsourceとtargetは既定imageをdigest固定で使う() throws IOException {
+        assertTrue(ciFiles().contains(BACKUP_INTEGRATION_COMPOSE),
+                "backup-integration の compose を既定以外のimageの検査対象に含めてください");
+        String compose = read(BACKUP_INTEGRATION_COMPOSE);
+        List<String> images = compose.lines()
+                .filter(line -> line.strip().startsWith("image:") && line.contains("mysql"))
+                .map(String::strip)
+                .toList();
+        // source と target は同じ anchor（x-mysql-common）から image を受け取る
+        assertFalse(images.isEmpty(), "backup-integration の MySQL image（source/target）が見つかりません");
+        for (String image : images) {
+            assertTrue(image.matches("^image:\\s*" + Pattern.quote(MySqlTestImages.DEFAULT_IMAGE) + "@sha256:[0-9a-f]{64}$"),
+                    "backup-integration の MySQL は既定image（" + MySqlTestImages.DEFAULT_IMAGE + "）を digest 固定で使ってください: "
+                            + image);
         }
     }
 
@@ -340,7 +346,7 @@ class MySqlTestImagesTest {
         return MySqlTestImages.DEFAULT_IMAGE.substring(MySqlTestImages.DEFAULT_IMAGE.indexOf(':') + 1);
     }
 
-    /** CIが実行するworkflow・script・pom。 */
+    /** CIが実行するworkflow・script・pom と、backup-integration job が起動する MySQL の compose。 */
     private static List<Path> ciFiles() throws IOException {
         List<Path> files = new ArrayList<>();
         for (Path root : List.of(CI_WORKFLOW.getParent(), Path.of("scripts"))) {
@@ -349,6 +355,7 @@ class MySqlTestImagesTest {
             }
         }
         files.add(Path.of("pom.xml"));
+        files.add(BACKUP_INTEGRATION_COMPOSE);
         return files;
     }
 
