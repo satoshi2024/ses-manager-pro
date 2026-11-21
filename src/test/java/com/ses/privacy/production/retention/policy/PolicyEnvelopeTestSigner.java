@@ -2,6 +2,7 @@ package com.ses.privacy.production.retention.policy;
 
 import com.ses.privacy.foundation.ApprovalEnvelopeCanonicalizer;
 import com.ses.privacy.foundation.ApprovalEnvelopeMetadata;
+import com.ses.privacy.foundation.PolicyEnvelopeSigningStatement;
 import com.ses.privacy.foundation.PolicyApprovalEnvelope;
 import com.ses.privacy.foundation.ProductionPolicyTrustRegistry;
 import com.ses.privacy.foundation.TrustedAuthority;
@@ -98,7 +99,8 @@ final class PolicyEnvelopeTestSigner {
                 PROVIDER, "TEST_PURPOSE", "TEST_TRIGGER", retentionRule, "TEST_ONLY_DISPOSITION", new byte[]{0});
         byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
         PrivateKey key = keys.getOrDefault(authorityId + ":" + KEY_ID, generate().getPrivate());
-        return new Signed(canonical, sign(key, canonical));
+        // 本番は digest 声明への署名だけを受け付ける（NF07-TRUST。KMS の手順と同じ）
+        return new Signed(canonical, sign(key, PolicyEnvelopeSigningStatement.of(canonical)));
     }
 
     static byte[] sign(PrivateKey key, byte[] payload) {

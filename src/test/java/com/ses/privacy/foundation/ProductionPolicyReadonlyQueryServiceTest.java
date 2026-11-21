@@ -434,7 +434,8 @@ class ProductionPolicyReadonlyQueryServiceTest {
         byte[] canonical = ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
         Signature signer = Signature.getInstance("Ed25519");
         signer.initSign(keyPair.getPrivate());
-        signer.update(canonical);
+        // 本番は digest 声明への署名だけを受け付ける（NF07-TRUST）
+        signer.update(PolicyEnvelopeSigningStatement.of(canonical));
         byte[] signature = signer.sign();
         TrustedAuthority anchor = new TrustedAuthority("authority-test", "key-test", keyPair.getPublic(),
                 Set.of(TENANT), Set.of(MODULE), Set.of(ELEMENT), Set.of("POLICY"),

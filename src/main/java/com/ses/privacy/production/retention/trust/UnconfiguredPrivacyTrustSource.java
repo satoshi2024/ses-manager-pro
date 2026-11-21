@@ -8,7 +8,8 @@ import com.ses.privacy.production.retention.policy.ConfiguredPolicyTrustRegistry
 import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
 
 /**
- * 第1期の trust（D-03 の方式の決定前）。policy・hold 解除の anchor はどちらも0件、失効状態は常に UNKNOWN。
+ * 第1期の trust、および D-03 の trust 文書（{@code privacy.trust.kms.anchor-file}）を設定しない間の trust。policy・hold 解除の
+ * anchor はどちらも0件、失効状態は常に UNKNOWN。
  *
  * <p>この間は、policy の登録・有効化（NF07-REG）と hold 解除（NF07-REL）の入口は404のまま（開放の gate が trust を満たさない）、
  * 説明照会は {@code UNKNOWN_TRUST_ANCHOR} / {@code POLICY_UNKNOWN} に閉じる。決定ID を設定しても開かない。

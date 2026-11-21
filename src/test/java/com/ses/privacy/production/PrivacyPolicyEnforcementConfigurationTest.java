@@ -184,7 +184,8 @@ class PrivacyPolicyEnforcementConfigurationTest {
         byte[] canonical = com.ses.privacy.foundation.ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned);
         java.security.Signature signer = java.security.Signature.getInstance("Ed25519");
         signer.initSign(keyPair.getPrivate());
-        signer.update(canonical);
+        // 本番は digest 声明への署名だけを受け付ける（NF07-TRUST）
+        signer.update(com.ses.privacy.foundation.PolicyEnvelopeSigningStatement.of(canonical));
         com.ses.privacy.foundation.TrustedAuthority anchor = new com.ses.privacy.foundation.TrustedAuthority(
                 "policy-issuer-test", "k1", keyPair.getPublic(), java.util.Set.of("tenant-a"),
                 java.util.Set.of("NF08_AI_SUMMARY"), java.util.Set.of("AI_EXTERNAL_PROVIDER_COPY"), java.util.Set.of("POLICY"),

@@ -114,12 +114,13 @@ final class HoldReleaseProofVerifier implements HoldReleaseVerifier {
     }
 
     @Override
-    public boolean trustReady() {
+    public boolean trustReady(String tenantId) {
         try {
             Map<String, HoldReleaseTrustAnchor> anchors = registry == null ? null : registry.anchors();
             // 解除には authority・主体・鍵を共有しない発行者と承認者の組が要るため、その組が ACTIVE と確認できるときだけ開く
-            // （anchor の件数ではなく組で数える。同じ authority の2つの鍵では開かない。RB-NF07-REG review P3-1）
-            return PrivacyTrustReadiness.releasePairAvailable(anchors, revocations);
+            // （anchor の件数ではなく組で数える。同じ authority の2つの鍵では開かない。RB-NF07-REG review P3-1）。
+            // 有効期間は verify と同じ clock で判定し、tenant は授権 tenant で絞る（RB-NF07-REG delta review P3-1）
+            return PrivacyTrustReadiness.releasePairAvailable(anchors, revocations, clock.instant(), tenantId);
         } catch (RuntimeException e) {
             return false;
         }

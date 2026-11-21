@@ -143,6 +143,7 @@
 - NF01 二者確認: `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF`（§1.7）。
 - NF06: `IMPORT_ROW_REFERENCE_HMAC_KEY` と admission の承認設定（`feature-switches.md` 4.8.2）。
 - NF07: 決定ID束縛 `PRIVACY_APPROVAL_*`。DSARでは加えて `PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`（同 4.7）。
+- NF07 の policy の登録・有効化と hold 解除を開ける場合（D-03 = AWS KMS。NF07-TRUST）: `PRIVACY_TRUST_KMS_ANCHOR_FILE`（`privacy.trust.kms.anchor-file`。trust 文書の file の絶対 path）と `PRIVACY_TRUST_KMS_MAX_DOCUMENT_AGE`（`privacy.trust.kms.max-document-age`。5分〜31日）。任意で `PRIVACY_TRUST_KMS_RELOAD_INTERVAL`（既定 `30s`、1秒〜5分）。`PRIVACY_RETENTION_ENABLED=true` で `PRIVACY_TRUST_KMS_ANCHOR_FILE` を設定すると、設定（時間の値が解釈できない・範囲外を含む）・文書の形式が違えば起動しない（§4.6）。flag が OFF なら、時間の値が解釈できなくても起動は止まらない（文字列で受け取り、検査は ON の起動だけ）。値は secret ではない（×）が、file の書込みは D-03 owner の手順に限る（file の内容が trust の正本。EFS に置き、application は読取り専用で mount する。2026-11-18 決定）。
 - NF05: `INTEGRATION_HUB_PUBLIC_ID_KEY`、`INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION` と鍵、truststore 等（DG-05）。RB-NF05 で次を加えた（どれも開ける方向だけで必須。OFFのままなら不要）:
   - `INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER`（`integration.hub.crypto.credential-hash-pepper`）: credential の保存用 HMAC の pepper。32 byte を `=` 無しの base64url で書き、暗号鍵（全 version）と復号後の byte 列が違う値にする。secret（〇）。inbound・outbound のどちらを開けても必須（N5-P3-2）。
   - `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST`（`integration.hub.public-api.approval.approval-digest`）: DG-05-IN の決定書に記載された承認内容の SHA-256。inbound を開けるときに必須。secret ではない（×）。
@@ -551,7 +552,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | NF02（`FEATURE_NF02_ENABLED`。子の顧客ポータルを含む） | DG-02（CS Owner。B3 休日の運用事項 H-1・H-2 を含む）と、当年度を含む全社共通カレンダーの登録 | `customer-success-service-desk/dg-02-first-release-decision-package.md`、`feature-switches.md` 4.3 |
 | NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる。<br>FINAL review b-13 の項目（RB-NF05 で DG-05 草案 §1.1・§6 に反映）:<br>(a) 決定IDの承認内容 digest への束縛: **実装済み**。開ける方向の `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST` / `INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST` が要る（§1.0）。署名者と転記者の二人が草案 §1.1 の正規形から再計算して照合する（**未実施**。署名の時に行う）。<br>(b) ownership の MySQL 試験: project・contract-status・invoice-status の分岐を `IntegrationHubV192AuditRetentionMySqlTest`（shard 3）に追加した。**Runner の証跡は未取得**。<br>(c) 実wireの TLS・XFF: JVM 内の loopback で fast 試験を追加した（`HttpsIntegrationHubWebhookTransportWireTlsTest`・`ExternalApiForwardedHeaderConnectorTest`）。実ネットワークの peer・ALB 経由の XFF・WAF の証跡は代替しない（**SRE が staging で取得、未取得**）。<br>(d) **SRE の負荷実測: 未取得**（人が行う。認証前の body 読取・AES-GCM・HMAC、rate 行と client 行の `FOR UPDATE`、5秒周期の状態 lock、bulk 検索を含む）。<br>あわせて N5-P3-2（credential hash を pepper 付き HMAC に。`INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER` が開放時に必須）と N5-P3-7（要求経路の lease 一括回収を間引き）を実装した。<br>RB-NF05 review で残った判断・受理（草案 §1.1）:<br>(e) **Security/Owner の判断（未取得）**: digest は鍵も有効期間も持たないため、**撤回・置換された旧決定（旧ID＋旧digest）を再び設定しても起動検査を通る**。防ぐのは配備記録と変更管理だけである。NF06・NF07 のように署名日・失効日を正規形へ入れる（正規形 v2）かを決める。<br>(f) **Owner/SRE の受理（未取得）**: truststore file の byte が変わること（同じ証明書の作り直しを含む）、`batch-size`・`fixed-delay-ms`・`unauthenticated-audit-max-per-minute` を変えることは、どれも新しい DG-05 決定（新しい決定ID・digest・署名）が要る運用負担になる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
 | NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5。<br>FINAL review b-14 の項目（RB-NF05）:<br>(a) multi-host・failover・loadbalance・replication・SRV の JDBC URL: `ImportJdbcReconnectGuard` が起動時に拒否するようにし、4.8.2 #7 に書いた。透過再接続 proxy と Hikari 以外の pool は引き続き DBA/SRE が確認する。<br>(b) **W3-12 §6 の人手確認のうち未了のもの（未取得）**: LB の timeout 後の回復（検証中に LB が 504 や HTML の 503 を返した後、画面の「開く」で状態を取り直せること）、行参照鍵が欠けたときの preview・エラーCSV の 503（`error.import.rowReferenceUnavailable`）の画面表示。staging（実 MySQL）で人が確かめる。<br>(c) digest 正規形の golden vector: 4.8.2 #1 と a1a §10 に追加した（source code は ASCII 順）。二人による再計算そのものは署名の時に行う（未実施）。<br>(d) **DBA の確認（未取得）**: 全 instance が同じアプリ account（同じ user 名）を使い、alternating-users 方式の rotation をしないこと（§1.2、4.8.2 #10）。別の user で張った COMMIT 接続は照合から見えず、時間だけの判定へ戻る。<br>実装で埋めたもの: 照合器が COMMIT 接続の server thread の実行中は回収しない（記録後に server が再起動・切替えされた場合は接続IDを使わない。a1a §6）、`t_document_version.storage_key` の索引（V200）、エラーCSVの最終行 `#END`（集計時の除外は 4.8.2・a1a §11）、host 部に `;` を含む JDBC URL の拒否。MySQL の試験は追加したが **Runner の証跡は未取得** | `feature-switches.md` 4.8.2 |
-| NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放は、D-05 ownerの受理事項（§4.4末尾）と合わせる。<br>**解除の開放は、D-03・D-05 の署名だけでなく NF07-TRUST の実装が要る**（§4.5）。第1期は trust anchor registry が空で、失効 provider は常に UNKNOWN を返すため、解除の API は NF07-TRUST（registry と失効 provider）の実装まで404のままである。<br>NF07-TRUST のうち方式に依存しない部分は実装済み（RB-NF07-REG）: 接続点 `PrivacyTrustSource`（REG・REL・説明照会が共用）、REL の P3-6（Journal の解除 event に claim の digest、監査に claim）・P3-8（Ed25519 以外の鍵を登録で拒否）・P3-9（失効 provider が ACTIVE と答えるまで入口を閉じる）・P3-10（partition の一致）。**残る KMS/HSM の anchor registry と CRL/OCSP の失効 provider（`PrivacyTrustSource` の adapter）は、D-03 の方式が決まった後に実装する（未実装。D-03 の方式は未決定）**。**D-03 で選ぶ方式は Ed25519 の署名鍵を扱えること（必須。verifier は Ed25519 だけを検証し、他の算法の鍵は anchor として扱わない）**。退役した鍵の公開鍵も事後の検証のために保管する。<br>あわせて D-05 owner が「holdを開放した後、NF07-TRUST が終わるまで解除できない」ことを受理する（未取得）。<br>**policy の登録・有効化（NF07-REG。`POST /api/privacy/policies`・`/{id}/activate`）の開放は、D-01・D-02・D-03 の署名（D-02 は未取得）と NF07-TRUST の実装が要る**。解除と同じく、第1期は registry が空・失効 provider が常に UNKNOWN のため404のままで、決定IDだけを設定しても開かない。登録者と有効化者は別の privacy-admin（2名以上）。current より前に署名された revision への巻戻しは409（戻すには新しい revision として署名し直す。D-02 owner が別の運用を望む場合は再検討）。誤って登録した CANDIDATE は取り下げられる（`/{id}/withdraw`）。NF08 の外部送信はこの登録・有効化で対象 policy が `APPROVED_ACTIVE` になることを前提にする（計画 §8） | `feature-switches.md` 4.7・4.7.6、§4.4・§4.5 |
+| NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放は、D-05 ownerの受理事項（§4.4末尾）と合わせる。<br>**解除の開放は、D-03・D-05 の署名だけでなく trust 文書（§4.6）が要る**（§4.5）。trust 文書を設定するまでは trust anchor registry が空で、失効 provider は常に UNKNOWN を返すため、解除の API は404のままである。<br>NF07-TRUST のうち方式に依存しない部分は実装済み（RB-NF07-REG）: 接続点 `PrivacyTrustSource`（REG・REL・説明照会が共用）、REL の P3-6（Journal の解除 event に claim の digest、監査に claim）・P3-8（Ed25519 以外の鍵を登録で拒否）・P3-9（失効 provider が ACTIVE と答えるまで入口を閉じる）・P3-10（partition の一致）。**D-03 の方式は AWS KMS 非対称署名・鍵 version 単位の失効に決定（2026-11-18。CRL/OCSP は使わない）。その adapter（`KmsPrivacyTrustSource`。trust 文書を判定のたびに読む）は RB-NF07-TRUST-KMS で実装済み（§4.6）。D-03 の署名は未取得**（方式は決まったが署名は無い）。verifier は Ed25519 だけを検証し、他の算法の鍵は anchor として扱わない。gate は有効期間外・授権 tenant の外の anchor を数えない。<br>開放の前に人が行うこと（全て**未取得・未実施**）: (a) D-03 の署名と `PRIVACY_APPROVAL_D03_*`。(b) KMS key（`ECC_NIST_EDWARDS25519`）の作成と key policy（`kms:Sign` を署名者だけに許す。Security・D-03 owner）。(c) trust 文書の置き場所は **EFS の volume、application は読取り専用で mount**（2026-11-18 利用者決定。task definition の雛形の mount は RB-DEPLOY）。残るのは、書込みの経路と権限（access point・IAM・security group）、Fargate の実際の mount option の確認と失効の反映の遅れ・EFS に届かないときに閉じるまでの時間の実測、更新の担当と周期、`PRIVACY_TRUST_KMS_MAX_DOCUMENT_AGE` の値（SRE・Security・D-03 owner。§4.6）。**EFS に届かないとき、trust は各判定で最長0.3秒しか待たず、最長でおよそ `PRIVACY_TRUST_KMS_RELOAD_INTERVAL` の2倍（既定で約60秒）で閉じる**（I/O を要求ごとに止めない修正は実装済み。delta review P2-A）。(d) staging で、実 KMS key の署名（policy の digest 声明と解除の claim）を application が検証できることの確認（KMS の Ed25519 の署名が 64 bytes の RFC 8032 の形であることを含む）。(e) 退役した鍵の公開鍵・ARN の保管と、KMS key の削除の方針。<br>あわせて D-05 owner が「holdを開放した後、D-03 の署名と trust 文書が揃うまで解除できない」ことを受理する（未取得）。<br>**policy の登録・有効化（NF07-REG。`POST /api/privacy/policies`・`/{id}/activate`）の開放は、D-01・D-02・D-03 の署名（D-02・D-03 は未取得）と trust 文書（§4.6）が要る**。解除と同じく、trust 文書を設定するまでは registry が空・失効 provider が常に UNKNOWN のため404のままで、決定IDだけを設定しても開かない。登録者と有効化者は別の privacy-admin（2名以上）。current より前に署名された revision への巻戻しは409（戻すには新しい revision として署名し直す。D-02 owner が別の運用を望む場合は再検討）。誤って登録した CANDIDATE は取り下げられる（`/{id}/withdraw`）。NF08 の外部送信はこの登録・有効化で対象 policy が `APPROVED_ACTIVE` になることを前提にする（計画 §8） | `feature-switches.md` 4.7・4.7.6、§4.4・§4.5 |
 | NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8) を D-06 owner と受理する: D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する）。<br>さらに次も要る（**いずれも未取得**。人が行う確認・受理で、実装では代えられない）。<br>(a) SELF 交付区分の確認（D-06 owner。F2 r4 P3-I）: WORK_REPORT・RECEIPT は第三者の情報を含み得る。**未取得**。<br>(b) 「承認者は承認の前に草案の全内容を取得できる」という不変条件の Privacy の受理。不変条件は計画 §1 の I-10 に記載済み（RB-NF07-HOLD）。**受理は未取得**。<br>(c) `feature-switches.md` 4.7.2 の人手確認 (a)(c) を行う。(a) は起動時の INFO log `DSARの設定値（D-06 の決定書と照合する）` の `dueDays`・`packageMaxAge` を D-06 の決定書と人が照合する（この2値は approval digest に入らない。digest に入れる v2 正規形の案は計画 §3.5.2 にあるが、決定書の digest の手順が変わるため未実装）。(c) は D-06 の redaction 規則を、承認者による承認前の確認が使える状態にしてから設定する。**未取得**。<br>`POST /resolution` の応答の警告（HYG-FINAL P3-F の残り）は実装済み（RB-NF07-HOLD）: 本人が HELD で結果が削除・利用停止なら、応答の `holdConflict` と画面の警告 toast で知らせる（記録は止めない）。<br>性能の残り（開放の条件ではない。後続の backlog）: 開示 package の孤児の照会（`PrivacyExportPackageMapper.selectOrphanFiles`、毎時 :15）は `t_file_security_metadata` の全表走査のまま（`file_kind` に索引が無く、消すには DDL が要る。HYG-FINAL P3-D の残り） | `feature-switches.md` 4.7.2 の #5 と人手確認、計画 §1 I-10、§4.4（D14 と受理事項） |
 | NF08 外部送信（`AI_EXTERNAL_SEND_ENABLED`） | S-1〜S-8（DPA、DG-08、NF07 policy、外部送信決定、費用上限とGCP quota、`GATE-S17-G10-PROD`、modelリスク評価とcredential、DNS snapshot）と、**B2c-2 実装開始前の人手承認**（B2c-2 の着手条件）。prodはB2c-2の完了と独立Reviewまで、設定に関係なく起動を拒否する（冒頭のNF08 B2c-1の項）。<br>NF07-NF08-LINK は実装済み（RB-NF08-LINK）: 送信ごとに `AI_EXTERNAL_SEND_NF07_POLICY_ID` の NF07 policy が `APPROVED_ACTIVE` でなければ拒否する。LINK は S-1〜S-8 の代わりにならず、上の署名・承認は全て**未取得**。LINK が許可するには NF07 の行の policy 登録・有効化（D-02・D-03 と NF07-TRUST）と `PRIVACY_RETENTION_ENABLED=true` も要る。LINK の key の data element は V196 にある `AI_EXTERNAL_PROVIDER_COPY`（統括の決定、DDL なし）。**Privacy Owner がこの data element への束縛を確認する（未取得）**。<br>承認の再利用（W3-03 P3-2）: NF07 policy の再発行より前に署名した NF08 承認は LINK が拒否する。この防護は悪意の無い巻戻しだけを止め、意図的な内部者は止めない。受理（全て**未取得**、gate §7.4）:<br>(a) 方式と運用上の帰結（S-4 は NF07 envelope の発行日（JST 換算）以降に署名する。NF07 の再発行（D-03 の鍵 rotation を含む）のたびに NF08 の再署名まで外部送信が止まる）: Production Owner・Privacy Owner・D-03 owner。<br>(b) 残る穴 1（NF07 を再発行しない NF08 だけの置き換え）の運用規則: Production Owner・Privacy Owner。<br>(c) 残る穴 2（設定を変更できる者による内容の偽造）の HMAC: Security／CISO（S-7）。D-03 の鍵による署名にする場合は D-02・D-03 owner も。<br>(d) 残る穴 3（永続的な高水位）: DDL を伴う後続の開発 batch（版番号は総括が割り当てる）。<br>S-9（staging 観測）は NF07 の連鎖全体（NF07-TRUST の adapter、audience `PRODUCTION` の envelope と staging 用 anchor、REG の登録・有効化、`PRIVACY_RETENTION_ENABLED=true`）に依存し、準備する者と時期は**未定**（gate §8） | `ai-management-copilot/external-send-approval-gate.md` §7.4・§8、`.kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md`（B2c-2 の開始条件） |
 
@@ -1032,12 +1033,12 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 
 ### 4.5 NF07 保全holdの解除（NF07-REL。開放は D-03・D-05 の署名後）
 
-`POST /api/privacy/holds/{holdId}/release` は、D-03・D-05 の決定ID が有効で、prod の verifier があり、解除 authority の trust anchor が登録され、**失効 provider が2つ以上の anchor（異なる authority）に ACTIVE を返す**まで 404 を返す（第1期の registry は空、失効 provider は常に UNKNOWN。実 registry と失効 provider は NF07-TRUST の D-03 方式の adapter）。数えるのは、ISSUER の役割の anchor と APPROVER の役割の anchor で authority・主体（`sys_user:<id>`）・鍵を共有しない1組で、同じ authority の2つの鍵（rotation の重複期間）や ISSUER だけの2件では開かない。anchor と失効状態は判定のたびに読むため、anchor を消せば再起動せずに閉じる。開放の後の手順は次のとおり。署名は system の外（D-03 で決める方式。Ed25519 の鍵を扱えること）で行い、system は鍵を持たない。
+`POST /api/privacy/holds/{holdId}/release` は、D-03・D-05 の決定ID が有効で、prod の verifier があり、解除 authority の trust anchor が登録され、**失効 provider が2つ以上の anchor（異なる authority）に ACTIVE を返す**まで 404 を返す（trust 文書（§4.6）を設定するまでは registry が空、失効 provider は常に UNKNOWN。D-03 方式（AWS KMS）の adapter は RB-NF07-TRUST-KMS で実装済み）。数えるのは、ISSUER の役割の anchor と APPROVER の役割の anchor で authority・主体（`sys_user:<id>`）・鍵を共有しない1組で（どちらも判定の時刻に有効期間内で、授権 tenant（`OIDC_TENANT_ID`）を範囲に含むもの）、同じ authority の2つの鍵（rotation の重複期間）や ISSUER だけの2件では開かない。anchor と失効状態は判定のたびに読むため、anchor を消せば再起動せずに閉じる。開放の後の手順は次のとおり。署名は system の外（D-03 で決める方式。Ed25519 の鍵を扱えること）で行い、system は鍵を持たない。
 
 **手順**
 
 1. privacy-admin（要求者）が hold 画面で解除する hold を選び、理由コード・ticket・理由を入力する。画面は束縛の全項目（tenant・partition・hold ID・hold revision・理由の hash・command ID（画面で発行）・解除の時点の journal head の revision と event hash・要求者・開始者）と署名依頼の JSON を表示する。
-2. 署名依頼の JSON を発行者と承認者（要求者とは別の、trust anchor に登録された2名）に渡す。各人は下の正規形に Ed25519 で署名し、JSON の `issuer` / `approver` に `authorityId`・`keyId`・`issuedAt`・`expiresAt`・`signature`（base64）を記入する。
+2. 署名依頼の JSON を発行者と承認者（要求者とは別の、trust anchor に登録された2名）に渡す。各人は下の正規形に Ed25519 で署名し（AWS KMS の手順は §4.6。署名の対象をそのまま `MessageType=RAW` で署名する）、JSON の `issuer` / `approver` に `authorityId`・`keyId`・`issuedAt`・`expiresAt`・`signature`（base64）を記入する。
 3. 要求者が署名済みの JSON を画面に貼り付けて送る。理由コード・ticket・理由を変えると理由の hash が変わるため署名し直す。journal head・hold revision・開始者が署名の後に変わった場合は 409 になるので、新しい値で署名し直す。同じ JSON の再送は元の結果を返す（Journal に重ねない。proof の期限の後でも同じ）。**claim を再署名すると同じ command ID でも 409**（`error.privacy.holdReleaseConflict`。Journal の解除 event は両 claim の digest を持つため、別の claim は別の command になる）。ACK 不明の後の再送には、最初に送った JSON をそのまま使う。新しく署名し直す場合は画面で新しい command ID を発行してから署名を依頼する。
 4. 解除の後、Journal の解除 event の `action_id` は両 claim の digest（正規形は plan §4 の NF07-TRUST 実装記録）、監査 `NF07_HOLD_RELEASE_CLAIM` に発行者・承認者の claim（anchor・発行日時・期限・署名 hex）が1行ずつ残る。事後に「誰が署名したか」を確かめるときは、監査の claim から digest を計算して `action_id` と照合し、束縛の digest（`request_hash`）への署名を anchor の公開鍵で検証する（そのため D-03 の方式は退役した鍵の公開鍵も保管する）。
 
@@ -1073,6 +1074,137 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 - 画面の理由の hash は Web Crypto（`crypto.subtle`）で計算するため、https か localhost の画面でだけ表示される。それ以外（http）では「計算できません」と表示され、署名依頼の JSON の `reasonHash` は `null` になる。その場合は上の正規形で理由の hash を計算して記入する（`HoldReleaseProofVerifierTest` と `PrivacyHoldReleaseHashJsTest` が同じ test vector と照合する）。
 - 理由本文に対になっていない surrogate（不正な文字）を含む要求は 400 になる（Java と Web Crypto で byte 列が一致しないため）。
 - 帰属できない element の DATA_ELEMENT hold は、tenant に ACTIVE な SUBJECT hold がある間は解除できない（409 `error.privacy.holdReleaseDependency`）。受理するか DDL lane で選択の保存を足すかは plan §11 の未決事項。
+
+### 4.6 NF07 の trust 文書と署名の手順（D-03 = AWS KMS 非対称署名。NF07-TRUST）
+
+D-03 の方式は AWS KMS 非対称署名・鍵 version 単位の失効（2026-11-18 決定。CRL / OCSP は使わない）。application は AWS を呼ばない（SDK を持たず、KMS の認証情報も要らない）。署名は D-03 owner が KMS で行い、application は trust 文書に転記した公開鍵を JDK の Ed25519 で検証する。**実装は済んでいるが開放ではない**: hold 解除と policy の登録・有効化を開くには、D-01・D-02・D-03・D-05 の署名と決定ID（§1.7）が要る。**D-03 の署名は未取得**。
+
+**設定**（§1.0 の「ONにした時だけ必須になる設定」）
+
+| 環境変数（property） | 内容 | 既定 |
+|---|---|---|
+| `PRIVACY_TRUST_KMS_ANCHOR_FILE`（`privacy.trust.kms.anchor-file`） | trust 文書の file の絶対 path。空なら trust は第1期と同じ（anchor 0件・失効状態 UNKNOWN、入口は404） | 空 |
+| `PRIVACY_TRUST_KMS_MAX_DOCUMENT_AGE`（`privacy.trust.kms.max-document-age`） | 文書の `generatedAt` からの鮮度の上限（5分〜31日。`PT24H`・`24h` の形。単位の無い数値は秒）。過ぎると anchor は0件・失効状態は全て UNKNOWN（入口は閉じ、照会は `APPROVED_ACTIVE` にならない）。値は D-03 で決める（下の EFS の項の目安） | なし |
+| `PRIVACY_TRUST_KMS_RELOAD_INTERVAL`（`privacy.trust.kms.reload-interval`） | file の最終更新日時と大きさが変わらない間、読んだ内容を使い続ける最長の時間（1秒〜5分）。最終更新日時と大きさは判定のたびに確かめ、変われば次の判定で読み直す | `30s` |
+
+- 起動時の検査（`PrivacyTrustStartupValidator`、prod）: `PRIVACY_RETENTION_ENABLED=true` で `PRIVACY_TRUST_KMS_ANCHOR_FILE` を設定したときだけ行う（flag が OFF・trust が未設定なら何もしない。NF07 の既存の起動検査と同じ規則。`feature-switches.md` 4.7.7）。構造的な不足（path が絶対でない、鮮度の上限が未設定・解釈できない・範囲外、再読込の間隔が解釈できない・範囲外、file が読めない・1MiB を超える、文書の形式の違反）は固定の違反コード（`trust.kms.<code> at <文書の中の位置>`）で起動を止める。値・公開鍵・ARN は出さない。時間要因（鮮度の上限を過ぎた・作成日時が未来・有効期間内で ACTIVE の anchor が無い）だけなら WARN `NF07_TRUST_NOT_READY_AT_STARTUP` で起動を続け、入口は閉じたままにする。
+- 時間の値（`MAX_DOCUMENT_AGE`・`RELOAD_INTERVAL`）は文字列で受け取って使うときに解釈する。`1 day` のような解釈できない値でも、`PRIVACY_RETENTION_ENABLED` が OFF なら起動は止まらない（OFF の間は何も検査しない規則のまま）。ON の起動では `trust.kms.maxDocumentAge.invalid` / `trust.kms.reloadInterval.invalid` で止まる。実行中は鮮度の上限なら「設定が無い」と同じ（anchor 0件・UNKNOWN）、再読込の間隔なら既定の30秒として扱う。
+- 実行中: 文書が消えた・壊れた・巻き戻った（同じ process で読んだ文書より前の `generatedAt`）、鮮度の上限を過ぎた・作成日時が未来（5分を超える）なら、anchor 0件・失効状態 UNKNOWN として扱い（fail-closed。直前に読めた内容には戻らない）、WARN `NF07_TRUST_DOCUMENT_STATE: state=UNAVAILABLE reason=…` を状態が変わったときに1回出す。鮮度の上限を過ぎると `state=STALE`、読み直せたら INFO `state=LOADED`。`UNAVAILABLE`・`STALE` をアラート対象にする。
+- **file の置き方（2026-11-18 利用者決定）: trust 文書は EFS の volume に置き、application の task は読取り専用で mount する**。mount の path（`/app/privacy-trust`）・volume・access point の正本は §1.6 の 11（RB-DEPLOY が追加する項。本節では繰り返さない）で、`PRIVACY_TRUST_KMS_ANCHOR_FILE` にはその mount の下の file の絶対 path を書く（例: `/app/privacy-trust/nf07-trust.json`）。task definition の雛形は RB-DEPLOY が扱い、本 batch は `infra/**` を変えない。ECS の secret（環境変数）は変えるのに再起動が要り、失効を再起動なしに反映できないため使わない。
+  - 書込み: D-03 owner の手順だけが、application とは別の経路（読書き可能な mount を持つ管理用の host・task 等。**SRE と D-03 owner で確定する**）で書く。一時 file に書いてから同じ directory の中で rename して置き換える（書きかけの file を読んでも fail-closed になるだけで、正しい文書を置けば次の判定で戻る）。**file の内容が trust の正本**で、EFS に書き込める者は anchor を足せる。EFS の access point・IAM・mount target の security group で、書込みを D-03 owner の経路だけに限る（**SRE・Security の確認事項**）。trust 文書そのものは署名していない（文書を root 公開鍵で署名させる強化は将来の選択肢。review P3-9 の記録）。
+  - 失効の反映の遅れ: EFS は NFS で、client は file の属性（最終更新日時・大きさ）を cache する（Linux の NFS client の既定は `acregmin=3`・`acregmax=60` 秒、directory は `acdirmin=30`・`acdirmax=60` 秒）。application は判定のたびに属性を見るが、cache の間は変化が見えないため、失効の反映は「属性の cache の残り」か「`RELOAD_INTERVAL`（既定30秒）が過ぎて読み直すまで」の早い方まで遅れ得る（読み直しは file を開き直すため、NFS の close-to-open の規則で新しい内容を読む）。rename で置き換えた直後は directory の lookup の cache も効くため、**最悪の遅れは `RELOAD_INTERVAL` と属性・lookup の cache（既定で約60秒）を足した程度と見込み、SRE が staging で実測する（未実施）**。遅れを縮めるなら `RELOAD_INTERVAL` を短くする（例: `10s`。判定は file の属性を見るだけで、I/O が止まっても要求を待たせないため、短くしても EFS の障害で要求が詰まることはない）。mount option（`actimeo` 等）は Fargate では選べない見込み（次の項）。
+  - mount option: task definition の `efsVolumeConfiguration`（RB-DEPLOY の雛形では `transitEncryption: ENABLED` と `accessPointId`）には `soft`・`timeo`・`actimeo` 等の NFS の mount option を書く項目が無く、Fargate では ECS が mount する。そのため **`hard` mount（属性の cache は既定の値）を前提にする**。実際の option（NFS の版・`hard`・`timeo`・属性の cache）は **SRE が staging の task で確かめる（未確認）**。上の「`actimeo` を小さくする」は Fargate では選べない見込みで、遅れを縮める手段は `RELOAD_INTERVAL` だけと考える。
+  - **EFS に届かないとき（delta review P2-A で修正）**: hard mount では stat・読込みが返らない。trust の判定は file を読む thread を1つの lock で直列化するが、lock は最長0.3秒しか待たず、lock を持つ thread の I/O が0.3秒を超えて続いていれば待たない。lock を取れなかった判定は I/O をせず、最後に file を確かめた時刻から `RELOAD_INTERVAL` の内は直前に読めた内容を使い、外なら閉じる（anchor 0件・UNKNOWN、WARN `NF07_TRUST_DOCUMENT_STATE: state=UNAVAILABLE reason=document.stalled` を1回）。止まるのは I/O 中の1 thread だけで、他の要求が trust の判定で待つのは1回あたり最長0.3秒（NF08 の送信・hold・policy の画面が EFS の障害で全ての thread を占めることはない）。**EFS に届かなくなってから trust が閉じるまでは、最長でおよそ `RELOAD_INTERVAL` の2倍（既定で約60秒）**の見込み（属性の cache の間は stat が返り、`RELOAD_INTERVAL` ごとの読み直しで止まり、その後 `RELOAD_INTERVAL` の間だけ直前の内容を使うため。SRE が staging で実測する。未実施）。EFS が戻れば、次の判定で読み直して元に戻る（再起動は要らない）。起動時の検査は20秒で打ち切り、`PRIVACY_RETENTION_ENABLED=true` なら `trust.kms.document.timeout` で起動を止める（port を開く前）。
+  - 鮮度の上限の目安: 文書を更新する周期の2〜3倍（例: 毎日更新なら `48h`〜`72h`）。更新が1回遅れても入口が閉じず、止まったことは上限の内に `STALE` の WARN で分かる。値は D-03 で決める（**未決**）。
+
+**trust 文書の形式**（JSON、`format` は `ses-nf07-kms-trust-v1`。未知の field・同じ名前の field の重複・欠落・型の違いは文書全体を拒否する）。下の値は全て合成値で、実在の鍵・account ではない。解除には、別の authority・別の主体・別の KMS key の承認者（`roles` に `APPROVER`）の anchor も同じ形で足す:
+
+```json
+{
+  "format": "ses-nf07-kms-trust-v1",
+  "generatedAt": "2026-12-01T00:00:00Z",
+  "policyAnchors": [
+    {
+      "authorityId": "privacy-policy-issuer",
+      "keyId": "kms-2026a",
+      "kmsKeyArn": "arn:aws:kms:ap-northeast-1:111122223333:key/00000000-0000-0000-0000-000000000000",
+      "keySpec": "ECC_NIST_EDWARDS25519",
+      "signingAlgorithm": "ED25519_SHA_512",
+      "publicKey": "<GetPublicKey の PublicKey（DER の SubjectPublicKeyInfo の base64）>",
+      "status": "ACTIVE",
+      "validFrom": "2026-12-01T00:00:00Z",
+      "validUntil": "2027-12-01T00:00:00Z",
+      "tenants": ["default"],
+      "scopes": ["NF08_AI_SUMMARY"],
+      "dataElements": ["AI_PROMPT_LOG"],
+      "actions": ["EXTERNAL_DISPATCH"],
+      "providers": ["gemini-adapter"]
+    }
+  ],
+  "holdReleaseAnchors": [
+    {
+      "authorityId": "hold-release-issuer-a",
+      "keyId": "kms-2026a",
+      "kmsKeyArn": "arn:aws:kms:ap-northeast-1:111122223333:key/11111111-1111-1111-1111-111111111111",
+      "keySpec": "ECC_NIST_EDWARDS25519",
+      "signingAlgorithm": "ED25519_SHA_512",
+      "publicKey": "<GetPublicKey の PublicKey>",
+      "status": "ACTIVE",
+      "validFrom": "2026-12-01T00:00:00Z",
+      "validUntil": "2027-12-01T00:00:00Z",
+      "tenants": ["default"],
+      "principal": "sys_user:20",
+      "roles": ["ISSUER"],
+      "targetTypes": ["SUBJECT", "DATA_ELEMENT"]
+    }
+  ],
+  "envelopeStatuses": {
+    "nf07-policy-2026-0001": "ACTIVE"
+  }
+}
+```
+
+- anchor 1件 ＝ KMS key 1つ（鍵 version）。同じ ARN・同じ公開鍵の anchor を2件書かない。anchor ID（`authorityId:keyId`）は policy と解除をまたいで一意。
+- `authorityId`・`keyId` は `[A-Za-z0-9._-]` の1〜64文字（`:` を含めない）。`keyId` は鍵 version の識別子（例: `kms-2026a`）で、KMS key の ARN は文字種と長さに収まらないため `kmsKeyArn` に書く。`kmsKeyArn` は key の ARN（alias の ARN は付け替えられるため不可。multi-Region key の `mrk-` は可）。
+- `keySpec` は `ECC_NIST_EDWARDS25519`、`signingAlgorithm` は `ED25519_SHA_512` だけ（`ED25519_PH_SHA_512` は Ed25519ph で、純粋な Ed25519 と互換が無いため拒否する）。
+- `publicKey` は `aws kms get-public-key` の `PublicKey` をそのまま書く（base64。PEM・改行・padding の欠けは不可）。application が Ed25519 の SubjectPublicKeyInfo（RFC 8410、44 bytes）であることを検査する。
+- `status` は `ACTIVE` / `REVOKED`。policy の anchor に `envelopeKinds`・`audiences` は書かない（`POLICY`・`PRODUCTION` に固定）。解除の anchor の `principal` は `sys_user:<id>`、`roles` は `ISSUER` / `APPROVER`、`targetTypes` は `SUBJECT` / `DATA_ELEMENT`。範囲の項目（`tenants` 等）は空・重複・`[A-Za-z0-9_.:-]` 以外の文字を不可。
+- **`tenants` には `OIDC_TENANT_ID`（未設定なら `default`）を必ず含める**。開放の gate は授権 tenant を範囲に含む anchor だけを数えるため、含めないと D-03 の決定ID を設定しても入口は404のまま（fail-closed だが原因が見えにくい）。
+- `envelopeStatuses` は policy envelope の `revocationReference` ごとの状態。**書いた参照だけが ACTIVE になる**（書いていない参照は UNKNOWN で、照会は `APPROVED_ACTIVE` にならない）。policy を登録する前に、その envelope の参照を `ACTIVE` で足す。
+- **envelope の `revocationReference` には `:` を含めない**（例: `nf07-policy-2026-0001`）。`:` を含む値は鍵の ID（`authorityId:keyId`）と区別できないため、文書の `envelopeStatuses` に書くと文書全体を拒否し（`envelope.reference`）、その参照を持つ envelope は本番の verifier が失効状態を UNKNOWN として拒否する（`REVOCATION_STATUS_UNKNOWN`。anchor ID と同じ参照の envelope が鍵の状態で ACTIVE にならないようにする。review P2-1）。
+
+**鍵の作成と公開鍵の転記**（D-03 owner。AWS CLI v2。application は実行しない）
+
+```sh
+aws kms create-key --key-spec ECC_NIST_EDWARDS25519 --key-usage SIGN_VERIFY --description "NF07 policy issuer kms-2026a"
+aws kms get-public-key --key-id <key の ARN> --query '{PublicKey:PublicKey,KeySpec:KeySpec,SigningAlgorithms:SigningAlgorithms}'
+```
+
+- `KeySpec` が `ECC_NIST_EDWARDS25519`、`SigningAlgorithms` に `ED25519_SHA_512` があることを確かめ、`PublicKey` を文書の `publicKey` に転記する。key policy で `kms:Sign` を署名者だけに許す（**未決。Security・D-03 owner**）。
+
+**policy envelope の署名**（KMS の `MessageType=RAW` の message は 4096 bytes まで。envelope の canonical bytes は保持規則等の文字列の長さで 4096 bytes を超え得る（登録の上限は 64KB）ため、canonical bytes の SHA-256 を持つ固定長 100 bytes の digest 声明に署名する。声明への署名も純粋な Ed25519 で、Ed25519ph は使わない）
+
+```sh
+# envelope.bin = canonical bytes（登録の要求の envelope を base64 から戻したもの）
+d=$(sha256sum envelope.bin | cut -d' ' -f1)          # macOS は shasum -a 256 envelope.bin
+echo "$d"   # 署名の前に、D-02 の決定書に記載された envelope の digest と一致することを確かめる
+printf '30:NF07-POLICY-ENVELOPE-DIGEST-V164:%s' "$d" > statement.bin   # 100 bytes、改行なし
+wc -c < statement.bin                                # 100 であること
+aws kms sign --key-id <key の ARN> --message fileb://statement.bin --message-type RAW \
+  --signing-algorithm ED25519_SHA_512 --query Signature --output text > signature.b64
+```
+
+- `$d` は登録の一覧・詳細に出る `envelopeDigest`（`ApprovalEnvelopeCanonicalizer.digest`）と同じ値。署名者は envelope の中身ではなく digest に署名するため、**署名の前に D-02 の決定書の digest と照合する**（違えば署名しない）。
+- 登録の要求の `signature` は `signature.b64` の内容（Ed25519 署名の base64）。**本番の verifier は声明への署名だけを受け付ける**（canonical bytes そのものへの署名は 4096 bytes 以下でも拒否する。手順を1つにし、短い envelope だけ直接署名できて長いと KMS で失敗する罠を避けるため。review P3-2）。digest だけ・Ed25519ph の署名も受け付けない。canonical bytes への署名を検証するのは本番ではない合成層（`ApprovalEnvelopeVerifier`）だけで、その形と声明は先頭の bytes で区別できる（`PolicyEnvelopeSigningStatementTest` が固定）。
+- 声明の正規形: `<UTF-8 の byte 長>:<値>` の field を区切り無しで連結（§4.5 と同じ）。field は domain `NF07-POLICY-ENVELOPE-DIGEST-V1` と、canonical bytes の SHA-256（小文字 hex 64桁）。
+- test vector（`PolicyEnvelopeSigningStatementTest` が Java の実装と照合する。値は Node.js で独立に計算した）: canonical bytes が ASCII の `abc` なら、声明は `30:NF07-POLICY-ENVELOPE-DIGEST-V164:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`、声明の SHA-256 は `9d79de0b996eff91f78260cbc8c886e2be239e01a1487ac6ad03a1683bfa7e66`。
+
+**hold 解除の claim の署名**（§4.5 の「署名の対象」をそのまま RAW で署名する。被署名 bytes は authority・key の ID が64文字、日時が `Instant` の最長の表記でも 352 bytes で 4096 bytes を下回るため、digest 声明は使わない）
+
+```sh
+# claim.bin = §4.5 の正規形の「署名の対象」（hash を取らない）。printf '%s' で書き、末尾に改行を付けない（echo は改行を足す）
+printf '%s' "$CLAIM" > claim.bin                    # $CLAIM は「署名の対象」の文字列
+sha256sum claim.bin                                  # 手順の確認: §4.5 の test vector の入力で作ると 549567a9…（§4.5 の表）になること
+aws kms sign --key-id <key の ARN> --message fileb://claim.bin --message-type RAW \
+  --signing-algorithm ED25519_SHA_512 --query Signature --output text
+```
+
+- 送る前に、KMS を使わず公開鍵だけで署名を確かめる手順（OpenSSL 3 の `pkeyutl -verify -rawin` 等）を D-03 owner が staging で確かめて本節に足す（**未実施**）。
+
+**鍵の rotation**（新しい KMS key ＝ 新しい鍵 version）
+
+1. 新しい KMS key を作り、新しい `keyId`（例: `kms-2027a`）の anchor を足す。`validFrom` は旧鍵の `validUntil` より前にする（重複期間の間は新旧どちらの鍵の署名も通り、gate も開いたまま）。
+2. 以後の署名は新しい鍵で行う。旧鍵で署名した current の policy は、旧鍵の `validUntil` より前に、新しい鍵で署名し直した新しい revision に置き換える（`validUntil` を過ぎると旧鍵の署名は期限切れとして拒否される）。
+3. 旧鍵の `validUntil` の後は、旧 anchor を文書から外してよい（外した鍵の署名は次の検証から `UNKNOWN_TRUST_ANCHOR`）。退役した鍵の公開鍵と ARN は、監査の claim や保存した envelope を事後に検証するため、文書の版と一緒に保管する。KMS key の削除は保管の方針を D-03 で決めてから（**未決**）。
+
+**失効**（鍵 version 単位）
+
+- 鍵の失効: その anchor の `status` を `REVOKED` にし、`generatedAt` を更新した文書を置く。次の判定から、その鍵で署名した全ての policy の照会が `POLICY_REVOKED`、登録・有効化・解除は拒否、gate はその鍵を数えない。再起動は要らない。KMS 側でも key を無効にする（application は KMS の状態を見ないため、文書の更新が失効の正本）。
+- envelope だけの失効: `envelopeStatuses` のその参照を `REVOKED` にする。
+- `REVOKED` は戻さない。同じ process では、`ACTIVE` に戻した文書を置いても `REVOKED` のまま扱う（再起動の後は文書の値に従う）。誤って失効した鍵は新しい KMS key で作り直す。`REVOKED` の行は消さない（消すと照会は `POLICY_REVOKED` ではなく trust anchor 不明・失効状態不明になる）。
+- 古い版の文書を置かない。同じ process では前に読んだ文書より前の `generatedAt` の文書を受け付けず fail-closed にするが、再起動の後は防げない。
+
+**鮮度**: 内容が変わらなくても、鮮度の上限の内に `generatedAt` を更新した文書を置き直す。更新が止まると失効状態は UNKNOWN になり、入口は閉じる（失効を確かめられない状態として扱う）。更新の担当と周期は D-03 で決める（**未決**）。
 
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 

@@ -601,26 +601,26 @@ class HoldReleaseProofVerifierTest {
 
     @Test
     void 失効providerが2件以上のanchorをACTIVEと答えるときだけtrustReadyになる() {
-        assertThat(verifier.trustReady()).isTrue();
+        assertThat(verifier.trustReady(TENANT)).isTrue();
 
         revocations = ref -> RevocationStatus.UNKNOWN;
-        assertThat(verifier.trustReady()).as("常に UNKNOWN の provider").isFalse();
+        assertThat(verifier.trustReady(TENANT)).as("常に UNKNOWN の provider").isFalse();
         revocations = ref -> ref.startsWith(APPROVER) ? RevocationStatus.UNKNOWN : RevocationStatus.ACTIVE;
-        assertThat(verifier.trustReady()).as("発行者と承認者の2件が要る").isFalse();
+        assertThat(verifier.trustReady(TENANT)).as("発行者と承認者の2件が要る").isFalse();
         revocations = ref -> ref.startsWith(APPROVER) ? RevocationStatus.REVOKED : RevocationStatus.ACTIVE;
-        assertThat(verifier.trustReady()).isFalse();
+        assertThat(verifier.trustReady(TENANT)).isFalse();
         revocations = ref -> {
             throw new IllegalStateException("ocsp down");
         };
-        assertThat(verifier.trustReady()).isFalse();
+        assertThat(verifier.trustReady(TENANT)).isFalse();
 
         assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> java.util.Map.of(),
-                ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+                ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady(TENANT)).isFalse();
         assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), authorities.registry(), null,
-                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady(TENANT)).isFalse();
         assertThat(ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> {
             throw new IllegalStateException("registry down");
-        }, ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady()).isFalse();
+        }, ref -> RevocationStatus.ACTIVE, Clock.fixed(NOW, ZoneOffset.UTC)).trustReady(TENANT)).isFalse();
     }
 
     @Test
@@ -653,7 +653,7 @@ class HoldReleaseProofVerifierTest {
 
     private boolean readyWith(java.util.Map<String, HoldReleaseTrustAnchor> anchors, RevocationStatusProvider provider) {
         return ProductionPrivacyComponents.holdReleaseVerifier(prod(), () -> anchors, provider,
-                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady();
+                Clock.fixed(NOW, ZoneOffset.UTC)).trustReady(TENANT);
     }
 
     private static HoldReleaseTrustAnchor anchor(String authorityId, String keyId, String principal, Set<Role> roles) {

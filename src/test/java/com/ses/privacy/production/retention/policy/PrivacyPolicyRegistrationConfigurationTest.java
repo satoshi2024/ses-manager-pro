@@ -64,14 +64,25 @@ class PrivacyPolicyRegistrationConfigurationTest {
 
     @Test
     void 登録のgateとverifierはtrustを判定のたびに読みanchorを消せば再起動せずに閉じる() {
+        // 権限評価の設定 tenant を anchor の tenant と揃える（gate は授権 tenant を範囲に含む anchor だけを数える）
+        OidcSecurityProperties oidc = new OidcSecurityProperties();
+        oidc.setTenantId(TENANT);
         PrivacyPolicyRegistrationService service = new PrivacyPolicyRegistrationConfiguration()
                 .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
-                                null), approval(), mock(RetentionPolicyMapper.class), mock(PiiDataElementMapper.class),
+                                oidc), approval(), mock(RetentionPolicyMapper.class), mock(PiiDataElementMapper.class),
                         mock(AuditLogService.class), mock(PlatformTransactionManager.class), provider(Clock.class, clock),
                         prod, trust);
         assertThat(trust.calls.get()).as("Bean の構築時には trust を読まない").isZero();
 
         assertThat(service.isOpen()).isTrue();
+        // 授権 tenant（OIDC_TENANT_ID 未設定なら default）が anchor の範囲の外なら開かない（RB-NF07-REG delta review P3-1）
+        PrivacyPolicyRegistrationService otherTenant = new PrivacyPolicyRegistrationConfiguration()
+                .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
+                                null), approval(), mock(RetentionPolicyMapper.class), mock(PiiDataElementMapper.class),
+                        mock(AuditLogService.class), mock(PlatformTransactionManager.class), provider(Clock.class, clock),
+                        prod, trust);
+        assertThat(otherTenant.isOpen()).isFalse();
+        assertThat(otherTenant.readiness().missing()).containsExactly("trust");
         assertThat(trust.calls.get()).isPositive();
 
         signer.remove(PolicyEnvelopeTestSigner.AUTHORITY);
@@ -96,11 +107,11 @@ class PrivacyPolicyRegistrationConfigurationTest {
         assertThatThrownBy(() -> verifier.verify(TENANT, signed.canonical(), signed.signature()))
                 .isInstanceOfSatisfying(PolicyRegistrationRejectedException.class,
                         e -> assertThat(e.reason()).isEqualTo(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR));
-        assertThat(verifier.trustReady()).isFalse();
+        assertThat(verifier.trustReady(TENANT)).isFalse();
 
         // trust source が例外を投げても閉じる（fail-closed）
         trust.failing = true;
-        assertThat(verifier.trustReady()).isFalse();
+        assertThat(verifier.trustReady(TENANT)).isFalse();
         assertThatThrownBy(() -> verifier.verify(TENANT, signed.canonical(), signed.signature()))
                 .isInstanceOf(PolicyRegistrationRejectedException.class);
     }

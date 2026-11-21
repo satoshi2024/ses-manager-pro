@@ -273,7 +273,8 @@ class ProductionApprovalEnvelopeVerifierTest {
         private PolicyApprovalEnvelope signed(PolicyApprovalEnvelope unsigned) throws Exception {
             Signature signer = Signature.getInstance("Ed25519");
             signer.initSign(keyPair.getPrivate());
-            signer.update(ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned));
+            // 本番は digest 声明への署名だけを受け付ける（NF07-TRUST）
+            signer.update(PolicyEnvelopeSigningStatement.of(ApprovalEnvelopeCanonicalizer.canonicalBytes(unsigned)));
             return new PolicyApprovalEnvelope(unsigned.metadata(), unsigned.policyId(), unsigned.policyVersion(),
                     unsigned.dataElementId(), unsigned.action(), unsigned.providerId(), unsigned.purpose(),
                     unsigned.trigger(), unsigned.retentionRule(), unsigned.disposition(), signer.sign());
