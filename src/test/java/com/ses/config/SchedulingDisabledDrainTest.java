@@ -177,6 +177,10 @@ class SchedulingDisabledDrainTest {
             "com.ses.backup.quiesce.BackupQuiesceDataSourcePostProcessor:DestructionAwareBeanPostProcessor",
             "業務の dataSource の破棄の時に SHUTDOWN にし、permit と書込み可能な接続が0になるのを最長10秒待ち、Hikari を閉じてから"
                     + " instance を STOPPED にする（信号表への書込み。design.md §6.11）",
+            // RB-QUIESCE BWQ-007: prod の起動時検査（静止応答が登録の前にも呼ぶ。1回だけ検査する）
+            "com.ses.backup.quiesce.BackupQuiesceProductionValidator:SmartInitializingSingleton",
+            "停止口の ticket の形式と、業務の DataSource の readOnlyPropagatesToServer を検査する（設定を読むだけ。DB 書込なし。"
+                    + "違反は起動を中止。design.md §12.2）",
             "com.ses.config.ProductionSchemaVersionGuard:SmartInitializingSingleton",
             "prod の起動時に flyway_schema_history を読んで schema の版を確かめる（読むだけ。合わなければ起動を中止）",
             "com.ses.privacy.production.PrivacyDecisionWindowMonitor:SmartInitializingSingleton",

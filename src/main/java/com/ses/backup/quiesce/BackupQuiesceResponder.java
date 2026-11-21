@@ -108,6 +108,7 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
     private final BackupQuiesceProperties properties;
     private final BackupQuiesceMetrics metrics;
     private final Supplier<Executor> taskExecutor;
+    private final Supplier<BackupQuiesceProductionValidator> validator;
     private final boolean startThreads;
     private final BackupQuiesceTicker stateMachineTicker = new BackupQuiesceTicker("backup-quiesce-responder");
     private final AtomicBoolean flushInFlight = new AtomicBoolean();
@@ -123,21 +124,32 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
     private int retentionStep;
     private boolean lastPollFoundActive;
 
-    /** Spring が使う。{@code taskExecutor} は使う時に引く（{@code dataSource} の依存の循環を作らない）。 */
+    /**
+     * Spring が使う。{@code taskExecutor} は使う時に引く（{@code dataSource} の依存の循環を作らない）。prod の起動時検査
+     * （{@link BackupQuiesceProductionValidator}）は instance の登録の前に呼ぶ（SmartInitializingSingleton の順に依らない）。
+     */
     public BackupQuiesceResponder(BackupQuiesceLifecycleAnchor anchor, BackupQuiesceMetrics metrics,
-                                  ObjectProvider<Executor> taskExecutor) {
-        this(anchor, metrics, taskExecutor::getIfAvailable, true);
+                                  ObjectProvider<Executor> taskExecutor,
+                                  ObjectProvider<BackupQuiesceProductionValidator> validator) {
+        this(anchor, metrics, taskExecutor::getIfAvailable, true, validator::getIfAvailable);
     }
 
     /** 試験用（thread を始めず、tick を試験が呼ぶ）。 */
     BackupQuiesceResponder(BackupQuiesceLifecycleAnchor anchor, BackupQuiesceMetrics metrics,
                            Supplier<Executor> taskExecutor, boolean startThreads) {
+        this(anchor, metrics, taskExecutor, startThreads, () -> null);
+    }
+
+    private BackupQuiesceResponder(BackupQuiesceLifecycleAnchor anchor, BackupQuiesceMetrics metrics,
+                                   Supplier<Executor> taskExecutor, boolean startThreads,
+                                   Supplier<BackupQuiesceProductionValidator> validator) {
         this.anchor = Objects.requireNonNull(anchor, "anchor");
         this.gate = anchor.gate();
         this.properties = anchor.properties();
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
         this.startThreads = startThreads;
+        this.validator = Objects.requireNonNull(validator, "validator");
     }
 
     @Override
@@ -153,6 +165,11 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
      */
     @Override
     public void afterSingletonsInstantiated() {
+        // 停止口の ticket と最後の防線の JDBC 設定を、instance を登録する前に確かめる（BWQ-007。違反は起動の中止）
+        BackupQuiesceProductionValidator productionValidator = validator.get();
+        if (productionValidator != null) {
+            productionValidator.validate();
+        }
         if (!anchor.isActive()) {
             return;
         }

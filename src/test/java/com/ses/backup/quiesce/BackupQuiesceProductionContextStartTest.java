@@ -81,8 +81,13 @@ class BackupQuiesceProductionContextStartTest {
     @Autowired
     private DataSource dataSource;
 
+    // BWQ-007: enabled=true の prod の context は起動時検査を置き換えずに通す（H2 の URL は Connector/J の検査の対象外）
+    @Autowired
+    private BackupQuiesceProductionValidator productionValidator;
+
     @Test
     void prodのprofileで静止を有効にしたcontextが起動しbean初期化のdirectoryの作成は拒否されない() {
+        assertThat(productionValidator.isValidated()).as("実の起動時検査が登録の前に通った").isTrue();
         BackupWriteGate gate = anchor.gate();
         assertThat(gate.mode()).isEqualTo(BackupWriteGate.Mode.ARMED);
         assertThat(gate.isProdProfile()).isTrue();

@@ -662,8 +662,9 @@ app:
   - **停止口**: prod の `enabled=false` は、`disabled-ticket` が変更 ticket の形式（`^[A-Z][A-Z0-9]+-[0-9]+$`）のときだけ許す。無ければ起動を中止する。許した場合は **DISABLED の動き**になる: instance の登録と heartbeat を続け（`gate_state='DISABLED'`）、gate は閉じず、要求には `REFUSED`（`DISABLED`）を返し、起動時の APP_STOPPED の保持の拒否も続ける。provider は ONLINE・APP_STOPPED のどちらも、DISABLED の instance があれば失敗する。そのため停止口の間は backup が全て失敗し RPO の alert になる。起動時に ERROR `errorCode=BACKUP_QUIESCE_DISABLED`（ticket を含む）を出し、gauge `ses_backup_quiesce_disabled=1` を出し続ける。
   - prod 以外の `enabled=false` は登録も heartbeat もしない（試験の context の背景の thread を止めるため）。
   - 業務の DataSource の JDBC URL と `spring.datasource.hikari.data-source-properties` で、Connector/J の展開後の属性も含めて `readOnlyPropagatesToServer` が false なら中止する（prod 以外でも `enabled=true` なら行う）。`ConnectorJUrl` は `ImportJdbcReconnectGuard` の package-private の入れ子の enum なので、`com.ses.common.jdbc.ConnectorJUrl`（public）へ移し、`ImportJdbcReconnectGuard` もそれを使う。
-- prod の profile で全 context を起動する試験のうち `application-test.yml` を import するもの（実装の時に grep で数え直す）は、`@MockBean BackupQuiesceProductionValidator` を置く。
-- `BackupQuiesceTestContextInventoryTest`（静的な走査）が、全ての `@SpringBootTest` が test profile か `app.backup-quiesce.enabled` の明示のどちらかを持つことを固定する。
+- 検査の順（第 2 段階 2c）: `SmartInitializingSingleton` の間の順は bean の登録の順で決まり保証されないため、静止応答（`BackupQuiesceResponder.afterSingletonsInstantiated`）が instance の登録の前に `validate()` を呼ぶ（検査は 1 回だけ行う）。停止口の ticket が無い起動は、信号表に行を書く前に止まる。`readOnlyPropagatesToServer` は `true`・`yes` 以外の値を全て無効とみなし（Connector/J は `false`・`no` を無効とし、他の値では接続に失敗する）、複数 host・解析できない URL は展開後の属性を確かめられないため拒否する。
+- prod の profile で全 context を起動する試験のうち `application-test.yml` を import するもの（実装の時に grep で数え直す）は、`@MockBean BackupQuiesceProductionValidator` を置く（第 2 段階 2c の数え直し: `@SpringBootTest` では `ProductionSecurityConfigurationTest` の 1 件。`BackupQuiesceProductionContextStartTest` は `enabled=true` を明示し検査を通るため置き換えず、実の検査が通ったことを確かめる。`FreeeProductionStartupTest` は `@SpringBootTest` でなく、freee の `@PostConstruct` の検査で先に止まる）。
+- `BackupQuiesceTestContextInventoryTest`（静的な走査）が、全ての `@SpringBootTest` が test profile（基底 class の `@ActiveProfiles` を含む）か `app.backup-quiesce.enabled` の明示のどちらかを持つことを固定する。prod の profile では明示を必須とし、`enabled=false` を明示した context には `@MockBean BackupQuiesceProductionValidator` を求める。
 
 ### 12.3 同じ変更で直すもの（CLAUDE.md の規則）
 
@@ -674,6 +675,7 @@ app:
   - 雛形が `BACKUP_QUIESCE_ENABLED=true` を明示すること。
 - `infra/ecs/task-definition.prod.json`: environment に `{ "name": "BACKUP_QUIESCE_ENABLED", "value": "true" }`、app の container に `"stopTimeout": 120`（D-P3-5）。
 - `infra/ecs/offline/validate-task-definition.ps1`: 雛形の mode は `BACKUP_QUIESCE_ENABLED=true`、実値の mode は `true`、または `false` と `BACKUP_QUIESCE_DISABLED_TICKET`（形式つき）の組。secrets に置かない、正規名（`APP_BACKUPQUIESCE_*`・`APP_BACKUP_QUIESCE_*`）や `SPRING_APPLICATION_JSON` の `app.backup-quiesce` で上書きしない、`BACKUP_QUIESCE_*` の数値が範囲内、`startPeriod >= startup-wait-max + 120`、`stopTimeout >= 90`（`SHUTDOWN_TIMEOUT`＋executor の 30 秒＋余裕。`SHUTDOWN_TIMEOUT` を変えた場合はその値で計算）。`test-validate-task-definition.ps1` に正例・負例を足し、pwsh と Windows PowerShell 5.1 の両方で `0 mismatched` を確かめる。`ProductionTaskDefinitionTemplateTest` に雛形の期待を足す。
+  - 実装で足した照合（第 2 段階 2c）: `BACKUP_QUIESCE_*` は文書の名前の綴りだけを許す（大文字小文字の違いも FAIL）。`true` と組の ticket は FAIL（停止口を戻した後の消し忘れ）。時間の値は `<整数><単位>` だけを許す（ISO-8601 と単位の無い数は FAIL）。`stopTimeout` の計算に使う `SHUTDOWN_TIMEOUT` は environment に置かせ、正規名（`SPRING_LIFECYCLE_*`）と `SPRING_APPLICATION_JSON` の `spring.lifecycle` で変えることも FAIL にする。
 
 ### 12.4 backup tool の設定（`.env.backup`）
 

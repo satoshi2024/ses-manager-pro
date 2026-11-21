@@ -46,7 +46,7 @@
 
 ### 1.0 prod 必須設定（無い・形式が違うとアプリが起動しない。一覧の正本）
 
-`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。
+`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。backup の書込み静止の31〜41の11項目は既定値を持つため無くても起動するが、値・組合せ・範囲が違うと起動しない（雛形は31を `true` で明示する）。
 
 - 一覧はコードを走査して作った（FINAL-FIX、2026-11-17）。走査した出処は3つ: prod profile の validator の必須項目、`@Value` のうち既定値が空・開発用で prod では拒否されるもの、`application-prod.yml` の `${...}` のうち既定値が空で prod では拒否されるもの。
 - 既定値を全く持たない `@Value` と、既定値の無い `application-prod.yml` の `${...}` は、どちらも0件だった。どの項目も空か開発用の既定値を持つため、Spring の解決では止まらない。止めるのは validator である。
@@ -57,7 +57,7 @@
 
 | # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
 |---|---|---|---|---|---|
-| 1 | `DB_URL`（`spring.datasource.url`） | アプリDBのJDBC URL | `jdbc:mysql://<host>:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo`。`autoReconnect=true` / `autoReconnectForPools=true`（`yes` も。百分率符号化した値も）を付けない。host は1つだけ書く: multi-host（`h1,h2`・`[h1,h2]`・`address=(...)`）、`jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`・`jdbc:mysqlx://` は使わない（どれも起動を中止する。RB-NF05）。query に `useConfigs`・`propertiesTransform`・切替え系の key（`failOverReadOnly`・`maxReconnects` 等）も書かない（driver が展開した後の有効な属性も検査し、`(effectiveAutoReconnect)` / `(connectionTopology)` で起動を中止する。RB-HYG）。staging で本番と同じ形式の `DB_URL` で起動し、guard が通ることを一度確かめる。未設定だと開発用の localhost へ接続し、起動時 schema guard（§4）で止まる | 〇（接続先） | `application.yml:122`、`ImportJdbcReconnectGuard`（`violations`・`multiHost`） |
+| 1 | `DB_URL`（`spring.datasource.url`） | アプリDBのJDBC URL | `jdbc:mysql://<host>:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo`。`autoReconnect=true` / `autoReconnectForPools=true`（`yes` も。百分率符号化した値も）を付けない。host は1つだけ書く: multi-host（`h1,h2`・`[h1,h2]`・`address=(...)`）、`jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`・`jdbc:mysqlx://` は使わない（どれも起動を中止する。RB-NF05）。query に `useConfigs`・`propertiesTransform`・切替え系の key（`failOverReadOnly`・`maxReconnects` 等）も書かない（driver が展開した後の有効な属性も検査し、`(effectiveAutoReconnect)` / `(connectionTopology)` で起動を中止する。RB-HYG）。`readOnlyPropagatesToServer=false`（`no` 等の有効でない値も）を query・`spring.datasource.hikari.data-source-properties` のどちらにも付けない: backup の書込み静止の最後の防線（静止中の業務の接続の読取り専用）が DB に届かなくなるため、driver の展開後の属性まで見て起動を中止する（`BackupQuiesceProductionValidator`。RB-QUIESCE）。staging で本番と同じ形式の `DB_URL` で起動し、guard が通ることを一度確かめる。未設定だと開発用の localhost へ接続し、起動時 schema guard（§4）で止まる | 〇（接続先） | `application.yml:122`、`ImportJdbcReconnectGuard`（`violations`・`multiHost`） |
 | 2 | `DB_USERNAME`（`spring.datasource.username`） | アプリaccount（§1.2。DDL権限なし） | 既定は開発用の値。必ず上書きする | 〇 | `application.yml:123` |
 | 3 | `DB_PASSWORD`（`spring.datasource.password`） | 同上 | 同上 | 〇 | `application.yml:124` |
 | 4 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`） | 転送ヘッダーを信頼する接続元（ALBのsubnet） | カンマ区切りのCIDR。IPv4は private（10/8・172.16/12・192.168/16）か 100.64/10 で /16 以下、IPv6は /48 以下、host部は0。`127.0.0.1` を入れない（SRE-3） | × | `application-prod.yml:76`、`ForwardedHeaderProductionValidator.java:67-105` |
@@ -123,6 +123,31 @@
 | 29 | `FREEE_REDIRECT_URI`（`freee.redirect-uri`） | OAuthのredirect URI | HTTPS | × | `application-prod.yml:163`、`FreeeIntegrationServiceImpl.java:199-221` |
 | 30 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数 | 〇 | `application.yml:520`、`FreeeIntegrationServiceImpl.java:199-221`、`IntegrationConnectionServiceImpl.java:46` |
 
+**backup の書込み静止**（RB-QUIESCE。設計は `.kiro/specs/backup-write-quiesce/design.md` §12。31〜41 は既定値を持ち、無くても起動する）
+
+- 範囲と相互の関係は全 profile で bind の時に `BackupQuiesceProperties` が検査し、外れると起動を中止する。停止口（31・32）と最後の防線の JDBC 設定（1 の `readOnlyPropagatesToServer`）は prod の起動時検査 `BackupQuiesceProductionValidator` が port を開く前（instance の登録の前）に検査する。prod の判定は有効な profile で行う。
+- どれも secret ではない（×）。secrets・正規名（`APP_BACKUP_QUIESCE_*`・`APP_BACKUPQUIESCE_*`）・`SPRING_APPLICATION_JSON` の `app.backup-quiesce` で渡すと、task definition の照合（`validate-task-definition.ps1`）が FAIL にする。時間の値は照合のため `<整数><単位>`（単位は `ms`・`s`・`m`・`h`・`d`）で書く（アプリは ISO-8601 と単位の無い数（ミリ秒）も読むが、照合は拒否する）。
+- 雛形（`infra/ecs/task-definition.prod.json`）は `BACKUP_QUIESCE_ENABLED=true` を明示し、app の container に `stopTimeout: 120` を置く。照合は雛形・実値のどちらの mode でも、`healthCheck.startPeriod` が 40 の値＋120 秒以上（既定の値で 180）、`stopTimeout` が `SHUTDOWN_TIMEOUT`＋60 秒以上（既定 90。graceful 停止・`taskExecutor` の待ち 30 秒・STOPPED の前の排水の待ち 10 秒の余裕。Fargate の上限は 120 のため `SHUTDOWN_TIMEOUT` は 60 秒以下にする）であることを確かめる。`SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` 等の正規名で停止の時間を変えることも FAIL にする。
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 31 | `BACKUP_QUIESCE_ENABLED`（`app.backup-quiesce.enabled`） | backup の書込み静止の静止応答 | 本番は `true`（既定 `true`。雛形も `true`）。`false` は停止口で、prod では 32 と組でだけ起動する（下の「停止口の使い方」）。値は `true` / `false` で書く | × | `application.yml:250`、`BackupQuiesceProductionValidator` |
+| 32 | `BACKUP_QUIESCE_DISABLED_TICKET`（`app.backup-quiesce.disabled-ticket`） | 停止口を使う承認済みの変更 ticket | `^[A-Z][A-Z0-9]+-[0-9]+$`（例 `CHG-1234`）。31 が `false` のときだけ設定する（`true` に戻したら消す。照合は `true` と組の ticket を FAIL にする）。ticket が無い・形式が違うと prod は起動しない | × | `application.yml:251`、`BackupQuiesceProductionValidator` |
+| 33 | `BACKUP_QUIESCE_POLL_INTERVAL` | 静止要求の読取り間隔 | 既定 `1s`。200ms 以上で 34 より短い | × | `application.yml:252`、`BackupQuiesceProperties` |
+| 34 | `BACKUP_QUIESCE_HEARTBEAT_INTERVAL` | heartbeat の間隔 | 既定 `5s`。35 より短い | × | `application.yml:253`、同上 |
+| 35 | `BACKUP_QUIESCE_FENCE_AFTER` | heartbeat を書けない時に自分で更新を止める（self-fence）までの時間 | 既定 `20s`。30 秒以下で、35 − 34 が 13 秒（制御用の接続の取得 3 秒＋socket 10 秒）より長い | × | `application.yml:254`、同上 |
+| 36 | `BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT` | checkpoint の排水の上限（U-3） | 既定 `30s`。正の値で 38 より短い | × | `application.yml:255`、同上 |
+| 37 | `BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL` | full の排水の上限（U-3） | 既定 `600s`。正の値で 39 より短い | × | `application.yml:256`、同上 |
+| 38 | `BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT` | checkpoint の最大保持時間（U-1） | 既定 `300s`。30 秒〜900 秒 | × | `application.yml:257`、同上 |
+| 39 | `BACKUP_QUIESCE_MAX_HOLD_FULL` | full の最大保持時間（U-1） | 既定 `3600s`。60 秒〜4 時間 | × | `application.yml:258`、同上 |
+| 40 | `BACKUP_QUIESCE_STARTUP_WAIT_MAX` | 静止の最中に起動した時に解除を待つ上限 | 既定 `60s`。10 秒〜120 秒。ECS の `healthCheck.startPeriod` はこの値＋120 秒以上にする | × | `application.yml:259`、同上 |
+| 41 | `BACKUP_QUIESCE_RETENTION` | 信号表の解除済みの行の保存期間（U-12） | 既定 `30d`。1 日〜365 日 | × | `application.yml:260`、同上 |
+
+**停止口の使い方**（U-7。31 を `false` にする緊急の手段）
+- 使う場面: 静止応答の不具合で業務に支障が出て、修正の release まで静止応答を外す必要がある時だけ。承認済みの変更 ticket を取り、task definition に `BACKUP_QUIESCE_ENABLED=false` と `BACKUP_QUIESCE_DISABLED_TICKET=<ticket>` を入れ、`validate-task-definition.ps1 -Mode Actual` で組を確かめてから配備し直す。
+- 停止口の間: アプリは instance の登録と heartbeat を続け（`sys_backup_quiesce_instance.gate_state='DISABLED'`）、gate は閉じず、静止の要求には `REFUSED`（`DISABLED`）を返す。backup の provider は ONLINE・停止確認（`--app-stopped`）のどちらも、停止口の行があれば失敗する。**そのため停止口の間は checkpoint と full が全て失敗し、RPO の alert になる**。起動の時に ERROR `errorCode=BACKUP_QUIESCE_DISABLED`（ticket を含む）を出し、gauge `ses_backup_quiesce_disabled` が 1 になる（どちらも critical の alert の条件）。ticket と期間を配備記録に残す。
+- 戻す手順: `BACKUP_QUIESCE_ENABLED=true` にして `BACKUP_QUIESCE_DISABLED_TICKET` を消し、配備し直す。停止口の task が通常に停止すれば instance の行は `STOPPED` になる。異常に止まった（SIGKILL・task の喪失等で `STOPPED` にならない）停止口の行が残ると、heartbeat の古さによらず全ての backup が失敗し続ける。この場合は DBA が ECS で task の停止と processlist の0件を確かめてから、その行だけを手の SQL で `STOPPED` にする（SQL と手順は `backup-write-quiesce/design.md` §9.4。§1.8 の例外の一覧への追加は RB-QUIESCE の文書の task（BWQ-013）で行う）。その後、次の checkpoint が成功することを確かめる。
+
 **検査の効き方と試験の範囲（注意）**
 - 18 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験ではこの検査が走らず、CI はその未設定を検出しない。配備では task definition の `SPRING_PROFILES_ACTIVE=prod` で効く。
 - 27〜30（freee）の検査は、FINAL-FIX で有効profileも見るようにした。CI は次の2つで確かめる。
@@ -138,6 +163,9 @@
 - `AI_EXTERNAL_SEND_ENABLED=true`（B2c-2 の完了まで常に拒否。冒頭の NF08 B2c-1 の項）。
 - `freee.*-base-url` を公式host以外にする（`FreeeIntegrationServiceImpl.java:192-195`）。
 - `CLOUDSIGN_ENABLED=true` のまま `CLOUDSIGN_CLIENT_ID` を設定しない、または `cloudsign.base-url` を公式のallow-list外にする（`CloudSignProperties.java:86-112`）。
+- `BACKUP_QUIESCE_DISABLED_TICKET`（形式 `^[A-Z][A-Z0-9]+-[0-9]+$`）無しの `BACKUP_QUIESCE_ENABLED=false`（31・32。`BackupQuiesceProductionValidator`）。
+- `DB_URL` の query または `spring.datasource.hikari.data-source-properties` の `readOnlyPropagatesToServer=false`（driver の展開後の属性を含む。1。`BackupQuiesceProductionValidator`）。
+- `BACKUP_QUIESCE_*` を範囲の外・相互の関係に反する値にする（33〜41。`BackupQuiesceProperties`）。
 
 **ONにした時だけ必須になる設定**（OFFのままなら不要。手順は各正本）:
 - bootstrap: `SECURITY_BOOTSTRAP_EXPIRES_AT`（§4.2）。

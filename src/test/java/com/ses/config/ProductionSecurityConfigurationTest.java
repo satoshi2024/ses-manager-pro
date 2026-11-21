@@ -64,6 +64,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     // 削除の thread を動かす。共有の testdb へ書かないよう class 専用の H2 にし、class の後に context を閉じて thread を止める
     // （RB-QUIESCE 2a review P3-5。BackupQuiesceTestContextInventoryTest が固定する）。
     ,"spring.datasource.url=jdbc:h2:mem:prod_security_configuration;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL"
+    // importしたapplication-test.ymlと同じ値を明示する（BWQ-007: 全ての@SpringBootTestがtest profileか静止の有効・無効の
+    // 明示を持つ）。prodのticketの無いenabled=falseは起動時検査が止めるため、下のvalidatorを@MockBeanにする
+    ,"app.backup-quiesce.enabled=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("prod")
@@ -82,6 +85,11 @@ class ProductionSecurityConfigurationTest {
     // ProductionSchemaVersionGuardTest / FlywayProdFreshInstallMySqlTest へ分離する。
     @MockBean
     private ProductionSchemaVersionGuard productionSchemaVersionGuard;
+
+    // backup の書込み静止の prod の起動時検査（停止口の ticket。BackupQuiesceProductionValidatorTest が単体で検証する）。
+    // この context は application-test.yml の enabled=false を ticket 無しで使うため置き換える（design.md §12.2）
+    @MockBean
+    private com.ses.backup.quiesce.BackupQuiesceProductionValidator backupQuiesceProductionValidator;
 
     @Autowired
     private MockMvc mockMvc;

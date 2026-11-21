@@ -147,6 +147,9 @@
   - **失敗/rollback:** 一覧に理由の無い呼出しが残れば完了にしない。
 
 - [ ] **BWQ-007 — prod の起動時検査・停止口・雛形・照合 script・§1.0**
+  - **状態:** 実装・fast の試験・照合 script の自己試験（pwsh と Windows PowerShell 5.1 で `0 mismatched`）は済み（第 2 段階 2c）。Demo は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2c）:** `BackupQuiesceProductionValidator`（`SmartInitializingSingleton`。静止応答が instance の登録の前にも呼ぶ。1 回だけ検査する）、`com.ses.common.jdbc.ConnectorJUrl`（`ImportJdbcReconnectGuard` の入れ子の enum を public にして移した。規則は同じ）。`readOnlyPropagatesToServer` は URL の query・data-source-properties の key（大文字小文字を問わない）・Connector/J の展開後の属性で見て、`true`・`yes` 以外は無効とみなし、複数 host・解析できない URL は拒否する。`@MockBean BackupQuiesceProductionValidator` は数え直しで `ProductionSecurityConfigurationTest` の 1 件（`enabled=false` を明示）。`BackupQuiesceProductionContextStartTest`（`enabled=true`）は置き換えずに実の検査が通ったことを確かめる。`BackupQuiesceTestContextInventoryTest` に「全ての `@SpringBootTest` が test profile（基底 class を含む）か明示を持ち、prod の `enabled=false` は `@MockBean` を持つ」を足した。`SchedulingDisabledDrainTest` の起動の hook の一覧に validator を足した。雛形に `BACKUP_QUIESCE_ENABLED=true` と `stopTimeout: 120`、照合 script に停止口の組・名前の綴り・secrets・正規名（`APP_BACKUP_QUIESCE_*`・`SPRING_LIFECYCLE_*`）・`SPRING_APPLICATION_JSON`・範囲・`startPeriod`・`stopTimeout` の検査、§1.0 に 31〜41 の行・設定してはいけない値・停止口の使い方を足した。**Runner 待ち**: Demo（dev の DB に prod 相当の設定の一部を与えた起動）。
 
   - **依存:** BWQ-002、BWQ-003、BWQ-004
   - **対応要求:** BWQ-RQ-008

@@ -55,9 +55,20 @@ public class BackupQuiesceConfiguration {
         return new BackupQuiesceMetrics(anchor.gate());
     }
 
+    /**
+     * prod の起動時検査（BWQ-007。§12.2）。静止応答は instance の登録の前にこの検査を呼ぶ。prod の profile で
+     * {@code application-test.yml}（{@code enabled=false}）を import する全体の context の試験は {@code @MockBean} で置き換える。
+     */
+    @Bean
+    static BackupQuiesceProductionValidator backupQuiesceProductionValidator(Environment environment,
+                                                                             BackupQuiesceProperties properties) {
+        return new BackupQuiesceProductionValidator(environment, properties);
+    }
+
     @Bean
     static BackupQuiesceResponder backupQuiesceResponder(BackupQuiesceLifecycleAnchor anchor, BackupQuiesceMetrics metrics,
-                                                         @Qualifier("taskExecutor") ObjectProvider<Executor> taskExecutor) {
-        return new BackupQuiesceResponder(anchor, metrics, taskExecutor);
+                                                         @Qualifier("taskExecutor") ObjectProvider<Executor> taskExecutor,
+                                                         ObjectProvider<BackupQuiesceProductionValidator> validator) {
+        return new BackupQuiesceResponder(anchor, metrics, taskExecutor, validator);
     }
 }
