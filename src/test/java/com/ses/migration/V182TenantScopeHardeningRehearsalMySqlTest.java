@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.flywaydb.core.api.configuration.FluentConfiguration;
@@ -58,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  *
  * <p>契約書: .kiro/specs/asset-account-license-lifecycle/v182-rehearsal-contract.md
  * 規約:
- * 1. Docker Disposable mysql:8.0 (tmpfsマウント) 上でFlywayを実行する (Docker必須・零skip)。
+ * 1. Docker Disposable MySQL（{@link com.ses.test.MySqlTestImages} が決めるimage、tmpfsマウント）上でFlywayを実行する (Docker必須・零skip)。
  * 2. 空白DBからV182、V181合成データからV182、V184への継続適用を検証する。
  * 3. 生成列callback_active_slotはクエリ検証のみ行い、直接UPDATEしない。
  * 4. 同一Txでの二段階修復・CASおよび可観測な並行修復での敗者更新ゼロ残存をアサートする。
@@ -84,7 +85,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_v182_rehearsal_root")
             .withUsername("root")
             .withPassword("ses");

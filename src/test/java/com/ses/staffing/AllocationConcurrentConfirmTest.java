@@ -7,6 +7,7 @@ import com.ses.mapper.AllocationPlanMapper;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.AllocationPlanService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,7 @@ class AllocationConcurrentConfirmTest {
 
     @Container
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_db")
             .withUsername("root")
             .withPassword("ses");

@@ -3,6 +3,8 @@
 **NOT real AWS.** No ECR push, no ECS deploy, no AWS API.
 This is an **offline AWS / local ECS-like simulation**, not a substitute for AWS actual acceptance.
 
+`validate-task-definition.ps1` と `test-validate-task-definition.ps1` は、Windows PowerShell 5.1 が BOM の無い file を ANSI で読むため ASCII だけで書く（日本語の例外。`ProductionTaskDefinitionTemplateTest` が検査する）。
+
 ## Probe convention (REV-ECS-P1-001)
 
 | Probe | Path | Use |
@@ -23,9 +25,22 @@ pwsh infra/ecs/build-image.ps1
 
 ```powershell
 pwsh infra/ecs/offline/validate-task-definition.ps1
+pwsh infra/ecs/offline/test-validate-task-definition.ps1
 pwsh infra/ecs/offline/verify-offline-sim.ps1 -EgressNegativeSelfTestOnly
 pwsh infra/ecs/offline/verify-offline-sim.ps1
 ```
+
+## MySQL image
+
+- 既定は本番と同じ MySQL 8.4 LTS の固定tag `mysql:8.4.13`（`docker-compose.yml` と `verify-offline-sim.ps1` の補助imageの両方。test の既定値 `src/test/java/com/ses/test/MySqlTestImages.java` と揃える）。
+- 本機に 8.4 のimageが無く、新たに取得しない（downloadしない）場合は、実行前に `SES_OFFLINE_MYSQL_IMAGE=mysql:8.0.36` を設定する。設定しないと compose が `mysql:8.4.13` を pull しにいく。
+
+```powershell
+$env:SES_OFFLINE_MYSQL_IMAGE = 'mysql:8.0.36'
+pwsh infra/ecs/offline/verify-offline-sim.ps1
+```
+
+- その結果は 8.0 での確認であり、8.4 の証拠にはならない。8.4 の offline simulation は 8.4 のimageを取得できる環境で行う（CI では実行していない）。
 
 ## Uploads (REV-ECS-P1-002)
 

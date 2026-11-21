@@ -6,6 +6,7 @@ import com.ses.dto.portal.PortalAcceptInvitationRequest;
 import com.ses.service.portal.PortalAuthService;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,7 +58,7 @@ class PortalAdminInvitationAcceptConcurrentMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_rb_prerun_portal_admin_invite")
             .withUsername("root")
             .withPassword("ses");

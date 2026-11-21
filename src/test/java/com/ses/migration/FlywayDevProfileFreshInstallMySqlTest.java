@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.config.LegacyDatabaseFlywayCallback;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationState;
@@ -45,7 +46,7 @@ class FlywayDevProfileFreshInstallMySqlTest {
 
     @Container
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.36")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_dev_profile_fresh_install")
             .withUsername("root")
             .withPassword("ses")

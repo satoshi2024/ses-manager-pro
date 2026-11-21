@@ -10,6 +10,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
 import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -33,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 class SyntheticPrivacyRequestServiceMySqlTest {
     private static final String PASS=java.util.UUID.randomUUID().toString();
-    @Container static final MySQLContainer<?> MYSQL=new MySQLContainer<>("mysql:8.0")
+    @Container static final MySQLContainer<?> MYSQL=new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName(JournalTestConnectionCapability.randomDatabase()).withUsername("root").withPassword(PASS);
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate jdbc;

@@ -2,6 +2,7 @@ package com.ses.mapper;
 
 import com.ses.entity.BpPayment;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Transactional
 class BpPaymentTenantSqlMySqlTest {
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("g5_bp_tenant").withUsername("root").withPassword("ses");
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {

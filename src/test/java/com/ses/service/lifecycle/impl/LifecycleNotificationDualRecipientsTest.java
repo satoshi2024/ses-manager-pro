@@ -25,8 +25,12 @@ import static org.mockito.Mockito.when;
 /**
  * W3-21a review P3-7（W3-21b）: 二者確認の「確認待ち」通知は、lifecycle menuの全利用者への配信をやめ、
  * 案件のtenantの有効な確認者（管理者・HR）と有効なタスクの担当者（review P3-3(a)）だけへ個別に送る。
+ * 提出者本人は宛先から除く（RB-POSTLAUNCH D-3）。
  */
 class LifecycleNotificationDualRecipientsTest {
+
+    /** 宛先の誰でもない提出者（要員本人の提出など）。 */
+    private static final long OTHER_SUBMITTER = 99L;
 
     private NotificationService notificationService;
     private SysUserMapper sysUserMapper;
@@ -45,7 +49,7 @@ class LifecycleNotificationDualRecipientsTest {
         when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of(user(11L), user(12L)));
         when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(user(20L));
 
-        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(" tenant-a "), 55L);
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(" tenant-a "), 55L, OTHER_SUBMITTER);
 
         ArgumentCaptor<Long> recipients = ArgumentCaptor.forClass(Long.class);
         verify(notificationService, times(4)).publishToUser(recipients.capture(), eq("DUAL_CONFIRMATION_PENDING"),
@@ -62,7 +66,7 @@ class LifecycleNotificationDualRecipientsTest {
         when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of(user(20L)));
         when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(user(20L));
 
-        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L);
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L, OTHER_SUBMITTER);
 
         ArgumentCaptor<String> title = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
@@ -76,7 +80,7 @@ class LifecycleNotificationDualRecipientsTest {
     void 案件のtenantが無ければ確認者を検索せず有効な担当者だけへ送る() {
         when(sysUserMapper.selectById(20L)).thenReturn(user(20L));
 
-        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(null), 55L);
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase(null), 55L, OTHER_SUBMITTER);
 
         verify(sysUserMapper, never()).selectActiveByRoleAndTenant(anyString(), anyString());
         verify(notificationService, times(1)).publishToUser(eq(20L), eq("DUAL_CONFIRMATION_PENDING"), anyString(),
@@ -91,9 +95,9 @@ class LifecycleNotificationDualRecipientsTest {
         disabled.setStatus(0);
         when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(disabled);
 
-        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L);
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L, OTHER_SUBMITTER);
         // 別tenant・削除済みは tenant限定の検索で見つからない
-        service.notifyDualConfirmationSubmitted(task(21L), lifecycleCase("tenant-a"), 56L);
+        service.notifyDualConfirmationSubmitted(task(21L), lifecycleCase("tenant-a"), 56L, OTHER_SUBMITTER);
 
         verify(notificationService, never()).publishToUser(eq(20L), any(), any(), any(), any(), any(), any());
         verify(notificationService, never()).publishToUser(eq(21L), any(), any(), any(), any(), any(), any());
@@ -105,10 +109,35 @@ class LifecycleNotificationDualRecipientsTest {
     void 担当者も確認者もいなければ誰にも送らない() {
         when(sysUserMapper.selectActiveByRoleAndTenant(anyString(), anyString())).thenReturn(List.of());
 
-        service.notifyDualConfirmationSubmitted(task(null), lifecycleCase("tenant-a"), 55L);
+        service.notifyDualConfirmationSubmitted(task(null), lifecycleCase("tenant-a"), 55L, OTHER_SUBMITTER);
 
         verify(notificationService, never()).publishToUser(anyLong(), any(), any(), any(), any(), any(), any());
         verify(notificationService, never()).publish(any(), any(), any(), any(), any(), any());
+    }
+
+    /**
+     * RB-POSTLAUNCH D-3: 提出者本人は自分の提出を確認できない（確認者のroleでも canDecide=false）ため、確認者や担当者で
+     * あっても「確認待ち」を送らない。他の確認者・担当者には従来どおり送る。
+     */
+    @Test
+    void 提出者本人は確認者や担当者であっても確認待ちの宛先から除く() {
+        when(sysUserMapper.selectActiveByRoleAndTenant("管理者", "tenant-a")).thenReturn(List.of(user(10L)));
+        when(sysUserMapper.selectActiveByRoleAndTenant("HR", "tenant-a")).thenReturn(List.of(user(11L)));
+        when(sysUserMapper.selectByIdAndTenant(20L, "tenant-a")).thenReturn(user(20L));
+
+        // 管理者（確認者）本人の提出
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 55L, 10L);
+        // 担当者本人の提出
+        service.notifyDualConfirmationSubmitted(task(20L), lifecycleCase("tenant-a"), 56L, 20L);
+
+        ArgumentCaptor<Long> first = ArgumentCaptor.forClass(Long.class);
+        verify(notificationService, times(2)).publishToUser(first.capture(), eq("DUAL_CONFIRMATION_PENDING"),
+                anyString(), anyString(), anyString(), eq("lifecycle-dual-submitted-55"), eq("lifecycle"));
+        assertThat(first.getAllValues()).containsExactly(11L, 20L);
+        ArgumentCaptor<Long> second = ArgumentCaptor.forClass(Long.class);
+        verify(notificationService, times(2)).publishToUser(second.capture(), eq("DUAL_CONFIRMATION_PENDING"),
+                anyString(), anyString(), anyString(), eq("lifecycle-dual-submitted-56"), eq("lifecycle"));
+        assertThat(second.getAllValues()).containsExactly(10L, 11L);
     }
 
     private static SysUser user(Long id) {

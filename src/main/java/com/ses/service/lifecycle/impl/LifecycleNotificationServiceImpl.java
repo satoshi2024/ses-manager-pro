@@ -102,13 +102,17 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
      * dedupe keyは {@link NotificationService#publishToUser} が宛先ごとに一意化する。
      */
     @Override
-    public void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId) {
+    public void notifyDualConfirmationSubmitted(LifecycleTask task, LifecycleCase lcCase, long submissionId,
+                                                long submitterUserId) {
         String dedupeKey = String.format("lifecycle-dual-submitted-%d", submissionId);
         String title = String.format("【確認待ち】タスク「%s」の証跡が提出されました", task.getTaskName());
         String message = String.format("案件番号:%s のタスク「%s」の二者確認の証跡が提出されました。内容を確認してください。",
                 lcCase.getCaseNo(), task.getTaskName());
         String link = "/lifecycle/" + lcCase.getId();
-        for (Long recipient : dualConfirmationPendingRecipients(task, lcCase)) {
+        Set<Long> recipients = dualConfirmationPendingRecipients(task, lcCase);
+        // 提出者本人は自分の提出を確認できない（確認者のroleでも canDecide=false）ため「確認待ち」を送らない（D-3）
+        recipients.remove(submitterUserId);
+        for (Long recipient : recipients) {
             notificationService.publishToUser(recipient, "DUAL_CONFIRMATION_PENDING", title, message, link, dedupeKey,
                     "lifecycle");
         }
@@ -116,7 +120,8 @@ public class LifecycleNotificationServiceImpl implements LifecycleNotificationSe
 
     /**
      * 確認待ちの宛先: 案件のtenantの有効な管理者・HR（確認者）と、有効なタスクの担当者。tenantが無ければ担当者だけ。
-     * 担当者本人が提出者でも除かない（通知の呼出しが提出者IDを持たないため。review P3-3(b)）。
+     * 提出者本人は呼出し側（{@link #notifyDualConfirmationSubmitted}）で除く（RB-POSTLAUNCH D-3。以前は呼出しが
+     * 提出者IDを持たなかったため除けなかった。review P3-3(b)）。
      */
     private Set<Long> dualConfirmationPendingRecipients(LifecycleTask task, LifecycleCase lcCase) {
         Set<Long> recipients = new LinkedHashSet<>();

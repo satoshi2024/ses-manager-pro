@@ -26,6 +26,7 @@ import com.ses.service.AssetOffboardingService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.lifecycle.impl.LifecycleExceptionApprovalAdapter;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -77,7 +78,7 @@ class LifecycleLockOrderMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf01_lifecycle_lock_order")
             .withUsername("root")
             .withPassword("ses");

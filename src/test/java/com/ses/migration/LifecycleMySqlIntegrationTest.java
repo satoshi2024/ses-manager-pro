@@ -20,6 +20,7 @@ import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import com.ses.test.TenantTestSecurity;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -59,7 +60,7 @@ class LifecycleMySqlIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_lifecycle_mysql")
             .withUsername("root")
             .withPassword("ses");
@@ -186,6 +187,12 @@ class LifecycleMySqlIntegrationTest {
 
         assertNotNull(caseDto.getId());
         assertEquals("ACTIVE", caseDto.getStatus());
+        // RB-POSTLAUNCH B-3: 一覧の進捗は case_id IN (...) の1回の検索（判定に使う列だけの select）で数える。
+        // 実MySQLでもその検索が通り、完了前は 0/1 と数えること（review P3-10: 空の一覧だけではこの検索を通らない）。
+        LifecycleCaseDto listedBefore = caseService.listCases(null, null, eng.getId(), null, null, admin).stream()
+                .filter(c -> c.getId().equals(caseDto.getId())).findFirst().orElseThrow();
+        assertEquals(1, listedBefore.getTotalTasks());
+        assertEquals(0, listedBefore.getCompletedTasks());
 
         LifecycleTask task = taskMapper.selectByCaseId(caseDto.getId()).get(0);
         taskService.completeTask(task.getId(), admin.getId(), CompleteLifecycleTaskCommand.builder()
@@ -196,6 +203,10 @@ class LifecycleMySqlIntegrationTest {
 
         LifecycleCase finalCase = caseMapper.selectById(caseDto.getId());
         assertEquals("COMPLETED", finalCase.getStatus());
+        LifecycleCaseDto listedAfter = caseService.listCases(null, null, eng.getId(), null, null, admin).stream()
+                .filter(c -> c.getId().equals(caseDto.getId())).findFirst().orElseThrow();
+        assertEquals(1, listedAfter.getCompletedTasks());
+        assertEquals(100, listedAfter.getProgressPercent());
 
         // 完了通知はcommit後の独立transactionで永続化される（NF01 batch 0: afterCommit + REQUIRES_NEW）。
         Integer completedNotifications = jdbcTemplate.queryForObject(

@@ -342,7 +342,7 @@ public class LifecycleDualConfirmationAttemptService {
                 .requestSha256(attempt.requestSha256())
                 .submissionId(submissionId)
                 .build());
-        notifier.submittedAfterCommit(context.task(), context.lcCase(), submissionId);
+        notifier.submittedAfterCommit(context.task(), context.lcCase(), submissionId, submitter.userId());
         return result(context.taskId(), submission, null, STATE_PENDING, context.task().getStatus(), false);
     }
 

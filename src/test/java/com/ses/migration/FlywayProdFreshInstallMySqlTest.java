@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.config.ProductionSchemaVersionGuard;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.flywaydb.core.api.MigrationInfo;
@@ -79,12 +80,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FlywayProdFreshInstallMySqlTest {
 
     /**
-     * 本番と同系列の固定tagを使う（{@code ops/backup/tests/docker-compose.integration.yml} の
-     * {@code mysql:8.0.36} と揃える）。本番のMySQL版がDBAから確定したら
-     * {@code -Dses.flyway.fresh-install.mysql-image=mysql:8.0.xx} で差し替えられる。
+     * 本番と同じ MySQL 8.4 LTS の固定tag（{@link MySqlTestImages#DEFAULT_IMAGE}）を使う。解決順は
+     * {@code -Dses.flyway.fresh-install.mysql-image}（従来の別名・最優先）→ {@code -Dses.test.mysql.image}
+     * → 環境変数 {@code SES_TEST_MYSQL_IMAGE} → 既定値（{@link MySqlTestImages#freshInstallImage()}）。
      */
-    private static final String MYSQL_IMAGE =
-            System.getProperty("ses.flyway.fresh-install.mysql-image", "mysql:8.0.36");
+    private static final String MYSQL_IMAGE = MySqlTestImages.freshInstallImage();
 
     private static final String PROD_LOCATION = "classpath:db/migration-prod";
     private static final String ADMIN_PASSWORD_SCRIPT = "R__update_admin_password_bcrypt.sql";

@@ -10,6 +10,7 @@ import com.ses.dto.lifecycle.dual.DualConfirmationSubmitRequest;
 import com.ses.dto.lifecycle.dual.DualConfirmationViewDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.LifecycleCase;
+import com.ses.entity.LifecycleDualConfirmation;
 import com.ses.entity.LifecycleDualProjection;
 import com.ses.entity.LifecycleDualSubmission;
 import com.ses.entity.LifecycleDualSubmissionDocument;
@@ -71,6 +72,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -620,6 +622,51 @@ class LifecycleDualConfirmationCoordinatorTest {
         projection.setTaskGeneration(GENERATION - 1);
         assertThat(coordinator.view(TASK, principal(CONFIRMER), DualConfirmationChannel.INTERNAL).isStale()).isTrue();
         verifyNoInteractions(attempts, recorder);
+    }
+
+    /**
+     * RB-POSTLAUNCH D-2: 提出者・確認者は「ユーザーID N」ではなく名前で返す。社内の入口では照会者のtenantの利用者の氏名
+     * （無ければusername）を返し、本人の入口では照会者自身の名前だけを返す（社内の確認者の名前は本人画面へ広げない）。
+     */
+    @Test
+    void 照会は社内の入口で提出者と確認者の名前を返し本人の入口では本人の名前だけを返す() {
+        long engineerUser = 33L;
+        principalIs(engineerUser, "要員");
+        LifecycleDualProjection projection = LifecycleDualProjection.builder().tenantId(TENANT).taskId(TASK)
+                .caseId(CASE).taskGeneration(GENERATION).revision(1).submissionId(SUBMISSION)
+                .evidenceSha256(EVIDENCE_SHA).state("CONFIRMED").projectionVersion(0L).build();
+        when(projectionMapper.selectOne(any())).thenReturn(projection);
+        when(reader.findSubmission(TENANT, TASK, SUBMISSION)).thenReturn(submission(engineerUser));
+        when(confirmationMapper.selectOne(any())).thenReturn(LifecycleDualConfirmation.builder().tenantId(TENANT)
+                .submissionId(SUBMISSION).taskId(TASK).decision("CONFIRMED").confirmerUserId(CONFIRMER).build());
+        when(evaluator.canViewCase(any(), any(), any())).thenReturn(true);
+        when(evaluator.isTaskVisible(any(), any())).thenReturn(true);
+        when(sysUserMapper.selectByIdAndTenant(engineerUser, TENANT)).thenReturn(named(engineerUser, "検証 二号", "eng1"));
+        when(sysUserMapper.selectByIdAndTenant(CONFIRMER, TENANT)).thenReturn(named(CONFIRMER, " ", "hr1"));
+
+        DualConfirmationViewDto internal = coordinator.view(TASK, principal(CONFIRMER), DualConfirmationChannel.INTERNAL);
+        assertEquals("検証 二号", internal.getSubmitterName());
+        assertEquals("hr1", internal.getConfirmerName(), "氏名が空ならusername");
+        assertEquals(CONFIRMER, internal.getConfirmerUserId());
+
+        DualConfirmationViewDto self = coordinator.view(TASK, principal(engineerUser), DualConfirmationChannel.SELF);
+        assertEquals("検証 二号", self.getSubmitterName());
+        assertNull(self.getConfirmerName(), "本人画面には社内の確認者の名前を返さない");
+
+        // tenant内に見つからない利用者（削除済み・別tenant）は名前を返さない
+        when(sysUserMapper.selectByIdAndTenant(CONFIRMER, TENANT)).thenReturn(null);
+        assertNull(coordinator.view(TASK, principal(CONFIRMER), DualConfirmationChannel.INTERNAL).getConfirmerName());
+        verify(sysUserMapper, never()).selectByIdAndTenant(anyLong(), eq("tenant-b"));
+    }
+
+    private static SysUser named(long id, String realName, String username) {
+        SysUser user = new SysUser();
+        user.setId(id);
+        user.setTenantId(TENANT);
+        user.setRealName(realName);
+        user.setUsername(username);
+        user.setStatus(1);
+        return user;
     }
 
     @Test

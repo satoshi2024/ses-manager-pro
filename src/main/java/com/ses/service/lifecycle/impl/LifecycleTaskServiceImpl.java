@@ -283,6 +283,11 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (newAssignee == null || newAssignee.getStatus() == null || newAssignee.getStatus() != 1) {
             throw BusinessException.of(400, "error.lifecycle.invalidAssignee", "有効なユーザーを指定してください");
         }
+        // 社内専用（本人非公開）のタスクは要員ロールの利用者へ割り当てない。割り当てると期日接近・超過や確認待ちの通知で
+        // タスク名・案件titleが要員側へ渡り、その要員が案件の対象本人であることもある（RB-POSTLAUNCH review P3-8）。
+        if ("要員".equals(newAssignee.getRole()) && !Integer.valueOf(1).equals(task.getIsEngineerVisible())) {
+            throw BusinessException.of(400, "error.lifecycle.internalTaskEngineerAssignee");
+        }
 
         Long oldAssigneeId = task.getAssigneeUserId();
         String oldAssigneeRole = task.getAssigneeRole();

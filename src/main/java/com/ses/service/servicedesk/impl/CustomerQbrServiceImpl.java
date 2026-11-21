@@ -71,7 +71,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     public CustomerQbrDto getQbr(Long id) {
         CustomerQbr qbr = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (qbr == null) {
-            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+            throw BusinessException.of(404, "error.customerQbr.notFound");
         }
         assertAllowed(qbr.getCustomerId());
         return convertToDto(qbr);
@@ -83,7 +83,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         String tenantId = currentTenant();
         Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId());
         if (customer == null) {
-            throw BusinessException.of(404, "指定された顧客が見つかりません");
+            throw BusinessException.of(404, "error.customerSuccess.customerNotFound");
         }
         assertAllowed(req.getCustomerId());
 
@@ -112,7 +112,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     public void updateQbr(Long id, CustomerQbrUpdateRequest req) {
         CustomerQbr existing = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (existing == null) {
-            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+            throw BusinessException.of(404, "error.customerQbr.notFound");
         }
         assertAllowed(existing.getCustomerId());
 
@@ -126,7 +126,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         existing.setUpdatedAt(LocalDateTime.now(clock));
 
         if (qbrMapper.updateByIdForTenant(existing, currentTenant()) != 1) {
-            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+            throw BusinessException.of(404, "error.customerQbr.notFound");
         }
     }
 
@@ -135,11 +135,11 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     public void deleteQbr(Long id) {
         CustomerQbr existing = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (existing == null) {
-            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+            throw BusinessException.of(404, "error.customerQbr.notFound");
         }
         assertAllowed(existing.getCustomerId());
         if (qbrMapper.deleteByIdForTenant(id, existing.getCustomerId(), currentTenant()) != 1) {
-            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+            throw BusinessException.of(404, "error.customerQbr.notFound");
         }
     }
 

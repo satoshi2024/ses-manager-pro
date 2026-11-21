@@ -29,6 +29,7 @@ import com.ses.service.AssetService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -68,7 +69,7 @@ class AssetMySqlIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_manager_asset_mysql")
             .withUsername("root")
             .withPassword("ses");

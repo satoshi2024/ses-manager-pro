@@ -3,6 +3,7 @@ package com.ses.migration;
 import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import org.apache.ibatis.annotations.Update;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
@@ -26,7 +27,7 @@ import static org.assertj.core.api.Assertions.*;
 @Testcontainers
 class IntegrationHubV192AuditRetentionMySqlTest {
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("nf05_v192").withUsername("root").withPassword("ses");
     static DriverManagerDataSource source;
     static JdbcTemplate jdbc;

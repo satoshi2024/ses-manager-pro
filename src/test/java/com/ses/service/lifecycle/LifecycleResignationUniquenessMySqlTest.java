@@ -14,6 +14,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.nf01.preflight.Nf01PreflightTestAccess;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -86,7 +87,7 @@ class LifecycleResignationUniquenessMySqlTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
             .withDatabaseName("ses_nf01_resignation_unique")
             .withUsername("root")
             .withPassword("ses");

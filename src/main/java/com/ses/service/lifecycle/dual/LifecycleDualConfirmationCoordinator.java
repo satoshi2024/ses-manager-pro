@@ -290,6 +290,7 @@ public class LifecycleDualConfirmationCoordinator {
             boolean commentsVisible = DualConfirmationCommentDisclosure.canReadBody(actor.role(), actor.userId(),
                     submission.getSubmitterUserId());
             view.submitterUserId(submission.getSubmitterUserId())
+                    .submitterName(visibleUserName(actor, channel, submission.getSubmitterUserId()))
                     .submittedAt(submission.getCreatedAt())
                     .commentsVisible(commentsVisible)
                     .submissionCommentPresent(DualConfirmationCommentDisclosure.present(submission.getBusinessComment()))
@@ -311,6 +312,7 @@ public class LifecycleDualConfirmationCoordinator {
             if (confirmation != null) {
                 view.decision(confirmation.getDecision())
                         .confirmerUserId(confirmation.getConfirmerUserId())
+                        .confirmerName(visibleUserName(actor, channel, confirmation.getConfirmerUserId()))
                         .decidedAt(confirmation.getDecidedAt())
                         .decisionCommentPresent(DualConfirmationCommentDisclosure.present(
                                 confirmation.getDecisionComment()))
@@ -483,6 +485,23 @@ public class LifecycleDualConfirmationCoordinator {
     }
 
     // ===================================================================== discovery・前検査
+
+    /**
+     * 照会画面に出す提出者・確認者の表示名（RB-POSTLAUNCH D-2）。社内の入口では、案件詳細の担当者名やevent台帳の
+     * 操作者名と同じく、照会者のtenantの利用者の氏名（無ければusername）を返す。本人の入口では照会者自身の名前だけを返し、
+     * 社内の確認者など他の利用者の名前は返さない（画面は「社内の担当者」と出す）。tenant内に見つからなければnull。
+     */
+    private String visibleUserName(ExplicitActor actor, DualConfirmationChannel channel, Long userId) {
+        if (userId == null
+                || (channel != DualConfirmationChannel.INTERNAL && !Objects.equals(userId, actor.userId()))) {
+            return null;
+        }
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId, actor.tenantId());
+        if (user == null) {
+            return null;
+        }
+        return user.getRealName() != null && !user.getRealName().isBlank() ? user.getRealName() : user.getUsername();
+    }
 
     /** 照会・候補の対象タスク（照会者のtenant内で、照会者が案件とタスクを閲覧できること）。 */
     private TaskContext readVisibleTask(ExplicitActor actor, long taskId, DualConfirmationChannel channel) {
