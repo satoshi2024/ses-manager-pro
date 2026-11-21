@@ -45,7 +45,7 @@ public class GlobalExceptionHandler {
         this.backupWriteGate = backupWriteGate;
     }
 
-    /** 静止による拒否の数え方と 1792 の WARN の間引き（filter と共有。無い context では数えずに WARN を出す）。 */
+    /** 静止による拒否の数え方と読取り専用の拒否の WARN の間引き（filter と共有。無い context では数えずに WARN を出す）。 */
     private BackupQuiesceRejectionRecorder rejectionRecorder;
 
     @Autowired(required = false)
@@ -74,7 +74,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 静止による拒否（{@link BackupWriteQuiescedException}、gate が書込みを許さない間の ERROR 1792）を 503 の応答にする。
+     * 静止による拒否（{@link BackupWriteQuiescedException}、gate が書込みを許さない間の読取り専用の拒否（server の 1792 か
+     * Connector/J の client 側の S1009））を 503 の応答にする。
      * 静止による拒否でなければ null。業務例外・行 lock の競合・予期しない例外の handler の前で呼ぶ（最後の防線の変換）。
      */
     private ResponseEntity<ApiResult<Void>> quiescedResponseIfApplicable(Throwable e) {
@@ -84,7 +85,7 @@ public class GlobalExceptionHandler {
     private ResponseEntity<ApiResult<Void>> quiescedResponse(Throwable e) {
         CorrelationContext.put(CorrelationContext.ERROR_CODE, BackupQuiesceRejections.ERROR_CODE);
         CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
-        // controller の中の拒否は filter まで届かないため、ここで filter と同じ部品で数えて 1792 の WARN を間引く
+        // controller の中の拒否は filter まで届かないため、ここで filter と同じ部品で数えて読取り専用の拒否の WARN を間引く
         // （rejected_requests{readonly_sql|uploads|api}。2b review P2-1。§13.1〜§13.3）
         BackupQuiesceRejectionRecorder recorder = rejectionRecorder;
         if (recorder != null) {

@@ -61,7 +61,8 @@ public final class BackupQuiesceRejections {
 
     /**
      * 静止による拒否として 503 にする例外か: 原因の連鎖に {@link BackupWriteQuiescedException} がある、または gate が書込みを
-     * 許していない（OPEN・DISABLED でない）間の ERROR 1792（SQLSTATE {@code 25006}。最後の防線）がある。
+     * 許していない（OPEN・DISABLED でない）間の読取り専用の拒否（最後の防線。server の ERROR 1792（SQLSTATE {@code 25006}）か
+     * Connector/J の client 側の拒否（SQLSTATE {@code S1009}）。{@link BackupQuiesceReadOnlyViolation}。fix E）がある。
      */
     public static boolean isQuiesceRejection(Throwable failure, BackupWriteGate gate) {
         if (findQuiescedException(failure) != null) {
@@ -106,11 +107,11 @@ public final class BackupQuiesceRejections {
         return message(WRITE_UNAVAILABLE_KEY, WRITE_UNAVAILABLE_FALLBACK, source, locale);
     }
 
-    /** 最後の防線（ERROR 1792）で 503 にした拒否の metric の kind（§13.2）。 */
+    /** 最後の防線（読取り専用の拒否。server の 1792 か Connector/J の client 側の拒否）で 503 にした拒否の metric の kind（§13.2）。 */
     public static final String KIND_READONLY_SQL = "readonly_sql";
 
     /**
-     * 静止による拒否の metric の kind（§13.2 の {@code rejected_requests{kind}}）: 明示の例外が無ければ 1792 の
+     * 静止による拒否の metric の kind（§13.2 の {@code rejected_requests{kind}}）: 明示の例外が無ければ読取り専用の拒否の
      * {@code readonly_sql}、uploads の変更は {@code uploads}、それ以外の明示の拒否は外部 API なら {@code external}、JSON なら
      * {@code api}、画面なら {@code page}。filter と API の handler で同じ規則にする（2b review P2-1）。
      */

@@ -55,7 +55,7 @@ public class BackupQuiesceConfiguration {
         return new BackupQuiesceMetrics(anchor.gate());
     }
 
-    /** 静止による拒否の数え方と 1792 の WARN の間引き（filter と API の handler で共有。2b review P2-1）。 */
+    /** 静止による拒否の数え方と読取り専用の拒否の WARN の間引き（filter と API の handler で共有。2b review P2-1）。 */
     @Bean
     static BackupQuiesceRejectionRecorder backupQuiesceRejectionRecorder(BackupQuiesceMetrics metrics) {
         return new BackupQuiesceRejectionRecorder(metrics);

@@ -18,7 +18,9 @@ import java.util.Objects;
  *
  * <p>permit を持たない thread が gate の OPEN・DISABLED 以外の間に借りた接続には {@code setReadOnly(true)} を呼ぶ。Connector/J は
  * {@code readOnlyPropagatesToServer=true}（既定）で {@code SET SESSION TRANSACTION READ ONLY} を送り、MySQL は永続表への書込みを
- * ERROR 1792 で拒否する。接続を返すと Hikari が読取り専用を既定へ戻す。
+ * ERROR 1792 で拒否する。ただし {@code setReadOnly(true)} の接続の DML は、Connector/J が server へ送る前に SQLSTATE S1009 で拒否する
+ * （実 MySQL の業務の接続の書込みはこちらの形。fea83915 の Runner の実測。{@link BackupQuiesceReadOnlyViolation} がどちらも
+ * 読取り専用の拒否と判定する。fix E）。接続を返すと Hikari が読取り専用を既定へ戻す。
  *
  * <p>書込み可能な接続の数え方（I-4。{@link BackupWriteGate}）:
  * <ul>

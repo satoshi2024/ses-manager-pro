@@ -81,6 +81,8 @@
 
   - **実装の記録（第 2 段階 2a）:** `BackupQuiesceAwareDataSource`（`DelegatingDataSource`。接続は proxy で `setReadOnly`・`close` を数える）、`BackupQuiesceDataSourcePostProcessor`（static な `@Bean`。gate が INERT なら包まない。停止の時は SHUTDOWN・呼んだ thread の permit の返却・最長 10 秒の排水の待ち・Hikari を閉じてから STOPPED、閉じられなければ STOPPED を書かない）、`BackupQuiesceReadOnlyViolation`。BWQ-003 の MySQL 試験に停止の順の4件（通常の close・refresh の失敗・10 秒を超える permit・`ApplicationRunner` の失敗）を足した。fast は `BackupQuiesceAwareDataSourceTest`（H2 の Hikari の metric と `db` の health を含む）・`BackupQuiesceReadOnlyViolationTest`・`BusinessConnectionBypassGuardTest` と影響する既存の試験が通過。**Runner 待ち**: `BackupWriteQuiesceMySqlTest`・`BackupQuiesceResponderMySqlTest`（mysql shard 3。§19 の locking read と Hikari の読取り専用の戻しの記録を含む）と Demo（dev の app の静止中の一覧の表示と MySQL の general log）。
 
+  - **実装の記録（第 2 段階 2d、fix E。`fea83915` の Runner の実測）:** Connector/J 8.3.0 は読取り専用の接続の DML を server へ送る前に SQLSTATE `S1009` で拒否するため、`BackupQuiesceReadOnlyViolation.matches` が client 側の形も読取り専用の拒否とする（`design.md` §6.5.1・§19・§20.7）。H2 の試験の driver は既定で client 側の形を模す。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の 1792 の形を別の case で固定する。**Runner 待ち**: `BackupWriteQuiesceMySqlTest`（8 件）。
+
   - **依存:** BWQ-002、BWQ-003
   - **対応要求:** BWQ-RQ-002（AC-002-02・AC-002-07）、BWQ-RQ-004（AC-004-01）
   - **Objective:** 静止中に permit を持たない thread が業務の pool で書けないことを MySQL の層で保証し、排水が「書込み可能な接続」まで待つようにし、停止の時に業務の pool を閉じてから STOPPED を書く。

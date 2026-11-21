@@ -288,8 +288,11 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void 静止中のAPIのcontrollerの中の拒否もkindごとに数え1792のWARNを間引く() throws Exception {
-        // 2b review P2-1: /api/** の controller の中の 1792・明示の拒否は GlobalExceptionHandler が 503 にするため filter に届かない
+    void 静止中のAPIのcontrollerの中の拒否もkindごとに数え読取り専用の拒否はserver側もclient側も数えてWARNを間引く()
+            throws Exception {
+        // 2b review P2-1: /api/** の controller の中の読取り専用の拒否・明示の拒否は GlobalExceptionHandler が 503 にするため
+        // filter に届かない。fix E: 読取り専用の拒否は server の 1792（/readonly）と Connector/J の client 側の S1009
+        // （/readonly-client。実 MySQL の業務の接続の形）の両方
         closeGate();
         double readOnly = counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql");
         double uploads = counter(BackupQuiesceMetrics.REJECTED, "kind", "uploads");
@@ -303,10 +306,12 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
         String base = com.ses.controller.api.BackupQuiesceRejectionProbeConfiguration.BASE;
         try {
             for (int i = 0; i < 2; i++) {
-                mockMvc.perform(get(base + "/readonly"))
-                        .andExpect(status().isServiceUnavailable())
-                        .andExpect(header().string("X-SES-Error-Code", "BACKUP_QUIESCED"))
-                        .andExpect(jsonPath("$.code").value(503));
+                for (String path : java.util.List.of("/readonly", "/readonly-client")) {
+                    mockMvc.perform(get(base + path))
+                            .andExpect(status().isServiceUnavailable())
+                            .andExpect(header().string("X-SES-Error-Code", "BACKUP_QUIESCED"))
+                            .andExpect(jsonPath("$.code").value(503));
+                }
             }
             mockMvc.perform(get(base + "/uploads")).andExpect(status().isServiceUnavailable());
             mockMvc.perform(get(base + "/required-audit")).andExpect(status().isServiceUnavailable());
@@ -314,12 +319,12 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
             logger.detachAppender(appender);
         }
 
-        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql")).isEqualTo(readOnly + 2);
+        assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "readonly_sql")).isEqualTo(readOnly + 4);
         assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "uploads")).isEqualTo(uploads + 1);
         assertThat(counter(BackupQuiesceMetrics.REJECTED, "kind", "api")).isEqualTo(api + 1);
         assertThat(appender.list.stream().filter(event -> event.getFormattedMessage()
                 .startsWith("errorCode=BACKUP_QUIESCE_READONLY_REJECTED")))
-                .as("1792 の WARN は 60 秒に 1 回へ間引く").hasSizeLessThanOrEqualTo(1);
+                .as("読取り専用の拒否の WARN は（形によらず）60 秒に 1 回へ間引く").hasSizeLessThanOrEqualTo(1);
     }
 
     @Test

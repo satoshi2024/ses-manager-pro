@@ -337,7 +337,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - process が落ちれば持越しは失われ、その session は解除の後に行の idle 期限で失効し得る（安全側）。
   - portal の GET の経路の他の書込み: download の best-effort の監査（`PortalAuditService.record`。download は U-10 で 503 のため静止中は届かない）だけで、rate limit は memory、利用者・組織・権限・規約の同意は読むだけ（第 2 段階 2c で `PortalCustomerApiController`・`PortalBpApiController`・`PortalCustomerServiceDeskApiController`・`PortalAuthApiController` の GET を確かめた。網羅ではなく、残りは §13.2 の `rejected{readonly_sql}` で見つける。L-2）。
   - portal の logout と更新の要求は従来どおり 503（L-20）。
-- **最後の防線の変換**: 原因の連鎖に ERROR 1792（SQLSTATE `25006`）があり gate が OPEN でないときは 503 にする。判定は `BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。 どちらで 503 にした拒否も同じ部品 `BackupQuiesceRejectionRecorder` で `rejected_requests{kind}`（1792 は `readonly_sql`、uploads の明示は `uploads`、その他の明示は `api`・`page`・`external`）を数え、1792 の WARN `BACKUP_QUIESCE_READONLY_REJECTED` を 60 秒に 1 回へ間引く（第 2 段階 2c。2b の review P2-1: `/api/**` の controller の中の拒否は filter に届かず数えられていなかった）。
+- **最後の防線の変換**: 原因の連鎖に読取り専用の拒否（server の ERROR 1792（SQLSTATE `25006`）か、Connector/J の client 側の拒否（SQLSTATE `S1009` で message が「Connection is read-only. … Queries leading to data modification are not allowed」。§6.5.1））があり gate が OPEN でないときは 503 にする。判定は `BackupQuiesceReadOnlyViolation.matches` で、`BackupWriteGateFilter` の chain 全体の try/catch（未 commit の場合）、`GlobalExceptionHandler.handleBusinessException`・`handleException`・`handleLockConflict` の前で行う。明示に投げる `BackupWriteQuiescedException` の handler も足す。 どちらで 503 にした拒否も同じ部品 `BackupQuiesceRejectionRecorder` で `rejected_requests{kind}`（読取り専用の拒否は形によらず `readonly_sql`、uploads の明示は `uploads`、その他の明示は `api`・`page`・`external`）を数え、読取り専用の拒否の WARN `BACKUP_QUIESCE_READONLY_REJECTED`（拒否の形 `server-1792`・`connector-j-S1009` を含む）を 60 秒に 1 回へ間引く（第 2 段階 2c。2b の review P2-1: `/api/**` の controller の中の拒否は filter に届かず数えられていなかった。fix E: client 側の形を判定できず 500 になっていた。§20.7）。
 - **NF05 が OFF の外部 API**（第 2 段階 2c。2b の review P3-2）: 公開 API（`integration.hub.public-api.enabled`）が OFF の間は、`/external-api/**` を EXTERNAL でなく READ として permit を取らずに通し、平時と同じ `ExternalApiDisabledFilter` の 404（DB へ書かず `audit_suppressed{PUBLIC_API_DISABLED}` だけを数える）を返す。公開 API の有無と backup の実行を応答から区別させない。
 - **best-effort の監査（U-9 決定済み）**: `AuditLogServiceImpl.record` は gate が閉じていて permit が無いとき DB へ書かず、同じ内容（user・method・URI・status・applicationCode）を WARN の application log `errorCode=BACKUP_QUIESCE_AUDIT_DEFERRED` に出し、metric `skipped_writes{kind=best_effort_audit}` を数える。必須の監査（`recordRequired`）は例外になり要求は 503 になる。logout の監査だけは §6.13 のとおり解除の後に DB へ書く。
 
@@ -347,6 +347,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 
 - `BackupQuiesceDataSourcePostProcessor` が業務の `DataSource` bean（Hikari）を `BackupQuiesceAwareDataSource`（`DelegatingDataSource` の派生）で包む。static な `@Bean` method で登録し、gate・metric は `ObjectProvider` で包む時に遅れて引く。metric の登録は `MeterBinder` の bean で行う。この class は `DestructionAwareBeanPostProcessor` でもあり、停止の時の処理を持つ（§6.11）。
 - permit の無い thread が gate の OPEN と DISABLED 以外の間に借りた接続には `setReadOnly(true)` を呼ぶ。Connector/J は `readOnlyPropagatesToServer=true`（既定）で `SET SESSION TRANSACTION READ ONLY` を送り、MySQL は永続表への書込みを ERROR 1792 で拒否する。接続を返すと Hikari が既定へ戻す（§19）。
+  - **拒否の形（fix E。`fea83915` の Runner の実測）**: Connector/J 8.3.0 は `setReadOnly(true)` の接続で `Statement#executeUpdate`・`execute`、`ClientPreparedStatement#execute`（MyBatis の更新が通る）の DML を **server へ送る前に** client 側で拒否する（`SQLException`、SQLSTATE `S1009`、vendor code 0、message「Connection is read-only. Queries leading to data modification are not allowed」。`LocalizedErrorMessages` の `Statement.27`+`.28`・`PreparedStatement.20`+`.21` 等。英語の bundle だけ）。業務の接続の書込みは実際にはこの形になり、server の 1792 は driver を経由しない読取り専用（`SET SESSION TRANSACTION READ ONLY` を直接送った接続）や driver が文を送る経路で出る。`BackupQuiesceReadOnlyViolation.matches` は両方を読取り専用の拒否とする（任意の `S1009` は該当にしない。message の先頭と本文の両方を見る）。session も `transaction_read_only = 1` になるため、server 側の読取り専用は driver の外の防線として残る。driver の版を上げて文言が変われば `BackupQuiesceReadOnlyViolationTest`（driver の bundle の文言で照合する）が失敗する。H2 の試験の driver `ReadOnlyEnforcingH2Driver` は既定で client 側の形を模し、1792 にも切り替えられる。
 - 静止で読取り専用にした接続への `setReadOnly(false)` は無視する（DEBUG）。
 - `readOnlyPropagatesToServer=false` ではこの防線が黙って消えるため、起動時に拒否する（§12.2）。
 - `SELECT … FOR UPDATE` / `FOR SHARE`: 読取り専用の transaction では locking read も ERROR 1792 になる見込み（**未実測**。§19）。GET の経路で locking read を使う処理は静止中に 503 になる。静止中だけの挙動として受け入れ、metric と WARN の log で経路を見る（§17 L-2）。
@@ -731,7 +732,7 @@ app:
 | `BACKUP_QUIESCE_AUDIT_DEFERRED` | WARN | 静止中に best-effort の監査を DB へ書かなかった（内容を log に残す。U-9） |
 | `BACKUP_QUIESCE_DEFERRED_WRITE` | WARN | logout の失効と監査を解除の後へ回した（U-8） |
 | `BACKUP_QUIESCE_DEFERRED_WRITE_DROPPED` | WARN | 解除後の書込みを書かずに捨てた（上限 10,000 件を超えた最も古いもの、3 回失敗したもの、解除後の監査の時刻が許す範囲の外のもの。内容を log に残す。第 2 段階 2a・2b で足した） |
-| `BACKUP_QUIESCE_READONLY_REJECTED` | WARN | 最後の防線（1792）で 503 にした（経路の型。間引いて出す） |
+| `BACKUP_QUIESCE_READONLY_REJECTED` | WARN | 最後の防線（読取り専用の拒否。server の 1792 か Connector/J の client 側の `S1009`。§6.5.1）で 503 にした（経路の型と拒否の形。間引いて出す） |
 | `BACKUP_QUIESCE_DISABLED` | ERROR | prod で停止口を使って起動した（ticket を含む） |
 | `BACKUP_QUIESCE_STOP_UNCONFIRMED` | WARN | 停止の時に permit・書込み可能な接続が 10 秒で 0 にならず、STOPPED を書かなかった（D3-P3-1） |
 
@@ -745,7 +746,7 @@ app:
 | `ses_backup_quiesce_requests_total` | counter | `job_kind`、`result`（`acked`・`refused_drain_timeout`・`refused_error`・`refused_disabled`・`ack_unknown`・`ignored_expired`） |
 | `ses_backup_quiesce_drain_seconds` / `hold_seconds` | timer | `job_kind` |
 | `ses_backup_quiesce_resumed_total` | counter | `reason` |
-| `ses_backup_quiesce_rejected_requests_total` | counter | `kind`（`api`・`page`・`download`・`session`・`external`・`readonly_sql`・`uploads`） |
+| `ses_backup_quiesce_rejected_requests_total` | counter | `kind`（`api`・`page`・`download`・`session`・`external`・`readonly_sql`・`uploads`。`readonly_sql` は最後の防線の読取り専用の拒否で、server の 1792 と Connector/J の client 側の `S1009` の両方を数える。§6.5.1・fix E） |
 | `ses_backup_quiesce_deferred_total` | counter | `kind`（`scheduler`・`async`・`startup`・`logout`。`logout` は logout 1 回に 1（失効と監査の 2 件を後回しにしても。2b の review P3-6）） |
 | `ses_backup_quiesce_skipped_writes_total` | counter | `kind`（`session_touch`・`best_effort_audit`） |
 | `ses_backup_quiesce_deferred_writes_pending` | gauge | —（解除後の書込みの未処理の件数） |
@@ -837,7 +838,7 @@ CLAUDE.md は本 batch では変えない。
 | L-10 | 多 instance（sticky session 構成）でも protocol は働くが、本番は単一 task で多 instance の実測はしない | SRE-5 |
 | L-11 | prod 以外は登録の前（UNARMED）に書ける | §6.2。prod 以外は本番の backup の対象ではない |
 | L-12 | NF07 の Journal の接続は gate の外 | §6.3。別 instance で application DB の restore の対象外 |
-| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後の検出は 2 つで補い合う（第 2 段階 2c。2b の review P3-3）: (1) `InitializationWriteGuardTest`（静的な bytecode の走査）は、constructor・`@PostConstruct`・`afterPropertiesSet` を入口に、main の具体 class の method を辿って業務の DB の書込み（mapper の更新系・監査・`JdbcTemplate` の更新系・`*Service` の save・update・remove）を拒否する。interface の method は実装へ展開せず、invokedynamic（lambda）も辿らず、`@Bean` の factory method・BPP・`SmartInitializingSingleton` は入口に含まない。(2) `BackupQuiesceProductionContextStartTest` は、prod の profile の全体の context を、読取り専用の接続の DML を 1792 で拒否する試験の driver（`com.ses.test.ReadOnlyEnforcingH2Driver`）で起動し、登録の前（UNARMED）に業務の pool で DML を実行した bean があれば起動が止まるか拒否の記録に残ることを確かめる（interface・lambda・`@Bean`・SIS の経由を含む。試験の準備の `spring.sql.init` だけを外す）。(2) は H2 の上の判定のため、MySQL に固有の挙動（locking read・DDL）は含まない（§19）。fail-closed |
+| L-13 | prod では登録の前（UNARMED）の書込みが読取り専用で失敗するため、context の初期化中に DB へ書く bean があれば起動が止まる | 第 1 段階の抽出（約 15 class）では 1 件を見落とした: `ProductionBootstrapMode` の `@PostConstruct` が bootstrap の再開の必須監査を書いていた（2a の review P1-1）。これを起動の最後の `ApplicationRunner`（main の thread。startup permit の下）へ移し、監査を書けるまで再開を有効にしない（Tomcat は runner より前に要求を受けるため）。書けなければ従来どおり起動を中止する。以後の検出は 2 つで補い合う（第 2 段階 2c。2b の review P3-3）: (1) `InitializationWriteGuardTest`（静的な bytecode の走査）は、constructor・`@PostConstruct`・`afterPropertiesSet` を入口に、main の具体 class の method を辿って業務の DB の書込み（mapper の更新系・監査・`JdbcTemplate` の更新系・`*Service` の save・update・remove）を拒否する。interface の method は実装へ展開せず、invokedynamic（lambda）も辿らず、`@Bean` の factory method・BPP・`SmartInitializingSingleton` は入口に含まない。(2) `BackupQuiesceProductionContextStartTest` は、prod の profile の全体の context を、読取り専用の接続の DML を拒否する試験の driver（`com.ses.test.ReadOnlyEnforcingH2Driver`。既定は Connector/J の client 側の拒否の形 `S1009`、server の 1792 にも切り替えられる。fix E）で起動し、登録の前（UNARMED）に業務の pool で DML を実行した bean があれば起動が止まるか拒否の記録に残ることを確かめる（interface・lambda・`@Bean`・SIS の経由を含む。試験の準備の `spring.sql.init` だけを外す）。(2) は H2 の上の判定のため、MySQL に固有の挙動（locking read・DDL）は含まない（§19）。fail-closed |
 | L-14 | 静止中の logout の `t_user_session` の失効と監査は、解除の前に process が落ちると失われる | U-8。HTTP session は直ちに無効で、process とともに消えるため、残った行で session を使い続けることはできない。監査は WARN の log に残る |
 | L-15 | full の最中に task が置き換わると、その日の full は欠ける | U-13。RPO は checkpoint で保たれ、full は手で取り直す |
 | L-16 | idle の判定は静止の間（最大保持時間まで）緩む | U-14・U-15（portal の session も同じ。portal の持越しは memory の表で上限 10,000 件、溢れたら記録しない）。閉じる前から使われていない session も、閉じた時点で有効なら静止の間は使える。ただし servlet の session の期限（30 分）は別に効くため、実際の緩和はその範囲に収まる（D3-P3-6） |
@@ -860,6 +861,7 @@ CLAUDE.md は本 batch では変えない。
 |---|---|---|
 | 存在しない表への表単位の GRANT は `CREATE` を含めないと通らない（MySQL 8.4） | BWQ-011 の準備、DBA の staging | 規則が無くても §3.4 の後に GRANT する順は変えない |
 | 読取り専用の session で locking read が ERROR 1792 になる | BWQ-004 | 通るなら L-2 の locking read の 503 は起きない |
+| 読取り専用の業務の接続の DML を MySQL が ERROR 1792 で拒否する | BWQ-004（**`fea83915` の Runner の実測で前提が違った**。fix E） | Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に `S1009` で拒否する（vendor code 0）。1792 だけを見る判定は 503 にならず 500 で、`readonly_sql` も数えなかった（書込み自体は拒否されていた）。判定を両方の形にした（§6.5.1・§20.7）。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない読取り専用の session）を別の case で固定する |
 | Hikari は接続を返すと read-only を既定へ戻し、Connector/J は `SET SESSION TRANSACTION READ ONLY` を送る | BWQ-004 | 戻らなければ包みが返す時に戻す |
 | InnoDB の一意キーの検査の lock 待ち（REFUSED の INSERT が未確定の QUIESCED を待つ）と `innodb_lock_wait_timeout` の session 設定 | BWQ-003 の MySQL 試験 | 待ちの扱いを見直す |
 | Spring は破棄の callback を包む前の bean に登録し、refresh の失敗では `ContextClosedEvent` を出さない。`DestructionAwareBeanPostProcessor` は両方の経路で呼ばれる | BWQ-003 の停止の試験 | §6.11 の入口を見直す |
@@ -988,3 +990,9 @@ CLAUDE.md は本 batch では変えない。
 | P3-10 | spec の書き戻しの漏れ（§20・L-13・特権の logout・IP） | 本節と §20.5・L-13・L-21。IP は 2c の事実の修正の commit（§6.13・§14・§20、tasks の BWQ-005） |
 | P3-11 | 2a・2b を BWQ-007 無しで main へ入れない | PR の説明に書く（統括） |
 | 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く |
+
+### 20.7 Runner の実測（`fea83915` の mysql shard 3）と fix E
+
+| # | 内容 | 対応（第 2 段階 2d の fix commit E） |
+|---|---|---|
+| Runner | `BackupWriteQuiesceMySqlTest` の 7 件中 3 件が失敗（MySQL 8.0.36 の container。8.0/8.4 の違いではなく driver の挙動）: Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に client 側で拒否し（SQLSTATE `S1009`、vendor code 0、「Connection is read-only. Queries leading to data modification are not allowed」）、1792 だけを見る `BackupQuiesceReadOnlyViolation.matches` が判定できなかった。静止中の書込みは 500 になり `rejected_requests{readonly_sql}` も 1792 の WARN も出なかった（書込み自体は拒否されていた）。H2 の試験の driver が 1792 を模していたため隠れていた | `matches` が client 側の形（`S1009` で message の先頭と本文が driver の文言）も読取り専用の拒否とする（任意の `S1009` は該当にしない。503 への変換は従来どおり gate が OPEN でない時だけ）。`BackupQuiesceReadOnlyViolationTest` は driver の bundle（`com.mysql.cj.Messages`）の文言で照合し、他の `S1009` が該当しないことも固定する。`ReadOnlyEnforcingH2Driver` は既定で client 側の形を模し 1792 にも切り替えられる（`MySqlReadOnlyRejections`）。filter（`BackupWriteGateFilterReadOnlyRejectionTest`）・`GlobalExceptionHandlerTest`・`BackupWriteGateMockMvcTest`・`BackupQuiesceProductionContextStartTest` は両方の形で 503・`readonly_sql`・WARN の間引きを確かめる。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない `SET SESSION TRANSACTION READ ONLY` の DML → 1792）と `@@session.transaction_read_only = 1` を別に固定する。WARN に拒否の形を出す。§6.4・§6.5.1・§13.1・§13.2・L-13・§19 に書いた |

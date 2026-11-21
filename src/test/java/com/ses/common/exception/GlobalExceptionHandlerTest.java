@@ -289,45 +289,58 @@ class GlobalExceptionHandlerTest {
         return new java.sql.SQLException("The MySQL server is running with the --read-only option", "25006", 1792);
     }
 
-    @Test
-    void 静止中にBusinessExceptionに包まれた1792は再試行できる503にする() {
-        GlobalExceptionHandler handler = new GlobalExceptionHandler();
-        handler.setBackupWriteGate(closingGate());
-        org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", bundledMessageSource());
-        try {
-            var response = handler.handleBusinessException(
-                    new BusinessException(500, "保存に失敗しました", new RuntimeException(readOnlyViolation())));
+    /**
+     * 読取り専用の拒否の 2 つの形（fix E）: server の 1792 と、Connector/J の client 側の拒否（S1009。実 MySQL の業務の接続の
+     * 書込みはこちらになる。Statement と PreparedStatement で文言が違う）。
+     */
+    private static java.util.List<java.sql.SQLException> readOnlyViolations() {
+        return java.util.List.of(readOnlyViolation(), com.ses.test.MySqlReadOnlyRejections.connectorJStatement(),
+                com.ses.test.MySqlReadOnlyRejections.connectorJPrepared());
+    }
 
-            assertEquals(503, response.getStatusCode().value());
-            assertEquals(503, response.getBody().getCode());
-            assertEquals("BACKUP_QUIESCED", response.getHeaders().getFirst("X-SES-Error-Code"));
-            assertEquals("10", response.getHeaders().getFirst("Retry-After"));
-            assertEquals("バックアップを取得しているため、一時的に更新を受け付けていません。しばらく待ってから再度お試しください。",
-                    response.getBody().getMessage());
-            assertEquals("BACKUP_QUIESCED", CorrelationContext.get(CorrelationContext.ERROR_CODE));
-        } finally {
-            CorrelationContext.clear();
+    @Test
+    void 静止中にBusinessExceptionに包まれた読取り専用の拒否はserver側もclient側も再試行できる503にする() {
+        for (java.sql.SQLException violation : readOnlyViolations()) {
+            GlobalExceptionHandler handler = new GlobalExceptionHandler();
+            handler.setBackupWriteGate(closingGate());
+            org.springframework.test.util.ReflectionTestUtils.setField(handler, "messageSource", bundledMessageSource());
+            try {
+                var response = handler.handleBusinessException(
+                        new BusinessException(500, "保存に失敗しました", new RuntimeException(violation)));
+
+                assertEquals(503, response.getStatusCode().value(), violation.getMessage());
+                assertEquals(503, response.getBody().getCode());
+                assertEquals("BACKUP_QUIESCED", response.getHeaders().getFirst("X-SES-Error-Code"));
+                assertEquals("10", response.getHeaders().getFirst("Retry-After"));
+                assertEquals("バックアップを取得しているため、一時的に更新を受け付けていません。しばらく待ってから再度お試しください。",
+                        response.getBody().getMessage());
+                assertEquals("BACKUP_QUIESCED", CorrelationContext.get(CorrelationContext.ERROR_CODE));
+            } finally {
+                CorrelationContext.clear();
+            }
         }
     }
 
     @Test
-    void 静止中の1792は予期しない例外と行lockの競合の前でも503にし開いた後は従来どおり() {
-        GlobalExceptionHandler handler = new GlobalExceptionHandler();
-        com.ses.backup.quiesce.BackupWriteGate gate = closingGate();
-        handler.setBackupWriteGate(gate);
-        try {
-            assertEquals(503, handler.handleException(new IllegalStateException(readOnlyViolation()))
-                    .getStatusCode().value());
-            assertEquals(503, handler.handleLockConflict(new org.springframework.dao.CannotAcquireLockException(
-                    "lock", readOnlyViolation())).getStatusCode().value());
+    void 静止中の読取り専用の拒否は予期しない例外と行lockの競合の前でも503にし開いた後は従来どおり() {
+        for (java.sql.SQLException violation : readOnlyViolations()) {
+            GlobalExceptionHandler handler = new GlobalExceptionHandler();
+            com.ses.backup.quiesce.BackupWriteGate gate = closingGate();
+            handler.setBackupWriteGate(gate);
+            try {
+                assertEquals(503, handler.handleException(new IllegalStateException(violation))
+                        .getStatusCode().value(), violation.getMessage());
+                assertEquals(503, handler.handleLockConflict(new org.springframework.dao.CannotAcquireLockException(
+                        "lock", violation)).getStatusCode().value());
 
-            com.ses.backup.quiesce.BackupQuiesceTestSupport.reopen(gate, 1);
-            assertEquals(500, handler.handleException(new IllegalStateException(readOnlyViolation()))
-                    .getStatusCode().value());
-            assertEquals(500, handler.handleBusinessException(
-                    new BusinessException(500, "x", readOnlyViolation())).getStatusCode().value());
-        } finally {
-            CorrelationContext.clear();
+                com.ses.backup.quiesce.BackupQuiesceTestSupport.reopen(gate, 1);
+                assertEquals(500, handler.handleException(new IllegalStateException(violation))
+                        .getStatusCode().value(), "開いた後は従来どおり: " + violation.getMessage());
+                assertEquals(500, handler.handleBusinessException(
+                        new BusinessException(500, "x", violation)).getStatusCode().value());
+            } finally {
+                CorrelationContext.clear();
+            }
         }
     }
 
@@ -354,11 +367,12 @@ class GlobalExceptionHandlerTest {
     }
 
     /**
-     * 2b review P2-1: API の controller の中の拒否も filter と同じ部品で数え（{@code rejected_requests{kind}}）、1792 の WARN を
-     * 間引く。数え方は 1792 → {@code readonly_sql}、uploads の明示 → {@code uploads}、その他の明示 → {@code api}。
+     * 2b review P2-1: API の controller の中の拒否も filter と同じ部品で数え（{@code rejected_requests{kind}}）、読取り専用の拒否の
+     * WARN を間引く。数え方は読取り専用の拒否（server の 1792 も Connector/J の client 側の S1009 も。fix E）→
+     * {@code readonly_sql}、uploads の明示 → {@code uploads}、その他の明示 → {@code api}。
      */
     @Test
-    void 静止による503はkindごとに数え1792のWARNは間引く() {
+    void 静止による503はkindごとに数え読取り専用の拒否はserver側もclient側もreadonly_sqlでWARNは間引く() {
         com.ses.backup.quiesce.BackupWriteGate gate = closingGate();
         io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
@@ -372,10 +386,12 @@ class GlobalExceptionHandlerTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            assertEquals(503, handler.handleException(new IllegalStateException(readOnlyViolation()))
-                    .getStatusCode().value());
-            assertEquals(503, handler.handleBusinessException(new BusinessException(500, "x", readOnlyViolation()))
-                    .getStatusCode().value());
+            for (java.sql.SQLException violation : readOnlyViolations()) {
+                assertEquals(503, handler.handleException(new IllegalStateException(violation))
+                        .getStatusCode().value(), violation.getMessage());
+                assertEquals(503, handler.handleBusinessException(new BusinessException(500, "x", violation))
+                        .getStatusCode().value(), violation.getMessage());
+            }
             assertEquals(503, handler.handleBackupWriteQuiesced(
                     new com.ses.backup.quiesce.BackupWriteQuiescedException("uploads:file-storage.store"))
                     .getStatusCode().value());
@@ -387,11 +403,12 @@ class GlobalExceptionHandlerTest {
             CorrelationContext.clear();
         }
 
-        assertEquals(2.0, rejected(registry, "readonly_sql"));
+        assertEquals(2.0 * readOnlyViolations().size(), rejected(registry, "readonly_sql"));
         assertEquals(1.0, rejected(registry, "uploads"));
         assertEquals(1.0, rejected(registry, "api"));
         assertEquals(1, appender.list.stream().filter(event -> event.getFormattedMessage()
-                .startsWith("errorCode=BACKUP_QUIESCE_READONLY_REJECTED")).count(), "2 件目の 1792 の WARN は間引く");
+                .startsWith("errorCode=BACKUP_QUIESCE_READONLY_REJECTED")).count(),
+                "2 件目からの読取り専用の拒否の WARN は（形によらず）間引く");
     }
 
     private static double rejected(io.micrometer.core.instrument.MeterRegistry registry, String kind) {

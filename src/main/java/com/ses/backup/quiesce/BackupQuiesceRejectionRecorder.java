@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
- * 静止による拒否（最後の防線の ERROR 1792・明示の {@link BackupWriteQuiescedException}）で 503 にした要求を数え、1792 の WARN
+ * 静止による拒否（最後の防線の読取り専用の拒否（server の 1792 か Connector/J の client 側の S1009。fix E）・明示の
+ * {@link BackupWriteQuiescedException}）で 503 にした要求を数え、読取り専用の拒否の WARN
  * {@code errorCode=BACKUP_QUIESCE_READONLY_REJECTED} を 60 秒に 1 回へ間引いて出す（design.md §13.1・§13.2・§6.5.1）。
  *
  * <p>{@link BackupWriteGateFilter}（chain の外へ出た例外）と {@code GlobalExceptionHandler}（{@code /api/**} の controller の中の
@@ -37,7 +38,7 @@ public class BackupQuiesceRejectionRecorder {
     }
 
     /**
-     * 拒否を数え、1792 なら WARN を間引いて出す。
+     * 拒否を数え、読取り専用の拒否（server の 1792 か Connector/J の client 側の拒否）なら WARN を間引いて出す。
      *
      * @param failure  静止による拒否の例外（{@link BackupQuiesceRejections#isQuiesceRejection} を満たすもの）
      * @param external 外部 API の要求か
@@ -65,7 +66,8 @@ public class BackupQuiesceRejectionRecorder {
             return;
         }
         log.warn("errorCode=BACKUP_QUIESCE_READONLY_REJECTED backup の静止中に読取り専用の接続へ書こうとした要求を 503 にしました"
-                        + "（{}、変換={}、例外={}、この間に省いた同じ log={}件）", route, origin,
-                failure == null ? "-" : failure.getClass().getSimpleName(), suppressedReadOnlyLogs.getAndSet(0));
+                        + "（{}、変換={}、例外={}、拒否の形={}、この間に省いた同じ log={}件）", route, origin,
+                failure == null ? "-" : failure.getClass().getSimpleName(), BackupQuiesceReadOnlyViolation.form(failure),
+                suppressedReadOnlyLogs.getAndSet(0));
     }
 }

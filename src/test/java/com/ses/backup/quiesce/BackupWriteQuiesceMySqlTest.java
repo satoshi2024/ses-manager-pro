@@ -35,7 +35,11 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  * （design.md §6.5・§19）。
  *
  * <ul>
- *   <li>静止中に permit の無い thread が業務の pool から試みた INSERT・UPDATE は ERROR 1792 で失敗する。permit の thread は書ける。</li>
+ *   <li>静止中に permit の無い thread が業務の pool から試みた INSERT・UPDATE は読取り専用の拒否で失敗する（{@code setReadOnly(true)}
+ *       の接続では Connector/J が server へ送る前に SQLSTATE S1009 で拒否する。fea83915 の Runner の実測。fix E）。session も
+ *       {@code transaction_read_only = 1} で、driver の外の防線になる。permit の thread は書ける。</li>
+ *   <li>driver を経由しない読取り専用（{@code SET SESSION TRANSACTION READ ONLY}）の DML は server が ERROR 1792 で拒否する
+ *       （server 側の形。{@link BackupQuiesceReadOnlyViolation#matches} はどちらも該当とする）。</li>
  *   <li>locking read（{@code FOR UPDATE}・{@code FOR SHARE}）の読取り専用の transaction での挙動を記録する（§19 の未実測の前提）。</li>
  *   <li>閉じる前に借りた書込み可能な接続が返されるまで排水は終わらない。</li>
  *   <li>静止の前に始まった読取り専用の transaction の終わりの {@code setReadOnly(false)} で書込み可能に戻らない。</li>
@@ -94,18 +98,29 @@ class BackupWriteQuiesceMySqlTest {
     }
 
     @Test
-    void 静止中にpermitの無いthreadのINSERTとUPDATEは1792で失敗しpermitのthreadは書ける() throws Exception {
+    void 静止中にpermitの無いthreadのINSERTとUPDATEは読取り専用の拒否で失敗しpermitのthreadは書ける() throws Exception {
         insert(business, 0, "before");
         gate.beginClosing(1);
         assertThat(gate.isDrained()).isTrue();
-        try (Connection connection = business.getConnection(); Statement st = connection.createStatement()) {
-            assertThat(scalar(st, "SELECT @@session.transaction_read_only")).isEqualTo(1L);
+        try (Connection connection = business.getConnection(); Statement st = connection.createStatement();
+             java.sql.PreparedStatement prepared = connection.prepareStatement(
+                     "INSERT INTO bq_marker (round_no, writer) VALUES (?, 'no-permit')")) {
+            assertThat(scalar(st, "SELECT @@session.transaction_read_only")).as("server 側も読取り専用（driver の外の防線）")
+                    .isEqualTo(1L);
             Throwable insert = catchThrowable(() -> st.executeUpdate(
                     "INSERT INTO bq_marker (round_no, writer) VALUES (1, 'no-permit')"));
+            assertThat(insert).isInstanceOf(SQLException.class);
             assertThat(BackupQuiesceReadOnlyViolation.matches(insert)).as(String.valueOf(insert)).isTrue();
-            assertThat(((SQLException) insert).getErrorCode()).isEqualTo(1792);
             Throwable update = catchThrowable(() -> st.executeUpdate("UPDATE bq_marker SET writer = 'x'"));
-            assertThat(BackupQuiesceReadOnlyViolation.matches(update)).isTrue();
+            assertThat(BackupQuiesceReadOnlyViolation.matches(update)).as(String.valueOf(update)).isTrue();
+            // MyBatis の更新が通る ClientPreparedStatement#execute
+            prepared.setInt(1, 1);
+            Throwable preparedInsert = catchThrowable(prepared::execute);
+            assertThat(BackupQuiesceReadOnlyViolation.matches(preparedInsert)).as(String.valueOf(preparedInsert)).isTrue();
+            log.info("[RB-QUIESCE §19・fix E] 読取り専用の業務の接続の DML の拒否の形（MySQL {}）: Statement={}（SQLSTATE {}、code {}）、"
+                    + "PreparedStatement={}（SQLSTATE {}）", MYSQL.getDockerImageName(), insert.getMessage(),
+                    ((SQLException) insert).getSQLState(), ((SQLException) insert).getErrorCode(),
+                    preparedInsert.getMessage(), ((SQLException) preparedInsert).getSQLState());
         }
         try (BackupWritePermit permit = gate.tryAcquireDetached(BackupWritePermit.Kind.SCHEDULER, "job")) {
             permit.attachToCurrentThread();
@@ -113,6 +128,27 @@ class BackupWriteQuiesceMySqlTest {
         }
         assertThat(count("writer = 'no-permit'")).isZero();
         assertThat(count("writer IN ('before', 'permit')")).isEqualTo(2L);
+    }
+
+    /**
+     * fix E: driver を経由しない読取り専用（{@code SET SESSION TRANSACTION READ ONLY}。Connector/J は接続を読取り専用と知らないため
+     * 文を server へ送る）の DML は、server が ERROR 1792（SQLSTATE 25006）で拒否する。server 側の形も静止の拒否と判定する。
+     */
+    @Test
+    void driverを経由しない読取り専用のsessionのDMLはserverが1792で拒否し静止の拒否と判定する() throws Exception {
+        try (Connection raw = DriverManager.getConnection(MYSQL.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             Statement st = raw.createStatement()) {
+            // setReadOnly を呼ばないため、Connector/J の手元の読取り専用の印は立たず、DML は server へ送られる
+            st.execute("SET SESSION TRANSACTION READ ONLY");
+            assertThat(scalar(st, "SELECT @@session.transaction_read_only")).isEqualTo(1L);
+            Throwable insert = catchThrowable(() -> st.executeUpdate(
+                    "INSERT INTO bq_marker (round_no, writer) VALUES (1, 'server-readonly')"));
+            assertThat(insert).isInstanceOf(SQLException.class);
+            assertThat(((SQLException) insert).getErrorCode()).as(String.valueOf(insert)).isEqualTo(1792);
+            assertThat(((SQLException) insert).getSQLState()).isEqualTo("25006");
+            assertThat(BackupQuiesceReadOnlyViolation.matches(insert)).isTrue();
+        }
+        assertThat(count("writer = 'server-readonly'")).isZero();
     }
 
     @Test
@@ -125,8 +161,9 @@ class BackupWriteQuiesceMySqlTest {
                 connection.setAutoCommit(false);
                 try (Statement st = connection.createStatement()) {
                     Throwable failure = catchThrowable(() -> st.executeQuery("SELECT id FROM bq_marker " + lock).close());
-                    String outcome = failure == null ? "許可" : BackupQuiesceReadOnlyViolation.matches(failure) ? "1792"
-                            : "その他: " + failure;
+                    String outcome = failure == null ? "許可" : BackupQuiesceReadOnlyViolation.matches(failure)
+                            ? "拒否（" + ((SQLException) failure).getSQLState() + "/" + ((SQLException) failure).getErrorCode()
+                            + "）" : "その他: " + failure;
                     outcomes.add(lock + "=" + outcome);
                 } finally {
                     connection.rollback();
@@ -136,7 +173,7 @@ class BackupWriteQuiesceMySqlTest {
         }
         log.info("[RB-QUIESCE §19] 読取り専用の transaction の locking read（MySQL {}）: {}",
                 MYSQL.getDockerImageName(), outcomes);
-        assertThat(outcomes).allSatisfy(outcome -> assertThat(outcome).matches(".*=(許可|1792)"));
+        assertThat(outcomes).allSatisfy(outcome -> assertThat(outcome).matches(".*=(許可|拒否（.*）)"));
     }
 
     @Test
@@ -250,7 +287,7 @@ class BackupWriteQuiesceMySqlTest {
         }
         assertThat(violations).as("ack の後・開く前に commit された permit の無い行").isEmpty();
         assertThat(written.get()).as("開いている間は書ける（試験の非空虚性）").isPositive();
-        assertThat(refused.get()).as("閉じている間の書込みは 1792 で拒否された").isPositive();
+        assertThat(refused.get()).as("閉じている間の書込みは読取り専用の拒否（client 側か server 側）で拒否された").isPositive();
         assertThat(unexpected.get()).isZero();
         assertThat(gate.writableConnectionCount()).isZero();
     }

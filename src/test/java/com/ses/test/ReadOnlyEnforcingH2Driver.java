@@ -20,9 +20,14 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 /**
- * 試験用の JDBC driver: H2 へ委譲し、{@code Connection#setReadOnly(true)} の接続で DML を実行すると MySQL の ERROR 1792
- * （SQLSTATE {@code 25006}）を模した例外を投げる。H2 は {@code setReadOnly} を何もしない hint として扱うため、そのままでは
- * backup の書込み静止の最後の防線（静止中・登録の前の業務の接続の読取り専用）が H2 の試験で効かない（RB-QUIESCE 2b review P3-3）。
+ * 試験用の JDBC driver: H2 へ委譲し、{@code Connection#setReadOnly(true)} の接続で DML を実行すると読取り専用の拒否を模した
+ * 例外を投げる。H2 は {@code setReadOnly} を何もしない hint として扱うため、そのままでは backup の書込み静止の最後の防線（静止中・
+ * 登録の前の業務の接続の読取り専用）が H2 の試験で効かない（RB-QUIESCE 2b review P3-3）。
+ *
+ * <p>拒否の形は既定で Connector/J の client 側の拒否（SQLSTATE {@code S1009}・vendor code 0・driver の文言。実 MySQL の業務の
+ * 接続の実際の形。{@code fea83915} の Runner の実測）で、{@link #useForm} で server の ERROR 1792（SQLSTATE {@code 25006}）に
+ * 切り替えられる（{@link MySqlReadOnlyRejections}）。以前は 1792 だけを模していたため、client 側の形を判定できない不具合を
+ * 隠していた（fix E）。
  *
  * <p>{@code spring.datasource.driver-class-name} に指定すると、Hikari がこの driver で接続を作る（業務の pool の一番内側）。
  * 静止の部品（{@code BackupQuiesceAwareDataSource}）が呼ぶ {@code setReadOnly} と Hikari の返却の時の戻しがここに届く。
@@ -39,6 +44,12 @@ public final class ReadOnlyEnforcingH2Driver implements Driver {
             "executeBatch", "executeLargeBatch", "addBatch");
     private static final List<String> REJECTED = new CopyOnWriteArrayList<>();
     private static final ThreadLocal<Integer> EXEMPT = ThreadLocal.withInitial(() -> 0);
+    private static volatile MySqlReadOnlyRejections.Form form = MySqlReadOnlyRejections.Form.CONNECTOR_J_CLIENT;
+
+    /** 拒否の形を切り替える（既定は Connector/J の client 側の拒否）。試験の後は既定へ戻す。 */
+    public static void useForm(MySqlReadOnlyRejections.Form rejectionForm) {
+        form = rejectionForm == null ? MySqlReadOnlyRejections.Form.CONNECTOR_J_CLIENT : rejectionForm;
+    }
 
     private final Driver delegate = new org.h2.Driver();
 
@@ -95,14 +106,14 @@ public final class ReadOnlyEnforcingH2Driver implements Driver {
         return delegate.getParentLogger();
     }
 
-    /** 読取り専用の接続で DML なら 1792 を模した例外。 */
-    static void check(boolean readOnly, String sql) throws SQLException {
+    /** 読取り専用の接続で DML なら読取り専用の拒否を模した例外（形は {@link #useForm}）。 */
+    static void check(boolean readOnly, String sql, boolean prepared) throws SQLException {
         if (!readOnly || sql == null || EXEMPT.get() > 0 || !DML.matcher(sql).find()) {
             return;
         }
         String head = sql.strip();
         REJECTED.add(head.length() > 120 ? head.substring(0, 120) : head);
-        throw new SQLException("Cannot execute statement in a READ ONLY transaction.", "25006", 1792);
+        throw MySqlReadOnlyRejections.of(form, prepared);
     }
 
     private static Object invoke(Object target, Method method, Object[] args) throws Throwable {
@@ -155,9 +166,9 @@ public final class ReadOnlyEnforcingH2Driver implements Driver {
             return Proxy.newProxyInstance(ReadOnlyEnforcingH2Driver.class.getClassLoader(), new Class<?>[]{type},
                     (proxy, method, args) -> {
                         if (EXECUTE_METHODS.contains(method.getName())) {
-                            String sql = args != null && args.length > 0 && args[0] instanceof String text
-                                    ? text : preparedSql;
-                            check(readOnly, sql);
+                            boolean direct = args != null && args.length > 0 && args[0] instanceof String;
+                            String sql = direct ? (String) args[0] : preparedSql;
+                            check(readOnly, sql, !direct);
                         }
                         return ReadOnlyEnforcingH2Driver.invoke(statement, method, args);
                     });

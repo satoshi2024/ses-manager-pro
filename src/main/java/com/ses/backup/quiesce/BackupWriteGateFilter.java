@@ -38,7 +38,8 @@ import java.util.Locale;
  *   <li>{@code LOGOUT}: 取れれば permit を持って従来どおり。取れなければ permit なしで通し、logout の handler が失効と監査を
  *       解除の後へ回す（U-8。§6.13）。</li>
  * </ul>
- * chain 全体を包み、静止による拒否（{@link BackupWriteQuiescedException}、gate が書込みを許さない間の ERROR 1792）を、応答が
+ * chain 全体を包み、静止による拒否（{@link BackupWriteQuiescedException}、gate が書込みを許さない間の読取り専用の拒否（server の
+ * 1792 か Connector/J の client 側の S1009））を、応答が
  * 確定していなければ 503 に変える（最後の防線の変換）。
  *
  * <p>gate・metric・文言の部品は {@code ObjectProvider} で使う時に引く。{@code @WebMvcTest} 等で gate が無ければ、また
@@ -174,14 +175,14 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         }
     }
 
-    /** chain の中で静止による拒否（最後の防線の 1792 等）が起きた: 応答が確定していなければ 503 にする。 */
+    /** chain の中で静止による拒否（最後の防線の読取り専用の拒否等）が起きた: 応答が確定していなければ 503 にする。 */
     private void convertToRejection(HttpServletRequest request, HttpServletResponse response, BackupWriteGate gate,
                                     BackupQuiesceRequestClassifier.Classification classification, Throwable failure)
             throws IOException {
         String path = RequestPaths.pathWithinApplication(request);
         boolean external = classification == BackupQuiesceRequestClassifier.Classification.EXTERNAL_API;
         boolean json = BackupQuiesceRejections.isJsonRequest(request, path);
-        // 数え方と 1792 の WARN の間引きは API の handler と共有する（2b review P2-1）
+        // 数え方と読取り専用の拒否の WARN の間引きは API の handler と共有する（2b review P2-1）
         BackupQuiesceRejectionRecorder recorder = rejectionRecorderProvider.getIfAvailable();
         if (recorder != null) {
             recorder.record(failure, external, json,
