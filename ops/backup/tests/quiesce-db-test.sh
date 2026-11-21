@@ -48,6 +48,7 @@ quiesce::check_provider
 for step in "$@"; do
   rc=0
   case "$step" in
+    app-stopped) quiesce::select_app_stopped ;;
     acquire) quiesce::acquire || rc=$? ;;
     verify) quiesce::verify || rc=$? ;;
     release) quiesce::release || rc=$? ;;
@@ -659,6 +660,114 @@ case_unknown_provider_rejected() {
   teardown_qdb
 }
 
+# ------------------------------------------------------------ BWQ-010: quiesce-app-stopped（--app-stopped）
+
+stopped_verdict() { # <判定> [<内訳>]
+  printf 'VERDICT\t%s\t2026-11-22T00:00:06Z\t1763769606000000\t0\t%s\n' "$1" "${2:-test}"
+}
+
+case_app_stopped_success_writes_quiesce_json() {
+  setup_qdb
+  run_job FULL app-stopped acquire json verify release
+  assert_eq 0 "$JOB_RC" "app が止まっていれば停止確認の取得・verify・解除が成功する（表が空でも通る）"
+  assert_eq '{"result":"ok"}' "$JOB_OUT" "結果の JSON に保持 process の出力が混ざらない"
+  local q="$T/state/quiesce.json"
+  assert_eq quiesce-app-stopped "$(jq -r .provider "$q")" "quiesce.json: provider"
+  assert_eq APP_STOPPED "$(jq -r .mode "$q")" "quiesce.json: mode APP_STOPPED"
+  assert_eq 0 "$(jq '.instances | length' "$q")" "quiesce.json: instance は空"
+  assert_eq 2026-11-22T00:00:06Z "$(jq -r .started_at_utc "$q")" "整合時刻は保持の後の確認の DB の時刻"
+  assert_eq COMPLETED "$(jq -r .release_reason "$q")" "verify 済みの解除は COMPLETED"
+  assert_contains "$(calls)" "ddl-lock stopped-precheck insert-request stopped-check" \
+    "DDL lock → 事前の確認 → 保持の登録 → 登録の後の分類し直しの順（§9.2）"
+  assert_contains "$(call_params insert-request)" "mode = 'APP_STOPPED';" "保持の要求は APP_STOPPED"
+  assert_eq 2 "$(call_count stopped-check)" "verify も同じ分類で確かめる"
+  assert_eq 0 "$(call_count resume-check)" "停止確認の解除は RESUMED を待つ instance が無い"
+  assert_eq 0 "$(call_count poll-acks)" "ONLINE の ack の待ちをしない"
+  assert_eq 0 "$(call_count full-new-instance)" "APP_STOPPED の full は新しい instance で中止しない（D3-P2-2）"
+  assert_file "$T/qdb/ddl-lock.released" "DDL lock を返す"
+  teardown_qdb
+}
+
+case_app_stopped_precheck_failures() {
+  local v expect
+  for v in FAIL_ALIVE FAIL_DISABLED FAIL_ACTIVE_REQUEST; do
+    setup_qdb
+    case "$v" in
+      FAIL_ALIVE) expect="停止していない app の instance があります" ;;
+      FAIL_DISABLED) expect="停止口" ;;
+      FAIL_ACTIVE_REQUEST) expect="他の静止要求が有効" ;;
+    esac
+    { printf 'EXPIRED\t0\n'; stopped_verdict "$v"; instance_line "$INSTANCE_A" ALIVE 1 - - - 0; } > "$T/qdb/stopped-precheck.1.out"
+    run_job FULL app-stopped acquire
+    assert_eq 11 "$JOB_RC" "停止確認の事前の確認 $v で取得しない"
+    assert_eq 0 "$(call_count insert-request)" "停止確認の事前の確認 $v なら保持を登録しない"
+    assert_contains "$JOB_ERR" "$expect" "停止確認の事前の確認 $v の理由"
+    # 片付けの後（停止口の行を STOPPED にした・app が止まった・前の要求が解かれた）は取得する
+    run_job FULL app-stopped acquire release
+    assert_eq 0 "$JOB_RC" "停止確認の事前の確認 $v の原因を除いた後は取得する"
+    teardown_qdb
+  done
+}
+
+case_app_stopped_instance_registered_with_hold_fails_and_aborts() {
+  setup_qdb
+  # 保持の登録と instance の登録が重なった: 登録の後の分類し直しで見つかる（どちらかが他方を見る。§5.3）
+  { stopped_verdict FAIL_ALIVE alive=1; instance_line "$INSTANCE_B" ALIVE 1 0 - - 0 STARTING; } > "$T/qdb/stopped-check.1.out"
+  run_job FULL app-stopped acquire
+  assert_eq 11 "$JOB_RC" "保持の登録と重なって登録した instance があれば取得しない"
+  assert_contains "$JOB_ERR" "$INSTANCE_B" "見つけた instance を示す"
+  assert_contains "$(call_params release)" "status = 'ABORTED'; reason = 'ABORTED';" "保持を ABORTED にする"
+  teardown_qdb
+}
+
+case_app_stopped_verify_fails_on_registration_during_hold() {
+  setup_qdb
+  # 保持中に instance が登録して heartbeat を書いた（起動を中止して STOPPED を書かなかった）
+  { stopped_verdict FAIL_ALIVE alive=1; instance_line "$INSTANCE_B" ALIVE 1 0 - - 0 STARTING; } > "$T/qdb/stopped-check.2.out"
+  run_job FULL app-stopped acquire verify release
+  assert_contains "$JOB_ERR" "step:verify=1" "保持中の instance の登録・heartbeat で verify は失敗する"
+  assert_contains "$(call_params release)" "status = 'ABORTED'; reason = 'VERIFY_FAILED';" "verify の失敗は VERIFY_FAILED で解く"
+  teardown_qdb
+}
+
+case_app_stopped_full_with_aborted_startup_stays_valid() {
+  setup_qdb
+  # APP_STOPPED の full の最中に起動しようとした instance は、登録して保持を読み、起動を中止して STOPPED を書く（SQL は数えない）。
+  # 保持は ABORTED にならず（保持 process は ONLINE の full の時だけ中止を調べる）、verify は通る（D3-P2-2 の負例）
+  { stopped_verdict OK; instance_line "$INSTANCE_B" IGNORED 0 0 - - 0 STOPPED; } > "$T/qdb/stopped-check.2.out"
+  run_job FULL app-stopped acquire sleep:3 verify release
+  assert_contains "$JOB_ERR" "step:verify=0" "起動を中止して STOPPED を書いた instance では verify が通る"
+  assert_eq 0 "$(call_count full-new-instance)" "APP_STOPPED の full では新しい instance で中止しない"
+  if (( $(call_count renew) >= 1 )); then
+    test_assert "APP_STOPPED の保持も lease を延ばし続ける"
+  else
+    test_fail "APP_STOPPED の保持も lease を延ばし続ける" "renew 0 回"
+  fi
+  assert_no_file "$T/state/full-aborted" "中止の印を書かない"
+  assert_contains "$(call_params release)" "status = 'RELEASED'; reason = 'COMPLETED';" "VALID の解除"
+  teardown_qdb
+}
+
+case_app_stopped_from_environment_is_rejected() {
+  setup_qdb
+  export QUIESCE_PROVIDER=quiesce-app-stopped
+  run_job FULL acquire
+  assert_nonzero "$JOB_RC" "QUIESCE_PROVIDER=quiesce-app-stopped を環境変数で与えると始まらない"
+  assert_contains "$JOB_ERR" "環境変数では選べません" "--app-stopped で明示するよう示す"
+  assert_eq "" "$(cat "$T/qdb/calls.log" 2>/dev/null)" "DB に触れない"
+  # --app-stopped を付けても、環境変数の停止確認は拒否する（定期の job の環境に残った設定で選ばせない）
+  run_job FULL app-stopped acquire
+  assert_nonzero "$JOB_RC" "環境変数の停止確認は --app-stopped と組でも拒否する"
+  export QUIESCE_PROVIDER=quiesce-db
+  teardown_qdb
+}
+
+run_case case_app_stopped_success_writes_quiesce_json
+run_case case_app_stopped_precheck_failures
+run_case case_app_stopped_instance_registered_with_hold_fails_and_aborts
+run_case case_app_stopped_verify_fails_on_registration_during_hold
+run_case case_app_stopped_full_with_aborted_startup_stays_valid
+run_case case_app_stopped_from_environment_is_rejected
 run_case case_acquire_verify_release_success
 run_case case_release_without_verify_is_aborted
 run_case case_requested_by_default_and_format

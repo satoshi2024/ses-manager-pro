@@ -968,4 +968,25 @@ case_tool_image_bash_supports_hold_process() {
 
 run_case case_tool_image_bash_supports_hold_process
 
+# RB-QUIESCE BWQ-010（design.md §9.3）: app の停止を確かめる full は `tool-image.sh compose run --rm backup --app-stopped` で
+# 起動する（tool-image.sh は変えない）。run --rm <service> の後ろの引数は container へそのまま渡る
+case_compose_passes_app_stopped_to_backup() {
+  setup_fake_docker
+  local copy content
+  copy="$T/repo/ops/backup"
+  mkdir -p "$copy/image"
+  cp "$TOOL_IMAGE" "$copy/image/tool-image.sh"
+  content=$(current_content_id)
+  pinned_compose "$copy/docker-compose.yml" "$content"
+
+  TOOL_OUT=$(bash "$copy/image/tool-image.sh" compose run --rm backup --app-stopped 2>&1)
+  TOOL_RC=$?
+  assert_zero "$TOOL_RC" "run --rm backup --app-stopped を許可する"
+  assert_contains "$(grep '^compose ' "$FAKE_DOCKER_LOG")" "image-id.yml run --rm backup --app-stopped" \
+    "--app-stopped を backup の container の引数として渡す"
+  assert_contains "$(cat "$PROD_COMPOSE")" "/usr/local/bin/backup-full.sh" "backup の service の entrypoint は backup-full.sh"
+}
+
+run_case case_compose_passes_app_stopped_to_backup
+
 test_summary "W1-B1 tool image reproducibility"

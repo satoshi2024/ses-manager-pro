@@ -287,8 +287,12 @@ main() {
 
 case "${1:---run}" in
   --run) main ;;
+  # 停止確認は明示の引数でだけ選ぶ（design.md §9.3。RB-QUIESCE BWQ-010）
+  --app-stopped) quiesce::select_app_stopped; main ;;
   --help|-h) cat <<'EOF'
-Usage: create-checkpoint.sh [--help]
+Usage: create-checkpoint.sh [--app-stopped | --help]
+  --app-stopped  app が動いていない時の checkpoint（app の停止を DB の信号表で確かめる provider quiesce-app-stopped を使う。
+                 QUIESCE_PROVIDER の環境変数では選べない）
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_USER,
 MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR, UPLOADS_ROOT, UPLOADS_POINTER（既定 current）,
 UPLOADS_STAGING_PARENT, QUIESCE_PROVIDER（quiesce-db / quiesce-local。quiesce-local の時だけ REPLICA_HEARTBEAT_DIR,
@@ -296,5 +300,5 @@ SCHEDULER_ACK_DIR）, QUIESCE_*（README「設定」）, BINLOG_RAW_DIR, BINLOG_
 CONTENT_HASH_TABLES
 EOF
     exit 0 ;;
-  *) echo "Usage: create-checkpoint.sh [--help]" >&2; exit 2 ;;
+  *) echo "Usage: create-checkpoint.sh [--app-stopped | --help]" >&2; exit 2 ;;
 esac

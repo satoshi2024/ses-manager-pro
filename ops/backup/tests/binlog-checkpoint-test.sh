@@ -448,6 +448,26 @@ case_checkpoint_quiesce_db_verify_failure_not_valid() {
     "cleanup が VERIFY_FAILED で解除する"
 }
 
+# BWQ-010: checkpoint も --app-stopped でだけ停止確認を選び、環境変数の QUIESCE_PROVIDER=quiesce-app-stopped では始まらない
+case_checkpoint_app_stopped_only_by_argument() {
+  setup_checkpoint_qdb
+  local out code
+  out=$("$CHECKPOINT" --app-stopped 2> "$T/err.log")
+  code=$?
+  assert_zero "$code" "--app-stopped の checkpoint が成功する"
+  assert_eq APP_STOPPED "$(jq -r .quiesce.mode <<< "$out" 2>/dev/null)" "結果に mode APP_STOPPED を記録"
+  assert_contains "$(awk -F'\t' '$2 == "insert-request" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "mode = 'APP_STOPPED';" \
+    "保持の要求は APP_STOPPED"
+
+  : > "$FAKE_QDB_DIR/calls.log"
+  out=$(QUIESCE_PROVIDER=quiesce-app-stopped "$CHECKPOINT" 2>&1)
+  code=$?
+  assert_nonzero "$code" "QUIESCE_PROVIDER=quiesce-app-stopped を環境変数で与えると checkpoint は始まらない"
+  assert_contains "$out" "環境変数では選べません" "--app-stopped で明示するよう示す"
+  assert_eq "" "$(cat "$FAKE_QDB_DIR/calls.log")" "DB の信号表に触れない"
+}
+
+run_case case_checkpoint_app_stopped_only_by_argument
 run_case case_checkpoint_quiesce_db_verifies_before_release
 run_case case_checkpoint_quiesce_db_verify_failure_not_valid
 run_case case_archive_normal_once

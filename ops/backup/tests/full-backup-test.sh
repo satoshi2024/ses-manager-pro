@@ -616,6 +616,45 @@ case_backup_full_new_instance_aborts_dump() {
   teardown_full
 }
 
+# BWQ-010: app が動いていない時の full は --app-stopped でだけ選ぶ（QUIESCE_PROVIDER の環境変数では選べない。§9.3）
+case_backup_full_app_stopped() {
+  setup_full_qdb
+  local out code
+  out=$("$BACKUP_FULL" --app-stopped 2> "$T/err.log")
+  code=$?
+  assert_zero "$code" "--app-stopped の full が成功する"
+  assert_eq VALID "$(jq -r .status <<< "$out" 2>/dev/null)" "--app-stopped の full は VALID"
+  assert_eq APP_STOPPED "$(jq -r .quiesce.mode <<< "$out" 2>/dev/null)" "結果に mode APP_STOPPED を記録"
+  assert_eq quiesce-app-stopped "$(jq -r .quiesce.provider <<< "$out" 2>/dev/null)" "結果に provider を記録"
+  assert_eq APP_STOPPED "$(jq -r '.quiesce.mode' "$(compgen -G "$T/work/index/full-*.json" | head -n 1)" 2>/dev/null)" \
+    "index（metadata）に mode APP_STOPPED を記録"
+  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "ddl-lock stopped-precheck insert-request stopped-check" \
+    "停止確認の手順（§9.2）"
+  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "preflight" "preflight は信号表と権限を検査する"
+  teardown_full
+}
+
+case_backup_full_rejects_app_stopped_from_environment() {
+  setup_full_qdb
+  export QUIESCE_PROVIDER=quiesce-app-stopped
+  local out code count
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "QUIESCE_PROVIDER=quiesce-app-stopped を環境変数で与えると full は始まらない"
+  assert_contains "$out" "環境変数では選べません" "--app-stopped で明示するよう示す"
+  assert_eq "" "$(cat "$FAKE_QDB_DIR/calls.log" 2>/dev/null)" "DB の信号表に触れない"
+  count=$(RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+    /usr/local/bin/restic snapshots --json 2>/dev/null | jq 'length')
+  assert_eq 0 "${count:-0}" "snapshot を発行しない"
+  out=$("$BACKUP_FULL" --app-stopped 2>&1)
+  code=$?
+  assert_nonzero "$code" "環境変数の停止確認は --app-stopped と組でも拒否する"
+  export QUIESCE_PROVIDER=quiesce-db
+  teardown_full
+}
+
+run_case case_backup_full_app_stopped
+run_case case_backup_full_rejects_app_stopped_from_environment
 run_case case_backup_full_quiesce_db_verifies_before_release
 run_case case_backup_full_quiesce_db_verify_failure_not_valid
 run_case case_backup_full_quiesce_db_dump_failure

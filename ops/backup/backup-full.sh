@@ -109,7 +109,10 @@ backup_full::dump() { # <dump_file> <err_file>
 
 usage() {
   cat <<'EOF'
-Usage: backup-full.sh [--help]
+Usage: backup-full.sh [--app-stopped | --help]
+
+  --app-stopped  app が動いていない時の full（初回・配備の時・保守。deploy-runbook §2 の5）。app の停止を DB の信号表で確かめる
+                 provider quiesce-app-stopped を使う（QUIESCE_PROVIDER の環境変数では選べない。RB-QUIESCE BWQ-010）
 
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_PORT,
 MYSQL_USER, MYSQL_PASSWORD_FILE, MYSQL_DATABASE, BACKUP_WORK_DIR,
@@ -138,8 +141,8 @@ main() {
   MYSQL_PORT=${MYSQL_PORT:-3306}
 
   export RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE
-  # preflight（子 process）にも同じ uploads の設定を渡す
-  export UPLOADS_ROOT UPLOADS_POINTER
+  # preflight（子 process）にも同じ uploads の設定と、書込み静止の provider（checks.quiesce）を渡す
+  export UPLOADS_ROOT UPLOADS_POINTER QUIESCE_PROVIDER
 
   if ! mysql_options::init; then
     common::fail "mysql option file を作成できません（接続設定を確認してください）"
@@ -369,6 +372,8 @@ main() {
 
 case "${1:---run}" in
   --run) main ;;
+  # 停止確認は明示の引数でだけ選ぶ（tool-image.sh compose run --rm backup --app-stopped。design.md §9.3）
+  --app-stopped) quiesce::select_app_stopped; main ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac

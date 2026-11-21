@@ -203,6 +203,9 @@
   - **失敗/rollback:** 既存の `quiesce-local` の試験（`quiesce-lock-test.sh`）を壊さない。tool image の content ID が変わるため、配布の pin のし直しを BWQ-013 の runbook に書く。
 
 - [ ] **BWQ-010 — backup tool: `quiesce-app-stopped` と `--app-stopped`**
+  - **状態:** 実装・shell の試験（tool image の中）は済み（第 2 段階 2d）。Demo（dev の DB と app の起動）と、SQL を実 MySQL 8.4 で動かす BWQ-011 は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2d）:** `providers/quiesce-app-stopped.sh`（sub command は `quiesce-db.sh` と同じ。保持 process・解除の共通部分は `lib/quiesce-db-common.sh`）と `quiesce-db.d/stopped-precheck.sql`・`stopped-check.sql`。手順は §9.2 のとおり（DDL lock → 事前の確認 → APP_STOPPED の保持の INSERT と commit → 新しい transaction で分類し直し、停止していない instance・停止口の行があれば保持を ABORTED にして失敗）。verify は同じ分類。`lib/quiesce.sh` は source の時の `QUIESCE_PROVIDER` を覚え、`quiesce-app-stopped` が環境変数から来たら `--app-stopped` と組でも拒否する（`quiesce::check_provider`。job の最初に呼ぶ）。`backup-full.sh`・`create-checkpoint.sh` は `--app-stopped` でだけ選ぶ（`quiesce::select_app_stopped`）。`backup-full.sh` は preflight に `QUIESCE_PROVIDER` を渡す（`--app-stopped` でも `checks.quiesce` を行う）。`tool-image.sh compose run --rm backup --app-stopped` で引数が container へ渡ることを `tool-image-test.sh` で確かめた（`tool-image.sh` は変えていない）。定期の job（timer）は引数を付けずに `compose run --rm backup`・`checkpoint` を起動する前提で、repository の中に停止確認を選べる経路は残っていない（環境変数の経路は拒否する）。
 
   - **依存:** BWQ-009、BWQ-003（起動の拒否・停止の順・DISABLED）
   - **対応要求:** BWQ-RQ-005
