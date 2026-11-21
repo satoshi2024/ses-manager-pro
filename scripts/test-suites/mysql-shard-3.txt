@@ -41,3 +41,4 @@ ResignationCompletionLockOrderMySqlTest
 PrivacyRequestServiceMySqlTest
 PortalAdminInvitationAcceptConcurrentMySqlTest
 BackupQuiesceResponderMySqlTest
+BackupWriteQuiesceMySqlTest

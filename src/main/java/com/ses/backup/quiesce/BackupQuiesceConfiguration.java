@@ -34,6 +34,13 @@ public class BackupQuiesceConfiguration {
         return new BackupQuiesceDestructionOrderPostProcessor();
     }
 
+    /** 業務の {@code dataSource} を包む（BWQ-004）。BeanPostProcessor なので static にし、anchor は包む時に引く。 */
+    @Bean
+    static BackupQuiesceDataSourcePostProcessor backupQuiesceDataSourcePostProcessor(
+            ObjectProvider<BackupQuiesceLifecycleAnchor> anchor) {
+        return new BackupQuiesceDataSourcePostProcessor(anchor);
+    }
+
     @Bean
     static BackupQuiesceMetrics backupQuiesceMetrics(BackupQuiesceLifecycleAnchor anchor) {
         return new BackupQuiesceMetrics(anchor.gate());

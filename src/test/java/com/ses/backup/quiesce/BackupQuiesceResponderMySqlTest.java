@@ -235,6 +235,183 @@ class BackupQuiesceResponderMySqlTest {
         }
     }
 
+    // ---------------------------------------------------------------- 停止の順（BWQ-004。§6.11）
+
+    @Test
+    void 通常のcontextのcloseではSTOPPEDを書いた時点で業務のHikariが閉じていてtaskExecutorのtaskが終わっている() throws Exception {
+        ObservedHikariDataSource.reset();
+        stopRunner().run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean("dataSource")).isInstanceOf(BackupQuiesceAwareDataSource.class);
+            assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status <> 'STOPPED'"))
+                    .isEqualTo(1L);
+            context.getBean("taskExecutor", Executor.class).execute(() -> {
+                try {
+                    Thread.sleep(2_000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                ObservedHikariDataSource.TASK_DONE.set(true);
+            });
+        });
+        assertThat(ObservedHikariDataSource.stoppedAtClose).as("Hikari を閉じた時点ではまだ STOPPED でない").isZero();
+        assertThat(ObservedHikariDataSource.taskDoneAtClose).as("taskExecutor の task は Hikari より先に終わっている")
+                .isTrue();
+        assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED' "
+                + "AND stopped_at IS NOT NULL")).as("Hikari を閉じた後に STOPPED を書いた").isEqualTo(1L);
+    }
+
+    @Test
+    void refreshの失敗でもHikariを閉じた後にSTOPPEDを書きstartup_permitを返して10秒待たない() throws Exception {
+        ObservedHikariDataSource.reset();
+        long start = System.nanoTime();
+        stopRunner().withUserConfiguration(FailAfterRegistration.class)
+                .run(context -> assertThat(context).hasFailed());
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(10));
+        assertThat(ObservedHikariDataSource.closedCount.get()).isPositive();
+        assertThat(ObservedHikariDataSource.stoppedAtClose).isZero();
+        assertThat(ObservedHikariDataSource.notStoppedAtClose).as("登録の後に失敗した").isEqualTo(1L);
+        assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED'"))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void permitを持つ処理が10秒より長く続く停止ではSTOPPEDを書かずWARNを出す() throws Exception {
+        ObservedHikariDataSource.reset();
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(BackupQuiesceDataSourcePostProcessor.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
+        Thread[] holder = new Thread[1];
+        long[] closingStarted = new long[1];
+        try {
+            stopRunner().run(context -> {
+                BackupWriteGate gate = context.getBean(BackupQuiesceLifecycleAnchor.class).gate();
+                holder[0] = new Thread(() -> {
+                    BackupWritePermit permit = gate.tryAcquire(BackupWritePermit.Kind.HTTP, "SlowRequest");
+                    acquired.countDown();
+                    try {
+                        Thread.sleep(15_000);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        if (permit != null) {
+                            permit.close();
+                        }
+                    }
+                }, "slow-request");
+                holder[0].start();
+                assertThat(acquired.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                closingStarted[0] = System.nanoTime();
+            });
+        } finally {
+            logger.detachAppender(appender);
+        }
+        assertThat(Duration.ofNanos(System.nanoTime() - closingStarted[0])).isGreaterThanOrEqualTo(Duration.ofSeconds(10));
+        assertThat(appender.list).anyMatch(event -> event.getFormattedMessage()
+                .startsWith("errorCode=BACKUP_QUIESCE_STOP_UNCONFIRMED") && event.getFormattedMessage().contains("SlowRequest"));
+        assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED'"))
+                .as("書込み中かもしれない instance を STOPPED にしない").isZero();
+        holder[0].join(20_000);
+    }
+
+    @Test
+    void ApplicationRunnerの失敗ではmainのthreadのstartup_permitが返され停止が10秒待たない() throws Exception {
+        ObservedHikariDataSource.reset();
+        long start = System.nanoTime();
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
+                new org.springframework.boot.builder.SpringApplicationBuilder(RunnerFailureApplication.class)
+                        .web(org.springframework.boot.WebApplicationType.NONE)
+                        .profiles("prod")
+                        .properties(stopProperties())
+                        .run());
+        assertThat(failure).isNotNull();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(10));
+        assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED'"))
+                .isEqualTo(1L);
+        assertThat(ObservedHikariDataSource.stoppedAtClose).isZero();
+    }
+
+    private static String[] stopProperties() {
+        DataSourceProperties app = appDataSource();
+        return new String[]{"spring.config.name=bq-responder-mysql-none", "spring.main.banner-mode=off",
+                "spring.datasource.url=" + app.getUrl(), "spring.datasource.username=" + APP_USER,
+                "spring.datasource.password=" + APP_PASSWORD,
+                "spring.datasource.type=" + ObservedHikariDataSource.class.getName(),
+                "app.scheduling.enabled=false", "app.backup-quiesce.enabled=true"};
+    }
+
+    private static org.springframework.boot.test.context.runner.ApplicationContextRunner stopRunner() {
+        return new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withInitializer(context -> context.getEnvironment().setActiveProfiles("prod"))
+                .withConfiguration(org.springframework.boot.autoconfigure.AutoConfigurations.of(
+                        org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration.class,
+                        org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class))
+                .withUserConfiguration(com.ses.config.AsyncConfig.class, BackupQuiesceConfiguration.class)
+                .withPropertyValues(stopProperties());
+    }
+
+    /** 業務の DataSource（Hikari）が閉じた時点の信号表と taskExecutor の task の状態を記録する。 */
+    public static class ObservedHikariDataSource extends com.zaxxer.hikari.HikariDataSource {
+        static final java.util.concurrent.atomic.AtomicBoolean TASK_DONE = new java.util.concurrent.atomic.AtomicBoolean();
+        static final java.util.concurrent.atomic.AtomicInteger closedCount = new java.util.concurrent.atomic.AtomicInteger();
+        static volatile long stoppedAtClose = -1;
+        static volatile long notStoppedAtClose = -1;
+        static volatile boolean taskDoneAtClose;
+
+        static void reset() {
+            TASK_DONE.set(false);
+            closedCount.set(0);
+            stoppedAtClose = -1;
+            notStoppedAtClose = -1;
+            taskDoneAtClose = false;
+        }
+
+        @Override
+        public void close() {
+            if (closedCount.getAndIncrement() == 0) {
+                try {
+                    stoppedAtClose = scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED'");
+                    notStoppedAtClose = scalarLong(
+                            "SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status <> 'STOPPED'");
+                } catch (SQLException failure) {
+                    throw new IllegalStateException(failure);
+                }
+                taskDoneAtClose = TASK_DONE.get();
+            }
+            super.close();
+        }
+    }
+
+    /** 登録（静止応答の afterSingletonsInstantiated）の後に初期化で例外を投げる（refresh の失敗）。 */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    static class FailAfterRegistration {
+        @org.springframework.context.annotation.Bean
+        org.springframework.beans.factory.SmartInitializingSingleton failingAfterRegistration() {
+            return () -> {
+                throw new IllegalStateException("登録の後の初期化の失敗（試験）");
+            };
+        }
+    }
+
+    /** {@code ApplicationRunner} が失敗する起動（SpringApplication が main の thread で context を閉じる）。 */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    @org.springframework.boot.autoconfigure.ImportAutoConfiguration({
+            org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration.class,
+            org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class})
+    @org.springframework.context.annotation.Import({com.ses.config.AsyncConfig.class, BackupQuiesceConfiguration.class})
+    static class RunnerFailureApplication {
+        @org.springframework.context.annotation.Bean
+        org.springframework.boot.ApplicationRunner failingRunner() {
+            return arguments -> {
+                throw new IllegalStateException("起動時処理の失敗（試験）");
+            };
+        }
+    }
+
     // ---------------------------------------------------------------- helper
 
     private static Connection root() throws SQLException {

@@ -71,7 +71,9 @@
   - **Demo:** dev profile の app を起動し、MySQL の client で要求を手で入れ、ack の行と log（`BACKUP_QUIESCE_REQUESTED`・`ACKED`）を確かめる。延長せずに待ち、`AUTO_RESUMED` の ERROR と ack の `RESUMED`（`LEASE_EXPIRED`）を見る。app を止め、instance の行が `STOPPED` になることを見る。
   - **失敗/rollback:** `DataSource` の bean が 2 つになって自動構成が崩れたら holder の形に戻す。破棄の順の依存が循環したら、静止応答が DataSource に依存していないかを確かめる。
 
-- [ ] **BWQ-004 — DataSource の最後の防線（読取り専用・接続の数え方・停止の時の STOPPED）**
+- [x] **BWQ-004 — DataSource の最後の防線（読取り専用・接続の数え方・停止の時の STOPPED）**
+
+  - **実装の記録（第 2 段階 2a）:** `BackupQuiesceAwareDataSource`（`DelegatingDataSource`。接続は proxy で `setReadOnly`・`close` を数える）、`BackupQuiesceDataSourcePostProcessor`（static な `@Bean`。gate が INERT なら包まない。停止の時は SHUTDOWN・呼んだ thread の permit の返却・最長 10 秒の排水の待ち・Hikari を閉じてから STOPPED、閉じられなければ STOPPED を書かない）、`BackupQuiesceReadOnlyViolation`。BWQ-003 の MySQL 試験に停止の順の4件（通常の close・refresh の失敗・10 秒を超える permit・`ApplicationRunner` の失敗）を足した。fast は `BackupQuiesceAwareDataSourceTest`（H2 の Hikari の metric と `db` の health を含む）・`BackupQuiesceReadOnlyViolationTest`・`BusinessConnectionBypassGuardTest` と影響する既存の試験が通過。**Runner 待ち**: `BackupWriteQuiesceMySqlTest`・`BackupQuiesceResponderMySqlTest`（mysql shard 3。§19 の locking read と Hikari の読取り専用の戻しの記録を含む）と Demo（dev の app の静止中の一覧の表示と MySQL の general log）。
 
   - **依存:** BWQ-002、BWQ-003
   - **対応要求:** BWQ-RQ-002（AC-002-02・AC-002-07）、BWQ-RQ-004（AC-004-01）

@@ -527,7 +527,7 @@ class BackupQuiesceResponderTest {
     }
 
     /** 信号表の fake。時刻は gate と同じ単調時計を DB の時刻へ写して扱う。 */
-    static final class FakeRepository implements BackupQuiesceSignalRepository {
+    static class FakeRepository implements BackupQuiesceSignalRepository {
 
         static final class Request {
             long id;
