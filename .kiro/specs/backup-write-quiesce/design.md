@@ -451,7 +451,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 
 - 静止中（gate が OPEN でなく permit が無い）に `/logout` の POST を受けたら、logout の handler は:
   1. HTTP session を直ちに無効にし、JSESSIONID の cookie を消す（従来どおり）。
-  2. `PersistentSessionService.revokeCurrent` の DB の書込み（`t_user_session` の失効）と、`logoutSuccessHandler` の監査（`LOGOUT`）を、`BackupQuiesceDeferredWrites`（解除後の書込みの一覧。memory、上限 10,000 件、超えたら最も古いものから WARN を出して捨てる）へ入れる。**入れる時に、後で書く値を全て logout の時点で取っておく**（D3-P3-5）: user、tenant、session の hash、logout の時刻（監査の `createdAt` と失効の時刻に使う）、接続元の IP、correlation ID、method・URI・status・applicationCode。`AuditLogServiceImpl.record` は今の時刻と今の request から値を取るため、解除後の書込みには取っておいた値をそのまま書く method（`AuditLogService.recordCaptured`）を足して使う。入れた時に同じ内容（user・session の hash の先頭 8 文字・時刻）を WARN の application log `errorCode=BACKUP_QUIESCE_DEFERRED_WRITE` に出す。
+  2. `PersistentSessionService.revokeCurrent` の DB の書込み（`t_user_session` の失効）と、`logoutSuccessHandler` の監査（`LOGOUT`）を、`BackupQuiesceDeferredWrites`（解除後の書込みの一覧。memory、上限 10,000 件、超えたら最も古いものから WARN を出して捨てる）へ入れる。**入れる時に、後で書く値を全て logout の時点で取っておく**（D3-P3-5）: user、tenant、session の hash、logout の時刻（監査の `createdAt` と失効の時刻に使う）、correlation ID、method・URI・status・applicationCode。**接続元の IP は取っておかず、書かない**（第 2 段階 2c の事実の修正）: `t_audit_log` には IP の列が無い（V11 から今まで）。そのために DDL を足すことはせず、IP を application log にも新しく書かない。`AuditLogServiceImpl.record` は今の時刻と今の request から値を取るため、解除後の書込みには取っておいた値をそのまま書く method（`AuditLogService.recordCaptured`）を足して使う。入れた時に同じ内容（user・session の hash の先頭 8 文字・時刻）を WARN の application log `errorCode=BACKUP_QUIESCE_DEFERRED_WRITE` に出す。
   3. logout の完了の画面（OIDC の RP initiated logout を含む）へ進める。
 - gate が OPEN に戻ったら、状態機械が一覧を `taskExecutor` へ投入し、各書込みは「解除後の書込み」の permit を持って業務の service を通して書く。permit を取れない（その間に gate がまた閉じた）場合は捨てずに一覧へ戻し、次に開いた時に書く（D3-P3-5）。DB の失敗は WARN を出して 3 回まで繰り返し、それでも失敗したら WARN の log（内容つき）を残して捨てる。
 - **portal の logout は対象外**（D3-P3-5）: 外部の顧客・BP の portal の logout（`/api/portal/auth/logout`）は DB の session（`t_portal_session`。失効は DB の行で即時に効く）を使うため、失効を解除の後へ遅らせると session がその間使えてしまう。portal の logout は静止中も WRITE と同じく 503 のままにする（利用者は待って操作し直す）。
@@ -758,7 +758,7 @@ health indicator は作らない。
 | backup tool の shell | `ops/backup/tests/quiesce-db-test.sh`（fake の mysql。上の場合に加えて、**job 本体を kill すると保持 process が終わり lock が返る**、**acquire の process が終わっても保持 process が延長を続ける**、release が RESUMED を新しい instance にだけ求める）、`full-backup-test.sh`・`binlog-checkpoint-test.sh`（verify を解除の前に呼ぶ、verify の失敗で VALID にしない、`--app-stopped`、full の `NEW_INSTANCE` の中止）、`script-contract-test.sh`、`preflight-test.sh`（exit 19） |
 | CI の backup integration | compose の `scheduler`・`replica` の fake を DB の protocol を話す shell の `responder` に置き換え、source に V202 の file を適用し、表単位の GRANT、最初の full を `--app-stopped`、checkpoint を `quiesce-db` で取る。responder を途中で止めた負例。生成列 `active_slot` の dump・復元・schema fingerprint の往復を確かめる（D-P3-7） |
 
-- 第 4 版で足した試験（D3-P3-8）: prod と prod 以外の profile で context が起動する（depends-on の循環が無い。BWQ-003）、排水が 10 秒で終わらない停止で STOPPED を書かない（BWQ-003）、APP_STOPPED の full の最中に起動しようとした task で要求が ABORTED にならずその task が起動を中止する（BWQ-009・010・011）、heartbeat が 300 秒より古い停止口の行でも ONLINE と `--app-stopped` が失敗し、片付けの SQL の後は通る（BWQ-009・010・011）、保持 process の出力が結果の JSON に混ざらない・DDL lock の待ちの間の kill で終わる・mysqldump の最中の kill で終わる（BWQ-009）、中止の後の job が mysqldump を止めて早く失敗する（BWQ-009）、release が ack の無い新しい instance を待たない（BWQ-009）、解除後の監査が logout の時点の時刻・IP・correlation ID を持つ・gate がまた閉じたら一覧へ戻る（BWQ-005）、portal の logout が静止中 503（BWQ-005）。
+- 第 4 版で足した試験（D3-P3-8）: prod と prod 以外の profile で context が起動する（depends-on の循環が無い。BWQ-003）、排水が 10 秒で終わらない停止で STOPPED を書かない（BWQ-003）、APP_STOPPED の full の最中に起動しようとした task で要求が ABORTED にならずその task が起動を中止する（BWQ-009・010・011）、heartbeat が 300 秒より古い停止口の行でも ONLINE と `--app-stopped` が失敗し、片付けの SQL の後は通る（BWQ-009・010・011）、保持 process の出力が結果の JSON に混ざらない・DDL lock の待ちの間の kill で終わる・mysqldump の最中の kill で終わる（BWQ-009）、中止の後の job が mysqldump を止めて早く失敗する（BWQ-009）、release が ack の無い新しい instance を待たない（BWQ-009）、解除後の書込みが logout の時点の user・tenant・session の hash・時刻（`created_at`）・correlation ID を持つ（IP は §6.13 のとおり対象外）・gate がまた閉じたら一覧へ戻る（BWQ-005）、portal の logout が静止中 503（BWQ-005）。
 - MySQL の試験は `scripts/test-suites/mysql-shard-3.txt` に足し、実行時間を見て振り分け直す。`MySqlTestShardInventoryTest` と `MySqlTestImagesTest` が通ること。
 - 試験は各 task の対象だけを流す。全 gate の実行は統合の時に統括が決める。
 
@@ -923,7 +923,7 @@ CLAUDE.md は本 batch では変えない。
 | D3-P3-2 | 保持 process の出力を `hold.log` へ、起動の直後から pipe を読む、長い子 process は書き口を閉じる、bash 4.4 以上 | §7.6、§19 | BWQ-009 |
 | D3-P3-3 | 制御用・heartbeat 用の pool に Hikari の `connectionTimeout=3000` | §5.2 | BWQ-003 |
 | D3-P3-4 | 中止の後は job が mysqldump を止めて早く失敗する、full の CRITICAL（26 時間）までの取り直しの期限を runbook に、release は QUIESCED の ack を持つ instance にだけ RESUMED を求める | §7.3、§7.6、§11 | BWQ-009・013 |
-| D3-P3-5 | 解除後の監査は logout の時点の時刻・IP・correlation ID を使う、gate がまた閉じたら一覧へ戻す、portal の logout は対象外で 503 | §6.3、§6.13、§17 L-20 | BWQ-005 |
+| D3-P3-5 | 解除後の書込みは logout の時点の user・tenant・session の hash・時刻・correlation ID を使う（IP は `t_audit_log` に列が無いため対象外。第 2 段階 2c の事実の修正）、gate がまた閉じたら一覧へ戻す、portal の logout は対象外で 503 | §6.3、§6.13、§17 L-20 | BWQ-005 |
 | D3-P3-6 | L-16 に servlet の session の期限を書く | §6.4、§17 L-16 | — |
 | D3-P3-7 | §6.4 の日本語でない 1 語（取捨の誤字）を「扱い」に直す | §6.4 | — |
 | D3-P3-8 | D3-P2-1〜3 と portal の logout の 503 の試験を tasks に足す | §14 | BWQ-003・005・009・010・011 |
