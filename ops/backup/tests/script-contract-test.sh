@@ -244,10 +244,11 @@ EOF
 # 使わないと決めたもの（@@have_ssl・--binlog-format の指定・SET_USER_ID）。大文字・小文字を区別しない。
 MYSQL84_REMOVED_PATTERN='RESET MASTER|SHOW MASTER (STATUS|LOGS)|PURGE MASTER LOGS|CHANGE MASTER TO|MASTER_LOG_(FILE|POS)|(START|STOP|RESET) SLAVE|SHOW SLAVE (STATUS|HOSTS)|--master-data|--delete-master-logs|--default[-_]authentication[-_]plugin|have_ssl|--binlog[-_]format|SET_USER_ID'
 
-# 8.4 の server・client に対して動く file（本番 script と、実 MySQL 8.4 で動く integration の script・compose）
+# 8.4 の server・client に対して動く file（本番 script と、実 MySQL 8.4 で動く integration の script・compose・responder）
 mysql84_target_files() {
   production_scripts
-  printf '%s\n' "$BACKUP_ROOT/docker-compose.yml" "$HERE/docker-compose.integration.yml" "$HERE/integration-pitr.sh"
+  printf '%s\n' "$BACKUP_ROOT/docker-compose.yml" "$HERE/docker-compose.integration.yml" "$HERE/integration-pitr.sh" \
+    "$HERE/integration-responder.sh"
 }
 
 # 上の構文を含む行を出力する（<file>:<行番号>: <行>）。行全体のコメントは見ない（経緯の説明は書いてよい）

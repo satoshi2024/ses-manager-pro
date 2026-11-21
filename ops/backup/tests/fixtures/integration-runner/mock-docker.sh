@@ -18,8 +18,7 @@ scenario=${MOCK_SCENARIO:-pitr-native}
 SRC_ID=1111111111111111111111111111111111111111111111111111111111111111
 TGT_ID=2222222222222222222222222222222222222222222222222222222222222222
 TOOL_ID=3333333333333333333333333333333333333333333333333333333333333333
-SCHED_ID=4444444444444444444444444444444444444444444444444444444444444444
-REPL_ID=5555555555555555555555555555555555555555555555555555555555555555
+RESP_ID=4444444444444444444444444444444444444444444444444444444444444444
 FOREIGN_ID=9999999999999999999999999999999999999999999999999999999999999999
 NET_ID=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 OTHER_NET_ID=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
@@ -39,8 +38,7 @@ service_of() {
     "$SRC_ID") echo source ;;
     "$TGT_ID") echo target ;;
     "$TOOL_ID") echo tool ;;
-    "$SCHED_ID") echo scheduler ;;
-    "$REPL_ID") echo replica ;;
+    "$RESP_ID") echo responder ;;
     "$FOREIGN_ID") echo source ;;
     *) return 1 ;;
   esac
@@ -64,9 +62,9 @@ compose_ids() {
   case "$scenario" in
     up-fail) return 0 ;;
     partial-up|no-timeout) printf '%s\n' "$SRC_ID" "$TGT_ID" ;;
-    foreign-container) printf '%s\n' "$FOREIGN_ID" "$TGT_ID" "$TOOL_ID" "$SCHED_ID" "$REPL_ID" ;;
+    foreign-container) printf '%s\n' "$FOREIGN_ID" "$TGT_ID" "$TOOL_ID" "$RESP_ID" ;;
     diag-ps-fail) return 1 ;;
-    *) printf '%s\n' "$SRC_ID" "$TGT_ID" "$TOOL_ID" "$SCHED_ID" "$REPL_ID" ;;
+    *) printf '%s\n' "$SRC_ID" "$TGT_ID" "$TOOL_ID" "$RESP_ID" ;;
   esac
 }
 
@@ -222,7 +220,8 @@ write_pitr_outputs() {
   host=$(host_work_dir "$@") || return 1
   mkdir -p "$host/evidence"
   printf '%s\n' '{"state":"SUCCESS","plan_id":"plan-mock-1"}' > "$host/integration-summary.json"
-  for file in validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt; do
+  for file in validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt \
+      quiesce-full.json quiesce-checkpoint.json quiesce-negative.txt quiesce-generated-column.txt; do
     printf 'mock %s\n' "$file" > "$host/evidence/$file"
   done
 }

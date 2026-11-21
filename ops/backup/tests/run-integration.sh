@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # HFP-03-011 integration suite ランナー（ホスト側）
 #
-# docker compose（pinned MySQL 8.4.13 ×2 + tool イメージ）で隔離ネットワークを
-# 構築し、integration-pitr.sh を tool コンテナ内で実行して実 PITR を検証する。
+# docker compose（pinned MySQL 8.4.13 ×2 + tool イメージ + 書込み静止の responder）で隔離ネットワークを
+# 構築し、integration-pitr.sh を tool コンテナ内で実行して実 PITR を検証する。書込み静止は DB の protocol
+# （quiesce-db・quiesce-app-stopped）で取る（RB-QUIESCE BWQ-012）。
 #
 # - host port を公開しない（internal network）
 # - パスワードは合成値（INTEGRATION_SRC_PW / INTEGRATION_TGT_PW）を自動生成
@@ -48,6 +49,11 @@ unset DD_PROBE_DIR
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 COMPOSE_FILE=$(cygpath -w "$HERE/docker-compose.integration.yml" 2>/dev/null || echo "$HERE/docker-compose.integration.yml")
+# 書込み静止の DB の protocol（RB-QUIESCE BWQ-012）: compose の responder service が動かす shell の loop と、source に適用する
+# 信号表の migration（V202）。container は repository を mount しないため、prepare_work_dir が WORK へ写す。
+RESPONDER_SRC="$HERE/integration-responder.sh"
+QUIESCE_SCHEMA_NAME=V202__backup_write_quiesce_signal.sql
+QUIESCE_SCHEMA_SRC="$HERE/../../../src/main/resources/db/migration/$QUIESCE_SCHEMA_NAME"
 
 if ! docker info > /dev/null 2>&1; then
   echo "BLOCKED: Docker が利用できません。integration suite は実 MySQL コンテナで実行します。" >&2
@@ -67,8 +73,7 @@ PROJECT_CONTAINER_IDS=()
 SOURCE_CID=""
 TARGET_CID=""
 TOOL_CID=""
-SCHEDULER_CID=""
-REPLICA_CID=""
+RESPONDER_CID=""
 NET=""
 RUN_ID=""
 PROJECT=""
@@ -159,6 +164,16 @@ write_exclusive_file() { # <path> <content>
   [[ -f "$path" && ! -L "$path" ]] || return 1
   actual=$(dd if="$path" iflag=nonblock bs=65536 count=16 status=none 2>/dev/null; printf x) || return 1
   [[ "$actual" == "${content}x" ]]
+}
+
+# repository の file を WORK の中へ写す（write_exclusive_file と同じ排他作成。既存の file・symlink には書かない）。
+# 末尾の改行も保つ。RB-QUIESCE BWQ-012 の responder と V202 に使う。
+copy_into_work() { # <repository の file> <WORK の中の path>
+  local content
+  [[ -f "$1" && -r "$1" ]] || { echo "FAIL: integration の入力の file がありません: $1" >&2; return 1; }
+  content=$(cat -- "$1"; printf x) || return 1
+  write_exclusive_file "$2" "${content%x}" \
+    || { echo "FAIL: integration の入力の file を作業ディレクトリへ写せません: $2" >&2; return 1; }
 }
 
 # kill -0 による生存確認が意味を持つ範囲（同じ PID 名前空間）を表す識別子を出力する。
@@ -744,7 +759,11 @@ prepare_work_dir() {
   WORK_OWNED=1
   # サブディレクトリも -p なしの mkdir で新規作成だけを許す（既存のディレクトリ・symlink を引き継がない）。
   mkdir "$WORK/evidence" "$WORK/drill-evidence" "$WORK/uploads" "$WORK/work" "$WORK/repo" "$WORK/staging" \
-    "$WORK/locks" "$WORK/capath" "$WORK/capath-tgt" "$WORK/heartbeats" "$WORK/scheduler" "$WORK/keys" || return 1
+    "$WORK/locks" "$WORK/capath" "$WORK/capath-tgt" "$WORK/responder" "$WORK/schema" "$WORK/keys" || return 1
+  # RB-QUIESCE BWQ-012: responder の loop（compose の responder service が起動の時に読む）と、integration-pitr.sh が
+  # source に適用する信号表の migration（V202）。compose up より前に置く。
+  copy_into_work "$RESPONDER_SRC" "$WORK/responder/integration-responder.sh" || return 1
+  copy_into_work "$QUIESCE_SCHEMA_SRC" "$WORK/schema/$QUIESCE_SCHEMA_NAME" || return 1
   export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
   WWORK=$(cygpath -w "$WORK" 2>/dev/null || echo "$WORK")
   WORK_AWK=$(cygpath -u "$WORK" 2>/dev/null || echo "$WORK")
@@ -764,11 +783,13 @@ prepare_work_dir() {
 # この区間は harness-selftest-test.sh が sed で切り出して単体検証する。区間外の関数へ依存しないこと。
 #
 # 失敗時診断の上限（静的見積り）:
-#   - Docker 呼び出しは ps 1 回 + 所有確認 inspect 最大 5 回 + service ごとの state/logs 最大 10 回 = 最大 16 回。
+#   - Docker 呼び出しは ps 1 回 + 所有確認 inspect 最大 4 回 + service ごとの state/logs 最大 8 回 = 最大 13 回
+#     （service は source・target・tool・responder の 4 つ。RB-QUIESCE BWQ-012 で scheduler・replica を responder に置き換えた）。
 #     各回は GNU timeout -k 1s により DIAG_CALL_TIMEOUT_SECONDS（既定 5 秒）+ 強制終了猶予 1 秒で打ち切る。
 #   - redactor（awk）は対応する Docker 呼び出しと並行に走り、同じ上限 + 2 秒（+ 猶予 1 秒）で打ち切る。
 #   - 最終 secret scan は DIAG_SCAN_TIMEOUT_SECONDS（既定 10 秒）+ 猶予 1 秒で打ち切る。
-#   Linux では時計の挙動に依存しない上限は「呼び出し回数 × 個別 timeout」（約 127 秒）である。
+#   Linux では時計の挙動に依存しない上限は「呼び出し回数 × 個別 timeout」（約 105 秒。ps と inspect の 5 回 × 6 秒、
+#   state/logs の 8 回 × 8 秒、最終 scan の 11 秒）である。
 #   MSYS では timeout が docker.exe を終了させた後に CLI plugin の孫プロセスがパイプを保持し続けるかは未確認。
 #   DIAG_BUDGET_SECONDS（既定 15 秒）は bash の SECONDS（壁時計ベース・1 秒分解能）による目安で、
 #   使い切った後の呼び出しを省略するだけの best-effort であり、硬い期限ではない。
@@ -1204,7 +1225,7 @@ verify_project_container() {
   IFS='|' read -r found_id found_project found_service <<< "$details"
   [[ "${found_id:0:12}" == "${id:0:12}" && "$found_project" == "$PROJECT" ]] || return 1
   case "$found_service" in
-    source|target|tool|scheduler|replica) ;;
+    source|target|tool|responder) ;;
     *) return 1 ;;
   esac
   [[ -z "$expected_service" || "$found_service" == "$expected_service" ]] || return 1
@@ -1212,8 +1233,7 @@ verify_project_container() {
     source) SOURCE_CID=$id ;;
     target) TARGET_CID=$id ;;
     tool) TOOL_CID=$id ;;
-    scheduler) SCHEDULER_CID=$id ;;
-    replica) REPLICA_CID=$id ;;
+    responder) RESPONDER_CID=$id ;;
   esac
   PROJECT_CONTAINER_IDS+=("$id")
 }
@@ -1221,12 +1241,12 @@ verify_project_container() {
 refresh_project_containers() {
   local ids id count=0
   PROJECT_CONTAINER_IDS=()
-  SOURCE_CID="" TARGET_CID="" TOOL_CID="" SCHEDULER_CID="" REPLICA_CID=""
+  SOURCE_CID="" TARGET_CID="" TOOL_CID="" RESPONDER_CID=""
   ids=$(compose ps -aq 2>/dev/null) || return 1
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
     count=$((count + 1))
-    (( count <= 5 )) || return 1
+    (( count <= 4 )) || return 1
     verify_project_container "$id" || return 1
   done <<< "$ids"
   PROJECT_IDS_VERIFIED=1
@@ -1267,7 +1287,7 @@ collect_failure_diagnostics() {
   local -a command_status
   PROJECT_IDS_VERIFIED=0
   PROJECT_CONTAINER_IDS=()
-  SOURCE_CID="" TARGET_CID="" TOOL_CID="" SCHEDULER_CID="" REPLICA_CID=""
+  SOURCE_CID="" TARGET_CID="" TOOL_CID="" RESPONDER_CID=""
   if (( ! WORK_OWNED )) || [[ -z "$DIAG_FILE" ]]; then return 0; fi
   if ! verify_work_still_owned; then
     echo "diagnostics: 作業ディレクトリの所有を再確認できないため診断を書き込みません" >&2
@@ -1302,8 +1322,8 @@ collect_failure_diagnostics() {
     while IFS= read -r id; do
       [[ -n "$id" ]] || continue
       count=$((count + 1))
-      if (( count > 5 )); then
-        append_diagnostic_line "container-list=more than five entries; excess and cleanup omitted"
+      if (( count > 4 )); then
+        append_diagnostic_line "container-list=more than four entries; excess and cleanup omitted"
         break
       fi
       if ! [[ "$id" =~ ^[a-fA-F0-9]{12,64}$ ]]; then
@@ -1322,7 +1342,7 @@ collect_failure_diagnostics() {
       fi
       IFS='|' read -r found_id found_project found_service <<< "$details"
       if [[ "${found_id:0:12}" != "${id:0:12}" || "$found_project" != "$PROJECT" ]] \
-          || ! [[ "$found_service" =~ ^(source|target|tool|scheduler|replica)$ ]]; then
+          || ! [[ "$found_service" =~ ^(source|target|tool|responder)$ ]]; then
         append_diagnostic_line "container=${id:0:12} ownership=unverified omitted"
         continue
       fi
@@ -1331,21 +1351,19 @@ collect_failure_diagnostics() {
         source) SOURCE_CID=$id ;;
         target) TARGET_CID=$id ;;
         tool) TOOL_CID=$id ;;
-        scheduler) SCHEDULER_CID=$id ;;
-        replica) REPLICA_CID=$id ;;
+        responder) RESPONDER_CID=$id ;;
       esac
     done <<< "$ids"
-    if (( count <= 5 && ${#PROJECT_CONTAINER_IDS[@]} == count )); then PROJECT_IDS_VERIFIED=1; fi
+    if (( count <= 4 && ${#PROJECT_CONTAINER_IDS[@]} == count )); then PROJECT_IDS_VERIFIED=1; fi
   fi
 
   inspect_format='{{.Id}}|{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}|{{.State.StartedAt}}|{{.State.FinishedAt}}|{{if .State.Health}}{{.State.Health.Status}}{{range .State.Health.Log}}{{println}}health_start={{.Start}} health_exit={{.ExitCode}} health_output={{.Output}}{{end}}{{end}}|{{.Image}}{{range .Mounts}}{{println}}mount_type={{.Type}} source={{.Source}} destination={{.Destination}} rw={{.RW}}{{end}}'
-  for service in target source tool scheduler replica; do
+  for service in target source tool responder; do
     case "$service" in
       target) id=$TARGET_CID ;;
       source) id=$SOURCE_CID ;;
       tool) id=$TOOL_CID ;;
-      scheduler) id=$SCHEDULER_CID ;;
-      replica) id=$REPLICA_CID ;;
+      responder) id=$RESPONDER_CID ;;
     esac
     [[ -n "$id" ]] || continue
     if ! diag_call_limit > /dev/null; then
@@ -1386,7 +1404,7 @@ collect_failure_diagnostics() {
 
 check_fixed_container_names() {
   local name ids rc
-  for name in ses-bkup-int-source ses-bkup-int-target ses-bkup-int-tool ses-bkup-int-schedule ses-bkup-int-replica; do
+  for name in ses-bkup-int-source ses-bkup-int-target ses-bkup-int-tool ses-bkup-int-responder; do
     ids=$(docker ps -aq --filter "name=^/${name}$" 2>/dev/null)
     rc=$?
     if (( rc != 0 )) || [[ -n "$ids" ]]; then
@@ -1499,7 +1517,8 @@ docker run --rm --network "$NET" \
   -e FULL_COORDINATE_FILE=/work/full-coordinate \
   -e BACKUP_WORK_DIR=/work/work -e PLANS_DIR=/work/plans -e UPLOADS_ROOT=/work/uploads -e UPLOADS_POINTER=current \
   -e UPLOADS_STAGING_PARENT=/work/staging \
-  -e REPLICA_HEARTBEAT_DIR=/work/heartbeats -e SCHEDULER_ACK_DIR=/work/scheduler \
+  -e QUIESCE_PROVIDER=quiesce-db -e RESPONDER_DIR=/work/responder \
+  -e QUIESCE_SCHEMA_FILE="/work/schema/$QUIESCE_SCHEMA_NAME" \
   -e QUIESCE_DEADLINE_SECONDS=60 -e QUIESCE_STALE_SECONDS=60 \
   -e REPOSITORY_LOCK_DIR=/work/locks \
   -e APP_COMMIT=integration -e FLYWAY_VERSION=42 \
@@ -1613,7 +1632,9 @@ fi
 echo "secret scan: 0 matches"
 
 echo "== evidence SHA =="
-(cd "$WORK/evidence" && sha256sum integration-summary.json validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt | tee "$WORK/evidence/evidence-sha.txt")
+# quiesce-*.json / quiesce-*.txt: 書込み静止の DB の protocol の証跡（RB-QUIESCE BWQ-012。integration-pitr.sh が書く）
+(cd "$WORK/evidence" && sha256sum integration-summary.json validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt \
+  quiesce-full.json quiesce-checkpoint.json quiesce-negative.txt quiesce-generated-column.txt | tee "$WORK/evidence/evidence-sha.txt")
 normalize_evidence_permissions
 
 echo "== integration suite SUCCESS（skip 0・全ステップ実実行） =="
