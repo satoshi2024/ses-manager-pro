@@ -86,33 +86,65 @@ production の uploads は、uploads の根の下の版の directory（`v0`、`v
 復元した uploads は今の版を上書きせず、新しい版として置いてから pointer を切り替える。restore 主体（uploads の access
 point を app と同じ uid で読み書きで mount する）が実行する。
 
-```bash
-# validate-restore.sh が READY_FOR_CUTOVER を返した後（app は動いていてよい。今の版と pointer は変えない）
-uploads-cutover.sh stage --from <restore.sh の uploads_ready> --root <uploads の根> --version <新しい版>
-# app の停止中、DB の cutover と同じ change の中で（1 回の rename。pointer は前後とも必ずどちらかの版を指す）
-uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>
-# 確認（読むだけ）
-uploads-cutover.sh status --root <uploads の根>
-# rollback: 逆向きの switch（switch が出力した rollback= の command。旧版は消していない）
-uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
-```
+### 4.5.1 DB と uploads の切替えの順序（正本。README と deploy-runbook §1.6 の11 (f) はここを引く）
+
+DB の cutover（`cutover.sh` / `rollback-cutover.sh`）と uploads の pointer の切替え（`uploads-cutover.sh switch`）は、
+**pointer が指す版と app が使う DB が常に一対になる**ように、次の順序だけで行う。`cutover.sh`・`rollback-cutover.sh` は
+pointer に触れず、`uploads-cutover.sh` は app の停止も DB との対も確かめないため、順序は人が守る。
+
+理由: 孤児清掃（`FileCleanupServiceImpl`。scheduler）は `current` が指す版だけを見て、DB が参照しない古い file を消す。
+DB を復旧点の DB に替えたのに pointer が旧版のまま、または DB を戻したのに pointer が新しい版のままで scheduler が動くと、
+その版の中の「今の DB が参照しない」file（旧版の復旧点より後の file 等）が消える。read-only smoke も、新しい DB と
+新しい版の組合せで行わなければ確かめたことにならない。
+
+1. **app と scheduler を止める**（deploy-runbook §2 の1〜4。全 instance の停止と DB への app の接続 0 件）。
+   止まるまで 3 以降へ進まない（app は起動時に pointer の下の directory を作り、scheduler は孤児清掃を動かす）。
+2. **stage**（今の版と pointer は変えないため、1 の前に済ませてもよい）:
+   `uploads-cutover.sh stage --from <restore.sh の uploads_ready> --root <uploads の根> --version <新しい版>`
+   （`validate-restore.sh` が `READY_FOR_CUTOVER` を返した plan の `uploads_ready` を使う）。
+3. **switch と確認**:
+   `uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>` の後、
+   `uploads-cutover.sh status --root <uploads の根>` が rc 0 で `target=<新しい版>` を出し、`leftover=` と `error=` が
+   無いことを確かめる。出力の `rollback=` の command を change ticket に控える。
+4. **`cutover.sh`**（§3）: read-only smoke は、新しい DB と 3 で切り替えた新しい版の組合せで行われる。
+5. **write-enable の前に戻すとき**（read-only smoke の失敗で `cutover.sh` が `rolled-back`・exit 3 で止まった場合を含む）:
+   `rollback-cutover.sh`（§4）と逆向きの switch（`--to <旧版> --expect <新しい版>`。3 で控えた `rollback=`）を
+   **必ず対で**行い、`status` が `target=<旧版>` を出すことを確かめてから旧環境の app を起動する。どちらか一方だけで
+   app・scheduler を起動しない。
+6. **`write-enabled` の後**は uploads も戻さない（DB と同じ。§2 の「`write-enabled` からの rollback は禁止」）。旧版は
+   消さずに残す（削除は deploy-runbook §4.4 の D15 の手順だけ）。
+7. **app と scheduler を起動する前に、DB と pointer が一対であることを確かめて記録する**:
+
+   ```bash
+   # DB 側: 状態と plan（write-enabled なら新しい DB、rolled-back なら旧環境）
+   jq -r '"state=\(.state) plan_id=\(.plan_id)"' "$CUTOVER_STATE_FILE"
+   jq -r '"checkpoint=\(.effective_checkpoint.restic_snapshot_id)"' "$PLANS_DIR/<plan-id>.json"
+   # uploads 側: pointer の指す版（rc 0、leftover= と error= が無いこと）
+   uploads-cutover.sh status --root <uploads の根>
+   ```
+
+   期待: `state=write-enabled` なら `target=<新しい版>`（その plan の `uploads_ready` から stage した版）、
+   `state=rolled-back` なら `target=<旧版>`。plan-id・checkpoint・版の名前・`status` の出力を対として change ticket と
+   配備記録に残す。一致しなければ起動しない。
+
+### 4.5.2 各 command の性質
 
 - `stage` は、既にある名前（今の版を含む）・pointer の名前・1 段でない名前、symlink や特殊 file を含む複製元を拒否する。
   複製は一時 directory に行い、内容（相対 path と SHA-256）が一致してから 1 回の rename で版にするため、失敗しても
   作りかけの版は残らない。
 - `switch` は pointer が `--expect` と違う・解決できない（無い・実 directory に置き換わっている・絶対 path 等）、または
-  切替え先が実 directory でなければ何も変えずに失敗する。
-- DB と uploads の切替え・rollback の順序と、cutover の状態機械（`CUTOVER_STATE_FILE`）との対応は deploy-runbook
-  （RB-DEPLOY）の手順に従う。`cutover.sh` と `rollback-cutover.sh` は uploads の pointer に触れない。
+  切替え先が実 directory でなければ何も変えずに失敗する。pointer は前後とも必ずどちらかの版を指す（1 回の rename）。
+- `status` は読むだけで、根の下に何も書かない。
+- `switch` は切替え先の版の来歴（どの plan・checkpoint から stage したか）を確かめない。4.5.1 の 7 の記録で人が確かめる。
 
 ## 5. 判定早見表
 
 | 状況 | 対応 | コマンド |
 |---|---|---|
 | validation が FAILED_VALIDATION | cutover 不可。restore のやり直し | `restore.sh` → `validate-restore.sh` |
-| read-only smoke 失敗（cutover 中） | 旧環境へ rollback | cutover.sh が自動で `state=rolled-back`（exit 3） |
-| write-enable 前に旧環境へ戻す | rollback | `rollback-cutover.sh --plan <plan-id>` |
-| write-enabled 後 | 戻れない（新規 transaction を失う） | —（切戻しは次の正規復元手順で） |
+| read-only smoke 失敗（cutover 中） | 旧環境へ rollback。uploads も逆向きの switch（§4.5.1 の 5） | cutover.sh が自動で `state=rolled-back`（exit 3）＋ `uploads-cutover.sh switch --to <旧版> --expect <新しい版>` |
+| write-enable 前に旧環境へ戻す | rollback。uploads の逆向きの switch と必ず対で（§4.5.1 の 5） | `rollback-cutover.sh --plan <plan-id>` ＋ `uploads-cutover.sh switch --to <旧版> --expect <新しい版>` |
+| write-enabled 後 | 戻れない（新規 transaction を失う）。uploads も戻さない（§4.5.1 の 6） | —（切戻しは次の正規復元手順で） |
 | rolled-back 後の再開 | restore からやり直し | `restore.sh` 以降を再実行 |
 
 ## 6. production 固有の注意（HFP-03-PROD-004 と併用）

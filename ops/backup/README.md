@@ -36,8 +36,8 @@ production 環境への接続・復元は行わないこと。初回本番配備
   `CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE=…, SOURCE_LOG_POS=…` から full の起点を読む。8.0 の旧形式
   `CHANGE MASTER TO … MASTER_LOG_FILE` は受け付けない（production は 8.4 だけで、8.4 の server・mysqldump 8.4.13 は旧形式を
   使わない。旧形式だけの dump は起点を取れずに backup が失敗する = fail-closed）。復元前の GTID・binlog のリセットは `RESET BINARY LOGS AND GTIDS`（8.4 で `RESET MASTER` は削除）。
-  `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外し、preflight は
-  記録だけに使う。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
+  `binlog_format` は 8.4 で非推奨（既定の ROW だけを使う）のため、integration の server 起動 option から外した。preflight は
+  変数があり ROW でなければ exit 12 で止まる（変数そのものが無い版では判定しない。RB-W P3-6）。`SHOW MASTER STATUS` などの 8.4 で削除された構文は使わない（`tests/script-contract-test.sh` が本番 script と
   integration を走査する）。mysqldump 8.4.13 が `--source-data=2` で 8.4 の server に発行する構文（`SHOW BINARY LOG STATUS`
   の想定）と、その出力の形式は CI（実 MySQL 8.4.13 の integration）で確認する（未取得）。
   preflight の server の変数は `SHOW GLOBAL VARIABLES` で 1 つずつ有無を見て、無い変数は名前を挙げて失敗する。
@@ -311,13 +311,16 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
 ./validate-restore.sh --plan <plan-id> --uploads-dir <staging> --smoke <script>
 # uploads: 検証した staging を新しい版として本番の uploads の根へ複製する（今の版と pointer は変えない）
 ./uploads-cutover.sh stage --from <staging> --root <uploads の根> --version <新しい版>
-./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
-# uploads: app の停止中に pointer を 1 回の rename で切り替える（DB の cutover と同じ change の中）
+# ここから先は app と scheduler を止めてから。順序の正本は runbooks/restore-cutover.md §4.5.1
+# uploads: pointer を 1 回の rename で切り替え、status で確かめる（cutover.sh の前）
 ./uploads-cutover.sh switch --root <uploads の根> --to <新しい版> --expect <今の版>
-# rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）
+./uploads-cutover.sh status --root <uploads の根>
+# DB: read-only smoke は新しい DB と新しい版の組合せで行われる
+./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
+# rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）は、逆向きの switch と必ず対で行う
 ./rollback-cutover.sh --plan <plan-id>
-# uploads の rollback: 逆向きの switch（switch が出力した rollback= の command）
 ./uploads-cutover.sh switch --root <uploads の根> --to <旧版> --expect <新しい版>
+# app と scheduler を起動する前に、DB（CUTOVER_STATE_FILE の state・plan_id）と pointer（status）の対を確かめる
 ```
 
 ### uploads の版の切替え（`uploads-cutover.sh`。RB-W 追加修正 C）
@@ -335,10 +338,15 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
   残った一時 directory を確かめる（読むだけ）。
 - **実行する主体**: restore 主体（uploads の access point を app と同じ uid で読み書きで mount する。backup の container は
   `:ro` のため実行できない）。umask 077 のため新しい directory は 0700 になるが、app と同じ uid のため読み書きできる。
-- **残る窓**: stage の直前の確認と rename の間に、同じ名前の空の directory か symlink を作られると rename がそれを置き換える
-  （中身のある directory・file なら rename は失敗する）。switch の `--expect` の確認と rename の間に別の主体が pointer を
-  変えると後の rename が勝つ。どちらも同じ change の中で 1 名が実行する前提で受け入れ、切替え後に `status` で確かめる。
-- 手順の順序（DB の cutover と uploads の switch をどこで行い、どう確かめるか）は deploy-runbook（RB-DEPLOY）が書く。
+- **残る窓**: stage の直前の確認と rename の間に、同じ名前の空の directory を作られると rename がそれを置き換える
+  （directory の rename は、宛先が中身のある directory なら ENOTEMPTY、file・symlink なら ENOTDIR で失敗する）。switch の
+  `--expect` の確認と rename の間に別の主体が pointer を変えると後の rename が勝つ。どちらも同じ change の中で 1 名が
+  実行する前提で受け入れ、切替え後に `status` で確かめる。
+- **順序**: DB の cutover・rollback と uploads の switch の順序、app・scheduler の停止、起動前の DB と pointer の対の確認は
+  `runbooks/restore-cutover.md` §4.5.1 を正本とする（deploy-runbook §1.6 の11 (f) もそこを引く）。switch は `cutover.sh` の前、
+  rollback は `rollback-cutover.sh` と逆向きの switch を対で行い、`write-enabled` の後は uploads も戻さない。
+- **旧版と残りの削除**: `uploads-cutover.sh` は何も消さない。旧版の directory（`v<n>`）と `.stage-*`・`.<pointer>.switch-*` の
+  削除は人手の物理削除で、deploy-runbook §4.4 の D15 の手順（保持・hold・DSAR の扱い）に従う。
 
 `validate-restore.sh` は、従来の項目に加えて次を満たさなければ `READY_FOR_CUTOVER` を返さない:
 
@@ -456,6 +464,9 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   作れる環境が要る。Linux（tool image）ではそのまま動き、Git for Windows では `MSYS=winsymlinks:sys` を設定して実行する
   （設定しないと `ln -s` が複製を作り、`ln -s ..` は親を再帰的に複製して終わらない。そのため両 suite は最初に
   `require_symlink_capable_environment`（`tests/lib/test-framework.sh`）で確かめ、満たさなければ以降の case を実行せずに失敗する）。
+  `quiesce-lock-test.sh`・`full-backup-test.sh`・`binlog-checkpoint-test.sh`・`preflight-test.sh` も uploads の fixture に
+  `ln -s v0 current` を使うため symlink が要る（この 4 つは前提を確かめず、symlink を作れない環境では pointer の解決の失敗として
+  落ちる。止まりはしない。jq も要るため、通常は tool image の中で動かす）。
 
 ### integration の作業ディレクトリ（既定 WORK）の扱い
 
