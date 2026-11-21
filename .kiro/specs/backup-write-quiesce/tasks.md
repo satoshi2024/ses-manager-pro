@@ -217,6 +217,9 @@
   - **失敗/rollback:** 定期の job から停止確認が選べる経路が 1 つでも残れば完了にしない。
 
 - [ ] **BWQ-011 — provider と app の protocol の MySQL 契約試験**
+  - **状態:** 試験を書き、fast の棚卸し（`MySqlTestShardInventoryTest` 等）は通過（第 2 段階 2d）。`BackupQuiesceProviderContractMySqlTest`（mysql shard 3）の実行と Demo（試験の log）は Runner 待ち。
+
+  - **実装の記録（第 2 段階 2d）:** provider の SQL は shell の `quiesce_db::run_sql` と同じ形（前置きの `SET SESSION time_zone = '+00:00'`・`innodb_lock_wait_timeout = 5`・型を検査した `SET @p_…`、行全体の注釈を除き行末の `;` で分けた文）で、README「source 側の account の権限」と同じ権限だけの `bq_backup` で実行する。静止応答は実の `BackupQuiesceResponder`（`bq_app`。session の time_zone `+09:00`）。表を作る前の表単位の GRANT の結果（§19）は試験の log に記録する（判定はしない）。観測した接続元の照合は shell と同じ規則の `foreignHosts`。停止の後の STOPPED は `BackupQuiesceLifecycleAnchor.writeStopped`（業務の pool を閉じた後の書込み）を直接呼んで模す。
 
   - **依存:** BWQ-003、BWQ-009、BWQ-010
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-007、BWQ-RQ-012、BWQ-RQ-014
