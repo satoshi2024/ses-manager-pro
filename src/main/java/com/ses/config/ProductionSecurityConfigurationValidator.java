@@ -35,7 +35,7 @@ import java.net.URISyntaxException;
 @Component
 @Profile("prod")
 @RequiredArgsConstructor
-public class ProductionSecurityConfigurationValidator implements ApplicationRunner {
+public class ProductionSecurityConfigurationValidator implements ApplicationRunner, AdministratorStartupConditions {
 
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(ProductionSecurityConfigurationValidator.class);
@@ -57,6 +57,9 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
      * break-glass username以外でOIDCでログインできる管理者がこの人数以上必要。
      */
     static final int MIN_OIDC_ADMINISTRATORS = 3;
+
+    /** break-glass管理者usernameの件数（ちょうどこの件数を要求する）。 */
+    static final int BREAK_GLASS_ADMINISTRATORS = 2;
 
     /** Gemini APIの許可ホスト（GeminiTextServiceImplと同一のallowlist） */
     private static final Set<String> ALLOWED_AI_HOSTS = Set.of("generativelanguage.googleapis.com");
@@ -165,6 +168,25 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     }
 
     /**
+     * 管理者の継続性guard（{@code AdministratorContinuityGuard}。RB-ADMIN-GUARD）向け: {@link #validate} と同じ分岐・
+     * 同じ照会で、OIDCでログインできる管理者とbreak-glass管理者の条件を判定する。bootstrap中は {@link #validate} と同じく
+     * どちらも判定しない。DBへは書かず、bootstrapの再開（{@code completePendingReopen}）も進めない。
+     */
+    @Override
+    public List<AdministratorConditionCheck> checkAdministratorConditions() {
+        if (productionBootstrapMode != null && productionBootstrapMode.isActive()) {
+            return List.of(
+                    AdministratorConditionCheck.notEvaluated(AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS,
+                            MIN_OIDC_ADMINISTRATORS),
+                    AdministratorConditionCheck.notEvaluated(
+                            AdministratorConditionCheck.Condition.BREAK_GLASS_ADMINISTRATORS,
+                            BREAK_GLASS_ADMINISTRATORS));
+        }
+        List<String> errors = new ArrayList<>();
+        return List.of(validateOidcAdministrators(errors), validateBreakGlassUsers(errors));
+    }
+
+    /**
      * bootstrapを無効にした起動で完全な検査が通った時点を、初回bootstrapの完了として記録する（冪等）。
      * 記録できなければ起動を拒否する。理由: 記録が無いままだと、本番稼働後のbootstrap再開（承認不要のbreak-glassに等しい）が
      * 承認ticketも監査も無く行えてしまい、しかも誰も気づけない。書込は初回だけで、以後の起動は1回の参照で済む。
@@ -189,22 +211,24 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
      * 「OIDCでログインできる」は {@code OidcLoginUserService} のDB側の照合条件（設定tenant・issuerの有効なOIDC providerに
      * 対するAPPROVEDの外部identity linkを持つ、有効な管理者）で判定する。IdP側のaccount状態やMFA assuranceは起動時に
      * 確認できないため見ない（必要条件の検査）。break-glass usernameはOIDC sessionが失効させられるため数えない。
+     * 結果は管理者の継続性guardも使う（{@link #checkAdministratorConditions}）。
      */
-    private void validateOidcAdministrators(List<String> errors) {
+    private AdministratorConditionCheck validateOidcAdministrators(List<String> errors) {
+        AdministratorConditionCheck.Condition condition = AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS;
         String tenantId = trimmed(oidcProperties.getTenantId());
         String issuer = trimmed(oidcProperties.getIssuerUri());
         if (tenantId == null || issuer == null) {
             // tenant-id・issuer-uriの未設定は別の検査でエラーにしている
-            return;
+            return AdministratorConditionCheck.notEvaluated(condition, MIN_OIDC_ADMINISTRATORS);
         }
         if (identityProviderMapper == null || userExternalIdentityMapper == null) {
             errors.add("OIDCでログインできる管理者の人数を確認できません");
-            return;
+            return AdministratorConditionCheck.unverifiable(condition, MIN_OIDC_ADMINISTRATORS);
         }
         com.ses.entity.IdentityProvider provider = identityProviderMapper.selectEnabledByTenantAndIssuer(tenantId, issuer);
         if (provider == null || provider.getId() == null || !OIDC_PROVIDER_TYPE.equalsIgnoreCase(provider.getProviderType())) {
             errors.add("設定tenant・issuerの有効なOIDC providerが登録されていません（m_identity_provider）");
-            return;
+            return AdministratorConditionCheck.evaluated(condition, 0, MIN_OIDC_ADMINISTRATORS, false);
         }
         List<String> linked = userExternalIdentityMapper.selectApprovedActiveUsernamesByRole(
                 tenantId, provider.getId(), ADMIN_ROLE);
@@ -213,10 +237,13 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             linked.stream().filter(StringUtils::hasText).map(String::trim).forEach(administrators::add);
         }
         administrators.removeAll(normalizedUsernames(oidcProperties.getBreakGlassUsernames()));
-        if (administrators.size() < MIN_OIDC_ADMINISTRATORS) {
+        boolean satisfied = administrators.size() >= MIN_OIDC_ADMINISTRATORS;
+        if (!satisfied) {
             errors.add("OIDCでログインできる有効な管理者（break-glass username以外）が" + MIN_OIDC_ADMINISTRATORS
                     + "名以上必要です（break-glass incidentの起票1名・承認2名。現在" + administrators.size() + "名）");
         }
+        return AdministratorConditionCheck.evaluated(condition, administrators.size(), MIN_OIDC_ADMINISTRATORS,
+                satisfied);
     }
 
     private static String trimmed(String value) {
@@ -329,12 +356,18 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         }
     }
 
-    private void validateBreakGlassUsers(List<String> errors) {
+    /**
+     * break-glass管理者の検査（完全な検査だけ）。条件を満たすbreak-glass管理者の人数を返す（管理者の継続性guardも使う。
+     * {@link #checkAdministratorConditions}）。満たすのは、ちょうど2件で、2件とも以下の検査を全て通る場合だけ。
+     */
+    private AdministratorConditionCheck validateBreakGlassUsers(List<String> errors) {
+        AdministratorConditionCheck.Condition condition = AdministratorConditionCheck.Condition.BREAK_GLASS_ADMINISTRATORS;
         Set<String> usernames = normalizedUsernames(oidcProperties.getBreakGlassUsernames());
-        if (usernames.size() != 2) {
+        if (usernames.size() != BREAK_GLASS_ADMINISTRATORS) {
             errors.add("有効なbreak-glass管理者usernameをちょうど2件設定してください");
-            return;
+            return AdministratorConditionCheck.evaluated(condition, 0, BREAK_GLASS_ADMINISTRATORS, false);
         }
+        int valid = 0;
         String tenantId = StringUtils.hasText(oidcProperties.getTenantId())
                 ? oidcProperties.getTenantId().trim() : "default";
         for (String username : usernames) {
@@ -355,8 +388,12 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             }
             if (userMfaMapper.countEnrolled(tenantId, user.getId()) != 1) {
                 errors.add("break-glass usernameはMFA enrollment完了済みでなければなりません: " + username);
+                continue;
             }
+            valid++;
         }
+        return AdministratorConditionCheck.evaluated(condition, valid, BREAK_GLASS_ADMINISTRATORS,
+                valid == BREAK_GLASS_ADMINISTRATORS);
     }
 
     private void validateOidcMetadata(List<String> errors) {

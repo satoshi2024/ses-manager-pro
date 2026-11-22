@@ -237,8 +237,13 @@
                     <runOrder>random</runOrder>
                     <!-- タイムゾーン/ロケール/文字コードを本番設定(application.ymlのAsia/Tokyo・日本語)へ固定する。
                          未固定だとローカル(JST・ja_JP・環境依存のfile.encoding)とCI(UTC・en_US)で
-                         日付境界やメッセージ解決が食い違う。@{jacocoArgLine}はカバレッジ計測用エージェント。 -->
-                    <argLine>@{jacocoArgLine} -Duser.timezone=Asia/Tokyo -Duser.language=ja -Duser.country=JP -Dfile.encoding=UTF-8</argLine>
+                         日付境界やメッセージ解決が食い違う。@{jacocoArgLine}はカバレッジ計測用エージェント。
+                         -XX:MaxRAMPercentage=40: fork の heap の上限を物理 memory の 40%（JVM の既定は 25%）にする。
+                         fast の suite は Spring の試験 context を最大 32 個（既定の cache）持ち、1つが 100MB を超えるため、
+                         CI（16GB、既定の上限は約 4GB）で実行順（random）によって Java heap space で落ちた
+                         （main 1f8f2a0c の run 44986074160、PR #130 の run 45028127894）。割合で指定し、memory の小さい
+                         手元の機械でも物理 memory を超えて取らない。 -->
+                    <argLine>@{jacocoArgLine} -XX:MaxRAMPercentage=40 -Duser.timezone=Asia/Tokyo -Duser.language=ja -Duser.country=JP -Dfile.encoding=UTF-8</argLine>
                     <systemPropertyVariables>
                         <api.version>1.40</api.version>
                         <junit.jupiter.execution.parallel.enabled>${junit.parallel.enabled}</junit.jupiter.execution.parallel.enabled>

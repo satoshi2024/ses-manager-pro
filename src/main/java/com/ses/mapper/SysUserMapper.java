@@ -48,6 +48,18 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     SysUser selectByIdForUpdate(@Param("id") Long id);
 
     /**
+     * 管理者の継続性guard（{@code AdministratorContinuityGuard}。RB-ADMIN-GUARD）のlock対象の発見（lockは取らない）:
+     * 全tenantの未削除の管理者と、変更対象の利用者の {@code id}・{@code tenant_id}。起動時検査のOIDC管理者の人数は
+     * {@code sys_user.tenant_id} を見ないため、tenantで絞らない。
+     */
+    @Select("<script>SELECT id, tenant_id FROM sys_user WHERE (role = #{adminRole} AND deleted_flag = 0)"
+            + "<if test='targetIds != null and targetIds.size() > 0'> OR id IN "
+            + "<foreach collection='targetIds' item='targetId' open='(' separator=',' close=')'>#{targetId}</foreach>"
+            + "</if></script>")
+    List<SysUser> selectAdministratorContinuityLockTargets(@Param("adminRole") String adminRole,
+                                                          @Param("targetIds") Collection<Long> targetIds);
+
+    /**
      * NF01 lock rank 3 の利用者行X lock（細粒度epoch計画 §3.4「所属writer（release・closeAssignmentsForUser）」）。
      * 論理削除済みの行も返す（利用者削除は論理削除の後に所属を閉じるため、削除済みの行もlockしてからactor epochを進める）。
      */

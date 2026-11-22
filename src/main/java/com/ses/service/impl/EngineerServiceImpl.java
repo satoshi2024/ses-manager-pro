@@ -16,6 +16,7 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.AdministratorContinuityGuard;
 import com.ses.service.security.ScopeChangeInvalidator;
 import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.security.epoch.ActorEpochAnchors;
@@ -69,6 +70,14 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    /** 管理者の継続性guard（RB-ADMIN-GUARD。本番だけ判定する）。手動構築のテストでは未配線で、判定しない。 */
+    private AdministratorContinuityGuard administratorContinuityGuard;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAdministratorContinuityGuard(AdministratorContinuityGuard administratorContinuityGuard) {
+        this.administratorContinuityGuard = administratorContinuityGuard;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
@@ -158,8 +167,17 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         return removed;
     }
 
-    /** 連携ユーザーの status列だけを0にし、変化した時だけactor epochを進める（lock済みの行を使う）。 */
+    /**
+     * 連携ユーザーの status列だけを0にし、変化した時だけactor epochを進める（lock済みの行を使う）。
+     *
+     * <p>RB-ADMIN-GUARD: 連携ユーザーは要員roleでしか紐付けられないが、後から管理者へrole変更された口座を無効化すると
+     * 本番の起動時検査（OIDC管理者・break-glass・privacy-admin）を割り得る。本番では、lock済みの連携ユーザーの行のまま
+     * （NF01のlock計画を変えずに）変更の前後で起動時条件を判定し、割るなら要員の削除ごと拒否する。</p>
+     */
     private void disableLinkedUser(SysUser lockedUser, String tenantId) {
+        AdministratorContinuityGuard.Snapshot continuity = administratorContinuityGuard == null
+                ? AdministratorContinuityGuard.Snapshot.inactive()
+                : administratorContinuityGuard.captureLocked("ENGINEER_DELETE", lockedUser.getId());
         int updated = sysUserMapper.update(null, new UpdateWrapper<SysUser>()
                 .eq("id", lockedUser.getId())
                 .eq("tenant_id", tenantId)
@@ -168,6 +186,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(lockedUser), lockedUser.getStatus(), 0);
+        if (administratorContinuityGuard != null) {
+            administratorContinuityGuard.verify(continuity);
+        }
         if (persistentSessionService != null) {
             persistentSessionService.revokeAllForUser(lockedUser.getId(), "ENGINEER_DELETED");
         }

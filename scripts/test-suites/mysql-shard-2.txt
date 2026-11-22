@@ -40,3 +40,4 @@ PrivacyHoldReleaseMySqlTest
 PrivacyPolicyRegistrationMySqlTest
 SkillSheetConfirmFirstAttemptMySqlTest
 FlywayDevProfileFreshInstallMySqlTest
+AdministratorContinuityGuardMySqlTest

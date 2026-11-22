@@ -1,5 +1,7 @@
 package com.ses.privacy.production;
 
+import com.ses.config.AdministratorConditionCheck;
+import com.ses.config.AdministratorStartupConditions;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.IdentityProvider;
 import com.ses.mapper.IdentityProviderMapper;
@@ -59,7 +61,8 @@ import java.util.TreeSet;
  */
 @Component
 @Profile("prod")
-public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton {
+public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton,
+        AdministratorStartupConditions {
 
     private static final Logger log = LoggerFactory.getLogger(PrivacyProductionConfigurationValidator.class);
 
@@ -68,6 +71,9 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
 
     /** 時間要因で NF07 を OFF として扱ったまま起動したことを示す固定コード（監視のlog検索用）。 */
     public static final String LOG_CODE_STOPPED = "NF07_PRIVACY_STOPPED_AT_STARTUP";
+
+    /** privacy-admin の所属者を照会できなかったことを示す違反コード（起動を止める。guard へは照会失敗として伝える）。 */
+    private static final String UNVERIFIABLE_PRIVACY_ADMINS = "privacyAdmins.unverifiable";
 
     private static final String ADMIN_ROLE = "管理者";
     private static final String OIDC_PROVIDER_TYPE = "OIDC";
@@ -167,6 +173,27 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
     }
 
     /**
+     * 管理者の継続性guard（{@code AdministratorContinuityGuard}。RB-ADMIN-GUARD）向け: {@link #validate} と同じ照会
+     * （{@code validatePrivacyAdministrators}）で privacy-admin の有効な管理者を数える。NF07 の flag の ON/OFF に関わらず
+     * 判定する（OFF の間に人数を割ると、ON にする起動がこの検査で止まるため）。provider が無い場合は {@link #validate} と
+     * 同じく満たさない扱いにする。照会に失敗した場合（{@code validatePrivacyAdministrators} が例外を握って
+     * {@code privacyAdmins.unverifiable} にする場合）は、人数を比べられないことを guard へ伝えるため
+     * {@link AdministratorConditionCheck#unverifiable} で返す（guard は拒否する。{@link #validate} の扱いは変えない）。
+     * DB へは書かない。
+     */
+    @Override
+    public List<AdministratorConditionCheck> checkAdministratorConditions() {
+        List<String> missing = new ArrayList<>();
+        int administrators = validatePrivacyAdministrators(authorizationTenantId(), missing);
+        AdministratorConditionCheck.Condition condition = AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS;
+        if (missing.contains(UNVERIFIABLE_PRIVACY_ADMINS)) {
+            return List.of(AdministratorConditionCheck.unverifiable(condition, MIN_PRIVACY_ADMINISTRATORS));
+        }
+        return List.of(AdministratorConditionCheck.evaluated(condition, administrators, MIN_PRIVACY_ADMINISTRATORS,
+                missing.isEmpty()));
+    }
+
+    /**
      * DSAR を ON にする追加の前提（§5.1 の表。NF07-A2b）。D-06 の決定ID（本人確認基準・期限規則・package の最長保存期間の根拠）は
      * {@link PrivacyDecisionBinding#requiredDecisions} が DSAR に要求し、欠落・placeholder・digest 不一致は {@code decisionBinding.*}
      * として既に数える。ここでは決定書に従って設定する値と F2 provider の登録を確かめる。
@@ -230,11 +257,11 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
                     tenantId, ADMIN_ROLE, identityTenantId, provider.getId());
         } catch (RuntimeException e) {
             log.error("[privacy] privacy-adminの所属者を照会できません", e);
-            missing.add("privacyAdmins.unverifiable");
+            missing.add(UNVERIFIABLE_PRIVACY_ADMINS);
             return -1;
         }
         if (usernames == null) {
-            missing.add("privacyAdmins.unverifiable");
+            missing.add(UNVERIFIABLE_PRIVACY_ADMINS);
             return -1;
         }
         // break-glass username は incident 外の OIDC session が失効させられ、break-glass session では privacy が

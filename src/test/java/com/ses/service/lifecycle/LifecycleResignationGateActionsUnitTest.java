@@ -102,6 +102,41 @@ class LifecycleResignationGateActionsUnitTest {
         order.verify(portalSessionService).revokeAllForUser(eq(301L), anyString());
     }
 
+    /**
+     * RB-ADMIN-GUARD: 連携ユーザー（後から管理者へrole変更された口座）の停止は、案件完了のplanでlock済みの行のまま
+     * （追加のlockを取らずに）管理者の継続性guardへ変更の前後を渡し、拒否なら所属の終了・session失効より前に止める。
+     */
+    @Test
+    void 連携ユーザーの停止は追加のlockを取らずに継続性guardで判定し拒否なら後続の自動処理より前に止める() {
+        com.ses.service.security.AdministratorContinuityGuard guard =
+                org.mockito.Mockito.mock(com.ses.service.security.AdministratorContinuityGuard.class);
+        com.ses.service.security.AdministratorContinuityGuard.Snapshot snapshot =
+                new com.ses.service.security.AdministratorContinuityGuard.Snapshot("RESIGNATION_COMPLETE",
+                        List.of(USER_ID), List.of(), true);
+        when(guard.captureLocked("RESIGNATION_COMPLETE", USER_ID)).thenReturn(snapshot);
+        org.mockito.Mockito.doThrow(BusinessException.of(400, "error.user.adminContinuity.oidcAdministrators", 2, 3))
+                .when(guard).verify(snapshot);
+        checker.setAdministratorContinuityGuard(guard);
+        SysUser promoted = activeUser(null);
+        promoted.setRole("管理者");
+        linkedUser(promoted);
+        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> checker.executeAutomaticGateActions(resignationCase(), engineer()));
+
+        assertEquals("error.user.adminContinuity.oidcAdministrators", ex.getMessageKey());
+        InOrder order = inOrder(sysUserMapper, guard, authorizationEpochFence);
+        order.verify(sysUserMapper).selectByIdAndTenantForUpdate(USER_ID, TENANT);
+        order.verify(guard).captureLocked("RESIGNATION_COMPLETE", USER_ID);
+        order.verify(sysUserMapper).update(isNull(), any());
+        order.verify(authorizationEpochFence).advanceIfChanged(AuthorizationEpochAnchor.actor(TENANT, USER_ID), 1, 0);
+        order.verify(guard).verify(snapshot);
+        verify(guard, never()).lockAndCapture(any(), any());
+        verifyNoInteractions(organizationService, engineerAccountLinkService, persistentSessionService,
+                portalSessionService);
+    }
+
     @Test
     void scope側の自動処理はsessionを失効させず対象だけを返し既に無効な連携ユーザーではactor_epochを停止で進めない() {
         SysUser disabled = activeUser(null);

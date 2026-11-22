@@ -144,12 +144,15 @@ quiesce_db::param_line() { # <型>:<名前>=<値>
 }
 
 # providers/quiesce-db.d/<名前>.sql を実行し、結果（tab 区切り）を標準出力へ出す。標準エラーは redact して（password の値と
-# `password=` 等の形を伏せ、400 文字までにして）QDB_SQL_ERROR に入れる。QDB_SQL_ERROR は呼んだ shell にだけ残る（command
-# substitution の中で呼ぶと親には届かない。2d review P2-1）ため、provider・preflight・保持 process は quiesce_db::query で呼ぶ。
+# `password=` 等の形を伏せ、400 文字までにして）QDB_SQL_ERROR に入れる。400 文字に切る前の redact した文は QDB_SQL_ERROR_FULL に
+# 入れる（preflight は接続の識別子を伏せてから切るため。切ってから伏せると、切れ目で分かれた host 等の一部が残る。RB-QUIESCE
+# 最終 review の残余 1）。どちらも呼んだ shell にだけ残る（command substitution の中で呼ぶと親には届かない。2d review P2-1）
+# ため、provider・preflight・保持 process は quiesce_db::query で呼ぶ。
 quiesce_db::run_sql() { # <名前> [<型>:<名前>=<値>...]
   local name=$1 file sqlin errf rc=0 p line prefix=""
   shift
   QDB_SQL_ERROR=""
+  QDB_SQL_ERROR_FULL=""
   [[ "$name" =~ ^[a-z][a-z0-9-]{0,40}$ ]] || { quiesce_db::log "SQL の名前が不正です: $name"; return 2; }
   file="$QUIESCE_DB_SQL_DIR/$name.sql"
   [[ -f "$file" ]] || { quiesce_db::log "SQL の file がありません: $file"; return 2; }
@@ -169,14 +172,16 @@ quiesce_db::run_sql() { # <名前> [<型>:<名前>=<値>...]
   "$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" --connect-timeout=10 -N -B \
     "$MYSQL_DATABASE" < "$sqlin" 2> "$errf" || rc=$?
   if [[ -s "$errf" ]]; then
-    QDB_SQL_ERROR=$(quiesce_db::redacted_error "$errf")
+    QDB_SQL_ERROR_FULL=$(quiesce_db::redacted_error "$errf")
+    # 400 文字に切るのは伏せた後（伏せる前に切ると値の一部が残り得るため）
+    QDB_SQL_ERROR=${QDB_SQL_ERROR_FULL:0:400}
   fi
   rm -f "$sqlin" "$errf"
   return "$rc"
 }
 
-# mysql の標準エラーの file を 1 行にし、password の値（MYSQL_PASSWORD_FILE の内容）と `password=`・`secret:` 等の形を伏せ、
-# 伏せた後に 400 文字までにする（伏せる前に切ると値の一部が残り得るため）
+# mysql の標準エラーの file を 1 行にし、password の値（MYSQL_PASSWORD_FILE の内容）と `password=`・`secret:` 等の形を伏せる。
+# 文字数は切らない（切るのは呼出し側で、必ず伏せた後に切る）
 quiesce_db::redacted_error() { # <file>
   local text pw=""
   text=$(tr '\n\r\t' '   ' < "$1" 2>/dev/null || true)
@@ -185,16 +190,18 @@ quiesce_db::redacted_error() { # <file>
   fi
   [[ -n "$pw" ]] && text=${text//"$pw"/<redacted>}
   text=$(common::redact <<< "$text")
-  printf '%s\n' "${text:0:400}"
+  printf '%s\n' "$text"
 }
 
-# run_sql を呼んだ shell の中で実行し（subshell にしない）、結果を <変数名> に、redact した標準エラーを QDB_SQL_ERROR に入れる。
+# run_sql を呼んだ shell の中で実行し（subshell にしない）、結果を <変数名> に、redact した標準エラーを QDB_SQL_ERROR
+# （400 文字まで）と QDB_SQL_ERROR_FULL（切る前）に入れる。
 # 結果は command substitution と同じく末尾の改行を除く。終了コードは run_sql のもの。<変数名> は呼出し側で local にしておく。
 quiesce_db::query() { # <変数名> <名前> [<型>:<名前>=<値>...]
   local __qdb_var=$1 __qdb_out __qdb_val __qdb_rc=0
   shift
   [[ "$__qdb_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { quiesce_db::log "結果の変数名が不正です: $__qdb_var"; return 2; }
   QDB_SQL_ERROR=""
+  QDB_SQL_ERROR_FULL=""
   __qdb_out=$(mktemp "${TMPDIR:-/tmp}/ses-quiesce-db-out.XXXXXX") || { QDB_SQL_ERROR="結果の一時 file を作れません"; return 2; }
   quiesce_db::run_sql "$@" > "$__qdb_out" || __qdb_rc=$?
   __qdb_val=$(cat "$__qdb_out" 2>/dev/null || true)

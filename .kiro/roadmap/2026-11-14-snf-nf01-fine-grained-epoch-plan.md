@@ -212,7 +212,7 @@ SELECT id, tenant_id, deleted_flag, organization_id, engineer_scope_epoch
 | waiveTask（承認経由） | 2 X → 4 X → 5 X | task generation |
 | 変更申請の承認（profile） | 2 X → 3 X{連携ユーザー、email列だけ} → 7 X{要員} → 11 | engineer（会計履歴・組織が変わった時） |
 | role menu・認可config | 1 X → 葉 | global |
-| 利用者の更新・状態・削除・権限割当 | 3 X{利用者} →（所属を閉じる場合）7 X{連携要員} → 8 X → 葉 | actor（＋engineer） |
+| 利用者の更新・状態・削除・権限割当 | 3 X{利用者}（本番は 3 X{全tenantの未削除の管理者 ∪ 利用者}、(tenant_id, id) 昇順。RB-ADMIN-GUARD。作成は insert の前に 3 X{全tenantの未削除の管理者}）→（所属を閉じる場合）7 X{連携要員} → 8 X → 葉 | actor（＋engineer） |
 | 営業割当・account link | 3 S{営業ユーザー/連携ユーザー} → 7 X → 9 または 10 | engineer |
 | 要員の組織変更 | 7 X → 11 | engineer |
 | 所属writer（assign・transfer・update） | 3 X{本人} → 6 X{対象組織（旧・新）} → 7 X{本人の連携要員} → 8 X | actor（本人）、engineer（連携要員） |
@@ -230,6 +230,7 @@ SELECT id, tenant_id, deleted_flag, organization_id, engineer_scope_epoch
 - completeCase の順8は、連携ユーザー本人の所属行に加え、連携ユーザーを上長とする他人の所属行（上長解除の対象）も含める。順3の操作者Sと連携ユーザーXが同じIDの場合は 400 `error.lifecycle.selfResignationCompletion` で拒否する（業務規則の拒否。画面に案内を出すため403にしない）。lock前に通常読取で前提（状態・権限・阻害タスク・ゲート）を確かめて早期に拒否し、lock後に同じ判定をやり直す。planは `LifecycleCompletionLockPlanner` が列挙し、`LifecycleLockExecutor` で1回だけ取る。
 - 要員行を書く業務writerのうち、所属組織（`t_engineer.organization_id`）を書く更新（EngineerServiceImpl.updateWithStatusGuard・updateById）と休暇申請（LeaveServiceImpl.apply）は、外部キー検査の参照先の組織行を順7のXより前に順6のSで取る。
 - 担当変更（reassignTask）の新担当は順3のSで取る（ActorShareLock）。H2は `FOR SHARE` を解釈しないため、順3・順6の共有lockとexecutorのSHAREDは同じ行・同じ順の `FOR UPDATE` で代える（`SharedLockSupport`）。
+- RB-ADMIN-GUARD（本番の `prod` profile だけ。deploy-runbook §5.6）: 利用者の作成・更新・状態変更・削除と権限group割当は、管理者の継続性guard（`AdministratorContinuityGuard.lockAndCapture`）が、そのtransactionの最初のlockとして全tenantの未削除の管理者と対象の利用者の `sys_user` 行を (tenant_id, id) 昇順で1行ずつ順3のXに取る（対象の行のlockを兼ね、以降の `selectByIdForUpdate` は同じ行の再取得になる。作成は insert の前に管理者だけを取り、作成した行（最大のid）はその後になる）。lock後の再discoveryでlockしていない管理者が見つかれば、途中で足さず409で終える（§3.5 規則1）。これらのwriterは READ_COMMITTED で、guardは実際のtransactionの分離レベルを実行時に確かめる。利用者の作成・role変更から入れ子で呼ぶ権限group割当はlockを取り直さない。要員の削除と退社完了（RESIGNATION）は lock を足さず、lock済みの連携ユーザーの行のまま判定する（`captureLocked`。上表と §3.4 の completeCase の lock列は変わらない）。prod以外では lock を取らない。
 
 ### 3.5 共通規則
 

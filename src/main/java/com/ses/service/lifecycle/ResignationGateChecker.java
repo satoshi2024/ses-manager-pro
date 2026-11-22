@@ -50,6 +50,18 @@ public class ResignationGateChecker {
     private final AuthorizationEpochFence authorizationEpochFence;
 
     /**
+     * 管理者の継続性guard（RB-ADMIN-GUARD。本番だけ判定する）。手動構築・mock注入のテストでは未配線で、判定しない。
+     * 連携ユーザーは要員roleでしか紐付けられないが、後から管理者へrole変更された口座の停止で本番の起動時検査を割らせない。
+     */
+    private com.ses.service.security.AdministratorContinuityGuard administratorContinuityGuard;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAdministratorContinuityGuard(
+            com.ses.service.security.AdministratorContinuityGuard administratorContinuityGuard) {
+        this.administratorContinuityGuard = administratorContinuityGuard;
+    }
+
+    /**
      * 退社ゲートの全項目を検証する。
      */
     public ResignationGateResultDto evaluate(LifecycleCase lcCase, Engineer engineer) {
@@ -345,6 +357,11 @@ public class ResignationGateChecker {
             Long userId = link.getSysUserId();
             SysUser user = lockLinkedUserInTenant(userId, tenantId);
             if (user != null && (user.getStatus() == null || user.getStatus() != 0)) {
+                // RB-ADMIN-GUARD: 連携ユーザーの行は案件完了のplanでX lock済み。追加のlockを取らずに変更前の起動時条件を取る。
+                com.ses.service.security.AdministratorContinuityGuard.Snapshot continuity =
+                        administratorContinuityGuard == null
+                                ? com.ses.service.security.AdministratorContinuityGuard.Snapshot.inactive()
+                                : administratorContinuityGuard.captureLocked("RESIGNATION_COMPLETE", userId);
                 int updated = sysUserMapper.update(null, new UpdateWrapper<SysUser>()
                         .eq("id", userId)
                         .eq("tenant_id", tenantId)
@@ -355,6 +372,10 @@ public class ResignationGateChecker {
                 }
                 // statusは主体の有効性（述語(a)）を変えるため、lockした行のtenantでactor epochを進める（計画 §2.2）。
                 authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(user), user.getStatus(), 0);
+                // 管理者へrole変更された連携ユーザーの停止で起動時条件を割るなら、案件の完了ごと拒否する。
+                if (administratorContinuityGuard != null) {
+                    administratorContinuityGuard.verify(continuity);
+                }
                 log.info("Deactivated user {} due to resignation case completion", userId);
             }
 

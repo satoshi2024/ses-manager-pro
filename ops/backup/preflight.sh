@@ -120,8 +120,9 @@ preflight::quiesce_grants_ok() { # <結果> <DB 名>
   return 1
 }
 
-# SQL の失敗の文（quiesce_db::run_sql が password を伏せたもの）から、出力 JSON に入れない接続の識別子を伏せる
-# （`'user'@'host'` の形と、MYSQL_HOST・MYSQL_DATABASE・MYSQL_USER の値。3 文字未満の値は文を壊すため伏せない）。
+# SQL の失敗の文（quiesce_db::run_sql が password を伏せたもの。400 文字に切る前の文）から、出力 JSON に入れない接続の識別子を
+# 伏せ、伏せた後に 400 文字までにする（`'user'@'host'` の形と、MYSQL_HOST・MYSQL_DATABASE・MYSQL_USER の値。3 文字未満の値は
+# 文を壊すため伏せない）。切ってから伏せると、切れ目で分かれた host・IP・DB 名の前半が残る（RB-QUIESCE 最終 review の残余 1）。
 # 値は前後が識別子の文字（英数字・_・$）でない所だけを伏せ、表の名前の一部（例: user が backup のときの
 # sys_backup_quiesce_instance）は変えない（最終 review P3-4）
 preflight::sanitize_sql_error() { # <文>
@@ -131,7 +132,7 @@ preflight::sanitize_sql_error() { # <文>
   t=$(preflight::mask_token "$t" "${MYSQL_HOST:-}" '<host>')
   t=$(preflight::mask_token "$t" "${MYSQL_DATABASE:-}" '<db>')
   t=$(preflight::mask_token "$t" "${MYSQL_USER:-}" '<user>')
-  printf '%s\n' "$t"
+  printf '%s\n' "${t:0:400}"
 }
 
 # <文> の中の <値> を、前後が識別子の文字（英数字・_・$）でない所だけ <置換> にする（値の正規表現の特殊文字は逃がす）
@@ -150,7 +151,7 @@ preflight::mask_token() { # <文> <値> <置換>
 # 書込み静止の検査（RB-QUIESCE design.md §12.4。読むだけ。QUIESCE_PROVIDER が DB の provider の時だけ）。
 # 信号表の 3 表、要求の表への表単位の INSERT・UPDATE、停止口の行が無いこと、新しい instance の protocol の版と閾値の式。
 preflight::check_quiesce() {
-  local out rc=0 n errf sqlerr=""
+  local out rc=0 n errf sqlerr="" rawerr
   QUIESCE_CHECK_STATUS=ok
   errf=$(mktemp "${TMPDIR:-/tmp}/ses-preflight-quiesce.XXXXXX")
   if ! quiesce_db::load_settings CHECKPOINT 2> "$errf"; then
@@ -163,9 +164,12 @@ preflight::check_quiesce() {
   quiesce_db::query out preflight "int:stale_seconds=$QDB_STALE" "int:dead_seconds=$QDB_DEAD" \
     "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION" "int:lease_seconds=$QDB_LEASE" "int:renew_seconds=$QDB_RENEW" \
     "int:full=0" 2>/dev/null || rc=$?
-  # SQL の失敗の文は password を伏せた上で、接続の識別子も伏せて理由に入れる（2d review P2-1・P3-4）
-  if [[ -n "${QDB_SQL_ERROR:-}" ]]; then
-    sqlerr=$(preflight::sanitize_sql_error "$QDB_SQL_ERROR")
+  # SQL の失敗の文は password を伏せた上で、接続の識別子も伏せて理由に入れる（2d review P2-1・P3-4）。伏せるのは 400 文字に
+  # 切る前の文（QDB_SQL_ERROR_FULL）で、切るのは伏せた後（最終 review の残余 1）。結果の一時 file を作れない時は
+  # QDB_SQL_ERROR だけに理由が入る
+  rawerr=${QDB_SQL_ERROR_FULL:-${QDB_SQL_ERROR:-}}
+  if [[ -n "$rawerr" ]]; then
+    sqlerr=$(preflight::sanitize_sql_error "$rawerr")
   fi
   n=$(quiesce_db::col "$out" TABLES 2 || true)
   QUIESCE_CHECK_TABLES=$n

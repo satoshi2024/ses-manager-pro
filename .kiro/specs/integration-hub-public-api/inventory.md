@@ -97,12 +97,12 @@ fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）
 
 | 境界 | 現行実装 | 行/契約 | NF-05への含意 |
 |---|---|---|---|
-| 内部管理chain | SecurityConfig.securityFilterChain | SecurityConfig.java:117 | form login、OIDC、内部role、CSRFを持つ。HTTP Basicは業務chainに無く、`GET /actuator/prometheus` 専用のchain（`@Order(2)`、STATELESS）だけが持つ（FINAL review §6.4 で訂正） |
-| 内部filter順 | MenuPermissionFilter → ApiAuditFilter → MfaEnforcementFilter → PersistentSessionFilter | SecurityConfig.java:120-126 | 新公開clientを内部Authenticationへ変換しない |
+| 内部管理chain | SecurityConfig.securityFilterChain | SecurityConfig.java（securityFilterChain） | form login、OIDC、内部role、CSRFを持つ。HTTP Basicは業務chainに無く、`GET /actuator/prometheus` 専用のchain（`@Order(2)`、STATELESS）だけが持つ（FINAL review §6.4 で訂正） |
+| 内部filter順 | MenuPermissionFilter → ApiAuditFilter → MfaEnforcementFilter → PersistentSessionFilter | SecurityConfig.securityFilterChainのaddFilterBefore・addFilterAfter | 新公開clientを内部Authenticationへ変換しない |
 | 内部認可 | ActionPermissionResolver + AuthorizationService + MenuPermissionFilter | MenuPermissionFilter.java:66-117 | menu/API actionの正本は内部向け。公開client scopeとは別モデルにする |
-| 内部audit | ApiAuditFilter | ApiAuditFilter.java:103-117 | /api/のPOST/PUT/DELETEとdownload中心。/external-api/は未カバー |
-| 内部CSRF | Cookie XSRF-TOKEN → X-XSRF-TOKEN | SecurityConfig.java:310-315 | 公開machine-to-machine chainはCSRF方式と署名認証の役割を分離して承認する |
-| 既存webhook例外 | /api/webhooks/** permitAll、CSRF ignore | SecurityConfig.java:130-145, 312-315 | 新公開APIやinbound全体をこの例外へ追加しない。digital invoice webhookと分離する |
+| 内部audit | ApiAuditFilter | ApiAuditFilter.isAuditTarget | /api/のPOST/PUT/DELETEとdownload中心。/external-api/は未カバー |
+| 内部CSRF | Cookie XSRF-TOKEN → X-XSRF-TOKEN | SecurityConfig.securityFilterChainのcsrf（csrfTokenRepository） | 公開machine-to-machine chainはCSRF方式と署名認証の役割を分離して承認する |
+| 既存webhook例外 | /api/webhooks/** permitAll、CSRF ignore | SecurityConfig.securityFilterChainのpermitAllの一覧と、csrfのignoringRequestMatchers | 新公開APIやinbound全体をこの例外へ追加しない。digital invoice webhookと分離する |
 | Portal chain | @Order(1)、securityMatcher /portal/** と /api/portal/** | PortalSecurityConfig.java:50-64 | portal principal、専用session、専用CSRF、専用rate limit。公開APIが再利用してはならない |
 | Portal認証 | PortalLoginUser + PortalSessionFilter | PortalSecurityConfig.java:31-40 | internal roleへ偽装しない既存パターンをclient principalにも適用 |
 | Portal rate filter | PortalRateLimitFilter | PortalRateLimitFilter.java:39-75 | endpoint種別ごとの既存判定を参考にするが、公開client/IP/rateは別設計 |
@@ -133,7 +133,7 @@ public-api=false、external-transport=false、provider.mode=MOCKのみとし、m
 configは起動拒否する。disabled時もdeny-only chainを残し、controller/worker/scheduler/transportを
 生成しない。LOOPBACKは127.0.0.1または[::1]のliteralとallow-list portだけで、connection直前の
 socket peerも検証する。
-| 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
+| 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfigのdisable*AutoRegistration（FilterRegistrationBean） | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
 
 F2実装証跡は専用packageとF2 testsに限定し、production enablementと実顧客/provider接続は未実施である。A1 controllerは`69f857d3`で独立Implementation Review PASS済み、B1 development/test transportとworkerは`971c17d7`で実装し、初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007を`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediate済み・独立再Review待ちである。
 

@@ -12,6 +12,7 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.SysUserService;
+import com.ses.service.security.AdministratorContinuityGuard;
 import com.ses.service.security.epoch.ActorEpochAnchors;
 import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
@@ -54,13 +55,30 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.PersistentSessionService>
             persistentSessionServiceProvider;
 
+    /**
+     * 管理者の継続性guard（RB-ADMIN-GUARD。本番だけ判定する）。手動構築のテストでは未配線で、判定しない。
+     * 本番の起動時検査（OIDC管理者・break-glass・privacy-admin）を満たさなくなる更新・状態変更・削除を拒否する。
+     */
+    private AdministratorContinuityGuard administratorContinuityGuard;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAdministratorContinuityGuard(AdministratorContinuityGuard administratorContinuityGuard) {
+        this.administratorContinuityGuard = administratorContinuityGuard;
+    }
+
+    /**
+     * 作成は管理者の人数を減らさないが、入れ子の権限group割当（rank 3 の利用者行の後に書く）より前に、guardの
+     * lock（全管理者の行、rank 3 の昇順）を取って lock順をほかの利用者writerと揃える（作成した行は最大のidになる）。
+     * そのためほかの利用者writerと同じく READ_COMMITTED にする。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void createUser(SysUser sysUser, Authentication authentication) {
         com.ses.common.util.EntityProtectUtil.protectForCreate(sysUser);
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw BusinessException.of("error.user.credentialsRequired");
         }
+        AdministratorContinuityGuard.Snapshot continuity = lockAdministratorContinuity("USER_CREATE", null);
         // NF01 F-1（計画 §11）: bodyのtenantIdは使わず、操作者のDB上のtenantで作成する。
         // 操作者を特定できなければtenantを推測せずに拒否する（既定tenantへ落とさない）。
         SysUser operator = currentUser(authentication);
@@ -85,13 +103,22 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         // 新規ユーザーもrole相当のdefault groupへ割当てる。割当が無いとlegacy fallback
         // 判定になり、group側で権限を編集しても効かないユーザーが増える（V64/V66のbackfillと同じ状態に保つ）。
         // 割当集合が空→既定groupへ変わるため、入れ子の割当置換が新規ユーザーのactor epochを1回進める。
+        // 入れ子の割当置換のguardは、同じtransactionのこのguardに任せる。
         permissionGroupManagementService.replaceAssignments(sysUser.getId(), java.util.Set.of(), authentication);
+        verifyAdministratorContinuity(continuity);
     }
 
+    /**
+     * role・username（break-glass管理者の照合に使う）・password等の更新。role変更は入れ子で権限groupを既定へ戻す
+     * （privacy-adminの所属も外れる）。管理者の継続性guardのlock（全管理者と対象の行の昇順）を最初に取るため、
+     * lock待ちの間にcommitされた変更をlock後の判定で見るよう READ_COMMITTED にする（E-3）。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void updateUser(Long id, SysUser sysUser, Authentication authentication) {
-        // E-2: 対象利用者行（actor anchor）を最初のDB文でX lockし、以降の判定はlock後の値で行う。
+        // RB-ADMIN-GUARD: 本番では全管理者と対象利用者の行を（tenant, id）昇順でX lockしてから変更前の起動時条件を取る。
+        AdministratorContinuityGuard.Snapshot continuity = lockAdministratorContinuity("USER_UPDATE", id);
+        // E-2: 対象利用者行（actor anchor）をX lockし（guardのlockを兼ねる）、以降の判定はlock後の値で行う。
         // role判定と更新を同一ユーザー行で直列化し、並行更新の古いrole判定も防ぐ。
         SysUser old = baseMapper.selectByIdForUpdate(id);
         if (old == null) {
@@ -149,6 +176,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             permissionGroupManagementService.replaceAssignments(id, java.util.Set.of(), authentication);
             invalidateScope();
         }
+        // role変更（入れ子の割当置換を含む）・username変更の後の状態で起動時条件を判定し、割るならtransactionごと拒否する。
+        verifyAdministratorContinuity(continuity);
     }
 
     @Override
@@ -158,7 +187,10 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw BusinessException.of(400, "error.user.invalidStatus");
         }
         guardNotSelf(id, authentication, "自分自身のステータスは変更できません");
-        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする。
+        // RB-ADMIN-GUARD: 本番では全管理者と対象利用者の行を（tenant, id）昇順でX lockしてから変更前の起動時条件を取る。
+        AdministratorContinuityGuard.Snapshot continuity = lockAdministratorContinuity("USER_STATUS", id);
+        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする
+        // （guardのlockを兼ねる）。
         SysUser old = baseMapper.selectByIdForUpdate(id);
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -173,6 +205,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw BusinessException.of(404, "error.scope.notFound");
         }
         authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(old), old.getStatus(), status);
+        // 無効化で起動時条件を割るなら、所属のcloseとsessionの失効の前に拒否する（transactionごとrollback）。
+        verifyAdministratorContinuity(continuity);
         if (status != 1) {
             closeOrganizationAssignments(id);
             revokeUserSessions(id, "USER_DISABLED");
@@ -183,7 +217,10 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void deleteUser(Long id, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身は削除できません");
-        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする。
+        // RB-ADMIN-GUARD: 本番では全管理者と対象利用者の行を（tenant, id）昇順でX lockしてから変更前の起動時条件を取る。
+        AdministratorContinuityGuard.Snapshot continuity = lockAdministratorContinuity("USER_DELETE", id);
+        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする
+        // （guardのlockを兼ねる）。
         SysUser old = baseMapper.selectByIdForUpdate(id);
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -200,6 +237,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         // 論理削除は主体の有効性（述語(a)）を変えるため常に進める。
         authorizationEpochFence.advance(ActorEpochAnchors.of(old));
+        // 削除で起動時条件を割るなら、所属のcloseとsessionの失効の前に拒否する（transactionごとrollback）。
+        verifyAdministratorContinuity(continuity);
         closeOrganizationAssignments(id);
         revokeUserSessions(id, "USER_DELETED");
     }
@@ -217,6 +256,20 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
                 .set("password_change_required", 0));
         if (!success) {
             throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private AdministratorContinuityGuard.Snapshot lockAdministratorContinuity(String operation, Long targetUserId) {
+        if (administratorContinuityGuard == null) {
+            return AdministratorContinuityGuard.Snapshot.inactive();
+        }
+        return administratorContinuityGuard.lockAndCapture(operation,
+                targetUserId == null ? java.util.List.of() : java.util.List.of(targetUserId));
+    }
+
+    private void verifyAdministratorContinuity(AdministratorContinuityGuard.Snapshot continuity) {
+        if (administratorContinuityGuard != null) {
+            administratorContinuityGuard.verify(continuity);
         }
     }
 
