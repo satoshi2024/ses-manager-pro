@@ -100,8 +100,27 @@ class BackupWriteQuiesceMySqlTest {
     @Test
     void 静止中にpermitの無いthreadのINSERTとUPDATEは読取り専用の拒否で失敗しpermitのthreadは書ける() throws Exception {
         insert(business, 0, "before");
+        // 書ける側の permit は閉じ始める前に取る（閉じ始めた後は新しい permit を取れない。I-3）
+        BackupWritePermit permit = gate.tryAcquireDetached(BackupWritePermit.Kind.SCHEDULER, "job");
+        assertThat(permit).as("閉じ始める前なら permit を取れる").isNotNull();
+        try {
+            writeWithAndWithoutPermitWhileClosing(permit);
+        } finally {
+            permit.close();
+        }
+        assertThat(gate.isDrained()).as("閉じる前に取った permit を返すと排水が終わる").isTrue();
+        assertThat(count("writer = 'no-permit'")).isZero();
+        assertThat(count("writer IN ('before', 'permit')")).isEqualTo(2L);
+    }
+
+    private void writeWithAndWithoutPermitWhileClosing(BackupWritePermit permit) throws Exception {
         gate.beginClosing(1);
-        assertThat(gate.isDrained()).isTrue();
+        assertThat(gate.isDrained()).as("閉じる前に取った permit が返るまで排水は終わらない").isFalse();
+        BackupWritePermit late = gate.tryAcquireDetached(BackupWritePermit.Kind.SCHEDULER, "late");
+        if (late != null) {
+            late.close();
+        }
+        assertThat(late).as("閉じ始めた後の新しい permit は取れない").isNull();
         try (Connection connection = business.getConnection(); Statement st = connection.createStatement();
              java.sql.PreparedStatement prepared = connection.prepareStatement(
                      "INSERT INTO bq_marker (round_no, writer) VALUES (?, 'no-permit')")) {
@@ -122,12 +141,8 @@ class BackupWriteQuiesceMySqlTest {
                     ((SQLException) insert).getSQLState(), ((SQLException) insert).getErrorCode(),
                     preparedInsert.getMessage(), ((SQLException) preparedInsert).getSQLState());
         }
-        try (BackupWritePermit permit = gate.tryAcquireDetached(BackupWritePermit.Kind.SCHEDULER, "job")) {
-            permit.attachToCurrentThread();
-            insert(business, 1, "permit");
-        }
-        assertThat(count("writer = 'no-permit'")).isZero();
-        assertThat(count("writer IN ('before', 'permit')")).isEqualTo(2L);
+        permit.attachToCurrentThread();
+        insert(business, 1, "permit");
     }
 
     /**
