@@ -223,7 +223,7 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         }
         if (identityProviderMapper == null || userExternalIdentityMapper == null) {
             errors.add("OIDCでログインできる管理者の人数を確認できません");
-            return AdministratorConditionCheck.evaluated(condition, 0, MIN_OIDC_ADMINISTRATORS, false);
+            return AdministratorConditionCheck.unverifiable(condition, MIN_OIDC_ADMINISTRATORS);
         }
         com.ses.entity.IdentityProvider provider = identityProviderMapper.selectEnabledByTenantAndIssuer(tenantId, issuer);
         if (provider == null || provider.getId() == null || !OIDC_PROVIDER_TYPE.equalsIgnoreCase(provider.getProviderType())) {

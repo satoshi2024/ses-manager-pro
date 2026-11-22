@@ -32,6 +32,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -56,11 +57,14 @@ import static org.mockito.Mockito.doReturn;
  * providerにlinkした管理者と、fixtureのbreak-glass usernameだけ（seedの管理者は数えない）。拒否の監査はtransactionの完了後に
  * 書くため、監査serviceはmockにしてcommitする行を作らない（rollback・lockの直列化・監査の行は実MySQLの
  * {@code AdministratorContinuityGuardMySqlTest} が見る）。</p>
+ *
+ * <p>serviceは試験のtransactionへ参加するため、試験のtransactionを加防護のwriterと同じ READ_COMMITTED で始める
+ * （guardは実際のtransactionの分離レベルを確かめ、READ_COMMITTED でなければ確認できないとして拒否する）。</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/permission-group-seed-h2.sql")
-@Transactional
+@Transactional(isolation = Isolation.READ_COMMITTED)
 class AdministratorContinuityGuardH2Test {
 
     private static final String TENANT = "default";
@@ -164,6 +168,22 @@ class AdministratorContinuityGuardH2Test {
 
         assertDoesNotThrow(() -> sysUserService.updateUserStatus(first, 0, authentication()));
         assertEquals(0, jdbc.queryForObject("SELECT status FROM sys_user WHERE id = ?", Integer.class, first));
+    }
+
+    @Test
+    void prod以外では起動時検査を割る削除とrole変更も従来どおり通す() {
+        doReturn(false).when(guard).isActive();
+        long deleted = linkedAdmin("ops-a");
+        long demoted = linkedAdmin("ops-b");
+        linkedAdmin("ops-c");
+        SysUser body = new SysUser();
+        body.setRole("マネージャー");
+
+        assertDoesNotThrow(() -> sysUserService.deleteUser(deleted, authentication()));
+        assertDoesNotThrow(() -> sysUserService.updateUser(demoted, body, authentication()));
+
+        assertEquals(1, jdbc.queryForObject("SELECT deleted_flag FROM sys_user WHERE id = ?", Integer.class, deleted));
+        assertEquals("マネージャー", jdbc.queryForObject("SELECT role FROM sys_user WHERE id = ?", String.class, demoted));
     }
 
     @Test

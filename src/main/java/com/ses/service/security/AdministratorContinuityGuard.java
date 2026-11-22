@@ -51,11 +51,15 @@ import java.util.stream.Collectors;
  *       判定しない。privacy-adminはNF07のflagのON/OFFに関わらず判定する。</li>
  *   <li><b>前から満たさない条件では拒否しない</b>: bootstrapで人数を揃えている途中などの変更を止めない（壊れていない状態を
  *       壊す変更だけを止める）。</li>
+ *   <li><b>確認できなければ拒否する（fail-closed）</b>: 変更の前・後のどちらかで照会に失敗した（起動時検査の照会が例外になった、
+ *       privacyの照会の失敗を起動時検査が握った、判定の源が揃わない）場合と、実際のtransactionが READ_COMMITTED でない場合は、
+ *       人数を比べられないとして409（{@value #UNVERIFIABLE_MESSAGE_KEY}）で拒否する。</li>
  *   <li><b>直列化</b>: {@link #lockAndCapture} は、全tenantの未削除の管理者と変更対象の利用者の {@code sys_user} 行を
  *       {@code (tenant_id, id)} の昇順でX lockしてから変更前の判定を取る（NF01 lock rank 3 の最初のlockとして、呼出側が
  *       ほかのrank行をlockする前に呼ぶ。対象の行のlockを兼ねる）。lock後に発見をやり直し、lockしていない管理者が
- *       増えていれば409で止める。呼出側は READ_COMMITTED にする（lockを待つ間にcommitされた変更を、lock後の照会が見る）。
- *       2名の管理者が同時に別々の管理者を無効化しても、後の操作は先のcommitを待ってから数え直す。</li>
+ *       増えていれば409で止める。呼出側は READ_COMMITTED にする（lockを待つ間にcommitされた変更を、lock後の照会が見る。
+ *       メソッドに宣言しても外側の REPEATABLE READ のtransactionへ参加すると無視されるため、実際のtransactionの分離レベルを
+ *       実行時に確かめる）。2名の管理者が同時に別々の管理者を無効化しても、後の操作は先のcommitを待ってから数え直す。</li>
  *   <li>{@link #captureLocked} は、変更する利用者の行を呼出側が既にX lockしている経路（要員の削除・退社案件の完了による
  *       連携ユーザーの無効化。NF01のlock計画を変えない）で、追加のlockを取らずに変更前の判定を取る。この経路どうしの
  *       同時の変更は直列化しない（{@link #lockAndCapture} の経路とは対象の行のlockで直列化される）。</li>
@@ -75,8 +79,12 @@ public class AdministratorContinuityGuard {
     /** 拒否の監査の method（{@code t_audit_log.method} は VARCHAR(10)）。 */
     static final String AUDIT_METHOD = "SECURITY";
     static final String ADMIN_ROLE = "管理者";
+    /** 起動時条件を確認できないための拒否の文言（引数なし。409）。 */
+    static final String UNVERIFIABLE_MESSAGE_KEY = "error.user.adminContinuity.unverifiable";
     private static final String PRODUCTION_PROFILE = "prod";
     private static final int AUDIT_URI_MAX = 500;
+    private static final int DENIED_STATUS = 400;
+    private static final int UNVERIFIABLE_STATUS = 409;
 
     /** 条件ごとの拒否の文言（引数: 変更後の人数、必要な人数）。 */
     static final Map<Condition, String> MESSAGE_KEYS = Map.of(
@@ -84,7 +92,16 @@ public class AdministratorContinuityGuard {
             Condition.BREAK_GLASS_ADMINISTRATORS, "error.user.adminContinuity.breakGlassAdministrators",
             Condition.PRIVACY_ADMINISTRATORS, "error.user.adminContinuity.privacyAdministrators");
 
-    /** 同じtransactionで判定を開いていることの印（transactionの完了か {@link #verify} で外す）。 */
+    /**
+     * 同じtransactionで判定を開いていることの印（transactionの完了か {@link #verify} で外す）。
+     *
+     * <p>制限（RB-ADMIN-GUARD review P3-3）: この印は {@link TransactionSynchronizationManager} の thread に結び付く resource で、
+     * {@code REQUIRES_NEW}・{@code NOT_SUPPORTED} で外側のtransactionを suspend しても退避されない。外側の判定を開いたまま、
+     * 内側の新しいtransactionでguard付きのwriterを呼ぶと、内側は入れ子と見なされてlockも判定もせずに独立してcommitする。
+     * 現在そのような経路は無い（guard付きのwriterはすべて REQUIRED で、判定を開いた後に REQUIRES_NEW の内側からguard付きの
+     * writerを呼ばない。拒否の監査の REQUIRES_NEW はtransactionの完了後で、guard付きのwriterを呼ばない）。そのような経路を
+     * 足す場合は、印をtransactionごとに持つ形へ改めること。</p>
+     */
     private static final Object TRANSACTION_RESOURCE_KEY = new Object();
 
     private final Environment environment;
@@ -104,7 +121,7 @@ public class AdministratorContinuityGuard {
      *
      * @param operation     監査・logに残す操作名（固定値）
      * @param targetUserIds 変更する利用者（作成ではまだ無いので空）
-     * @throws BusinessException 409 lockの間に管理者が増えた（lockしていない管理者が居る）場合
+     * @throws BusinessException 409 lockの間に管理者が増えた（lockしていない管理者が居る）場合、または起動時条件を確認できない場合
      */
     public Snapshot lockAndCapture(String operation, Collection<Long> targetUserIds) {
         if (!isActive()) {
@@ -115,6 +132,7 @@ public class AdministratorContinuityGuard {
             return Snapshot.nested();
         }
         List<Long> targets = normalizedTargets(targetUserIds);
+        requireReadCommitted(operation, targets);
         Set<Long> locked = lockAdministratorsAndTargets(targets);
         // lock後の発見（READ_COMMITTED の新しい読取）。lockしていない管理者が増えていれば、その管理者の変更とは
         // 直列化できていないため、lockを途中で足さず（rank順を崩さず）409で止める。
@@ -131,6 +149,8 @@ public class AdministratorContinuityGuard {
     /**
      * 変更する利用者の行を呼出側が既にX lockしている経路で、追加のlockを取らずに変更前の判定を取る
      * （要員の削除・退社案件の完了による連携ユーザーの無効化。NF01のlock計画を変えない）。
+     *
+     * @throws BusinessException 409 起動時条件を確認できない場合
      */
     public Snapshot captureLocked(String operation, Long lockedUserId) {
         if (!isActive()) {
@@ -140,21 +160,23 @@ public class AdministratorContinuityGuard {
         if (TransactionSynchronizationManager.hasResource(TRANSACTION_RESOURCE_KEY)) {
             return Snapshot.nested();
         }
-        return open(operation, normalizedTargets(lockedUserId == null ? List.of() : List.of(lockedUserId)));
+        List<Long> targets = normalizedTargets(lockedUserId == null ? List.of() : List.of(lockedUserId));
+        requireReadCommitted(operation, targets);
+        return open(operation, targets);
     }
 
     /**
      * 変更後の判定を取り、変更前は満たし変更後は満たさない条件があれば、transactionをrollback-onlyにして拒否する。
      * 入れ子・prod以外の判定（{@link Snapshot#owner} でない）では何もしない。
      *
-     * @throws BusinessException 400 起動時検査を満たさなくなる変更の場合
+     * @throws BusinessException 400 起動時検査を満たさなくなる変更の場合。409 変更後の起動時条件を確認できない場合
      */
     public void verify(Snapshot snapshot) {
         if (snapshot == null || !snapshot.owner()) {
             return;
         }
         try {
-            List<AdministratorConditionCheck> after = evaluate();
+            List<AdministratorConditionCheck> after = evaluateOrReject(snapshot.operation(), snapshot.targetUserIds());
             List<Violation> violations = violations(snapshot.before(), after);
             if (violations.isEmpty()) {
                 return;
@@ -164,8 +186,9 @@ public class AdministratorContinuityGuard {
             log.warn("[admin-continuity] 本番の起動時検査を満たさなくなる変更を拒否しました: operation={} targets={} {}",
                     snapshot.operation(), snapshot.targetUserIds(), detail);
             markRollbackOnly();
-            registerDenialAudit(SecurityUtils.currentUsername(), auditUri(snapshot, detail));
-            throw BusinessException.of(400, MESSAGE_KEYS.get(first.condition()),
+            registerDenialAudit(SecurityUtils.currentUsername(),
+                    auditUri(snapshot.operation(), snapshot.targetUserIds(), detail), DENIED_STATUS);
+            throw BusinessException.of(DENIED_STATUS, MESSAGE_KEYS.get(first.condition()),
                     first.after().count(), first.after().required());
         } finally {
             // 同じtransactionで続く別の操作は、この操作の後の状態から判定し直す。
@@ -174,7 +197,7 @@ public class AdministratorContinuityGuard {
     }
 
     private Snapshot open(String operation, List<Long> targets) {
-        List<AdministratorConditionCheck> before = evaluate();
+        List<AdministratorConditionCheck> before = evaluateOrReject(operation, targets);
         TransactionSynchronizationManager.bindResource(TRANSACTION_RESOURCE_KEY, Boolean.TRUE);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -204,24 +227,63 @@ public class AdministratorContinuityGuard {
         return locked;
     }
 
-    /** 起動時検査の判定を集める。prodで条件が揃わなければ確認できないとして止める（fail-closed）。 */
-    private List<AdministratorConditionCheck> evaluate() {
+    /**
+     * 起動時検査の判定を集める。照会が例外になる・判定の源が揃わない・照会に失敗した条件がある場合は、人数を比べられない
+     * として拒否する（fail-closed）。
+     */
+    private List<AdministratorConditionCheck> evaluateOrReject(String operation, List<Long> targets) {
         Map<Condition, AdministratorConditionCheck> byCondition = new EnumMap<>(Condition.class);
-        conditionSources.orderedStream().forEach(source -> {
-            List<AdministratorConditionCheck> checks = source.checkAdministratorConditions();
-            if (checks != null) {
-                for (AdministratorConditionCheck check : checks) {
-                    if (check != null && check.condition() != null) {
-                        byCondition.put(check.condition(), check);
+        try {
+            conditionSources.orderedStream().forEach(source -> {
+                List<AdministratorConditionCheck> checks = source.checkAdministratorConditions();
+                if (checks != null) {
+                    for (AdministratorConditionCheck check : checks) {
+                        if (check != null && check.condition() != null) {
+                            byCondition.put(check.condition(), check);
+                        }
                     }
                 }
-            }
-        });
+            });
+        } catch (RuntimeException e) {
+            log.error("[admin-continuity] 起動時検査の条件を照会できません: operation={} exceptionClass={}",
+                    operation, e.getClass().getName());
+            throw rejectUnverifiable(operation, targets, "QUERY_FAILED");
+        }
         if (byCondition.size() != Condition.values().length) {
-            throw new IllegalStateException("管理者の起動時条件を確認できません（起動時検査の判定が揃いません: "
-                    + byCondition.keySet() + "）");
+            throw rejectUnverifiable(operation, targets, "SOURCES_MISSING");
+        }
+        String unverifiable = byCondition.values().stream()
+                .filter(check -> !check.verifiable())
+                .map(check -> check.condition().name())
+                .collect(Collectors.joining(","));
+        if (!unverifiable.isEmpty()) {
+            throw rejectUnverifiable(operation, targets, unverifiable);
         }
         return List.copyOf(byCondition.values());
+    }
+
+    /**
+     * 実際のtransactionの分離レベル（{@link TransactionSynchronizationManager#getCurrentTransactionIsolationLevel}。
+     * 新しいtransactionを始めた宣言の値で、参加した内側の宣言では変わらない。既定の分離レベルなら null）が
+     * READ_COMMITTED でなければ、lock後の照会が古いsnapshotを読み得るため拒否する。
+     */
+    private void requireReadCommitted(String operation, List<Long> targets) {
+        Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        if (isolation == null || isolation != TransactionDefinition.ISOLATION_READ_COMMITTED) {
+            log.error("[admin-continuity] READ_COMMITTED でないtransactionで呼ばれたため拒否します: operation={} isolation={}",
+                    operation, isolation == null ? "DEFAULT" : isolation);
+            throw rejectUnverifiable(operation, targets, "ISOLATION_" + (isolation == null ? "DEFAULT" : isolation));
+        }
+    }
+
+    /** 起動時条件を確認できない拒否（409）。transactionをrollback-onlyにし、rollback後に監査を残す。 */
+    private BusinessException rejectUnverifiable(String operation, List<Long> targets, String reason) {
+        log.warn("[admin-continuity] 本番の起動時検査の条件を確認できないため変更を拒否しました: operation={} targets={} reason={}",
+                operation, targets, reason);
+        markRollbackOnly();
+        registerDenialAudit(SecurityUtils.currentUsername(), auditUri(operation, targets, "unverifiable=" + reason),
+                UNVERIFIABLE_STATUS);
+        return BusinessException.of(UNVERIFIABLE_STATUS, UNVERIFIABLE_MESSAGE_KEY);
     }
 
     private static List<Violation> violations(List<AdministratorConditionCheck> before,
@@ -245,9 +307,9 @@ public class AdministratorContinuityGuard {
                 .collect(Collectors.joining(","));
     }
 
-    private static String auditUri(Snapshot snapshot, String detail) {
-        String uri = "/internal/admin-continuity/deny?operation=" + snapshot.operation()
-                + "&targets=" + snapshot.targetUserIds().stream().map(String::valueOf).collect(Collectors.joining(","))
+    private static String auditUri(String operation, List<Long> targets, String detail) {
+        String uri = "/internal/admin-continuity/deny?operation=" + operation
+                + "&targets=" + targets.stream().map(String::valueOf).collect(Collectors.joining(","))
                 + "&" + detail;
         return uri.length() <= AUDIT_URI_MAX ? uri : uri.substring(0, AUDIT_URI_MAX);
     }
@@ -256,19 +318,19 @@ public class AdministratorContinuityGuard {
      * 拒否したtransactionのrollback後に、独立transaction（REQUIRES_NEW）で監査を残す。lockを保持したまま別transactionを
      * 開かない（NF01 §3.5 規則6）ため、完了後に書く。書けなくても拒否は変わらない（best-effort。WARNを残す）。
      */
-    private void registerDenialAudit(String username, String uri) {
+    private void registerDenialAudit(String username, String uri, int status) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_COMMITTED) {
+            public void afterCompletion(int completionStatus) {
+                if (completionStatus == STATUS_COMMITTED) {
                     return;
                 }
-                writeDenialAudit(username, uri);
+                writeDenialAudit(username, uri, status);
             }
         });
     }
 
-    private void writeDenialAudit(String username, String uri) {
+    private void writeDenialAudit(String username, String uri, int status) {
         AuditLogService audit = auditLogService.getIfAvailable();
         PlatformTransactionManager manager = transactionManager.getIfAvailable();
         if (audit == null || manager == null) {
@@ -278,7 +340,7 @@ public class AdministratorContinuityGuard {
         try {
             TransactionTemplate template = new TransactionTemplate(manager);
             template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-            template.executeWithoutResult(status -> audit.record(username, AUDIT_METHOD, uri, 400,
+            template.executeWithoutResult(transaction -> audit.record(username, AUDIT_METHOD, uri, status,
                     AUDIT_APPLICATION_CODE, false));
         } catch (RuntimeException e) {
             log.warn("[admin-continuity] 拒否の監査を記録できませんでした: uri={} exceptionClass={}", uri,

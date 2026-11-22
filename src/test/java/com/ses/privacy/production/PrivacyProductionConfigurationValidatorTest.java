@@ -584,6 +584,38 @@ class PrivacyProductionConfigurationValidatorTest {
         assertInsufficient(1);
     }
 
+    @Test
+    void 継続性guard向けの判定は照会の失敗を確認できないとして返しvalidateの扱いは変えない() {
+        UserPermissionGroupMapper brokenMembers = mock(UserPermissionGroupMapper.class);
+        when(brokenMembers.selectEffectivePrivacyAdminUsernames(any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("secret-sql-5"));
+        IdentityProviderMapper brokenProviders = mock(IdentityProviderMapper.class);
+        when(brokenProviders.selectEnabledByTenantAndIssuer(any(), any()))
+                .thenThrow(new IllegalStateException("secret-sql-6"));
+        com.ses.config.AdministratorConditionCheck unverifiable = com.ses.config.AdministratorConditionCheck.unverifiable(
+                com.ses.config.AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS, 2);
+
+        for (PrivacyProductionConfigurationValidator broken : List.of(
+                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
+                        permissionGroupMapper, brokenMembers, identityProviderMapper, CLOCK),
+                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
+                        permissionGroupMapper, userPermissionGroupMapper, brokenProviders, CLOCK))) {
+            org.junit.jupiter.api.Assertions.assertEquals(List.of(unverifiable), broken.checkAdministratorConditions());
+            // 起動時の扱いは従来どおり（privacyAdmins.unverifiable で起動を止める）。
+            assertContainsAll(assertThrows(IllegalStateException.class, broken::validate), "privacyAdmins.unverifiable");
+        }
+
+        // issuer未設定でproviderを解決できないだけ（照会の失敗ではない）なら、validate と同じく満たさない扱いにする。
+        OidcSecurityProperties issuerUnset = oidc(Set.of());
+        issuerUnset.setIssuerUri(" ");
+        PrivacyProductionConfigurationValidator withoutIssuer = new PrivacyProductionConfigurationValidator(
+                flags(false, false), approval(), issuerUnset, permissionGroupMapper, userPermissionGroupMapper,
+                identityProviderMapper, CLOCK);
+        org.junit.jupiter.api.Assertions.assertEquals(List.of(com.ses.config.AdministratorConditionCheck.evaluated(
+                        com.ses.config.AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS, 0, 2, false)),
+                withoutIssuer.checkAdministratorConditions());
+    }
+
     private void twoPrivacyAdmins() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         member(admin("nf07b-ops-e"), privacyAdminGroupId);

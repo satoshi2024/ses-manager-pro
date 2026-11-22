@@ -62,6 +62,9 @@ class AdministratorContinuityGuardTest {
     void setUp() {
         TransactionSynchronizationManager.initSynchronization();
         TransactionSynchronizationManager.setActualTransactionActive(true);
+        // 加防護のwriterが始めるtransactionと同じ READ_COMMITTED（新しいtransactionの宣言の値が入る）。
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                TransactionDefinition.ISOLATION_READ_COMMITTED);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("ops-operator", "n/a", List.of()));
         when(environment.acceptsProfiles(any(Profiles.class))).thenReturn(true);
@@ -81,6 +84,7 @@ class AdministratorContinuityGuardTest {
         new ArrayList<>(TransactionSynchronizationManager.getResourceMap().keySet())
                 .forEach(TransactionSynchronizationManager::unbindResourceIfPossible);
         TransactionSynchronizationManager.setActualTransactionActive(false);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
         SecurityContextHolder.clearContext();
     }
 
@@ -241,13 +245,79 @@ class AdministratorContinuityGuardTest {
     }
 
     @Test
-    void 起動時検査の判定が揃わなければ確認できないとして止める() {
+    void 起動時検査の判定が揃わなければ確認できないとして409で拒否する() {
         when(security.checkAdministratorConditions()).thenReturn(List.of(oidc(3), breakGlass(2)));
         AdministratorContinuityGuard securityOnly = guard(List.of(security));
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
+        BusinessException error = assertThrows(BusinessException.class,
                 () -> securityOnly.lockAndCapture("USER_STATUS", List.of(10L)));
-        assertTrue(error.getMessage().contains("確認できません"), error.getMessage());
+        assertUnverifiable(error);
+        assertDeniedAudit("unverifiable=SOURCES_MISSING", 409);
+    }
+
+    // ---------------------------------------------------------------- 確認できなければ拒否（review P3-2・P3-4）
+
+    @Test
+    void READ_COMMITTEDでないtransactionではlockも照会もせず確認できないとして409で拒否する() {
+        // 外側の REPEATABLE READ（既定の分離レベル。宣言の値は null）へ参加した呼出し。
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+        BusinessException defaultIsolation = assertThrows(BusinessException.class,
+                () -> guard.lockAndCapture("USER_STATUS", List.of(10L)));
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        BusinessException repeatableRead = assertThrows(BusinessException.class,
+                () -> guard.captureLocked("RESIGNATION_COMPLETE", 30L));
+
+        assertUnverifiable(defaultIsolation);
+        assertUnverifiable(repeatableRead);
+        verifyNoInteractions(sysUserMapper, security, privacy);
+        assertDeniedAudit("unverifiable=ISOLATION_DEFAULT", 409);
+    }
+
+    @Test
+    void 変更前の照会に失敗した条件があれば確認できないとして409で拒否する() {
+        // privacy の照会の失敗は起動時検査が握って unverifiable で返す（validate の扱いは変えない）。
+        when(security.checkAdministratorConditions()).thenReturn(List.of(oidc(3), breakGlass(2)));
+        when(privacy.checkAdministratorConditions())
+                .thenReturn(List.of(AdministratorConditionCheck.unverifiable(Condition.PRIVACY_ADMINISTRATORS, 2)));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> guard.lockAndCapture("USER_STATUS", List.of(10L)));
+
+        assertUnverifiable(error);
+        assertDeniedAudit("unverifiable=PRIVACY_ADMINISTRATORS", 409);
+        // 変更前を確認できないまま判定を開かない（同じtransactionの後続の操作も入れ子扱いにならない）。
+        when(privacy.checkAdministratorConditions()).thenReturn(List.of(privacy(2)));
+        assertTrue(guard.lockAndCapture("USER_STATUS", List.of(10L)).owner());
+    }
+
+    @Test
+    void 変更後の照会が失敗したら確認できないとして409で拒否する() {
+        when(security.checkAdministratorConditions())
+                .thenReturn(List.of(oidc(4), breakGlass(2)))
+                .thenThrow(new IllegalStateException("db unavailable"));
+
+        AdministratorContinuityGuard.Snapshot snapshot = guard.lockAndCapture("USER_STATUS", List.of(10L));
+        BusinessException error = assertThrows(BusinessException.class, () -> guard.verify(snapshot));
+
+        assertUnverifiable(error);
+        assertDeniedAudit("unverifiable=QUERY_FAILED", 409);
+    }
+
+    private static void assertUnverifiable(BusinessException error) {
+        assertEquals(409, error.getCode());
+        assertEquals("error.user.adminContinuity.unverifiable", error.getMessageKey());
+    }
+
+    /** 登録された完了時の処理を rollback として流し、拒否の監査（独立transaction）の uri と status を確かめる。 */
+    private void assertDeniedAudit(String detail, int status) {
+        List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        synchronizations.forEach(sync -> sync.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        ArgumentCaptor<String> uri = ArgumentCaptor.forClass(String.class);
+        verify(auditLogService, org.mockito.Mockito.atLeastOnce()).record(eq("ops-operator"), eq("SECURITY"),
+                uri.capture(), eq(status), eq(AdministratorContinuityGuard.AUDIT_APPLICATION_CODE), eq(false));
+        assertTrue(uri.getAllValues().stream().anyMatch(value -> value.endsWith("&" + detail)),
+                uri.getAllValues()::toString);
     }
 
     @Test

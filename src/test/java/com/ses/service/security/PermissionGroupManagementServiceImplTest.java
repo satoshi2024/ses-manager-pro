@@ -100,6 +100,45 @@ class PermissionGroupManagementServiceImplTest {
         assertEquals("/api/permission-groups/users/7", audit.getValue().getUri());
     }
 
+    /**
+     * RB-ADMIN-GUARD review P3-1: 管理者の継続性guardのlock（全管理者と対象の行）は対象の行のlockより前に取り、
+     * 変更後の判定は割当の書込みの後・session失効と監査の前に行う。拒否なら失効と監査を行わない。
+     */
+    @Test
+    void 管理者の継続性guardのlockは対象の行より前に取り判定は割当の後で失効と監査の前に行う() {
+        AdministratorContinuityGuard guard = org.mockito.Mockito.mock(AdministratorContinuityGuard.class);
+        AdministratorContinuityGuard.Snapshot snapshot = new AdministratorContinuityGuard.Snapshot(
+                "PERMISSION_GROUP_REPLACE", List.of(7L), List.of(), true);
+        when(guard.lockAndCapture("PERMISSION_GROUP_REPLACE", List.of(7L))).thenReturn(snapshot);
+        org.mockito.Mockito.doThrow(BusinessException.of(400, "error.user.adminContinuity.privacyAdministrators", 1, 2))
+                .when(guard).verify(snapshot);
+        service.setAdministratorContinuityGuard(guard);
+        SysUser target = new SysUser();
+        target.setId(7L);
+        target.setTenantId("tenant-a");
+        target.setRole("管理者");
+        PermissionGroup group = new PermissionGroup();
+        group.setId(10L);
+        group.setTenantId("tenant-a");
+        group.setEnabled(1);
+        when(sysUserMapper.selectByIdForUpdate(7L)).thenReturn(target);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
+        when(userPermissionGroupMapper.insert(any(UserPermissionGroup.class))).thenReturn(1);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.replaceAssignments(7L, Set.of(10L), authentication));
+
+        assertEquals("error.user.adminContinuity.privacyAdministrators", error.getMessageKey());
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard, sysUserMapper, userPermissionGroupMapper);
+        order.verify(guard).lockAndCapture("PERMISSION_GROUP_REPLACE", List.of(7L));
+        order.verify(sysUserMapper).selectByIdForUpdate(7L);
+        order.verify(userPermissionGroupMapper).deleteAllForUser("tenant-a", 7L);
+        order.verify(userPermissionGroupMapper).insert(any(UserPermissionGroup.class));
+        order.verify(guard).verify(snapshot);
+        verify(persistentSessionService, never()).revokeAllForUser(any(), any());
+        verify(auditLogMapper, never()).insert(any(AuditLog.class));
+    }
+
     // ---------------------------------------------------------------- NF07 W-5（§6.7）
 
     @Test

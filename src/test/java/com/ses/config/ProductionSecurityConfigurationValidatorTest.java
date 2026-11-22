@@ -182,6 +182,93 @@ class ProductionSecurityConfigurationValidatorTest {
         org.mockito.Mockito.verify(bootstrap, org.mockito.Mockito.never()).completePendingReopen();
     }
 
+    @Test
+    void 継続性guard向けのbreak_glassの判定はvalidateの各条件と同じく満たさない() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default")).thenReturn(java.util.List.of());
+        // admin-b の DB の行だけを変える（admin-a は有効な管理者でMFA登録済み）: 条件ごとに validate と同じ理由で満たさない。
+        java.util.Map<String, java.util.function.Consumer<SysUser>> adminB = new java.util.LinkedHashMap<>();
+        adminB.put("role", user -> user.setRole("営業"));
+        adminB.put("status", user -> user.setStatus(0));
+        adminB.put("username", user -> user.setUsername("Admin-B"));
+        for (java.util.Map.Entry<String, java.util.function.Consumer<SysUser>> breaking : adminB.entrySet()) {
+            ProductionSecurityConfigurationValidator validator = administratorValidator(permissionGroupMapper,
+                    java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+            SysUserMapper users = mock(SysUserMapper.class);
+            when(users.selectByUsername(anyString())).thenAnswer(invocation -> {
+                SysUser user = new SysUser();
+                user.setUsername(invocation.getArgument(0));
+                user.setId("admin-a".equals(invocation.getArgument(0)) ? 1L : 2L);
+                user.setRole("管理者");
+                user.setStatus(1);
+                if ("admin-b".equals(invocation.getArgument(0))) {
+                    breaking.getValue().accept(user);
+                }
+                return user;
+            });
+            org.springframework.test.util.ReflectionTestUtils.setField(validator, "sysUserMapper", users);
+
+            assertBreakGlass(validator, 1, "有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: admin-b",
+                    breaking.getKey());
+        }
+
+        // MFA未登録、名がASCIIの英数字と「.」「_」「-」以外を含む、件数が2件でない設定も同じく満たさない。
+        assertBreakGlass(administratorValidator(permissionGroupMapper, java.util.List.of("ops-a", "ops-b", "ops-c"), 0),
+                1, "MFA enrollment完了済みでなければなりません: admin-b", "mfa");
+        ProductionSecurityConfigurationValidator nonAscii = administratorValidator(permissionGroupMapper,
+                java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+        oidcOf(nonAscii).setBreakGlassUsernames(new java.util.LinkedHashSet<>(java.util.List.of("admin-a", "admin-é")));
+        assertBreakGlass(nonAscii, 1, "ASCIIの英数字", "ascii");
+        ProductionSecurityConfigurationValidator single = administratorValidator(permissionGroupMapper,
+                java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+        oidcOf(single).setBreakGlassUsernames(java.util.Set.of("admin-a"));
+        assertBreakGlass(single, 0, "ちょうど2件", "count");
+    }
+
+    @Test
+    void 継続性guard向けのOIDC管理者の判定はtenantかissuerが未設定なら判定せずmapperが無ければ確認できない() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        for (String unset : java.util.List.of("tenant", "issuer")) {
+            ProductionSecurityConfigurationValidator validator = administratorValidator(permissionGroupMapper,
+                    java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+            if ("tenant".equals(unset)) {
+                oidcOf(validator).setTenantId(" ");
+            } else {
+                oidcOf(validator).setIssuerUri(" ");
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(AdministratorConditionCheck.notEvaluated(
+                            AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS, 3),
+                    validator.checkAdministratorConditions().get(0), unset);
+        }
+
+        // OIDC管理者を数えるmapperが無い: validate は「確認できません」で止め、guard へは照会失敗として伝える。
+        ProductionSecurityConfigurationValidator withoutMapper = administratorValidator(permissionGroupMapper,
+                java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+        withoutMapper.setUserExternalIdentityMapper(null);
+        AdministratorConditionCheck oidc = withoutMapper.checkAdministratorConditions().get(0);
+        org.junit.jupiter.api.Assertions.assertEquals(AdministratorConditionCheck.unverifiable(
+                AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS, 3), oidc);
+        org.junit.jupiter.api.Assertions.assertTrue(oidc.blocksStartup(), "起動時検査と同じく起動を止める側");
+        IllegalStateException error = assertThrows(IllegalStateException.class, withoutMapper::validate);
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("管理者の人数を確認できません"),
+                error.getMessage());
+    }
+
+    private static void assertBreakGlass(ProductionSecurityConfigurationValidator validator, int valid, String reason,
+                                         String label) {
+        AdministratorConditionCheck breakGlass = validator.checkAdministratorConditions().get(1);
+        org.junit.jupiter.api.Assertions.assertEquals(AdministratorConditionCheck.evaluated(
+                AdministratorConditionCheck.Condition.BREAK_GLASS_ADMINISTRATORS, valid, 2, false), breakGlass, label);
+        IllegalStateException error = assertThrows(IllegalStateException.class, validator::validate, label);
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains(reason), label + ": " + error.getMessage());
+    }
+
+    private static OidcSecurityProperties oidcOf(ProductionSecurityConfigurationValidator validator) {
+        return (OidcSecurityProperties) org.springframework.test.util.ReflectionTestUtils.getField(validator,
+                "oidcProperties");
+    }
+
     /** OIDC管理者の照会結果と admin-b のMFA登録数だけを変えた本番設定（admin-a は常にMFA登録済み）。 */
     private static ProductionSecurityConfigurationValidator administratorValidator(
             com.ses.mapper.PermissionGroupMapper permissionGroupMapper, java.util.List<String> oidcAdministrators,
