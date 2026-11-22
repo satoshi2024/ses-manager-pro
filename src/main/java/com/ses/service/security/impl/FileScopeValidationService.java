@@ -91,6 +91,13 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
 
+    /**
+     * 機能の開放の署名の文書の保存名の照合用（feature-enablement-console design §6.2）。汎用 file 経路の遮断に使い、無ければ全て拒否する
+     * （fail-closed）。全体の context では常に登録される MyBatis mapper。直接生成する単体テストは明示的に与える。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.FeatureSignOffMapper featureSignOffMapper;
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.beans.factory.ObjectProvider<com.ses.importcenter.metadata.ImportMetadataAuthorizationService>
             importAuthorizationProvider;
@@ -255,6 +262,8 @@ public class FileScopeValidationService {
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
         // NF07 DSAR の開示 package は専用ダウンロードだけ。role・group・tenant に関係なく、管理者の通過分岐より前に拒否する
         assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
+        // 機能の開放の署名の文書も専用の経路だけ（feature-enablement-console design §6.2）
+        assertFeatureSignOffNotAccessibleThroughGenericFilePath(storedName);
         assertImportJobNotAccessibleThroughGenericFilePath(storedName);
         // 1. t_resume_ingestion の原本ファイル
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
@@ -503,6 +512,7 @@ public class FileScopeValidationService {
      */
     public void assertRescanAllowed(String storedName) {
         assertPrivacyPackageNotAccessibleThroughGenericFilePath(storedName);
+        assertFeatureSignOffNotAccessibleThroughGenericFilePath(storedName);
     }
 
     /**
@@ -527,6 +537,28 @@ public class FileScopeValidationService {
         try {
             matches = privacyExportPackageMapper.countByStoredNames(currentTenant(), storedName,
                     normalizedStoredName(storedName));
+        } catch (RuntimeException e) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (matches > 0) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    /**
+     * 機能の開放の署名の文書（{@code t_feature_sign_off.stored_name}）は専用の取得（{@code GET /api/feature-enablement/sign-offs/{id}/document}）
+     * だけに限定する（feature-enablement-console design §6.2。先例 {@link #assertPrivacyPackageNotAccessibleThroughGenericFilePath}）。
+     * 署名の状態・tenant・role・group に関係なく一律に拒否する。保存名は正規化した名前でも照合する（署名の文書の保存名は小文字の16進と
+     * 小文字の拡張子で作られる）。mapper が無い・照会に失敗した場合も拒否する（fail-closed）。汎用の {@code load}・{@code rescan} も
+     * metadata の種別（{@code FEATURE_SIGN_OFF}）で拒否する（多重の防御）。
+     */
+    private void assertFeatureSignOffNotAccessibleThroughGenericFilePath(String storedName) {
+        if (storedName == null || storedName.isBlank() || featureSignOffMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        long matches;
+        try {
+            matches = featureSignOffMapper.countByStoredNames(storedName, normalizedStoredName(storedName));
         } catch (RuntimeException e) {
             throw BusinessException.of(403, "error.forbidden");
         }

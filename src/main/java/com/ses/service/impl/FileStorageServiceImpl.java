@@ -162,8 +162,9 @@ public class FileStorageServiceImpl implements FileStorageService {
                         result == null ? FileScanResult.Status.UNAVAILABLE.name() : result.status().name(),
                         result, result == null ? "scanner returned no result" : result.reason());
                 // 再scan可能なよう、拒否結果を記録できた実体はquarantineへ保持する。server が生成する種別（DSAR の開示
-                // package 等）は再scanの対象にせず実体を残さない（生成し直せる副本で、残すと期限の管理から外れる。NF07-A2b review P2-1）
-                scanRejectionRecorded = !kind.isServerGeneratedOnly();
+                // package 等）は再scanの対象にせず実体を残さない（生成し直せる副本で、残すと期限の管理から外れる。NF07-A2b review P2-1）。
+                // 機能の開放の署名の文書も同じく残さない（upload し直せる。誰も claim しない file を残さない。FE design §6.1）
+                scanRejectionRecorded = !kind.isDedicatedPathOnly();
                 throw BusinessException.of("error.file.scanRejected");
             }
             Files.move(quarantine, published);
@@ -187,11 +188,11 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     /**
-     * 保存できなかった server 生成の file の後始末。公開領域に移った実体も消し、拒否の結果を書いた metadata は論理削除する
-     * （孤児清掃・再scan・取得のどの対象にも残さない）。失敗しても元の例外を優先し、log だけを出す。
+     * 保存できなかった専用の経路だけの種別（server 生成の file・機能の開放の署名の文書）の後始末。公開領域に移った実体も消し、
+     * 拒否の結果を書いた metadata は論理削除する（孤児清掃・再scan・取得のどの対象にも残さない）。失敗しても元の例外を優先し、log だけを出す。
      */
     private void discardServerGenerated(FileKind kind, FileSecurityMetadata metadata, Path published) {
-        if (kind == null || !kind.isServerGeneratedOnly()) {
+        if (kind == null || !kind.isDedicatedPathOnly()) {
             return;
         }
         deleteQuietly(published);
@@ -253,7 +254,19 @@ public class FileStorageServiceImpl implements FileStorageService {
         return loadPublished(storedName, kind);
     }
 
-    private Resource loadPublished(String storedName, FileKind serverGeneratedKind) {
+    /**
+     * 専用の経路だけが読む種別（{@link FileKind#isDedicatedPathOnly()}。機能の開放の署名の文書等）の file を、その種別の専用経路から
+     * 読む（feature-enablement-console design §6.1）。metadata の種別が一致しなければ 403。汎用の {@link #load} はこれらの種別を開かない。
+     */
+    @Override
+    public Resource loadDedicated(String storedName, FileKind kind) {
+        if (kind == null || !kind.isDedicatedPathOnly()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        return loadPublished(storedName, kind);
+    }
+
+    private Resource loadPublished(String storedName, FileKind dedicatedKind) {
         if (storedName == null || storedName.isBlank()
                 || storedName.contains("/") || storedName.contains("\\") || storedName.contains("..")) {
             throw BusinessException.of("error.file.invalidName");
@@ -265,10 +278,11 @@ public class FileStorageServiceImpl implements FileStorageService {
                     || !"CLEAN".equals(metadata.getScanStatus())) {
                 throw BusinessException.of(403, "error.file.scanNotReady");
             }
-            boolean serverGenerated = isServerGenerated(metadata);
-            if (serverGeneratedKind == null ? serverGenerated
-                    : !serverGeneratedKind.name().equals(metadata.getFileKind())) {
-                // 汎用の取得では server 生成の file（DSAR の開示 package 等）を開かない。専用経路は種別の一致を要する
+            boolean dedicated = isDedicatedPathOnly(metadata);
+            if (dedicatedKind == null ? dedicated
+                    : !dedicatedKind.name().equals(metadata.getFileKind())) {
+                // 汎用の取得では専用の経路だけが読む file（DSAR の開示 package・機能の開放の署名の文書等）を開かない。
+                // 専用経路は種別の一致を要する
                 throw BusinessException.of(403, "error.forbidden");
             }
         }
@@ -325,8 +339,9 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (metadata == null || "PUBLISHED".equals(metadata.getStorageState())) {
             throw BusinessException.of(404, "error.file.unknownReference");
         }
-        if (isServerGenerated(metadata)) {
-            // server 生成の file は再scanで公開しない（保存の失敗時に実体を残さず、生成し直す。NF07-A2b review P2-1）
+        if (isDedicatedPathOnly(metadata)) {
+            // 専用の経路だけが読む file（server 生成の file・機能の開放の署名の文書）は再scanで公開しない（保存の失敗時に実体を残さず、
+            // 生成し直す・upload し直す。NF07-A2b review P2-1、FE design §6.1）
             throw BusinessException.of(403, "error.forbidden");
         }
         FileKind kind;
@@ -384,12 +399,12 @@ public class FileStorageServiceImpl implements FileStorageService {
         }
     }
 
-    private static boolean isServerGenerated(FileSecurityMetadata metadata) {
+    private static boolean isDedicatedPathOnly(FileSecurityMetadata metadata) {
         if (metadata == null || metadata.getFileKind() == null) {
             return false;
         }
         for (FileKind candidate : FileKind.values()) {
-            if (candidate.isServerGeneratedOnly() && candidate.name().equals(metadata.getFileKind())) {
+            if (candidate.isDedicatedPathOnly() && candidate.name().equals(metadata.getFileKind())) {
                 return true;
             }
         }

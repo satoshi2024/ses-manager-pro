@@ -33,6 +33,14 @@ public interface FileStorageService {
         return load(storedName);
     }
 
+    /**
+     * 専用の経路だけが読む種別（{@link FileKind#isDedicatedPathOnly()}。機能の開放の署名の文書等）の file を、その種別の専用経路から
+     * 読む（種別の一致を要する）。汎用の {@link #load} はこれらの種別を開かない。既定は {@link #load} と同じ（metadata を持たない実装向け）。
+     */
+    default Resource loadDedicated(String storedName, FileKind kind) {
+        return load(storedName);
+    }
+
     /** 保持期限到達等の認可済み処理で、現在tenantの保存実体を消去する。 */
     void delete(String storedName);
 

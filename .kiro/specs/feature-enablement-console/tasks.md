@@ -45,13 +45,13 @@
   - **Demo:** local の MySQL 8.4 の空の DB で `mvn spring-boot:run`（dev）を起動し、`SHOW CREATE TABLE t_feature_enablement_state\G` で複合 FK を、`flyway_schema_history` の最大が 203 であることを見る。
   - **失敗/rollback:** 版番号が衝突したら上の空き番号へ振り直す（空き番号を埋めない）。
 
-- [ ] **FE-A02 — entity・mapper・署名の文書の file 種別と 2 箇所の登録**
+- [x] **FE-A02 — entity・mapper・署名の文書の file 種別と 2 箇所の登録**
   - **依存:** FE-A01
   - **対応要求:** FE-RQ-004・013・017
   - **Objective:** 9 表の entity と mapper（event・組の member・延長の記録は `AppendOnlyMapper`）、`FileKind.FEATURE_SIGN_OFF`、汎用の upload・取得・再 scan の拒否、`FileReferenceProvider` を用意する。
   - **対象 file:** `src/main/java/com/ses/entity/FeatureEnablement*.java`・`FeatureSignOff*.java`（新規）、`src/main/java/com/ses/mapper/FeatureEnablement*Mapper.java`・`FeatureSignOff*Mapper.java`（新規。追記専用の 2 つも `com.ses.mapper` に置き、`AppendOnlyMapper` を継承して `appendOnlyTable()` を実装する。先例 `LifecycleDualEventMapper`）、`common/enums/FileKind.java`（`FEATURE_SIGN_OFF`（pdf・10 MB）・`isDedicatedPathOnly()`）、`controller/api/FileApiController.java`（:36-44）、`service/impl/FileStorageServiceImpl.java`（汎用の `load`・`rescan` の種別の拒否、`loadDedicated`）、`service/security/impl/FileScopeValidationService.java`（:255 と `assertRescanAllowed` :504-506 の前置きの拒否）、`service/impl/FeatureSignOffFileReferenceProvider.java`（新規）。
   - **Implementation:** entity に `deletedFlag` を置かない。`selectByIdForUpdate`・状態ごとの CAS 更新（`UpdateWrapper` で列を名指し。NULL に戻す列は `set(col, null)`。CLAUDE.md の `FieldStrategy.ALWAYS` の注意）。`FileScopeValidationService` に `assertFeatureSignOffNotAccessibleThroughGenericFilePath`（先例 :519）。
-  - **Automated test:** `FeatureEnablementEventMapperImmutabilityTest`・`FeatureSignOffBundleMemberMapperImmutabilityTest`（全ての更新・削除が例外）、`FileApiControllerTest` に `FEATURE_SIGN_OFF` の upload が 400 の case（server 生成の種別の拒否の試験が無い穴も同時に埋める）、`FileStorageServiceImplTest` に汎用の `load`・`rescan` が種別で 403・`loadDedicated` は種別の一致を要する case、`FileScopeValidationServiceTest` に署名の保存名が全 role で取得・再 scan とも 403 の case、`FeatureSignOffFileReferenceProviderTest`（`PURGED` 以外を claim）、`FileKindTest`（pdf だけ・10 MB）、`AllMappersSchemaSweepTest`。
+  - **Automated test:** `FeatureEnablementEventMapperImmutabilityTest`・`FeatureSignOffBundleMemberMapperImmutabilityTest`・`FeatureSignOffExtensionMapperImmutabilityTest`（全ての更新・削除が例外。延長の記録は P3-M3）、`FileApiControllerTest` に `FEATURE_SIGN_OFF` の upload が 400 の case（server 生成の種別の拒否の試験が無い穴も同時に埋める）、`FileStorageServiceImplTest` に汎用の `load`・`rescan` が種別で 403・`loadDedicated` は種別の一致を要する case、`FileScopeValidationServiceTest` に署名の保存名が全 role で取得・再 scan とも 403 の case、`FeatureSignOffFileReferenceProviderTest`（`PURGED` 以外を claim）、`FileKindTest`（pdf だけ・10 MB）、`AllMappersSchemaSweepTest`。
   - **Demo:** なし（試験の結果を確かめる）。
 
 - [ ] **FE-A03 — 目録・評価器の interface・共通の評価器**

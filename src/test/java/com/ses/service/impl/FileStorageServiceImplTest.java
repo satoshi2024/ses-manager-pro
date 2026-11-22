@@ -244,6 +244,83 @@ class FileStorageServiceImplTest {
         org.mockito.Mockito.verify(mapper).markDeletedForTenant(20L, "default");
     }
 
+    /**
+     * FE-A02（feature-enablement-console design §6.1）: 機能の開放の署名の文書（FEATURE_SIGN_OFF）は汎用の load・rescan では種別で
+     * 開かず（403）、専用の経路 loadDedicated は種別の一致を要する。server 生成の種別の専用経路（loadServerGenerated）でも開かない。
+     */
+    @Test
+    void load_汎用の取得と再scanは署名の文書を開かず専用の経路は種別の一致を要する() throws java.io.IOException {
+        String storedName = "featuresignoff000000000000000001.pdf";
+        byte[] pdf = "%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII);
+        java.nio.file.Files.createDirectories(tempDir.resolve("published"));
+        java.nio.file.Files.write(tempDir.resolve("published").resolve(storedName), pdf);
+        com.ses.entity.FileSecurityMetadata metadata = new com.ses.entity.FileSecurityMetadata();
+        metadata.setId(40L);
+        metadata.setTenantId("default");
+        metadata.setStoredName(storedName);
+        metadata.setFileKind(FileKind.FEATURE_SIGN_OFF.name());
+        metadata.setStorageState("PUBLISHED");
+        metadata.setScanStatus("CLEAN");
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.when(mapper.selectByStoredName("default", storedName)).thenReturn(metadata);
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        FileStorageServiceImpl storage = new FileStorageServiceImpl(props,
+                (path, kind) -> com.ses.service.security.FileScanResult.clean("test-scanner"), mapper);
+
+        BusinessException generic = assertThrows(BusinessException.class,
+                () -> AccountingTenantContextHolder.runWithTenant("default", () -> storage.load(storedName)));
+        assertEquals(403, generic.getCode());
+        assertEquals("error.forbidden", generic.getMessageKey());
+        assertNotNull(AccountingTenantContextHolder.runWithTenant("default",
+                () -> storage.loadDedicated(storedName, FileKind.FEATURE_SIGN_OFF)));
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.loadDedicated(storedName, FileKind.PRIVACY_EXPORT))).getCode(),
+                "専用の経路でも種別が違えば開かない");
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.loadDedicated(storedName, FileKind.SKILL_SHEET))).getCode(),
+                "専用の経路だけの種別でなければ開かない");
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.loadServerGenerated(storedName, FileKind.FEATURE_SIGN_OFF))).getCode(),
+                "server 生成の専用経路は署名の文書を開かない");
+
+        metadata.setStorageState("QUARANTINED");
+        java.nio.file.Files.createDirectories(tempDir.resolve("quarantine"));
+        java.nio.file.Files.write(tempDir.resolve("quarantine").resolve(storedName), pdf);
+        assertEquals(403, assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant(
+                "default", () -> storage.rescan(storedName))).getCode());
+        assertTrue(java.nio.file.Files.exists(tempDir.resolve("quarantine").resolve(storedName)),
+                "署名の文書は再scanで公開しない");
+    }
+
+    /** FE-A02（design §6.1）: 署名の文書は scan できなければ quarantine に残さず、拒否を書いた metadata を論理削除する。 */
+    @Test
+    void store_署名の文書はscanできなければ実体を残さずmetadataを論理削除する() throws java.io.IOException {
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((com.ses.entity.FileSecurityMetadata) invocation.getArgument(0)).setId(41L);
+            return 1;
+        }).when(mapper).insert(org.mockito.ArgumentMatchers.any(com.ses.entity.FileSecurityMetadata.class));
+        org.mockito.Mockito.when(mapper.updateScanResult(org.mockito.ArgumentMatchers.eq(41L),
+                org.mockito.ArgumentMatchers.eq("QUARANTINED"), org.mockito.ArgumentMatchers.eq("UNAVAILABLE"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        FileStorageServiceImpl unavailable = new FileStorageServiceImpl(
+                props, new com.ses.service.security.impl.UnavailableFileScanner(), mapper);
+
+        assertThrows(BusinessException.class, () -> AccountingTenantContextHolder.runWithTenant("default",
+                () -> unavailable.store("%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII),
+                        "signoff.pdf", FileKind.FEATURE_SIGN_OFF)));
+
+        assertEquals(0, regularFileCount(tempDir.resolve("quarantine")), "署名の文書の実体は quarantine に残さない");
+        assertEquals(0, regularFileCount(tempDir.resolve("published")));
+        org.mockito.Mockito.verify(mapper).markDeletedForTenant(41L, "default");
+    }
+
     /** NF07-A2b review P3-8・P2-1: 汎用の load と rescan は server 生成の種別を開かず、専用の経路は種別の一致を要する。 */
     @Test
     void load_汎用の取得と再scanはserver生成の種別を開かず専用の経路だけが読める() throws java.io.IOException {
