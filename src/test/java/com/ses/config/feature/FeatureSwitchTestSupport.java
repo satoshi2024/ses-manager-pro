@@ -61,7 +61,33 @@ final class FeatureSwitchTestSupport {
         return databaseSwitches(on);
     }
 
+    /**
+     * 本番の目録（段階 A の容易な7件だけに DB 管理の印。FE-A11）の DB の源で、7件のうち指定したものだけを閉じ、残りの7件は開いた
+     * snapshot、印の無い開放単位は全て ON の設定値（property の源）にした FeatureSwitches。{@link #disabledOnly} と同じ応答になる。
+     */
+    static FeatureSwitches standardDatabaseDisabledOnly(Feature... disabled) {
+        Set<Feature> off = disabled.length == 0 ? EnumSet.noneOf(Feature.class) : EnumSet.of(disabled[0], disabled);
+        Set<Feature> open = EnumSet.noneOf(Feature.class);
+        for (Feature feature : com.ses.featureenablement.catalog.FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED) {
+            if (!off.contains(feature)) {
+                open.add(feature);
+            }
+        }
+        FeatureSwitchProperties fallback = new FeatureSwitchProperties();
+        for (Feature feature : Feature.values()) {
+            toggle(fallback, feature).setEnabled(!off.contains(feature));
+        }
+        return databaseSwitches(open, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(), fallback);
+    }
+
     private static FeatureSwitches databaseSwitches(Set<Feature> open) {
+        return databaseSwitches(open, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard()
+                .withDatabaseManaged(EnumSet.allOf(Feature.class)), new FeatureSwitchProperties());
+    }
+
+    private static FeatureSwitches databaseSwitches(Set<Feature> open,
+                                                    com.ses.featureenablement.catalog.FeatureEnablementCatalog catalog,
+                                                    FeatureSwitchProperties fallback) {
         java.time.Instant now = java.time.Instant.parse("2026-11-23T01:00:00Z");
         java.time.Clock clock = java.time.Clock.fixed(now, java.time.ZoneOffset.UTC);
         com.ses.featureenablement.config.FeatureEnablementProperties properties =
@@ -76,12 +102,9 @@ final class FeatureSwitchTestSupport {
                 com.ses.featureenablement.FeatureEnablementTestSnapshots.builder(now);
         open.forEach(builder::open);
         holder.replace(builder.build());
-        com.ses.featureenablement.catalog.FeatureEnablementCatalog catalog =
-                com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard()
-                        .withDatabaseManaged(EnumSet.allOf(Feature.class));
         return new FeatureSwitches(new com.ses.featureenablement.state.DatabaseFeatureEnablementStateSource(holder, overlay,
-                catalog, new com.ses.featureenablement.state.PropertyFeatureEnablementStateSource(
-                new FeatureSwitchProperties()), properties, clock));
+                catalog, new com.ses.featureenablement.state.PropertyFeatureEnablementStateSource(fallback), properties,
+                clock));
     }
 
     /** 機能自身とその祖先（実効値をONにするのに必要な設定値の集合）。 */

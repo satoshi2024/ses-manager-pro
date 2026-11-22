@@ -684,7 +684,10 @@ writeAutoClose(f, reason):
 - 開閉の判定は全て `FeatureSwitches` 経由のため、源の差替え（§3）だけで実行時に開閉できる。各機能の code は変えない。
 - 目録の行（署名の種別・親）と、固有の評価器が要るもの:
   - NF02: `WorkCalendarConditionEvaluator`（本日を含む当年度の全社共通の暦。`ServiceSlaCalculator.findCalendarForScope` :366-400 の 4 段目と同じ条件で `WorkCalendarMapper` を 1 回照会。check は `Scope.OPEN_ONLY`: 申請・承認の時だけ必須で、開いた後は継続の条件にせず NF02 を自動閉鎖しない。期限の接近と喪失は §7.4 の警告。§18 J-16 決定済み）。
-  - NF10: `SchedulingConditionEvaluator`（`app.scheduling.enabled` が true でなければ `ADVISORY`）。
+    - 実装（FE-A11）: 照会は `WorkCalendarMapper.selectCompanyWideNotEndedBefore(本日)`（全社共通の有効な暦のうち本日より前に終わっていないもの）の 1 回。check の `validUntil` は暦が成り立つ最後の日の翌日で、今の暦の終わりにすぐ続く次の全社共通の暦があれば、その終わりまで延ばす（次年度の暦を登録済みなら期限の接近を警告しない。終わりの無い暦なら期限なし）。
+    - 照会に失敗した時は例外を投げず、code `calendar.companyWide.unverifiable`（評価できない類）の `UNVERIFIABLE` を返す。目録はこの code も開放の時だけの条件と宣言する（registry の例外の扱い `evaluator.unverifiable[...]` は継続の条件になり、照会の失敗で NF02 を自動閉鎖してしまうため。D-9）。申請・承認は評価できない条件として 409。
+  - NF10: `SchedulingConditionEvaluator`（`app.scheduling.enabled` が true でなければ `ADVISORY`。property が無ければ有効とみなす）。
+- 目録は段階 A でこの7件だけに DB 管理の印を付ける（`FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED`）。prod の起動時検査は、この7件の旧い開閉の変数（`FEATURE_NF01_ENABLED` 等と property の全ての綴り）を拒否し（§10）、`application-prod.yml` からこの7件の placeholder を削除した（NF02 顧客ポータルの `visible-since` は FE-B03 まで残す）。
 - 閉じた時の挙動は現在の OFF と同じ（filter の 404、menu の非表示、scheduler の no-op、子の 400。NF04 は `common.js` が SW の登録を解く。FS 4.4）。
 
 ### 8.2 NF01 二者確認

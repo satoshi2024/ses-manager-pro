@@ -129,35 +129,23 @@ app:
   feature-enablement:
     source: database
     allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}
-  # 機能スイッチ（段階公開）。本番も既定は全てOFF。デプロイ後に1機能ずつ環境変数でONにする（再起動で反映）。
-  # 手順: .kiro/specs/production-launch/feature-switches.md
+  # 機能スイッチ（段階公開）。段階 A で system の中（画面「機能の開放」の申請と二人の承認）で開閉する7件（NF01・NF02・NF02 顧客
+  # ポータル・NF03・NF03 資格番号・NF04・NF10。FE-A11）の placeholder はここに置かない。それらの旧い環境変数（FEATURE_NF01_ENABLED 等）
+  # を設定すると prod は起動しない（FeatureEnablementProductionValidator）。残りの機能は段階 B〜D で system の中へ移すまで、ここの値で
+  # 開閉する（本番も既定は OFF。再起動で反映）。手順: .kiro/specs/production-launch/feature-switches.md
   features:
-    nf01:
-      enabled: ${FEATURE_NF01_ENABLED:false}
     # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
     nf01-dual-confirmation:
       enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
       privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
-    nf02:
-      enabled: ${FEATURE_NF02_ENABLED:false}
-    # NF-02の子（顧客ポータルの問い合わせ）。既定はOFFで、初回リリースでは実値の task definition でONにする（2026-11-22 利用者決定）
+    # NF-02の子（顧客ポータルの問い合わせ）の公開範囲（開閉は system の中。公開範囲の変更は段階 B の FE-B03 で system の中へ移す）
     nf02-customer-portal:
-      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
       # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）
       visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
-    nf03:
-      enabled: ${FEATURE_NF03_ENABLED:false}
-    # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）
-    nf03-certification-pii:
-      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
-    nf04:
-      enabled: ${FEATURE_NF04_ENABLED:false}
     # NF-06（取込センター画面・API）。ONにする場合はapp.import-center.admissionの署名済み承認設定と
     # 行参照鍵（IMPORT_ROW_REFERENCE_HMAC_KEY）が必須（不備は起動失敗）。手順: feature-switches.md 4.8
     nf06:
       enabled: ${FEATURE_NF06_ENABLED:false}
-    nf10:
-      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== freee連携（HFP-01） =====
 # prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。

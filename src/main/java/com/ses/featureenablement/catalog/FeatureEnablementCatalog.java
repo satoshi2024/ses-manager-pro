@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
  * 項目・属する組を持つ。値（決定 ID・digest・鍵）は持たない。</p>
  *
  * <p>DB 管理の印（{@link UnitDefinition#databaseManaged()}）は段階の間の印で、印の無い開放単位は {@code database} の源でも
- * property の値を返す（design §3.1）。段階 A の本書では全て印なし（FE-A11 が容易な7件に、段階 B〜D が残りに付け、段階 E で印を
- * 削除する）。試験は {@link #withDatabaseManaged} で印を付けた写しを使う。</p>
+ * property の値を返す（design §3.1）。段階 A は容易な7件（{@link #STAGE_A_DATABASE_MANAGED}。FE-A11）に印を付け、段階 B〜D が
+ * 残りに付け、段階 E で印を削除する。試験は {@link #withDatabaseManaged} で印を付け直した写しを使う。</p>
  */
 public final class FeatureEnablementCatalog {
 
@@ -32,8 +32,17 @@ public final class FeatureEnablementCatalog {
     public static final String SETTING_NF02_VISIBLE_SINCE = "nf02-customer-portal.visible-since";
     /** NF07 の決定の束縛の組の種類（D-01・D-09 と、D-09 が dsar を承認する時の D-06。design §2.6.1）。 */
     public static final String BUNDLE_NF07_DECISION_BINDING = "NF07_DECISION_BINDING";
-    /** NF02 の全社共通カレンダー（開放の時だけの条件。D-9）。評価器は FE-A11 で足す。 */
+    /** NF02 の全社共通カレンダー（開放の時だけの条件。D-9）。評価器は {@code WorkCalendarConditionEvaluator}（FE-A11）。 */
     public static final String CODE_NF02_CALENDAR = "calendar.companyWide";
+    /**
+     * NF02 の暦を照会できない時の code（評価できない類。開放の時だけの条件のまま扱い、照会の失敗で NF02 を自動閉鎖しない。D-9。
+     * 申請・承認では評価できない条件として 409）。
+     */
+    public static final String CODE_NF02_CALENDAR_UNVERIFIABLE = "calendar.companyWide.unverifiable";
+    /** 段階 A で DB 管理にする容易な7件（requirements §6.1・6.3〜6.7・6.13。FE-A11）。 */
+    public static final Set<Feature> STAGE_A_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
+            Feature.NF04, Feature.NF10));
     /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は FE-D05 で足す。 */
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
 
@@ -214,6 +223,7 @@ public final class FeatureEnablementCatalog {
                 List.of("ServiceSlaCalculator.findCalendarForScope の4段目", "FS 4.3", "署名表の NF02 の行"),
                 decision("NF02_DG02", "CS_OWNER"));
         b.openOnly(Feature.NF02, CODE_NF02_CALENDAR);
+        b.openOnly(Feature.NF02, CODE_NF02_CALENDAR_UNVERIFIABLE);
 
         // NF02 顧客ポータルの問い合わせ（§6.4）
         b.unit(Feature.NF02_CUSTOMER_PORTAL, false, false, false, List.of(),
@@ -332,13 +342,16 @@ public final class FeatureEnablementCatalog {
         b.bundle(new BundleKind(BUNDLE_NF07_DECISION_BINDING, List.of("NF07_D01", "NF07_D09"), List.of("NF07_D06"), true,
                 true));
 
-        // NF10（§6.13）。scheduler 無効は警告だけ（ADVISORY。評価器は FE-A11）
+        // NF10（§6.13）。scheduler 無効は警告だけ（ADVISORY。評価器は SchedulingConditionEvaluator。FE-A11）
         b.unit(Feature.NF10, false, false, false, List.of(),
                 List.of("RB §1.7 の NF10 の行", "FS 4.5.1 の #1〜#8", "署名表の NF10 の行"),
                 decision("NF10_REPORT_OWNER", "REPORT_OWNER"),
                 decision("NF10_SRE", "SRE"),
                 decision("NF10_TZ_POLICY", "REPORT_OWNER", "SRE"),
                 decision("NF10_DRAIN_APPROVAL", "SRE", "DBA"));
+
+        // 段階 A の DB 管理の印（容易な7件。FE-A11）
+        b.databaseManaged(STAGE_A_DATABASE_MANAGED);
 
         return b.build();
     }
@@ -416,6 +429,12 @@ public final class FeatureEnablementCatalog {
 
         void bundle(BundleKind bundle) {
             bundles.put(bundle.code(), bundle);
+        }
+
+        void databaseManaged(Set<Feature> managed) {
+            for (Feature feature : managed) {
+                units.put(feature, units.get(feature).withDatabaseManaged(true));
+            }
         }
 
         private void replace(UnitDefinition unit, List<SignOffRequirement> requirements, Set<String> openOnly,

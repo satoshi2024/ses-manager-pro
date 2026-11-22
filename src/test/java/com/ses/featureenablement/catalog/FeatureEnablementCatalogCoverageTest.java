@@ -98,7 +98,11 @@ class FeatureEnablementCatalogCoverageTest {
                 .filter(unit -> !unit.openTransitionCodes().isEmpty())
                 .collect(Collectors.toMap(UnitDefinition::feature, UnitDefinition::openTransitionCodes));
 
-        assertThat(openOnly).containsExactly(Map.entry(Feature.NF02, Set.of(FeatureEnablementCatalog.CODE_NF02_CALENDAR)));
+        // 暦を照会できない時の code も開放の時だけの条件（照会の失敗で NF02 を自動閉鎖しない。D-9。FE-A11）
+        assertThat(openOnly).containsExactly(Map.entry(Feature.NF02, Set.of(FeatureEnablementCatalog.CODE_NF02_CALENDAR,
+                FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE)));
+        assertThat(FeatureEnablementCatalog.isUnverifiableCode(FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE))
+                .isTrue();
         assertThat(openTransition).containsExactly(
                 Map.entry(Feature.NF05_OUTBOUND, Set.of(FeatureEnablementCatalog.CODE_NF05_BARRIER_OFF)));
     }
@@ -146,16 +150,20 @@ class FeatureEnablementCatalogCoverageTest {
                 .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
     }
 
+    /** FE-A11: 段階 A は容易な7件だけに DB 管理の印を付け、NF01 二者確認・NF05・NF06・NF07 は段階 B〜D まで property の源。 */
     @Test
-    void 段階AではどのFeatureにもDB管理の印が無く写しで印を付けられる() {
+    void 段階Aは容易な7件だけにDB管理の印があり写しで印を付け直せる() {
+        EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
+                Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
         for (Feature feature : Feature.values()) {
-            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isFalse();
+            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature));
         }
-        FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF10));
+        assertThat(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageA);
+        FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF06));
         assertThat(managed.databaseManaged(Feature.NF04)).isTrue();
-        assertThat(managed.databaseManaged(Feature.NF10)).isTrue();
+        assertThat(managed.databaseManaged(Feature.NF06)).isTrue();
         assertThat(managed.databaseManaged(Feature.NF01)).isFalse();
-        assertThat(catalog.databaseManaged(Feature.NF04)).as("元の目録は変えない").isFalse();
+        assertThat(catalog.databaseManaged(Feature.NF06)).as("元の目録は変えない").isFalse();
     }
 
     @Test
