@@ -67,7 +67,9 @@ class WriterIsolationPolicyTest {
             Map.entry(com.ses.featureenablement.service.FeatureEnablementServiceImpl.class, List.of("requestOpen", "approve",
                     "reject", "withdraw", "close", "autoClose", "expirePendingRequests")),
             Map.entry(com.ses.featureenablement.service.FeatureSignOffServiceImpl.class, List.of("register", "confirm",
-                    "reject", "withdraw", "revoke", "requestExtension", "document")));
+                    "reject", "withdraw", "revoke", "requestExtension", "document")),
+            Map.entry(com.ses.featureenablement.service.FeatureSignOffBundleServiceImpl.class, List.of("register",
+                    "confirm", "reject", "withdraw", "revoke")));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {
