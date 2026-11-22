@@ -182,6 +182,44 @@ case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring() {
   assert_no_secret "$out"
 }
 
+# RB-QUIESCE 最終 review の残余 1: redact した失敗の文が 400 文字を超え、400 文字目が host 名や接続元の IP の途中に来ても、
+# 識別子を伏せてから 400 文字に切るため、その値の断片を出力しない（切ってから伏せると、切れ目の前の断片が伏せられずに残る）
+case_preflight_quiesce_sql_error_is_masked_before_truncation() {
+  local kind value lead tail pad i leaked
+  for kind in host user-host; do
+    setup_quiesce_env
+    if [[ "$kind" == host ]]; then
+      value='qz7h-db.internal.example'
+      export MYSQL_HOST=$value
+      lead="ERROR 2005 (HY000): Unknown MySQL server host '"
+      tail="' (-2) tail-marker-zz9"
+    else
+      value='172.31.250.199'
+      lead="ERROR 1142 (42000) at line 21: SELECT command denied to user 'bkp-user-7x9'@'"
+      tail="' for table 'sys_backup_quiesce_instance' tail-marker-zz9"
+    fi
+    # 値が 393 文字目から始まるように前を詰める（400 文字までに値の先頭 8 文字だけが入り、切れ目が値の途中に来る）
+    pad=$(printf '%*s' $(( 391 - ${#lead} )) '' | tr ' ' 'p')
+    printf 'TABLES\t0\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+    printf '%s\n' "$pad $lead$value$tail" > "$FAKE_QDB_DIR/preflight.err"
+    printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+    run_preflight
+    assert_eq 19 "$code" "SQL の失敗は exit 19（$kind）"
+    if [[ "$kind" == host ]]; then
+      assert_contains "$out" "host '<host>'" "切れ目に掛かる host 名も伏せる（$kind）"
+    else
+      assert_contains "$out" "'<user>'@'<host>'" "切れ目に掛かる user@host の形も伏せる（$kind）"
+    fi
+    leaked=""
+    for (( i = 4; i <= ${#value}; i++ )); do
+      [[ "$out" == *"${value:0:i}"* ]] && leaked+="${value:0:i} "
+    done
+    assert_eq "" "$leaked" "切れ目の前の値の断片（先頭の 4 文字以上）を出力しない（$kind）"
+    assert_not_contains "$out" "tail-marker-zz9" "伏せた後も 400 文字までに切る（$kind）"
+    assert_no_secret "$out"
+  done
+}
+
 run_preflight() {
   out=$(env BACKUP_TOOL_IMAGE_DIGEST='sha256:test-digest-001' "$PREFLIGHT" --json 2>&1)
   code=$?
@@ -498,6 +536,7 @@ run_case case_preflight_quiesce_ok
 run_case case_preflight_quiesce_failures_exit_19
 run_case case_preflight_quiesce_sql_error_is_shown_without_identifiers
 run_case case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring
+run_case case_preflight_quiesce_sql_error_is_masked_before_truncation
 
 # 全 case 出力の秘密 grep（framework log 含む）
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
