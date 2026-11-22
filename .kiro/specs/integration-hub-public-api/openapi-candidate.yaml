@@ -26,7 +26,8 @@ info:
     '500': [INTERNAL_ERROR]
     '503': [BACKUP_QUIESCED]
   x-backup-quiesce-rule: >
-    backupの書込み静止の間（15分ごとのcheckpointは通常数秒・最長300秒、02:00のfullは最長60分）は、
+    backupの書込み静止の間（15分ごとのcheckpointは通常数秒・最長300秒、02:00のfullは最長60分。どちらもその前の排水
+    （checkpointは最長30秒、fullは最長600秒。この間のRetry-Afterは10秒）を含む）は、
     /external-api/v1/** の全operationが503/BACKUP_QUIESCED（retryable=true、Retry-After、X-SES-Error-Code）を返す。
     要求は処理せず、監査行も書かない。clientはRetry-Afterの秒数の後に再試行する。公開APIが無効の間は、
     静止中も平時と同じ404を返す。

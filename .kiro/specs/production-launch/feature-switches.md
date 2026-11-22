@@ -78,10 +78,10 @@
 
 手順:
 
-1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施し、初回の起動（bootstrap mode。`deploy-runbook.md` §4・§4.2）を行う。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。初回の起動の task definition に機能スイッチの環境変数があると、照合（`validate-task-definition.ps1` の `-Phase Initial`）が値に関係なく FAIL にする。
+1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施し、初回の起動（bootstrap mode。`deploy-runbook.md` §4・§4.2）を行う。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。初回の起動の task definition に機能スイッチの環境変数があると、照合（`validate-task-definition.ps1` の `-Phase Initial`）が値に関係なく FAIL にする。NF-05 outbound のため、この起動から以後の全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID`（機能スイッチではない）を設定する（`deploy-runbook.md` §1.7「ON の起動までの順序と準備」の1）。
 2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF07_DSAR=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
-4. bootstrap を終えた後（`deploy-runbook.md` §5.5）、ON の起動の前の準備（NF-07 の Journal instance と専用の Flyway job、NF-05 outbound の同じ tenant での OFF の起動の記録、privacy-admin の割当（4.7.4 の2）、法人を持つ組織（4.8.2）、全社共通カレンダー（4.3）。owner と状態は `deploy-runbook.md` §1.7「ON の起動までの順序と準備」。利用者が DBA・SRE を手配する。**未取得**）を揃え、ON にする環境変数と ON の時に要る値を、署名の結果どおり task definition に設定する。値の所在は `deploy-runbook.md` §1.7「初回リリースのスイッチと、ONの起動時検査が要る値の所在」と §1.0「ONにした時だけ必須になる設定」。照合は `-Phase Steady` で行う（ON/OFF の組合せは拒否しない。名前・置き場所等だけを見る。ON の時に要る値は app の起動時検査が見る）。
+4. bootstrap を終えた後（`deploy-runbook.md` §5.5）、ON の起動の前の準備（NF-07 の Journal instance と専用の Flyway job、NF-05 outbound の OFF の記録（全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID` を設定し、ON の起動の前の最後の OFF の起動の後に状態の行と監査 `NF05_OUTBOUND_OFF` を確かめる）、privacy-admin の割当（4.7.4 の2）、法人を持つ組織（4.8.2）、全社共通カレンダー（4.3）。owner と状態は `deploy-runbook.md` §1.7「ON の起動までの順序と準備」。利用者が DBA・SRE を手配する。**未取得**）を揃え、ON にする環境変数と ON の時に要る値を、署名の結果どおり task definition に設定する。値の所在は `deploy-runbook.md` §1.7「初回リリースのスイッチと、ONの起動時検査が要る値の所在」と §1.0「ONにした時だけ必須になる設定」。照合は `-Phase Steady` で行う（ON/OFF の組合せは拒否しない。名前・置き場所等だけを見る。ON の時に要る値は app の起動時検査が見る）。
 5. 全停止で再起動し、起動ログの `[機能スイッチ] 起動時の状態` が `NF01=ON, NF01_DUAL_CONFIRMATION=ON, NF02=ON, NF02_CUSTOMER_PORTAL=ON, NF03=ON, NF03_CERTIFICATION_PII=ON, NF04=ON, NF06=ON, NF07_RETENTION=ON, NF07_DSAR=ON, NF10=ON` になることと、各機能の起動時の確認の log（4.7.4 の5、4.9.3 の3 等）を確かめる。NF-07 は決定の署名日前・失効日以降だと起動を止めずに OFF として扱う（4.7.2.1）ため、ここで ON を確かめる。NF-05 はこの log の対象外で、DG-05 草案 §4 の確認を行う。
 6. 各機能の画面・API が権限どおりに表示され、各節の ON の確認が済んでから公開する。
 
