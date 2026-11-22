@@ -24,7 +24,7 @@ NF07 保持・保全（hold の開始と解除）と NF07 本人請求（DSAR）
 
 | 候補 | 内容 | 利点 | 欠点 |
 |---|---|---|---|
-| a-1（推奨） | `write-enabled` の後30日（PITR の保持と同じ）で D15 の削除の対象にする。incident が続いて旧版が調査・回収に要るときは、incident commander が理由と新しい期限を change ticket に記録して延ばす | 期限が決まっていて、個人データが purge の外に残る期間に上限がある。backup の PITR の窓と揃い、説明しやすい | 30日で足りない調査では延長の手続が要る。延長を決める incident commander は baseline の 008 の事項で、まだ決まっていない（owner 未指定。runbook §1.7「Backup 開始の前提」の 008） |
+| a-1（推奨） | `write-enabled` の後30日（PITR の保持と同じ）で D15 の削除の対象にする。incident が続いて旧版が調査・回収に要るときは、incident commander が理由と新しい期限を change ticket に記録して延ばす | 期限が決まっていて、個人データが purge の外に残る期間に上限がある。backup の PITR の窓と揃い、説明しやすい | 30日で足りない調査では延長の手続が要る。延長を決める incident commander は baseline の 008 の事項で、まだ決まっていない（owner 未指定。runbook §1.7「owner 未指定の事項」） |
 | a-2 | incident の close まで（復旧点より後の実体を回収する（forward recovery）かを incident commander が決め、close を宣言した時点）。日数の上限は置かない | 業務の判断と連動し、回収に要る写しを途中で失わない | 期限が不定で長くなり得る。その間、旧版の個人データは保持期限と DSAR の外に残る（(d) の受理の前提が弱くなる） |
 | a-3 | `write-enabled` の後、旧版を backup の repository（restic）へ1回 snapshot して検証し、その後すぐ D15 で消す。保存は backup の保存期間に従う | uploads の mount に旧版が残らず、保存は backup と同じ扱い（暗号化・versioning/immutability）になる | 今の backup は `current` の指す版だけを写し、旧版を写す手段が無い（後続の batch で実装が要る）。取り出しの手順が増える |
 
