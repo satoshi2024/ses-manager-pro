@@ -55,6 +55,8 @@ fi
 #   PID は ddl-lock.pid。lock を持つことの毎秒の確認（SELECT 'DDL_HELD', … IS_USED_LOCK …）には「DDL_HELD<TAB>1」を返し、
 #   回数を ddl-held.count に書く。FAKE_QDB_LOCK_DIE_AFTER=N なら N 回目の確認で異常終了する（session の喪失）。
 #   FAKE_QDB_LOCK_LOST_AFTER=N なら N 回目から「DDL_HELD<TAB>0」を返す（session は生きたまま lock を失った。繋ぎ直し等）。
+#   FAKE_QDB_LOCK_STDIN_CLOSED_AFTER=N なら N 回目の確認に応答せずに標準入力を閉じ、終わらずに待つ（session は生きたまま
+#   確認の文を受け取れない。保持 process が終わる時の kill で終わる）。
 #   起動の引数は ddl-lock.argv に書く（--skip-reconnect の確認）。
 # 既定の instance: FAKE_QDB_INSTANCE_ID（既定 0b7c6a2e-1111-4a5b-9c3d-000000000001）、host 名 app-host-1、接続元 10.0.0.11
 # ------------------------------------------------------------
@@ -128,6 +130,10 @@ fake_qdb_ddl_lock() { # <記録の directory>
       [[ -n "$dir" ]] && printf '%s\n' "$n" > "$dir/ddl-held.count"
       if [[ -n "${FAKE_QDB_LOCK_DIE_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_DIE_AFTER )); then
         exit 1
+      fi
+      if [[ -n "${FAKE_QDB_LOCK_STDIN_CLOSED_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_STDIN_CLOSED_AFTER )); then
+        exec 0<&-
+        while :; do sleep 1; done
       fi
       if [[ -n "${FAKE_QDB_LOCK_LOST_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_LOST_AFTER )); then
         printf 'DDL_HELD\t0\n'

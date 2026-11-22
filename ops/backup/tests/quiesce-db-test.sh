@@ -33,8 +33,8 @@ setup_qdb() {
   export FAKE_QDB_DIR="$T/qdb" QUIESCE_STATE_DIR="$T/state" QUIESCE_PROVIDER=quiesce-db LIB_UNDER_TEST="$LIB"
   export QUIESCE_DEADLINE_SECONDS=8 QUIESCE_LEASE_RENEW_SECONDS=1 QUIESCE_VERIFY_OBSERVE_SECONDS=2 \
     QUIESCE_RESUME_CONFIRM_SECONDS=2 QUIESCE_FULL_NEW_INSTANCE_CHECK_SECONDS=1
-  unset MYSQL_PWD FAKE_QDB_LOCK FAKE_QDB_LOCK_DIE_AFTER FAKE_DUMP_SLEEP FAKE_DUMP_PID_FILE QUIESCE_STALE_SECONDS \
-    QUIESCE_DEAD_SECONDS QUIESCE_LEASE_SECONDS QUIESCE_LEASE_MAX_SECONDS QUIESCE_REQUESTED_BY QUIESCE_HOLD_FD
+  unset MYSQL_PWD FAKE_QDB_LOCK FAKE_QDB_LOCK_DIE_AFTER FAKE_QDB_LOCK_STDIN_CLOSED_AFTER FAKE_DUMP_SLEEP FAKE_DUMP_PID_FILE \
+    QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS QUIESCE_LEASE_SECONDS QUIESCE_LEASE_MAX_SECONDS QUIESCE_REQUESTED_BY QUIESCE_HOLD_FD
   # job 本体: lib/quiesce.sh を読み、引数の手順を順に行う（各手順の結果を標準エラーに「step=rc」で出す）
   cat > "$T/job.sh" <<'JOB'
 #!/usr/bin/env bash
@@ -450,13 +450,34 @@ case_renew_cap_stops_renewal() {
   teardown_qdb
 }
 
+# 最終 review P3-5 の 2 つ目の理由（RB-QUIESCE 最終 review の残余 3）: 確認の後に session が終わったら、「DDL の session が
+# 終わった」を印と hold.log に書く
 case_ddl_session_lost_fails_verify() {
   setup_qdb
   export FAKE_QDB_LOCK_DIE_AFTER=1
   run_job CHECKPOINT acquire sleep:3 verify release
   assert_file "$T/state/ddl-lock.lost" "DDL lock の session を失ったら印を書く"
+  assert_contains "$(cat "$T/state/ddl-lock.lost" 2>/dev/null)" "DDL の session が終わった" "印に失った理由（session が終わった）を残す"
+  assert_contains "$(cat "$T/state/hold.log")" "DDL 凍結の lock を失いました（DDL の session が終わった。" "hold.log に失った理由（session が終わった）を出す"
   assert_contains "$JOB_ERR" "step:verify=1" "DDL lock を失った静止区間は VALID にしない"
   unset FAKE_QDB_LOCK_DIE_AFTER
+  teardown_qdb
+}
+
+# 最終 review P3-5 の 3 つ目の理由（RB-QUIESCE 最終 review の残余 3）: session が生きたまま確認の文を受け取れなくなった
+# （標準入力を閉じた）ら、「DDL の session へ確認の文を送れない」を印と hold.log に書き、保持 process を終えて VALID にしない
+case_ddl_session_unwritable_fails_verify() {
+  setup_qdb
+  export FAKE_QDB_LOCK_STDIN_CLOSED_AFTER=1
+  run_job CHECKPOINT acquire sleep:3 verify release
+  assert_file "$T/state/ddl-lock.lost" "確認の文を送れなくなったら lock を失った印を書く"
+  assert_contains "$(cat "$T/state/ddl-lock.lost" 2>/dev/null)" "DDL の session へ確認の文を送れない" "印に失った理由（文を送れない）を残す"
+  assert_not_contains "$(cat "$T/state/ddl-lock.lost" 2>/dev/null)" "DDL の session が終わった" "session が生きている間は終わった理由にしない"
+  assert_contains "$(cat "$T/state/hold.log")" "DDL 凍結の lock を失いました（DDL の session へ確認の文を送れない。" "hold.log に失った理由（文を送れない）を出す"
+  assert_file "$T/state/hold.exited" "lock を失ったら保持 process を終える"
+  assert_contains "$JOB_ERR" "step:verify=1" "lock を失った静止区間は VALID にしない"
+  assert_not_contains "$JOB_ERR" "verify が通りました" "verify は OK にならない"
+  unset FAKE_QDB_LOCK_STDIN_CLOSED_AFTER
   teardown_qdb
 }
 
@@ -895,6 +916,7 @@ run_case case_hold_keeps_renewing_after_acquire_returns
 run_case case_renew_stopped_fails_verify
 run_case case_renew_cap_stops_renewal
 run_case case_ddl_session_lost_fails_verify
+run_case case_ddl_session_unwritable_fails_verify
 run_case case_ddl_lock_ownership_lost_ends_hold_and_fails_verify
 run_case case_ddl_lock_ownership_is_checked_every_second
 run_case case_insert_request_duplicate_shows_designed_message
