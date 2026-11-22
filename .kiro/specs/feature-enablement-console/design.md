@@ -54,6 +54,7 @@ package は `com.ses.featureenablement`（service・mapper 以外の部品）と
 | `t_feature_enablement_event` | 全ての遷移の履歴 | **追記専用**（`AppendOnlyMapper`＋trigger） |
 
 - 版番号は V203 の 1 件とする（統括の指定）。後の段階で DDL が要れば V204 以降を統括に申請する。
+- V203 の中の作成の順は FK の向きに合わせて generation → request → state → setting → sign_off → event、その後に trigger・menu・data element の seed とする（本節の説明の順とは違う）。
 - どの表も `deleted_flag` を持たない（論理削除しない。entity に `deletedFlag` を置かないので、全体の `logic-delete-field` は掛からない）。
 - 時刻の列は `DATETIME(6)` で、JVM の時計（`AutoFillMetaObjectHandler.rowTimestamp(clock)`）で書く。日付の列（署名日・失効日）は JST の業務日の `DATE`。
 - `tenant_id` は `VARCHAR(100)`（V190 の `t_legal_hold` と同じ）。値は設定の tenant（`OIDC_TENANT_ID`、未設定なら `default`）。
