@@ -324,7 +324,19 @@ class BackupQuiesceSchemaContractTest {
         String engineer = read(ENGINEER_SCHEMA);
         int start = engineer.indexOf(V202_SECTION_MARKER);
         assertThat(start).as("engineer-schema-h2.sql に V202 の節がある").isNotNegative();
-        return engineer.substring(start);
+        // V202 の節は次の版の節（例: V203 の機能の開放）の見出しの前で終わる。V202 が最後の節だった頃は
+        // file の末尾までを取っていたが、後の版の表まで V202 の表として数えてしまうため、見出しで区切る。
+        java.util.regex.Matcher next = Pattern.compile("\\n-- V(\\d+)（").matcher(engineer);
+        int end = engineer.length();
+        int from = start + V202_SECTION_MARKER.length();
+        while (next.find(from)) {
+            if (Integer.parseInt(next.group(1)) > 202) {
+                end = next.start();
+                break;
+            }
+            from = next.end();
+        }
+        return engineer.substring(start, end);
     }
 
     private static String read(Path path) throws Exception {
