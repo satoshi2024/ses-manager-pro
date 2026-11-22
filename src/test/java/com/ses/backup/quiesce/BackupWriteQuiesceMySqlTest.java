@@ -100,7 +100,8 @@ class BackupWriteQuiesceMySqlTest {
     @Test
     void 静止中にpermitの無いthreadのINSERTとUPDATEは読取り専用の拒否で失敗しpermitのthreadは書ける() throws Exception {
         insert(business, 0, "before");
-        // 書ける側の permit は閉じ始める前に取る（閉じ始めた後は新しい permit を取れない。I-3）
+        // 書ける側の permit は閉じ始める前に取る（閉じ始めた後の CLOSING では新しい permit を出さない。
+        // design.md §6.2「gate の状態」・§6.1 の I-4「数え方」）
         BackupWritePermit permit = gate.tryAcquireDetached(BackupWritePermit.Kind.SCHEDULER, "job");
         assertThat(permit).as("閉じ始める前なら permit を取れる").isNotNull();
         try {
