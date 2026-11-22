@@ -304,6 +304,10 @@ public class FileStorageServiceImpl implements FileStorageService {
     /**
      * 専用の経路だけの種別で、登録の rollback により持ち主の行と metadata を失った実体を消す（review rb-fe-a1 P3-1）。metadata が
      * 無いため {@link #delete} は使えない。汎用の種別は何もしない（metadata のある経路は {@link #delete}）。
+     *
+     * <p>誤って現存の原本の保存名を渡されても消さないよう、どの tenant にも（論理削除済みを含め）metadata の行が無いことを確かめて
+     * から消す（行がある・確かめられない時は 409 で何も消さない）。backup の書込み静止の最中は {@link #store}・{@link #delete} と同じく
+     * 拒否する（何も消さない）。どちらで拒んでも、持ち主の無い実体は孤児の清掃が消す（review rb-fe-a1 1a4fd48d 差分 P3-N1）。</p>
      */
     @Override
     public void discardUnregistered(String storedName, FileKind kind) {
@@ -316,6 +320,10 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (!published.startsWith(publishedDir()) || !quarantine.startsWith(quarantineDir())) {
             throw BusinessException.of("error.file.invalidPath");
         }
+        if (metadataMapper == null || metadataMapper.countAnyByStoredName(storedName) != 0) {
+            throw BusinessException.of(409, "error.file.unknownReference");
+        }
+        assertUploadsWritable("file-storage.discard-unregistered");
         deleteQuietly(published);
         deleteQuietly(quarantine);
     }

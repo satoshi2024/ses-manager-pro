@@ -44,7 +44,8 @@ public interface FileStorageService {
     /**
      * 専用の経路だけの種別（{@link FileKind#isDedicatedPathOnly()}）で、持ち主の行と metadata が登録の transaction の rollback で
      * 消えた実体を消す（metadata が無いため {@link #delete} では消せない。review rb-fe-a1 P3-1）。呼ぶ側は、同じ要求で自分が保存し
-     * rollback で持ち主を失った保存名だけを渡す。既定は何もしない（孤児の清掃が消す）。
+     * rollback で持ち主を失った保存名だけを渡し、持ち主の行が無いことを確かめてから呼ぶ。実装は metadata の行が無いことを確かめ
+     * （あれば 409）、backup の書込み静止の最中は拒否する（1a4fd48d 差分 P3-N1）。既定は何もしない（孤児の清掃が消す）。
      */
     default void discardUnregistered(String storedName, FileKind kind) {
     }

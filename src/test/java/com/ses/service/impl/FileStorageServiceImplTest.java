@@ -482,4 +482,73 @@ class FileStorageServiceImplTest {
             assertEquals(0, files.count());
         }
     }
+
+    // ---------------------------------------------------------------- 登録されなかった実体の削除（review rb-fe-a1 1a4fd48d 差分 P3-N1）
+
+    @Test
+    void discardUnregistered_metadataの行がどのtenantにも無い専用の経路の種別の実体だけを消す() throws java.io.IOException {
+        String storedName = "featuresignoff000000000000000002.pdf";
+        Path published = writeUnregistered("published", storedName);
+        Path quarantine = writeUnregistered("quarantine", storedName);
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        FileStorageServiceImpl storage = storage(mapper);
+
+        storage.discardUnregistered(storedName, FileKind.SKILL_SHEET);
+        assertTrue(java.nio.file.Files.exists(published), "汎用の種別は消さない（metadata のある経路は delete）");
+
+        storage.discardUnregistered(storedName, FileKind.FEATURE_SIGN_OFF);
+
+        assertFalse(java.nio.file.Files.exists(published));
+        assertFalse(java.nio.file.Files.exists(quarantine));
+        org.mockito.Mockito.verify(mapper).countAnyByStoredName(storedName);
+    }
+
+    @Test
+    void discardUnregistered_metadataの行がある保存名と確かめられない保存名は消さない() throws java.io.IOException {
+        String storedName = "featuresignoff000000000000000003.pdf";
+        Path published = writeUnregistered("published", storedName);
+        com.ses.mapper.FileSecurityMetadataMapper mapper = org.mockito.Mockito.mock(
+                com.ses.mapper.FileSecurityMetadataMapper.class);
+        org.mockito.Mockito.when(mapper.countAnyByStoredName(storedName)).thenReturn(1L);
+
+        BusinessException registered = assertThrows(BusinessException.class,
+                () -> storage(mapper).discardUnregistered(storedName, FileKind.FEATURE_SIGN_OFF));
+        assertEquals(409, registered.getCode());
+        assertTrue(java.nio.file.Files.exists(published), "現存の原本（他の tenant・論理削除済みの行を含む）を誤って消さない");
+
+        assertEquals(409, assertThrows(BusinessException.class,
+                () -> service.discardUnregistered(storedName, FileKind.FEATURE_SIGN_OFF)).getCode(),
+                "metadata を読めない構成では消さない");
+        assertTrue(java.nio.file.Files.exists(published));
+    }
+
+    @Test
+    void discardUnregistered_backupの書込み静止の最中はpermitが無ければ消さない() throws Exception {
+        String storedName = "featuresignoff000000000000000004.pdf";
+        Path published = writeUnregistered("published", storedName);
+        FileStorageServiceImpl storage = storage(org.mockito.Mockito.mock(com.ses.mapper.FileSecurityMetadataMapper.class));
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        storage.setBackupWriteGate(gate);
+        com.ses.backup.quiesce.BackupQuiesceTestSupport.close(gate, 2, java.time.Duration.ofMinutes(5));
+
+        assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.discardUnregistered(storedName, FileKind.FEATURE_SIGN_OFF));
+        assertTrue(java.nio.file.Files.exists(published), "静止中は uploads を変えない（孤児の清掃に任せる）");
+    }
+
+    private FileStorageServiceImpl storage(com.ses.mapper.FileSecurityMetadataMapper mapper) {
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(tempDir.toString());
+        return new FileStorageServiceImpl(props,
+                (path, kind) -> com.ses.service.security.FileScanResult.clean("test-scanner"), mapper);
+    }
+
+    private Path writeUnregistered(String directory, String storedName) throws java.io.IOException {
+        java.nio.file.Files.createDirectories(tempDir.resolve(directory));
+        Path path = tempDir.resolve(directory).resolve(storedName);
+        java.nio.file.Files.write(path, "%PDF-1.7\n%%EOF\n".getBytes(StandardCharsets.US_ASCII));
+        return path;
+    }
 }

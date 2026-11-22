@@ -17,6 +17,13 @@ public interface FileSecurityMetadataMapper extends BaseMapper<FileSecurityMetad
     FileSecurityMetadata selectByStoredName(@Param("tenantId") String tenantId,
                                             @Param("storedName") String storedName);
 
+    /**
+     * 保存名の metadata の行の数（全 tenant・論理削除済みを含む）。登録されなかった実体の削除（{@code discardUnregistered}）が、行の
+     * 無いことを確かめてから消すために使う（review rb-fe-a1 1a4fd48d 差分 P3-N1）。
+     */
+    @Select("SELECT COUNT(*) FROM t_file_security_metadata WHERE stored_name = #{storedName}")
+    long countAnyByStoredName(@Param("storedName") String storedName);
+
     @Update("UPDATE t_file_security_metadata SET storage_state = #{storageState}, "
             + "scan_status = #{scanStatus}, scanned_at = #{scannedAt}, scanner_version = #{scannerVersion}, "
             + "rejection_reason = #{rejectionReason}, updated_at = CURRENT_TIMESTAMP "

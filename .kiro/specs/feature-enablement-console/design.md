@@ -413,6 +413,7 @@ return true
 - **他の instance**: `FeatureEnablementSnapshotRefresher` が専用の thread で `app.feature-enablement.refresh-interval`（既定 5 秒）ごとに世代の 1 行を読み、変わっていれば snapshot を読み直す。`@Scheduled` を使わない（`app.scheduling.enabled=false` で scheduler を一括で止めた時に、全ての開放単位が古さで閉じないため。読むだけで書かない）。`SchedulingDisabledDrainTest` の既知の一覧に理由つきで足す（RB-QUIESCE の `BackupQuiesceTicker` と同じ扱い）。
 - **古さ**: 最後に読めた時刻（`verifiedAt`）から `app.feature-enablement.max-staleness`（既定 60 秒、10 秒〜300 秒）を超えたら、全ての開放単位を閉とする。DB の状態は変えず、読めれば戻る。`refresh-interval`（既定 5 秒、1 秒〜30 秒）は `max-staleness` の半分より短いことを bind の時に検査する（`@Validated`。review P3-13）。
 - **差替えの順**: 読込みは読み始めの順番を採り、後に読み始めた snapshot を差し替えた後は、それより前に読み始めた snapshot で上書きしない（poll の読込みが commit の前に始まり、commit の後の読直しより後に終わった時に旧い世代へ戻さない。実装 review rb-fe-a1 P2-3）。世代の値でなく読み始めの順で比べるのは、PITR の後（§13.1）や試験の rollback で DB の世代が小さくなっても読み直せるようにするため（DB の世代は commit の順に増えるため、後に読み始めた snapshot の世代は前のものより小さくならない）。
+- **読めなかった読込みも屏障にする**（実装 review rb-fe-a1 1a4fd48d 差分 P3-N2）: 読込みが失敗したら、その読み始めの順番を「最後に差し替えた順番」として記録し、それより前に読み始めた読込みが後で成功しても差し替えない（commit の後の読直しが失敗した時に、commit の前に読み始めた poll の読込みが旧い状態を差し替えて一時の閉鎖 `REFRESH_PENDING` を外す二重故障の窓を閉じる）。一時の閉鎖は、失敗した読込みより後に読み始めた読込みがまだ差し替えていない時だけ付け、外すのは差し替えた時だけにする（順番の判定と付け外しは同じ lock の中）。失敗より後に読み始めた読込みは commit の後に照会したため、その commit を含む。
 - 多 instance の版の失効は世代で行う（TTL ではなく版。TTL は古さの上限としてだけ使う）。現在は単一 instance（SRE-5）。
 
 ### 3.4 `FeatureSwitches` の変更
@@ -563,6 +564,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 - 新しい `FileKind` `FEATURE_SIGN_OFF`（拡張子 pdf だけ、上限 10 MB。multipart の上限 `max-file-size: 10MB`・`max-request-size: 12MB`（`application.yml:117-118`）の中に収める。review P3-2。`FileKind.java:21` の enum に足す）。PDF の magic byte・末尾の検査は既存の pdf の分岐を使う（`FileKind.java:107-131`）。
 - 汎用の経路を種別で拒否する（review P3-3）: `FileKind` に `isDedicatedPathOnly()` を足して `FEATURE_SIGN_OFF`（と server 生成の種別）で true を返す。(1) `FileApiController.upload`（:36-44）が 400 にする（現在は server 生成の種別だけを拒否している）。(2) 汎用の `load`・`rescan` が metadata の `file_kind` で 403 にする（CLAUDE.md の server 生成の規則 1 と同じ形の多重の防御）。専用の経路は `loadDedicated(name, kind)`（`loadServerGenerated` と同じく種別の一致を要する）で読む。
 - 登録の API は multipart（文書と JSON）を受け、`FileStorageService.store(byte[], originalName, FEATURE_SIGN_OFF)`（`FileStorageService.java:21`）で保存する。scan が `CLEAN` でなければ `error.file.scanRejected` で登録を拒否し、quarantine の実体と published の写しを消し metadata を論理削除する（署名の行は作らない。誰も claim しない file を残さず、汎用の再 scan で持ち主の無い file が公開されないため。server 生成の規則 3 と同じ。文書は upload し直せる）。
+- 登録の transaction が rollback した時は、保存した文書の実体を `FileStorageService.discardUnregistered` で消す（metadata も rollback するため `delete` は使えない。RB §4.4 の D18）。誤って現存の原本の保存名を渡されても消さないよう、呼ぶ側（`FeatureSignOffRegistrar`）が持ち主の署名の行が無いことを、実装が metadata の行がどの tenant にも（論理削除済みを含め）無いことを確かめ（あれば 409 で消さない）、backup の書込み静止の最中は `store`・`delete` と同じく拒否する（実装 review rb-fe-a1 1a4fd48d 差分 P3-N1）。拒んだ実体は孤児の清掃が消す。
 - SHA-256 は upload の経路が計算しないため（`FileStorageServiceImpl` は hash を持たない）、本機能が bytes から計算して `content_sha256` に保存する。取得は専用の経路（`GET /sign-offs/{id}/document`）で `FileStorageService.load` の後に計算し直し、大きさと hash が一致しなければ 409（先例 `PrivacyExportPackageService.readVerified` :880-901）。取得も監査する。
 
 ### 6.2 file の 2 箇所の登録（CLAUDE.md）
