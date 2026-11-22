@@ -273,7 +273,7 @@ CREATE TABLE t_feature_sign_off_bundle_member (
 - 登録: 新しい署名（文書つき）と引き継ぐ確認済みの署名を組として 1 回の要求で登録する。新しい署名は `REGISTERED`、組も `REGISTERED`。
 - **決定の束縛（digest と構造）の入力**（review P2-N1）: 組の種類の digest・構造の検査は、**現在 `CONFIRMED` の組の全ての member** の参照・日付・構造化された値を入力にし、member の署名の行の状態（`EXPIRED`・`REVOKED`、`PURGED` の後も残る参照と日付）を見ない。member の有効性（署名日・失効日・取消し）は、その決定を要する開放単位の `SignOffConditionEvaluator` だけが判定する（P1-2 の「開放単位が要る決定だけ」）。そのため D-06 の行が `EXPIRED`・`REVOKED` になっても D-09 の digest は合ったままで、保持・保全は閉じず、D-06 を要する DSAR だけが閉じる。
 - 組の member の署名を 1 件だけ取り消しても（`REVOKED`）組は `CONFIRMED` のままにし、その種別を要する開いている開放単位だけを同じ transaction で `AUTO_CLOSED(SIGN_OFF_REVOKED)` にする。組の取消し（組を `REVOKED`）は、組の種類を要する全ての開放単位を閉じる。取り消した member を新しい署名に替えるには、新しい組を登録・確認する（組に属する種別は 1 件ずつ確認できない）。
-- 確認（組ごとに 1 回、登録者と別の privacy-admin）: §6.5 の手順。組の中の digest の整合（D-09 の `approvalDigest` = 組の D-01・(D-06)・D-09 から `PrivacyDecisionBinding.computeDigest` :305-311 で計算した値）を確かめ、合わなければ 400。全ての member の署名日が今日以前であることも確かめる（§2.6）。
+- 確認（組ごとに 1 回、登録者と別の privacy-admin）: §6.5 の手順。組の中の digest の整合（D-09 の `approvalDigest` = 組の D-01・(D-06)・D-09 から `PrivacyDecisionBinding.computeDigest` :305-311 で計算した値）を確かめ、合わなければ 400。全ての member の署名日が今日以前であることも確かめる（§2.6）。 組の種類が整合の検査を要する（`BundleKind.consistencyCheckRequired`。`NF07_DECISION_BINDING` は要する）のに検査の実装が無ければ、確認は 409 `error.featureEnablement.bundleCheckMissing`（`evaluator.missing` と同じく fail-closed。実装 review rb-fe-a1 P3-3）。
 - 組に属さない種別（NF07 の D-02・D-03・D-05、NF06 の admission、NF05 の DG-05 等）は、従来どおり 1 件ずつ登録・確認する（どれも digest の内容が自分の中で閉じるか、配備の設定と照合する）。
 
 ### 2.6.2 `t_feature_sign_off_extension`（証拠の類の延長の記録。review P2-N2）
@@ -544,7 +544,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 - どれも開放状態は変えない。
 
 ### 5.5 閉鎖（`POST /units/{key}/close`）
-
+ 理由は `closed_reason`（code の列）に入る区分で、目録の `MANUAL_CLOSE_REASONS`（`MANUAL_OWNER_DECISION`・`MANUAL_SECURITY_INCIDENT`・`MANUAL_CONDITION_DOUBT`・`MANUAL_OPERATION_ERROR`・`MANUAL_VERIFICATION`・`MANUAL_OTHER`）だけを受ける（system の理由の code と混ぜない。自由記述は受けない。画面は選択肢で出す。実装 review rb-fe-a1 P3-4）。
 - 有効な管理者 1 名で行える（閉じる方向は安全側。§18 J-19）。理由が必須。break-glass・bootstrap の session は不可（§11.2）。
 - 開放状態を `MANUALLY_CLOSED` にし、開いている子を `AUTO_CLOSED`（`PARENT_CLOSED`）にし（§18 J-18）、未決の申請があれば `CANCELLED` にする。NF05 outbound は barrier の行を OFF に書き直す（§9.3）。
 - NF01 二者確認の閉鎖では、確認の dialog に「二者確認を含む有効な template の件数」（FS 4.9.5 の (3)）を出す。
@@ -595,7 +595,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 
 - 失効: `expires_on` の当日（JST 0:00）から無効。hot path は snapshot の `openUntil` で即時に閉じ、定期の評価が `AUTO_CLOSED`（`SIGN_OFF_EXPIRED`）にし、署名を `EXPIRED` にする。
 - 失効の接近: `feature-enablement.expiry-warning-days`（`m_system_config`。`/system-config` の `SCHEMAS` に足す。既定 30、1〜366）日前から毎日 1 回、管理者へ通知し WARN を出す。`privacy.approval.expiry-warning-days`（`PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS`）の役割を引き継ぎ、旧い変数として廃止する。
-- 確認の時の検査（1 件・組の共通）: (1) 確認者は登録者以外（NF07 の種別は privacy-admin）。(2) **署名日が今日以前**（JST）。今日より後なら 400 `error.featureEnablement.signOffNotYetSigned`（文言で D-8 により署名日に自動で開かないこと、署名日の当日に確認することを案内する。review P2-6）。(3) 上限の日数。(4) 種別ごとの検査（§6.3）。組は組の中の digest の整合も。
+- 確認の時の検査（1 件・組の共通）: (1) 確認者は登録者以外（NF07 の種別は privacy-admin）。(2) **署名日が今日以前**（JST）。今日より後なら 400 `error.featureEnablement.signOffNotYetSigned`（文言で D-8 により署名日に自動で開かないこと、署名日の当日に確認することを案内する。review P2-6）。(3) 上限の日数。(4) 種別ごとの検査（§6.3）。組は組の中の digest の整合も。 (5) 失効日が今日より後（失効日を迎えた署名は登録・確認とも 400 `error.featureEnablement.signOffAlreadyExpired`、延長の申請は 409、延長の承認は条件の不成立。日の始まりの `EXPIRED` の付与の前でも同じ。確認済みの有効な署名を失効した署名で差し替えて開いている開放単位を閉じる誤操作を防ぐ。実装 review rb-fe-a1 P3-2）。
 - 差替え（1 件）: 同じ transaction で §5.1 の読直しと失効の先行の閉鎖を行い（review P2-2 (b)）、旧い行を `SUPERSEDED`、新しい行を `CONFIRMED` にし、それを要する開いている開放単位を `Purpose.CHANGE`（`remoteChecksAllowed=false`）で評価し直す。成り立てば開いたまま、成り立たなければ同じ transaction で `AUTO_CLOSED`（`SIGN_OFF_REPLACED_INVALID`）。
 - 差替え（組）: 同じ transaction で、旧い組を `SUPERSEDED`、旧い組の member のうち新しい組で置き換わる署名を `SUPERSEDED` にし（引き継ぐ署名は `CONFIRMED` のまま）、新しい組の新しい署名を `CONFIRMED`、新しい組を `CONFIRMED` にしてから、それを要する開いている開放単位を評価し直す（review P1-2）。組の一部だけを `CONFIRMED` にする経路は無い。
 - 延長（証拠の類だけ。review P2-N2）: 新しい行を作らず、延長の申請（`SIGN_OFF_EXTENSION`）を申請者と別の管理者が承認すると、同じ行の `expires_on` を更新し、追記専用の `t_feature_sign_off_extension` に申請者・確認者・旧い期限・新しい期限を残す（§2.6.2）。文書・保存名・署名日は変えない。新しい期限の上限は承認の日から 1,095 日。
@@ -819,7 +819,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 - service の拒否（403）と DB の CHECK・複合 FK（§2.3〜§2.6.1）の二重。開放状態・設定の行は承認した申請の行と申請者・承認者が一致することを複合 FK で強制する（review P3-12）。DB は同じ利用者 ID を拒否するだけで、次の残る穴は防げない（review P3-11）:
   - 同じ人が 2 つの口座を持つ（口座の管理と OIDC の IdP に任せる）。
-  - 管理者の role の付与は 1 名でできるため、盗まれた管理者が自分の別の OIDC 口座を管理者にして自分で承認する。対策として、利用者が管理者の role を得た時に有効な管理者全員へ通知する（`SysUserServiceImpl` の role の変更の経路。§7.5）。「承認者の管理者の role を申請者が付与した、または N 日以内に付与された」場合の拒否は、付与者と付与の時刻が `sys_user` に無く確かな記録が無いため本 batch では行わない（行うには DDL が要る。go-live の後の backlog）。
+  - 管理者の role の付与は 1 名でできるため、盗まれた管理者が自分の別の OIDC 口座を管理者にして自分で承認する。対策として、利用者が管理者の role を得た時に有効な管理者全員へ通知する（`SysUserServiceImpl` の role の変更の経路。§7.5）。「承認者の管理者の role を申請者が付与した、または N 日以内に付与された」場合の拒否は、付与者と付与の時刻が `sys_user` に無く確かな記録が無いため本 batch では行わない（行うには DDL が要る。go-live の後の backlog）。 通知するのは利用者の作成と role の変更で管理者になった時と、無効の管理者を有効に戻した時（管理者の能力を新たに得る経路）。lock の解除は一時の状態の終わりで能力を新たに得ないため通知しない（実装 review rb-fe-a1 P3-8）。宛先は遷移の transaction の中で決め、送付は commit の後に新しい transaction で行う（P2-2）。
   - 両方を Security の既知の限界として RB §5.6 に書く。RB §5.6 に運用の規則「承認の前に、直近に管理者の role を得た利用者が承認者でないことを確かめる（全ての管理者への通知で知る）」を書き、付与の記録（付与者・時刻）の DDL を go-live の後の backlog の 1 項目として記録する（review P3-N10）。
 - 承認者が申請の時と違う内容を承認しないよう指紋で守る（§4.5）。
 - 開放には少なくとも 2 名の有効な管理者が要る。prod は起動時検査で OIDC 管理者 3 名以上（`ProductionSecurityConfigurationValidator.MIN_OIDC_ADMINISTRATORS` :59）を保証し、PR #130 の guard が人数を割る変更を拒否するため、常に 2 名を確保できる。
@@ -831,6 +831,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - **break-glass を不可にする理由**: break-glass は IdP が使えない時の限られた操作のための口座で、incident の許可 action は 1〜20 の既知の action に限られ、`user.*`・`permission.manage`・`privacy.*` を既に拒否している（`BreakGlassServiceImpl.validateAndSerializeActions` :316-331）。機能の開放は緊急の操作ではなく（閉じる方向は通常の管理者 1 名でできる）、break-glass の口座で開けると、IdP の障害の最中に監視の少ない口座で公開範囲を広げられる。incident の許可 action で `feature-enablement.*` を拒否し、session の判定でも拒否する（二重）。
 - **bootstrap を不可にする理由**: bootstrap は初回の IdP・管理者の登録のための期限付きの local の session で、使える入口は `user`・`identity-provider` と `permission` の参照だけ（`BootstrapSessionFilter` :64・:73・:135-156）。bootstrap の最中は OIDC の管理者が揃っておらず、承認者の独立性も無い。本機能の入口を許可の一覧に足さない（bootstrap の filter が 403 にする）。
 - 閉鎖も同じ session の規則とする（break-glass の口座で閉じる必要がある場面は、配備の設定の総スイッチで代える）。
+- 行為者の値（`FeatureEnablementActor`）を作れるのは `FeatureEnablementActorPolicy.resolve`（この session の規則を通した値）だけで、controller 等が利用者 ID から直接作れない（構築子は package の中だけ。有効な管理者の DB の読直しも同じ package の service だけが呼ぶ。実装 review rb-fe-a1 P3-7）。service は受け取った行為者を要求ごとに DB から読み直す。
 
 ### 11.3 敏感な機能の追加の条件
 
