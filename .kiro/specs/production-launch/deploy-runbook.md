@@ -50,7 +50,7 @@
 
 ### 1.0 prod 必須設定（無い・形式が違うとアプリが起動しない。一覧の正本）
 
-`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。backup の書込み静止の31〜41の11項目は既定値を持つため無くても起動するが、値・組合せ・範囲が違うと起動しない（雛形は31を `true` で明示する）。
+`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。backup の書込み静止の31〜41の11項目は既定値を持つため無くても起動するが、値・組合せ・範囲が違うと起動しない（雛形は31を `true` で明示する）。機能の開放の緊急の総スイッチ42も既定値を持つが、値が `true`・`false` 以外なら起動しない（雛形は `true` で明示する）。
 
 - 一覧はコードを走査して作った（FINAL-FIX、2026-11-17）。走査した出処は3つ: prod profile の validator の必須項目、`@Value` のうち既定値が空・開発用で prod では拒否されるもの、`application-prod.yml` の `${...}` のうち既定値が空で prod では拒否されるもの。
 - 既定値を全く持たない `@Value` と、既定値の無い `application-prod.yml` の `${...}` は、どちらも0件だった。どの項目も空か開発用の既定値を持つため、Spring の解決では止まらない。止めるのは validator である。
@@ -151,6 +151,17 @@
 - 使う場面: 静止応答の不具合で業務に支障が出て、修正の release まで静止応答を外す必要がある時だけ。承認済みの変更 ticket を取り、task definition に `BACKUP_QUIESCE_ENABLED=false` と `BACKUP_QUIESCE_DISABLED_TICKET=<ticket>` を入れ、`validate-task-definition.ps1 -Mode Actual` で組を確かめてから配備し直す。
 - 停止口の間: アプリは instance の登録と heartbeat を続け（`sys_backup_quiesce_instance.gate_state='DISABLED'`）、gate は閉じず、静止の要求には `REFUSED`（`DISABLED`）を返す。backup の provider は ONLINE・停止確認（`--app-stopped`）のどちらも、停止口の行があれば失敗する。**そのため停止口の間は checkpoint と full が全て失敗し、RPO の alert になる**。起動の時に ERROR `errorCode=BACKUP_QUIESCE_DISABLED`（ticket を含む）を出し、gauge `ses_backup_quiesce_disabled` が 1 になる（どちらも critical の alert の条件）。ticket と期間を配備記録に残す。
 - 戻す手順: `BACKUP_QUIESCE_ENABLED=true` にして `BACKUP_QUIESCE_DISABLED_TICKET` を消し、配備し直す。停止口の task が通常に停止すれば instance の行は `STOPPED` になる。異常に止まった（SIGKILL・task の喪失等で `STOPPED` にならない）停止口の行が残ると、heartbeat の古さによらず全ての backup が失敗し続ける。この場合は DBA が ECS で task の停止と processlist の0件を確かめてから、その行だけを手の SQL で `STOPPED` にする（SQL と手順は §4.7 の「停止口の行の片付け」。§1.8 の RR-10 の例外の一覧にある。設計は `backup-write-quiesce/design.md` §9.4）。その後、次の checkpoint が成功することを確かめる。
+
+**機能の開放**（feature-enablement-console design §10。FE-A08。42 は既定値を持ち、無くても起動するが、値が違うと起動しない）
+
+- 機能は配備の設定ではなく system の中（画面「機能の開放」の申請と別の管理者の承認）で開く。配備の設定に置けるのは 42 の緊急の総スイッチだけである（D-5）。検査は `FeatureEnablementProductionValidator` が port を開く前に行う（prod の判定は有効な profile。42 の値の形式は全 profile で検査する）。message には変数名だけを出し、値を出さない。
+- 42 の `false` は全ての開放単位を次の起動で閉じ（`AUTO_CLOSED(MASTER_SWITCH_CLOSED)`）、未決の申請を取り消す。申請・承認は 409 になり、署名の登録・確認・閲覧はできる。`true` に戻しても自動では開かず、各開放単位を二人で開き直す（J-11）。起動の時に ERROR `errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED` を出し、gauge `ses_feature_enablement_master_allowed` が 0 になる。閉じる方向の操作のため ticket を要さないが、理由と期間を配備記録に残す。
+- 次は設定しない（prod は起動しない。照合 `validate-task-definition.ps1` も FAIL にする）: `APP_FEATURE_ENABLEMENT_*`（総スイッチの正規名 `APP_FEATURE_ENABLEMENT_ALLOWED` を含む）、42 以外の `FEATURE_ENABLEMENT_*`、`SPRING_APPLICATION_JSON` の `app.feature-enablement`・`FEATURE_ENABLEMENT_*`、同じ名前の system property。運用値（`source`・`refresh-interval`・`max-staleness`・`evaluation-interval`・`evaluation-initial-delay`・`journal-reverify-interval`・`sign-off-purge-cron`）は `application*.yml` の値だけで動かす（`max-staleness` を大きくして fail-closed を外すことも防ぐ）。prod の `app.feature-enablement.source` は `database` 以外では起動しない。
+- system の中で開閉する開放単位（目録の DB 管理の印。段階 A は NF01・NF02・NF02 顧客ポータル・NF03・NF03 資格番号・NF04・NF10）の旧い開閉の変数（`FEATURE_NF01_ENABLED` 等と、その property の全ての綴り。環境変数・system property・`SPRING_APPLICATION_JSON`）があると起動しない（§18 J-12）。照合が全ての旧い変数を FAIL にするのは段階 E（FE-E01）で、それまでは起動時検査だけが止める。
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 42 | `FEATURE_ENABLEMENT_ALLOWED`（`app.feature-enablement.allowed`） | 緊急の総スイッチ。`false` で全ての開放単位を閉じ、system の中でも開けない | 本番は `true`（既定 `true`。雛形も `true`）。値は原文で `true` か `false` だけ（`yes`・`on`・`1`・大文字・空白は起動しない）。`false` は緊急の停止と、backup からの復旧（PITR）の後の最初の起動だけに使う | × | `application.yml`・`application-prod.yml` の `app.feature-enablement.allowed`、`FeatureEnablementProductionValidator` |
 
 **検査の効き方と試験の範囲（注意）**
 - 18 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験ではこの検査が走らず、CI はその未設定を検出しない。配備では task definition の `SPRING_PROFILES_ACTIVE=prod` で効く。

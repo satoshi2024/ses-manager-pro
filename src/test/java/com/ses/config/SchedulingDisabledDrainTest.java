@@ -202,6 +202,10 @@ class SchedulingDisabledDrainTest {
             "NF07 の Journal（application DB と別の MySQL instance）の権限と migration を読んで検査する（書込みなし）",
             "com.ses.privacy.production.retention.trust.PrivacyTrustStartupValidator:SmartInitializingSingleton",
             "prod profile だけ。NF07 の trust 文書の設定を検査する（DB 書込なし）",
+            // FE-A08: 機能の開放の起動時検査（総スイッチの原文・prod の源・運用値の上書き・旧い変数）
+            "com.ses.featureenablement.config.FeatureEnablementProductionValidator:SmartInitializingSingleton",
+            "環境変数・system property・SPRING_APPLICATION_JSON の名前と総スイッチの原文を読んで検査する（設定を読むだけ。DB に"
+                    + "触れない。違反は起動を中止。feature-enablement-console design §10）",
             // FE-A04: 機能の開放の世代の poll の thread の起動と停止（SmartLifecycle。DB の源で refresh-thread-enabled の時だけ thread を作る）
             "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:Lifecycle",
             "世代の poll の専用 thread を起動・停止する（読むだけ。DB 書込なし）",

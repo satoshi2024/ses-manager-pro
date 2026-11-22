@@ -39,4 +39,35 @@ class FeatureEnablementPropertiesTest {
         assertThatThrownBy(cron::validate).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("sign-off-purge-cron");
     }
+
+    /** FE-A08（design §3.3・§7.2・§10）: 運用値の範囲の境と、refresh-interval は max-staleness の半分より短いという相互の関係。 */
+    @Test
+    void 運用値は範囲の境を受け範囲の外と相互の関係の違反は起動を止める() {
+        FeatureEnablementProperties bounds = new FeatureEnablementProperties();
+        bounds.setRefreshInterval(Duration.ofSeconds(30));
+        bounds.setMaxStaleness(Duration.ofSeconds(300));
+        bounds.setEvaluationInterval(Duration.ofMinutes(60));
+        bounds.setJournalReverifyInterval(Duration.ofMinutes(1));
+        bounds.setEvaluationInitialDelay(Duration.ZERO);
+        bounds.validate();
+
+        assertRejected(p -> p.setRefreshInterval(Duration.ofMillis(999)), "refresh-interval");
+        assertRejected(p -> p.setRefreshInterval(Duration.ofSeconds(31)), "refresh-interval");
+        assertRejected(p -> p.setMaxStaleness(Duration.ofSeconds(9)), "max-staleness");
+        assertRejected(p -> p.setMaxStaleness(Duration.ofSeconds(301)), "max-staleness");
+        assertRejected(p -> p.setEvaluationInterval(Duration.ofSeconds(59)), "evaluation-interval");
+        assertRejected(p -> p.setEvaluationInterval(Duration.ofMinutes(61)), "evaluation-interval");
+        assertRejected(p -> p.setJournalReverifyInterval(Duration.ofMinutes(61)), "journal-reverify-interval");
+        assertRejected(p -> p.setSource(null), "source");
+        assertRejected(p -> {
+            p.setRefreshInterval(Duration.ofSeconds(10));
+            p.setMaxStaleness(Duration.ofSeconds(20));
+        }, "max-staleness の半分");
+    }
+
+    private static void assertRejected(java.util.function.Consumer<FeatureEnablementProperties> change, String message) {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        change.accept(properties);
+        assertThatThrownBy(properties::validate).isInstanceOf(IllegalStateException.class).hasMessageContaining(message);
+    }
 }

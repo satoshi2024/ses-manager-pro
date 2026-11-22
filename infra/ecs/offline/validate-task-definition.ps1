@@ -325,11 +325,26 @@ $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY
   'SECURITY_BOOTSTRAP_REOPEN_TICKET', 'BREAK_GLASS_USERNAMES', 'TRUSTED_PROXIES', 'TZ', 'FILE_SCANNER_HOST', 'FILE_SCANNER_PORT',
   'METRICS_SCRAPER_ENABLED', 'METRICS_SCRAPER_USERNAME', 'PRIVACY_TRUST_KMS_ANCHOR_FILE', 'FREEE_ENABLED', 'CLOUDSIGN_ENABLED',
   'LOCAL_LOGIN_ENABLED', 'OIDC_ENABLED', 'BREAK_GLASS_LOGIN_ENABLED', 'OIDC_REQUIRE_MFA_ASSURANCE', 'MFA_ENABLED',
-  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED', 'UPLOAD_BASE_PATH', 'SHUTDOWN_TIMEOUT')
+  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED', 'UPLOAD_BASE_PATH', 'SHUTDOWN_TIMEOUT',
+  'FEATURE_ENABLEMENT_ALLOWED')
 $visibleKeys = @($mustBeVisible | ForEach-Object { NameKey $_ })
 # BACKUP_QUIESCE_* (deploy-runbook 1.0 rows 31-41) are all judged by value.
 $hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' -or $k.StartsWith('BACKUPQUIESCE') })
 if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
+
+# Feature enablement (feature-enablement-console design section 10, deploy-runbook 1.0 row 42): features are opened inside
+# the system, and the deployment carries only the emergency master switch. The app reads its raw text and refuses
+# anything but true or false (yes, on, 1 and upper case bind as booleans in Spring, so they are refused here too); the
+# operational values (APP_FEATURE_ENABLEMENT_*, FEATURE_ENABLEMENT_* other than the switch) must not be overridden.
+$enablementAllowed = @($c.environment | Where-Object { $_.name -ceq 'FEATURE_ENABLEMENT_ALLOWED' } | ForEach-Object { [string]$_.value })
+if ($enablementAllowed.Count -ne 1) { Fail 'FEATURE_ENABLEMENT_ALLOWED missing: set true (false only for the emergency stop and the first start after a restore) (deploy-runbook 1.0 row 42)' }
+if ($enablementAllowed[0] -cne 'true' -and $enablementAllowed[0] -cne 'false') { Fail 'FEATURE_ENABLEMENT_ALLOWED must be exactly true or false: the app refuses yes, on, 1, upper case and spaces (deploy-runbook 1.0 row 42)' }
+$enablementOverrides = @($allNames | Where-Object {
+    $k = NameKey $_
+    $k.StartsWith('APPFEATUREENABLEMENT') -or ($k.StartsWith('FEATUREENABLEMENT') -and $_ -cne 'FEATURE_ENABLEMENT_ALLOWED')
+  })
+if ($enablementOverrides.Count -gt 0) { Fail ('feature-enablement operational settings must not be set; only FEATURE_ENABLEMENT_ALLOWED (deploy-runbook 1.0 row 42): ' + ($enablementOverrides -join ',')) }
+Ok "FEATURE_ENABLEMENT_ALLOWED=$($enablementAllowed[0]) in environment; no feature-enablement operational override"
 
 # deploy-runbook.md section 4: prod alone, and no other profile or configuration source the validator cannot read.
 $profiles = @($c.environment | Where-Object { $_.name -eq 'SPRING_PROFILES_ACTIVE' } | ForEach-Object { ([string]$_.value).Trim() })
@@ -552,7 +567,13 @@ if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
 }
 $guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
   'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main',
-  'compliance', 'app.upload', 'app.backupquiesce', 'spring.lifecycle')
+  'compliance', 'app.upload', 'app.backupquiesce', 'spring.lifecycle', 'app.featureenablement')
+# The feature-enablement settings, the master switch included, never come through SPRING_APPLICATION_JSON (deploy-runbook
+# 1.0 row 42): app.feature-enablement.* and the FEATURE_ENABLEMENT_ALLOWED placeholder name in any spelling.
+function Test-EnablementJsonKey([string]$k) {
+  $flat = $k -replace '\.', ''
+  $flat.StartsWith('featureenablement') -or $flat.StartsWith('appfeatureenablement')
+}
 function Get-JsonKeys([object]$node, [string]$prefix) {
   if ($node -is [System.Management.Automation.PSCustomObject]) {
     foreach ($p in $node.PSObject.Properties) {
@@ -566,7 +587,7 @@ function Get-JsonKeys([object]$node, [string]$prefix) {
 foreach ($json in @(EnvValues 'SPRING_APPLICATION_JSON')) {
   try { $parsed = $json | ConvertFrom-Json } catch { Fail 'SPRING_APPLICATION_JSON is not valid JSON' }
   $keys = @(Get-JsonKeys $parsed '' | ForEach-Object { ($_.ToLowerInvariant() -replace '[_-]', '') })
-  $hit = @($keys | Where-Object { $k = $_; @($guarded | Where-Object { $k -eq $_ -or $k.StartsWith("$_.") }).Count -gt 0 })
+  $hit = @($keys | Where-Object { $k = $_; (Test-EnablementJsonKey $k) -or @($guarded | Where-Object { $k -eq $_ -or $k.StartsWith("$_.") }).Count -gt 0 })
   if ($hit.Count -gt 0) { Fail ('SPRING_APPLICATION_JSON sets guarded properties: ' + ($hit -join ',') + ' (use environment variables)') }
 }
 Ok 'no system property or SPRING_APPLICATION_JSON override of the checked settings'

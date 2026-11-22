@@ -200,6 +200,27 @@ class ProductionTaskDefinitionTemplateTest {
                 .isGreaterThanOrEqualTo(60 + 120);
     }
 
+    /**
+     * 機能の開放（feature-enablement-console design §10、deploy-runbook §1.0 の42）: 雛形は緊急の総スイッチを environment に {@code true}
+     * で明示し（secret に置かない）、運用値（{@code APP_FEATURE_ENABLEMENT_*}・総スイッチ以外の {@code FEATURE_ENABLEMENT_*}）を持たない。
+     * 総スイッチは {@code FEATURE_ENABLEMENT_ALLOWED} の placeholder で prod の property に束縛される。
+     */
+    @Test
+    void 雛形は機能の開放の総スイッチをtrueで明示し運用値を持たない() throws IOException {
+        JsonNode app = appContainer();
+
+        assertThat(environment(app, "FEATURE_ENABLEMENT_ALLOWED")).isEqualTo("true");
+        assertThat(names(app.path("secrets")).stream().filter(name -> name.startsWith("FEATURE_ENABLEMENT"))).isEmpty();
+        List<String> all = new ArrayList<>(names(app.path("environment")));
+        all.addAll(names(app.path("secrets")));
+        assertThat(all.stream().map(name -> name.toUpperCase(java.util.Locale.ROOT).replaceAll("[._-]", ""))
+                .filter(key -> key.startsWith("APPFEATUREENABLEMENT")
+                        || key.startsWith("FEATUREENABLEMENT") && !key.equals("FEATUREENABLEMENTALLOWED")))
+                .as("運用値は配備の設定で上書きしない（D-5）").isEmpty();
+        assertThat(Files.readString(Path.of("src/main/resources/application-prod.yml"), StandardCharsets.UTF_8))
+                .contains("allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}").contains("source: database");
+    }
+
     @Test
     void APP_SCHEDULING_ENABLEDはschedulerの条件propertyへ束縛される() {
         SystemEnvironmentPropertySource env = new SystemEnvironmentPropertySource("env",
@@ -219,7 +240,8 @@ class ProductionTaskDefinitionTemplateTest {
                 "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE", "entryPoint",
                 "management", "UPLOAD_BASE_PATH", "/app/uploads/current", "BACKUP_QUIESCE_ENABLED",
                 "BACKUP_QUIESCE_DISABLED_TICKET", "BACKUP_QUIESCE_STARTUP_WAIT_MAX", "SHUTDOWN_TIMEOUT", "APPBACKUPQUIESCE",
-                "app.backupquiesce")) {
+                "app.backupquiesce", "FEATURE_ENABLEMENT_ALLOWED", "APPFEATUREENABLEMENT", "FEATUREENABLEMENT",
+                "app.featureenablement")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
         // RB-QUIESCE BWQ-007: 停止口の ticket の形式、startPeriod と stopTimeout の下限（design.md §12.3）

@@ -818,6 +818,13 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 ## 11. 安全
 
 ### 11.1 二人の承認
+**実装で決めた細部（FE-A08）**:
+
+- 検査は `SmartInitializingSingleton`（port を開く前、`FeatureEnablementStartupEvaluator` の起動時の評価より前）で1回だけ行う。総スイッチの原文の検査は全 profile、源・運用値・旧い変数は prod だけ（`Environment.acceptsProfiles`）。
+- 名前の正規化は ps1 の `NameKey` を広げた形（大文字にして英数字以外を全て除く。`app.features[nf01].enabled` のような綴りも同じ key になる）。
+- 運用値の上書き: 環境変数と system property は `APPFEATUREENABLEMENT` で始まる名前（総スイッチの正規名 `APP_FEATURE_ENABLEMENT_ALLOWED` を含む）と、`FEATUREENABLEMENTALLOWED` 以外の `FEATUREENABLEMENT` で始まる名前を拒否する。`SPRING_APPLICATION_JSON`（環境変数）と `spring.application.json`（system property）の key は総スイッチを含めて全て拒否する（総スイッチは task definition の environment に置く）。
+- 照合（`validate-task-definition.ps1`）は、`FEATURE_ENABLEMENT_ALLOWED` が environment に1つあり原文で `true`/`false`（雛形・実値の両 mode、両 phase）、運用値の名前が無く、`SPRING_APPLICATION_JSON` に `app.feature-enablement`・`FEATURE_ENABLEMENT_*` が無いことを見る。旧い変数の FAIL は FE-E01（段階 E）で全てに広げる。それまでは段階 A の7件の旧い変数を照合は通し、起動時検査だけが止める（RB §1.0 の「機能の開放」に書いた）。
+
 
 - service の拒否（403）と DB の CHECK・複合 FK（§2.3〜§2.6.1）の二重。開放状態・設定の行は承認した申請の行と申請者・承認者が一致することを複合 FK で強制する（review P3-12）。DB は同じ利用者 ID を拒否するだけで、次の残る穴は防げない（review P3-11）:
   - 同じ人が 2 つの口座を持つ（口座の管理と OIDC の IdP に任せる）。
