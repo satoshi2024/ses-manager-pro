@@ -3,7 +3,7 @@
 ## 実行規約
 
 - 本書は第 1 段階（spec）で書いた。実装は spec の独立 review の後、統括の指示で段階ごとに始める。
-- 利用者の決定（`requirements.md` §2 の D-1〜D-6）と、`design.md` §18 の判断点（J-01〜J-20）の決まった値に従う。判断点が推奨と違う値に決まったら、先に `design.md` とこの task を直してから進める。
+- 利用者の決定（`requirements.md` §2 の D-1〜D-9。D-7〜D-9 は `design.md` §18 の J-01・J-09・J-16 の決定済みの値）と、§18 の残りの判断点（J-02〜J-20 の J-09・J-16 以外）の決まった値に従う。判断点が推奨と違う値に決まったら、先に `design.md` とこの task を直してから進める。
 - checkbox は、実装・自動試験・Demo が全て終わった時だけ `- [x]` にする（CLAUDE.md の spec の手順）。
 - 試験は各 task の対象だけを流す（`mvn test -Dtest=…`。MySQL は `-Pmysql-tests -Dtest=…`、browser は `-Pbrowser-tests`）。全 gate の実行の時期と mysql の shard は統括が決める。migration の file を足した後は `mvn clean test` にする。
 - 版番号は V203（統括の指定）。着手時に `db/migration` と `db/migration-dev` の merged の状態で空いていることを確かめる。DDL が他に要れば V204 以降を統括に申請する。
@@ -57,8 +57,8 @@
   - **対応要求:** FE-RQ-001・005
   - **Objective:** `FeatureEnablementCatalog`（13 件、署名の種別、鍵、親、副入口、DB 管理の印）と、`FeatureConditionEvaluator`・`FeatureConditionCheck`・`FeatureEvaluationContext`・`FeatureConditionRegistry`、共通の評価器（総閘・親・署名・鍵）、指紋を作る。
   - **対象 file:** `src/main/java/com/ses/featureenablement/catalog/*`・`condition/*`（新規）、`config/feature/Feature.java`（`NF05_INBOUND`・`NF05_OUTBOUND` を足す。`propertyName`・`environmentVariable`）、`config/feature/FeatureSwitchProperties.java`（`toggle` の NF05 の case は NF05 の property を返す）、`FeatureSwitchRouteCoverageTest`・`FeatureSwitchDefaultsTest`（一覧の追加だけ）。
-  - **Implementation:** `design.md` §4。違反 code は固定の文字列だけ。評価器の例外は registry が `UNVERIFIABLE` にする。固有の評価器を要する開放単位に評価器が無ければ `evaluator.missing`。指紋の正規形は §4.5。
-  - **Automated test:** `FeatureEnablementCatalogCoverageTest`（13 件・NF08 なし・種別の一意・親の循環なし）、`FeatureConditionRegistryTest`、`SignOffConditionEvaluatorTest`（JST の境・署名日前・条件付きの種別）、`FeatureConditionFingerprintTest`（golden vector）。
+  - **Implementation:** `design.md` §4。check は `Scope`（`CONTINUOUS` / `OPEN_ONLY`）を持ち、`OPEN_ONLY` は申請・承認の時だけ開閉を左右する（D-9）。違反 code は固定の文字列だけ。評価器の例外は registry が `UNVERIFIABLE` にする。固有の評価器を要する開放単位に評価器が無ければ `evaluator.missing`。指紋の正規形は §4.5。
+  - **Automated test:** `FeatureEnablementCatalogCoverageTest`（13 件・NF08 なし・種別の一意・親の循環なし・`OPEN_ONLY` は NF02 の暦だけ）、`FeatureConditionRegistryTest`（`OPEN_ONLY` の不成立は申請・承認では不成立、起動時・定期では閉鎖の根拠にならない）、`SignOffConditionEvaluatorTest`（JST の境・署名日前・条件付きの種別）、`FeatureConditionFingerprintTest`（golden vector）。
   - **Demo:** なし。
 
 - [ ] **FE-A04 — snapshot・源の切替え・`FeatureSwitches` の変更**
@@ -94,7 +94,7 @@
   - **Objective:** `FeatureEnablementStartupEvaluator`（`SmartLifecycle`、web server の前）、`FeatureEnablementConditionScheduler`（`evaluateAll`・`evaluateAtBusinessDayStart`。`@SchedulerLock`・`void`）、overlay と `UNVERIFIABLE` の 3 回、申請の期限切れ、失効の接近の通知、副入口の変化の履歴。
   - **対象 file:** `featureenablement/evaluation/*`（新規）、`FeatureSwitchRouteCoverageTest`（`UNGATED_SCHEDULERS` に理由つき）、`SystemConfigServiceImpl`（`SCHEMAS` に `feature-enablement.expiry-warning-days`）、`messages*.properties`（通知の文言）。
   - **Implementation:** `design.md` §7。DB に書けない時は overlay のまま次の周期。WARN `errorCode=FEATURE_AUTO_CLOSED`。
-  - **Automated test:** `FeatureEnablementConditionSchedulerH2Test`（不成立で自動閉鎖・他の開放単位は不変・通知、例外で overlay・3 回で自動閉鎖、失効日の 0:00 の後の最初の評価、期限切れの申請）、`FeatureEnablementStartupEvaluatorTest`（起動時の自動閉鎖・総閘）、`ScheduledMethodsHaveSchedulerLockTest`、`SchedulerLockProxyInvocationTest`。
+  - **Automated test:** `FeatureEnablementConditionSchedulerH2Test`（不成立で自動閉鎖・他の開放単位は不変・通知、例外で overlay・3 回で自動閉鎖、失効日の 0:00 の後の最初の評価、期限切れの申請、`OPEN_ONLY` の check が外れても閉じず監査 `FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST` と通知だけ）、`FeatureEnablementStartupEvaluatorTest`（起動時の自動閉鎖・総閘）、`ScheduledMethodsHaveSchedulerLockTest`、`SchedulerLockProxyInvocationTest`。
   - **Demo:** dev（DB の源）で開いた NF04 の署名の失効日を翌日にした合成の署名へ差し替え、clock を進めた試験で自動閉鎖と通知を確かめる（試験の結果を見る）。
 
 - [ ] **FE-A08 — 総閘・旧い変数の拒否・prod の源の固定（段階 A の範囲）**
@@ -127,11 +127,11 @@
 - [ ] **FE-A11 — 容易な 7 件を DB 管理にする（NF01・NF02・NF02 顧客ポータル・NF03・NF03 資格番号・NF04・NF10）**
   - **依存:** FE-A07、FE-A08、FE-A10
   - **対応要求:** FE-RQ-001・006（要件 §6.1・6.3〜6.7・6.13）
-  - **Objective:** 7 件の目録の行（署名の種別・親）に DB 管理の印を付け、NF02 の暦と NF10 の scheduler の評価器を足す。
+  - **Objective:** 7 件の目録の行（署名の種別・親）に DB 管理の印を付け、NF02 の暦（開放の時だけの条件。D-9）と NF10 の scheduler の評価器を足す。
   - **対象 file:** `featureenablement/catalog/FeatureEnablementCatalog.java`、`featureenablement/condition/WorkCalendarConditionEvaluator.java`・`SchedulingConditionEvaluator.java`（新規）、`mapper/WorkCalendarMapper.java`（件数の method）、`FeatureEnablementProductionValidator`（7 件の旧い変数）。
-  - **Implementation:** 暦は `ServiceSlaCalculator.findCalendarForScope`（:366-400）の 4 段目と同じ条件で 1 回照会。期限の接近と scheduler 無効は `ADVISORY`。各機能の code は変えない。
-  - **Automated test:** `WorkCalendarConditionEvaluatorTest`、`SchedulingConditionEvaluatorTest`、`FeatureEnablementEasyUnitsH2Test`（7 件を DB の源で開閉し、filter・menu・scheduler・子の gate が property の源と同じ応答になる）、`FeatureSwitchChildTemplateRenderingTest`（DB の源の変種）。
-  - **Demo:** dev（DB の源）で NF02 を開き（暦の seed を入れる）、子の顧客ポータルを開き、`/portal/customer` に問い合わせの tab が出ること、NF02 を閉じると子も `AUTO_CLOSED` になることを見る。
+  - **Implementation:** 暦は `ServiceSlaCalculator.findCalendarForScope`（:366-400）の 4 段目と同じ条件（本日を含む当年度の全社共通の暦）で 1 回照会し、check を `Scope.OPEN_ONLY` にする: 申請・承認の時だけ必須、開いた後は NF02 を自動閉鎖しない。暦の有効期間の終わりの 30 日前からと切れた後は、日の始まりの評価で毎日 1 回、監査・管理者への通知・WARN（`design.md` §7.4）。暦が無い間の SLA の計算（WARN `missing_calendar`、土日だけを休日）は変えない。scheduler 無効は `ADVISORY`。各機能の code は変えない。
+  - **Automated test:** `WorkCalendarConditionEvaluatorTest`（暦なし・期間外・要員／組織／法人つきの暦だけ・無効の暦で不成立、`Scope.OPEN_ONLY`）、`FeatureEnablementNf02CalendarH2Test`（暦なしで NF02 の申請・承認が 409、開いた後に暦が切れても NF02 と子は `OPEN` のまま、30 日前からの毎日の監査と通知、`ServiceSlaCalculator` の既存の `missing_calendar` の試験が変わらず通る）、`SchedulingConditionEvaluatorTest`、`FeatureEnablementEasyUnitsH2Test`（7 件を DB の源で開閉し、filter・menu・scheduler・子の gate が property の源と同じ応答になる）、`FeatureSwitchChildTemplateRenderingTest`（DB の源の変種）。
+  - **Demo:** dev（DB の源）で、暦が無い状態では NF02 の申請が条件の不成立で拒否されることを見る。暦の seed を入れて NF02 を開き、子の顧客ポータルを開き、`/portal/customer` に問い合わせの tab が出ること、NF02 を閉じると子も `AUTO_CLOSED` になることを見る。暦の有効期間の終わりを 30 日以内にした seed で日の始まりの評価を手で呼び、NF02 が開いたままで通知と監査が出ることを見る。
 
 ### 段階 B
 

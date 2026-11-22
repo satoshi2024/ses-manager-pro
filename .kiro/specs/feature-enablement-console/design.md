@@ -2,7 +2,7 @@
 
 - 状態: **草案（第 1 段階: spec のみ）**。要件は `requirements.md`（以下「要件」）、手順は `tasks.md`。
 - 行番号は `88b31d45` の行番号である。実装の着手時に再確認する。
-- 判断が要る点は §18 に J-01〜J-20 として一覧し、各節では推奨だけを書く。
+- 判断が要る点は §18 に J-01〜J-20 として一覧する。J-01・J-09・J-16 は決定済み（2026-11-22、利用者）で、決まった値で各節を書いた。他は推奨の状態で、各節は推奨で書く（独立 review の後に統括が決める）。
 
 ## 0. 位置付け
 
@@ -355,9 +355,11 @@ public interface FeatureConditionEvaluator {
     List<FeatureConditionCheck> evaluate(Feature feature, FeatureEvaluationContext context);
 }
 
-public record FeatureConditionCheck(String code, Category category, Status status, boolean temporal,
+public record FeatureConditionCheck(String code, Category category, Scope scope, Status status, boolean temporal,
                                     LocalDate validUntil, List<String> detailCodes) {
     public enum Category { MASTER, PARENT, AUTO, SIGN_OFF, SECRET, SETTING, ADVISORY }
+    /** CONTINUOUS: 開いている間も評価し、外れたら自動閉鎖する。OPEN_ONLY: 申請・承認の時だけ開閉を左右する。 */
+    public enum Scope { CONTINUOUS, OPEN_ONLY }
     public enum Status { SATISFIED, UNSATISFIED, UNVERIFIABLE, NOT_APPLICABLE }
 }
 
@@ -368,7 +370,8 @@ public record FeatureEvaluationContext(String tenantId, LocalDate businessDate, 
 ```
 
 - `code` と `detailCodes` は固定の文字列（既存の違反 code をそのまま使う。例: `decisionBinding.d01.expiresOn.expired`、`privacyAdmins.insufficient[current=1;required=2]`、`dsar.dueDaysUnset`、`state=MISSING`）。値・digest・username・例外の本文を含めない（`PrivacyProductionConfigurationValidator` の message の規則と同じ）。
-- `ADVISORY` は警告だけで、開閉を左右しない（NF02 の暦の期限の接近、NF10 の scheduler 無効）。
+- `ADVISORY` は警告だけで、開閉を左右しない（NF10 の scheduler 無効）。NF02 の暦は `ADVISORY` ではなく `OPEN_ONLY` の check で、期限の接近と喪失は §7.4 の告警になる。
+- `Scope.OPEN_ONLY` の check は、`Purpose.REQUEST`・`APPROVAL` の時だけ成否を開閉の根拠にする。`STARTUP`・`PERIODIC`・`CHANGE` の評価で `UNSATISFIED`・`UNVERIFIABLE` になっても自動閉鎖・overlay にせず、警告（§7.4）として扱う。現在 `OPEN_ONLY` は NF02 の全社共通カレンダーだけ（§18 J-16。決定済み）。他の check は全て `CONTINUOUS`。
 - `openAfterChange` は、承認しようとしている開放単位を含めた「変更の後に開いている開放単位」。NF07 の capability の判定（保持・保全が開いている日に DSAR を足す等）に使う。
 - `FeatureConditionRegistry` は全ての評価器を集め、開放単位ごとに `MASTER`・`PARENT`・`SIGN_OFF` の共通の評価器（§4.3）と固有の評価器の結果を並べる。評価器の例外は、その評価器の全ての check を `UNVERIFIABLE`（code `evaluator.unverifiable[<評価器の名前>]`）にする。固有の評価器を要する開放単位（NF01 二者確認・NF02・NF05・NF06・NF07）に評価器が無ければ `evaluator.missing` の `UNVERIFIABLE` にする。
 
@@ -500,7 +503,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 
 - `FeatureEnablementConditionScheduler`:
   - `evaluateAll()`: `@Scheduled(fixedDelayString = "${app.feature-enablement.evaluation-interval:PT5M}")`、`@SchedulerLock(name = "featureEnablementEvaluation")`、`void`。開いている開放単位と副入口を評価する。
-  - `evaluateAtBusinessDayStart()`: `@Scheduled(cron = "5 0 0 * * *", zone = "Asia/Tokyo")`、`@SchedulerLock(name = "featureEnablementDayStart")`、`void`。失効の反映・申請の期限切れ・失効の接近の通知。
+  - `evaluateAtBusinessDayStart()`: `@Scheduled(cron = "5 0 0 * * *", zone = "Asia/Tokyo")`、`@SchedulerLock(name = "featureEnablementDayStart")`、`void`。失効の反映・申請の期限切れ・失効の接近の通知・開放の時だけの条件（NF02 の暦）の期限の接近と喪失の告警（§7.4）。
   - どちらも `FeatureSwitchRouteCoverageTest` の `UNGATED_SCHEDULERS` に理由つきで登録する（機能スイッチで止めない）。
 - scheduler が無効（`app.scheduling.enabled=false`）の間は、期限による閉鎖（hot path）と変更時の評価だけが働く（FS 4.1 に書く）。
 
@@ -509,7 +512,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 | 開放単位 | 照会 |
 |---|---|
 | 共通（総閘・親・署名） | snapshot から（0） |
-| NF02 | 暦 1 |
+| NF02 | 暦 1（日の始まりの告警だけ。閉鎖の根拠にしない） |
 | NF01 二者確認 | 証跡種別 2 |
 | NF06 | 権限の行 1、法人 1 |
 | NF07（保持・保全・DSAR の両方を開いた場合） | group 1、管理者 2、許可行 1、provider 0（memory）、Journal の権限（10 分に 1 回まで。Journal への 1〜2）、trust（memory の文書） |
@@ -520,7 +523,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 ### 7.4 自動閉鎖の処理
 
 ```
-check = registry.evaluate(f, ctx)
+check = registry.evaluate(f, ctx).filter(scope == CONTINUOUS)   // OPEN_ONLY は閉鎖の根拠にしない（§4.2）
 if any UNSATISFIED:
     overlay.close(f, reason)                       // 直ちに実効値を閉じる
     tx { lock; 状態が OPEN/OPEN_PENDING_RESTART なら AUTO_CLOSED(reason); 子も AUTO_CLOSED(PARENT_CLOSED);
@@ -534,11 +537,12 @@ else:
 ```
 
 - 連続回数は memory に持つ（再起動で 0 に戻る。安全側には overlay が働く）。
+- `OPEN_ONLY` の check（NF02 の全社共通カレンダー）が開いている間に外れても、NF02 と子は開いたままにする。日の始まりの評価で、暦の有効期間の終わりの既定 30 日前（`feature-enablement.expiry-warning-days` と同じ日数）から毎日 1 回、監査 `FEATURE_OPEN_CONDITION_EXPIRING`（`recordDomainEventRequired`）・管理者への通知・WARN `errorCode=FEATURE_OPEN_CONDITION_EXPIRING` を出し、暦が切れた後も同じく毎日告警する（`FEATURE_OPEN_CONDITION_LOST`）。暦が無い間の SLA の計算は現行どおり（`ServiceSlaCalculator.isNonWorkingDay` :314-329 が WARN `missing_calendar` を出し、土日だけを休日として数える）。
 - 副入口は DB の状態を持たない。成否が変わったら履歴 `SUBGATE_CLOSED`・`SUBGATE_OPENED` と通知を出す（要求ごとの gate は今のまま 404・409 を返す）。
 
 ### 7.5 通知・metric・log
 
-- 通知（`NotificationService.publishToUser` を有効な管理者全員へ。NF07 は privacy-admin を含める。dedupe key は開放単位・事象・業務日）: 申請（承認の依頼）、承認・却下、自動閉鎖、総閘による閉鎖、失効の接近、副入口の閉鎖、再起動待ち。
+- 通知（`NotificationService.publishToUser` を有効な管理者全員へ。NF07 は privacy-admin を含める。dedupe key は開放単位・事象・業務日）: 申請（承認の依頼）、承認・却下、自動閉鎖、総閘による閉鎖、失効の接近、開放の時だけの条件の期限の接近と喪失（NF02 の暦）、副入口の閉鎖、再起動待ち。
 - metric: `ses_feature_enablement_open{feature}`（0/1。実効値）、`ses_feature_enablement_state{feature,state}`、`ses_feature_enablement_auto_closed_total{feature,reason}`、`ses_feature_enablement_snapshot_age_seconds`、`ses_feature_enablement_master_allowed`、`ses_feature_enablement_sign_off_days_remaining{feature}`。tag に ID・氏名・値を載せない。
 - log: WARN `errorCode=FEATURE_AUTO_CLOSED feature=<key> reason=<code>`、ERROR `errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED`、WARN `errorCode=FEATURE_ENABLEMENT_SNAPSHOT_STALE`。CloudWatch の metric filter は SRE-8 と同じ形で置ける（RB に例を書く）。
 
@@ -548,7 +552,7 @@ else:
 
 - 開閉の判定は全て `FeatureSwitches` 経由のため、源の差替え（§3）だけで実行時に開閉できる。各機能の code は変えない。
 - 目録の行（署名の種別・親）と、固有の評価器が要るもの:
-  - NF02: `WorkCalendarConditionEvaluator`（全社共通の暦。`ServiceSlaCalculator.findCalendarForScope` :366-400 の 4 段目と同じ条件で `WorkCalendarMapper` を 1 回照会。期限の接近は `ADVISORY`）。
+  - NF02: `WorkCalendarConditionEvaluator`（本日を含む当年度の全社共通の暦。`ServiceSlaCalculator.findCalendarForScope` :366-400 の 4 段目と同じ条件で `WorkCalendarMapper` を 1 回照会。check は `Scope.OPEN_ONLY`: 申請・承認の時だけ必須で、開いた後は継続の条件にせず NF02 を自動閉鎖しない。期限の接近と喪失は §7.4 の告警。§18 J-16 決定済み）。
   - NF10: `SchedulingConditionEvaluator`（`app.scheduling.enabled` が true でなければ `ADVISORY`）。
 - 閉じた時の挙動は現在の OFF と同じ（filter の 404、menu の非表示、scheduler の no-op、子の 400。NF04 は `common.js` が SW の登録を解く。FS 4.4）。
 
@@ -564,7 +568,7 @@ else:
 - `ImportAdmissionApprovalSource`（新設）: 現在の `ImportAdmissionApprovalProperties`（`@ConfigurationProperties("app.import-center.admission")`）を返す property の実装と、確認済みの署名 `NF06_ADMISSION` から `ImportAdmissionApprovalProperties` の値を作る DB の実装。`ApprovedSourceImportAdmissionPort`（:121）が毎回この源を読む。
 - `ImportAdmissionStartupValidator`（:52-77）・`ImportRowReferenceKeyStartupValidator`（:38-55）: 例外で起動を止める処理を削除し、`ImportCenterEnablementConditions`（profile に依らない評価器）が同じ判定を呼ぶ: `ImportAdmissionApproval.evaluate(source.current(), businessDate)` の構造的な不足と期間、`ImportSourceRowReference.state()`（:96）、V193 の権限の行（`PermissionGroupActionMapper` に RB §3.4 の V193 の照会と同じ件数の method を足す）、単一法人（`LegalEntityContextService` と同じ条件の件数）。
 - `ImportJdbcReconnectGuard` は変えない（常時）。
-- 期間の外の扱いが変わる: 現在は「起動して upload だけ 403」、本機能の後は「NF06 を自動閉鎖（404）」（D-4。§18 J-09）。
+- 期間の外の扱いが変わる: 現在は「起動して upload だけ 403」、本機能の後は「NF06 を自動閉鎖（404）」（D-4。§18 J-09。決定済み（2026-11-22、利用者））。
 
 ### 8.4 NF02 の公開範囲
 
@@ -680,7 +684,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 ### 11.4 監査
 
 - `method`: `FEAT_EN`（7 文字。`t_audit_log.method` は `VARCHAR(10)`。`AuditLogMethodLengthGuardTest`）。
-- `application_code`（`VARCHAR(64)`）: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`・`FEATURE_OPEN_STALE`・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`・`FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`・`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`・`FEATURE_SIGNOFF_REGISTERED`・`FEATURE_SIGNOFF_CONFIRMED`・`FEATURE_SIGNOFF_REJECTED`・`FEATURE_SIGNOFF_REVOKED`・`FEATURE_SIGNOFF_SUPERSEDED`・`FEATURE_SIGNOFF_EXPIRED`・`FEATURE_SIGNOFF_PURGED`・`FEATURE_SIGNOFF_DOWNLOADED`・`FEATURE_SUBGATE_CHANGED`。
+- `application_code`（`VARCHAR(64)`）: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`・`FEATURE_OPEN_STALE`・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`・`FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`・`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`・`FEATURE_SIGNOFF_REGISTERED`・`FEATURE_SIGNOFF_CONFIRMED`・`FEATURE_SIGNOFF_REJECTED`・`FEATURE_SIGNOFF_REVOKED`・`FEATURE_SIGNOFF_SUPERSEDED`・`FEATURE_SIGNOFF_EXPIRED`・`FEATURE_SIGNOFF_PURGED`・`FEATURE_SIGNOFF_DOWNLOADED`・`FEATURE_SUBGATE_CHANGED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`。
 - 本文（`before_state`・`after_state`）: 開放単位・状態・理由の code・申請 ID・署名 ID だけ。
 - 自動の遷移は actor SYSTEM、`confirmationSource` は `STARTUP` / `SCHEDULER_POLL`（既存の値を使う。無ければ足す）。
 - 履歴（§2.7）と監査は同じ transaction で書く。
@@ -762,7 +766,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 | unit | 各評価器の試験（`LifecycleDualConfirmationEnablementConditionsTest`・`ImportCenterEnablementConditionsTest`・`PrivacyProductionConfigurationValidatorTest` の追加・`IntegrationHubProductionEnablementPolicyTest` の追加） | 起動時検査と同じ入力で同じ code になること（判定の写しが無いこと） |
 | H2 | `FeatureEnablementServiceH2Test` | 申請・承認・却下・取下げ・期限切れ・陳腐化・閉鎖・cascade、行為者の規則、監査と履歴の行、CHECK・一意索引（H2） |
 | H2 | `FeatureSignOffServiceH2Test` | upload の scan・hash・照合、二人の確認、差替え・取消しでの自動閉鎖、汎用の経路の拒否、消去と hold の gate |
-| H2 | `FeatureEnablementConditionSchedulerH2Test` | 定期・日の始まりの評価、`void`、自動閉鎖と通知 |
+| H2 | `FeatureEnablementConditionSchedulerH2Test` | 定期・日の始まりの評価、`void`、自動閉鎖と通知、`OPEN_ONLY`（NF02 の暦）が外れても閉じず監査と通知だけ |
 | MVC | `FeatureEnablementApiControllerTest` | 権限（管理者以外 403、group の有無）、`ApiResult`、CSRF |
 | 既存 | `FeatureSwitchFilterTest`・`FeatureSwitchMenuAndViewTest`・`FeatureSwitchSchedulerGateTest`・`FeatureSwitchRouteCoverageTest`・`FeatureSwitchRuntimeConditionTest`・`ActionPermissionMatrixTest`・`MessageBundleConsistencyTest`・`StaticAssetLocalityTest`・`AuditLogMethodLengthGuardTest`・`ScheduledMethodsHaveSchedulerLockTest`・`SchedulerLockProxyInvocationTest`・`SchedulingDisabledDrainTest`・`TestIsolationAuditTest`・`MigrationScriptIntegrityTest`・`DeployRunbookMigrationCountTest` | 変えずに（または一覧の追加だけで）通る。DB の源でも同じ OFF の応答になる変種を足す |
 | 静的 | `FeatureEnablementCatalogCoverageTest`・`PrivacyFeatureFlagReadGuardTest`・`IntegrationHubFlagReadGuardTest`・`FeatureEnablementLegacySettingTest` | 目録の網羅、直接の読取りの禁止、旧い変数の一覧と ps1 の一致 |
@@ -785,9 +789,9 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 ## 18. 判断が要る点
 
-| # | 論点 | 選択肢 | 推奨と理由 |
+| # | 論点 | 選択肢 | 決定または推奨と理由 |
 |---|---|---|---|
-| J-01 | D-5「部署の設定には鍵と総閘だけ」の範囲 | (a) 機能スイッチと署名の値だけを移し、基盤の設定（NF05 の bound-tenant-id・CIDR・送信先・trusted proxies・mode・truststore の path、NF07 の Journal の接続・trust 文書の path・鮮度の上限、DSAR の通知日数）は残す。(b) 基盤の設定も DB に移す | (a)。基盤の設定は bean・Tomcat・接続 pool の構成に起動時に使い、SRE が持つ値で、DB に移しても再起動は残る。NF05 の承認の内容（CIDR 等）は digest で決定に束縛されるため、部署の設定に残しても決定と食い違えば開かない。**決定の文言どおりに読むと (b) になり得るため、利用者の確認が要る** |
+| J-01 | D-5「部署の設定には鍵と総閘だけ」の範囲 | (a) 機能スイッチと署名の値だけを移し、基盤の設定（NF05 の bound-tenant-id・CIDR・送信先・trusted proxies・mode・truststore の path、NF07 の Journal の接続・trust 文書の path・鮮度の上限、DSAR の通知日数）は残す。(b) 基盤の設定も DB に移す | **決定済み（2026-11-22、利用者）: (a)**。機能スイッチと署名の値だけを system へ移し、基盤の設定は部署の設定に残す（内容は署名の digest で決定に束縛する）。理由: 基盤の設定は bean・Tomcat・接続 pool の構成に起動時に使い、SRE が持つ値で、DB に移しても再起動は残る。NF05 の承認の内容（CIDR 等）は digest で決定に束縛されるため、部署の設定に残しても決定と食い違えば開かない |
 | J-02 | dev・test の源 | (a) property のまま、DB は opt-in。(b) 全 profile で DB | (a)。既存の試験の意味を保ち（test は全て開）、H2 の schema の 2 系統の負担を増やさない |
 | J-03 | 副入口（hold 開始・REL・REG）を独立の開放単位にするか | (a) しない（署名の二人の確認で開く。条件が外れれば副入口だけ閉じて告警）。(b) NF07 保持・保全の子の開放単位にして、開放の申請と承認を別に要する | (a)。依頼の分け方（保持・保全に REL・REG を含める）に合い、副入口の署名は privacy-admin の二人の確認を経る。(b) は二人の操作が二重になる |
 | J-04 | break-glass・bootstrap の session で申請・承認できるか | (a) どちらも不可。(b) break-glass は可 | (a)。§11.2 |
@@ -795,14 +799,14 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 | J-06 | 署名の登録に二人の確認を求めるか | (a) 求める。(b) 1 名で登録、開放の承認でだけ二人 | (a)。§6.4（差替えは開放の承認を経ないため） |
 | J-07 | 未決の申請の期限 | 7 日 / 30 日 / 無期限 | 7 日。古い条件で承認させない |
 | J-08 | 署名の有効期限の上限 | (a) 全種別 366 日。(b) 種別ごと（受理・実測は 3 年等） | (a)。既存の NF07・NF06・NF08 の規則と同じで単純。運用の負担が大きければ (b) |
-| J-09 | 時間要因の扱いの変更 | 2026-11-14 の「失効は OFF 扱いで起動、署名日前は署名日に自動で開く」を D-4 で置き換え、自動では開かない。NF06 の期間外は「upload だけ 403」から「NF06 を閉じる（404）」に変わる | 置き換える（D-4 の帰結）。利用者に変更の確認を求める |
+| J-09 | 時間要因の扱いの変更 | 2026-11-14 の「失効は OFF 扱いで起動、署名日前は署名日に自動で開く」を D-4 で置き換え、自動では開かない。NF06 の期間外は「upload だけ 403」から「NF06 を閉じる（404）」に変わる | **決定済み（2026-11-22、利用者）: 新しい規則に置き換える**（D-4 の帰結）。署名の失効でその開放単位を自動閉鎖して告警し、NF06 の期間外は NF06 全体を閉じる（404）。署名日前の署名では開かず、署名日以降に管理者の申請と承認で開く。2026-11-14 の時間要因の規則（失効・署名日前は起動を止めず OFF 扱い、署名日に自動で開く。FS 4.7.2.1・`ImportAdmissionStartupValidator:75`）をこれで置き換える |
 | J-10 | 評価できない時 | (a) 直ちに overlay、3 回続けば自動閉鎖。(b) 直ちに自動閉鎖。(c) overlay のまま | (a)。一時の DB の障害で再承認を強いず、続けば D-4 どおり閉じる |
 | J-11 | 総閘を開に戻した後 | (a) 自動では開かない（申請と承認）。(b) 戻せば元どおり | (a)。D-4 と同じ扱いで、緊急停止の後に各機能を確かめ直す |
 | J-12 | prod の旧い変数 | (a) 起動を止める。(b) WARN で無視 | (a)。無視すると運用者が開閉を誤解する。新規構築のため移行の負担は無い |
 | J-13 | 画面の閲覧者 | (a) 管理者だけ。(b) マネージャーにも参照 | (a)。条件と署名の参照は安全上の構成を表す。必要になれば `feature-enablement.view` の seed を足す |
 | J-14 | 署名者の氏名と文書の保存期間 | 失効・取消し・差替えから 3 年 / 5 年 / 無期限 | 3 年（暫定）。法務・Privacy の確認が要る |
 | J-15 | DSAR の `due-days`・`package-max-age` | (a) D-06 の署名の構造化された値（digest v1 には入れない）。(b) 運用の値として部署の設定に残す。(c) digest v2 に入れる | (a)。D-06 の値で、差替えに再起動を要しないため。(c) は決定書の digest の手順が変わるため別の判断 |
-| J-16 | NF02 の暦の条件 | (a) 継続の条件（暦が切れれば NF02 を閉じる。30 日前から警告）。(b) 承認の時だけ | (a)。D-4 に合う。ただし年度の境で顧客の問い合わせが 404 になる危険があり、警告を確実に受ける運用が要る |
+| J-16 | NF02 の暦の条件 | (a) 継続の条件（暦が切れれば NF02 を閉じる。30 日前から警告）。(b) 開放の時だけの条件 | **決定済み（2026-11-22、利用者）: (b)**。申請・承認の時に当年度の全社共通カレンダーを必須にし、その後は継続の条件にせず NF02 を自動閉鎖しない（`Scope.OPEN_ONLY`。§4.2）。暦の有効期間の終わりの 30 日前から毎日、監査と管理者への通知で告警する（§7.4）。暦が無い間は現行の WARN `missing_calendar` と、土日だけを休日とする計算を続ける。worker の推奨は (a) だった |
 | J-17 | PR #130 の guard の privacy-admin の条件 | (a) NF07 が開いている・再起動待ち・未決の申請の時だけ判定。(b) 現在どおり常に判定 | (a)。§14 |
 | J-18 | 親の閉鎖で子を閉じるか | (a) 子も自動閉鎖（再承認が要る）。(b) 子の状態は残し、実効値だけ閉 | (a)。D-4（条件「親が開」が外れたら閉じる）に合う |
 | J-19 | 閉鎖の人数 | (a) 管理者 1 名。(b) 二人 | (a)。閉じる方向は安全側で、緊急に遅らせない |
