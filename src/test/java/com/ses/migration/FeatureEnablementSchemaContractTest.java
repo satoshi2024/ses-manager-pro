@@ -245,7 +245,19 @@ class FeatureEnablementSchemaContractTest {
         String engineer = read(ENGINEER_SCHEMA);
         int start = engineer.indexOf(V203_SECTION_MARKER);
         assertThat(start).as("engineer-schema-h2.sql に V203 の節がある").isNotNegative();
-        return engineer.substring(start);
+        // 次の版の節の見出しの前で区切る（file の末尾までを取ると、後の版の表まで V203 の表として数える。
+        // V202 の契約試験が V203 を足した時に同じ形で落ちた）。
+        java.util.regex.Matcher next = java.util.regex.Pattern.compile("\\n-- V(\\d+)（").matcher(engineer);
+        int end = engineer.length();
+        int from = start + V203_SECTION_MARKER.length();
+        while (next.find(from)) {
+            if (Integer.parseInt(next.group(1)) > 203) {
+                end = next.start();
+                break;
+            }
+            from = next.end();
+        }
+        return engineer.substring(start, end);
     }
 
     private static String read(Path path) throws Exception {
