@@ -995,7 +995,7 @@ CI で取る行は、2026-11-22 の PR #128（head `9448aaf1`、run 44979797399�
 | P3-9 | `MySqlTestShardInventoryTest` が source の部分一致で数える | compile 済みの class の JUnit の注釈で数え、fixture の空白の工夫を外した。前半（`BackupQuiesceTestContextInventoryTest` が `SpringApplicationBuilder`・initializer で prod にした context を見ない）は 2c の review P3-2 で、`SpringApplicationBuilder` の prod の context を理由つきの一覧の中だけにする走査を足した（§20.8）。`ApplicationContextRunner`・initializer の profile は静的な走査の外に残る（L-22） |
 | P3-10 | spec の書き戻しの漏れ（§20・L-13・特権の logout・IP） | 本節と §20.5・L-13・L-21。IP は 2c の事実の修正の commit（§6.13・§14・§20、tasks の BWQ-005） |
 | P3-11 | 2a・2b を BWQ-007 無しで main へ入れない | PR の説明に書く（統括） |
-| 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く |
+| 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く。RB-FIRST-RELEASE で `openapi-candidate.yaml` に 503（`BACKUP_QUIESCED`）を足し、`IntegrationHubOpenApiContractTest` で固定した（commit `107ea95b`。2026-11-22 利用者決定） |
 
 ### 20.7 Runner の実測（`fea83915` の mysql shard 3）と fix E
 
@@ -1044,3 +1044,12 @@ CI で取る行は、2026-11-22 の PR #128（head `9448aaf1`、run 44979797399�
 | P3-7 | 監視の AUTO_RESUMED の原因に DDL lock の喪失が無い | `LEASE_EXPIRED` の一つとして足した |
 | P3-8 | P2-1 の回帰を止める静的な守りが無い | `script-contract-test.sh` に、本番 script が `quiesce_db::run_sql` を command substitution の中で呼ばず lib の外で直接呼ばないことの走査（見本の fixture つき）を足した |
 | P3-9 | 文言 | §1.2 の pool の書き方、監視の Connector/J の文言の末尾の「.」 |
+
+### 20.11 本機の MySQL 8.4.13 での確認（2026-11-22、統括の記録）の所見
+
+本機（MySQL 8.4.13、dev・prod の profile、dummy の設定）で app 側の BQ-3・BQ-4 の手順を確かめた記録（統括の記録。証跡は repository の外）で見つかった P3 の2件。どちらも挙動は変えていない。本機の結果は staging の実施（BQ-3・BQ-4。**未取得**）の代わりにならない。
+
+| # | 内容 | 対応（RB-FIRST-RELEASE の fix commit `a0b92024`） |
+|---|---|---|
+| F-1 | prod 以外の profile で静止中に起動すると、`BACKUP_QUIESCE_STARTUP_WAIT` の直後に「backup の静止が解除されたため、起動を続けます」と出て待たずに起動する。§6.2・D-P3-3（prod 以外の UNARMED は書ける）による仕様どおりの挙動だが、静止は解除されておらず、log が事実と違う。BWQ-014 の「起動の待ち」は prod の profile でだけ確かめられる | `awaitStartupPermit` が permit を取る前に UNARMED かつ prod 以外かを見て、「prod 以外の profile では登録の前（UNARMED）でも書込みを許すため、backup の静止（要求の番号 N）の解除を待たずに起動を続けます（静止は解除されていません）」を出す。prod の文言は変えない。`BackupQuiesceResponderTest` |
+| F-2 | `BACKUP_QUIESCE_RESUMED` の log が保持の秒数・保留した非同期の処理・解除後の書込みだけで、§13.1 の拒否・待機・省略の件数を出さない | §13.1 の順で、拒否した要求（`rejected_requests` の全 kind）・待たせた定期実行（`deferred` の `scheduler`）・省いた書込み（`skipped_writes` の全 kind）の件数を足した。値は既存の counter の、要求を読んでからの増分（`BackupQuiesceMetrics.totals()`。新しい数え方は作らない）。`BackupQuiesceResponderTest` |
