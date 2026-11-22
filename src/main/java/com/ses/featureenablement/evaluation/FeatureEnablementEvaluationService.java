@@ -78,6 +78,13 @@ public class FeatureEnablementEvaluationService {
     private final Map<Feature, Instant> localUnverifiableSince = new ConcurrentHashMap<>();
     /** 副入口の前回の成否（変化を履歴に残す）。 */
     private final Map<String, Boolean> subgateStates = new ConcurrentHashMap<>();
+    /** 最後の評価の結果（画面の一覧の表示。FE-A09）。手で組み立てる試験では無い。 */
+    private volatile FeatureEnablementEvaluationResults results;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setResults(FeatureEnablementEvaluationResults results) {
+        this.results = results;
+    }
 
     public FeatureEnablementEvaluationService(FeatureEnablementProperties properties, FeatureEnablementSnapshotHolder holder,
                                               FeatureConditionRegistry registry, FeatureEnablementCatalog catalog,
@@ -165,6 +172,10 @@ public class FeatureEnablementEvaluationService {
         FeatureEnablementSnapshot snapshot = holder.get();
         FeatureEvaluation evaluation = registry.evaluate(feature, new FeatureEvaluationContext(tenant.tenantId(),
                 FeatureEvaluationContext.businessDate(clock), clock, snapshot, purpose, Set.of(), true));
+        FeatureEnablementEvaluationResults store = results;
+        if (store != null) {
+            store.record(evaluation);
+        }
         if (!evaluation.closingUnsatisfied().isEmpty()) {
             String reason = truncate(evaluation.firstClosingReason().orElse("CONDITION_UNSATISFIED"));
             // 直ちに実効値を閉じる（書けるまで外さない）

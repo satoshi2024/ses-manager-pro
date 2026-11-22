@@ -123,9 +123,10 @@
   - **対応要求:** FE-RQ-011・012
   - **Objective:** `FeatureEnablementApiController`（`design.md` §15.1。組の API を含む）と page controller、権限の配線を足す。
   - **対象 file:** `controller/api/FeatureEnablementApiController.java`・`controller/page/FeatureEnablementPageController.java`（新規）、`service/security/ActionPermissionResolver.java`（`RESOURCE_NAMES` :13 と `pageResource` :450）、`service/security/impl/AuthorizationServiceImpl.java`（`isAdminOnlyAction` :204-208 に `feature-enablement.`）、`config/SecurityConfig.java`（両 path を `hasRole("管理者")`）、`service/security/impl/BreakGlassServiceImpl.java`（`validateAndSerializeActions` :316-331 で拒否）、`FeatureSwitchRouteCoverageTest`（`UNGATED_ROUTE_PREFIXES` に理由つき）。
-  - **Implementation:** 一覧・履歴は `PageUtils.safePage`。`/units` は実効値と閉じている理由を返す。`/units/{key}/evaluate` は開放単位ごとに 1 分に 1 回で、状態を遷移させない（`Purpose.DISPLAY`）。応答は `ApiResult`。
+  - **Implementation:** 一覧・履歴は `PageUtils.safePage`。`/units` は実効値と閉じている理由を返す。`/units/{key}/evaluate` は開放単位ごとに 1 分に 1 回で、状態を遷移させない（`Purpose.DISPLAY`）。応答は `ApiResult`。段階 A2 の実装の細部（読取りの `FeatureEnablementQueryService`、最後の評価の memory、申請の種類、`UNGATED_ROUTE_PREFIXES` に登録しない理由）は `design.md` §15.1 の「実装で決めた細部」。
   - **Automated test:** `FeatureEnablementApiControllerTest`（管理者 200、営業・HR・マネージャー（group あり・なし）403、未認証 401/302、CSRF、氏名を一覧に返さない、実効値の項目、evaluate で状態が変わらない）、`ActionPermissionMatrixTest`（allow-list を足さずに通る）、`BreakGlassServiceImplTest` に `feature-enablement.view` の拒否、`MenuPermissionFilter` の試験に admin の素通しと resolver の null にならないこと。
   - **Demo:** dev で管理者と営業で `/api/feature-enablement/units` を叩き、200 と 403 を見る。
+    - 手順（段階 A2 で補った）: dev で `admin` / `admin123` で login し、`/user/list` で営業の利用者を作る。管理者の browser で `/api/feature-enablement/units` を開くと 200 の JSON（`effectiveOpen`・`closedReasons` を含み、署名者の氏名を含まない）、営業で login した browser では 403 で、sidebar に「機能の開放」が出ないことを見る。break-glass の incident の申請に `feature-enablement.view` を入れると 400 になることは `BreakGlassServiceImplTest` の結果で見る。
 
 - [ ] **FE-A10 — 画面「機能の開放」と 4 言語の文言**
   - **依存:** FE-A09

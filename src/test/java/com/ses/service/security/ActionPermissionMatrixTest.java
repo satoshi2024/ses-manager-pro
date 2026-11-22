@@ -557,6 +557,31 @@ class ActionPermissionMatrixTest {
         }
     }
 
+    /**
+     * 機能の開放（feature-enablement-console FE-RQ-012・FE-AC-012-01）: 画面と API の URI は {@code feature-enablement} の action へ
+     * 解決され（null にならない）、管理者は group の '*' で通る。営業・HR・マネージャーは group の有無に関わらず拒否する
+     * （非管理者の group へ {@code feature-enablement.*} を seed せず、{@code isAdminOnlyAction} が legacy でも拒否する）。
+     */
+    @Test
+    void 機能の開放は管理者だけが使え営業とHRとマネージャーはgroupの有無に関わらず拒否される() {
+        assertEquals("feature-enablement.view", ActionPermissionResolver.resolve("GET", "/api/feature-enablement/units"));
+        assertEquals("feature-enablement.create",
+                ActionPermissionResolver.resolve("POST", "/api/feature-enablement/requests/1/approve"));
+        assertEquals("feature-enablement.view", ActionPermissionResolver.resolve("GET", "/feature-enablement"));
+        for (String action : List.of("feature-enablement.view", "feature-enablement.create")) {
+            assertTrue(authorizationService.isAllowed(authenticate(9007L, "管理者"), action), "管理者（group）: " + action);
+            assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), action), "管理者（legacy）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"), action), "営業（group）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), action), "HR（group）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), action), "マネージャー（group）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9999L, "営業"), action), "営業（legacy）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9997L, "HR"), action), "HR（legacy）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9996L, "マネージャー"), action),
+                    "マネージャー（legacy）: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), action), "要員: " + action);
+        }
+    }
+
     private Authentication authenticate(Long id, String role) {
         SysUser user = new SysUser();
         user.setId(id);

@@ -477,7 +477,9 @@ public final class ActionPermissionResolver {
                 Map.entry("/quotation", "quotation"),
                 Map.entry("/analytics", "analytics"),
                 Map.entry("/ai", "ai"),
-                Map.entry("/lifecycle", "lifecycle"));
+                Map.entry("/lifecycle", "lifecycle"),
+                // 機能の開放（FE-RQ-012。V203 の m_menu feature-enablement と対）
+                Map.entry("/feature-enablement", "feature-enablement"));
         return pages.entrySet().stream()
                 .filter(entry -> uri.equals(entry.getKey()) || uri.startsWith(entry.getKey() + "/"))
                 .map(Map.Entry::getValue)

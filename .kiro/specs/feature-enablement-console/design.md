@@ -815,9 +815,6 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - 段階 A〜D の間は、移行済みの開放単位の変数だけを拒否する（§3.1 の印）。段階 E で全てを拒否する。
 - RB §1.0 に行を足し、`infra/ecs/task-definition.prod.json` の雛形に `FEATURE_ENABLEMENT_ALLOWED=true` を置く（CLAUDE.md: prod の fail-fast を足す change で同時に行う）。
 
-## 11. 安全
-
-### 11.1 二人の承認
 **実装で決めた細部（FE-A08）**:
 
 - 検査は `SmartInitializingSingleton`（port を開く前、`FeatureEnablementStartupEvaluator` の起動時の評価より前）で1回だけ行う。総スイッチの原文の検査は全 profile、源・運用値・旧い変数は prod だけ（`Environment.acceptsProfiles`）。
@@ -825,6 +822,9 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - 運用値の上書き: 環境変数と system property は `APPFEATUREENABLEMENT` で始まる名前（総スイッチの正規名 `APP_FEATURE_ENABLEMENT_ALLOWED` を含む）と、`FEATUREENABLEMENTALLOWED` 以外の `FEATUREENABLEMENT` で始まる名前を拒否する。`SPRING_APPLICATION_JSON`（環境変数）と `spring.application.json`（system property）の key は総スイッチを含めて全て拒否する（総スイッチは task definition の environment に置く）。
 - 照合（`validate-task-definition.ps1`）は、`FEATURE_ENABLEMENT_ALLOWED` が environment に1つあり原文で `true`/`false`（雛形・実値の両 mode、両 phase）、運用値の名前が無く、`SPRING_APPLICATION_JSON` に `app.feature-enablement`・`FEATURE_ENABLEMENT_*` が無いことを見る。旧い変数の FAIL は FE-E01（段階 E）で全てに広げる。それまでは段階 A の7件の旧い変数を照合は通し、起動時検査だけが止める（RB §1.0 の「機能の開放」に書いた）。
 
+## 11. 安全
+
+### 11.1 二人の承認
 
 - service の拒否（403）と DB の CHECK・複合 FK（§2.3〜§2.6.1）の二重。開放状態・設定の行は承認した申請の行と申請者・承認者が一致することを複合 FK で強制する（review P3-12）。DB は同じ利用者 ID を拒否するだけで、次の残る穴は防げない（review P3-11）:
   - 同じ人が 2 つの口座を持つ（口座の管理と OIDC の IdP に任せる）。
@@ -936,6 +936,16 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 - action の key は `ActionPermissionResolver` の規則どおり（`GET` → `feature-enablement.view`、`POST` → `feature-enablement.create`）。行為者の細かな規則（§11）は service 層で判定する。
 - 誤りの code は 4 つの bundle の `error.featureEnablement.*`。
+
+**実装で決めた細部（FE-A09）**:
+
+- 読取りは `FeatureEnablementQueryService`（一覧・詳細・再評価・申請と履歴の頁・組の一覧・目録）。閲覧も含め全ての API が `FeatureEnablementActorPolicy.resolve`（session の種別と有効な管理者の読直し）を通る（J-13）。
+- 一覧の「最後の評価」は `FeatureEnablementEvaluationResults`（この instance の memory。起動時・定期・画面の再評価の結果を開放単位ごとに1件）から出す。開いていない開放単位は定期の評価をしないため、再評価を押すまで「未評価」。再評価は開放単位ごとに1分に1回（それより早ければ 429 `error.featureEnablement.evaluateTooSoon`）。
+- `POST /requests` の `type` は段階 A では `OPEN` と `SIGN_OFF_EXTENSION`（`target` は `signoff:<id>`、`value` は新しい失効日）だけ。`SETTING_CHANGE` は FE-B03 まで 400 `requestTypeUnsupported`。延長は `POST /sign-offs/{id}/extend` からも申請できる。表に無い取下げ（`POST /sign-offs/{id}/withdraw`・`/sign-off-bundles/{id}/withdraw`。登録者だけ）も置く。組の一覧は `GET /sign-off-bundles`。
+- 承認の結果が承認でない時は、service の transaction の commit の後に controller が 409（`Outcome.messageKey()`、成り立たない条件の code を引数）にする。
+- 署名の詳細は氏名を含むが、保存名・元の file 名を返さず、`structuredValues` のうち名前が `digest` で終わる値と文書の SHA-256 は先頭 16 文字だけにする。一覧（`Summary`）は氏名を含めない。文書の取得の file 名は `<種別>-<id>.pdf`（`Cache-Control: no-store`）。
+- 組の登録は multipart で、part `request` に JSON（`bundleKind`・新しい member・`carriedOver`）、新しい member ごとに文書の part `file.<種別>`。
+- `FeatureSwitchRouteCoverageTest` の `UNGATED_ROUTE_PREFIXES` には登録しない: controller は NF の service package に依存せず、action の resource も NF に属さないため、NF の入口として検出されない（登録すると同試験の「古い登録」で落ちる）。
 
 ### 15.2 画面
 
