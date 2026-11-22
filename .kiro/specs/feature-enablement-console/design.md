@@ -301,6 +301,7 @@ CREATE TABLE t_feature_sign_off_extension (
 
 - 延長は新しい署名の行を作らない。署名の行の `expires_on` を同じ行で更新し（`stored_name`・SHA-256・署名日は変えない。`uk_fe_sign_off_stored_name` はそのまま）、同じ transaction でこの表に 1 行を足す。延長の申請は `t_feature_enablement_request`（`request_type='SIGN_OFF_EXTENSION'`、`target_key='signoff:<id>'`、`proposed_value` は新しい失効日）を使い、申請者以外の有効な管理者の承認（`decided_by`）で確定する。同じ署名に未決の延長は 1 件だけ（`pending_slot`）。
 - 対象は `kind_class=EVIDENCE` で `CONFIRMED` の行だけ。新しい失効日の上限は承認の日から 1,095 日。
+- 申請と承認の時の指紋は、対象の署名の `id:version`・状態・類・失効日と新しい失効日から計算する（版 `fe-extension-v1`）。承認の時に、まだ `CONFIRMED` で証拠の類であること、指紋が申請の時と同じことを確かめ、違えば申請を `STALE` で終える（spec の micro review 88630af1 の P3-M1）。NF07 の種別の延長は申請者・承認者とも privacy-admin に限る（J-05。段階 C で有効にする）。
 - 消去（§6.6）はその行の最後の状態と失効日で判定する（延長した行は文書を共有しないため、旧い期限で文書が消えることは無い）。
 
 ### 2.7 `t_feature_enablement_event`（追記専用）

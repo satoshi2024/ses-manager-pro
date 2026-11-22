@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.TreeSet;
 
 /**
- * NF07 hold の gate に接続した破壊的経路（production-bridge-phased-plan.md §3.4.1 の D1〜D10。A1H-2）。
+ * NF07 hold の gate に接続した破壊的経路（production-bridge-phased-plan.md §3.4.1 の D1〜D10。A1H-2。D17 は機能の開放の署名の消去）。
  *
  * <p>経路ごとに、接続点の source（{@code src/main/java} からの相対 path）と、その経路が判定する data element を宣言する。
  * {@code PrivacyHoldPathClassificationTest} がこの宣言から逆に、各接続点が実際に gate を呼ぶこと（source にこの定数がある
@@ -37,7 +37,13 @@ public enum PrivacyHoldPath {
     /** 外部 API の read snapshot の purge（{@code ExternalApiReadSnapshotPurgeService}）。 */
     D9("com/ses/service/integrationhub/ExternalApiReadSnapshotPurgeService.java", List.of("EXTERNAL_API_READ_SNAPSHOT")),
     /** 孤児 file の清掃（{@code FileCleanupService}。{@link PrivacyHoldFileReferenceProvider} が hold の対象の保存名を守る）。 */
-    D10("com/ses/privacy/production/retention/hold/PrivacyHoldFileReferenceProvider.java", List.of());
+    D10("com/ses/privacy/production/retention/hold/PrivacyHoldFileReferenceProvider.java", List.of()),
+    /**
+     * 機能の開放の終わった署名の氏名・元の file 名・文書の消去（{@code FeatureSignOffPurgeScheduler}。回の初めに1回。
+     * feature-enablement-console design §6.6。D11〜D16 は RB §4.4 の他の経路と対象外の番号）。
+     */
+    D17("com/ses/featureenablement/signoff/FeatureSignOffPurgeScheduler.java",
+            List.of("FEATURE_SIGN_OFF_SIGNER_NAME", "FEATURE_SIGN_OFF_DOCUMENT"));
 
     /** D7 の record kind（{@code IntegrationHubRetentionPurgeScheduler} の走査対象と同じ）。 */
     public static final List<String> INTEGRATION_HUB_KINDS = IntegrationHub.KINDS;

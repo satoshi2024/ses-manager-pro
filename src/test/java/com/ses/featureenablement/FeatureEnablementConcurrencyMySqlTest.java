@@ -76,6 +76,8 @@ class FeatureEnablementConcurrencyMySqlTest {
     @Autowired
     private FeatureEnablementService service;
     @Autowired
+    private com.ses.featureenablement.service.FeatureSignOffService signOffs;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private FeatureEnablementCatalog catalog;
@@ -169,7 +171,80 @@ class FeatureEnablementConcurrencyMySqlTest {
         assertThat(fixture.state(Feature.NF10)).isIn("MANUALLY_CLOSED", "AUTO_CLOSED");
     }
 
+    /** FE-A06: 署名の取消し × 承認。どちらの順でも、取り消した署名を要する開放単位は開いていない。 */
+    @Test
+    void 署名の取消しと承認の並行はどちらの順でも開放単位は開いていない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor revoker = fixture.admin();
+        ensureClosed(Feature.NF04, revoker);
+        FeatureEnablementRequest request = service.requestOpen(Feature.NF04, null, requester);
+        long privacy = fixture.confirmedId("NF04_PRIVACY");
+        int version = signOffVersion(privacy);
+
+        List<Object> outcomes = race(
+                () -> service.approve(request.getId(), 0, null, approver),
+                () -> {
+                    signOffs.revoke(privacy, version, "SIGNER_WITHDREW", revoker);
+                    return "revoked";
+                });
+
+        assertNoLockFailure(outcomes);
+        assertThat(outcomes.get(1)).as("取消しは必ず成功する").isEqualTo("revoked");
+        assertThat(fixture.state(Feature.NF04)).isNotIn("OPEN", "OPEN_PENDING_RESTART");
+        FeatureEnablementApprovalResult result = (FeatureEnablementApprovalResult) outcomes.get(0);
+        if (result.approved()) {
+            assertThat(fixture.closedReason(Feature.NF04)).as("承認が先なら取消しが自動閉鎖する")
+                    .isEqualTo("SIGN_OFF_REVOKED");
+        } else {
+            assertThat(result.outcome()).as("取消しが先なら承認は条件の不成立")
+                    .isEqualTo(FeatureEnablementApprovalResult.Outcome.CONDITIONS_UNSATISFIED);
+            assertThat(fixture.requestStatus(request.getId())).isEqualTo("PENDING");
+            // 後の test の申請と衝突しないよう取り下げる
+            service.withdraw(request.getId(), fixture.requestVersion(request.getId()), requester);
+        }
+    }
+
+    /** FE-A06: 署名の差替え × 承認。差替えが先なら承認は STALE、承認が先なら成り立つ差替えで開いたまま。 */
+    @Test
+    void 署名の差替えと承認の並行は差替えが先ならSTALEで承認が先なら開いたまま() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor confirmer = fixture.admin();
+        ensureClosed(Feature.NF04, confirmer);
+        FeatureEnablementRequest request = service.requestOpen(Feature.NF04, null, requester);
+        long replacement = fixture.signOff("NF04_SRE", "REGISTERED", SIGNED, EXPIRES);
+
+        List<Object> outcomes = race(
+                () -> service.approve(request.getId(), 0, null, approver),
+                () -> signOffs.confirm(replacement, 0, confirmer));
+
+        assertNoLockFailure(outcomes);
+        assertThat(jdbc.queryForObject("SELECT status FROM t_feature_sign_off WHERE id = ?", String.class, replacement))
+                .isEqualTo("CONFIRMED");
+        FeatureEnablementApprovalResult result = (FeatureEnablementApprovalResult) outcomes.get(0);
+        if (result.approved()) {
+            assertThat(fixture.state(Feature.NF04)).isEqualTo("OPEN");
+        } else {
+            assertThat(result.outcome()).isEqualTo(FeatureEnablementApprovalResult.Outcome.STALE);
+            assertThat(fixture.requestStatus(request.getId())).as("STALE は commit される").isEqualTo("STALE");
+        }
+    }
+
     // ---------------------------------------------------------------- helper
+
+    /** 開いていれば閉じる（前の test の状態を持ち越さない）。 */
+    private void ensureClosed(Feature feature, FeatureEnablementActor closer) {
+        if ("OPEN".equals(fixture.state(feature))) {
+            service.close(feature, "TEST_RESET", closer);
+        }
+    }
+
+    private int signOffVersion(long id) {
+        return jdbc.queryForObject("SELECT version FROM t_feature_sign_off WHERE id = ?", Integer.class, id);
+    }
 
     /** 開放単位を開く（前の test で開いていればそのまま）。 */
     private void ensureOpen(Feature feature, FeatureEnablementActor requester, FeatureEnablementActor approver) {

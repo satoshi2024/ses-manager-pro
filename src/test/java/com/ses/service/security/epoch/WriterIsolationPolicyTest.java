@@ -65,7 +65,9 @@ class WriterIsolationPolicyTest {
             Map.entry(LifecycleCaseServiceImpl.class, List.of("completeCase")),
             // 機能の開放（feature-enablement-console design §5.1）: 条件の評価で他の表の最新の commit を読む writer
             Map.entry(com.ses.featureenablement.service.FeatureEnablementServiceImpl.class, List.of("requestOpen", "approve",
-                    "reject", "withdraw", "close", "autoClose", "expirePendingRequests")));
+                    "reject", "withdraw", "close", "autoClose", "expirePendingRequests")),
+            Map.entry(com.ses.featureenablement.service.FeatureSignOffServiceImpl.class, List.of("register", "confirm",
+                    "reject", "withdraw", "revoke", "requestExtension", "document")));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {

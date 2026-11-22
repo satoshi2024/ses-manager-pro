@@ -1143,7 +1143,7 @@ SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
  ORDER BY d.tenant_id, d.id;
 ```
 
-### 4.4 NF07 保全holdと破壊的経路（D1〜D16。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W、D16 は RB-QUIESCE）
+### 4.4 NF07 保全holdと破壊的経路（D1〜D17。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W、D16 は RB-QUIESCE、D17 は FE-A06）
 
 hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も使っていない間は、どの経路も従来どおり動き、増える照会は gate の1回だけである（journal の設定が無い prod でも同じ）。hold を使った tenant では、gate が Journal と一致を確かめられない（`UNAVAILABLE`）と、その tenant の gate 対象の削除が止まる。gate と経路は `privacy.retention.enabled` に依存しない（OFF に戻しても掛けた hold は守る）。plan §3.4.1・§3.4.3。
 
@@ -1160,8 +1160,9 @@ hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も
 | D14 | DSAR の開示 package の削除（`PrivacyExportPackagePurgeScheduler` 毎時 :15、交付の記録、期限切れ草案の作り直し。NF07-A2b） | 接続しない（対象外。下の「D14」） | — |
 | D15 | uploads の旧版 directory（`v<n>`）と切替えの残り（`.stage-*`・`.<pointer>.switch-*`）の削除（人手。RB-W） | 接続しない（app の経路ではない。下の「D15」の手順で守る） | — |
 | D16 | backup の書込み静止の信号表の保存期間の削除（`BackupQuiesceResponder` が1日1回、有効な要求が無い時に `JdbcBackupQuiesceSignalRepository.purgeRequests`・`purgeInstances` で物理削除する。30日。U-12。RB-QUIESCE） | 接続しない（対象外。下の「D16」） | — |
+| D17 | 機能の開放の終わった署名（`SUPERSEDED`・`EXPIRED`・`REVOKED`・`REJECTED`）の氏名・元の file 名・文書の消去（`FeatureSignOffPurgeScheduler` 03:40、`purge_after` は終えた日（失効は失効日）の3年後。feature-enablement-console design §6.6。FE-A06） | 設定の tenant に回の初めに1回。data element `FEATURE_SIGN_OFF_SIGNER_NAME`・`FEATURE_SIGN_OFF_DOCUMENT`（`NOT_ATTRIBUTABLE`）を element 単位で判定する | その回を消さない（HELD・UNCLASSIFIED・UNAVAILABLE。gate の Bean が無い時も消さない）。行は `purge_after` を過ぎたまま残り、次の回に判定し直す |
 
-- **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）、`ses.privacy.hold.file.cleanup.aborted`（tag `stage`＝`gate`/`resolve`。D10 の中止）、`ses.privacy.hold.file.unprotectable`（tag `element`。D10 で守れない外部の実体）、gate の `ses.privacy.hold.gate.unavailable`。WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`・`NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。D7・D9 は1つの tenant の停止で全 tenant の kind が止まるため、`path=D7`・`path=D9` も監視に入れる。D10 の中止が続くと孤児清掃（PII を含む取込の一時 CSV・quarantine の失敗実体を含む）が全 tenant で止まるため、`ses.privacy.hold.file.cleanup.aborted` も同じく監視する。log に tenant・subject は出ない。
+- **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9・D17、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）、`ses.privacy.hold.file.cleanup.aborted`（tag `stage`＝`gate`/`resolve`。D10 の中止）、`ses.privacy.hold.file.unprotectable`（tag `element`。D10 で守れない外部の実体）、gate の `ses.privacy.hold.gate.unavailable`。WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`・`NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。D7・D9 は1つの tenant の停止で全 tenant の kind が止まるため、`path=D7`・`path=D9` も監視に入れる。D10 の中止が続くと孤児清掃（PII を含む取込の一時 CSV・quarantine の失敗実体を含む）が全 tenant で止まるため、`ses.privacy.hold.file.cleanup.aborted` も同じく監視する。log に tenant・subject は出ない。
 - **app DB の照会が戻らないとき（RB-NF07-HOLD delta review D-P3-1）**: gate は application DB の `@@server_uuid` を照会する（query timeout 10秒、接続の network timeout 15秒）。これが戻らず上限を超えると、同じ transaction の中で gate を呼ぶ手動の経路（D1・D2 等）はその操作が接続切断のエラーで失敗として終わり、batch はその回が失敗する（UNAVAILABLE の通常の skip ではない。削除はしない）。続く場合は application DB への接続（half-open の TCP 等）を調べる。
 - **回の途中で開始された hold**: batch 経路は回の初めの snapshot を使うため、次の回から効く（最大で1回分の実行時間）。
 - **DATA_ELEMENT hold の対**: 履歴取込の原本（`RESUME_INGESTION_ORIGINAL`）だけを hold しても文書台帳の副本（`DOCUMENT:RESUME_INGESTION`）は D1〜D3 で止まらない。副本も止めるなら両方に DATA_ELEMENT hold を掛ける（D-05 owner の受理事項。F2 delta review P3-G）。

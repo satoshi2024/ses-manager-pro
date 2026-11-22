@@ -41,7 +41,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 class SchedulerLockProxyInvocationTest {
 
     private static final String[] LOCK_NAMES = {
-            "privacyDsarDeadlineDaily", "certificationExpiryNotificationDaily", "serviceRequestAttachmentCompensation"};
+            "privacyDsarDeadlineDaily", "certificationExpiryNotificationDaily", "serviceRequestAttachmentCompensation",
+            "featureSignOffPurge"};
 
     @Autowired
     private ApplicationContext context;
@@ -52,7 +53,9 @@ class SchedulerLockProxyInvocationTest {
         return Stream.of(
                 Arguments.of(PrivacyDsarDeadlineScheduler.class, "notifyDaily", LOCK_NAMES[0]),
                 Arguments.of(CertificationExpiryNotificationScheduler.class, "dispatchToday", LOCK_NAMES[1]),
-                Arguments.of(ServiceRequestAttachmentCompensationScheduler.class, "retryDue", LOCK_NAMES[2]));
+                Arguments.of(ServiceRequestAttachmentCompensationScheduler.class, "retryDue", LOCK_NAMES[2]),
+                // FE-A06: 機能の開放の署名の消去（期日を過ぎた行が無ければ何も書かない）
+                Arguments.of(com.ses.featureenablement.signoff.FeatureSignOffPurgeScheduler.class, "purge", LOCK_NAMES[3]));
     }
 
     @ParameterizedTest
@@ -81,7 +84,8 @@ class SchedulerLockProxyInvocationTest {
     @BeforeTransaction
     @AfterTransaction
     void removeLockRows() {
-        jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (?, ?, ?)", (Object[]) LOCK_NAMES);
+        jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (" + String.join(", ", java.util.Collections.nCopies(
+                LOCK_NAMES.length, "?")) + ")", (Object[]) LOCK_NAMES);
     }
 
     // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-006）

@@ -404,6 +404,29 @@ public class FeatureEnablementWriteSupport {
         auditLogService.recordDomainEventRequired(entry);
     }
 
+    /**
+     * 状態を変えない操作（署名の文書の取得等）を監査する（世代の lock を取らない。transaction の中で呼び、失敗すれば操作ごと
+     * rollback する）。
+     */
+    public void auditRead(FeatureEnablementActor actor, String applicationCode, Long referenceId, String afterState) {
+        AuditLog entry = new AuditLog();
+        entry.setUsername(actor.username());
+        entry.setMethod(AUDIT_METHOD);
+        entry.setUri("/api/feature-enablement");
+        entry.setStatus(200);
+        entry.setApplicationCode(applicationCode);
+        entry.setSuccessFlag(true);
+        entry.setReferenceType(AUDIT_REFERENCE_TYPE);
+        entry.setReferenceId(referenceId);
+        entry.setActorType(ActorType.HUMAN.name());
+        entry.setConfirmationSource(ConfirmationSource.MANUAL_API.name());
+        entry.setHumanUserId(actor.userId());
+        entry.setAfterState(afterState);
+        entry.setCorrelationId(UUID.randomUUID().toString());
+        entry.setCreatedAt(MyBatisPlusConfig.AutoFillMetaObjectHandler.rowTimestamp(clock));
+        auditLogService.recordDomainEventRequired(entry);
+    }
+
     /** 通知の部品。 */
     public FeatureEnablementNotifier notifier() {
         return notifier;

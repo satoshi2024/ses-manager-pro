@@ -136,7 +136,11 @@ class FeatureSwitchRouteCoverageTest {
             // NF07-A2b: DSAR の開示 package（NF07 自身が作った一時 package）の期限超過・終了 case の削除
             Map.entry("com.ses.privacy.production.dsar.PrivacyExportPackagePurgeScheduler",
                     "DSARの開示packageのpurge_after超過・終了したcaseのpackageの削除は公開可否と無関係に続ける"
-                            + "（NF07_DSARをOFFへ戻した後も期限を超えてpackageを残さない。I-9。packageが無ければ照会1回で終わる）"));
+                            + "（NF07_DSARをOFFへ戻した後も期限を超えてpackageを残さない。I-9。packageが無ければ照会1回で終わる）"),
+            // FE-A06: 機能の開放の署名の氏名・文書の消去（D17）。NF07 へ依存するのは保全holdのgateを呼ぶ部分だけ
+            Map.entry("com.ses.featureenablement.signoff.FeatureSignOffPurgeScheduler",
+                    "終わった署名の氏名・文書の3年後の消去は保存期間の規則で、NF07はhold gateの判定だけに使う"
+                            + "（flagで止めると期限を超えて個人データを残す。RB §4.4 の D17）"));
 
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {
