@@ -90,7 +90,7 @@
   - **Automated test:** `FeatureSignOffServiceH2Test`（scan の拒否と実体の削除、hash の照合と不一致の 409、登録者による確認の 403、署名日が未来の確認の 400 と旧い署名の維持、差替えで開いたまま・成り立たなければ自動閉鎖、scheduler が止まっていた間に失効した旧い署名の差替えで先に自動閉鎖、取消しで自動閉鎖と通知、`active_slot`、一覧に氏名なし）、`FeatureSignOffExtensionH2Test`（延長で同じ行の期限が延びて延長の記録が 1 行、申請者本人の承認 403、決定の類は延長できない、上限、延長の後に旧い期限から 3 年を過ぎても文書を取得できる）、`FeatureSignOffKindValidationTest`（種別ごとの参照・構造化された値・類の上限・役割・DG-05 は形式だけ）、`FeatureSignOffPurgeSchedulerTest`（3 年・氏名と元の file 名・hold の対象は消さない・`void`）、`PrivacyHoldPathGuardTest` の経路の一覧。MySQL（`FeatureEnablementConcurrencyMySqlTest` に追加）: 署名の取消し・差替え × 承認。
   - **Demo:** dev（DB の源）で合成の PDF を `NF04_BUSINESS_OWNER` として登録 → 別の管理者が確認 → 専用の経路で取得でき、`/api/files/…` では 403 になることを見る。
 
-- [ ] **FE-A12 — 署名の組（`t_feature_sign_off_bundle`）の登録・確認・差替え・取消し**
+- [x] **FE-A12 — 署名の組（`t_feature_sign_off_bundle`）の登録・確認・差替え・取消し**
   - **依存:** FE-A06
   - **対応要求:** FE-RQ-004
   - **Objective:** `design.md` §2.6.1・§6.5 の組の流れを、組の種類に依らない形で実装する（NF07 の組の種類の定義と digest の整合の検査は FE-C01 で足す）。

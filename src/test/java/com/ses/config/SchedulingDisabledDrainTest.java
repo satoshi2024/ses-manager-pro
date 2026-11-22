@@ -204,7 +204,11 @@ class SchedulingDisabledDrainTest {
             "prod profile だけ。NF07 の trust 文書の設定を検査する（DB 書込なし）",
             // FE-A04: 機能の開放の世代の poll の thread の起動と停止（SmartLifecycle。DB の源で refresh-thread-enabled の時だけ thread を作る）
             "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:Lifecycle",
-            "世代の poll の専用 thread を起動・停止する（読むだけ。DB 書込なし）");
+            "世代の poll の専用 thread を起動・停止する（読むだけ。DB 書込なし）",
+            // FE-A07: 起動時の評価（SmartLifecycle。web server より前。DB の源の時だけ動く）
+            "com.ses.featureenablement.evaluation.FeatureEnablementStartupEvaluator:Lifecycle",
+            "起動時に開いている開放単位を評価し、成り立たなければ自動閉鎖を書く（scheduler でなく起動の1回。"
+                    + "閉じる側の書込みだけで、書けなければ memory の書込み待ちで閉じる）");
 
     /** {@code @Async} method（taskExecutor上で実行。起点はrequestまたはscheduler）。 */
     private static final Map<String, String> ASYNC_INVENTORY = inventory(

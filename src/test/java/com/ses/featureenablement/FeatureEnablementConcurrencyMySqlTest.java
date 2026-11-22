@@ -78,6 +78,16 @@ class FeatureEnablementConcurrencyMySqlTest {
     @Autowired
     private com.ses.featureenablement.service.FeatureSignOffService signOffs;
     @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationService evaluation;
+    @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationWriter evaluationWriter;
+    @Autowired
+    private com.ses.featureenablement.state.FeatureEnablementSnapshotLoader loader;
+    @Autowired
+    private com.ses.featureenablement.state.FeatureEnablementSnapshotHolder holder;
+    @Autowired
+    private com.ses.config.feature.FeatureSwitches switches;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private FeatureEnablementCatalog catalog;
@@ -231,6 +241,59 @@ class FeatureEnablementConcurrencyMySqlTest {
             assertThat(result.outcome()).isEqualTo(FeatureEnablementApprovalResult.Outcome.STALE);
             assertThat(fixture.requestStatus(request.getId())).as("STALE は commit される").isEqualTo("STALE");
         }
+    }
+
+    /** FE-A07: 定期の自動閉鎖 × 子の承認。どちらの順でも親は自動閉鎖し、子は開いていない。 */
+    @Test
+    void 定期の自動閉鎖と子の承認の並行はどちらの順でも親が閉じ子は開いていない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF03, SIGNED, EXPIRES);
+        fixture.confirmedSignOffs(Feature.NF03_CERTIFICATION_PII, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor closer = fixture.admin();
+        ensureClosed(Feature.NF03_CERTIFICATION_PII, closer);
+        ensureOpen(Feature.NF03, requester, approver);
+        FeatureEnablementRequest child = service.requestOpen(Feature.NF03_CERTIFICATION_PII, null, requester);
+        jdbc.update("UPDATE t_feature_sign_off SET status = 'REVOKED', ended_by = ?, ended_at = TIMESTAMP "
+                + "'2026-11-23 09:00:00', end_reason = 'TEST' WHERE tenant_id = 'default' AND kind_code = "
+                + "'NF03_BUSINESS_OWNER' AND status = 'CONFIRMED'", closer.userId());
+
+        List<Object> outcomes = race(
+                () -> service.approve(child.getId(), 0, null, approver),
+                () -> {
+                    evaluation.evaluateOpenUnits(
+                            com.ses.featureenablement.condition.FeatureEvaluationContext.Purpose.PERIODIC, false);
+                    return "evaluated";
+                });
+
+        assertNoLockFailure(outcomes);
+        assertThat(fixture.state(Feature.NF03)).isEqualTo("AUTO_CLOSED");
+        assertThat(fixture.state(Feature.NF03_CERTIFICATION_PII)).isIn("CLOSED", "AUTO_CLOSED", "MANUALLY_CLOSED");
+        if ("PENDING".equals(fixture.requestStatus(child.getId()))) {
+            service.withdraw(child.getId(), fixture.requestVersion(child.getId()), requester);
+        }
+    }
+
+    /** FE-A07: 評価できない状態の始まりは DB にあり、2つの instance 相当の snapshot が同じに閉じる（review P2-2 (c)）。 */
+    @Test
+    void 評価できない状態の始まりは2つのinstance相当のsnapshotで同じに閉じる() {
+        fixture.confirmedSignOffs(Feature.NF10, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        ensureOpen(Feature.NF10, requester, approver);
+
+        evaluationWriter.markUnverifiable(Feature.NF10, "journal.unreachable", false);
+        com.ses.featureenablement.state.FeatureEnablementSnapshot first = loader.load("default");
+        com.ses.featureenablement.state.FeatureEnablementSnapshot second = loader.load("default");
+
+        assertThat(first.unit(Feature.NF10).unverifiableSince()).isNotNull()
+                .isEqualTo(second.unit(Feature.NF10).unverifiableSince());
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF10)).as("評価できない間は閉じる").isFalse();
+
+        evaluationWriter.clearUnverifiable(Feature.NF10, false);
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF10)).as("回復で開く").isTrue();
     }
 
     // ---------------------------------------------------------------- helper

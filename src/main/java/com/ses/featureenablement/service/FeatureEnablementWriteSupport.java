@@ -288,7 +288,10 @@ public class FeatureEnablementWriteSupport {
         return true;
     }
 
-    /** 読み直した状態で {@code openUntil} を過ぎた開いている開放単位を {@code AUTO_CLOSED(SIGN_OFF_EXPIRED)} にする。 */
+    /**
+     * 読み直した状態で {@code openUntil} を過ぎた開いている開放単位を先に自動閉鎖する（失効日を過ぎれば {@code SIGN_OFF_EXPIRED}、要る署名が
+     * 欠けていれば {@code SIGN_OFF_MISSING}）。
+     */
     public List<Feature> closeExpired(WriteContext context) {
         Set<Feature> closed = new LinkedHashSet<>();
         FeatureEnablementSnapshot snapshot = context.snapshot;
@@ -297,7 +300,9 @@ public class FeatureEnablementWriteSupport {
         for (Feature feature : ordered) {
             FeatureEnablementSnapshot.UnitView unit = snapshot.unit(feature);
             if (unit.state().openLike() && !context.today.isBefore(unit.openUntil()) && !closed.contains(feature)) {
-                if (closeUnit(context, feature, "SIGN_OFF_EXPIRED", null)) {
+                // 要る署名が欠けた（openUntil が MIN）なら欠落、失効日を過ぎたなら失効として閉じる
+                String reason = LocalDate.MIN.equals(unit.openUntil()) ? "SIGN_OFF_MISSING" : "SIGN_OFF_EXPIRED";
+                if (closeUnit(context, feature, reason, null)) {
                     closed.add(feature);
                     closed.addAll(catalog.children(feature));
                 }

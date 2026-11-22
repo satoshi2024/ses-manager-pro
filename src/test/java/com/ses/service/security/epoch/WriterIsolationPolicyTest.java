@@ -69,7 +69,10 @@ class WriterIsolationPolicyTest {
             Map.entry(com.ses.featureenablement.service.FeatureSignOffServiceImpl.class, List.of("register", "confirm",
                     "reject", "withdraw", "revoke", "requestExtension", "document")),
             Map.entry(com.ses.featureenablement.service.FeatureSignOffBundleServiceImpl.class, List.of("register",
-                    "confirm", "reject", "withdraw", "revoke")));
+                    "confirm", "reject", "withdraw", "revoke")),
+            Map.entry(com.ses.featureenablement.evaluation.FeatureEnablementEvaluationWriter.class, List.of("markUnverifiable",
+                    "clearUnverifiable", "markExpiredSignOffs", "cancelAllPending", "recordOpenConditionWarning",
+                    "recordSubgateChange")));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {

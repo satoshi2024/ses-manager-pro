@@ -515,7 +515,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 - 全ての書込みは次の順で lock する: (1) 世代の行、(2) 開放状態の行（親→子、同じ階層は key の昇順）、(3) 申請の行、(4) 署名の行（id の昇順）、(5) 設定の行、(6) NF05 outbound の barrier の行（`m_system_config` の `integration.hub.outbound.runtime.v1`）。(1) で tenant の中の変更が直列になるため、本機能の表どうしでは deadlock しない。
 - 分離レベルは READ COMMITTED（条件の評価で他の表の最新の commit を読むため。`WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS` に足す）。
 - 監査は同じ transaction の `recordDomainEventRequired`（`AuditLogServiceImpl:160-176`）。失敗すれば遷移ごと rollback する。
-- 世代の行を lock した直後に、同じ transaction の中で snapshot を読み直す（§3.2）。続けて、読み直した状態で `openUntil` を過ぎた開いている開放単位（scheduler が止まっていて自動閉鎖が書かれていないもの）を先に `AUTO_CLOSED`（`SIGN_OFF_EXPIRED`）にする。その後に要求の遷移を行う（署名の差替えで、失効した開放単位を承認なしに戻さない。review P2-2 (b)）。
+- 世代の行を lock した直後に、同じ transaction の中で snapshot を読み直す（§3.2）。続けて、読み直した状態で `openUntil` を過ぎた開いている開放単位（scheduler が止まっていて自動閉鎖が書かれていないもの）を先に `AUTO_CLOSED`（`SIGN_OFF_EXPIRED`。要る署名が欠けて `openUntil` が無い時は `SIGN_OFF_MISSING`。FE-A07 で区別した）にする。その後に要求の遷移を行う（署名の差替えで、失効した開放単位を承認なしに戻さない。review P2-2 (b)）。
 - 通知は commit の後に best-effort で送る（失敗しても遷移は戻さない）。
 
 ### 5.2 申請（`POST /api/feature-enablement/requests`）

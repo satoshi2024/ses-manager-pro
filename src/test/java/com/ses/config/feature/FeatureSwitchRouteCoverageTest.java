@@ -142,6 +142,28 @@ class FeatureSwitchRouteCoverageTest {
                     "終わった署名の氏名・文書の3年後の消去は保存期間の規則で、NF07はhold gateの判定だけに使う"
                             + "（flagで止めると期限を超えて個人データを残す。RB §4.4 の D17）"));
 
+    /**
+     * NF の service に依存しないため上の検出に掛からないが、機能のスイッチで止めない scheduler（理由必須。FE-A07。
+     * feature-enablement-console design §7.2 の「UNGATED_SCHEDULERS に理由つきで登録する」をこの表で満たす）。
+     */
+    private static final Map<String, String> NON_NF_UNGATED_SCHEDULERS = Map.ofEntries(
+            Map.entry("com.ses.featureenablement.evaluation.FeatureEnablementConditionScheduler",
+                    "開いている開放単位を条件の不成立・失効・評価できない状態で閉じる側の処理で、スイッチで止めると条件が外れても"
+                            + "開いたままになる（design §7.2）"));
+
+    @Test
+    void 機能の開放の定期の評価はスイッチで止めず理由つきで登録されている() throws Exception {
+        Set<String> scheduled = new TreeSet<>();
+        for (Class<?> type : scheduledClasses()) {
+            scheduled.add(type.getName());
+        }
+        for (Map.Entry<String, String> entry : NON_NF_UNGATED_SCHEDULERS.entrySet()) {
+            assertThat(scheduled).as("古い登録: %s", entry.getKey()).contains(entry.getKey());
+            assertThat(entry.getValue()).as("理由").isNotBlank();
+            assertThat(hasFeatureSwitchesField(Class.forName(entry.getKey()))).as(entry.getKey()).isFalse();
+        }
+    }
+
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {
         List<Route> routes = controllerRoutes();

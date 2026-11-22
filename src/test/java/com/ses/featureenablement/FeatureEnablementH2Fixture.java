@@ -96,6 +96,24 @@ public final class FeatureEnablementH2Fixture {
         return id;
     }
 
+    /**
+     * 開放単位を条件の評価を経ずに開く（承認した申請と開放状態の行を入れる。固有の評価器が未実装の開放単位の継続評価の試験用）。
+     */
+    public void openDirectly(Feature feature, FeatureEnablementActor requester, FeatureEnablementActor approver) {
+        String fingerprint = "f".repeat(64);
+        jdbc.update("INSERT INTO t_feature_enablement_request (tenant_id, request_type, target_key, status, "
+                        + "condition_fingerprint, condition_summary, requested_by, requested_at, expires_at, decided_by, "
+                        + "decided_at, version) VALUES (?, 'OPEN', ?, 'APPROVED', ?, 'fixture', ?, TIMESTAMP '2026-11-20 09:00:00', "
+                        + "TIMESTAMP '2026-11-27 09:00:00', ?, TIMESTAMP '2026-11-20 10:00:00', 1)", TENANT, feature.name(),
+                fingerprint, requester.userId(), approver.userId());
+        Long requestId = jdbc.queryForObject("SELECT MAX(id) FROM t_feature_enablement_request WHERE tenant_id = ? "
+                + "AND target_key = ? AND status = 'APPROVED'", Long.class, TENANT, feature.name());
+        jdbc.update("INSERT INTO t_feature_enablement_state (tenant_id, feature_key, state, version, open_request_id, "
+                        + "opened_by, approved_by, opened_at, updated_at) VALUES (?, ?, 'OPEN', 1, ?, ?, ?, "
+                        + "TIMESTAMP '2026-11-20 10:00:00', TIMESTAMP '2026-11-20 10:00:00')", TENANT, feature.name(),
+                requestId, requester.userId(), approver.userId());
+    }
+
     public Long confirmedId(String kind) {
         List<Long> ids = jdbc.queryForList("SELECT id FROM t_feature_sign_off WHERE tenant_id = ? AND kind_code = ? "
                 + "AND status = 'CONFIRMED'", Long.class, TENANT, kind);
