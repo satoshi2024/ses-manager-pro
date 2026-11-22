@@ -54,7 +54,7 @@
   - **Automated test:** `FeatureEnablementEventMapperImmutabilityTest`・`FeatureSignOffBundleMemberMapperImmutabilityTest`・`FeatureSignOffExtensionMapperImmutabilityTest`（全ての更新・削除が例外。延長の記録は P3-M3）、`FileApiControllerTest` に `FEATURE_SIGN_OFF` の upload が 400 の case（server 生成の種別の拒否の試験が無い穴も同時に埋める）、`FileStorageServiceImplTest` に汎用の `load`・`rescan` が種別で 403・`loadDedicated` は種別の一致を要する case、`FileScopeValidationServiceTest` に署名の保存名が全 role で取得・再 scan とも 403 の case、`FeatureSignOffFileReferenceProviderTest`（`PURGED` 以外を claim）、`FileKindTest`（pdf だけ・10 MB）、`AllMappersSchemaSweepTest`。
   - **Demo:** なし（試験の結果を確かめる）。
 
-- [ ] **FE-A03 — 目録・評価器の interface・共通の評価器**
+- [x] **FE-A03 — 目録・評価器の interface・共通の評価器**
   - **依存:** FE-A01
   - **対応要求:** FE-RQ-001・004・005
   - **Objective:** `FeatureEnablementCatalog`（13 件、署名の種別と類（決定・証拠）、組、鍵、親、副入口、DB 管理の印、評価できない類の code）と、`FeatureConditionEvaluator`・`FeatureConditionCheck`・`FeatureEvaluationContext`・`FeatureConditionRegistry`、共通の評価器（総スイッチ・親・署名・鍵）、指紋を作る。

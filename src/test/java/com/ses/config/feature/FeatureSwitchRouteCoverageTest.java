@@ -163,8 +163,11 @@ class FeatureSwitchRouteCoverageTest {
         }
 
         assertThat(routes).as("controller入口を1件も検出できない").isNotEmpty();
+        // NF-05 の2件（機能の開放の開放単位。design §3.4）は controller 入口を FeatureSwitchFilter で遮断しない（inbound の 404 は
+        // ExternalApiDisabledFilter）ため、所属の検出の対象から外す
         assertThat(ownedFeatures).as("全NFの入口を検出できること（検出規則の空振り防止）")
-                .containsExactlyInAnyOrderElementsOf(Feature.topLevel());
+                .containsExactlyInAnyOrderElementsOf(Feature.topLevel().stream()
+                        .filter(feature -> feature != Feature.NF05_INBOUND && feature != Feature.NF05_OUTBOUND).toList());
         assertThat(violations)
                 .as("NF配下の入口がFeatureの遮断表に未登録です。Featureへprefixを追加するか、"
                         + "意図的な対象外なら理由付きでUNGATED_ROUTE_PREFIXESへ登録してください: %s", violations)

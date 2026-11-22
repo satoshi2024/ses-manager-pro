@@ -71,6 +71,9 @@ class FeatureSwitchFilterTest {
             Map.entry(Feature.NF03_CERTIFICATION_PII, List.of()),
             // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
             Map.entry(Feature.NF04, List.of()),
+            // NF-05 は FeatureSwitchFilter で遮断しない（inbound の 404 は ExternalApiDisabledFilter。機能の開放の開放単位。design §3.4）
+            Map.entry(Feature.NF05_INBOUND, List.of()),
+            Map.entry(Feature.NF05_OUTBOUND, List.of()),
             // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
             Map.entry(Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
                     "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings")),
@@ -88,8 +91,9 @@ class FeatureSwitchFilterTest {
     /**
      * 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。
      * NF07_RETENTION は A1H-1 で hold 画面（{@code /privacy/holds}）を登録したため外した（{@code /privacy} 自体は登録しない）。
+     * NF-05 の2件（機能の開放の開放単位）は画面も API も遮断表に持たない（既存の画面・API を巻き込まないことだけを確かめる）。
      */
-    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of();
+    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF05_INBOUND, Feature.NF05_OUTBOUND);
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.ofEntries(
@@ -102,6 +106,8 @@ class FeatureSwitchFilterTest {
             Map.entry(Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap")),
             Map.entry(Feature.NF03_CERTIFICATION_PII, List.of()),
             Map.entry(Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest")),
+            Map.entry(Feature.NF05_INBOUND, List.of()),
+            Map.entry(Feature.NF05_OUTBOUND, List.of()),
             // NF-06の画面（取込センター、W3-12）
             Map.entry(Feature.NF06, List.of("/import-center")),
             // NF-07 の hold 画面（A1H-1）
@@ -123,7 +129,8 @@ class FeatureSwitchFilterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = {"NF04", "NF03_CERTIFICATION_PII", "NF01_DUAL_CONFIRMATION"},
+    @EnumSource(value = Feature.class, names = {"NF04", "NF03_CERTIFICATION_PII", "NF01_DUAL_CONFIRMATION",
+            "NF05_INBOUND", "NF05_OUTBOUND"},
             mode = EnumSource.Mode.EXCLUDE)
     void OFFの機能のAPIはCustomErrorControllerと同じApiResult形式の404になる(Feature feature) throws Exception {
         assertThat(API_SAMPLES.get(feature)).as("代表APIが空振りしないこと").isNotEmpty();

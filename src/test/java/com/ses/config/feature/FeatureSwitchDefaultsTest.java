@@ -36,10 +36,10 @@ class FeatureSwitchDefaultsTest {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
         }
         assertThat(switches.disabledKeys()).containsExactly("nf01", "nf01-dual-confirmation", "nf02",
-                "nf02-customer-portal", "nf03", "nf03-certification-pii", "nf04", "nf06", "nf07-retention",
-                "nf07-dsar", "nf10");
+                "nf02-customer-portal", "nf03", "nf03-certification-pii", "nf04", "nf05-inbound", "nf05-outbound", "nf06",
+                "nf07-retention", "nf07-dsar", "nf10");
         assertThat(switches.describe()).isEqualTo("NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, "
-                + "NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, "
+                + "NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF05_INBOUND=OFF, NF05_OUTBOUND=OFF, NF06=OFF, "
                 + "NF07_RETENTION=OFF, NF07_DSAR=OFF, NF10=OFF");
     }
 
@@ -53,7 +53,7 @@ class FeatureSwitchDefaultsTest {
         assertThat(new FeatureSwitches(properties).isEnabled(Feature.NF01)).isFalse();
         assertThat(new FeatureSwitches(properties).isEnabled(Feature.NF02)).isTrue();
         assertThat(new FeatureSwitches(properties).isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isFalse();
-        assertThat(new FeatureSwitches(null).isEnabled(Feature.NF02)).isFalse();
+        assertThat(new FeatureSwitches((FeatureSwitchProperties) null).isEnabled(Feature.NF02)).isFalse();
         assertThat(new FeatureSwitches(properties).isEnabled(null)).isFalse();
     }
 
@@ -100,7 +100,7 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF02.parent()).isEmpty();
         assertThat(Feature.NF02.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.topLevel()).containsExactly(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF04,
-                Feature.NF06, Feature.NF07_RETENTION, Feature.NF07_DSAR, Feature.NF10);
+                Feature.NF05_INBOUND, Feature.NF05_OUTBOUND, Feature.NF06, Feature.NF07_RETENTION, Feature.NF07_DSAR, Feature.NF10);
         // NF-07 の2機能は親子にしない（片方だけを公開できる。C-1）
         assertThat(Feature.NF07_DSAR.parent()).isEmpty();
         assertThat(Feature.NF07_DSAR.root()).isEqualTo(Feature.NF07_DSAR);
@@ -131,8 +131,10 @@ class FeatureSwitchDefaultsTest {
         }
     }
 
+    // NF05 の2件（機能の開放の開放単位。feature-enablement-console design §3.4）は prod の application-prod.yml が
+    // integration.hub.*.enabled を false に固定し環境変数を読まない（開くのは段階 D の起動の前の読取り）。
     @ParameterizedTest
-    @EnumSource(Feature.class)
+    @EnumSource(value = Feature.class, names = {"NF05_INBOUND", "NF05_OUTBOUND"}, mode = EnumSource.Mode.EXCLUDE)
     void prodで環境変数を指定した機能だけがONになる(Feature target) throws IOException {
         // 子スイッチは親の環境変数も必要（親子の論理積）。指定した機能と祖先だけがONになり、子は自動でONにならない。
         Set<Feature> lineage = FeatureSwitchTestSupport.lineage(target);
@@ -193,10 +195,12 @@ class FeatureSwitchDefaultsTest {
     void testプロファイルは既存テストの意味を保つため全機能ON() throws IOException {
         FeatureSwitches switches = bind(Map.of(), "application.yml", "application-test.yml");
 
+        // NF05 の2件は test profile でも integration.hub.*.enabled=false のまま（既存の試験の意味を保つ。NF05 の試験は専用の設定で開く）
         for (Feature feature : Feature.values()) {
-            assertThat(switches.isEnabled(feature)).as(feature.name()).isTrue();
+            boolean nf05 = feature == Feature.NF05_INBOUND || feature == Feature.NF05_OUTBOUND;
+            assertThat(switches.isEnabled(feature)).as(feature.name()).isEqualTo(!nf05);
         }
-        assertThat(switches.disabledKeys()).isEmpty();
+        assertThat(switches.disabledKeys()).containsExactly("nf05-inbound", "nf05-outbound");
     }
 
     @Test
@@ -227,7 +231,15 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF07_DSAR.key()).isEqualTo("nf07-dsar");
         assertThat(Feature.NF07_DSAR.propertyName()).isEqualTo("privacy.dsar.enabled");
         assertThat(Feature.NF07_DSAR.environmentVariable()).isEqualTo("PRIVACY_DSAR_ENABLED");
-        assertThat(Set.of(Feature.values())).hasSize(11);
+        // NF-05 は integration.hub.* の設定キー・環境変数を使い、app.features.* には別名を作らない（機能の開放の開放単位。design §3.4）。
+        assertThat(Feature.NF05_INBOUND.key()).isEqualTo("nf05-inbound");
+        assertThat(Feature.NF05_INBOUND.propertyName()).isEqualTo("integration.hub.public-api.enabled");
+        assertThat(Feature.NF05_INBOUND.environmentVariable()).isEqualTo("INTEGRATION_HUB_PUBLIC_API_ENABLED");
+        assertThat(Feature.NF05_OUTBOUND.propertyName()).isEqualTo("integration.hub.external-transport.enabled");
+        assertThat(Feature.NF05_OUTBOUND.environmentVariable()).isEqualTo("INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED");
+        assertThat(Feature.NF05_INBOUND.parent()).isEmpty();
+        assertThat(Feature.NF05_OUTBOUND.parent()).isEmpty();
+        assertThat(Set.of(Feature.values())).hasSize(13);
     }
 
     @Test
@@ -322,6 +334,10 @@ class FeatureSwitchDefaultsTest {
                 .orElseGet(FeatureSwitchProperties::new);
         // NF-07 は privacy.* を正本にする（Spring contextでは同じbeanを usePrivacyFeatureProperties で受け取る）。
         properties.usePrivacyFeatureProperties(bindPrivacy(binder));
+        // NF-05 は integration.hub.* を正本にする（Spring contextでは同じbeanを useIntegrationHubProperties で受け取る）。
+        properties.useIntegrationHubProperties(binder.bind("integration.hub",
+                Bindable.of(com.ses.config.integrationhub.IntegrationHubExternalApiProperties.class)).orElseGet(
+                com.ses.config.integrationhub.IntegrationHubExternalApiProperties::new));
         return new FeatureSwitches(properties);
     }
 
