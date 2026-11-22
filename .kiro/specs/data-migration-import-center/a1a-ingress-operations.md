@@ -237,7 +237,7 @@ printf 'crm\ncrm-2\ncrm2\ncrm_2\n' | LC_ALL=C sort
 - 判定: 承認が有効でも、現在の tenant が承認 tenant と一致し、source code が承認一覧に含まれ、entity が `CUSTOMER`・schema が `ses-import-v1` の場合だけ許可する。body 読取前（`admitBeforeBody`）と内容 hash 確定後（`admitContent`）の両方で評価し直し、日付の変わり目の失効と、token 発行時と異なる決定（決定 ID・digest）を拒否する。
 - 監査: 判定結果を `t_audit_log` へ残す（method `ADMISSION`、uri `/api/import-center/uploads;phase=…;result=…;decision=…;source=…`）。許可は `recordRequired`（`IMPORT_ADMISSION_ALLOWED`）で、記録できなければ許可しない（503 `error.import.auditUnavailable`）。拒否（`IMPORT_ADMISSION_DENIED`、`reason=` に固定の違反コード）は best-effort で、記録の成否にかかわらず拒否する。CSV 本文・hash 全体は書かない（content phase は SHA-256 の先頭 12 桁だけ）。
 - 起動時（`ImportAdmissionStartupValidator`、prod profile のみ）:
-  - NF06 OFF: 起動を止めない（初回リリースは OFF で配備）。部分的な設定があれば WARN だけを出す。
+  - NF06 OFF: 起動を止めない（初回の起動（bootstrap）は OFF。初回リリース（go-live）では ON にする（2026-11-22 利用者決定。`production-launch/feature-switches.md` 3.1））。部分的な設定があれば WARN だけを出す。
   - NF06 ON: 構造的な不備（未設定・部分設定・形式不正・placeholder・digest 不一致・有効期間上限超過等）があれば起動失敗。メッセージには固定の違反コードだけを出す。
   - NF06 ON で不備が時間要因だけ（署名日前・失効）: 起動は継続し、upload だけを拒否したまま WARN `NF06_IMPORT_ADMISSION_STOPPED_AT_STARTUP` を出す。再承認後に設定を差し替えて再起動する。
 
