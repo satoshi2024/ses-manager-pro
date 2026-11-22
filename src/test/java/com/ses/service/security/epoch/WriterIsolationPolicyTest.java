@@ -53,16 +53,19 @@ class WriterIsolationPolicyTest {
      * RB-ADMIN-GUARD分（管理者の継続性guard）: 全管理者の行の発見・lockの後に起動時条件を数え直す利用者の作成・更新と権限group
      * 割当（lock待ちの間にcommitされた無効化・role変更・割当替えをlock後の判定で見るため）。
      */
-    private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
-            PortalEngineerLinkServiceImpl.class, List.of("register"),
-            SysUserServiceImpl.class, List.of("createUser", "updateUser", "updateUserStatus", "deleteUser"),
-            PermissionGroupManagementServiceImpl.class, List.of("replaceAssignments"),
-            RoleMenuServiceImpl.class, List.of("replaceMenus"),
-            SystemConfigServiceImpl.class, List.of("updateAll"),
-            EngineerServiceImpl.class, List.of("removeById"),
-            EngineerAccountLinkServiceImpl.class, List.of("unlinkByEngineerId"),
-            OrganizationServiceImpl.class, OrganizationWriters.ALL,
-            LifecycleCaseServiceImpl.class, List.of("completeCase"));
+    private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.ofEntries(
+            Map.entry(PortalEngineerLinkServiceImpl.class, List.of("register")),
+            Map.entry(SysUserServiceImpl.class, List.of("createUser", "updateUser", "updateUserStatus", "deleteUser")),
+            Map.entry(PermissionGroupManagementServiceImpl.class, List.of("replaceAssignments")),
+            Map.entry(RoleMenuServiceImpl.class, List.of("replaceMenus")),
+            Map.entry(SystemConfigServiceImpl.class, List.of("updateAll")),
+            Map.entry(EngineerServiceImpl.class, List.of("removeById")),
+            Map.entry(EngineerAccountLinkServiceImpl.class, List.of("unlinkByEngineerId")),
+            Map.entry(OrganizationServiceImpl.class, OrganizationWriters.ALL),
+            Map.entry(LifecycleCaseServiceImpl.class, List.of("completeCase")),
+            // 機能の開放（feature-enablement-console design §5.1）: 条件の評価で他の表の最新の commit を読む writer
+            Map.entry(com.ses.featureenablement.service.FeatureEnablementServiceImpl.class, List.of("requestOpen", "approve",
+                    "reject", "withdraw", "close", "autoClose", "expirePendingRequests")));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {

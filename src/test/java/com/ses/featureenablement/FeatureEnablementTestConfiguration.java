@@ -24,10 +24,15 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>目録: 全ての開放単位に DB 管理の印を付け（段階 A の本番の目録は印なし）、組の流れの試験用の組の種類
  *       {@link #TEST_BUNDLE}（member {@code NF04_BUNDLE_A}・{@code NF04_BUNDLE_B}、NF04 が要する）を足した写し。</li>
  *   <li>時計: 進められる時計（{@link MutableTestClock}。試験の前に {@link MutableTestClock#reset} する）。</li>
+ *   <li>監査: {@code AuditLogService} の spy（監査の失敗の試験が stub する）。</li>
  * </ul>
  */
 @TestConfiguration
 public class FeatureEnablementTestConfiguration {
+
+    /** 監査の失敗で遷移ごと rollback することを確かめる試験が stub する（既定は実物へ委ねる。試験ごとに reset される）。 */
+    @org.springframework.boot.test.mock.mockito.SpyBean
+    private com.ses.service.AuditLogService auditLogService;
 
     /** 試験用の組の種類（FE-A12）。 */
     public static final String TEST_BUNDLE = "TEST_BUNDLE";

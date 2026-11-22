@@ -67,6 +67,18 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     /**
+     * 管理者の role の付与の通知（機能の開放の二人の承認の残る穴への対策。feature-enablement-console design §11.1）。
+     * 手動構築のテストでは未配線で、通知しない。
+     */
+    private com.ses.featureenablement.service.AdministratorRoleGrantNotifier administratorRoleGrantNotifier;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAdministratorRoleGrantNotifier(
+            com.ses.featureenablement.service.AdministratorRoleGrantNotifier administratorRoleGrantNotifier) {
+        this.administratorRoleGrantNotifier = administratorRoleGrantNotifier;
+    }
+
+    /**
      * 作成は管理者の人数を減らさないが、入れ子の権限group割当（rank 3 の利用者行の後に書く）より前に、guardの
      * lock（全管理者の行、rank 3 の昇順）を取って lock順をほかの利用者writerと揃える（作成した行は最大のidになる）。
      * そのためほかの利用者writerと同じく READ_COMMITTED にする。
@@ -106,6 +118,9 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         // 入れ子の割当置換のguardは、同じtransactionのこのguardに任せる。
         permissionGroupManagementService.replaceAssignments(sysUser.getId(), java.util.Set.of(), authentication);
         verifyAdministratorContinuity(continuity);
+        if (StatusConstants.ROLE_ADMIN.equals(sysUser.getRole())) {
+            notifyAdministratorRoleGranted(sysUser.getId(), operator);
+        }
     }
 
     /**
@@ -178,6 +193,9 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         // role変更（入れ子の割当置換を含む）・username変更の後の状態で起動時条件を判定し、割るならtransactionごと拒否する。
         verifyAdministratorContinuity(continuity);
+        if (roleChanged && StatusConstants.ROLE_ADMIN.equals(sysUser.getRole())) {
+            notifyAdministratorRoleGranted(id, current);
+        }
     }
 
     @Override
@@ -265,6 +283,14 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         return administratorContinuityGuard.lockAndCapture(operation,
                 targetUserId == null ? java.util.List.of() : java.util.List.of(targetUserId));
+    }
+
+    /** 管理者の role を得た利用者を、有効な管理者全員へ通知する（commit の後。送付の記録の監査は同じ transaction）。 */
+    private void notifyAdministratorRoleGranted(Long grantedUserId, SysUser operator) {
+        if (administratorRoleGrantNotifier != null) {
+            administratorRoleGrantNotifier.administratorRoleGranted(grantedUserId,
+                    operator == null ? null : operator.getId(), operator == null ? null : operator.getUsername());
+        }
     }
 
     private void verifyAdministratorContinuity(AdministratorContinuityGuard.Snapshot continuity) {

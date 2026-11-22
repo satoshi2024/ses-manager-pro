@@ -42,3 +42,4 @@ PrivacyHoldServiceMySqlTest
 PrivacyHoldProjectionReconcilerMySqlTest
 PrivacyRequestApprovalMySqlTest
 FeatureEnablementSchemaMySqlTest
+FeatureEnablementConcurrencyMySqlTest
