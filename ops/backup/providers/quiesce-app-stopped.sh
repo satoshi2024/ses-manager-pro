@@ -57,7 +57,7 @@ quiesce_db_stopped::acquire() { # <state_dir> <job_kind>
   quiesce_db::wait_ddl_lock "$d" || return 1
 
   # 2. 事前の確認（助言）
-  out=$(quiesce_db::run_sql stopped-precheck "${params[@]}") || rc=$?
+  quiesce_db::query out stopped-precheck "${params[@]}" || rc=$?
   if (( rc != 0 )); then
     quiesce_db::log "事前の確認の SQL が失敗しました: ${QDB_SQL_ERROR:-rc=$rc}"
     return 1
@@ -71,11 +71,11 @@ quiesce_db_stopped::acquire() { # <state_dir> <job_kind>
   # 3. APP_STOPPED の保持の INSERT と commit。番号を state dir に書く（保持 process が延長を始める）
   token=$(quiesce_db::random_token) || { quiesce_db::log "要求の token を作れません"; return 1; }
   rc=0
-  out=$(quiesce_db::run_sql insert-request "hex:token=$token" "enum:mode=APP_STOPPED" "enum:job_kind=$kind" \
+  quiesce_db::query out insert-request "hex:token=$token" "enum:mode=APP_STOPPED" "enum:job_kind=$kind" \
     "int:lease_seconds=$QDB_LEASE" "hex:requested_by_hex=$(quiesce_db::hex_of "$QDB_REQUESTED_BY")" \
-    "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION") || rc=$?
+    "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION" || rc=$?
   if (( rc != 0 )); then
-    if [[ "$QDB_SQL_ERROR" == *uk_bq_request_active* ]]; then
+    if [[ "${QDB_SQL_ERROR:-}" == *uk_bq_request_active* ]]; then
       quiesce_db::log "他の静止要求が有効なため保持を登録できません（有効な要求は同時に 1 つだけ）"
     else
       quiesce_db::log "保持を登録できません: ${QDB_SQL_ERROR:-rc=$rc}"
@@ -92,7 +92,7 @@ quiesce_db_stopped::acquire() { # <state_dir> <job_kind>
 
   # 4. 登録の後に新しい transaction で分類し直す（登録と instance の登録が重なっても、どちらかが他方を見る。§5.3）
   rc=0
-  out=$(quiesce_db::run_sql stopped-check "int:request_id=${req[1]}" "${params[@]}") || rc=$?
+  quiesce_db::query out stopped-check "int:request_id=${req[1]}" "${params[@]}" || rc=$?
   if (( rc != 0 )) || ! quiesce_db::read_verdict "$out"; then
     quiesce_db::log "保持の後の確認を実行できません: ${QDB_SQL_ERROR:-rc=$rc}"
     quiesce_db::release_request "$d" || true
@@ -129,14 +129,14 @@ quiesce_db_stopped::verify() { # <state_dir>
   local -a params=()
   rm -f "$d/verified" "$d/verify-failed"
   quiesce_db::load_request_env "$d" || { quiesce_db::mark "$d/verify-failed" "保持の要求がありません"; return 1; }
-  quiesce_db::load_settings "$QDB_REQUEST_KIND" || return 1
-  quiesce_db::init_mysql || return 1
+  quiesce_db::load_settings "$QDB_REQUEST_KIND" || { quiesce_db_stopped::verify_fail "$d" "書込み静止の設定（QUIESCE_*）が不正です"; return 1; }
+  quiesce_db::init_mysql || { quiesce_db_stopped::verify_fail "$d" "DB への接続の準備に失敗しました"; return 1; }
   mapfile -t params < <(quiesce_db_stopped::params)
   if ! problem=$(quiesce_db::hold_problem "$d"); then
     quiesce_db_stopped::verify_fail "$d" "$problem"
     return 1
   fi
-  out=$(quiesce_db::run_sql stopped-check "int:request_id=$QDB_REQUEST_ID" "${params[@]}") || rc=$?
+  quiesce_db::query out stopped-check "int:request_id=$QDB_REQUEST_ID" "${params[@]}" || rc=$?
   if (( rc != 0 )) || ! quiesce_db::read_verdict "$out"; then
     quiesce_db_stopped::verify_fail "$d" "保持の確認を実行できません: ${QDB_SQL_ERROR:-rc=$rc}"
     return 1

@@ -70,7 +70,7 @@ quiesce_db_online::acquire() { # <state_dir> <job_kind>
   quiesce_db::wait_ddl_lock "$d" || return 1
 
   # 2. 事前の確認（助言）。期限切れの有効な要求を EXPIRED にしてから分類する
-  out=$(quiesce_db::run_sql precheck "${params[@]}") || rc=$?
+  quiesce_db::query out precheck "${params[@]}" || rc=$?
   if (( rc != 0 )); then
     quiesce_db::log "事前の確認の SQL が失敗しました: ${QDB_SQL_ERROR:-rc=$rc}"
     return 1
@@ -87,11 +87,11 @@ quiesce_db_online::acquire() { # <state_dir> <job_kind>
   # 3. 要求の INSERT と commit。番号を state dir に書く（保持 process が延長を始める）
   token=$(quiesce_db::random_token) || { quiesce_db::log "要求の token を作れません"; return 1; }
   rc=0
-  out=$(quiesce_db::run_sql insert-request "hex:token=$token" "enum:mode=ONLINE" "enum:job_kind=$kind" \
+  quiesce_db::query out insert-request "hex:token=$token" "enum:mode=ONLINE" "enum:job_kind=$kind" \
     "int:lease_seconds=$QDB_LEASE" "hex:requested_by_hex=$(quiesce_db::hex_of "$QDB_REQUESTED_BY")" \
-    "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION") || rc=$?
+    "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION" || rc=$?
   if (( rc != 0 )); then
-    if [[ "$QDB_SQL_ERROR" == *uk_bq_request_active* ]]; then
+    if [[ "${QDB_SQL_ERROR:-}" == *uk_bq_request_active* ]]; then
       quiesce_db::log "他の静止要求が有効なため要求を登録できません（有効な要求は同時に 1 つだけ）"
     else
       quiesce_db::log "静止要求を登録できません: ${QDB_SQL_ERROR:-rc=$rc}"
@@ -117,7 +117,7 @@ quiesce_db_online::acquire() { # <state_dir> <job_kind>
       return 1
     fi
     rc=0
-    out=$(quiesce_db::run_sql poll-acks "int:request_id=${req[1]}" "${params[@]}" "int:margin_seconds=$QDB_MARGIN") || rc=$?
+    quiesce_db::query out poll-acks "int:request_id=${req[1]}" "${params[@]}" "int:margin_seconds=$QDB_MARGIN" || rc=$?
     if (( rc == 0 )) && quiesce_db::read_verdict "$out"; then
       case "$QDB_VERDICT" in
         OK) break ;;
@@ -176,8 +176,8 @@ quiesce_db_online::verify() { # <state_dir>
   local -a params=()
   rm -f "$d/verified" "$d/verify-failed"
   quiesce_db::load_request_env "$d" || { quiesce_db::mark "$d/verify-failed" "要求がありません"; return 1; }
-  quiesce_db::load_settings "$QDB_REQUEST_KIND" || return 1
-  quiesce_db::init_mysql || return 1
+  quiesce_db::load_settings "$QDB_REQUEST_KIND" || { quiesce_db_online::verify_fail "$d" "書込み静止の設定（QUIESCE_*）が不正です"; return 1; }
+  quiesce_db::init_mysql || { quiesce_db_online::verify_fail "$d" "DB への接続の準備に失敗しました"; return 1; }
   mapfile -t params < <(quiesce_db_online::common_params)
   consistency=$(jq -r '.started_at_epoch_us // empty' "$d/quiesce.json" 2>/dev/null || true)
   [[ "$consistency" =~ ^[0-9]{1,19}$ ]] || { quiesce_db_online::verify_fail "$d" "quiesce.json に整合時刻がありません"; return 1; }
@@ -186,7 +186,7 @@ quiesce_db_online::verify() { # <state_dir>
     return 1
   fi
   # 1. app に接続元を観測し直させる
-  out=$(quiesce_db::run_sql verify-request "int:request_id=$QDB_REQUEST_ID") || rc=$?
+  quiesce_db::query out verify-request "int:request_id=$QDB_REQUEST_ID" || rc=$?
   if (( rc != 0 )); then
     quiesce_db_online::verify_fail "$d" "verify の要求を書けません: ${QDB_SQL_ERROR:-rc=$rc}"
     return 1
@@ -203,8 +203,8 @@ quiesce_db_online::verify() { # <state_dir>
       return 1
     fi
     rc=0
-    out=$(quiesce_db::run_sql verify-check "int:request_id=$QDB_REQUEST_ID" "${params[@]}" \
-      "int:margin_seconds=$QDB_MARGIN" "int:consistency_epoch_us=$consistency") || rc=$?
+    quiesce_db::query out verify-check "int:request_id=$QDB_REQUEST_ID" "${params[@]}" \
+      "int:margin_seconds=$QDB_MARGIN" "int:consistency_epoch_us=$consistency" || rc=$?
     if (( rc == 0 )) && quiesce_db::read_verdict "$out"; then
       case "$QDB_VERDICT" in
         OK) break ;;

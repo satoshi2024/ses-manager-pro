@@ -117,7 +117,49 @@ case_preflight_quiesce_failures_exit_19() {
     assert_eq fail "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は fail（$kind）"
     assert_contains "$out" "$expect" "理由を出す（$kind）"
     assert_no_secret "$out"
+    if [[ "$kind" == disabled ]]; then
+      # 2d review P3-4: instance は ID と件数だけで示し、app の host 名・接続元を出力 JSON に出さない
+      assert_contains "$out" "1 件（dead-0001）" "停止口の instance を ID と件数で示す"
+      assert_not_contains "$out" "app-host-9" "app の host 名を出力しない"
+      assert_not_contains "$out" "10.0.0.9" "app の接続元を出力しない"
+    fi
     unset QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS
+  done
+}
+
+# 2d review P2-1: SQL の失敗の文が理由に出る（command substitution で失われない）。password と接続の識別子
+# （user@host・MYSQL_HOST・DB 名・user）は伏せる
+case_preflight_quiesce_sql_error_is_shown_without_identifiers() {
+  local kind
+  for kind in tables instances; do
+    setup_quiesce_env
+    if [[ "$kind" == tables ]]; then
+      printf 'TABLES\t0\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+      printf '%s\n' "ERROR 1146 (42S02) at line 18: Table 'ses_manager_db.sys_backup_quiesce_instance' doesn't exist" \
+        > "$FAKE_QDB_DIR/preflight.err"
+    else
+      { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+        printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+        printf 'GRANTS_END\n'
+      } > "$FAKE_QDB_DIR/preflight.out"
+      printf '%s\n' "ERROR 1142 (42000) at line 21: SELECT command denied to user 'bkp-user-7x9'@'10.1.2.3' for table 'sys_backup_quiesce_instance'" \
+        "password=$FAKE_PW 127.0.0.1" > "$FAKE_QDB_DIR/preflight.err"
+    fi
+    printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+    run_preflight
+    assert_eq 19 "$code" "SQL の失敗は exit 19（$kind）"
+    if [[ "$kind" == tables ]]; then
+      assert_contains "$out" "doesn't exist" "MySQL の失敗の文を理由に出す（$kind）"
+      assert_contains "$out" "<db>.sys_backup_quiesce_instance" "DB 名を伏せて表の名前は残す（$kind）"
+    else
+      assert_contains "$out" "instance の検査を実行できません: ERROR 1142 (42000)" "MySQL の失敗の文を理由に出す（$kind）"
+      assert_contains "$out" "SELECT command denied" "失敗の理由（権限の不足）が分かる（$kind）"
+      assert_not_contains "$out" "10.1.2.3" "接続元を出力しない（$kind）"
+      assert_not_contains "$out" "127.0.0.1" "MYSQL_HOST を出力しない（$kind）"
+    fi
+    assert_not_contains "$out" "ses_manager_db" "DB 名を出力しない（$kind）"
+    assert_not_contains "$out" "bkp-user-7x9" "user を出力しない（$kind）"
+    assert_no_secret "$out"
   done
 }
 
@@ -435,6 +477,7 @@ run_case case_preflight_help
 run_case case_preflight_quiesce_skipped_for_local
 run_case case_preflight_quiesce_ok
 run_case case_preflight_quiesce_failures_exit_19
+run_case case_preflight_quiesce_sql_error_is_shown_without_identifiers
 
 # 全 case 出力の秘密 grep（framework log 含む）
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

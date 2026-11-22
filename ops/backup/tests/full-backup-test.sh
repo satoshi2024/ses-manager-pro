@@ -537,6 +537,20 @@ case_backup_full_quiesce_db_verifies_before_release() {
   idx=$(compgen -G "$T/work/index/full-*.json" | head -n 1)
   assert_eq true "$(jq -r '.quiesce.window_seconds | type == "number"' "$idx" 2>/dev/null)" "index に静止区間の秒数を記録"
   assert_eq ONLINE "$(jq -r '.quiesce.mode' "$idx" 2>/dev/null)" "index（metadata）に mode を記録"
+  # 2d review P3-4: backup の保存期間まで残る metadata（restic・index）には quiesce.json の投影だけを入れる。instance は ID と件数で、
+  # app の host 名・接続元・要求の token・state dir の path を入れない（quiesce.json の全体は state dir にだけ残る）
+  assert_eq 7 "$(jq -r '.quiesce.request_id' "$idx" 2>/dev/null)" "index（metadata）に要求の番号を記録"
+  assert_eq 2026-11-22T00:00:06Z "$(jq -r '.quiesce.verified_at_utc' "$idx" 2>/dev/null)" "index（metadata）に verify の時刻を記録"
+  assert_eq 1 "$(jq -r '.quiesce.instance_count' "$idx" 2>/dev/null)" "index（metadata）に instance の件数を記録"
+  assert_eq 0b7c6a2e-1111-4a5b-9c3d-000000000001 "$(jq -r '.quiesce.instance_ids[0]' "$idx" 2>/dev/null)" \
+    "index（metadata）に instance の ID を記録"
+  assert_eq 0 "$(jq '[.quiesce | .. | objects | keys[] | select(. == "host_name" or . == "db_client_host" or . == "request_token"
+      or . == "state_dir")] | length' "$idx" 2>/dev/null)" "index（metadata）に host 名・接続元・token・state dir の key が無い"
+  assert_not_contains "$(cat "$idx")" "app-host-1" "index（metadata）に app の host 名が無い"
+  assert_not_contains "$(cat "$idx")" "10.0.0.11" "index（metadata）に app の接続元が無い"
+  assert_not_contains "$(cat "$idx")" "$QUIESCE_STATE_DIR" "index（metadata）に state dir の path が無い"
+  assert_eq app-host-1 "$(jq -r '.instances[0].host_name' "$QUIESCE_STATE_DIR/quiesce.json" 2>/dev/null)" \
+    "quiesce.json の全体（host 名を含む）は job の state dir にだけ残る"
   steps=$(cut -f1 "$QUIESCE_STATE_DIR/window.steps" | tr '\n' ' ')
   assert_eq "acquire dump uploads table_counts schema_fingerprint verify release " "$steps" \
     "verify は静止区間の採取の後・解除の直前に呼ぶ（内訳の順）"
@@ -590,19 +604,25 @@ case_backup_full_new_instance_aborts_dump() {
   setup_full_qdb
   export FAKE_DUMP_SLEEP=60 FAKE_DUMP_PID_FILE="$T/dump.pid"
   printf 'ABORT\t1\t1\n' > "$FAKE_QDB_DIR/full-new-instance.2.out"
-  local out code start elapsed dump_pid
-  start=$(date +%s)
+  local out code end mark since dump_pid
   out=$("$BACKUP_FULL" 2>&1)
   code=$?
-  elapsed=$(( $(date +%s) - start ))
+  end=$(date +%s)
   assert_nonzero "$code" "full の中止で非 0"
   assert_contains "$out" "BACKUP_QUIESCE_FULL_ABORTED" "中止の errorCode を通知"
   assert_contains "$out" "取り直してください" "取り直しを案内する"
   assert_contains "$out" "mysqldump を止めました" "mysqldump を止めたことを通知"
-  if (( elapsed <= 15 )); then
-    test_assert "中止を知ってから早く失敗する（全体 ${elapsed} 秒。mysqldump の完了の 60 秒を待たない）"
+  # 2d review P3-8: tasks の字面どおり、中止の印（full-aborted）が書かれてから job が終わるまでを 10 秒以内とする
+  mark=$(stat -c %Y "$QUIESCE_STATE_DIR/full-aborted" 2>/dev/null || true)
+  if [[ "$mark" =~ ^[0-9]+$ ]]; then
+    since=$(( end - mark ))
+    if (( since <= 10 )); then
+      test_assert "中止の印から 10 秒以内に非 0 で終わる（${since} 秒。mysqldump の完了の 60 秒を待たない）"
+    else
+      test_fail "中止の印から 10 秒以内に非 0 で終わる" "${since} 秒"
+    fi
   else
-    test_fail "中止を知ってから早く失敗する" "${elapsed} 秒"
+    test_fail "中止の印から 10 秒以内に非 0 で終わる" "中止の印（full-aborted）がありません"
   fi
   dump_pid=$(cat "$T/dump.pid" 2>/dev/null || true)
   if [[ -n "$dump_pid" ]] && ! kill -0 "$dump_pid" 2>/dev/null; then

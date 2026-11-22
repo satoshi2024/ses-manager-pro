@@ -31,7 +31,9 @@
 #       新しい instance の protocol の版・閾値の式が provider の設定と合わない、QUIESCE_* の設定が不正
 #   1   上記以外（env 不足、接続失敗）
 #
-# 注意: 出力 JSON に host / user / DB 名 / パスワードは含めない。
+# 注意: 出力 JSON に host / user / DB 名 / パスワードは含めない。書込み静止の理由（checks.quiesce）も、app の instance は
+#       ID と件数だけで示し（app の host 名・接続元を出さない）、SQL の失敗の文は password・user@host・MYSQL_HOST・DB 名・user を
+#       伏せて出す（2d review P2-1・P3-4）。
 # ============================================================
 set -Eeuo pipefail
 umask 077
@@ -118,10 +120,22 @@ preflight::quiesce_grants_ok() { # <結果> <DB 名>
   return 1
 }
 
+# SQL の失敗の文（quiesce_db::run_sql が password を伏せたもの）から、出力 JSON に入れない接続の識別子を伏せる
+# （`'user'@'host'` の形と、MYSQL_HOST・MYSQL_DATABASE・MYSQL_USER の値。3 文字未満の値は文を壊すため伏せない）
+preflight::sanitize_sql_error() { # <文>
+  local t=$1
+  [[ -n "$t" ]] || return 0
+  t=$(sed -E "s/'[^']*'@'[^']*'/'<user>'@'<host>'/g" <<< "$t")
+  if (( ${#MYSQL_HOST} >= 3 )); then t=${t//"$MYSQL_HOST"/<host>}; fi
+  if (( ${#MYSQL_DATABASE} >= 3 )); then t=${t//"$MYSQL_DATABASE"/<db>}; fi
+  if (( ${#MYSQL_USER} >= 3 )); then t=${t//"$MYSQL_USER"/<user>}; fi
+  printf '%s\n' "$t"
+}
+
 # 書込み静止の検査（RB-QUIESCE design.md §12.4。読むだけ。QUIESCE_PROVIDER が DB の provider の時だけ）。
 # 信号表の 3 表、要求の表への表単位の INSERT・UPDATE、停止口の行が無いこと、新しい instance の protocol の版と閾値の式。
 preflight::check_quiesce() {
-  local out rc=0 n errf
+  local out rc=0 n errf sqlerr=""
   QUIESCE_CHECK_STATUS=ok
   errf=$(mktemp "${TMPDIR:-/tmp}/ses-preflight-quiesce.XXXXXX")
   if ! quiesce_db::load_settings CHECKPOINT 2> "$errf"; then
@@ -131,14 +145,18 @@ preflight::check_quiesce() {
     return 0
   fi
   rm -f "$errf"
-  out=$(quiesce_db::run_sql preflight "int:stale_seconds=$QDB_STALE" "int:dead_seconds=$QDB_DEAD" \
+  quiesce_db::query out preflight "int:stale_seconds=$QDB_STALE" "int:dead_seconds=$QDB_DEAD" \
     "int:protocol_version=$QUIESCE_DB_PROTOCOL_VERSION" "int:lease_seconds=$QDB_LEASE" "int:renew_seconds=$QDB_RENEW" \
-    "int:full=0" 2>/dev/null) || rc=$?
+    "int:full=0" 2>/dev/null || rc=$?
+  # SQL の失敗の文は password を伏せた上で、接続の識別子も伏せて理由に入れる（2d review P2-1・P3-4）
+  if [[ -n "${QDB_SQL_ERROR:-}" ]]; then
+    sqlerr=$(preflight::sanitize_sql_error "$QDB_SQL_ERROR")
+  fi
   n=$(quiesce_db::col "$out" TABLES 2 || true)
   QUIESCE_CHECK_TABLES=$n
   if [[ "$n" != 3 ]]; then
     QUIESCE_CHECK_STATUS=fail
-    note_fail "$EXIT_QUIESCE" "書込み静止の信号表（sys_backup_quiesce_request・_instance・_ack）がありません（${n:-取得できない}/3 表。V202 の migration の後に backup を始めます）${QDB_SQL_ERROR:+: $QDB_SQL_ERROR}"
+    note_fail "$EXIT_QUIESCE" "書込み静止の信号表（sys_backup_quiesce_request・_instance・_ack）がありません（${n:-取得できない}/3 表。V202 の migration の後に backup を始めます）${sqlerr:+: $sqlerr}"
     return 0
   fi
   if preflight::quiesce_grants_ok "$out" "$MYSQL_DATABASE"; then
@@ -150,7 +168,7 @@ preflight::check_quiesce() {
   fi
   if (( rc != 0 )) || ! quiesce_db::read_verdict "$out" 2>/dev/null; then
     QUIESCE_CHECK_STATUS=fail
-    note_fail "$EXIT_QUIESCE" "書込み静止の instance の検査を実行できません: ${QDB_SQL_ERROR:-rc=$rc}"
+    note_fail "$EXIT_QUIESCE" "書込み静止の instance の検査を実行できません: ${sqlerr:-rc=$rc}"
     return 0
   fi
   QUIESCE_CHECK_VERDICT=$QDB_VERDICT
@@ -159,11 +177,11 @@ preflight::check_quiesce() {
     OK) : ;;
     FAIL_DISABLED)
       QUIESCE_CHECK_STATUS=fail
-      note_fail "$EXIT_QUIESCE" "停止口（BACKUP_QUIESCE_ENABLED=false）の instance の行があります（STOPPED でない DISABLED。停止口の間・異常に止まった後の行の片付けの前は backup が全て失敗します。design.md §9.4）: $(quiesce_db::instances_text "$out" '^DISABLED$')"
+      note_fail "$EXIT_QUIESCE" "停止口（BACKUP_QUIESCE_ENABLED=false）の instance の行があります（STOPPED でない DISABLED。停止口の間・異常に止まった後の行の片付けの前は backup が全て失敗します。design.md §9.4）: $(quiesce_db::instance_ids_text "$out" '^DISABLED$')"
       ;;
     *)
       QUIESCE_CHECK_STATUS=fail
-      note_fail "$EXIT_QUIESCE" "新しい instance の protocol の版・閾値の式が provider の設定と合いません（$QDB_VERDICT、$QDB_DETAIL）: $(quiesce_db::instances_text "$out" '^REQUIRED$')"
+      note_fail "$EXIT_QUIESCE" "新しい instance の protocol の版・閾値の式が provider の設定と合いません（$QDB_VERDICT、$QDB_DETAIL）: $(quiesce_db::instance_ids_text "$out" '^REQUIRED$')"
       ;;
   esac
   return 0

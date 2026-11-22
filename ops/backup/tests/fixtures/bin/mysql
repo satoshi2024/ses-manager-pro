@@ -7,6 +7,7 @@ set -uo pipefail
 if [[ -n "${FAKE_ARGV_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$FAKE_ARGV_LOG"
 fi
+fake_all_args="$*"
 
 query=""
 for arg in "$@"; do
@@ -51,7 +52,10 @@ fi
 #   <名前>.sleep         応答の前に待つ秒数
 # ddl-lock（保持 process の session）: FAKE_QDB_LOCK = 1（取れた。既定）/ 0（取れない）/ hang（GET_LOCK の待ちのまま
 #   stdin を読まない）。取れたら ddl-lock.held を作り、stdin の EOF で消して ddl-lock.released を作る（lock の返却）。
-#   PID は ddl-lock.pid。FAKE_QDB_LOCK_DIE_AFTER=N なら N 回目の DO 0; で異常終了する（session の喪失）。
+#   PID は ddl-lock.pid。lock を持つことの毎秒の確認（SELECT 'DDL_HELD', … IS_USED_LOCK …）には「DDL_HELD<TAB>1」を返し、
+#   回数を ddl-held.count に書く。FAKE_QDB_LOCK_DIE_AFTER=N なら N 回目の確認で異常終了する（session の喪失）。
+#   FAKE_QDB_LOCK_LOST_AFTER=N なら N 回目から「DDL_HELD<TAB>0」を返す（session は生きたまま lock を失った。繋ぎ直し等）。
+#   起動の引数は ddl-lock.argv に書く（--skip-reconnect の確認）。
 # 既定の instance: FAKE_QDB_INSTANCE_ID（既定 0b7c6a2e-1111-4a5b-9c3d-000000000001）、host 名 app-host-1、接続元 10.0.0.11
 # ------------------------------------------------------------
 fake_qdb_instance() { # <分類> <新しい> <要求の前から> <ack> <観測した接続元> <verify の後の観測>
@@ -107,6 +111,7 @@ fake_qdb_default() { # <名前> <前置き>
 fake_qdb_ddl_lock() { # <記録の directory>
   local dir=$1 line lock=${FAKE_QDB_LOCK:-1} n=0
   [[ -n "$dir" ]] && printf '%s\n' "$$" > "$dir/ddl-lock.pid"
+  [[ -n "$dir" ]] && printf '%s\n' "$fake_all_args" > "$dir/ddl-lock.argv"
   while IFS= read -r line; do
     [[ "$line" == --* ]] && continue
     if [[ "$line" == *GET_LOCK* ]]; then
@@ -118,10 +123,16 @@ fake_qdb_ddl_lock() { # <記録の directory>
       [[ "$lock" == 1 && -n "$dir" ]] && : > "$dir/ddl-lock.held"
       continue
     fi
-    if [[ "$line" == "DO 0;" ]]; then
+    if [[ "$line" == "SELECT 'DDL_HELD'"*IS_USED_LOCK* ]]; then
       n=$((n + 1))
+      [[ -n "$dir" ]] && printf '%s\n' "$n" > "$dir/ddl-held.count"
       if [[ -n "${FAKE_QDB_LOCK_DIE_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_DIE_AFTER )); then
         exit 1
+      fi
+      if [[ -n "${FAKE_QDB_LOCK_LOST_AFTER:-}" ]] && (( n >= FAKE_QDB_LOCK_LOST_AFTER )); then
+        printf 'DDL_HELD\t0\n'
+      else
+        printf 'DDL_HELD\t1\n'
       fi
     fi
   done

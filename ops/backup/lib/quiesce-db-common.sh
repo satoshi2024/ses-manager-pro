@@ -140,7 +140,9 @@ quiesce_db::param_line() { # <型>:<名前>=<値>
   esac
 }
 
-# providers/quiesce-db.d/<名前>.sql を実行し、結果（tab 区切り）を標準出力へ出す。標準エラーは QDB_SQL_ERROR に入る。
+# providers/quiesce-db.d/<名前>.sql を実行し、結果（tab 区切り）を標準出力へ出す。標準エラーは redact して（password の値と
+# `password=` 等の形を伏せ、400 文字までにして）QDB_SQL_ERROR に入れる。QDB_SQL_ERROR は呼んだ shell にだけ残る（command
+# substitution の中で呼ぶと親には届かない。2d review P2-1）ため、provider・preflight・保持 process は quiesce_db::query で呼ぶ。
 quiesce_db::run_sql() { # <名前> [<型>:<名前>=<値>...]
   local name=$1 file sqlin errf rc=0 p line prefix=""
   shift
@@ -164,10 +166,38 @@ quiesce_db::run_sql() { # <名前> [<型>:<名前>=<値>...]
   "$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" --connect-timeout=10 -N -B \
     "$MYSQL_DATABASE" < "$sqlin" 2> "$errf" || rc=$?
   if [[ -s "$errf" ]]; then
-    QDB_SQL_ERROR=$(head -c 400 "$errf" | tr '\n' ' ' | common::redact)
+    QDB_SQL_ERROR=$(quiesce_db::redacted_error "$errf")
   fi
   rm -f "$sqlin" "$errf"
   return "$rc"
+}
+
+# mysql の標準エラーの file を 1 行にし、password の値（MYSQL_PASSWORD_FILE の内容）と `password=`・`secret:` 等の形を伏せ、
+# 伏せた後に 400 文字までにする（伏せる前に切ると値の一部が残り得るため）
+quiesce_db::redacted_error() { # <file>
+  local text pw=""
+  text=$(tr '\n\r\t' '   ' < "$1" 2>/dev/null || true)
+  if [[ -n "${MYSQL_PASSWORD_FILE:-}" && -r "${MYSQL_PASSWORD_FILE:-}" ]]; then
+    IFS= read -r pw < "$MYSQL_PASSWORD_FILE" || true
+  fi
+  [[ -n "$pw" ]] && text=${text//"$pw"/<redacted>}
+  text=$(common::redact <<< "$text")
+  printf '%s\n' "${text:0:400}"
+}
+
+# run_sql を呼んだ shell の中で実行し（subshell にしない）、結果を <変数名> に、redact した標準エラーを QDB_SQL_ERROR に入れる。
+# 結果は command substitution と同じく末尾の改行を除く。終了コードは run_sql のもの。<変数名> は呼出し側で local にしておく。
+quiesce_db::query() { # <変数名> <名前> [<型>:<名前>=<値>...]
+  local __qdb_var=$1 __qdb_out __qdb_val __qdb_rc=0
+  shift
+  [[ "$__qdb_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { quiesce_db::log "結果の変数名が不正です: $__qdb_var"; return 2; }
+  QDB_SQL_ERROR=""
+  __qdb_out=$(mktemp "${TMPDIR:-/tmp}/ses-quiesce-db-out.XXXXXX") || { QDB_SQL_ERROR="結果の一時 file を作れません"; return 2; }
+  quiesce_db::run_sql "$@" > "$__qdb_out" || __qdb_rc=$?
+  __qdb_val=$(cat "$__qdb_out" 2>/dev/null || true)
+  rm -f "$__qdb_out"
+  printf -v "$__qdb_var" '%s' "$__qdb_val"
+  return "$__qdb_rc"
 }
 
 # 結果のうち 1 欄目が <tag> の最初の行の <n> 番目の欄（1 始まり。tag 自身が 1）。無ければ 1 を返す
@@ -219,6 +249,20 @@ quiesce_db::instances_text() { # <結果> <分類の正規表現>
     text+="${text:+, }${f[1]}（${f[7]:-}、${f[2]}、ack=${f[5]:-}${reason}、heartbeat ${f[15]:-?} ms 前、${f[16]:-}/${f[17]:-}）"
   done <<< "$1"
   printf '%s\n' "${text:-なし}"
+}
+
+# INSTANCE の行のうち、分類が <分類の正規表現> に合うものを「<件数> 件（instance_id, …）」にする。host 名・接続元を出さない
+# （preflight の JSON の理由に使う。2d review P3-4）
+quiesce_db::instance_ids_text() { # <結果> <分類の正規表現>
+  local line ids="" n=0
+  local -a f=()
+  while IFS= read -r line; do
+    IFS=$'\t' read -r -a f <<< "$line"
+    [[ "${f[0]:-}" == INSTANCE && "${f[2]:-}" =~ $2 ]] || continue
+    n=$((n + 1))
+    ids+="${ids:+, }${f[1]}"
+  done <<< "$1"
+  printf '%s 件（%s）\n' "$n" "${ids:-なし}"
 }
 
 # 観測した接続元が、ack（QUIESCED）した必要な instance の接続元（db_client_host）だけであることを確かめる（§5.4）。
@@ -386,19 +430,31 @@ quiesce_db::hold() { # <state_dir> <job_kind>
 }
 
 # DDL 凍結の lock の session（pipe の右）。標準入力の SQL を順に実行し、結果を ddl-session.out へ書く。
+# --skip-reconnect: 接続が切れたら繋ぎ直さずに終わる（繋ぎ直した session は lock を持たないため。2d review P3-5）
 quiesce_db::ddl_session() { # <state_dir>
   printf '%s\n' "$BASHPID" > "$1/ddl-session.pid"
   exec "$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" --connect-timeout=10 -N -B --unbuffered \
-    "$MYSQL_DATABASE" > "$1/ddl-session.out" 2>> "$1/hold.log"
+    --skip-reconnect "$MYSQL_DATABASE" > "$1/ddl-session.out" 2>> "$1/hold.log"
 }
 
 quiesce_db::session_alive() { # <pid>
   [[ -n "$1" ]] && kill -0 "$1" 2>/dev/null
 }
 
+# DDL の session の最後の行が lock の確認（DDL_HELD）なら、その値（1 = この session が lock を持つ、0 = 持たない）を出す。
+# まだ確認の結果が無ければ何も出さない（session が書くのは DDL_LOCK の 1 行と DDL_HELD の行だけ）
+quiesce_db::last_ddl_held() { # <state_dir>
+  local last
+  last=$(tail -n 1 "$1/ddl-session.out" 2>/dev/null || true)
+  if [[ "$last" == DDL_HELD$'\t'* ]]; then
+    printf '%s\n' "${last#DDL_HELD$'\t'}"
+  fi
+  return 0
+}
+
 # 保持 process の loop（pipe の左）。標準出力は DDL の session への pipe で、診断は全て hold.log（標準エラー）へ書く。
 quiesce_db::hold_loop() { # <state_dir>
-  local d=$1 ddl_fd line line_rc lock=WAITING session_pid="" now lock_deadline res out sql_rc
+  local d=$1 ddl_fd line line_rc lock=WAITING session_pid="" now lock_deadline res out sql_rc held
   local request_id="" renewing=0 checking=0 renew_due=0 check_due=0
   local -a lease=()
   exec {ddl_fd}>&1 1>&2
@@ -446,11 +502,18 @@ quiesce_db::hold_loop() { # <state_dir>
         fi
         ;;
       HELD)
-        # session を idle で保ち、失ったことに気付く（失ったら verify を失敗させる）
-        if ! quiesce_db::session_alive "$session_pid" || ! printf 'DO 0;\n' >&"$ddl_fd" 2>/dev/null; then
+        # 毎秒、この session がまだ lock を持つことを確かめる（2d review P3-5）。session は --skip-reconnect で、接続が切れたら
+        # mysql が終わる。繋ぎ直しで lock を失ったまま文が通る場合にも気付くよう、IS_USED_LOCK と CONNECTION_ID を比べる。
+        # 前の確認の結果が 1 でない・session が終わった・文を送れない場合は lock を失ったとみなし、印を書いて保持 process を
+        # 終える（verify は hold_problem で失敗し、app は lease の期限で再開する）
+        held=$(quiesce_db::last_ddl_held "$d")
+        if [[ -n "$held" && "$held" != 1 ]] || ! quiesce_db::session_alive "$session_pid" \
+          || ! printf "SELECT 'DDL_HELD', COALESCE(IS_USED_LOCK('%s') = CONNECTION_ID(), 0);\n" "$QUIESCE_DB_LOCK_NAME" \
+            >&"$ddl_fd" 2>/dev/null; then
           lock=LOST
-          quiesce_db::mark "$d/ddl-lock.lost"
-          quiesce_db::log "ERROR: DDL 凍結の lock の session を失いました（この静止区間の backup は VALID にしません）"
+          quiesce_db::mark "$d/ddl-lock.lost" "${held:+IS_USED_LOCK の確認=$held}"
+          quiesce_db::log "ERROR: DDL 凍結の lock を失いました（${held:+この session が lock を持たない（$held）。}session の終わり・文の送信の失敗を含む。この静止区間の backup は VALID にしません。保持 process を終えます）"
+          break
         fi
         ;;
     esac
@@ -466,8 +529,8 @@ quiesce_db::hold_loop() { # <state_dir>
     if (( renewing == 1 && now >= renew_due )); then
       renew_due=$(( now + QDB_RENEW ))
       sql_rc=0
-      out=$(quiesce_db::run_sql renew "int:request_id=$request_id" "int:lease_max_seconds=$QDB_LEASE_MAX" \
-        "int:dead_seconds=$QDB_DEAD" {ddl_fd}>&-) || sql_rc=$?
+      quiesce_db::query out renew "int:request_id=$request_id" "int:lease_max_seconds=$QDB_LEASE_MAX" \
+        "int:dead_seconds=$QDB_DEAD" {ddl_fd}>&- || sql_rc=$?
       if (( sql_rc != 0 )); then
         quiesce_db::log "WARN: lease を延ばせませんでした（次の延長で再試行します）: ${QDB_SQL_ERROR:-rc=$sql_rc}"
       elif [[ "$(quiesce_db::col "$out" RENEW 2 || true)" != 1 ]]; then
@@ -485,7 +548,7 @@ quiesce_db::hold_loop() { # <state_dir>
     if (( checking == 1 && now >= check_due )); then
       check_due=$(( now + QDB_NEWINST ))
       sql_rc=0
-      out=$(quiesce_db::run_sql full-new-instance "int:request_id=$request_id" {ddl_fd}>&-) || sql_rc=$?
+      quiesce_db::query out full-new-instance "int:request_id=$request_id" {ddl_fd}>&- || sql_rc=$?
       if (( sql_rc != 0 )); then
         quiesce_db::log "WARN: full の最中の新しい instance を調べられませんでした（次の確認で再試行します）: ${QDB_SQL_ERROR:-rc=$sql_rc}"
       elif [[ "$(quiesce_db::col "$out" ABORT 2 || true)" == 1 ]]; then
@@ -536,7 +599,7 @@ quiesce_db::release_request() { # <state_dir>
   elif [[ -f "$d/verify-failed" ]]; then
     reason=VERIFY_FAILED
   fi
-  out=$(quiesce_db::run_sql release "int:request_id=$QDB_REQUEST_ID" "enum:status=$status" "enum:reason=$reason") || rc=$?
+  quiesce_db::query out release "int:request_id=$QDB_REQUEST_ID" "enum:status=$status" "enum:reason=$reason" || rc=$?
   if (( rc != 0 )); then
     quiesce_db::log "重大: 静止要求（番号 $QDB_REQUEST_ID）を解除できません（app は lease の期限で自動で再開します）: ${QDB_SQL_ERROR:-rc=$rc}"
     return 1
@@ -581,7 +644,7 @@ quiesce_db::confirm_resumed() { # <state_dir>
   deadline=$(( $(quiesce_db::now) + QDB_RESUME ))
   while :; do
     rc=0
-    out=$(quiesce_db::run_sql resume-check "int:request_id=$QDB_REQUEST_ID" "int:stale_seconds=$QDB_STALE") || rc=$?
+    quiesce_db::query out resume-check "int:request_id=$QDB_REQUEST_ID" "int:stale_seconds=$QDB_STALE" || rc=$?
     if (( rc == 0 )) && quiesce_db::read_verdict "$out"; then
       waiting="" down=""
       while IFS= read -r line; do

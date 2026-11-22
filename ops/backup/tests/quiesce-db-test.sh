@@ -460,6 +460,110 @@ case_ddl_session_lost_fails_verify() {
   teardown_qdb
 }
 
+# 2d review P3-5: DDL lock の session は --skip-reconnect で動き、毎秒 IS_USED_LOCK と CONNECTION_ID を比べる。session が
+# 生きたまま lock を失った（繋ぎ直し等）ら、印を書いて保持 process を終え、verify は VALID にしない
+case_ddl_lock_ownership_lost_ends_hold_and_fails_verify() {
+  setup_qdb
+  export FAKE_QDB_LOCK_LOST_AFTER=2
+  run_job CHECKPOINT acquire sleep:6 verify release
+  assert_contains "$(cat "$T/qdb/ddl-lock.argv" 2>/dev/null)" "--skip-reconnect" "DDL lock の session は繋ぎ直さない（--skip-reconnect）"
+  assert_file "$T/state/ddl-lock.lost" "IS_USED_LOCK の確認が 0 になったら lock を失った印を書く"
+  assert_contains "$(cat "$T/state/ddl-lock.lost" 2>/dev/null)" "IS_USED_LOCK の確認=0" "印に確認の値を残す"
+  assert_contains "$(cat "$T/state/hold.log")" "DDL 凍結の lock を失いました" "hold.log に lock の喪失を出す"
+  assert_file "$T/state/hold.exited" "lock を失ったら保持 process を終える"
+  assert_contains "$JOB_ERR" "step:verify=1" "lock を失った静止区間は VALID にしない"
+  assert_not_contains "$JOB_ERR" "verify が通りました" "verify は OK にならない"
+  unset FAKE_QDB_LOCK_LOST_AFTER
+  teardown_qdb
+}
+
+case_ddl_lock_ownership_is_checked_every_second() {
+  setup_qdb
+  run_job CHECKPOINT acquire sleep:3 verify release
+  assert_eq 0 "$JOB_RC" "lock を持ち続ければ成功する"
+  local n
+  n=$(cat "$T/qdb/ddl-held.count" 2>/dev/null || echo 0)
+  if (( n >= 2 )); then
+    test_assert "静止区間の間、lock を持つことを毎秒確かめる（$n 回）"
+  else
+    test_fail "静止区間の間、lock を持つことを毎秒確かめる" "$n 回"
+  fi
+  assert_no_file "$T/state/ddl-lock.lost" "lock を持つ間は喪失の印を書かない"
+  teardown_qdb
+}
+
+# 2d review P2-1: SQL の失敗の文は呼んだ shell に残り（command substitution の subshell で失われない）、set -u でも
+# 落ちない。要求の一意索引への衝突は設計の日本語の message になり、ack の待ちへ進まない
+case_insert_request_duplicate_shows_designed_message() {
+  local p
+  for p in quiesce-db quiesce-app-stopped; do
+    setup_qdb
+    printf '1\n' > "$T/qdb/insert-request.rc"
+    printf '%s\n' "ERROR 1062 (23000) at line 12: Duplicate entry '1' for key 'sys_backup_quiesce_request.uk_bq_request_active'" \
+      > "$T/qdb/insert-request.err"
+    if [[ "$p" == quiesce-app-stopped ]]; then
+      run_job FULL app-stopped acquire release
+    else
+      run_job CHECKPOINT acquire release
+    fi
+    assert_eq 11 "$JOB_RC" "要求を登録できなければ acquire が失敗する（$p）"
+    assert_not_contains "$JOB_ERR" "unbound variable" "set -u の下で QDB_SQL_ERROR が未設定にならない（$p）"
+    if [[ "$p" == quiesce-app-stopped ]]; then
+      assert_contains "$JOB_ERR" "他の静止要求が有効なため保持を登録できません" "一意索引への衝突は設計の message（$p）"
+      assert_eq 0 "$(call_count stopped-check)" "登録できなければ保持の後の確認へ進まない（$p）"
+    else
+      assert_contains "$JOB_ERR" "他の静止要求が有効なため要求を登録できません" "一意索引への衝突は設計の message（$p）"
+      assert_eq 0 "$(call_count poll-acks)" "登録できなければ ack の待ちへ進まない（$p）"
+    fi
+    teardown_qdb
+  done
+}
+
+case_sql_error_text_is_logged_with_password_redacted() {
+  setup_qdb
+  printf '1\n' > "$T/qdb/insert-request.rc"
+  printf '%s\n' "ERROR 1142 (42000) at line 12: INSERT command denied to user 'bkp-user-7x9'@'10.1.2.3' for table 'sys_backup_quiesce_request'" \
+    "password=$FAKE_PW 値だけ: $FAKE_PW" > "$T/qdb/insert-request.err"
+  run_job CHECKPOINT acquire release
+  assert_eq 11 "$JOB_RC" "権限の不足で要求を登録できなければ acquire が失敗する"
+  assert_contains "$JOB_ERR" "静止要求を登録できません: ERROR 1142 (42000)" "MySQL の失敗の文を log に出す"
+  assert_contains "$JOB_ERR" "INSERT command denied" "失敗の理由（権限の不足）が分かる"
+  assert_not_contains "$JOB_ERR" "$FAKE_PW" "password の値を出さない"
+  assert_contains "$JOB_ERR" "<redacted>" "password を伏せた印を出す"
+  assert_eq 0 "$(call_count poll-acks)" "登録できなければ ack の待ちへ進まない"
+  teardown_qdb
+}
+
+# 2d review P3-9: verify の準備（設定の検査・接続の準備）の失敗も verify-failed の印を書き、解除の理由を VERIFY_FAILED にする
+case_verify_preparation_failure_marks_verify_failed() {
+  local p
+  for p in quiesce-db quiesce-app-stopped; do
+    setup_qdb
+    cat > "$T/verify-prep.sh" <<'PREP'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. "$LIB_UNDER_TEST/common.sh"
+. "$LIB_UNDER_TEST/quiesce.sh"
+QUIESCE_JOB_KIND=CHECKPOINT
+quiesce::check_provider
+[[ "$PREP_PROVIDER" == quiesce-app-stopped ]] && quiesce::select_app_stopped
+quiesce::acquire
+rc=0
+QUIESCE_STALE_SECONDS=300 QUIESCE_DEAD_SECONDS=300 quiesce::verify || rc=$?
+echo "step:verify=$rc" >&2
+quiesce::release || true
+PREP
+    chmod +x "$T/verify-prep.sh"
+    JOB_RC=0
+    PREP_PROVIDER=$p "$T/verify-prep.sh" > "$T/job.out" 2> "$T/job.err" || JOB_RC=$?
+    JOB_ERR=$(cat "$T/job.err")
+    assert_contains "$JOB_ERR" "step:verify=1" "設定の不正で verify は失敗する（$p）"
+    assert_contains "$(cat "$T/state/verify-failed" 2>/dev/null)" "設定" "verify の準備の失敗も verify-failed の印を書く（$p）"
+    assert_contains "$(call_params release)" "reason = 'VERIFY_FAILED';" "解除の理由は VERIFY_FAILED（$p）"
+    teardown_qdb
+  done
+}
+
 # ------------------------------------------------------------ 保持 process: job の SIGKILL
 
 case_kill_job_during_dump_ends_hold_and_returns_lock() {
@@ -791,6 +895,11 @@ run_case case_hold_keeps_renewing_after_acquire_returns
 run_case case_renew_stopped_fails_verify
 run_case case_renew_cap_stops_renewal
 run_case case_ddl_session_lost_fails_verify
+run_case case_ddl_lock_ownership_lost_ends_hold_and_fails_verify
+run_case case_ddl_lock_ownership_is_checked_every_second
+run_case case_insert_request_duplicate_shows_designed_message
+run_case case_sql_error_text_is_logged_with_password_redacted
+run_case case_verify_preparation_failure_marks_verify_failed
 run_case case_kill_job_during_dump_ends_hold_and_returns_lock
 run_case case_kill_job_during_ddl_lock_wait_ends_hold
 run_case case_new_instance_during_online_full_aborts_request
