@@ -47,7 +47,8 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("初回 bootstrap では再開 ticket と local login を設定しない（§4.2）")
                 .doesNotContain("SECURITY_BOOTSTRAP_REOPEN_TICKET", "LOCAL_LOGIN_ENABLED");
         assertThat(names(app.path("environment")).stream().filter(name -> FEATURE_SWITCH.matcher(name).matches()))
-                .as("初回リリースは機能スイッチの環境変数を設定しない（feature-switches 3.1）").isEmpty();
+                .as("初回の起動（bootstrap）は機能スイッチの環境変数を設定しない。初回リリースで ON にするスイッチは §5.5 の後の起動で実値の"
+                        + " task definition に設定する（feature-switches 3.1）").isEmpty();
     }
 
     @Test

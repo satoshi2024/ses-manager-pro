@@ -71,6 +71,8 @@ class IntegrationHubOpenApiContractTest {
         String responsePart = yaml.substring(response, schemasStart);
         assertTrue(responsePart.contains("X-Correlation-ID:"));
         assertTrue(responsePart.contains(BackupQuiesceRejections.RETRY_AFTER_HEADER + ":"));
+        // Retry-After の範囲は BackupQuiesceRejections.retryAfterSeconds の 5〜60（filter の実際の値は BackupWriteGateMockMvcTest）
+        assertTrue(responsePart.contains("minimum: 5") && responsePart.contains("maximum: 60"), "Retry-After の範囲が 5〜60 でない");
         assertTrue(responsePart.contains(BackupQuiesceRejections.ERROR_CODE_HEADER + ":"));
         assertTrue(responsePart.contains("enum: [" + code + "]"));
         assertTrue(responsePart.contains("$ref: '#/components/schemas/BackupQuiescedError'"));

@@ -63,8 +63,8 @@ public enum Feature {
     /**
      * NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT・添付）。
      *
-     * <p>初回リリースは内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする
-     * （決定 B-NF02-2）。NF-02がONでも本スイッチがOFFならportalの問い合わせAPIは404、portal画面の
+     * <p>既定はOFF。初回リリースでは NF-02 本体とともにONにする（2026-11-22 利用者決定で B-NF02-2 の「第二段階」を変更。
+     * feature-switches.md 3.1・3.4）。NF-02がONでも本スイッチがOFFならportalの問い合わせAPIは404、portal画面の
      * 「問い合わせ」タブ・モーダル・scriptは出さない。
      */
     NF02_CUSTOMER_PORTAL(NF02, "顧客ポータルの問い合わせ（起票・返信・CSAT）",
@@ -84,7 +84,8 @@ public enum Feature {
      * NF-03の子: 資格番号（retention class {@code CERTIFICATION_PII}）の入力。
      *
      * <p>遮断するURLは持たない。OFFの間は資格申請・再申請で資格番号を受け付けず（service層で拒否）、
-     * 本人画面の資格番号入力欄を出さない。DG-07（保持年数・破棄）承認まで本番はOFFとする（決定 B-NF03-1）。
+     * 本人画面の資格番号入力欄を出さない。既定はOFFで、初回リリースでは DG-07（保持年数・破棄）の承認を前提にONにする
+     * （2026-11-22 利用者決定で B-NF03-1 の「DG-07 承認まで本番はOFF」を変更。feature-switches.md 3.4）。
      * 資格の取得日・期限・証憑、学習計画、skill gap等の非PII部分はNF-03本体のスイッチに従う。
      */
     NF03_CERTIFICATION_PII(NF03, "資格番号（CERTIFICATION_PII）の入力",

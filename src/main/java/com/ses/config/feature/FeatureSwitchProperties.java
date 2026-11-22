@@ -117,7 +117,7 @@ public class FeatureSwitchProperties {
      * 顧客ポータルの問い合わせの子スイッチ。ON/OFFに加えて、portalへ出してよい問い合わせの範囲を持つ。
      *
      * <p>{@code visibleSince} はoffset付きISO-8601（例: {@code 2027-04-01T00:00:00+09:00}）。未設定・空なら
-     * portalから起票された問い合わせだけをportalへ出す（初回リリース中に社内で登録した問い合わせを出さないfail-closed）。
+     * portalから起票された問い合わせだけをportalへ出す（社内で登録した問い合わせを出さないfail-closed）。
      * 解釈は {@code com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy} が行い、不正な値は起動失敗になる。
      */
     @Data
