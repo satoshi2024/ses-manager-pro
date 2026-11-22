@@ -1,5 +1,7 @@
 package com.ses.privacy.production;
 
+import com.ses.config.AdministratorConditionCheck;
+import com.ses.config.AdministratorStartupConditions;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.IdentityProvider;
 import com.ses.mapper.IdentityProviderMapper;
@@ -59,7 +61,8 @@ import java.util.TreeSet;
  */
 @Component
 @Profile("prod")
-public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton {
+public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton,
+        AdministratorStartupConditions {
 
     private static final Logger log = LoggerFactory.getLogger(PrivacyProductionConfigurationValidator.class);
 
@@ -164,6 +167,21 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
             log.info("[privacy] DSARの設定値（D-06 の決定書と照合する）: dueDays={} packageMaxAge={}",
                     dsar.getDueDays(), dsar.getPackageMaxAge());
         }
+    }
+
+    /**
+     * 管理者の継続性guard（{@code AdministratorContinuityGuard}。RB-ADMIN-GUARD）向け: {@link #validate} と同じ照会
+     * （{@code validatePrivacyAdministrators}）で privacy-admin の有効な管理者を数える。NF07 の flag の ON/OFF に関わらず
+     * 判定する（OFF の間に人数を割ると、ON にする起動がこの検査で止まるため）。照会できない・provider が無い場合は
+     * {@link #validate} と同じく満たさない扱いにする。DB へは書かない。
+     */
+    @Override
+    public List<AdministratorConditionCheck> checkAdministratorConditions() {
+        List<String> missing = new ArrayList<>();
+        int administrators = validatePrivacyAdministrators(authorizationTenantId(), missing);
+        return List.of(AdministratorConditionCheck.evaluated(
+                AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS, administrators,
+                MIN_PRIVACY_ADMINISTRATORS, missing.isEmpty()));
     }
 
     /**

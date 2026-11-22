@@ -560,6 +560,30 @@ class PrivacyProductionConfigurationValidatorTest {
         return new PrivacyDecisionWindowMonitor(flags(true, false), approval, oidc(), CLOCK, (MeterRegistry) null);
     }
 
+    // ---------------------------------------------------------------- 管理者の継続性guard（RB-ADMIN-GUARD）
+
+    @Test
+    void 継続性guard向けの判定はflagがOFFでも起動時と同じ照会でprivacy_adminを数える() {
+        long first = admin("nf07b-ops-d");
+        member(first, privacyAdminGroupId);
+        member(admin("nf07b-ops-e"), privacyAdminGroupId);
+        PrivacyProductionConfigurationValidator flagsOff = new PrivacyProductionConfigurationValidator(
+                flags(false, false), approval(), oidc(Set.of("admin", "bg-second")), permissionGroupMapper,
+                userPermissionGroupMapper, identityProviderMapper, CLOCK);
+
+        org.junit.jupiter.api.Assertions.assertEquals(List.of(com.ses.config.AdministratorConditionCheck.evaluated(
+                        com.ses.config.AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS, 2, 2, true)),
+                flagsOff.checkAdministratorConditions());
+        assertDoesNotThrow(validator(approval())::validate);
+
+        jdbcTemplate.update("UPDATE t_user_permission_group SET deleted_flag = 1 WHERE user_id = ? AND group_id = ?",
+                first, privacyAdminGroupId);
+        org.junit.jupiter.api.Assertions.assertEquals(List.of(com.ses.config.AdministratorConditionCheck.evaluated(
+                        com.ses.config.AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS, 1, 2, false)),
+                flagsOff.checkAdministratorConditions());
+        assertInsufficient(1);
+    }
+
     private void twoPrivacyAdmins() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         member(admin("nf07b-ops-e"), privacyAdminGroupId);

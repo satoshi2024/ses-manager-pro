@@ -142,6 +142,63 @@ class ProductionSecurityConfigurationValidatorTest {
         org.junit.jupiter.api.Assertions.assertFalse(error.getMessage().contains("db unavailable"), error.getMessage());
     }
 
+    // ---------------------------------------------------------------- 管理者の継続性guard（RB-ADMIN-GUARD）
+
+    @Test
+    void 継続性guard向けの判定はvalidateと同じ照会でOIDC管理者とbreak_glassを数える() {
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default")).thenReturn(java.util.List.of());
+
+        ProductionSecurityConfigurationValidator satisfied = administratorValidator(permissionGroupMapper,
+                java.util.List.of("ops-a", "ops-b", "ops-c"), 1);
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(
+                AdministratorConditionCheck.evaluated(AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS, 3, 3, true),
+                AdministratorConditionCheck.evaluated(
+                        AdministratorConditionCheck.Condition.BREAK_GLASS_ADMINISTRATORS, 2, 2, true)),
+                satisfied.checkAdministratorConditions());
+        assertDoesNotThrow(satisfied::validate);
+
+        // OIDC管理者が2名（break-glass usernameは数えない）・admin-b のMFAが未登録: 起動時検査と同じく両方を満たさない。
+        ProductionSecurityConfigurationValidator broken = administratorValidator(permissionGroupMapper,
+                java.util.List.of("ops-a", "ops-b", "admin-a"), 0);
+        java.util.List<AdministratorConditionCheck> checks = broken.checkAdministratorConditions();
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(
+                AdministratorConditionCheck.evaluated(AdministratorConditionCheck.Condition.OIDC_ADMINISTRATORS, 2, 3, false),
+                AdministratorConditionCheck.evaluated(
+                        AdministratorConditionCheck.Condition.BREAK_GLASS_ADMINISTRATORS, 1, 2, false)), checks);
+        IllegalStateException error = assertThrows(IllegalStateException.class, broken::validate);
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("現在2名"), error.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("MFA enrollment完了済み"),
+                error.getMessage());
+
+        // bootstrap中は validate と同じく、どちらも判定しない（照会もしない）。
+        ProductionBootstrapMode bootstrap = mock(ProductionBootstrapMode.class);
+        when(bootstrap.isActive()).thenReturn(true);
+        broken.setProductionBootstrapMode(bootstrap);
+        checks = broken.checkAdministratorConditions();
+        org.junit.jupiter.api.Assertions.assertTrue(checks.stream().noneMatch(AdministratorConditionCheck::evaluated),
+                checks::toString);
+        org.mockito.Mockito.verify(bootstrap, org.mockito.Mockito.never()).completePendingReopen();
+    }
+
+    /** OIDC管理者の照会結果と admin-b のMFA登録数だけを変えた本番設定（admin-a は常にMFA登録済み）。 */
+    private static ProductionSecurityConfigurationValidator administratorValidator(
+            com.ses.mapper.PermissionGroupMapper permissionGroupMapper, java.util.List<String> oidcAdministrators,
+            int adminBEnrolled) {
+        ProductionSecurityConfigurationValidator validator = validProductionValidator(permissionGroupMapper);
+        UserMfaMapper userMfaMapper = mock(UserMfaMapper.class);
+        when(userMfaMapper.countEnrolled("default", 1L)).thenReturn(1);
+        when(userMfaMapper.countEnrolled("default", 2L)).thenReturn(adminBEnrolled);
+        org.springframework.test.util.ReflectionTestUtils.setField(validator, "userMfaMapper", userMfaMapper);
+        com.ses.mapper.UserExternalIdentityMapper externalIdentityMapper =
+                mock(com.ses.mapper.UserExternalIdentityMapper.class);
+        when(externalIdentityMapper.selectApprovedActiveUsernamesByRole("default", 7L, "管理者"))
+                .thenReturn(oidcAdministrators);
+        validator.setUserExternalIdentityMapper(externalIdentityMapper);
+        return validator;
+    }
+
     /** NF07以外の検査が全て通る本番設定（privacy の検査結果だけで起動可否が決まる）。 */
     private static ProductionSecurityConfigurationValidator validProductionValidator(
             com.ses.mapper.PermissionGroupMapper permissionGroupMapper) {

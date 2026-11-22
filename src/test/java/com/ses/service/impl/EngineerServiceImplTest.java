@@ -173,6 +173,43 @@ class EngineerServiceImplTest {
         assertTrue(sqlSet.startsWith("status=") && !sqlSet.contains(","), "status列だけを書く: " + sqlSet);
     }
 
+    /**
+     * RB-ADMIN-GUARD: 連携ユーザー（後から管理者へrole変更された口座を含む）の無効化は、lock済みの連携ユーザーの行のまま
+     * （NF01のlock計画を変えず、追加のlockを取らずに）管理者の継続性guardへ変更の前後を渡し、拒否なら要員の削除ごと止める。
+     */
+    @Test
+    void removeById_連携ユーザーの無効化は追加のlockを取らずに継続性guardで判定し拒否なら削除ごと止める() {
+        com.ses.service.security.AdministratorContinuityGuard guard =
+                mock(com.ses.service.security.AdministratorContinuityGuard.class);
+        com.ses.service.security.AdministratorContinuityGuard.Snapshot snapshot =
+                new com.ses.service.security.AdministratorContinuityGuard.Snapshot("ENGINEER_DELETE",
+                        java.util.List.of(3L), java.util.List.of(), true);
+        when(guard.captureLocked("ENGINEER_DELETE", 3L)).thenReturn(snapshot);
+        doThrow(BusinessException.of(400, "error.user.adminContinuity.oidcAdministrators", 2, 3))
+                .when(guard).verify(snapshot);
+        service.setAdministratorContinuityGuard(guard);
+        Engineer current = engineerWithLe(1L, 10L, 0);
+        SysUser linked = linkedUser(3L, 1);
+        linked.setRole("管理者");
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(current);
+        when(engineerAccountLinkService.findByEngineerId(1L)).thenReturn(link(3L));
+        when(sysUserMapper.selectByIdAndTenantForUpdate(3L, "default")).thenReturn(linked);
+        when(engineerMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(current);
+        when(engineerMapper.deleteByIdForTenant(1L, "default", 0)).thenReturn(1);
+        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.removeById(1L, 0));
+
+        assertEquals("error.user.adminContinuity.oidcAdministrators", ex.getMessageKey());
+        InOrder order = inOrder(sysUserMapper, guard, authorizationEpochFence);
+        order.verify(sysUserMapper).selectByIdAndTenantForUpdate(3L, "default");
+        order.verify(guard).captureLocked("ENGINEER_DELETE", 3L);
+        order.verify(sysUserMapper).update(isNull(), any());
+        order.verify(authorizationEpochFence).advanceIfChanged(AuthorizationEpochAnchor.actor("default", 3L), 1, 0);
+        order.verify(guard).verify(snapshot);
+        verify(guard, never()).lockAndCapture(any(), any());
+    }
+
     @Test
     void removeById_lock後に紐付けが別の利用者へ替わっていたら409で削除しない() {
         Engineer current = engineerWithLe(1L, 10L, 0);

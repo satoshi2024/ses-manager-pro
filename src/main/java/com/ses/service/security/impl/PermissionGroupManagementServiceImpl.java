@@ -15,6 +15,7 @@ import com.ses.mapper.PermissionGroupMapper;
 import com.ses.service.NotificationService;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
+import com.ses.service.security.AdministratorContinuityGuard;
 import com.ses.service.security.PermissionGroupManagementService;
 import com.ses.service.security.PersistentSessionService;
 import com.ses.service.security.epoch.ActorEpochAnchors;
@@ -22,6 +23,7 @@ import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -80,8 +82,24 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         return result;
     }
 
+    /**
+     * 管理者の継続性guard（RB-ADMIN-GUARD。本番だけ判定する）。手動構築のテストでは未配線で、判定しない。
+     * privacy-admin の解除で本番の起動時検査（privacy-admin 2名以上）を満たさなくなる割当替えを拒否する。
+     */
+    private AdministratorContinuityGuard administratorContinuityGuard;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAdministratorContinuityGuard(AdministratorContinuityGuard administratorContinuityGuard) {
+        this.administratorContinuityGuard = administratorContinuityGuard;
+    }
+
+    /**
+     * 割当の置換。管理者の継続性guardのlock（全管理者と対象の行の昇順）を最初に取るため、lock待ちの間にcommitされた変更を
+     * lock後の判定で見るよう READ_COMMITTED にする（E-3。利用者の作成・role変更から入れ子で呼ばれた場合は外側に参加し、
+     * guardの判定も外側に任せる）。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void replaceAssignments(Long userId, Set<Long> groupIds, Authentication authentication) {
         Long actorId = SecurityUtils.currentUserId();
         if (actorId == null || authentication == null || !authentication.isAuthenticated()) {
@@ -91,7 +109,11 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
             throw BusinessException.of(403, "error.permission.selfChange");
         }
 
-        // target user行をmutexにし、並行するrole/group/session変更を直列化する。
+        // RB-ADMIN-GUARD: 本番では全管理者と対象利用者の行を（tenant, id）昇順でX lockしてから変更前の起動時条件を取る。
+        AdministratorContinuityGuard.Snapshot continuity = administratorContinuityGuard == null
+                ? AdministratorContinuityGuard.Snapshot.inactive()
+                : administratorContinuityGuard.lockAndCapture("PERMISSION_GROUP_REPLACE", List.of(userId));
+        // target user行をmutexにし（guardのlockを兼ねる）、並行するrole/group/session変更を直列化する。
         SysUser target = sysUserMapper.selectByIdForUpdate(userId);
         if (target == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -138,6 +160,10 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         // 割当group集合が変わった時だけactor epochを1進める（同じ集合の再保存では進めない。E-4）。
         authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(target),
                 new TreeSet<>(beforeGroupIds), new TreeSet<>(requested));
+        // privacy-admin の解除で起動時条件を割るなら、session失効・監査・通知の前に拒否する（transactionごとrollback）。
+        if (administratorContinuityGuard != null) {
+            administratorContinuityGuard.verify(continuity);
+        }
         persistentSessionService.revokeAllForUser(userId, "PERMISSION_CHANGED");
         insertAudit(authentication.getName(), userId, now);
         if (privacyAdminChanged) {

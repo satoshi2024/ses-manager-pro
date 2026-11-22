@@ -50,10 +50,13 @@ class WriterIsolationPolicyTest {
      * 再discoveryを行う案件完了（計画 §2.4 E-3・§4.2）。
      * W3-02 P2-1(b)分（ポータル紐付け）: 要員lockの後に退社完了を通常読取で判定する紐付け登録（lock待ちの間にcommitされた
      * 退社完了を見るため）。
+     * RB-ADMIN-GUARD分（管理者の継続性guard）: 全管理者の行の発見・lockの後に起動時条件を数え直す利用者の作成・更新と権限group
+     * 割当（lock待ちの間にcommitされた無効化・role変更・割当替えをlock後の判定で見るため）。
      */
     private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
             PortalEngineerLinkServiceImpl.class, List.of("register"),
-            SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"),
+            SysUserServiceImpl.class, List.of("createUser", "updateUser", "updateUserStatus", "deleteUser"),
+            PermissionGroupManagementServiceImpl.class, List.of("replaceAssignments"),
             RoleMenuServiceImpl.class, List.of("replaceMenus"),
             SystemConfigServiceImpl.class, List.of("updateAll"),
             EngineerServiceImpl.class, List.of("removeById"),

@@ -204,6 +204,37 @@ class UserApiControllerTest {
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("2")));
     }
 
+    /**
+     * RB-ADMIN-GUARD: 本番の起動時検査を満たさなくなる変更の拒否（AdministratorContinuityGuard）は、既存の業務例外と同じ
+     * ApiResultの400で、条件・変更後の人数・必要な人数と後任の案内を返す（画面はこのmessageをtoastに出す）。
+     */
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void updateStatus_管理者の継続性guardの拒否は400と人数と後任の案内を返す() throws Exception {
+        doThrow(BusinessException.of(400, "error.user.adminContinuity.oidcAdministrators", 2, 3))
+                .when(sysUserService).updateUserStatus(eq(5L), eq(0), any());
+
+        mockMvc.perform(put("/api/users/5/status?status=0").with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("2名"), org.hamcrest.Matchers.containsString("3名"),
+                        org.hamcrest.Matchers.containsString("後任"))));
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void delete_privacy_adminの継続性guardの拒否は400で人数を返す() throws Exception {
+        doThrow(BusinessException.of(400, "error.user.adminContinuity.privacyAdministrators", 1, 2))
+                .when(sysUserService).deleteUser(eq(5L), any());
+
+        mockMvc.perform(delete("/api/users/5").with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("privacy-admin"),
+                        org.hamcrest.Matchers.containsString("1名"), org.hamcrest.Matchers.containsString("2名"))));
+    }
+
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void update_営業から他ロールへの変更で現任担当ありは拒否() throws Exception {
