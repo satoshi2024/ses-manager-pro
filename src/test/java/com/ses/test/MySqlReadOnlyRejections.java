@@ -24,7 +24,11 @@ public final class MySqlReadOnlyRejections {
     private MySqlReadOnlyRejections() {
     }
 
-    /** Connector/J の {@code Statement#executeUpdate}・{@code execute} の拒否（{@code Statement.27}+{@code .28}）。 */
+    /**
+     * Connector/J の {@code Statement#execute} の拒否（{@code Statement.27}+{@code .28}）。{@code executeUpdate}・{@code executeLargeUpdate}
+     * の拒否は {@code Statement.42}+{@code .43}（{@code StatementImpl.executeUpdateInternal}）で、8.3.0 では文言が同じ。両方の文言は
+     * {@code BackupQuiesceReadOnlyViolationTest} が確かめる（2d review P3-2）。
+     */
     public static SQLException connectorJStatement() {
         return new SQLException(Messages.getString("Statement.27") + Messages.getString("Statement.28"), "S1009", 0);
     }

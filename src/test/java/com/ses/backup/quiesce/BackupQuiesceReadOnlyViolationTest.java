@@ -32,8 +32,11 @@ class BackupQuiesceReadOnlyViolationTest {
      */
     @Test
     void ConnectorJのclient側の読取り専用の拒否はdriverの実際の文言で該当する() {
+        // Statement.27+.28 は execute、Statement.42+.43 は executeUpdate・executeLargeUpdate（StatementImpl.executeUpdateInternal。
+        // 2d review P3-2）
         List<String[]> pairs = List.of(
                 new String[]{"Statement.27", "Statement.28"},
+                new String[]{"Statement.42", "Statement.43"},
                 new String[]{"Statement.34", "Statement.35"},
                 new String[]{"PreparedStatement.20", "PreparedStatement.21"},
                 new String[]{"PreparedStatement.25", "PreparedStatement.26"},

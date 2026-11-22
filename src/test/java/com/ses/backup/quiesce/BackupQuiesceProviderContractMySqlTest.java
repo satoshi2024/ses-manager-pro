@@ -216,6 +216,106 @@ class BackupQuiesceProviderContractMySqlTest {
         assertThat(verified.verdict()).as("STOPPED の instance は数えず、必要な instance が 0").isEqualTo("FAIL_NO_INSTANCE");
     }
 
+    /**
+     * 2d review P3-6: 応答が STOPPED を書かずに止まった（落ちた）場合、verify の後の観測し直しが来ないため、verify-check は観測の
+     * 待ちの間ずっと WAIT で、provider の時限（{@code QUIESCE_VERIFY_OBSERVE_SECONDS}）で失敗する（OK にはならない）。
+     */
+    @Test
+    void 応答がSTOPPEDを書かずに止まるとverifyは観測の待ちの間WAITのままで時限で失敗する() throws Exception {
+        BackupQuiesceLifecycleAnchor anchor = anchor(new BackupQuiesceProperties(), true);
+        BackupQuiesceResponder responder = start(anchor);
+        Request request = insertRequest("ONLINE", "CHECKPOINT", LEASE);
+        Rows acquired = pollUntilDecided(request.id(), false, Duration.ofSeconds(20));
+        assertThat(acquired.verdict()).as(acquired.toString()).isEqualTo("OK");
+
+        // 落ちた: 状態機械と heartbeat の thread が止まり、接続も閉じるが、STOPPED は書かない（writeStopped を呼ばない）
+        responder.destroy();
+        anchor.destroy();
+        assertThat(scalarLong("SELECT COUNT(*) FROM sys_backup_quiesce_instance WHERE status = 'STOPPED'"))
+                .as("STOPPED を書いていない").isZero();
+
+        Rows requested = sql("verify-request", List.of("int:request_id=" + request.id()));
+        assertThat(requested.first("VERIFY_REQUESTED").get(1)).isEqualTo("1");
+        List<String> params = withRequest(request.id(), new ArrayList<>(common(false)));
+        params.add("int:margin_seconds=" + MARGIN);
+        params.add("int:consistency_epoch_us=" + acquired.nowEpochMicros());
+        List<String> verdicts = new ArrayList<>();
+        long giveUp = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() - giveUp < 0) {
+            verdicts.add(sql("verify-check", params).verdict());
+            Thread.sleep(1_000);
+        }
+        assertThat(verdicts).as("観測し直しが来ない間の verify-check の判定").isNotEmpty().containsOnly("WAIT");
+        log.info("[RB-QUIESCE BWQ-011] STOPPED を書かずに止まった応答: verify-check は {} 回とも WAIT（provider は時限で失敗する）",
+                verdicts.size());
+    }
+
+    /**
+     * 2d review P3-1: preflight の SQL（{@code preflight.sql}）を README の権限だけの user で実行し、{@code SHOW GRANTS FOR
+     * CURRENT_USER()} の実際の行を {@code preflight.sh} と同じ規則（{@link #requestTableGrantOk}）で判定する。表単位の権限の
+     * 無い user では判定が偽になることも確かめる。
+     */
+    @Test
+    void preflightのSQLをREADMEの権限のuserで実行しSHOW_GRANTSの行をshellと同じ規則で判定できる() throws Exception {
+        BackupQuiesceLifecycleAnchor anchor = anchor(new BackupQuiesceProperties(), true);
+        start(anchor);
+        Rows preflight = sql("preflight", common(false));
+        assertThat(preflight.first("TABLES").get(1)).as("信号表の 3 表").isEqualTo("3");
+        assertThat(preflight.verdict()).as(preflight.toString()).isEqualTo("OK");
+        assertThat(grantLines(preflight)).as("SHOW GRANTS の行").isNotEmpty();
+        assertThat(requestTableGrantOk(preflight, DATABASE))
+                .as("要求の表への表単位の INSERT・UPDATE がある（" + grantLines(preflight) + "）").isTrue();
+        log.info("[RB-QUIESCE BWQ-011] preflight.sql の SHOW GRANTS の行: {}", grantLines(preflight));
+
+        String noGrant = "bq_backup_nogrant";
+        try (Connection root = root(); Statement st = root.createStatement()) {
+            st.execute("CREATE USER '" + noGrant + "'@'%' IDENTIFIED BY '" + BACKUP_PASSWORD + "'");
+            st.execute("GRANT SELECT ON " + DATABASE + ".* TO '" + noGrant + "'@'%'");
+        }
+        try (Connection without = DriverManager.getConnection(MYSQL.getJdbcUrl(), noGrant, BACKUP_PASSWORD)) {
+            Rows denied = sqlOn(without, "preflight", common(false));
+            assertThat(requestTableGrantOk(denied, DATABASE)).as("表単位の権限の無い user（" + grantLines(denied) + "）")
+                    .isFalse();
+        } finally {
+            try (Connection root = root(); Statement st = root.createStatement()) {
+                st.execute("DROP USER '" + noGrant + "'@'%'");
+            }
+        }
+    }
+
+    /** preflight.sql の GRANTS_BEGIN〜GRANTS_END の間の行（SHOW GRANTS の 1 行 = 1 欄）。 */
+    private static List<String> grantLines(Rows rows) {
+        List<String> lines = new ArrayList<>();
+        boolean inGrants = false;
+        for (List<String> row : rows.rows()) {
+            if ("GRANTS_BEGIN".equals(row.get(0))) {
+                inGrants = true;
+            } else if ("GRANTS_END".equals(row.get(0))) {
+                inGrants = false;
+            } else if (inGrants) {
+                lines.add(row.get(0));
+            }
+        }
+        return lines;
+    }
+
+    /** {@code preflight.sh} の {@code preflight::quiesce_grants_ok} と同じ規則。 */
+    static boolean requestTableGrantOk(Rows rows, String database) {
+        java.util.regex.Pattern grant = java.util.regex.Pattern.compile(
+                "^GRANT (.+) ON `([^`]+)`\\.`sys_backup_quiesce_request` TO ");
+        for (String line : grantLines(rows)) {
+            java.util.regex.Matcher match = grant.matcher(line);
+            if (match.find() && match.group(2).equals(database)) {
+                String privileges = "," + match.group(1).replace(" ", "") + ",";
+                if (privileges.contains(",ALLPRIVILEGES,")
+                        || (privileges.contains(",INSERT,") && privileges.contains(",UPDATE,"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     @Test
     void 要求の前からのinstanceが整合時刻の後にackするとverifyが失敗する() throws Exception {
         BackupQuiesceLifecycleAnchor anchor = anchor(new BackupQuiesceProperties(), true);

@@ -3,6 +3,7 @@ package com.ses.backup.quiesce;
 import com.ses.config.ProductionSchemaVersionGuard;
 import com.ses.config.ProductionSecurityConfigurationValidator;
 import com.ses.test.ReadOnlyEnforcingH2Driver;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -167,17 +168,27 @@ class BackupQuiesceProductionContextStartTest {
                 assertThat(clientPrepared.getSQLState()).isEqualTo("S1009");
                 assertThat(BackupQuiesceReadOnlyViolation.matches(clientPrepared)).as(clientPrepared.getMessage()).isTrue();
 
+                // 形の切替えは static な状態のため、断言が失敗しても同じ JVM の他の試験へ残さない（2d review P3-3。@AfterEach でも戻す）
                 ReadOnlyEnforcingH2Driver.useForm(com.ses.test.MySqlReadOnlyRejections.Form.MYSQL_SERVER);
-                java.sql.SQLException server = org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
-                        () -> statement.executeUpdate(update));
-                assertThat(server.getErrorCode()).isEqualTo(1792);
-                assertThat(BackupQuiesceReadOnlyViolation.matches(server)).isTrue();
+                try {
+                    java.sql.SQLException server = org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
+                            () -> statement.executeUpdate(update));
+                    assertThat(server.getErrorCode()).isEqualTo(1792);
+                    assertThat(BackupQuiesceReadOnlyViolation.matches(server)).isTrue();
+                } finally {
+                    ReadOnlyEnforcingH2Driver.useForm(null);
+                }
             } finally {
-                ReadOnlyEnforcingH2Driver.useForm(null);
                 connection.setReadOnly(false);
             }
         } finally {
             ReadOnlyEnforcingH2Driver.clearRejectedStatements();
         }
+    }
+
+    /** 試験の driver の拒否の形を既定（Connector/J の client 側）へ戻す（2d review P3-3）。 */
+    @AfterEach
+    void 試験のdriverの拒否の形を既定へ戻す() {
+        ReadOnlyEnforcingH2Driver.useForm(null);
     }
 }
