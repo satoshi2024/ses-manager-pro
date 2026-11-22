@@ -193,6 +193,8 @@
 
   - **実装の記録（第 2 段階 2d）:** `providers/quiesce-db.sh`（`acquire|verify|release|hold`）・`lib/quiesce-db-common.sh`・`providers/quiesce-db.d/*.sql`（11 file）。判定（必要な instance の分類・ack・hold 期限・整合時刻・停止口）は SQL の `VERDICT` の行が出し、shell は観測した接続元の照合（文字列の分解）・時間の上限・state dir の印だけを見る（同じ SQL を BWQ-011 が実 MySQL で実行して固定するため）。SQL の引数は `int`・`hex`・`enum` の型で検査して `SET @p_…` で渡し（`requested_by` は hex にする）、string の user 変数を列と比べない（collation の衝突を避ける。要求は番号で指す）。整合時刻は `quiesce.json` の `started_at_utc`（秒、従来の書式）と `started_at_epoch_us`（DB の epoch の μ秒。verify の `acked_at <= 整合時刻` に使う）。保持 process は `quiesce::_start_hold` が `exec {QUIESCE_HOLD_FD}> >(…)` で起動し、DDL lock の session（mysql）を loop の右の pipe で持つ（`DO 0;` で idle を保ち、失えば `ddl-lock.lost`）。release は要求を解いた後に `release.requested` で保持 process を終わらせ（lock の返却）、その後で再開を確かめる。D4-P3-1 は「source の時に `exec {QUIESCE_HOLD_FD}>/dev/null` で初期化する」方式（環境変数の値は使わない）。D4-P3-4 は `backup_full::dump`（background・`if ! wait`・kill の後に wait・`{QUIESCE_HOLD_FD}>&-`）。DDL lock を待つ秒数は固定の 30 秒（`QUIESCE_DB_LOCK_WAIT_SECONDS`。§12.4 に変数を足さない）。静止区間の秒数と内訳は provider によらず `quiesce::step` で記録し、`QUIESCE_WINDOW_WARN_SECONDS` を超えたら WARN。preflight の `checks.quiesce`（exit 19）は `QUIESCE_PROVIDER` が DB の provider の時だけ。`full-backup-test.sh`・`binlog-checkpoint-test.sh` は image に写した `preflight.sh`・`snapshot-binlog.sh` ではなく repository の版を使うようにした。
 
+  - **実装の記録（2d の review の fix。`design.md` §20.9）:** SQL は `quiesce_db::query` で呼び、失敗の文（password を伏せる）を呼んだ shell に残す（P2-1）。DDL lock の session は `--skip-reconnect` で、毎秒の `DO 0;` を `IS_USED_LOCK` と `CONNECTION_ID` の比較に替え、lock を失ったら保持 process を終える（P3-5）。verify の準備の失敗も `verify-failed`（P3-9）。backup の metadata には `quiesce.json` の投影だけを入れ、preflight の理由は instance ID と件数（P3-4）。U-13 の試験は中止の印から 10 秒以内（P3-8）。
+
   - **依存:** BWQ-001
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-006、BWQ-RQ-007、BWQ-RQ-010、BWQ-RQ-014
   - **Objective:** backup の job が DB の信号表で app の静止を取得・確認・解除し、延長と DDL lock を job 本体に結び付け、途切れた静止・登録の割込み・必要な instance の欠け・後からの ack・停止口・full の最中の新しい instance を VALID にしない。
@@ -220,6 +222,8 @@
   - **状態:** 試験を書き、fast の棚卸し（`MySqlTestShardInventoryTest` 等）は通過（第 2 段階 2d）。`BackupQuiesceProviderContractMySqlTest`（mysql shard 3）の実行と Demo（試験の log）は Runner 待ち。
 
   - **実装の記録（第 2 段階 2d）:** provider の SQL は shell の `quiesce_db::run_sql` と同じ形（前置きの `SET SESSION time_zone = '+00:00'`・`innodb_lock_wait_timeout = 5`・型を検査した `SET @p_…`、行全体の注釈を除き行末の `;` で分けた文）で、README「source 側の account の権限」と同じ権限だけの `bq_backup` で実行する。静止応答は実の `BackupQuiesceResponder`（`bq_app`。session の time_zone `+09:00`）。表を作る前の表単位の GRANT の結果（§19）は試験の log に記録する（判定はしない）。観測した接続元の照合は shell と同じ規則の `foreignHosts`。停止の後の STOPPED は `BackupQuiesceLifecycleAnchor.writeStopped`（業務の pool を閉じた後の書込み）を直接呼んで模す。
+
+  - **実装の記録（2d の review の fix。`design.md` §20.9）:** `preflight.sql` を README の権限の user で実行し `SHOW GRANTS` の行を shell と同じ規則で判定する case（P3-1）と、STOPPED を書かずに止まった応答で verify-check が WAIT のままである case（P3-6）を足した（mysql shard 3。Runner 待ち）。
 
   - **依存:** BWQ-003、BWQ-009、BWQ-010
   - **対応要求:** BWQ-RQ-001、BWQ-RQ-003、BWQ-RQ-004、BWQ-RQ-007、BWQ-RQ-012、BWQ-RQ-014

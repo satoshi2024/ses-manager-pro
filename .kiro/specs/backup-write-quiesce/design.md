@@ -189,8 +189,9 @@ ack の状態: なし → `QUIESCED` または `REFUSED` → `QUIESCED` から `
 ### 3.9 保存期間と個人データ
 
 - 個人データは持たない（host 名・接続元の IP・job 名・時刻だけ）。`requested_by` に人の名前を書かせない。
+- **backup の側の記録（2d review P3-4 の統括の決定（2026-11-22）: 最小化）**: provider の `quiesce.json` の全体（instance ごとの host 名・接続元（`db_client_host`）・要求の token・state dir の path を含む）は job の state dir にだけ置き、job の container とともに消える。backup の保存期間まで残る metadata（restic の snapshot と index）には、provider・mode・job の種類・`request_id`・時刻・`release_reason`・静止区間の秒数と内訳・instance の件数と ID だけの投影を入れる（`ops/backup/lib/metadata.sh`）。preflight の JSON の理由も instance は ID と件数だけで示し、host 名・接続元・接続の識別子（user・DB 名）を出さない。置き場所・期限・ticket に貼らない取扱いは `ops/backup/README.md`「書込み静止の記録（quiesce.json）」。
 - **保存期間は 30 日（U-12。決定済み）**。app が 1 日 1 回、有効な要求が無い時に、30 日より古い RELEASED/ABORTED/EXPIRED の要求（ack は CASCADE）と `last_beat_at` が 30 日より古い instance を消す。ただし停止口で動いていた行（`gate_state = 'DISABLED'` かつ `status <> 'STOPPED'`）は消さない（§5.3・§9.4。DBA が確かめて手で STOPPED にするまで backup を失敗させ続ける行で、古さで消すと停止口の app の異常停止を見落とす。2a の review P3-7）。停止口の instance は、heartbeat でも停止の途中（gate が SHUTDOWN）でも `gate_state` に常に `DISABLED` を書き、STOPPED にする時も `DISABLED` のまま残す（2b の review P3-4。SHUTDOWN を書くと、停止が確かめられずに残った行がこの除外と §5.3 の停止口の分類から外れていた）。
-- 個人データを消す経路ではないため、NF07 の保全 hold の gate（`deploy-runbook.md` §4.4）には接続しない。review で求められれば §4.4 の除外の行に理由つきで足す。
+- 個人データを消す経路ではないため、NF07 の保全 hold の gate（`deploy-runbook.md` §4.4）には接続しない。§4.4 の除外の一覧に D16 として理由つきで載せた（2d review の後の統括の指示（2026-11-22）。pii-inventory の DB-148〜DB-150 に登録したため）。
 - `privacy-retention-dsar/pii-inventory.md` に DB-148〜DB-150 として 3 表を足す（構造の記録。個人データなし）。
 - privacy catalog の seed 行は足さない。この 3 表は個人データも provider も持たず、行を足すと catalog の未分類の件数が意味なく増える。`CATALOG_MISSING` は provider が宣言した data element だけが対象（`PrivacyCoverageReport`）なので、行が無くても欠落として報告されない。
 
@@ -347,7 +348,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 
 - `BackupQuiesceDataSourcePostProcessor` が業務の `DataSource` bean（Hikari）を `BackupQuiesceAwareDataSource`（`DelegatingDataSource` の派生）で包む。static な `@Bean` method で登録し、gate・metric は `ObjectProvider` で包む時に遅れて引く。metric の登録は `MeterBinder` の bean で行う。この class は `DestructionAwareBeanPostProcessor` でもあり、停止の時の処理を持つ（§6.11）。
 - permit の無い thread が gate の OPEN と DISABLED 以外の間に借りた接続には `setReadOnly(true)` を呼ぶ。Connector/J は `readOnlyPropagatesToServer=true`（既定）で `SET SESSION TRANSACTION READ ONLY` を送り、MySQL は永続表への書込みを ERROR 1792 で拒否する。接続を返すと Hikari が既定へ戻す（§19）。
-  - **拒否の形（fix E。`fea83915` の Runner の実測）**: Connector/J 8.3.0 は `setReadOnly(true)` の接続で `Statement#executeUpdate`・`execute`、`ClientPreparedStatement#execute`（MyBatis の更新が通る）の DML を **server へ送る前に** client 側で拒否する（`SQLException`、SQLSTATE `S1009`、vendor code 0、message「Connection is read-only. Queries leading to data modification are not allowed」。`LocalizedErrorMessages` の `Statement.27`+`.28`・`PreparedStatement.20`+`.21` 等。英語の bundle だけ）。業務の接続の書込みは実際にはこの形になり、server の 1792 は driver を経由しない読取り専用（`SET SESSION TRANSACTION READ ONLY` を直接送った接続）や driver が文を送る経路で出る。`BackupQuiesceReadOnlyViolation.matches` は両方を読取り専用の拒否とする（任意の `S1009` は該当にしない。message の先頭と本文の両方を見る）。session も `transaction_read_only = 1` になるため、server 側の読取り専用は driver の外の防線として残る。driver の版を上げて文言が変われば `BackupQuiesceReadOnlyViolationTest`（driver の bundle の文言で照合する）が失敗する。H2 の試験の driver `ReadOnlyEnforcingH2Driver` は既定で client 側の形を模し、1792 にも切り替えられる。
+  - **拒否の形（fix E。`fea83915` の Runner の実測）**: Connector/J 8.3.0 は `setReadOnly(true)` の接続で `Statement#executeUpdate`・`execute`、`ClientPreparedStatement#execute`（MyBatis の更新が通る）の DML を **server へ送る前に** client 側で拒否する（`SQLException`、SQLSTATE `S1009`、vendor code 0、message「Connection is read-only. Queries leading to data modification are not allowed」。`LocalizedErrorMessages` の `Statement.27`+`.28`（`execute`）・`Statement.42`+`.43`（`executeUpdate`・`executeLargeUpdate`。`StatementImpl.executeUpdateInternal`。2d review P3-2）・`PreparedStatement.20`+`.21` 等。英語の bundle だけ）。業務の接続の書込みは実際にはこの形になり、server の 1792 は driver を経由しない読取り専用（`SET SESSION TRANSACTION READ ONLY` を直接送った接続）や driver が文を送る経路で出る。`BackupQuiesceReadOnlyViolation.matches` は両方を読取り専用の拒否とする（任意の `S1009` は該当にしない。message の先頭と本文の両方を見る）。session も `transaction_read_only = 1` になるため、server 側の読取り専用は driver の外の防線として残る。driver の版を上げて文言が変われば `BackupQuiesceReadOnlyViolationTest`（driver の bundle の文言で照合する）が失敗する。H2 の試験の driver `ReadOnlyEnforcingH2Driver` は既定で client 側の形を模し、1792 にも切り替えられる。
 - 静止で読取り専用にした接続への `setReadOnly(false)` は無視する（DEBUG）。
 - `readOnlyPropagatesToServer=false` ではこの防線が黙って消えるため、起動時に拒否する（§12.2）。
 - `SELECT … FOR UPDATE` / `FOR SHARE`: 読取り専用の transaction では locking read も ERROR 1792 になる見込み（**未実測**。§19）。GET の経路で locking read を使う処理は静止中に 503 になる。静止中だけの挙動として受け入れ、metric と WARN の log で経路を見る（§17 L-2）。
@@ -481,7 +482,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 4. 要求を INSERT して commit し、要求の番号を state dir に書く（保持 process が延長を始める）。一意索引に当たれば他の要求が有効なので失敗する。
 5. `QUIESCE_DEADLINE_SECONDS`（既定 checkpoint 90 秒・full 660 秒）まで 1 秒ごとに、新しい transaction で instance を分類し直し、必要な全 instance の ack を読む。**必要な instance が 1 つ以上**で全て `QUIESCED` なら成功。`REFUSED`・`RESUMED`・停止口の行（heartbeat の古さによらない）が 1 つでも、ack の無い状態不明の instance があれば直ちに失敗する。
 6. ack を確かめる: `scheduler_state` が `PAUSED`/`DISABLED`、必要な instance の申告値が閾値の式を満たす、観測した host が ack した必要な instance の `db_client_host` に含まれる。instance の `max_hold_*` が `QUIESCE_LEASE_MAX_SECONDS` より短ければ WARN を出す（D-P3-6）。
-7. `quiesce.json` を書く: `provider`、`mode`、`request_id`、`request_token`、`requested_at_utc`、`started_at_utc`（全 ack を確かめた時刻。整合時刻。§5.3 の「整合点より前に ack」の基準）、instance ごとの ID・host・`started_at_utc`・`acked_at_utc`・`hold_until_utc`、`ddl_lock`、`released_at_utc: null`。
+7. `quiesce.json` を書く: `provider`、`mode`、`request_id`、`request_token`、`requested_at_utc`、`started_at_utc`（全 ack を確かめた時刻。整合時刻。§5.3 の「整合点より前に ack」の基準）、instance ごとの ID・host・`started_at_utc`・`acked_at_utc`・`hold_until_utc`、`ddl_lock`、`released_at_utc: null`。 `quiesce.json` の全体（host 名・接続元・`request_token`・state dir の path を含む）は job の state dir にだけ置き、container とともに消える。backup の metadata（restic の snapshot と index。backup の保存期間まで残る）には、provider・mode・job の種類・`request_id`・時刻・`release_reason`・静止区間の秒数と内訳・instance の件数と ID だけの投影を入れる（`lib/metadata.sh` の `metadata::quiesce_projection`。2d review P3-4 の統括の決定（2026-11-22））。
 - 失敗の cleanup は要求を `ABORTED` にする（app は I-3 で開く）。保持 process は job の pipe が閉じた時に終わる。
 
 ### 7.2 verify
@@ -1010,3 +1011,19 @@ CLAUDE.md は本 batch では変えない。
 | P3-5 | `BackupQuiesceProductionContextStartTest` の javadoc が古い | fix commit E（試験の driver の拒否の形を変えた commit）で直した |
 | P3-6 | 照合 script の `SHUTDOWN_TIMEOUT` の形式・置き場所の制限が §1.0 に無い | `deploy-runbook.md` §1.0 の backup の書込み静止の段に書いた（`environment` に `<整数><単位>`） |
 | P3-7 | commit message の誤記（3a5fb783 の負例の件数は 28、fea83915 の用語） | amend しない。PR の説明で直す（統括） |
+
+### 20.9 第 2 段階 2d の実装の review（`90aa628d`）
+
+| # | 内容 | 対応（第 2 段階 2e の後の fix commit。統括の決定は 2026-11-22） |
+|---|---|---|
+| P2-1 | `quiesce_db::run_sql` が command substitution の subshell で `QDB_SQL_ERROR` を設定し、親に届かない（SQL の失敗の文が log に出ず、`set -u` の下で一意索引の衝突の判定が unbound で落ちる） | `quiesce_db::query`（呼んだ shell の中で実行し、結果を変数へ、redact した標準エラーを `QDB_SQL_ERROR` へ）に全ての呼出しを移した。標準エラーは password の値と `password=` 等の形を伏せてから 400 文字に切る。判定は `${QDB_SQL_ERROR:-}`。preflight は加えて user@host・`MYSQL_HOST`・DB 名・user を伏せて理由に出す。試験は `quiesce-db-test.sh`（一意索引の衝突の message・unbound が無い・ack の待ちへ進まない、失敗の文と password の伏せ）と `preflight-test.sh`（SQL の失敗の文を識別子を伏せて出す） |
+| P3-1 | BWQ-011 が `preflight.sql` を実行していない | `BackupQuiesceProviderContractMySqlTest` に、README の権限の user で `preflight.sql` を実行し `SHOW GRANTS` の行を `preflight.sh` と同じ規則で判定する case（表単位の権限の無い user では偽）を足した |
+| P3-2 | fix E の文言の試験に `Statement.42`・`.43` が無い | 試験の一覧に足し、`MySqlReadOnlyRejections` の javadoc と §6.5.1 を直した |
+| P3-3 | `ReadOnlyEnforcingH2Driver.useForm` の戻しが断言の失敗で残り得る | 切替えの直後から try/finally で戻し、`@AfterEach` でも戻す |
+| P3-4 | `quiesce.json` の全体（host 名・接続元・token・state dir）が backup の metadata に入り、preflight の理由に host 名が出る | 統括の決定（最小化）: metadata には投影（`metadata::quiesce_projection`。instance は件数と ID）だけを入れ、全体は state dir にだけ置く。preflight の理由は instance ID と件数。§3.9・§7.1・`metadata.sh`・`preflight.sh` の頭の注釈・README を直した。試験は `full-backup-test.sh`（index に host 名・接続元・token・state dir が無い） |
+| P3-5 | DDL lock の session の防御 | mysql を `--skip-reconnect` で起動し、毎秒の `DO 0;` を `IS_USED_LOCK('ses_backup_ddl_freeze') = CONNECTION_ID()` の確認に替えた。結果が 1 でない・session が終わった・送れない場合は印 `ddl-lock.lost` を書いて保持 process を終える（verify は失敗し、app は lease の期限で再開する）。試験は `quiesce-db-test.sh` |
+| P3-6 | BWQ-011 に「STOPPED を書かずに止まった」応答の case が無い | `destroy` の後に STOPPED を書かず、verify-check が観測の待ちの間 WAIT のままである case を足した |
+| P3-7 | README の「preflight は権限を検査しない」 | BWQ-013（2e）で直した（要求の表への表単位の権限だけを検査する） |
+| P3-8 | U-13 の試験が job 全体の 15 秒で見ている | 中止の印（`full-aborted`）から job の終わりまでを 10 秒以内で見る |
+| P3-9 | verify の準備の失敗で `verify-failed` を書かない | 設定の検査と接続の準備の失敗も `verify-failed` を書き、解除の理由を `VERIFY_FAILED` にする。試験は `quiesce-db-test.sh` |
+| P3-10・P3-11 | commit の衛生・件数の誤記 | 直さない（統括が PR の説明に書く） |

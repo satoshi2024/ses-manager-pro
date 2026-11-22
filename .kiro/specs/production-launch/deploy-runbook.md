@@ -1057,7 +1057,7 @@ SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
  ORDER BY d.tenant_id, d.id;
 ```
 
-### 4.4 NF07 保全holdと破壊的経路（D1〜D15。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W）
+### 4.4 NF07 保全holdと破壊的経路（D1〜D16。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W、D16 は RB-QUIESCE）
 
 hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も使っていない間は、どの経路も従来どおり動き、増える照会は gate の1回だけである（journal の設定が無い prod でも同じ）。hold を使った tenant では、gate が Journal と一致を確かめられない（`UNAVAILABLE`）と、その tenant の gate 対象の削除が止まる。gate と経路は `privacy.retention.enabled` に依存しない（OFF に戻しても掛けた hold は守る）。plan §3.4.1・§3.4.3。
 
@@ -1073,6 +1073,7 @@ hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も
 | D10 | `FileCleanupService.cleanupOrphanFiles`（両 scheduler） | `PrivacyHoldFileReferenceProvider` が hold の対象の保存名を参照に足す | gate が UNAVAILABLE・catalog に行の無い element・保存先が表の列なのに解決できない element の場合は例外で清掃のその回を中止（1件も消さない）。実体が外部 service 側にある element は清掃を止めない（下の「外部にある実体」） |
 | D14 | DSAR の開示 package の削除（`PrivacyExportPackagePurgeScheduler` 毎時 :15、交付の記録、期限切れ草案の作り直し。NF07-A2b） | 接続しない（対象外。下の「D14」） | — |
 | D15 | uploads の旧版 directory（`v<n>`）と切替えの残り（`.stage-*`・`.<pointer>.switch-*`）の削除（人手。RB-W） | 接続しない（app の経路ではない。下の「D15」の手順で守る） | — |
+| D16 | backup の書込み静止の信号表の保存期間の削除（`BackupQuiesceResponder` が1日1回、有効な要求が無い時に `JdbcBackupQuiesceSignalRepository.purgeRequests`・`purgeInstances` で物理削除する。30日。U-12。RB-QUIESCE） | 接続しない（対象外。下の「D16」） | — |
 
 - **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）、`ses.privacy.hold.file.cleanup.aborted`（tag `stage`＝`gate`/`resolve`。D10 の中止）、`ses.privacy.hold.file.unprotectable`（tag `element`。D10 で守れない外部の実体）、gate の `ses.privacy.hold.gate.unavailable`。WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`・`NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。D7・D9 は1つの tenant の停止で全 tenant の kind が止まるため、`path=D7`・`path=D9` も監視に入れる。D10 の中止が続くと孤児清掃（PII を含む取込の一時 CSV・quarantine の失敗実体を含む）が全 tenant で止まるため、`ses.privacy.hold.file.cleanup.aborted` も同じく監視する。log に tenant・subject は出ない。
 - **app DB の照会が戻らないとき（RB-NF07-HOLD delta review D-P3-1）**: gate は application DB の `@@server_uuid` を照会する（query timeout 10秒、接続の network timeout 15秒）。これが戻らず上限を超えると、同じ transaction の中で gate を呼ぶ手動の経路（D1・D2 等）はその操作が接続切断のエラーで失敗として終わり、batch はその回が失敗する（UNAVAILABLE の通常の skip ではない。削除はしない）。続く場合は application DB への接続（half-open の TCP 等）を調べる。
@@ -1156,6 +1157,15 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 - **`database-backup-recovery/design.md:272`「旧 version は retention 期限まで read-only で保持」**: read-only 化も retention の期限も実装していない（`uploads-cutover.sh` は mode を変えず、旧版は restore 主体と app の uid で書ける）。app は `current` が指す版だけを使うため、app が旧版へ書くことはない。運用では、保持期間の間は旧版を変更も削除もせず、削除は D15 の確認を経る。read-only 化（書込みの mode を外す等）を行うかは DBA・Privacy Owner の確認項（**未決定**）。
 - **残り（`.stage-*`・`.<pointer>.switch-*`）**: 中身は restore の staging（`uploads_ready`）の写しか版を指す symlink で、唯一の写しではない（restic の repository と restore の staging に同じものがある）。`status` で確かめ、作った change の中で restore 主体が消してよい。
 - **記録**: 消した版・残りの名前、日時、確かめた者（hold の確認を含む）、消す前後の `status` の出力を change ticket と配備記録に残す。
+
+**D16: backup の書込み静止の信号表の保存期間の削除（RB-QUIESCE。gate に接続しない＝対象外）**
+
+`privacy-retention-dsar/pii-inventory.md` の DB-148〜DB-150 に登録した3表（`sys_backup_quiesce_request`・`sys_backup_quiesce_instance`・`sys_backup_quiesce_ack`）の、app による保存期間の削除である。`PrivacyHoldPathGuard` に接続しない理由は次のとおり（backup-write-quiesce design.md §3.9）。
+
+1. **hold の対象になり得る data subject が無い。** 3表は backup の静止要求・app の instance（JVM の起動ごとの UUID）・その応答の記録で、利用者・要員・顧客の誰にも結び付かない（tenant 列も本人の ID も持たない。同 §3.4）。catalog（`m_pii_data_element`）にも data element を置かない（同 §3.9）ため、subject の hold・DATA_ELEMENT の hold のどちらも当たらない。
+2. **個人データを持たない。内容も最小化してある。** 持つのは app の container の host 名・DB から見た接続元の IP・job 名・時刻・状態だけで、`requested_by` は job 名と backup host の形式（`^[A-Za-z0-9._:-]{1,64}$`。個人名を書かない）だけを受け付ける。backup の側の記録（restic・index の metadata）も、instance の ID と件数だけに絞った（2d review P3-4。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」）。
+3. **削除の範囲は保存期間の古い行だけ。** 30日（U-12）より古い解除済み（RELEASED・ABORTED・EXPIRED）の要求（応答の行は CASCADE）と、`last_beat_at` が30日より古い instance だけを消し、有効な要求がある間は消さない。停止口で動いていた行（`gate_state = 'DISABLED'` かつ `STOPPED` でない）は古さによらず消さない（§4.7 の片付けまで backup を失敗させ続ける行のため）。消した件数は INFO の log に出す。
+4. **手作業の変更は別。** §4.7 の停止口の行の片付けは行を `STOPPED` にする UPDATE で、行を消さない（§1.8 の RR-10 の例外）。
 
 **D-05 owner の受理事項（A1H-2。hold 開始の開放の署名と合わせて受理する）**: (1) 原本と副本の DATA_ELEMENT hold は別 element（上の「DATA_ELEMENT hold の対」）、(2) 外部にある実体は D10 の範囲外（上の「外部にある実体」）、(3) D7・D9 は1つの tenant の停止で全 tenant の kind を止める（過剰停止）、(4) D1 の READ_COMMITTED による最初の hold との順序の窓と、D1・D2 の本人の導出が文書行の lock より前であること（plan §3.4 A1H-2 実装記録の残余）、(5) 帰属できない element の行は SUBJECT hold で守られない（plan §3.4.3 規則6）、(6) D13 の PWA の台帳と freee の従業員対応の物理削除（上の表）、(7) 参照元の行が物理削除された実体は D10 で守れない（D11、plan §9 R-15）、(8) D14 の開示 package は hold で止めない（NF07-A2b。D-06 owner と合わせて受理する）。本人請求そのものが争いになり、交付した内容が証拠になる場合でも、system は `package-max-age` を超えて内容を残さず、内容 hash と交付記録だけを残す。内容を残すなら、交付の時点で system の外の保全手続で保管する。(9) D15 の uploads の旧版（`v<n>`・`.stage-*`・`.current.switch-*`）の人による削除は gate に接続しない（上の D15）。保持期間、hold の対象が旧版に無いことの確かめ方、read-only 化は未決定で、DSAR の削除と保持期限の purge が旧版に届かないことは D-06 owner と合わせて受理する（**未取得**）。
 

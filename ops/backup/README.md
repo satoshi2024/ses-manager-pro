@@ -159,23 +159,25 @@ full と checkpoint は整合点を取る前に書込みの静止を取り、静
 
 ### 書込み静止の記録（quiesce.json）
 
-- **置き場所**: 静止を取った job が state dir（container の中の一時 directory。`run --rm` の container とともに消える）に `quiesce.json`
-  （0600）を書き、full・checkpoint の `metadata.json` の `quiesce` に全体が入る。metadata.json は restic repository の snapshot（暗号化）
-  と、backup-data の volume の index（`$BACKUP_WORK_DIR/index/full-*.json`・`checkpoint-*.json`）に残る。
-- **期限**: backup そのものと同じ。repository の snapshot は retention（下の「retention」。PITR 30 日と代表）で消え、index の file は
-  volume の上に残る（`retention.sh` は index を消さない）。
-- **内容**: provider・mode・job_kind・要求の番号（`request_id`）・`request_token`（要求ごとの 16 byte の乱数の hex。秘密ではないが
-  要求を特定する値）・時刻（`requested_at_utc`・整合時刻 `started_at_utc`・`verified_at_utc`・`released_at_utc`）・静止区間の秒数と
-  内訳・DDL lock の名前・state dir の path、instance ごとの ID・`host_name`（app の container の host 名）・`db_client_host`（DB から
+- **`quiesce.json` の全体は job の state dir にだけある**: 静止を取った job が state dir（`QUIESCE_STATE_DIR`。既定は container の中の
+  `/tmp/ses-quiesce-<pid>`）に `quiesce.json`（0600）と `hold.log` を書く。state dir は job の container とともに消え、`run --rm` では job
+  の終わりに消える（compose の command そのものが強制終了されて container が止まったまま残った場合は、その container を消すまで残る。
+  `tool-image.sh compose ps` で確かめ、SRE が消す）。`QUIESCE_STATE_DIR` を volume 等の残る場所へ向けない。
+- **内容（state dir の全体）**: provider・mode・job_kind・要求の番号（`request_id`）・`request_token`（要求ごとの 16 byte の乱数の hex。
+  秘密ではないが要求を特定する値）・時刻（`requested_at_utc`・整合時刻 `started_at_utc`・`verified_at_utc`・`released_at_utc`）・静止区間の
+  秒数と内訳・DDL lock の名前・state dir の path、instance ごとの ID・`host_name`（app の container の host 名）・`db_client_host`（DB から
   見た app の接続元の IP）・時刻。個人データは含まないが、内部の host 名と IP を含む。
-- **ticket・chat・配備記録に `quiesce.json` や metadata.json の `quiesce` をそのまま貼らない**。記録には job の結果の JSON（stdout）の
-  `quiesce` の欄（provider・mode・`request_id`・時刻・`window_seconds`。host・IP・token を含まない）を使う。内訳や instance の数が要る
-  ときは、CI の backup integration の証跡（`quiesce-full.json`・`quiesce-checkpoint.json`）と同じ投影にする。
-  ```bash
-  jq '.quiesce | {provider, mode, job_kind, request_id, started_at_utc, verified_at_utc, released_at_utc, release_reason,
-       window_seconds, window_breakdown_seconds, instances: ((.instances // []) | length)}' <index の file>
-  ```
-  障害の調査で instance ごとの値が要るときは backup host の上で見て、ticket には instance ID と結論だけを書く。
+- **backup の metadata には投影だけを入れる**（2d review P3-4）: full・checkpoint の `metadata.json` の `quiesce`（restic repository の
+  snapshot と、backup-data の volume の index `$BACKUP_WORK_DIR/index/full-*.json`・`checkpoint-*.json` に、backup の保存期間まで残る。
+  snapshot は下の「retention」（PITR 30 日と代表）で消え、index の file は volume の上に残る）は、`lib/metadata.sh` の
+  `metadata::quiesce_projection` が作る投影で、provider・mode・job_kind・`request_id`・時刻（requested・started・verified・released）・
+  `release_reason`・静止区間の秒数と内訳・instance の件数（`instance_count`・`verified_instance_count`）と ID（`instance_ids`）だけを持つ。
+  `host_name`・`db_client_host`・`request_token`・`state_dir`・instance ごとの時刻は入れない（`tests/full-backup-test.sh` が確かめる）。
+- **ticket・chat・配備記録に state dir の `quiesce.json` をそのまま貼らない**。記録には job の結果の JSON（stdout）の `quiesce` の欄
+  （provider・mode・`request_id`・時刻・`window_seconds`）か、index の `quiesce`（上の投影。`jq '.quiesce' <index の file>`）を使う。
+  CI の backup integration の証跡（`quiesce-full.json`・`quiesce-checkpoint.json`）も同じ考え方の投影である。障害の調査で instance ごとの
+  host 名・接続元が要るときは、job の stderr（provider の失敗の message には instance ごとの host 名が出る）か job の最中の state dir を
+  backup host の上で見て、ticket には instance ID と結論だけを書く（preflight の JSON の理由は instance ID と件数だけを出す）。
 
 ## 実行
 
