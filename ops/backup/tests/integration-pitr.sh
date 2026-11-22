@@ -111,7 +111,11 @@ log "== 0. 書込み静止の信号表（V202）・backup account の表単位�
 # 表を作る前の表単位の GRANT は BWQ-011 の MySQL 契約試験が記録する）。integration の backup account は root（全権限を持つ）
 # だが、preflight は表単位の GRANT の行を求めるため、本番と同じ GRANT を付ける（接続は root@'%'）。
 [[ -f "$QUIESCE_SCHEMA_FILE" ]] || fail "信号表の migration（$QUIESCE_SCHEMA_FILE）がありません（run-integration.sh が WORK へ写す）"
-src_root "$MYSQL_DATABASE" < "$QUIESCE_SCHEMA_FILE" || fail "信号表の migration（V202）を source に適用できません"
+# 本番の Flyway job と同じ utf8mb4 の接続で適用する。生成列 active_slot の式の文字列の introducer は DDL の接続の
+# 文字集合で決まり、mysql client の既定（container の locale では latin1）で作ると、mysqldump（SET NAMES utf8mb4）
+# からの復元後に式が変わって schema fingerprint（G-04）が一致しない（CI run 44977161397 で検出。design §19）。
+src_root --default-character-set=utf8mb4 "$MYSQL_DATABASE" < "$QUIESCE_SCHEMA_FILE" \
+  || fail "信号表の migration（V202）を source に適用できません"
 src_root -e "GRANT INSERT, UPDATE ON \`$MYSQL_DATABASE\`.\`sys_backup_quiesce_request\` TO 'root'@'%';" \
   || fail "backup account に要求の表の表単位の権限を付けられません"
 src_root -N -B -e "SHOW GRANTS FOR 'root'@'%';" 2>/dev/null | grep -F 'sys_backup_quiesce_request' > "$EVID/quiesce-grants.txt" \

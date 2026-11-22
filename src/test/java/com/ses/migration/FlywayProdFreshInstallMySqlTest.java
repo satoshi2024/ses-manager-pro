@@ -586,6 +586,14 @@ class FlywayProdFreshInstallMySqlTest {
         assertEquals("STORED GENERATED", queryString(st, "SELECT extra FROM information_schema.columns "
                 + "WHERE table_schema = DATABASE() AND table_name = 'sys_backup_quiesce_request' "
                 + "AND column_name = 'active_slot'"), "active_slot は STORED の生成列");
+        String generation = queryString(st, "SELECT generation_expression FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = 'sys_backup_quiesce_request' "
+                + "AND column_name = 'active_slot'");
+        // 生成式の文字列の introducer は DDL の接続の文字集合で決まる。本番の job の接続（characterEncoding=utf-8）では
+        // utf8mb4 になり、mysqldump（SET NAMES utf8mb4）からの復元でも同じ形に戻るため、復元の検証の schema fingerprint
+        // （G-04）が一致する。latin1 の接続で作ると復元後に変わり、検証が FAILED_VALIDATION になる（design §19）
+        assertTrue(generation.contains("_utf8mb4") && !generation.contains("_latin1"),
+                "本番の job の接続で作った active_slot の生成式の introducer は utf8mb4: " + generation);
         assertEquals(0L, scalar(st, "SELECT non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() "
                 + "AND table_name = 'sys_backup_quiesce_request' AND index_name = 'uk_bq_request_active'"));
         assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "

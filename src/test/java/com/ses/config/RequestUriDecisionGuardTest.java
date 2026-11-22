@@ -52,7 +52,10 @@ class RequestUriDecisionGuardTest {
             "com/ses/config/feature/FeatureSwitchFilter.java",
             new Allowed(1, "contextPath差引き済み: 生pathと復号後pathの両方で照合し、どちらかが一致すれば遮断する（遮断側にだけ働く）"),
             "com/ses/controller/api/PwaMutationApiController.java",
-            new Allowed(1, "ledger用: client側のhashと結び付くoperation文字列。表記が変われば不一致として拒否する（fail-closed）"));
+            new Allowed(1, "ledger用: client側のhashと結び付くoperation文字列。表記が変われば不一致として拒否する（fail-closed）"),
+            "com/ses/backup/quiesce/BackupQuiesceRequestClassifier.java",
+            new Allowed(1, "contextPath差引き済み: 外部APIかを生pathと復号後pathの両方で照合し、どちらかが一致すれば外部APIとして"
+                    + "permitを求める（静止中は503。厳しい側にだけ働く。他の判定はpathWithinApplication）"));
 
     /** directory単位で許可する範囲（理由付き）。 */
     private static final Map<String, String> ALLOWED_DIRECTORIES = Map.of(
