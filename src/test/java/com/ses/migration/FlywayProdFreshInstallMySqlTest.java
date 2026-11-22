@@ -602,9 +602,11 @@ class FlywayProdFreshInstallMySqlTest {
                         "t_feature_enablement_event|DELETE", "t_feature_enablement_event|UPDATE",
                         "t_feature_sign_off_bundle_member|DELETE", "t_feature_sign_off_bundle_member|UPDATE",
                         "t_feature_sign_off_extension|DELETE", "t_feature_sign_off_extension|UPDATE"),
+                // event_manipulation は ENUM('INSERT','UPDATE','DELETE') で、そのまま ORDER BY すると定義の順
+                // （UPDATE が DELETE の前）になる。文字列として並べ、期待の列（字母順）と比べる。
                 rows(st, "SELECT CONCAT_WS('|', event_object_table, event_manipulation) FROM information_schema.triggers "
                         + "WHERE trigger_schema = DATABASE() AND event_object_table LIKE 't\\_feature\\_%' "
-                        + "AND action_timing = 'BEFORE' ORDER BY event_object_table, event_manipulation"),
+                        + "AND action_timing = 'BEFORE' ORDER BY event_object_table, CAST(event_manipulation AS CHAR)"),
                 "追記専用の3表の BEFORE UPDATE・DELETE の trigger");
         assertEquals(73L, scalar(st, "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()"),
                 "trigger の総数（deploy-runbook §1.2・§3.4）");
