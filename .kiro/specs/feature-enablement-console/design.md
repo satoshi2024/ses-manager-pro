@@ -955,6 +955,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - 署名・受理の tab: 種別ごとの現在の署名（状態・類・期間・残り日数・登録者・確認者）、登録の modal（種別を選ぶと役割の選択肢と構造化された値の入力欄が変わる。digest を持つ種別は system の計算値の先頭 16 文字を出し、文書の値と照合させる。NF05 の DG-05 は現在の配備の設定から計算した値との一致・不一致を出す）、署名の組の登録の modal（NF07 の D-01・D-09（・D-06）を 1 画面で、変わらない署名は「引き継ぐ」を選ぶ）、確認・却下・取消し・延長（証拠の類だけ）。署名日が今日より後の署名は確認の button を出さず、署名日を示す。
 - 履歴の tab: `.card > .card-body > form#searchForm` の構造で絞込みを置く（`SES.filterPanel` が phone で畳む）。
 - 規約: `SES.csrf.header()`、`res.code === 200`、`Toast`、閉鎖・取消しは `Swal.fire` で確認、`/lib/...` の同梱の library だけ。
+- 実装で決めた細部（FE-A10）: 「設定」tab は公開範囲の変更（FE-B03）と一緒に足す（段階 A では置かない）。署名の却下・取消しの理由は code の列（`^[A-Z][A-Z0-9_]{0,63}$`）のため、画面は区分の選択肢（却下: `DOCUMENT_MISMATCH`・`ROLE_MISMATCH`・`DATE_MISMATCH`・`REFERENCE_MISMATCH`・`OTHER`、取消し: `DECISION_WITHDRAWN`・`DOCUMENT_ERROR`・`SECURITY_CONCERN`・`OTHER`）を出す。申請の却下の理由は自由記述（必須）。自分の登録した署名・組には確認・却下の button を出さず取下げだけを出す。組に属する種別の1件ずつの署名には確認の button を出さない（API も 409）。NF05 の DG-05 の一致・不一致の表示（FE-D05）と NF01 二者確認の閉鎖の警告の DUAL template の件数（FE-B01）は各段階で足す。
 
 ## 16. 試験の方針
 

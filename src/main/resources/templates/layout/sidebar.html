@@ -415,6 +415,13 @@
                         <span th:text="#{menu.system.config}">システム設定</span>
                     </a>
                 </li>
+                <!-- 機能の開放（feature-enablement-console FE-A10）: 管理者だけ（menu feature-enablement は 管理者 だけに付与。V203） -->
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('feature-enablement')}">
+                    <a th:href="@{/feature-enablement}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/feature-enablement' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-toggles me-2"></i>
+                        <span th:text="#{menu.featureEnablement}">機能の開放</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('import-center')}">
                     <a th:href="@{/import-center}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/import-center' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cloud-upload me-2"></i>
