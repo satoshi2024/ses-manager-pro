@@ -532,7 +532,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
   - job 本体が起動する長い子 process（mysqldump・`cp -a`・restic・mysqlbinlog 等）は `{QUIESCE_HOLD_FD}>&-` で書き口を閉じて起動する（子が書き口を持つと、container の外で job が kill されても子が終わるまで EOF にならないため）。`script-contract-test.sh` が、`lib/quiesce.sh` を読む script の長い子 process の起動にこの指定があることを確かめる。`tool-image.sh compose run` では job が container の PID 1 で、PID 1 が終われば container 内の process は全て止まる。
   - process substitution の process を `wait` で待つには bash 4.4 以上が要る。tool image の bash（Debian bookworm の 5.2）で満たし、`tool-image-test.sh` が版を確かめる。
 - **役目**:
-  1. DDL 凍結の lock の session を持つ（mysql の session の stdin へ `DO 0;` を流し続ける。保持 process が終わると session も終わり、MySQL が lock を返す）。lock を取れたら state dir に印を書く。
+  1. DDL 凍結の lock の session を持つ（mysql は `--skip-reconnect` で起動し、接続が切れたら繋ぎ直さずに終わる。保持 process が終わると session も終わり、MySQL が lock を返す）。lock を取れたら state dir に印を書く。lock を取った後は毎秒 session の stdin へ `SELECT 'DDL_HELD', COALESCE(IS_USED_LOCK('ses_backup_ddl_freeze') = CONNECTION_ID(), 0);` を流して、この session がまだ lock を持つことを確かめる。結果が 1 でない・session が終わった・文を送れない場合は lock を失ったとみなし、`ddl-lock.lost` の印を書いて保持 process を終える（verify は失敗し、lease の延長が止まるため app は lease の期限で再開する。2d review P3-5）。この確認の文は shell の中の固定の文で、`quiesce-db.d` の file ではないため BWQ-011 の Java の契約試験の外にあり、CI の backup integration が実 MySQL 8.4 の client で通す。
   2. state dir に要求の番号が書かれたら、`read -t <QUIESCE_LEASE_RENEW_SECONDS>` で pipe を待ち、時間切れのたびに lease を延ばす（EOF なら終わる）。延長の UPDATE が 0 行なら印を書いて延長を止める（verify が失敗する）。
   3. 延長の上限: `requested_at` から `min(QUIESCE_LEASE_MAX_SECONDS, 必要な instance の max_hold(job_kind))` を超えたら延長を止める。
   4. **ONLINE の full の最中の新しい instance（U-13）**: **`mode = 'ONLINE'` かつ `job_kind = 'FULL'` のときだけ**（D3-P2-2）、5 秒ごとに `started_at >= requested_at` で STOPPED でない instance を調べ、見つけたら要求を `ABORTED`（`release_reason='NEW_INSTANCE'`）にして延長を止め、state dir に中止の印を書き、WARN `BACKUP_QUIESCE_FULL_ABORTED` を出す。app は要求の消失を読んで再開し、新しい instance の起動の待ちも終わる。**APP_STOPPED の full（配備の前の backup）は中止しない**: 保持の間に起動した task は §6.8 のとおり起動を中止し続け、保持は解かれない（中止すると配備の途中、§3 の Flyway の前に app が起動してしまうため）。
@@ -1027,3 +1027,17 @@ CLAUDE.md は本 batch では変えない。
 | P3-8 | U-13 の試験が job 全体の 15 秒で見ている | 中止の印（`full-aborted`）から job の終わりまでを 10 秒以内で見る |
 | P3-9 | verify の準備の失敗で `verify-failed` を書かない | 設定の検査と接続の準備の失敗も `verify-failed` を書き、解除の理由を `VERIFY_FAILED` にする。試験は `quiesce-db-test.sh` |
 | P3-10・P3-11 | commit の衛生・件数の誤記 | 直さない（統括が PR の説明に書く） |
+
+### 20.10 最終の差分 review（`b0dd8f41`）
+
+| # | 内容 | 対応（最終 review の fix commit） |
+|---|---|---|
+| P3-1 | 本 branch の code の変更で、`deploy-runbook.md` の既存の行番号の参照がずれた（`backup-full.sh`・`create-checkpoint.sh`・`preflight.sh`・`application.yml`・`ProductionSecurityConfigurationValidator`・`ImportStageReconciliationLedger`・`ImportRawTempFileStore`・`ContractDocumentServiceImpl`・`GlobalExceptionHandler`・`SecurityConfig`・HFP-03 の `design.md:272`） | 行番号を変えない書き方（関数名・class 名・節名）へ替えた。`application.yml` と validator は値の行の番号を HEAD に合わせた。requirements §1 の行番号は origin/main `42719b10` の値であることを明記した |
+| P3-2 | 2026-11-22 の利用者決定（BWQ-014 は本 PR で行わず、本番の前に SRE が staging で行う）が文書に無い | `deploy-runbook.md` §1.7 の BQ-3・BQ-4、tasks の BWQ-005・BWQ-013・BWQ-014・BWQ-015 に書いた（**未取得**。隔離環境で通しても満たさない）。BWQ-014 の Evidence は `quiesce.json` の投影 |
+| P3-3 | §7.6 の本文が `DO 0;` のまま | §7.6 の役目 1 を `--skip-reconnect` と IS_USED_LOCK の確認に直し、確認の文が契約試験の外であることを `lib/quiesce-db-common.sh` の頭の注釈に書いた |
+| P3-4 | preflight の伏字が user 名を含む表の名前を壊す | 値の前後が識別子の文字でない所だけを伏せる（`preflight::mask_token`）。`preflight-test.sh` に user `backup` の case を足した |
+| P3-5 | held=1 の LOST の log が誤解を招く | 失った理由（lock を持たない・session が終わった・文を送れない）を分けて印と log に書く |
+| P3-6 | D16 と README の最小化が metadata だけであることが書かれていない | dump・binlog には信号表の行（host 名・接続元・token）が入り backup の保存期間まで残ることを書いた。保存期間は既定 30 日（1〜365 日） |
+| P3-7 | 監視の AUTO_RESUMED の原因に DDL lock の喪失が無い | `LEASE_EXPIRED` の一つとして足した |
+| P3-8 | P2-1 の回帰を止める静的な守りが無い | `script-contract-test.sh` に、本番 script が `quiesce_db::run_sql` を command substitution の中で呼ばず lib の外で直接呼ばないことの走査（見本の fixture つき）を足した |
+| P3-9 | 文言 | §1.2 の pool の書き方、監視の Connector/J の文言の末尾の「.」 |

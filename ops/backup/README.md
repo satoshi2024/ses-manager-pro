@@ -173,6 +173,10 @@ full と checkpoint は整合点を取る前に書込みの静止を取り、静
   `metadata::quiesce_projection` が作る投影で、provider・mode・job_kind・`request_id`・時刻（requested・started・verified・released）・
   `release_reason`・静止区間の秒数と内訳・instance の件数（`instance_count`・`verified_instance_count`）と ID（`instance_ids`）だけを持つ。
   `host_name`・`db_client_host`・`request_token`・`state_dir`・instance ごとの時刻は入れない（`tests/full-backup-test.sh` が確かめる）。
+- **最小化したのは metadata だけ**: DB の full の dump と binlog には信号表（`sys_backup_quiesce_*`）の行そのものが入る（mysqldump に
+  `--ignore-table` を付けない。行は `host_name`・`db_client_host`・`observed_app_hosts`・`request_token` を含み、app の保存期間（既定
+  30 日）の分がある）。これらは backup そのものの保存期間まで残る。個人データではない（`.kiro/specs/backup-write-quiesce/design.md`
+  §3.9）。restore の後の扱いは `runbooks/restore-cutover.md` §4.6。
 - **ticket・chat・配備記録に state dir の `quiesce.json` をそのまま貼らない**。記録には job の結果の JSON（stdout）の `quiesce` の欄
   （provider・mode・`request_id`・時刻・`window_seconds`）か、index の `quiesce`（上の投影。`jq '.quiesce' <index の file>`）を使う。
   CI の backup integration の証跡（`quiesce-full.json`・`quiesce-checkpoint.json`）も同じ考え方の投影である。障害の調査で instance ごとの

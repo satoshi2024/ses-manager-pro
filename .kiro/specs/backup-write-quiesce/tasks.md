@@ -97,7 +97,7 @@
   - **失敗/rollback:** Hikari の metric・health が消えたら包み方を直す。負荷の試験で 1 件でも漏れたら I-4 の実装を見直す（試験を緩めない）。
 
 - [ ] **BWQ-005 — HTTP の分類と 503（filter・例外・エラーページ・文言・session・logout・監査・外部 API）**
-  - **状態:** 実装・fast の試験は済み（commit `b47ee2d2`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket（`SECURITY_BOOTSTRAP_REOPEN_TICKET`）を付けた起動の記録（BWQ-014 か staging。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3）を含める。**未取得**。外部 API の静止中の 503 は NF05 を開ける前の受理と openapi-candidate の更新の対象（`deploy-runbook.md` §1.7 の NF05 の行の (g)・(h)。**未取得**）。
+  - **状態:** 実装・fast の試験は済み（commit `b47ee2d2`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket（`SECURITY_BOOTSTRAP_REOPEN_TICKET`）を付けた起動の記録（staging。BWQ-014 とともに本番の前に SRE が行う（2026-11-22 利用者決定）。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3）を含める。**未取得**。外部 API の静止中の 503 は NF05 を開ける前の受理と openapi-candidate の更新の対象（`deploy-runbook.md` §1.7 の NF05 の行の (g)・(h)。**未取得**）。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGateFilter`（+35。WRITE・EXTERNAL は permit、LOGOUT は取れれば permit、chain 全体の 1792・`BackupWriteQuiescedException` を 503 へ）・`BackupQuiesceRequestClassifier`・`BackupWriteQuiescedException`・`BackupQuiesceRejections`（503 の header・文言・`Retry-After`）・`BackupQuiesceLogoutDeferral`（logout の handler と success handler）・`AuditedDownloadPaths`、gate の bean（`BackupQuiesceConfiguration`。破棄の callback を推定させない）。`AuditLogService.recordCaptured`（D4-P3-3: 呼出し元は `BackupQuiesceDeferredWrites` だけで `AuditLogMethodLengthGuardTest` が bytecode で固定、時刻は `[今 − 最長の保持時間 − 余裕, 今]`、余裕は 5 分＋checkpoint の最大保持時間）と `PersistentSessionService.captureCurrent`・`revokeCaptured`、U-14 の解除後の最初の touch は `UserSessionMapper.touchCarriedOver`（既存の `touch` は行の idle 期限で絞るため）。`t_audit_log` に IP の列が無いため、解除後の監査に IP は書けない（取っておく値から外した）。
 
@@ -140,7 +140,7 @@
   - **失敗/rollback:** 待機が最大保持時間を超えないことを確かめる。
 
 - [ ] **BWQ-015 — uploads の最後の防線（storage 層の確認と一覧の試験）**
-  - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket を付けた起動の記録（BWQ-014 か staging。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3。登録の前（UNARMED）の uploads の directory の作成が assert に当たらず、実 MySQL の読取り専用の接続の下で起動の途中の書込みが拒否されないこと）を含める。**未取得**。
+  - **状態:** 実装・fast の試験は済み（commit `5efe3683`）。Demo は Runner 待ち。完了（`[x]`）の条件に、MySQL 8.4 で prod の profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket を付けた起動の記録（staging。BWQ-014 とともに本番の前に SRE が行う（2026-11-22 利用者決定）。2b の review 第 8 点 c。`deploy-runbook.md` §1.7 の BQ-3。登録の前（UNARMED）の uploads の directory の作成が assert に当たらず、実 MySQL の読取り専用の接続の下で起動の途中の書込みが拒否されないこと）を含める。**未取得**。
 
   - **実装の記録（第 2 段階 2b）:** `BackupWriteGate.assertUploadsMutationAllowed`（prod の UNARMED を含め、書込みを許さず permit が無ければ `BackupWriteQuiescedException`。filter の metric は `uploads`）。assert を置いた入口: `FileStorageServiceImpl`（保存・削除・再 scan）、`LocalDocumentStorage`（put・promote・delete・deleteStrict）、`ContractDocumentServiceImpl.create`（PDF）、`ImportStageReconciliationLedger`（write・remove）、`LegacyUploadMigrationService.migrate`、`FileCleanupServiceImpl.cleanupOrphanFiles`、一覧の試験で見つけた `ImportRawTempFileStore`（create は assert、deleteOrReport は「例外を投げない」契約のため静止中は消さずに孤児清掃へ委ねる）。`UploadsMutationInventoryTest` は 40 件（MUTATES 23・DIRECTORY_ONLY 9・OUTSIDE 8）を照合し、MUTATES は guard の method が gate の判定を呼ぶことも確かめる。`DocumentServiceImpl`・CloudSign の一時 file と NF01 の preflight の CLI は upload root の外。
 
@@ -249,7 +249,7 @@
   - **失敗/rollback:** 所要時間が大きく増えたら responder の間隔を見直す。`MySqlTestImagesTest` が integration の image の参照を拒否しないこと。
 
 - [ ] **BWQ-013 — 文書（runbook・README・監視・restore・baseline・pii-inventory）**
-  - **状態:** 文書は書いた（第 2 段階 2e）。Demo（§2〜§4 を上から読み、BWQ-014 と同じ順であることの確認）は済み（worker の報告）。checkbox は、Runner・CI の実測値の書き戻し（`design.md` §19、`deploy-runbook.md` §1.7 の BQ-5）と BWQ-014 の通しの Demo（BQ-4）の後に統括が決める。
+  - **状態:** 文書は書いた（第 2 段階 2e）。Demo（§2〜§4 を上から読み、BWQ-014 と同じ順であることの確認）は済み（worker の報告）。checkbox は、Runner・CI の実測値の書き戻し（`design.md` §19、`deploy-runbook.md` §1.7 の BQ-5）と BWQ-014 の通しの Demo（BQ-4。2026-11-22 利用者決定で、本番の前に SRE が staging で行う。本 PR では行わない）の後に統括が決める。
 
   - **実装の記録（第 2 段階 2e）:** `deploy-runbook.md`: 冒頭の一覧（RB-QUIESCE の項）、§0 の表、§1.0（停止口の行の片付けの参照）、§1.2（backup account の要求の表への表単位の `INSERT`・`UPDATE` と付ける時期・PROD-002 と署名、アプリ account の制御用・heartbeat 用の接続と host の型が 1 つ）、§1.7（DBA-1 の除外、「Backup 開始の前提」の `QUIESCE_PROVIDER=quiesce-db`・tool image の pin のし直し・preflight の `checks.quiesce`・002 の writer・004a・004b と循環しない解除の条件、新しい表 BQ-1〜BQ-5（U-11 の Security・DBA の署名、U-1 の staging の EFS の実測、MySQL 8.4 の prod の起動、BWQ-014、§19 の CI の実測）、NF05 の行の (g) U-6 の NF05 owner の受理・(h) openapi-candidate の 503）、§1.8（RR-10 の例外に §3.4 の GRANT と §4.7 の 2 つの SQL）、§2 の0（定期起動の停止）・3（STOPPED）・4（instance の行と 300 秒の待ち）・5（`--app-stopped` の full。初回は §3.4 の後）、§3.3（定期起動の停止の参照）、§3.4（表単位の GRANT と確認）、§4（`--app-stopped` の後に起動、readiness の後の確認と再開）、新しい §4.7（instance の確認・backup の再開・004b・障害の切分け・保持の手での終了・停止口の行の片付け）、§5（静止中の 503）、§6（restore の後の信号表と権限）。`ops/backup/README.md`: 「設定」に provider の表・`.env.backup` の `QUIESCE_*`・preflight・`CONTENT_HASH_TABLES` の注意と「書込み静止の記録（quiesce.json）」（置き場所・期限・ticket に貼らない投影）、「実行」に `--app-stopped` と「欠けた full の取り直し」、「ツールイメージの build・配布」に content ID の変化と pin のし直し、「権限分離」に要求の表の行・要らないもの（`DELETE`・`PROCESS`）・preflight と契約試験、origin/main `42719b10` の 298〜299 行の静止の説明、「復元」「監視」の参照、「テスト」に integration の responder・root の backup account（最小権限は BWQ-011 が確かめる）・shell の試験。`backup-health-monitoring.md`: §13.3 の条件の表と対応（CRITICAL 6・WARN 6。最後の防線の拒否は Connector/J の client 側の `S1009` と server の 1792 の両方を数える）。`restore-cutover.md`: 新しい §4.6（信号表の残り・権限の付け直し・再開の前の確認）。`baseline.md`: PROD-002 の writer、PROD-004 を 004a・004b に分けた。HFP-03 の `design.md` §5.1 の参照。`pii-inventory.md`: DB-148〜DB-150。`design.md` §19 の実測の記録。
 
@@ -262,21 +262,22 @@
   - **Demo:** §2〜§4 の手順を上から読み、BWQ-014 の通しの Demo と同じ順（timer の停止 → drain → 停止 → GRANT の確認 → `--app-stopped` の full → Flyway → 起動 → timer の再開 → 最初の ONLINE checkpoint）になっていることを確かめる。
   - **失敗/rollback:** 新しく書く文は日本語の用語（統合・リリース・本番）を使う。既存の節の記述と矛盾したら、正本（§1.0・README の表）を先に直す。
 
-- [ ] **BWQ-014 — 隔離環境での通しの Demo と証跡**
+- [ ] **BWQ-014 — staging での通しの Demo と証跡（本番の前に SRE が行う）**
+  - **状態:** **2026-11-22 利用者決定: RB-QUIESCE の PR では行わず、本番の前（go-live の前）に SRE が staging で行う**（実行規約の「Demo は local の MySQL 8.4 か Testcontainers・integration の compose」の例外。実 AWS の staging を使うが、本番の環境・credential は使わない）。**未取得**。取れるまで本番は NO-GO のまま。隔離環境（Runner の Docker 等）で通しても完了にしない（`deploy-runbook.md` §1.7 の BQ-4）。BQ-3（MySQL 8.4 の prod の起動）も同じ機会に行ってよい。
 
   - **依存:** BWQ-001〜BWQ-013・BWQ-015。本番の前に SRE が staging の EFS で uploads の snapshot の時間を測る（U-1。`design.md` §10.1）
   - **対応要求:** 全体（特に BWQ-RQ-002・003・005・010・014）
-  - **Objective:** 初回 backup（停止確認）→ app 起動 → 15 分 checkpoint（ONLINE）→ 解除の失敗と自動再開 → full の最中の置換え → restore の後の起動、の一連が隔離環境で runbook どおりに動くことを示す。
+  - **Objective:** 初回 backup（停止確認）→ app 起動 → 15 分 checkpoint（ONLINE）→ 解除の失敗と自動再開 → full の最中の置換え → restore の後の起動、の一連が staging で runbook どおりに動くことを示す。
   - **対象 file:** なし（証跡は repository の外。`target/backup-recovery-evidence/<run-id>/RB-QUIESCE/` を推奨）。
   - **Implementation / Demo:**
-    1. 空の MySQL 8.4 に Flyway（dev）で V1〜V202 を適用し、backup account に表単位の権限を付け、app を起動しない状態で `--app-stopped` の full を取る。
-    2. app（dev、scheduler 有効）を起動し、instance の行を確かめる。
+    1. 空の MySQL 8.4 に V1〜V202 を適用し（staging では `deploy-runbook.md` §3 の専用 Flyway job）、backup account に表単位の権限を付け、app を起動しない状態で `--app-stopped` の full を取る。
+    2. app（staging の設定、scheduler 有効）を起動し、instance の行を確かめる。
     3. app に書込みの負荷（marker の INSERT を続ける script と upload）をかけながら checkpoint を取り、ack の後に marker と uploads が増えないこと、解除の後に増えることを確かめる。静止中に logout し、解除の後に `t_user_session` が失効することを確かめる。静止区間の秒数と内訳、503 の件数（metric）を記録する。
     4. backup の job を静止の最中に kill し、保持 process が終わり、app が lease で再開し `AUTO_RESUMED` が出ることを確かめる。
     5. checkpoint の最中に app を再起動し、新しい instance が ack して checkpoint が VALID になることを確かめる。ONLINE の full の最中に app を再起動し、full が `NEW_INSTANCE` で中止され、job が mysqldump を止めて早く失敗し、app が 1〜2 分で起動し、手で取り直した full が VALID になることを確かめる。`--app-stopped` の full の最中に app を起動し、保持が解かれず app が起動を中止することを確かめる。
     6. 停止口（ticket つきの `enabled=false`）で起動し、checkpoint と `--app-stopped` の full の両方が失敗することを確かめる。その app を SIGKILL で止め、300 秒を過ぎても `--app-stopped` の full が失敗し、片付けの SQL の後は通ることを確かめる。
-    7. checkpoint から隔離の recovery target へ復元し、backup account と権限を付け直し、app を起動して残った要求が期限切れとして無視されることを確かめる。
-  - **Evidence:** 各 step の log の要約（errorCode・request_id・秒数）、`quiesce.json`、metric の抜粋、marker の照合結果。個人データ・秘密を含めない。
+    7. checkpoint から staging の recovery target（本番とは別）へ復元し、backup account と権限を付け直し、app を起動して残った要求が期限切れとして無視されることを確かめる。
+  - **Evidence:** 各 step の log の要約（errorCode・request_id・秒数）、`quiesce.json` の投影（job の結果の JSON の `quiesce` の欄か index の `quiesce`。state dir の全体は貼らない。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」）、metric の抜粋、marker の照合結果。個人データ・秘密を含めない。
   - **失敗/rollback:** 1 つでも期待と違えば該当する task へ戻る。本番の環境では行わない。
 
 ## 実装規模の見込み

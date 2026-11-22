@@ -91,7 +91,10 @@ app が backup の解除を確かめないまま更新を再開した。log の�
 1. 同じ要求の番号で `BACKUP_QUIESCE_FULL_ABORTED` が出ていれば ONLINE の full の中止（U-13）による再開で、「WARN: full の中止（取り直し）」
    に従う（この場合 AUTO_RESUMED の対応は要らない）。
 2. 同じ時刻の backup の job の stderr（`[quiesce-db]` の行と `hold.log` の要約）を見る。job・host が落ちた（`LEASE_EXPIRED`）なら host と
-   job を直す。`MAX_HOLD` なら「WARN: 静止区間が長い」。acquire・verify の失敗の片付け（`REQUEST_GONE`）なら、その失敗の理由を直す。
+   job を直す。`LEASE_EXPIRED` には、job は動いたまま保持 process が DDL 凍結の lock を失って終わり、lease の延長が止まった場合もある
+   （stderr・`hold.log` の要約に「DDL 凍結の lock を失いました」。その静止区間は verify で失敗する）。その場合は DB への接続（DDL の
+   session が切れた理由）と、同じ lock を取る Flyway job・DBA の DDL が動いていなかったかを確かめる。`MAX_HOLD` なら「WARN: 静止区間が
+   長い」。acquire・verify の失敗の片付け（`REQUEST_GONE`）なら、その失敗の理由を直す。
 3. `check-backup.sh --json` で、次の checkpoint が 15 分以内に VALID になることを確かめる。
 
 ### CRITICAL: FENCED（`BACKUP_QUIESCE_FENCED`）
@@ -194,7 +197,7 @@ ONLINE の full の最中に新しい app の instance が登録され（task �
 
 静止中に、HTTP の分類（filter）では止まらなかった書込みが、業務の接続の読取り専用（最後の防線）で拒否されて 503 になった（書込みは DB
 に入っていない）。**拒否の多くは Connector/J が server へ送る前に client 側で行い**（SQLSTATE `S1009`、vendor code 0、message
-「Connection is read-only. Queries leading to data modification are not allowed」）、**client 側の判定に掛からず server に届いた文は
+「Connection is read-only. Queries leading to data modification are not allowed.」）、**client 側の判定に掛からず server に届いた文は
 ERROR 1792（SQLSTATE `25006`）になる**。どちらも `ses_backup_quiesce_rejected_requests_total{kind="readonly_sql"}` に数え、WARN
 `errorCode=BACKUP_QUIESCE_READONLY_REJECTED`（60 秒に 1 回へ間引く）に経路の型と拒否の形（`connector-j-S1009` / `server-1792`）を出す。
 監視・log の検索を 1792 だけにしない（backup-write-quiesce design.md §20.7 の fix E）。

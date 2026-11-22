@@ -7,6 +7,8 @@
 
 ## 1. 背景（確認した事実）
 
+本節の file の行番号は origin/main `42719b10`（本 spec の実装の前）の行番号である。実装の後の位置は各 task の「実装の記録」と関数名で示す。
+
 - full（`ops/backup/backup-full.sh:131` の取得〜`:206` の解除。間に mysqldump と uploads の複製）と 15 分 checkpoint（`ops/backup/create-checkpoint.sh:130`〜`:187`。FLUSH BINARY LOGS、archiver の追従待ち、uploads の複製）は、整合点を取る前に書込みの静止を取得する。
 - provider は `ops/backup/providers/quiesce-local.sh` だけで、自ら「隔離/ローカル環境向け」と書いている。protocol は file で、heartbeat の file が 1 つも無いと失敗する（`:64-66`）。振り分けの `ops/backup/lib/quiesce.sh` は `quiesce-local` しか知らない。
 - app（`src/main`）には heartbeat・静止の ack・scheduler の ack のどれも実装が無い。CI の backup integration は compose の shell の loop が replica と scheduler の代わりをしている（`ops/backup/tests/docker-compose.integration.yml:72-109`）。
