@@ -3,6 +3,13 @@
 2026-11-14。実装方針の記録であり、CS Ownerの署名や本番公開の承認を代行しない。
 自動browserは統括Runnerだけが実行する。`ServiceDeskBrowserMTest`はdesktopと390pxで起票・詳細・公開返信・内部メモを実送信し、console/API失敗0件を検証する。
 
+## 前提の変更（決定済み（2026-11-22、利用者））
+
+- NF-02 の子の顧客ポータルの問い合わせ（`FEATURE_NF02_CUSTOMER_PORTAL_ENABLED`）も**初回リリースで ON** にする（B-NF02-2 の「第二段階」を変更した）。
+- そのため下の「第二段階」の節の確認は、初回配備（go-live）の前の確認になる（第一段階と同じく go-live の前提。**未取得**）。節の名前と項目は変えずに残す。
+- 第二段階の1つ目の「第一段階の内部desk公開条件には含めない」は、初回から CSAT の回答も公開の対象になるため、go-live の前に確かめる項目として読む。
+- 索引: `production-launch/deploy-runbook.md` §1.7 の NF02 の行、`production-launch/feature-switches.md` 4.3.1。
+
 | 記録 | 値 |
 |---|---|
 | 対象SHA / 実行run-id | |

@@ -587,7 +587,8 @@ if ($ExpectedScheduler -eq 'Disabled') {
 Ok "scheduler as expected ($ExpectedScheduler)"
 
 if ($Phase -eq 'Initial') {
-  # deploy-runbook.md sections 4 and 4.2: one task in bootstrap mode, all feature switches unset, NF07 trust as phase 1.
+  # deploy-runbook.md sections 4 and 4.2: one task in bootstrap mode, all feature switches unset, NF07 trust file empty.
+  # The switches of the first release go on from a steady start after section 5.5 (deploy-runbook 1.7, feature-switches 3.1).
   if (-not ((EnvValues 'SECURITY_BOOTSTRAP_ENABLED') -contains 'true')) { Fail 'SECURITY_BOOTSTRAP_ENABLED=true missing for the first start (deploy-runbook 4.2)' }
   $expires = @(EnvValues 'SECURITY_BOOTSTRAP_EXPIRES_AT')
   if ($expires.Count -ne 1 -or -not $expires[0]) { Fail 'SECURITY_BOOTSTRAP_EXPIRES_AT missing for the first start (deploy-runbook 4.2)' }
@@ -604,8 +605,8 @@ if ($Phase -eq 'Initial') {
   }
   if ($breakGlass.Count -ne 1 -or $breakGlass[0] -ne '') { Fail 'BREAK_GLASS_USERNAMES must be present and empty during bootstrap (deploy-runbook 4.2)' }
   if ($allNames -contains 'SECURITY_BOOTSTRAP_REOPEN_TICKET') { Fail 'SECURITY_BOOTSTRAP_REOPEN_TICKET must not be set for the first bootstrap (deploy-runbook 4.2; 5.7 only)' }
-  if ($featureSwitches.Count -gt 0) { Fail ('feature switches must stay unset for the first release (feature-switches 3.1): ' + ($featureSwitches -join ',')) }
-  if ($anchorFile.Count -ne 1 -or $anchorFile[0] -ne '') { Fail 'PRIVACY_TRUST_KMS_ANCHOR_FILE must be empty for the first release (NF07 trust as phase 1; deploy-runbook 1.6 item 11)' }
+  if ($featureSwitches.Count -gt 0) { Fail ('feature switches must stay unset for the initial bootstrap start; set them from a steady start after deploy-runbook 5.5 (feature-switches 3.1): ' + ($featureSwitches -join ',')) }
+  if ($anchorFile.Count -ne 1 -or $anchorFile[0] -ne '') { Fail 'PRIVACY_TRUST_KMS_ANCHOR_FILE must be empty for the initial bootstrap start; set it from a steady start (deploy-runbook 1.6 item 11)' }
   Ok 'first start: bootstrap mode on, BREAK_GLASS_USERNAMES empty, no feature switch, NF07 trust empty'
 } else {
   # deploy-runbook.md section 5.5: bootstrap off and exactly two break-glass names.

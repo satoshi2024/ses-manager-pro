@@ -24,6 +24,13 @@ info:
     '409': [INBOUND_PAYLOAD_CONFLICT]
     '429': [RATE_LIMITED]
     '500': [INTERNAL_ERROR]
+    '503': [BACKUP_QUIESCED]
+  x-backup-quiesce-rule: >
+    backupの書込み静止の間（15分ごとのcheckpointは通常数秒・最長300秒、02:00のfullは最長60分。どちらもその前の排水
+    （checkpointは最長30秒、fullは最長600秒。この間のRetry-Afterは10秒）を含む）は、
+    /external-api/v1/** の全operationが503/BACKUP_QUIESCED（retryable=true、Retry-After、X-SES-Error-Code）を返す。
+    要求は処理せず、監査行も書かない。clientはRetry-Afterの秒数の後に再試行する。公開APIが無効の間は、
+    静止中も平時と同じ404を返す。
   x-non-enumeration-rule: >
     Scope外のdetail targetは存在しないtargetと同じ404/RESOURCE_NOT_FOUNDへ収束させる。
     list/countではscope外rowを母集団へ含めず、error、cursor、件数から存在を推測できないようにする。
@@ -67,6 +74,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/engineer-availability/{publicEngineerId}:
     get:
       tags: [engineer-availability]
@@ -102,6 +111,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/projects:
     get:
       tags: [project]
@@ -136,6 +147,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/projects/{publicProjectId}:
     get:
       tags: [project]
@@ -171,6 +184,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/projects/count:
     get:
       tags: [project]
@@ -203,6 +218,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/contract-statuses:
     get:
       tags: [contract-status]
@@ -237,6 +254,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/contract-statuses/{publicContractId}:
     get:
       tags: [contract-status]
@@ -272,6 +291,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/contract-statuses/count:
     get:
       tags: [contract-status]
@@ -304,6 +325,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/invoice-statuses:
     get:
       tags: [invoice-status]
@@ -338,6 +361,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/invoice-statuses/{publicInvoiceId}:
     get:
       tags: [invoice-status]
@@ -373,6 +398,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/invoice-statuses/count:
     get:
       tags: [invoice-status]
@@ -405,6 +432,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
   /external-api/v1/webhooks/{provider}:
     post:
       tags: [inbound-webhook]
@@ -492,6 +521,8 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/BackupQuiesced'
 components:
   securitySchemes:
     publicClientAuthentication:
@@ -645,6 +676,28 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ServerError'
+    BackupQuiesced:
+      description: >
+        Temporarily unavailable while the backup write quiesce holds. The request was not processed and no audit row
+        was written. Retry after the Retry-After seconds.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+        Retry-After:
+          description: Seconds until retry. 10 while the quiesce is starting, otherwise the remaining hold rounded into 5 to 60 (60 when unknown).
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 60
+        X-SES-Error-Code:
+          description: Same value as the body code.
+          schema:
+            type: string
+            enum: [BACKUP_QUIESCED]
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/BackupQuiescedError'
   schemas:
     EngineerAvailability:
       type: object
@@ -1205,3 +1258,26 @@ components:
           maxLength: 128
         retryable:
           type: boolean
+    BackupQuiescedError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 503
+      x-allowed-error-codes: [BACKUP_QUIESCED]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [BACKUP_QUIESCED]
+        message:
+          type: string
+          maxLength: 256
+          example: Temporarily unavailable during backup
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+          enum: [true]

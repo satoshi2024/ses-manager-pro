@@ -1,6 +1,6 @@
 # 機能スイッチ運用手順（NF-01 / NF-02 / NF-03 / NF-04 / NF-06 / NF-07 / NF-10、子スイッチ3件）
 
-- 対象: 初回本番リリース（新規構築・全停止デプロイ・専用Flyway job）で段階公開するS-NF機能
+- 対象: 初回本番リリース（新規構築・全停止デプロイ・専用Flyway job）で公開するS-NF機能。初回リリースで ON にする機能と OFF のままの機能は 3.1（2026-11-22 利用者決定）
 - 位置づけ: **権限ではなく公開可否のスイッチ**。OFFの機能は管理者を含む全ロール・未認証利用者から見えなくなる
 - 実装: `com.ses.config.feature`（`Feature` / `FeatureSwitchProperties` / `FeatureSwitches` / `FeatureSwitchFilter`）
 - 対象外: NF-05・NF-08（既存の本番向けハードゲートで制御）、NF-09。NF-07は保持・保全（`NF07_RETENTION`）と DSAR（`NF07_DSAR`、`privacy.dsar.enabled`。A2a で登録）を親子にしない2つの最上位機能として登録する
@@ -66,13 +66,28 @@
 
 ## 3. ON / OFF の手順
 
-### 3.1 初回デプロイ
+### 3.1 初回デプロイと初回リリース
 
-1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施する。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。
+**初回リリースのスイッチ（決定済み（2026-11-22、利用者））**: 初回リリース（go-live。利用者への公開）の時点で、NF-01 本体・NF-01 二者確認・NF-02（子の顧客ポータルの問い合わせを含む）・NF-03 本体と資格番号・NF-04・NF-05（inbound・outbound）・NF-06・NF-07 保持・保全（hold の解除と policy の登録・有効化を含む）・NF-07 本人請求（DSAR）・NF-10 を ON にし、NF-08 は OFF のままにする。2026-11-17 からの「初回リリースは全スイッチOFF」の方針を変更した。
+
+- NF-02 の子の顧客ポータルの問い合わせ（`FEATURE_NF02_CUSTOMER_PORTAL_ENABLED`）も初回リリースで ON にする（決定済み（2026-11-22、利用者）。B-NF02-2 の「初回は OFF（第二段階）」を変更した。3.4・4.3.1）。
+- NF-07 の trust 文書には、解除の anchor と一緒に policy の登録・有効化（NF07-REG）の anchor も初回から入れる（決定済み（2026-11-22、利用者））。そのため D-02 の署名（保存期間等の値）も go-live の前提になる（4.7.6。**未取得**）。
+- ON にする機能の署名・受理・設定値・staging の確認は、全て初回配備（go-live）の前提になる。一覧は `deploy-runbook.md` §1.7（どれも**未取得**。利用者が取得を手配する）。揃うまで go-live しない。
+- NF-08 は B2c-2 の完了と独立 Review まで prod が起動を拒否する（対象外の機能。`deploy-runbook.md` §1.7 の NF08 の行）。初回リリースの後に B2c-2 を始めるが、着手の前に利用者の人手の承認が要る（**未取得**）。
+- code と雛形（`infra/ecs/task-definition.prod.json`）の既定値は OFF のまま変えない。ON は、実際に登録する task definition に署名の結果どおり設定する。
+
+手順:
+
+1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施し、初回の起動（bootstrap mode。`deploy-runbook.md` §4・§4.2）を行う。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。初回の起動の task definition に機能スイッチの環境変数があると、照合（`validate-task-definition.ps1` の `-Phase Initial`）が値に関係なく FAIL にする。NF-05 outbound のため、この起動から以後の全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID`（機能スイッチではない）を設定する（`deploy-runbook.md` §1.7「ON の起動までの順序と準備」の1）。
 2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF01_DUAL_CONFIRMATION=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF07_DSAR=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
+4. bootstrap を終えた後（`deploy-runbook.md` §5.5）、ON の起動の前の準備（NF-07 の Journal instance と専用の Flyway job、NF-05 outbound の OFF の記録（全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID` を設定し、ON の起動の前の最後の OFF の起動の後に状態の行と監査 `NF05_OUTBOUND_OFF` を確かめる）、privacy-admin の割当（4.7.4 の2）、法人を持つ組織（4.8.2）、全社共通カレンダー（4.3）。owner と状態は `deploy-runbook.md` §1.7「ON の起動までの順序と準備」。利用者が DBA・SRE を手配する。**未取得**）を揃え、ON にする環境変数と ON の時に要る値を、署名の結果どおり task definition に設定する。値の所在は `deploy-runbook.md` §1.7「初回リリースのスイッチと、ONの起動時検査が要る値の所在」と §1.0「ONにした時だけ必須になる設定」。照合は `-Phase Steady` で行う（ON/OFF の組合せは拒否しない。名前・置き場所等だけを見る。ON の時に要る値は app の起動時検査が見る）。
+5. 全停止で再起動し、起動ログの `[機能スイッチ] 起動時の状態` が `NF01=ON, NF01_DUAL_CONFIRMATION=ON, NF02=ON, NF02_CUSTOMER_PORTAL=ON, NF03=ON, NF03_CERTIFICATION_PII=ON, NF04=ON, NF06=ON, NF07_RETENTION=ON, NF07_DSAR=ON, NF10=ON` になることと、各機能の起動時の確認の log（4.7.4 の5、4.9.3 の3 等）を確かめる。NF-07 は決定の署名日前・失効日以降だと起動を止めずに OFF として扱う（4.7.2.1）ため、ここで ON を確かめる。NF-05 はこの log の対象外で、DG-05 草案 §4 の確認を行う。
+6. 各機能の画面・API が権限どおりに表示され、各節の ON の確認が済んでから公開する。
 
 ### 3.2 1機能ずつONにする
+
+初回リリースの後に機能を ON にするとき（3.3 で OFF にした機能を再び ON にするとき等）の手順である。初回リリースで ON にする機能は 3.1 の手順で ON にする。
 
 1. 対象NFの業務Owner承認・前提（下記4章の注意事項）を確認する。
 2. 対象の環境変数だけを `true` に設定する（例: `FEATURE_NF02_ENABLED=true`）。子スイッチをONにする場合は親の環境変数も `true` であることを確認する。複数instanceの場合は**全instanceで同じ値**にする。値の綴り誤りは起動失敗になるので、起動できない場合はまず値を確認する。
@@ -89,25 +104,25 @@
 4. 下記4章の「OFF中も動き続けるもの」を確認し、必要なら追加の運用対処を行う。
 5. 原因修正後、3.2の手順で再度ONにする。
 
-### 3.4 初回リリースの設定値（2026-11-13 決定 B-NF02-2 / B-NF03-1 / B-NF07-1）
+### 3.4 初回リリースの設定値（2026-11-13 決定 B-NF02-2 / B-NF03-1 / B-NF07-1。2026-11-22 利用者決定で一部を変更）
 
-初回リリースでは、親機能をONにする場合でも次の2つの子スイッチは**設定しない（既定のOFFのまま）**。NF-07の2つのスイッチも初回は**設定しない（OFF）**。
+2026-11-22 の利用者決定（3.1）で、NF-01 二者確認・NF-02 の顧客ポータルの問い合わせ・NF-03 資格番号・NF-07 の2つのスイッチは初回リリースで **ON** にする（B-NF02-2・B-NF03-1・B-NF07-1 の「初回は OFF」と、二者確認の「初回は OFF」を変更した）。初回リリースで ON にする行は、右端の「ONにする条件」が go-live の前提になる（どれも**未取得**。`deploy-runbook.md` §1.7）。
 
 | 環境変数 | 初回リリース | 根拠（決定記録） | ONにする条件（NF-02/NF-03は**実装側の提案。未決定**。NF-07は計画 §5.1 の条件で、prodでは起動時に強制する） |
 |---|---|---|---|
-| `PRIVACY_RETENTION_ENABLED` | 未設定（OFF） | B-NF07-1: production bridge（W-1〜W-12）を全て接続してから公開する。Q-8: 署名前は値UNKNOWN・flag OFF・未知は拒否のままマージする | 決定ID束縛（D-01・D-09 の決定ID・署名日・失効日、承認tenant、承認capability `retention`、approval digest）の完了と、privacy-admin の有効な管理者2名以上（break-glass口座を除く）。満たさなければ `PrivacyProductionConfigurationValidator` が起動を止める。決定の署名日前・失効だけなら起動は止めず、その間（実行中に失効日を迎えた日以降を含む）NF07はOFFとして扱われる（4.7.2.1） |
-| `PRIVACY_DSAR_ENABLED` | 未設定（OFF） | 同上。A2a で入口（`/privacy/dsar`・`/api/privacy/dsar`）と期限通知を `Feature.NF07_DSAR` に登録した。OFF の間は入口が404、期限通知の scheduler も止まる | prodでONにするには、上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提（`PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`・F2 provider 1件以上）が要る（A2b で実検査に置換。4.7 の表の5） |
-| `PRIVACY_DSAR_DUE_DAYS` | 未設定（期限日を計算しない） | D-06（DSAR SOP）の期限規則。法的な値のため既定値を持たない（I-1） | D-06 の署名後に、署名された日数（受付日 JST からの暦日数、1〜366）を人が設定する。D-01・D-06 の決定が無効な間は設定しても使わない |
-| `PRIVACY_DSAR_PACKAGE_MAX_AGE` | 未設定（草案 package を作らない） | D-06 で決める開示 package の最長保存期間（A2b）。法的な値のため既定値を持たない（I-1）。期限超過・交付記録・case の終了で package は PURGED になり実体も消える（削除の scheduler は flag OFF でも止めない） | D-06 の署名後に人が設定する（1時間〜366日。単位の無い数値は日数、`PT12H` 等も可）。範囲外は未設定と同じ |
+| `PRIVACY_RETENTION_ENABLED` | `true`（ON。2026-11-22 利用者決定。条件は go-live の前提で**未取得**） | B-NF07-1: production bridge（W-1〜W-12）を全て接続してから公開する。Q-8: 署名前は値UNKNOWN・flag OFF・未知は拒否のままマージする。2026-11-22 利用者決定で初回リリースで ON に変更（hold の解除を含む） | 決定ID束縛（D-01・D-09 の決定ID・署名日・失効日、承認tenant、承認capability `retention`、approval digest）の完了と、privacy-admin の有効な管理者2名以上（break-glass口座を除く）。満たさなければ `PrivacyProductionConfigurationValidator` が起動を止める。決定の署名日前・失効だけなら起動は止めず、その間（実行中に失効日を迎えた日以降を含む）NF07はOFFとして扱われる（4.7.2.1） |
+| `PRIVACY_DSAR_ENABLED` | `true`（ON。2026-11-22 利用者決定。条件は go-live の前提で**未取得**） | 同上（2026-11-22 利用者決定で初回リリースで ON に変更）。A2a で入口（`/privacy/dsar`・`/api/privacy/dsar`）と期限通知を `Feature.NF07_DSAR` に登録した。OFF の間は入口が404、期限通知の scheduler も止まる | prodでONにするには、上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提（`PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`・F2 provider 1件以上）が要る（A2b で実検査に置換。4.7 の表の5） |
+| `PRIVACY_DSAR_DUE_DAYS` | D-06 の署名値（初回リリースで DSAR を ON にするため必須。**未取得**。未設定なら期限日を計算せず、DSAR の ON の起動は `dsar.dueDaysUnset` で止まる） | D-06（DSAR SOP）の期限規則。法的な値のため既定値を持たない（I-1） | D-06 の署名後に、署名された日数（受付日 JST からの暦日数、1〜366）を人が設定する。D-01・D-06 の決定が無効な間は設定しても使わない |
+| `PRIVACY_DSAR_PACKAGE_MAX_AGE` | D-06 の署名値（初回リリースで DSAR を ON にするため必須。**未取得**。未設定なら草案 package を作らず、DSAR の ON の起動は `dsar.packageMaxAgeUnset` で止まる） | D-06 で決める開示 package の最長保存期間（A2b）。法的な値のため既定値を持たない（I-1）。期限超過・交付記録・case の終了で package は PURGED になり実体も消える（削除の scheduler は flag OFF でも止めない） | D-06 の署名後に人が設定する（1時間〜366日。単位の無い数値は日数、`PT12H` 等も可）。範囲外は未設定と同じ |
 | `PRIVACY_DSAR_DEADLINE_WARNING_DAYS` | 7 | 期限の何日前から privacy-admin へ通知するか（運用上の値。法的な期限ではない） | 運用者が 1〜90 の範囲で決める（範囲外は丸める） |
-| `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
-| `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
-| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | 未設定（OFF） | NF01細粒度epoch計画 §7.8 開始条件（統括の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8 | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
-| `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
+| `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | `true`（ON。決定済み（2026-11-22、利用者）。条件は go-live の前提で**未取得**） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする。2026-11-22 利用者決定で初回リリースで ON に変更（第二段階を設けない） | 公開の Owner 承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` を設定するかの決定（4.3.1）。親の `FEATURE_NF02_ENABLED` も `true` |
+| `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ。設定するかは CS Owner が決める。**未決定**） | 2026-11-13 決定: portal を開いても、portal を開く前に社内で登録した問い合わせは顧客へ出さない（初回リリースで ON にするため、未設定なら社内で登録した問い合わせはどれも出ない） | 社内で登録した問い合わせも出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する（設定する前の棚卸しは 4.3.1） |
+| `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` | `true`（ON。2026-11-22 利用者決定。条件は go-live の前提で**未取得**） | NF01細粒度epoch計画 §7.8 開始条件（統括の判断: commentを実際に書き込む＝子スイッチON より前にPrivacy署名が要る）・§12 O-8。2026-11-22 利用者決定で初回リリースで ON に変更（署名が先であることは変わらない） | Privacy署名（comment 2列の保存期間と削除・匿名化経路）、W3-21（W3-21a・W3-21b）のPASS。prodでは署名の参照 `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` が無いと `LifecycleDualConfirmationReleaseGate` が起動を止める（4.9） |
+| `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | `true`（ON。2026-11-22 利用者決定。条件は go-live の前提で**未取得**） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない。2026-11-22 利用者決定で初回リリースで ON に変更（DG-07 の確定が go-live の前提になる） | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
 
-- 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=OFF`、`NF03=ON, NF03_CERTIFICATION_PII=OFF` となることを確認する（NF-02/NF-03をONにした場合）。
-- 確認URL（NF-02 ON時）: `/api/portal/customer/service-desk/requests` が404、`/api/service-desk/requests` は権限どおり、顧客ポータル `/portal/customer` に「問い合わせ」タブが出ない。
-- 確認画面（NF-03 ON時）: 要員本人の `/my/certification-learning-skill-gap` の「資格を申請」に資格番号欄が出ない。API へ資格番号を付けて送ると400になる。
+- 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=ON`、`NF03=ON, NF03_CERTIFICATION_PII=ON` となることを確認する（初回リリース。3.1 の5）。
+- 確認URL（NF-02 と顧客ポータルが ON の時）: `/api/service-desk/requests` は権限どおり、顧客ポータル `/portal/customer` に「問い合わせ」タブが出て、portal 側の権限（`service-desk.view` / `service-desk.create`）どおりに起票・返信・CSAT ができる（4.3.1）。顧客ポータルの子を OFF にすると、`/api/portal/customer/service-desk/requests` が404になり「問い合わせ」タブが出ない。
+- 確認画面（NF-03 の子 ON 時）: 要員本人の `/my/certification-learning-skill-gap` の「資格を申請」に資格番号欄が出る。子が OFF のときは欄が出ず、API へ資格番号を付けて送ると400になる（4.6.1）。
 
 ## 4. 注意事項
 
@@ -144,17 +159,18 @@
 
 #### 4.3.1 顧客ポータルの子スイッチ（`nf02-customer-portal`）
 
-- OFF中（初回リリース）は、顧客からの起票・返信・CSAT回答・添付upload/downloadが全て404になる。問い合わせは社内担当がメール・電話等で受け、内部サービスデスク（`/service-desk`）へ代理起票する運用になる。
+- **初回リリースで ON にする（決定済み（2026-11-22、利用者）。B-NF02-2 の「初回は OFF（第二段階）」を変更した）**。下の「ON前の確認」（以前の「第二段階」）は go-live の前提である（**未取得**）。以下の OFF 中の説明は、問題時に子だけを OFF にした場合（3.3）に当たる。
+- OFF中は、顧客からの起票・返信・CSAT回答・添付upload/downloadが全て404になる。問い合わせは社内担当がメール・電話等で受け、内部サービスデスク（`/service-desk`）へ代理起票する運用になる。
 - CSATはportalからしか回答できないため、OFF中はCSATが集まらない。顧客ヘルスのCSAT要因は「missing input」となり減点されない（`CustomerHealthServiceImpl`。欠損を普通点で埋めない）。
-- **初回応答時刻（first response）の記録条件（現行実装）**: 社内担当が状態を `IN_PROGRESS`（内部画面の「対応着手」「対応再開」）へ変更したとき、または `PORTAL_VISIBLE` の返信を登録したときの早い方で記録される（`ServiceRequestServiceImpl#changeStatus` / `#addComment`）。`INTERNAL` メモだけでは記録されない。したがって初回リリース中は、**受付後に「対応着手」を押せば初回応答SLAを計測できる**。初回応答SLA上の「初回応答」を「対応着手」とみなしてよいかはDG-02-C2（CS Ownerの判断事項）。
-- **内部画面の返信の既定は「顧客ポータル公開返信」（`visibility=PORTAL_VISIBLE`）である**。初回リリース中は顧客から見えないが、データとしては公開扱いで保存される。**初回リリース中は、顧客への回答内容（メール・電話で伝えた内容の記録）も「社内限定メモ（`INTERNAL`）」で記録することを推奨する**（第二段階の公開対象を増やさない）。
-- **第二段階でONにしたときに顧客へ出る範囲（2026-11-13 決定により実装済み）**: portalの一覧・詳細・返信・CSAT・添付upload/downloadは、次のいずれかを満たす問い合わせだけを扱う（`PortalServiceRequestVisibilityPolicy`。範囲外は他社の問い合わせと同じ404）。
+- **初回応答時刻（first response）の記録条件（現行実装）**: 社内担当が状態を `IN_PROGRESS`（内部画面の「対応着手」「対応再開」）へ変更したとき、または `PORTAL_VISIBLE` の返信を登録したときの早い方で記録される（`ServiceRequestServiceImpl#changeStatus` / `#addComment`）。`INTERNAL` メモだけでは記録されない。したがって子が OFF の間は、**受付後に「対応着手」を押せば初回応答SLAを計測できる**。初回応答SLA上の「初回応答」を「対応着手」とみなしてよいかはDG-02-C2（CS Ownerの判断事項）。
+- **内部画面の返信の既定は「顧客ポータル公開返信」（`visibility=PORTAL_VISIBLE`）である**。子が OFF の間は顧客から見えないが、データとしては公開扱いで保存される。**子が OFF の間は、顧客への回答内容（メール・電話で伝えた内容の記録）も「社内限定メモ（`INTERNAL`）」で記録することを推奨する**（再び ON にした時の公開対象を増やさない）。子が ON の間は、範囲内の問い合わせの `PORTAL_VISIBLE` の返信は顧客に見える。
+- **ONにしたときに顧客へ出る範囲（2026-11-13 決定により実装済み）**: portalの一覧・詳細・返信・CSAT・添付upload/downloadは、次のいずれかを満たす問い合わせだけを扱う（`PortalServiceRequestVisibilityPolicy`。範囲外は他社の問い合わせと同じ404）。
   1. portalから起票された問い合わせ（`channel='PORTAL'` かつ `portal_user_id` あり。社内起票でchannelに「PORTAL」を選んでも該当しない）
   2. 公開開始時刻 `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` 以降に作成された問い合わせ（未設定なら該当なし）
-  - 既定（未設定）では、**初回リリース中に社内で登録した問い合わせとその返信・添付は、ON後も顧客へ出ない**。件名・本文は返信と異なり公開範囲を個別に指定できないため、この時刻による区切りが件名・本文を守る唯一の手段である。
+  - 既定（未設定）では、**社内で登録した問い合わせとその返信・添付は顧客へ出ない**（portal から起票した問い合わせだけが出る。初回リリースで ON にするため、社内で登録した問い合わせは登録の時期によらず出ない）。件名・本文は返信と異なり公開範囲を個別に指定できないため、この時刻による区切りが件名・本文を守る唯一の手段である。
   - 公開開始時刻を設定すると、その時刻以降に社内で登録した問い合わせは件名・本文・`PORTAL_VISIBLE` の返信・公開添付が顧客に見える（顧客portal利用者は招待時に `service-desk.view` を自動付与される）。設定する場合は、その時刻以降に社内で登録する問い合わせの件名・本文に顧客へ見せない内容を書かない運用とすること。
   - 内部サービスデスク（`/service-desk`、`/api/service-desk/**`）の一覧・詳細・返信・状態変更・添付は、この範囲の影響を受けない。
-- **ON前の確認（第二段階）**: (1) `visible-since` を設定するかと、その値をCS Ownerが決める。(2) 設定する場合は、その時刻以降に作成された社内登録分の件名・本文・`PORTAL_VISIBLE` 返信・公開添付を棚卸しする（内部画面の一覧・詳細は、問い合わせごとに「顧客公開対象」か「社内限定」かをportalと同じ判定で表示する。RB-NF02）。(3) portalの「詳細・返信」は、以前は page controller の無い `/portal/customer/service-desk/requests/{id}` を指して404になっていた。RB-I18N（P3-N2-9）で、同じ顧客ポータル画面の詳細・返信モーダル（`#portalRequestDetailModal`。既存の詳細API・返信APIを使い、子スイッチOFF中は描画しない）に改め、参照先の無い `templates/portal/customer/service-desk/{list,detail}.html` を削除した（新しいpage routeは追加していない）。(4) 顧客ポータルの全画面（`templates/portal/**` の6画面）はBootstrapを実在しない `/lib/bootstrap/css/…`・`/lib/bootstrap/js/…` で参照しており、CSS・JSとも404でモーダルと `d-none` が効かなかった。RB-I18N で内部画面と同じ `/lib/bootstrap/bootstrap.min.css`・`/lib/bootstrap/bootstrap.bundle.min.js` へ直し、template・静的HTMLが参照する同梱資源の実在を `StaticAssetLocalityTest` で検査するようにした（修正済み）。この修正は本スイッチと関係なく**初回配備の時点で**顧客ポータルの全画面（login・招待受諾・規約・customer・bp）の見た目と動作を変えるため、実ブラウザの確認は第二段階ではなく**初回配備の前提**である（`deploy-runbook.md` §1.7「初回配備から有効になる部分」の表、未取得）。第二段階のON前には、加えて問い合わせの起票・CSAT・詳細・返信のモーダルを実ブラウザで開いて確かめる。
+- **ON前の確認（初回リリースで ON にするため go-live の前提。以前の「第二段階」。どれも未取得）**: (1) `visible-since` を設定するかと、その値をCS Ownerが決める。(2) 設定する場合は、その時刻以降に作成された社内登録分の件名・本文・`PORTAL_VISIBLE` 返信・公開添付を棚卸しする（内部画面の一覧・詳細は、問い合わせごとに「顧客公開対象」か「社内限定」かをportalと同じ判定で表示する。RB-NF02）。(3) portalの「詳細・返信」は、以前は page controller の無い `/portal/customer/service-desk/requests/{id}` を指して404になっていた。RB-I18N（P3-N2-9）で、同じ顧客ポータル画面の詳細・返信モーダル（`#portalRequestDetailModal`。既存の詳細API・返信APIを使い、子スイッチOFF中は描画しない）に改め、参照先の無い `templates/portal/customer/service-desk/{list,detail}.html` を削除した（新しいpage routeは追加していない）。(4) 顧客ポータルの全画面（`templates/portal/**` の6画面）はBootstrapを実在しない `/lib/bootstrap/css/…`・`/lib/bootstrap/js/…` で参照しており、CSS・JSとも404でモーダルと `d-none` が効かなかった。RB-I18N で内部画面と同じ `/lib/bootstrap/bootstrap.min.css`・`/lib/bootstrap/bootstrap.bundle.min.js` へ直し、template・静的HTMLが参照する同梱資源の実在を `StaticAssetLocalityTest` で検査するようにした（修正済み）。この修正は本スイッチと関係なく**初回配備の時点で**顧客ポータルの全画面（login・招待受諾・規約・customer・bp）の見た目と動作を変えるため、実ブラウザの確認は**初回配備の前提**である（`deploy-runbook.md` §1.7「初回配備から有効になる部分」の表、未取得）。子を初回リリースで ON にするため、go-live の前に、加えて問い合わせの起票・CSAT・詳細・返信のモーダルを実ブラウザで開いて確かめる（未取得）。
 - ONにするには `FEATURE_NF02_ENABLED=true` と `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED=true` の両方が必要。portal側の権限（`service-desk.view` / `service-desk.create`）・招待・規約は既存portalの正本に従う。
 
 ### 4.4 NF-04
@@ -177,7 +193,7 @@
 
 #### 4.5.1 ONにする前の署名・受理（2026-11-17、RB-NF10。全て未取得）
 
-`deploy-runbook.md` §1.7 のNF10の行の詳細である。揃うまで `FEATURE_NF10_ENABLED` はOFFのまま。
+`deploy-runbook.md` §1.7 のNF10の行の詳細である。NF-10 は初回リリースで ON にする（3.1。2026-11-22 利用者決定）ため、下の全てが go-live の前提になる（揃うまで go-live しない）。
 
 | # | 要るもの | 決める人・署名者 | 状態 | 正本 |
 |---|---|---|---|---|
@@ -197,7 +213,8 @@
 
 #### 4.6.1 資格番号の子スイッチ（`nf03-certification-pii`）
 
-- OFF中（初回リリース）も、資格の申請・取得日・有効期限・証憑upload・HR確認（verify/reject）・訂正・取消・更新、学習計画、skill gapは従来どおり使える。止めるのは**資格番号の入力だけ**である。
+- 初回リリースでは ON にする（3.1・3.4。2026-11-22 利用者決定。B-NF03-1 の「初回は OFF」を変更した）。DG-07 の承認と、証憑文書についての Privacy の確認（下の4つ目）は go-live の前提（**未取得**）。
+- OFF中も、資格の申請・取得日・有効期限・証憑upload・HR確認（verify/reject）・訂正・取消・更新、学習計画、skill gapは従来どおり使える。止めるのは**資格番号の入力だけ**である。
 - 資格番号の入力経路は本人の申請と再申請の2つだけ（管理側API・CSV取込・他画面に資格番号の入力経路は無い。入口の一覧は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.1）。OFF中にAPIへ資格番号を付けて送ると、書込み・lock・暗号化の前に400で拒否する（黙って捨てない）。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致の再申請は409が先に返る。400の message key `certification.record.numberEntryDisabled` は4つのbundleに登録済みで、資格番号を空欄にして申請するよう案内する文言が表示される（正常な画面は資格番号を送らないため、直接API呼出しか、子スイッチON時に開いた古い画面だけが該当する）。
 - 新規構築でOFFのまま運用した期間は資格番号の暗号文が作られないため、一覧・詳細は「未登録」表示になる。
 - 証憑（資格証の画像・PDF）は資格番号や氏名を含み得るが、`CERTIFICATION_EVIDENCE` 文書として既存の文書台帳・retention/legal hold・scanに従う（本スイッチの対象外）。Privacyの確認事項として残す。
@@ -205,7 +222,7 @@
 
 ### 4.7 NF-07（W3-14b: 決定ID束縛とONの起動検査）
 
-計画: `.kiro/specs/privacy-retention-dsar/production-bridge-phased-plan.md` §3.1.1・§5.1・§5.2・§7。初回リリースはOFF（3.4）。
+計画: `.kiro/specs/privacy-retention-dsar/production-bridge-phased-plan.md` §3.1.1・§5.1・§5.2・§7。初回リリースでは保持・保全（hold の解除と policy の登録・有効化を含む。trust 文書には両方の anchor を入れる）と本人請求（DSAR）の両方を ON にする（3.1・3.4。2026-11-22 利用者決定）。go-live の前提は `deploy-runbook.md` §1.7 の NF07 の2行（Journal（同 §3.6）と trust（同 §4.6）を含む。どれも**未取得**）。
 
 #### 4.7.1 OFFのときの応答（正確な説明）
 
@@ -309,6 +326,8 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 計画: `production-bridge-phased-plan.md` §4 の NF07-REG 実装記録。`PRIVACY_RETENTION_ENABLED` の下の入口で、ON にしても下の前提が揃うまで開かない。
 
+**初回リリースで開ける（決定済み（2026-11-22、利用者））**: trust 文書には、hold の解除の anchor と一緒に policy の登録・有効化の anchor も初回から入れる。そのため下の前提（D-01・D-02・D-03 の署名。D-02 は保存期間等の値）は go-live の前提になる（D-02・D-03 は**未取得**。`deploy-runbook.md` §1.7 の NF07 の行）。
+
 - 入口: `POST /api/privacy/policies`（本文 `{"envelope":"<canonical bytes の base64>","signature":"<Ed25519 署名の base64>"}`。issuer が D-03 の鍵で署名した envelope をそのまま渡す。system は鍵を持たない）と `POST /api/privacy/policies/{id}/activate`（本文 `{"expectedCurrentId":<確認した current の行 ID。無ければ null>}`）、`POST /api/privacy/policies/{id}/withdraw`（本文なし。有効化されたことの無い `CANDIDATE` の取下げ）。action はどれも `privacy.policy.manage`（privacy-admin だけ）。
 - **開放の前提（要求ごとに判定。揃うまで存在しない URL と同じ404で、OFF と同じ本文）**: (1) D-01・D-02・D-03 の決定ID が有効（`privacy.approval.d02.decision-id` / `signed-on` / `expires-on` = `PRIVACY_APPROVAL_D02_DECISION_ID` / `_SIGNED_ON` / `_EXPIRES_ON`、D-03 は `PRIVACY_APPROVAL_D03_*`。`application.yml` の `privacy.approval.d02`・`d03`・`d05` に既定が空の placeholder がある。規則は 4.7.3 と同じ。D-02・D-03 は approval digest に入れない）、(2) prod profile、(3) trust anchor が1件以上登録され、失効 provider がそのうち1件以上を ACTIVE と答える（key が `authorityId:keyId` と違う anchor・Ed25519 以外の鍵の anchor・判定の時刻に有効期間外の anchor・授権 tenant（`OIDC_TENANT_ID`）を範囲に含まない anchor は数えない。anchor と失効状態は判定のたびに読むため、anchor を消せば再起動せずに閉じる）。**第1期は trust anchor registry が空で失効 provider が常に UNKNOWN のため、決定ID を設定しても開かない**（trust 文書（4.7.7）を設定するまでは開かない。D-03 方式の adapter は RB-NF07-TRUST-KMS で実装済み。deploy-runbook §1.7・§4.6）。
 - 手順: privacy-admin A が登録する（`CANDIDATE`）→ A とは別の privacy-admin B が、D-02 の決定書に記載された envelope の digest と一覧・詳細の digest（`envelopeDigest`）を照合し（一覧・詳細は envelope の法的な値を返さないため、B が確かめられる内容は policy ID・revision・digest）、現在の current の行 ID を `expectedCurrentId` にして有効化する（`CURRENT`。旧 current は同じ transaction で `SUPERSEDED`）→ `GET /api/privacy/policies/evaluate` で `APPROVED_ACTIVE` と digest を確認する。A 自身の有効化は403。
@@ -333,7 +352,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 ### 4.8 NF-06（W3-12: 取込センター画面とONの前提）
 
-正本: `.kiro/specs/data-migration-import-center/a1a-ingress-operations.md`（§10 admission、§11 検証・preview・error export、§13 画面）。初回リリースはOFFで配備する。ONにしても apply 系（apply・restart・rollback・compensation）は含まない（B-NF06-3）。
+正本: `.kiro/specs/data-migration-import-center/a1a-ingress-operations.md`（§10 admission、§11 検証・preview・error export、§13 画面）。初回の起動（bootstrap）は OFF で行い、初回リリース（go-live）では ON にする（3.1。2026-11-22 利用者決定。4.8.2 は go-live の前提で、**未取得**）。ONにしても apply 系（apply・restart・rollback・compensation）は含まない（B-NF06-3）。
 
 #### 4.8.1 OFFのときの応答
 
@@ -386,7 +405,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 ### 4.9 NF-01の子: 二者確認（`nf01-dual-confirmation`、W3-21a）
 
-二者確認は提出・確認の業務comment（`t_lifecycle_dual_submission.business_comment`・`t_lifecycle_dual_confirmation.decision_comment`）を追記専用表（V195。trigger と `AppendOnlyMapper` で更新・削除不可）へ保存する。これらの保存期間と削除・匿名化の経路はPrivacyの署名で決まる（NF01細粒度epoch計画 §10・§12 O-8）。実装は署名前に出荷し、子スイッチはOFFのままにする。
+二者確認は提出・確認の業務comment（`t_lifecycle_dual_submission.business_comment`・`t_lifecycle_dual_confirmation.decision_comment`）を追記専用表（V195。trigger と `AppendOnlyMapper` で更新・削除不可）へ保存する。これらの保存期間と削除・匿名化の経路はPrivacyの署名で決まる（NF01細粒度epoch計画 §10・§12 O-8）。実装は署名前に出荷し、署名までは子スイッチをOFFのままにする。初回リリースでは ON にする（3.1。2026-11-22 利用者決定）ため、4.9.2 の条件と `deploy-runbook.md` §1.7.1 の手動確認は go-live の前提になる（**未取得**）。
 
 #### 4.9.1 OFFのときの応答
 

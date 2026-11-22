@@ -307,7 +307,7 @@ DISABLED（停止口。U-7）: 登録と heartbeat を続け、gate は閉じな
 | portal の logout（`/api/portal/auth/logout`） | 外部の顧客・BP | 503（U-8 の対象外。DB の session のため失効を遅らせない。§6.13） | WRITE と同じ |
 | 書込みを伴う既知の GET | OIDC の `/oauth2/authorization/**`・`/login/oauth2/code/**`、freee の `/integrations/freee/**` | 503 | 同上 |
 | file の download（`ApiAuditFilter` の download 判定） | | **U-10（決定済み）**: 503（download の監査を欠かさない） | 同上 |
-| 外部 API `/external-api/**`（NF05。初回リリースは OFF で LB でも遮断） | | **U-6（決定済み）**: `ExternalApiErrorWriter` の 503（retryable・Retry-After）。監査行は書かず抑止の metric だけ。NF05 を開ける前に NF05 owner の受理が要る | 同上（§6.10） |
+| 外部 API `/external-api/**`（NF05。初回リリースで ON にする（2026-11-22 利用者決定。`deploy-runbook.md` §1.7）。開放までは LB でも遮断） | | **U-6（決定済み）**: `ExternalApiErrorWriter` の 503（retryable・Retry-After）。監査行は書かず抑止の metric だけ。NF05 を開ける前に NF05 owner の受理が要る | 同上（§6.10） |
 | bootstrap・break-glass の session の要求（`/logout` の POST を除く） | §5 の bootstrap 作業 | 503（毎回の監査を残せないため） | 同上 |
 | その他の GET・HEAD | 一覧・詳細・dashboard・通知の取得 | 継続。業務の接続は読取り専用。session の最終利用の更新は省き、idle は U-14 のとおり扱う（§6.4）。想定外の書込みは ERROR 1792 → 503。best-effort の監査は **U-9（決定済み）**: DB へ書かず WARN の application log | §6.4・§6.5 |
 | portal の GET・HEAD（`/portal/**`・`/api/portal/**`。portal の静的資源 `/portal/css`・`/portal/js`・`/portal/img` を含む。download を除く） | 検収・契約・請求・見積・注文請の参照、`/api/portal/auth/me` | **U-15（決定済み 2026-11-22）**: 継続。`PortalSessionFilter` の `PortalSessionServiceImpl.resolve` は `t_portal_session` へ書かず（touch も期限切れの失効も）、idle は U-14 と同じ規則で判定する（§6.4）。portal の download は U-10 のとおり 503 | §6.4 |
@@ -621,7 +621,8 @@ verify: 要求が有効で、手順 4 と同じ分類で該当する instance �
 ### 10.2 full の静止区間
 
 - 上の各区間に mysqldump の全体が加わる。初期の DB は小さく数十秒、10 GB 程度で 5〜15 分と見込む（DB の大きさは HFP-03-PROD-007 で BLOCKED）。02:00 に始まり、同じ時刻の日次 job は解除の後に遅れて走る。
-- mysqldump の起点の採取（`--source-data=2` の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`）は、静止中も続く長い SELECT の終わりを待ち、その間 lease の延長と heartbeat の UPDATE も待たされ得る（§17 L-6、§19）。
+- mysqldump の起点の採取（`--source-data=2` の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`。8.4 の mysqldump は `FLUSH LOCAL TABLES` / `FLUSH LOCAL TABLES WITH READ LOCK`）は、静止中も続く長い SELECT の終わりを待ち、その間 lease の延長と heartbeat の UPDATE も待たされ得る（§17 L-6、§19）。CI の小さい fixture（長い SELECT 無し）では待ちは 0 だった（§19）。
+- CI の実測（2026-11-22、run 44979797399 の backup integration、小さい fixture）: full の静止区間の内訳は acquire 1.168 秒、dump 1.028 秒、uploads 0.186 秒、table_counts 0.336 秒、content_hash 0.529 秒、schema_fingerprint 0.489 秒、verify 0.075 秒、release 0.478 秒（合計 約 4.29 秒）。本番の大きさの値ではない（本番の DB の大きさは HFP-03-PROD-007、uploads は BQ-2。どちらも**未取得**）。
 
 ### 10.3 上限と超えたときの挙動
 
@@ -833,7 +834,7 @@ CLAUDE.md は本 batch では変えない。
 | L-3 | 静止中の best-effort の監査は application log にだけ残る | U-9。監査表の連続性を求める場面ではその要求を WRITE に分類する |
 | L-4 | 停止確認では「heartbeat だけが止まり長い処理を続ける instance」を機械で見つけられない | U-2。二重の故障で、DBA の手の確認で補う。ONLINE は必要な instance 1 つ以上と観測で補う |
 | L-5 | processlist の観測は観測の瞬間に在る接続だけを見る。中継を挟むと弱くなる | §5.4。verify の前に観測し直させ、中継を使わないことを 004a で確かめる |
-| L-6 | full の起点の採取（`FLUSH TABLES WITH READ LOCK` 等）は長い SELECT を待ち、その間 lease の延長と heartbeat も待たされる。lease が切れると full は VALID にならない | full は 02:00 で長い SELECT は少ない。続けて起きる場合は後の batch で対策を検討する。§19 で確かめる |
+| L-6 | full の起点の採取（`FLUSH TABLES WITH READ LOCK` 等）は長い SELECT を待ち、その間 lease の延長と heartbeat も待たされる。lease が切れると full は VALID にならない | full は 02:00 で長い SELECT は少ない。続けて起きる場合は後の batch で対策を検討する。§19 で確かめる（CI の小さい fixture では待ち 0。長い SELECT と重なる場合は BWQ-014 の staging で確かめる。**未取得**） |
 | L-7 | checkpoint の区間が `startup-wait-max` より長いと、その間に置き換わった task は起動を中止し、ECS が起動し直す | §6.8。full の最中は U-13 で静止を解くため起動できる |
 | L-8 | 閉じた後に投入した async の task の保留一覧は memory にだけあり、落ちると失われる | §6.7。既存の executor の queue と同じ性質 |
 | L-9 | 長時間の処理と重なった checkpoint は欠ける | U-3 |
@@ -860,16 +861,18 @@ CLAUDE.md は本 batch では変えない。
 
 ## 19. 実装の時に実測で確かめる事項（未実測の前提）
 
+CI で取る行は、2026-11-22 の PR #128（head `9448aaf1`、run 44979797399）の値を書き戻した（`deploy-runbook.md` §1.7 の BQ-5）。CI の値は小さい fixture・隔離環境のもので、本番の大きさ・staging の値ではない（BQ-2・BQ-4。**未取得**）。
+
 | 前提 | 確かめる所 | 違った場合 |
 |---|---|---|
-| 存在しない表への表単位の GRANT は `CREATE` を含めないと通らない（MySQL 8.4） | BWQ-011 の準備（**未取得**。CI の mysql-test の shard 3 で `BackupQuiesceProviderContractMySqlTest` が試験の log に記録する予定。CI の backup integration は表を作った後に GRANT するため、ここでは取れない）、DBA の staging（**未取得**） | 規則が無くても §3.4 の後に GRANT する順は変えない |
+| 存在しない表への表単位の GRANT は `CREATE` を含めないと通らない（MySQL 8.4） | BWQ-011 の準備。**CI で取得済み（2026-11-22、run 44979797399 の mysql shard 3、`BackupQuiesceProviderContractMySqlTest`、mysql:8.4.13）**: 表を作る前の表単位の `GRANT INSERT, UPDATE` は**拒否**された（`Table 'ses_bq_contract.sys_backup_quiesce_request' doesn't exist`）。`CREATE` を含める形は U-11（要求の表への `INSERT`・`UPDATE` だけを与える）に反するため試していない。CI の backup integration は表を作った後に GRANT するため、ここでは取れない。DBA の staging は**未取得** | **結論: GRANT は §3 の migration の後（`deploy-runbook.md` §3.4）でなければならない**。配備の前の DBA-1 の確認では付けられない。restore で新しい source にした後も、表ができてから付け直す（`ops/backup/runbooks/restore-cutover.md` §4.6） |
 | 読取り専用の session で locking read が ERROR 1792 になる | BWQ-004 | 通るなら L-2 の locking read の 503 は起きない |
-| 読取り専用の業務の接続の DML を MySQL が ERROR 1792 で拒否する | BWQ-004（**`fea83915` の Runner の実測で前提が違った**。fix E） | Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に `S1009` で拒否する（vendor code 0）。1792 だけを見る判定は 503 にならず 500 で、`readonly_sql` も数えなかった（書込み自体は拒否されていた）。判定を両方の形にした（§6.5.1・§20.7）。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない読取り専用の session）を別の case で固定する |
+| 読取り専用の業務の接続の DML を MySQL が ERROR 1792 で拒否する | BWQ-004（**`fea83915` の Runner の実測で前提が違った**。fix E） | Connector/J 8.3.0 は `setReadOnly(true)` の接続の DML を server へ送る前に `S1009` で拒否する（vendor code 0）。1792 だけを見る判定は 503 にならず 500 で、`readonly_sql` も数えなかった（書込み自体は拒否されていた）。判定を両方の形にした（§6.5.1・§20.7）。`BackupWriteQuiesceMySqlTest` は判定で両方を受け入れ、server 側の形（driver を経由しない読取り専用の session）を別の case で固定する。fix E の後は CI で取得済み（2026-11-22、run 44979797399 の mysql shard 3。既定の mysql:8.4.13 で `BackupWriteQuiesceMySqlTest` を含む shard の全件が PASS） |
 | Hikari は接続を返すと read-only を既定へ戻し、Connector/J は `SET SESSION TRANSACTION READ ONLY` を送る | BWQ-004 | 戻らなければ包みが返す時に戻す |
 | InnoDB の一意キーの検査の lock 待ち（REFUSED の INSERT が未確定の QUIESCED を待つ）と `innodb_lock_wait_timeout` の session 設定 | BWQ-003 の MySQL 試験 | 待ちの扱いを見直す |
 | Spring は破棄の callback を包む前の bean に登録し、refresh の失敗では `ContextClosedEvent` を出さない。`DestructionAwareBeanPostProcessor` は両方の経路で呼ばれる | BWQ-003 の停止の試験 | §6.11 の入口を見直す |
-| mysqldump 8.4 の `--single-transaction --source-data=2` の lock の取り方と待ち | BWQ-012・BWQ-014（**未取得**。CI の backup integration で取得予定: 証跡 `full-dump-start-lock.txt`。記録だけで判定しない。統括が CI の後に書き戻す） | L-6 の扱いを見直す |
-| STORED 生成列 `active_slot` の mysqldump・import・schema fingerprint の扱い（D-P3-7） | BWQ-012。**一部実測（2026-11-22、CI run 44977161397 と手元の MySQL 8.0.36）**: 生成式の文字列の introducer は DDL の接続の文字集合で決まる。latin1 の接続（mysql client の container の locale の既定）で作ると `_latin1'REQUESTED'` と記録され、mysqldump（`SET NAMES utf8mb4`）からの復元後は `_utf8mb4'REQUESTED'` に変わり、復元の検証が schema fingerprint の column 区分の不一致で `FAILED_VALIDATION` になった。utf8mb4 の接続で作れば復元後も同じ形で一致する。本番の Flyway job の接続（`characterEncoding=utf-8`、§3.3 の `FLYWAY_URL`）は utf8mb4 になることを `FlywayProdFreshInstallMySqlTest` で固定し、integration は V202 を `--default-character-set=utf8mb4` で適用する。fingerprint の正規化は行わない（記録と違う形の復元を見逃さないため）。修正後の CI の往復の証跡 `quiesce-generated-column.txt` は統括が書き戻す | migration を Flyway job 以外（文字集合を指定しない mysql client 等）で適用すると、復元の検証が通らなくなる（fail-closed。§3 の手順で migration は job だけが行う） |
+| mysqldump 8.4 の `--single-transaction --source-data=2` の lock の取り方と待ち | BWQ-012・BWQ-014。**CI で取得済み（2026-11-22、run 44979797399 の backup integration。実 MySQL 8.4.13・client 8.4.13、証跡 `full-dump-start-lock.txt`。記録だけで判定しない）**: performance_schema の digest で、`FLUSH LOCAL TABLES` 1.202 ms、`FLUSH LOCAL TABLES WITH READ LOCK` 0.043 ms、`SHOW BINARY LOG STATUS` 0.042 ms、`START TRANSACTION WITH CONSISTENT SNAPSHOT` 0.041 ms、`UNLOCK TABLES` 0.033 ms、lock の待ちは全て 0.000。8.4 の mysqldump は binlog に書かない形（`LOCAL`）で表を flush し、global read lock を取り、その lock の下で一貫 snapshot を始め（`START TRANSACTION WITH CONSISTENT SNAPSHOT`）、起点（`SHOW BINARY LOG STATUS`）を読んでから lock を外す（上の時間は digest ごとの値で、文の順序を表さない）。小さい fixture で長い SELECT が無い条件の値で、長い SELECT と重なったときの待ち（L-6）は測っていない（BWQ-014 の staging。**未取得**） | L-6 の扱いを見直す（CI の値では見直しは要らない。staging の値で改めて判断する） |
+| STORED 生成列 `active_slot` の mysqldump・import・schema fingerprint の扱い（D-P3-7） | BWQ-012。**一部実測（2026-11-22、CI run 44977161397 と手元の MySQL 8.0.36）**: 生成式の文字列の introducer は DDL の接続の文字集合で決まる。latin1 の接続（mysql client の container の locale の既定）で作ると `_latin1'REQUESTED'` と記録され、mysqldump（`SET NAMES utf8mb4`）からの復元後は `_utf8mb4'REQUESTED'` に変わり、復元の検証が schema fingerprint の column 区分の不一致で `FAILED_VALIDATION` になった。utf8mb4 の接続で作れば復元後も同じ形で一致する。本番の Flyway job の接続（`characterEncoding=utf-8`、§3.3 の `FLYWAY_URL`）は utf8mb4 になることを `FlywayProdFreshInstallMySqlTest` で固定し、integration は V202 を `--default-character-set=utf8mb4` で適用する。fingerprint の正規化は行わない（記録と違う形の復元を見逃さないため）。**修正後は CI で取得済み（2026-11-22、`9448aaf1` の run 44979797399 の backup integration、証跡 `quiesce-generated-column.txt`）**: source・target とも `active_slot` は `_utf8mb4'REQUESTED'` の introducer の同じ生成式の `STORED GENERATED` で、一意索引は1つ、target の行は3（REQUESTED の1行が 1、ほかの2行が NULL）。validate は `READY_FOR_CUTOVER`、`content_hash`・`schema_fingerprint` とも PASS | migration を Flyway job 以外（文字集合を指定しない mysql client 等）で適用すると、復元の検証が通らなくなる（fail-closed。§3 の手順で migration は job だけが行う） |
 | bash の process substitution と `read -t` による保持 process の終わり方（job の SIGKILL で EOF）、process substitution の `wait`（bash 4.4 以上）、長い子 process が書き口を閉じること | BWQ-009（**第 2 段階 2d に tool image（Debian bookworm の bash 5.2）の中で成立を確かめた**: `quiesce-db-test.sh` の kill の case（mysqldump の最中と DDL lock の取得の待ちの間に job を SIGKILL すると、保持 process が 5 秒以内に終わり lock の session も終わる）、`$!` で process substitution の PID を取り `wait` できること。前提は変わらない） | 名前付き pipe 等に替える |
 | Connector/J の query timeout は文の取消しに別の接続を開く | BWQ-003 の MySQL 試験 | 制御用 pool の大きさと取消しの扱いを見直す |
 | Spring の `DisposableBeanAdapter` と depends-on による破棄の順（anchor・`taskExecutor`・`taskScheduler`） | BWQ-003 | 破棄の順の固定の方法を見直す |
@@ -992,7 +995,7 @@ CLAUDE.md は本 batch では変えない。
 | P3-9 | `MySqlTestShardInventoryTest` が source の部分一致で数える | compile 済みの class の JUnit の注釈で数え、fixture の空白の工夫を外した。前半（`BackupQuiesceTestContextInventoryTest` が `SpringApplicationBuilder`・initializer で prod にした context を見ない）は 2c の review P3-2 で、`SpringApplicationBuilder` の prod の context を理由つきの一覧の中だけにする走査を足した（§20.8）。`ApplicationContextRunner`・initializer の profile は静的な走査の外に残る（L-22） |
 | P3-10 | spec の書き戻しの漏れ（§20・L-13・特権の logout・IP） | 本節と §20.5・L-13・L-21。IP は 2c の事実の修正の commit（§6.13・§14・§20、tasks の BWQ-005） |
 | P3-11 | 2a・2b を BWQ-007 無しで main へ入れない | PR の説明に書く（統括） |
-| 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く |
+| 第 8 点 b | NF05 の openapi に 503 が無い | BWQ-013 で §1.7 の NF05 の行に書く。RB-FIRST-RELEASE で `openapi-candidate.yaml` に 503（`BACKUP_QUIESCED`）を足し、`IntegrationHubOpenApiContractTest` で固定した（commit `107ea95b`。2026-11-22 利用者決定） |
 
 ### 20.7 Runner の実測（`fea83915` の mysql shard 3）と fix E
 
@@ -1041,3 +1044,12 @@ CLAUDE.md は本 batch では変えない。
 | P3-7 | 監視の AUTO_RESUMED の原因に DDL lock の喪失が無い | `LEASE_EXPIRED` の一つとして足した |
 | P3-8 | P2-1 の回帰を止める静的な守りが無い | `script-contract-test.sh` に、本番 script が `quiesce_db::run_sql` を command substitution の中で呼ばず lib の外で直接呼ばないことの走査（見本の fixture つき）を足した |
 | P3-9 | 文言 | §1.2 の pool の書き方、監視の Connector/J の文言の末尾の「.」 |
+
+### 20.11 手元の環境の MySQL 8.4.13 での確認（2026-11-22、統括の記録）の所見
+
+手元の環境（MySQL 8.4.13、dev・prod の profile、dummy の設定）で app 側の BQ-3・BQ-4 の手順を確かめた記録（統括の記録。証跡は repository の外）で見つかった P3 の2件。どちらも挙動は変えていない。手元の環境の結果は staging の実施（BQ-3・BQ-4。**未取得**）の代わりにならない。
+
+| # | 内容 | 対応（RB-FIRST-RELEASE の fix commit `a0b92024`） |
+|---|---|---|
+| F-1 | prod 以外の profile で静止中に起動すると、`BACKUP_QUIESCE_STARTUP_WAIT` の直後に「backup の静止が解除されたため、起動を続けます」と出て待たずに起動する。§6.2・D-P3-3（prod 以外の UNARMED は書ける）による仕様どおりの挙動だが、静止は解除されておらず、log が事実と違う。BWQ-014 の「起動の待ち」は prod の profile でだけ確かめられる | `awaitStartupPermit` が permit を取る前に UNARMED かつ prod 以外かを見て、「prod 以外の profile では登録の前（UNARMED）でも書込みを許すため、backup の静止（要求の番号 N）の解除を待たずに起動を続けます（静止は解除されていません）」を出す。prod の文言は変えない。`BackupQuiesceResponderTest` |
+| F-2 | `BACKUP_QUIESCE_RESUMED` の log が保持の秒数・保留した非同期の処理・解除後の書込みだけで、§13.1 の拒否・待機・省略の件数を出さない | §13.1 の順で、拒否した要求（`rejected_requests` の全 kind）・待たせた定期実行（`deferred` の `scheduler`）・省いた書込み（`skipped_writes` の全 kind）の件数を足した。値は既存の counter の、要求を読んでからの増分（`BackupQuiesceMetrics.totals()`。新しい数え方は作らない）。`BackupQuiesceResponderTest` |

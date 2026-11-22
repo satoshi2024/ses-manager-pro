@@ -134,10 +134,10 @@ app:
       privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
     nf02:
       enabled: ${FEATURE_NF02_ENABLED:false}
-    # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）
+    # NF-02の子（顧客ポータルの問い合わせ）。既定はOFFで、初回リリースでは実値の task definition でONにする（2026-11-22 利用者決定）
     nf02-customer-portal:
       enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
-      # 未設定ならportal起票の問い合わせだけをportalへ出す（初回リリース中の社内登録分を出さない）
+      # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）
       visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}

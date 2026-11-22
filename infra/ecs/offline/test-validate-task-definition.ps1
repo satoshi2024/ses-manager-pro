@@ -178,7 +178,7 @@ try {
     $td = New-Initial; Set-Env (App $td) 'privacy.retention.enabled' 'true'; $td }
   Case 'integration.hub.public-api.enabled at the first start' $Initial 'feature switches must use the documented names' {
     $td = New-Initial; Set-Env (App $td) 'integration.hub.public-api.enabled' 'true'; $td }
-  Case 'INTEGRATION_HUB_PUBLICAPI_ENABLED at the first start' $Initial 'feature switches must stay unset for the first release' {
+  Case 'INTEGRATION_HUB_PUBLICAPI_ENABLED at the first start' $Initial 'feature switches must stay unset for the initial bootstrap start' {
     $td = New-Initial; Set-Env (App $td) 'INTEGRATION_HUB_PUBLICAPI_ENABLED' 'false'; $td }
   Case 'FEATURE_NF01_ENABLED from the secret store' $SteadyOn 'settings checked by value must be in environment' {
     $td = New-Steady 'true'; Add-Secret (App $td) 'FEATURE_NF01_ENABLED'; $td }

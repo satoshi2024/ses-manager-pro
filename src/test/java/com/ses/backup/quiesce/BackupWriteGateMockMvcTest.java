@@ -393,6 +393,14 @@ class BackupWriteGateMockMvcTest extends com.ses.portal.PortalTestSupport {
         assertThat(body.get("correlationId").asText()).isEqualTo(result.getResponse().getHeader("X-Correlation-ID"))
                 .hasSizeGreaterThanOrEqualTo(16);
         assertThat(body.has("data")).isFalse();
+        // openapi-candidate.yaml の BackupQuiesced の応答と BackupQuiescedError の項目（RB-FIRST-RELEASE review P3-5）
+        assertThat(result.getResponse().getHeader(BackupQuiesceRejections.ERROR_CODE_HEADER))
+                .isEqualTo(BackupQuiesceRejections.ERROR_CODE);
+        assertThat(Integer.parseInt(result.getResponse().getHeader(BackupQuiesceRejections.RETRY_AFTER_HEADER)))
+                .isBetween(BackupQuiesceRejections.RETRY_AFTER_MIN_SECONDS, BackupQuiesceRejections.RETRY_AFTER_MAX_SECONDS);
+        List<String> fields = new java.util.ArrayList<>();
+        body.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder("code", "message", "correlationId", "retryable");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_external_api_audit", Integer.class)).isEqualTo(audits);
         assertThat(counter("integration_hub_external_api_audit_suppressed_total", "reason", "BACKUP_QUIESCED"))
                 .isEqualTo(suppressed + 1);
