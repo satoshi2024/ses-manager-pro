@@ -59,6 +59,20 @@ class FeatureSwitchSchedulerGateTest {
         verify(runner).run(any());
     }
 
+    /** FE-A04（FE-AC-006-04）: DB の源で閉じた機能の scheduler も、property の源の OFF と同じく何もしない。 */
+    @Test
+    void DBの源でNF01が閉じていれば外部失効outboxもtenant巡回を始めず開けば実行する() {
+        var dispatcher = mock(com.ses.service.ExternalAccountRevocationDispatcher.class);
+        TenantAwareBatchRunner runner = mock(TenantAwareBatchRunner.class);
+        var scheduler = new com.ses.service.lifecycle.ExternalAccountRevocationScheduler(
+                dispatcher, runner, FeatureSwitchTestSupport.databaseDisabledOnly(Feature.NF01));
+        scheduler.dispatchRevocations();
+        verifyNoInteractions(dispatcher, runner);
+        inject(scheduler, FeatureSwitchTestSupport.databaseEnabledOnly(Feature.NF01));
+        scheduler.dispatchRevocations();
+        verify(runner).run(any());
+    }
+
     @Test
     void NF01_OFFならライフサイクルSLA監視は何もせずONなら実行する() {
         LifecycleSlaService slaService = mock(LifecycleSlaService.class);

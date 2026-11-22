@@ -75,7 +75,8 @@ class TestIsolationAuditTest {
             entry("com.ses.config.feature.FeatureSwitchServletContainerIntegrationTest", "機能スイッチOFF時の実Servlet container・Security chain順序・error dispatch（RANDOM_PORTのHTTPはテストTXを共有できない）", true, "専用H2 DBとテスト固有user・session・監査行を@AfterEachでdelete", "feature-switch-servlet"),
             entry("com.ses.controller.api.ImportRawUploadServletContainerE2ETest", "取込raw uploadの実Tomcat上のContent-Type・chunked転送・413のエンドツーエンド（RANDOM_PORTのHTTPはテストTXを共有できない）", true, "専用H2 DBとテスト固有user・session・監査行を@AfterEachでdelete", "import-raw-upload-servlet"),
             entry("com.ses.config.forwarded.ForwardedHeaderServletContainerIntegrationTest", "転送ヘッダー清浄化の実Tomcat connector検証（RANDOM_PORTのHTTPはテストTXを共有できない）", false, "DB書込なし（認証不要のecho endpointだけを呼ぶ。起動時の初期化はクラス専用H2 DBに閉じ@DirtiesContextで破棄）", "forwarded-header-servlet"),
-            entry("com.ses.config.forwarded.ForwardedHeaderUntrustedPeerServletContainerIntegrationTest", "信頼しない接続元の転送ヘッダー無視の実Tomcat connector検証（RANDOM_PORTのHTTPはテストTXを共有できない）", false, "DB書込なし（認証不要のecho endpointだけを呼ぶ。起動時の初期化はクラス専用H2 DBに閉じ@DirtiesContextで破棄）", "forwarded-header-untrusted-servlet")
+            entry("com.ses.config.forwarded.ForwardedHeaderUntrustedPeerServletContainerIntegrationTest", "信頼しない接続元の転送ヘッダー無視の実Tomcat connector検証（RANDOM_PORTのHTTPはテストTXを共有できない）", false, "DB書込なし（認証不要のecho endpointだけを呼ぶ。起動時の初期化はクラス専用H2 DBに閉じ@DirtiesContextで破棄）", "forwarded-header-untrusted-servlet"),
+            entry("com.ses.featureenablement.state.FeatureEnablementAfterCommitRefreshTest", "機能の開放の commit の後の snapshot の読直し（afterCommit はテストTXの rollback では動かない）", true, "専用H2 DBとテスト固有の開放状態・申請・世代の行を@AfterEachでdelete", "feature-enablement-after-commit")
     );
 
     /** テストTXの外でcommitする経路の目印。これらで確定した行はテストTXのrollbackでは消えない。 */

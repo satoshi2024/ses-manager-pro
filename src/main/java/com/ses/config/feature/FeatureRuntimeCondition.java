@@ -15,4 +15,12 @@ public interface FeatureRuntimeCondition {
 
     /** 現在、機能を公開してよいか。呼出しごとに評価する（日付の経過で変わり得る）。 */
     boolean satisfied();
+
+    /**
+     * 条件を満たさない理由の code（画面と log の理由。feature-enablement-console design §3.5）。満たしていれば空。既定は固定の
+     * {@code runtime.unsatisfied}（既存の実装はそのまま動く）。値・例外の本文を含めない。
+     */
+    default java.util.Optional<String> unsatisfiedReason() {
+        return satisfied() ? java.util.Optional.empty() : java.util.Optional.of("runtime.unsatisfied");
+    }
 }

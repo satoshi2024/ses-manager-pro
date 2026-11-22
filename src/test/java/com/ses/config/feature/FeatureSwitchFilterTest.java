@@ -419,6 +419,29 @@ class FeatureSwitchFilterTest {
         assertThat(body.get("message").asText()).isEqualTo(genuine.getMessage());
     }
 
+    /**
+     * FE-A04（FE-AC-006-04）: DB の源（開放状態の snapshot）で閉じた機能の応答は、property の源の OFF と同じ（遮断する入口・status・
+     * body・header）。閉じた機能とその子だけを遮断し、他の機能は通す。
+     */
+    @ParameterizedTest
+    @EnumSource(Feature.class)
+    void DBの源で閉じた機能の応答はpropertyの源のOFFと同じ(Feature disabled) throws Exception {
+        FeatureSwitchFilter property = filter(disabledOnly(disabled));
+        FeatureSwitchFilter database = filter(FeatureSwitchTestSupport.databaseDisabledOnly(disabled));
+
+        for (Feature other : Feature.values()) {
+            for (String uri : samples(other)) {
+                MockHttpServletResponse expected = new MockHttpServletResponse();
+                MockHttpServletResponse actual = new MockHttpServletResponse();
+                property.doFilter(new MockHttpServletRequest("GET", uri), expected, new MockFilterChain());
+                database.doFilter(new MockHttpServletRequest("GET", uri), actual, new MockFilterChain());
+                assertThat(actual.getStatus()).as(uri).isEqualTo(expected.getStatus());
+                assertThat(actual.getContentAsString()).as(uri).isEqualTo(expected.getContentAsString());
+                assertThat(actual.getHeader("Cache-Control")).as(uri).isEqualTo(expected.getHeader("Cache-Control"));
+            }
+        }
+    }
+
     private static List<String> samples(Feature feature) {
         return java.util.stream.Stream.concat(API_SAMPLES.get(feature).stream(), PAGE_SAMPLES.get(feature).stream())
                 .toList();

@@ -173,6 +173,10 @@ app:
   # scheduler専用テスト以外では定期実行を止め、テスト中のDB更新と非決定性を防ぐ。
   scheduling:
     enabled: false
+  # 機能の開放: 世代の poll の専用 thread は試験では起動しない（試験が明示的に読み直す。design §13）。源は既定の properties のまま
+  # （test profile の全て開を変えない。DB の源の試験は @TestPropertySource で app.feature-enablement.source=database にする）
+  feature-enablement:
+    refresh-thread-enabled: false
   # backup の書込み静止の応答は test profile では動かさない（登録・heartbeat の背景 thread を作らず、gate は常に OPEN）。
   # 静止応答を確かめる試験は専用の context で明示に有効にする（design.md §12.1）。
   backup-quiesce:

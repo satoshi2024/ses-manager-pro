@@ -133,7 +133,18 @@ class SchedulingDisabledDrainTest {
             "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.shutdownNow",
             "停止。状態機械は静止応答の破棄で、heartbeat は STOPPED を書く前と anchor の破棄（業務の DataSource の後）で止める",
             "com.ses.backup.quiesce.BackupQuiesceTicker:ScheduledExecutorService.awaitTermination",
-            "停止の待ち（最長12秒。実行中の文は socket の timeout 10秒までに終わる）");
+            "停止の待ち（最長12秒。実行中の文は socket の timeout 10秒までに終わる）",
+            // FE-A04: 機能の開放の世代の poll（feature-enablement-console design §3.3）。@Scheduled を使わないため
+            // APP_SCHEDULING_ENABLED=false でも動く（scheduler を一括で止めた時に全ての開放単位が古さで閉じないため）。読むだけで書かない
+            "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:Executors.newSingleThreadScheduledExecutor",
+            "世代の1行を refresh-interval（既定5秒）ごとに読み、変われば snapshot を読み直す専用の daemon thread。DB の源で "
+                    + "refresh-thread-enabled が true の時だけ作る（test profile は false）。DB へ書かない",
+            "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:Thread.<init>",
+            "上の thread（feature-enablement-refresher）。daemon で JVM の終了を妨げない",
+            "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:ScheduledExecutorService.scheduleWithFixedDelay",
+            "上の周期実行。poll の例外は捕まえて次の周期へ回す（周期が黙って止まらない）",
+            "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:ScheduledExecutorService.shutdownNow",
+            "停止（lifecycle の stop。実行中の poll は読むだけ）");
 
     /** 起動時に一度だけ動くhook（{@code app.scheduling.enabled} の外。各自の条件で起動する）。 */
     private static final Map<String, String> STARTUP_HOOK_INVENTORY = inventory(
@@ -190,7 +201,10 @@ class SchedulingDisabledDrainTest {
             "com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier:SmartInitializingSingleton",
             "NF07 の Journal（application DB と別の MySQL instance）の権限と migration を読んで検査する（書込みなし）",
             "com.ses.privacy.production.retention.trust.PrivacyTrustStartupValidator:SmartInitializingSingleton",
-            "prod profile だけ。NF07 の trust 文書の設定を検査する（DB 書込なし）");
+            "prod profile だけ。NF07 の trust 文書の設定を検査する（DB 書込なし）",
+            // FE-A04: 機能の開放の世代の poll の thread の起動と停止（SmartLifecycle。DB の源で refresh-thread-enabled の時だけ thread を作る）
+            "com.ses.featureenablement.state.FeatureEnablementSnapshotRefresher:Lifecycle",
+            "世代の poll の専用 thread を起動・停止する（読むだけ。DB 書込なし）");
 
     /** {@code @Async} method（taskExecutor上で実行。起点はrequestまたはscheduler）。 */
     private static final Map<String, String> ASYNC_INVENTORY = inventory(
