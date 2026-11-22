@@ -97,6 +97,7 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
                 throw BusinessException.of(400, "error.featureEnablement.bundleMembersInvalid", "-");
             }
             SignOffKind kind = FeatureSignOffKindValidator.validate(catalog, input(member.registration()));
+            requireNotExpired(member.registration().expiresOn());
             if (!bundleKind.code().equals(kind.bundleKind()) || freshKinds.put(kind.code(), kind) != null
                     || carried.containsKey(kind.code())) {
                 throw BusinessException.of(400, "error.featureEnablement.bundleMembersInvalid", kind.code());
@@ -213,6 +214,10 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
             if (row == null || !(carried ? "CONFIRMED" : "REGISTERED").equals(row.getStatus())) {
                 throw BusinessException.of(409, "error.featureEnablement.bundleMembersInvalid", member.getKindCode());
             }
+            if (!row.getExpiresOn().isAfter(context.today())) {
+                // 失効した署名を組に入れない（確認の後に依存する開放単位が閉じる誤操作を防ぐ。review rb-fe-a1 P3-2）
+                throw BusinessException.of(400, "error.featureEnablement.signOffAlreadyExpired");
+            }
             if (!carried) {
                 if (row.getSignedOn().isAfter(context.today())) {
                     throw BusinessException.of(400, "error.featureEnablement.signOffNotYetSigned");
@@ -223,9 +228,13 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
             }
             memberRows.put(member.getKindCode(), row);
         }
-        consistencyChecks.orderedStream()
-                .filter(check -> bundleKind.code().equals(check.bundleKind()))
-                .forEach(check -> check.verify(context.tenantId(), Map.copyOf(memberRows)));
+        List<FeatureSignOffBundleConsistencyCheck> checks = consistencyChecks.orderedStream()
+                .filter(check -> bundleKind.code().equals(check.bundleKind())).toList();
+        if (bundleKind.consistencyCheckRequired() && checks.isEmpty()) {
+            // 整合の検査を要する組の種類で実装が無ければ確認しない（evaluator.missing と同じく fail-closed。review rb-fe-a1 P3-3）
+            throw BusinessException.of(409, "error.featureEnablement.bundleCheckMissing");
+        }
+        checks.forEach(check -> check.verify(context.tenantId(), Map.copyOf(memberRows)));
 
         // 旧い組 → 置き換わる署名 → 新しい署名 → 新しい組の順（一意索引）
         if (previous != null && "CONFIRMED".equals(previous.getStatus())) {
@@ -270,7 +279,6 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
         List<Feature> closed = transitions.reevaluateDependents(context, bundleKind.allMembers(),
                 "SIGN_OFF_REPLACED_INVALID");
         write.finish(context);
-        transitions.notifyAutoClosed(context, closed, "SIGN_OFF_REPLACED_INVALID");
         return bundleMapper.selectById(bundle.getId());
     }
 
@@ -320,7 +328,6 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
         endBundle(context, bundle, "REVOKED", checked.userId(), reason);
         List<Feature> closed = transitions.closeDependents(context, bundleKind.allMembers(), "SIGN_OFF_REVOKED");
         write.finish(context);
-        transitions.notifyAutoClosed(context, closed, "SIGN_OFF_REVOKED");
         write.notifier().notifyAdministrators("bundleRevoked", new Object[]{bundleKind.code()},
                 "FEATURE_ENABLEMENT:BUNDLE_REVOKED:" + bundle.getId(), List.of());
     }
@@ -397,6 +404,14 @@ public class FeatureSignOffBundleServiceImpl implements FeatureSignOffBundleServ
     private BundleKind bundleKindOf(FeatureSignOffBundle bundle) {
         return catalog.bundleKind(bundle.getBundleKind())
                 .orElseThrow(() -> BusinessException.of(409, "error.featureEnablement.bundleKindUnknown"));
+    }
+
+    /** 失効日が今日以前の署名は登録しない（review rb-fe-a1 P3-2）。 */
+    private void requireNotExpired(java.time.LocalDate expiresOn) {
+        if (expiresOn != null && !expiresOn.isAfter(
+                com.ses.featureenablement.condition.FeatureEvaluationContext.businessDate(write.clock()))) {
+            throw BusinessException.of(400, "error.featureEnablement.signOffAlreadyExpired");
+        }
     }
 
     private FeatureEnablementActor requireActor(FeatureEnablementActor actor) {

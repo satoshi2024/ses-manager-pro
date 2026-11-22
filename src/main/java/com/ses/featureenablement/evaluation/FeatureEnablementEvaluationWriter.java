@@ -48,7 +48,7 @@ public class FeatureEnablementEvaluationWriter {
      * @return 書いてある始まりの時刻（開いていなければ null）
      */
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
-    public LocalDateTime markUnverifiable(Feature feature, String reasonCode, boolean startup) {
+    public LocalDateTime markUnverifiable(Feature feature, String reasonCode, boolean startup, LocalDateTime startedAt) {
         FeatureEnablementWriteSupport.WriteContext context = write.begin(actor(startup));
         FeatureEnablementState row = write.lockState(context, feature);
         if (row == null || !EnablementState.of(row.getState()).openLike()) {
@@ -59,18 +59,22 @@ public class FeatureEnablementEvaluationWriter {
             write.finish(context);
             return row.getUnverifiableSince();
         }
+        // DB に書けなかった間の始まり（memory）があれば、それを始まりにする（書けるまでの時間で自動閉鎖を遅らせない。P3-9）
+        LocalDateTime since = startedAt != null && startedAt.isBefore(context.now()) ? startedAt : context.now();
         UpdateWrapper<FeatureEnablementState> update = new UpdateWrapper<>();
         update.eq("id", row.getId()).eq("version", row.getVersion())
-                .set("unverifiable_since", context.now()).set("unverifiable_reason", truncate(reasonCode))
+                .set("unverifiable_since", since).set("unverifiable_reason", truncate(reasonCode))
                 .set("version", row.getVersion() + 1).set("updated_at", context.now());
         if (stateMapper.update(null, update) != 1) {
             throw new IllegalStateException("評価できない状態の始まりを書けません");
         }
         write.event(context, "FEATURE", feature.name(), row.getId(), "EVALUATION_UNVERIFIABLE", row.getState(),
                 row.getState(), truncate(reasonCode), null);
+        write.audit(context, "FEATURE_EVALUATION_UNVERIFIABLE", row.getId(), null,
+                "{\"feature\":\"" + feature.name() + "\",\"reason\":\"" + truncate(reasonCode) + "\"}");
         context.markChanged(feature);
         write.finish(context);
-        return context.now();
+        return since;
     }
 
     /** 評価できない状態の始まりを消す（回復）。消したら true。 */
@@ -91,6 +95,8 @@ public class FeatureEnablementEvaluationWriter {
         }
         write.event(context, "FEATURE", feature.name(), row.getId(), "EVALUATION_RECOVERED", row.getState(),
                 row.getState(), row.getUnverifiableReason(), null);
+        write.audit(context, "FEATURE_EVALUATION_RECOVERED", row.getId(), null,
+                "{\"feature\":\"" + feature.name() + "\"}");
         context.markChanged(feature);
         write.finish(context);
         return true;
@@ -134,6 +140,15 @@ public class FeatureEnablementEvaluationWriter {
         FeatureEnablementWriteSupport.WriteContext context = write.begin(FeatureEnablementWriteSupport.Actor.scheduler());
         write.audit(context, auditCode, null, null,
                 "{\"feature\":\"" + feature.name() + "\",\"check\":\"" + truncate(checkCode) + "\"}");
+        write.finish(context);
+    }
+
+    /** 総スイッチが閉じていたため開放単位を閉じたことを監査に残す（閉じた回だけ。design §11.4）。 */
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
+    public void recordMasterClosed(java.util.List<String> closedFeatures, boolean startup) {
+        FeatureEnablementWriteSupport.WriteContext context = write.begin(actor(startup));
+        write.audit(context, "FEATURE_MASTER_CLOSED", null, null,
+                "{\"features\":\"" + String.join(",", closedFeatures) + "\"}");
         write.finish(context);
     }
 

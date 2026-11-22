@@ -11,8 +11,16 @@ import java.util.Objects;
  * @param requiredMembers 必ず含める種別
  * @param optionalMembers 含めてもよい種別（例: D-09 が dsar を承認する時の D-06）
  * @param privacy         NF07 の組か（確認者を privacy-admin に限る。段階 C で有効にする）
+ * @param consistencyCheckRequired 組の種類ごとの整合の検査（{@code FeatureSignOffBundleConsistencyCheck}）を要するか。要るのに実装が
+ *                        無ければ組の確認を 409 にする（検査の欠けで素通りさせない。review rb-fe-a1 P3-3）
  */
-public record BundleKind(String code, List<String> requiredMembers, List<String> optionalMembers, boolean privacy) {
+public record BundleKind(String code, List<String> requiredMembers, List<String> optionalMembers, boolean privacy,
+                         boolean consistencyCheckRequired) {
+
+    /** 整合の検査を要しない組の種類。 */
+    public BundleKind(String code, List<String> requiredMembers, List<String> optionalMembers, boolean privacy) {
+        this(code, requiredMembers, optionalMembers, privacy, false);
+    }
 
     public BundleKind {
         Objects.requireNonNull(code, "code");

@@ -117,13 +117,20 @@ class PrivacyDataElementCatalogSeedTest {
     }
 
     @Test
-    void seedは構造行だけでownerとデータ分類とinventory状態はUNKNOWNのまま() {
+    void seedは構造行だけでownerとデータ分類とinventory状態はUNKNOWNのまま() throws Exception {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? AND "
                 + "(owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
                 + "OR owner_ref IS NOT NULL)", Long.class, TENANT)).isZero();
         // V196 の27件と V198（NF01 二者確認 B0）の9件と V203（機能の開放の署名者の氏名・署名の文書）の2件
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(38L);
+        long fixed = jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT);
+        assertThat(fixed).isEqualTo(38L);
+        // 配備の手順（RB §3.4 の DBA 立会いの照合 SQL）の件数も seed と同じ（review rb-fe-a1 P2-4。migration を足した時の書き漏れを防ぐ）
+        java.util.regex.Matcher runbook = java.util.regex.Pattern.compile(
+                "data_element_id NOT LIKE 'DOCUMENT:%';\\s*--\\s*(\\d+)").matcher(java.nio.file.Files.readString(
+                java.nio.file.Path.of(".kiro/specs/production-launch/deploy-runbook.md")));
+        assertThat(runbook.find()).as("RB §3.4 の catalog の件数の照会").isTrue();
+        assertThat(Long.parseLong(runbook.group(1))).as("RB §3.4 の catalog の件数").isEqualTo(fixed);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
                 + "AND inventory_ref IS NULL", Long.class, TENANT)).isZero();
     }

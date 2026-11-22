@@ -60,6 +60,18 @@ class FeatureSignOffServiceH2Test {
     private FeatureEnablementTestConfiguration.MutableTestClock clock;
     @Autowired
     private FeatureEnablementSnapshotHolder holder;
+    @Autowired
+    private java.util.List<com.ses.featureenablement.condition.FeatureConditionEvaluator> evaluators;
+    @Autowired
+    private FeatureEnablementWriteSupport write;
+    @Autowired
+    private FeatureSignOffRegistrar registrar;
+    @Autowired
+    private FeatureEnablementActorPolicy actorPolicy;
+    @Autowired
+    private com.ses.mapper.FeatureSignOffMapper signOffMapper;
+    @Autowired
+    private com.ses.mapper.FeatureEnablementRequestMapper requestMapper;
 
     private FeatureEnablementH2Fixture fixture;
     private FeatureEnablementActor registrant;
@@ -102,7 +114,7 @@ class FeatureSignOffServiceH2Test {
         // 一覧の行は氏名と元の file 名を持たない（詳細だけが返す）
         assertThat(Arrays.stream(FeatureSignOffService.Summary.class.getRecordComponents()).map(RecordComponent::getName))
                 .doesNotContain("signerName", "originalName");
-        assertThat(signOffs.list()).anyMatch(summary -> summary.id() == registered.getId()
+        assertThat(signOffs.list(third)).anyMatch(summary -> summary.id() == registered.getId()
                 && "CONFIRMED".equals(summary.status()));
         assertThat(signOffs.detail(registered.getId(), third).getSignerName()).isEqualTo("署名 太郎");
 
@@ -160,7 +172,7 @@ class FeatureSignOffServiceH2Test {
     }
 
     @Test
-    void 差替えで成り立てば開いたまま成り立たなければ同じtransactionで自動閉鎖する() {
+    void 差替えで成り立てば開いたまま成り立たなければ同じtransactionで自動閉鎖し失効した署名では差し替えない() {
         fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
         open(Feature.NF04);
         long old = fixture.confirmedId("NF04_SRE");
@@ -174,10 +186,16 @@ class FeatureSignOffServiceH2Test {
                 .isEqualTo(LocalDate.of(2029, 11, 23));
         assertThat(fixture.state(Feature.NF04)).as("成り立つ差替えは開いたまま").isEqualTo("OPEN");
 
-        // 失効日が今日の署名（当日から無効）への差替えは成り立たない
-        FeatureSignOff expired = signOffs.register(registration("NF04_SRE", "SRE-2026-1101", "SRE", SIGNED,
-                LocalDate.of(2026, 11, 23)), pdf("expired"), "sre.pdf", registrant);
-        signOffs.confirm(expired.getId(), 0, confirmer);
+        // 失効日が今日（当日から無効）の署名は登録できない（review rb-fe-a1 P3-2。確認済みの署名を失効した署名で差し替えない）
+        BusinessException expired = catchThrowableOfType(() -> signOffs.register(registration("NF04_SRE", "SRE-2026-1101",
+                "SRE", SIGNED, LocalDate.of(2026, 11, 23)), pdf("expired"), "sre.pdf", registrant), BusinessException.class);
+        assertThat(expired.getCode()).isEqualTo(400);
+        assertThat(expired.getMessageKey()).isEqualTo("error.featureEnablement.signOffAlreadyExpired");
+
+        // 差し替えた後に継続の条件が成り立たなければ同じ transaction で自動閉鎖する（固有の条件は試験の評価器で作る）
+        FeatureSignOff invalid = signOffs.register(registration("NF04_SRE", "SRE-INVALID-01", "SRE", SIGNED,
+                LocalDate.of(2027, 11, 20)), pdf("invalid"), "sre.pdf", registrant);
+        withReferenceCheck().confirm(invalid.getId(), 0, confirmer);
 
         assertThat(fixture.state(Feature.NF04)).isEqualTo("AUTO_CLOSED");
         assertThat(fixture.closedReason(Feature.NF04)).isEqualTo("SIGN_OFF_REPLACED_INVALID");
@@ -221,9 +239,10 @@ class FeatureSignOffServiceH2Test {
         assertThat(fixture.closedReason(Feature.NF04)).isEqualTo("SIGN_OFF_REVOKED");
         assertThat(fixture.state(Feature.NF03)).as("その種別を要しない開放単位は変えない").isEqualTo("OPEN");
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_notification WHERE recipient_user_id = ? AND type = "
-                + "'FEATURE_ENABLEMENT' AND title LIKE '%NF04_PRIVACY%'", Long.class, registrant.userId()))
-                .as("取消しは全ての管理者へ").isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.notices()).as("取消しは全ての管理者へ")
+                .filteredOn(notice -> notice.eventKey().equals("signOffRevoked")
+                        && notice.recipients().contains(registrant.userId()))
+                .singleElement().satisfies(notice -> assertThat(notice.args()).containsExactly("NF04_PRIVACY"));
     }
 
     @Test
@@ -252,6 +271,34 @@ class FeatureSignOffServiceH2Test {
     }
 
     // ---------------------------------------------------------------- helper
+
+    /** 参照が {@code SRE-INVALID} で始まる NF04_SRE を継続の条件の不成立にする試験の評価器を足した部品の service。 */
+    private FeatureSignOffService withReferenceCheck() {
+        java.util.List<com.ses.featureenablement.condition.FeatureConditionEvaluator> all = new java.util.ArrayList<>(evaluators);
+        all.add(new com.ses.featureenablement.condition.FeatureConditionEvaluator() {
+            @Override
+            public java.util.Set<Feature> features() {
+                return java.util.EnumSet.of(Feature.NF04);
+            }
+
+            @Override
+            public java.util.List<com.ses.featureenablement.condition.FeatureConditionCheck> evaluate(Feature feature,
+                    com.ses.featureenablement.condition.FeatureEvaluationContext context) {
+                var sre = context.snapshot().signOffs().get("NF04_SRE");
+                boolean invalid = sre != null && sre.reference().startsWith("SRE-INVALID");
+                return java.util.List.of(invalid
+                        ? com.ses.featureenablement.condition.FeatureConditionCheck.unsatisfied("test.sre.reference",
+                                com.ses.featureenablement.condition.FeatureConditionCheck.Category.AUTO, false)
+                        : com.ses.featureenablement.condition.FeatureConditionCheck.satisfied("test.sre.reference",
+                                com.ses.featureenablement.condition.FeatureConditionCheck.Category.AUTO, null));
+            }
+        });
+        com.ses.featureenablement.condition.FeatureConditionRegistry registry =
+                new com.ses.featureenablement.condition.FeatureConditionRegistry(catalog, all);
+        return new FeatureSignOffServiceImpl(write, new FeatureSignOffTransitions(write, registry, catalog, signOffMapper),
+                registrar, actorPolicy, catalog, signOffMapper, requestMapper, fileStorage,
+                com.ses.featureenablement.state.FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT));
+    }
 
     private void open(Feature feature) {
         FeatureEnablementActor requester = fixture.admin();

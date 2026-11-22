@@ -41,6 +41,14 @@ public class FeatureEnablementSnapshotHolder {
     private final List<Consumer<FeatureEnablementSnapshot>> listeners = new CopyOnWriteArrayList<>();
     private final Clock clock;
     private final AtomicReference<FeatureEnablementSnapshot> current = new AtomicReference<>();
+    /**
+     * 読込みの順番（読み始めの時に採る）。後に読み始めた snapshot を先に差し替えた後は、それより前に読み始めた snapshot で上書きしない
+     * （poll の読込みが commit の前に始まり、commit の後の読直しより後に終わった時に旧い世代へ戻さない。review rb-fe-a1 P2-3）。
+     * 世代の値ではなく読み始めの順で比べるのは、PITR の後や試験の rollback で DB の世代が小さくなっても読み直せるようにするため
+     * （DB の世代は commit の順に増えるため、後に読み始めた snapshot の世代は前に読み始めたものより小さくならない）。
+     */
+    private final java.util.concurrent.atomic.AtomicLong loadSequence = new java.util.concurrent.atomic.AtomicLong();
+    private long appliedSequence = -1L;
 
     public FeatureEnablementSnapshotHolder(FeatureEnablementSnapshotLoader loader, FeatureEnablementTenant tenant,
                                            FeatureEnablementProperties properties, FeatureEnablementOverlay overlay,
@@ -77,6 +85,7 @@ public class FeatureEnablementSnapshotHolder {
     /** DB から読み直して差し替える。読めなければ false（現在の snapshot を残す。古さで閉じる）。 */
     public boolean reload() {
         FeatureEnablementSnapshot loadedSnapshot;
+        long sequence = loadSequence.incrementAndGet();
         try {
             loadedSnapshot = loader.load(tenant.tenantId());
         } catch (RuntimeException e) {
@@ -84,8 +93,12 @@ public class FeatureEnablementSnapshotHolder {
                     e.getClass().getSimpleName());
             return false;
         }
-        replace(loadedSnapshot);
-        overlay.clearAll(FeatureEnablementOverlay.REFRESH_PENDING);
+        if (replaceIfLatest(loadedSnapshot, sequence)) {
+            overlay.clearAll(FeatureEnablementOverlay.REFRESH_PENDING);
+        } else {
+            log.debug("[機能の開放] 後に読み始めた snapshot を既に差し替えたため、この読込みは捨てます: generation={}",
+                    loadedSnapshot.generation());
+        }
         return true;
     }
 
@@ -137,9 +150,20 @@ public class FeatureEnablementSnapshotHolder {
         }
     }
 
-    /** snapshot を差し替える（試験と、読み直した snapshot の反映）。 */
+    /** snapshot を差し替える（試験。読込みの順番を新しくする）。 */
     public void replace(FeatureEnablementSnapshot snapshot) {
-        current.set(snapshot);
+        replaceIfLatest(snapshot, loadSequence.incrementAndGet());
+    }
+
+    /** 読み始めの順番が最後に差し替えたものより新しい時だけ差し替え、通知する。 */
+    private boolean replaceIfLatest(FeatureEnablementSnapshot snapshot, long sequence) {
+        synchronized (this) {
+            if (sequence < appliedSequence) {
+                return false;
+            }
+            appliedSequence = sequence;
+            current.set(snapshot);
+        }
         for (Consumer<FeatureEnablementSnapshot> listener : listeners) {
             try {
                 listener.accept(snapshot);
@@ -147,6 +171,7 @@ public class FeatureEnablementSnapshotHolder {
                 log.warn("[機能の開放] snapshot の差替えの通知に失敗しました: exceptionClass={}", e.getClass().getSimpleName());
             }
         }
+        return true;
     }
 
     private void reloadOrClose(List<Feature> features) {

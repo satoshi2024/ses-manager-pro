@@ -70,7 +70,18 @@ public class FeatureEnablementMetrics {
         Gauge.builder("ses.feature.enablement.master.allowed", () -> properties.isAllowed() ? 1 : 0).register(registry);
     }
 
-    /** 自動閉鎖を数える（理由は固定の code）。 */
+    /**
+     * 理由の tag（check の code の {@code [...]} の動的な detail を外して tag の種類を増やさない。review rb-fe-a1 P3-13）。
+     */
+    static String reasonTag(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "UNKNOWN";
+        }
+        int bracket = reason.indexOf('[');
+        return bracket < 0 ? reason : reason.substring(0, bracket);
+    }
+
+    /** 自動閉鎖を数える（理由は check の code。tag は {@link #reasonTag}）。 */
     public void autoClosed(Feature feature, String reason) {
         MeterRegistry registry = registryProvider == null ? null : registryProvider.getIfAvailable();
         if (registry == null) {
@@ -78,7 +89,7 @@ public class FeatureEnablementMetrics {
         }
         try {
             Counter.builder("ses.feature.enablement.auto.closed").tag("feature", feature.name())
-                    .tag("reason", reason == null ? "UNKNOWN" : reason).register(registry).increment();
+                    .tag("reason", reasonTag(reason)).register(registry).increment();
         } catch (RuntimeException ignored) {
             // metric の失敗は遷移を変えない
         }

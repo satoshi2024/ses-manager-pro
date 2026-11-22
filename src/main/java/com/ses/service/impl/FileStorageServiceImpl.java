@@ -301,6 +301,25 @@ public class FileStorageServiceImpl implements FileStorageService {
         }
     }
 
+    /**
+     * 専用の経路だけの種別で、登録の rollback により持ち主の行と metadata を失った実体を消す（review rb-fe-a1 P3-1）。metadata が
+     * 無いため {@link #delete} は使えない。汎用の種別は何もしない（metadata のある経路は {@link #delete}）。
+     */
+    @Override
+    public void discardUnregistered(String storedName, FileKind kind) {
+        if (kind == null || !kind.isDedicatedPathOnly()) {
+            return;
+        }
+        validateStoredName(storedName);
+        Path published = publishedDir().resolve(storedName).normalize();
+        Path quarantine = quarantineDir().resolve(storedName).normalize();
+        if (!published.startsWith(publishedDir()) || !quarantine.startsWith(quarantineDir())) {
+            throw BusinessException.of("error.file.invalidPath");
+        }
+        deleteQuietly(published);
+        deleteQuietly(quarantine);
+    }
+
     @Override
     public void delete(String storedName) {
         validateStoredName(storedName);

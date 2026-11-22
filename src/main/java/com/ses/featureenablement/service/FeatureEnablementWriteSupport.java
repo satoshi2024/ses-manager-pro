@@ -205,7 +205,7 @@ public class FeatureEnablementWriteSupport {
         }
         String tenantId = tenant.tenantId();
         LocalDateTime now = MyBatisPlusConfig.AutoFillMetaObjectHandler.rowTimestamp(clock);
-        generationMapper.insertIgnore(tenantId, now);
+        generationMapper.lockRow(tenantId, now);
         FeatureEnablementGeneration generation = generationMapper.selectForUpdate(tenantId);
         if (generation == null) {
             throw new IllegalStateException("機能の開放の世代の行を lock できません");
@@ -280,6 +280,9 @@ public class FeatureEnablementWriteSupport {
             if (meter != null) {
                 meter.autoClosed(feature, reasonCode);
             }
+            // 自動閉鎖は経路（定期の評価・失効の先行の閉鎖・取消し・差替え・親の閉鎖）に依らずここで通知する（commit の後）
+            notifier.notifyAdministrators("autoClosed", new Object[]{feature.name(), feature.displayName(), reasonCode},
+                    "FEATURE_ENABLEMENT:AUTO_CLOSED:" + feature.name() + ":" + context.correlationId, List.of());
         }
         closureHooks.orderedStream().forEach(hook -> hook.onClosed(context.tenantId, feature, newState, reasonCode));
         for (Feature child : catalog.children(feature)) {

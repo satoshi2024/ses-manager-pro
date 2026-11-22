@@ -89,8 +89,9 @@ class FeatureEnablementServiceH2Test {
                 .doesNotContain(requester.username());
         assertThat(request.getExpiresAt()).isEqualTo(request.getRequestedAt().plusDays(7));
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(fixture.countNotifications(approver.userId())).as("申請者以外の管理者へ承認の依頼").isEqualTo(1);
-        assertThat(fixture.countNotifications(requester.userId())).as("申請者には送らない").isZero();
+        assertThat(FeatureEnablementH2Fixture.countNotices(approver.userId(), "requested")).as("申請者以外の管理者へ承認の依頼")
+                .isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.countNotices(requester.userId(), "requested")).as("申請者には送らない").isZero();
 
         FeatureEnablementApprovalResult result = service.approve(request.getId(), 0, null, approver);
 
@@ -120,7 +121,7 @@ class FeatureEnablementServiceH2Test {
         assertConflict(() -> service.requestOpen(Feature.NF04, null, approver), "error.featureEnablement.pendingExists");
         assertConflict(() -> service.approve(request.getId(), 5, null, approver),
                 "error.featureEnablement.requestVersionMismatch");
-        assertConflict(() -> service.close(Feature.NF04, "MANUAL", approver), "error.featureEnablement.stateNotOpen");
+        assertConflict(() -> service.close(Feature.NF04, "MANUAL_OTHER", approver), "error.featureEnablement.stateNotOpen");
         assertThat(fixture.requestStatus(request.getId())).isEqualTo("PENDING");
         assertThat(fixture.countEvents("FEATURE", "CLOSED")).isZero();
 
@@ -229,15 +230,16 @@ class FeatureEnablementServiceH2Test {
         open(Feature.NF03_CERTIFICATION_PII);
         FeatureEnablementRequest pendingNf04 = service.requestOpen(Feature.NF04, null, requester);
 
-        service.close(Feature.NF03, "SECURITY_INCIDENT", third);
+        service.close(Feature.NF03, "MANUAL_SECURITY_INCIDENT", third);
 
         assertThat(fixture.state(Feature.NF03)).isEqualTo("MANUALLY_CLOSED");
-        assertThat(fixture.closedReason(Feature.NF03)).isEqualTo("SECURITY_INCIDENT");
+        assertThat(fixture.closedReason(Feature.NF03)).isEqualTo("MANUAL_SECURITY_INCIDENT");
         assertThat(fixture.state(Feature.NF03_CERTIFICATION_PII)).isEqualTo("AUTO_CLOSED");
         assertThat(fixture.closedReason(Feature.NF03_CERTIFICATION_PII)).isEqualTo("PARENT_CLOSED");
         assertThat(fixture.requestStatus(pendingNf04.getId())).as("他の開放単位の未決は残す").isEqualTo("PENDING");
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(fixture.countNotifications(requester.userId())).as("手動の閉鎖は全ての管理者へ").isPositive();
+        assertThat(FeatureEnablementH2Fixture.countNotices(requester.userId(), "closed")).as("手動の閉鎖は全ての管理者へ")
+                .isEqualTo(1);
 
         open(Feature.NF03);
         assertThat(fixture.state(Feature.NF03)).isEqualTo("OPEN");
@@ -247,6 +249,11 @@ class FeatureEnablementServiceH2Test {
         BusinessException invalid = catchThrowableOfType(() -> service.close(Feature.NF03, "誤って開いた", third),
                 BusinessException.class);
         assertThat(invalid.getCode()).isEqualTo(400);
+        // 手動の閉鎖の理由は目録の区分だけ（system の理由の code を書かせない。review rb-fe-a1 P3-4）
+        BusinessException systemReason = catchThrowableOfType(() -> service.close(Feature.NF03, "SIGN_OFF_REVOKED", third),
+                BusinessException.class);
+        assertThat(systemReason.getCode()).isEqualTo(400);
+        assertThat(systemReason.getMessageKey()).isEqualTo("error.featureEnablement.reasonCodeInvalid");
     }
 
     @Test

@@ -131,6 +131,7 @@ class FeatureEnablementStartupEvaluatorTest {
         assertThat(fixture.closedReason(Feature.NF03)).isEqualTo("MASTER_SWITCH_CLOSED");
         assertThat(fixture.state(Feature.NF03_CERTIFICATION_PII)).isEqualTo("AUTO_CLOSED");
         assertThat(fixture.requestStatus(pending.getId())).isEqualTo("CANCELLED");
+        assertThat(fixture.countAudit("FEATURE_MASTER_CLOSED")).as("閉じた回だけ監査").isEqualTo(1);
     }
 
     @Test

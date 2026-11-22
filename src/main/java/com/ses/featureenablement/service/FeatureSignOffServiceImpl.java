@@ -8,6 +8,7 @@ import com.ses.entity.FeatureEnablementRequest;
 import com.ses.entity.FeatureSignOff;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.catalog.SignOffKind;
+import com.ses.featureenablement.condition.FeatureEvaluationContext;
 import com.ses.featureenablement.signoff.FeatureSignOffKindValidator;
 import com.ses.featureenablement.state.FeatureEnablementTenant;
 import com.ses.mapper.FeatureEnablementRequestMapper;
@@ -87,6 +88,10 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
         SignOffKind kind = FeatureSignOffKindValidator.validate(catalog, input(registration));
         actorPolicy.requirePrivacyAdminIfRequired(kind.privacy(), checked);
         String signerName = FeatureSignOffRegistrar.optionalName(registration.signerName());
+        if (!registration.expiresOn().isAfter(FeatureEvaluationContext.businessDate(write.clock()))) {
+            // 失効した署名は登録しない（review rb-fe-a1 P3-2）
+            throw BusinessException.of(400, "error.featureEnablement.signOffAlreadyExpired");
+        }
         // 文書の保存（scan）は世代の lock の前に行う（scan の間に他の書込みを待たせない）
         FeatureSignOffRegistrar.StoredDocument stored = registrar.storeDocument(document, originalName);
 
@@ -145,7 +150,6 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
         List<Feature> closed = transitions.reevaluateDependents(context, List.of(kind.code()),
                 "SIGN_OFF_REPLACED_INVALID");
         write.finish(context);
-        transitions.notifyAutoClosed(context, closed, "SIGN_OFF_REPLACED_INVALID");
         return signOffMapper.selectById(row.getId());
     }
 
@@ -194,7 +198,6 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
         transitions.endSignOff(context, row, "REVOKED", checked.userId(), reason, null);
         List<Feature> closed = transitions.closeDependents(context, List.of(kind.code()), "SIGN_OFF_REVOKED");
         write.finish(context);
-        transitions.notifyAutoClosed(context, closed, "SIGN_OFF_REVOKED");
         write.notifier().notifyAdministrators("signOffRevoked", new Object[]{kind.code()},
                 "FEATURE_ENABLEMENT:SIGN_OFF_REVOKED:" + row.getId(), List.of());
     }
@@ -221,6 +224,10 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
         if (row == null || !"CONFIRMED".equals(row.getStatus()) || !kind.kindClass().extendable()
                 || !"EVIDENCE".equals(row.getKindClass())) {
             throw BusinessException.of(409, "error.featureEnablement.signOffNotExtendable");
+        }
+        if (!row.getExpiresOn().isAfter(context.today())) {
+            // 失効日を過ぎた証拠は延ばさない（日の始まりの EXPIRED の前でも。review rb-fe-a1 P3-2）
+            throw BusinessException.of(409, "error.featureEnablement.signOffAlreadyExpired");
         }
         validateExtension(row, newExpiresOn, context.today());
 
@@ -270,7 +277,8 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
 
     @Override
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
-    public List<Summary> list() {
+    public List<Summary> list(FeatureEnablementActor actor) {
+        requireActor(actor);
         return signOffMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<FeatureSignOff>()
                         .eq("tenant_id", tenant.tenantId()).orderByAsc("kind_code").orderByDesc("id"))
                 .stream().map(FeatureSignOffServiceImpl::summary).toList();
@@ -311,6 +319,10 @@ public class FeatureSignOffServiceImpl implements FeatureSignOffService {
                                    FeatureSignOff row, FeatureEnablementActor confirmer) {
         if (confirmer.userId().equals(row.getRegisteredBy())) {
             throw BusinessException.of(403, "error.featureEnablement.signOffSelfConfirm");
+        }
+        if (!row.getExpiresOn().isAfter(context.today())) {
+            // 失効した署名で確認済みの署名を差し替えない（依存する開放単位が閉じる誤操作を防ぐ。review rb-fe-a1 P3-2）
+            throw BusinessException.of(400, "error.featureEnablement.signOffAlreadyExpired");
         }
         if (row.getSignedOn().isAfter(context.today())) {
             throw BusinessException.of(400, "error.featureEnablement.signOffNotYetSigned");

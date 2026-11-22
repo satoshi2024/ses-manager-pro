@@ -228,6 +228,10 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (status != 1) {
             closeOrganizationAssignments(id);
             revokeUserSessions(id, "USER_DISABLED");
+        } else if (!Integer.valueOf(1).equals(old.getStatus()) && StatusConstants.ROLE_ADMIN.equals(old.getRole())) {
+            // 無効の管理者を有効に戻すことも、管理者の能力を得ることとして通知する（feature-enablement-console design §11.1。
+            // review rb-fe-a1 P3-8）。lock の解除は一時の状態の終わりで能力を新たに得ないため通知しない
+            notifyAdministratorRoleGranted(id, currentUser(authentication));
         }
     }
 

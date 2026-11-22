@@ -88,6 +88,10 @@ class FeatureEnablementConcurrencyMySqlTest {
     @Autowired
     private com.ses.config.feature.FeatureSwitches switches;
     @Autowired
+    private com.ses.mapper.FeatureEnablementGenerationMapper generationMapper;
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private FeatureEnablementCatalog catalog;
@@ -139,7 +143,7 @@ class FeatureEnablementConcurrencyMySqlTest {
         List<Object> outcomes = race(
                 () -> service.approve(child.getId(), 0, null, approver),
                 () -> {
-                    service.close(Feature.NF03, "OWNER_DECISION", closer);
+                    service.close(Feature.NF03, "MANUAL_OWNER_DECISION", closer);
                     return "closed";
                 });
 
@@ -170,7 +174,7 @@ class FeatureEnablementConcurrencyMySqlTest {
         List<Object> outcomes = race(
                 () -> service.approve(nf01.getId(), 0, null, approver),
                 () -> {
-                    service.close(Feature.NF10, "OWNER_DECISION", closer);
+                    service.close(Feature.NF10, "MANUAL_OWNER_DECISION", closer);
                     return "closed";
                 },
                 () -> service.expirePendingRequests(),
@@ -282,7 +286,7 @@ class FeatureEnablementConcurrencyMySqlTest {
         FeatureEnablementActor approver = fixture.admin();
         ensureOpen(Feature.NF10, requester, approver);
 
-        evaluationWriter.markUnverifiable(Feature.NF10, "journal.unreachable", false);
+        evaluationWriter.markUnverifiable(Feature.NF10, "journal.unreachable", false, null);
         com.ses.featureenablement.state.FeatureEnablementSnapshot first = loader.load("default");
         com.ses.featureenablement.state.FeatureEnablementSnapshot second = loader.load("default");
 
@@ -296,12 +300,88 @@ class FeatureEnablementConcurrencyMySqlTest {
         assertThat(switches.isEnabled(Feature.NF10)).as("回復で開く").isTrue();
     }
 
+    /**
+     * review rb-fe-a1 P1-1: 世代の行は no-op の upsert で最初から排他 lock を取る。二つ目の書き手は一つ目の commit まで排他 lock を
+     * 待ち（performance_schema の待ちの辺で確かめる。sleep で順序を作らない）、共有 lock からの昇格が無いため deadlock しない。
+     */
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void 世代の行のupsertは二つ目の書き手を排他lockで待たせdeadlockしない() throws Exception {
+        String lockTenant = "fe-lock-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 11, 23, 10, 0);
+        generationMapper.lockRow(lockTenant, now);
+        org.springframework.transaction.support.TransactionTemplate tx =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        CountDownLatch firstLocked = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong firstConnection = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicLong secondConnection = new java.util.concurrent.atomic.AtomicLong();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Long> first = pool.submit(() -> tx.execute(status -> {
+                firstConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                generationMapper.lockRow(lockTenant, now);
+                firstLocked.countDown();
+                awaitQuietly(releaseFirst);
+                long generation = generationMapper.selectForUpdate(lockTenant).getGeneration();
+                generationMapper.increment(lockTenant, now);
+                return generation;
+            }));
+            assertThat(firstLocked.await(30, TimeUnit.SECONDS)).isTrue();
+            Future<Long> second = pool.submit(() -> tx.execute(status -> {
+                secondConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                generationMapper.lockRow(lockTenant, now);
+                long generation = generationMapper.selectForUpdate(lockTenant).getGeneration();
+                generationMapper.increment(lockTenant, now);
+                return generation;
+            }));
+
+            List<com.ses.test.InnoDbRecordLockWaits.WaitEdge> edges = List.of();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (edges.isEmpty() && System.nanoTime() < deadline) {
+                assertThat(second.isDone()).as("二つ目の書き手は一つ目の commit の前に終わらない").isFalse();
+                edges = com.ses.test.InnoDbRecordLockWaits.waitEdgesOwnedBy(jdbc, firstConnection.get(),
+                        "t_feature_enablement_generation", null);
+                if (edges.isEmpty()) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(20));
+                }
+            }
+            assertThat(edges).as("二つ目の書き手が一つ目の世代の行の lock を待つ").isNotEmpty();
+            assertThat(edges).allSatisfy(edge -> {
+                assertThat(edge.requesterConnectionId()).as("待つのは二つ目（接続 ID を引けない時は 0）")
+                        .isIn(secondConnection.get(), 0L);
+                assertThat(edge.requesterMode()).as("共有 lock ではなく排他 lock を待つ: %s", edge.describe())
+                        .startsWith("X");
+            });
+
+            releaseFirst.countDown();
+            assertThat(first.get(60, TimeUnit.SECONDS)).isZero();
+            assertThat(second.get(60, TimeUnit.SECONDS)).as("二つ目は一つ目の commit の後の世代を読む").isEqualTo(1L);
+        } finally {
+            releaseFirst.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(generationMapper.selectGeneration(lockTenant)).isEqualTo(2L);
+    }
+
     // ---------------------------------------------------------------- helper
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            if (!latch.await(60, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("待ちの解除が来ません");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
 
     /** 開いていれば閉じる（前の test の状態を持ち越さない）。 */
     private void ensureClosed(Feature feature, FeatureEnablementActor closer) {
         if ("OPEN".equals(fixture.state(feature))) {
-            service.close(feature, "TEST_RESET", closer);
+            service.close(feature, "MANUAL_VERIFICATION", closer);
         }
     }
 

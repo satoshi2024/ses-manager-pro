@@ -38,6 +38,15 @@ public class FeatureEnablementProperties implements InitializingBean {
     /** Journal の権限の再検査の間隔の下限（既定10分、1分〜60分。段階 C）。 */
     private Duration journalReverifyInterval = Duration.ofMinutes(10);
 
+    /**
+     * 定期の評価の初回の遅延（既定1分、0〜60分。起動時の評価は {@code FeatureEnablementStartupEvaluator} が web server の前に行うため、
+     * 起動の直後に重ねて評価しない。{@code @Scheduled(initialDelayString)} が同じ key を読む。review rb-fe-a1 P3-5）。
+     */
+    private Duration evaluationInitialDelay = Duration.ofMinutes(1);
+
+    /** 終わった署名の消去の cron（既定 {@code 0 40 3 * * *}、Asia/Tokyo。{@code @Scheduled(cron)} が同じ key を読む）。 */
+    private String signOffPurgeCron = "0 40 3 * * *";
+
     /** 世代の poll の専用 thread を起動するか（試験では起動せず、試験が明示的に読み直す。design §13）。 */
     private boolean refreshThreadEnabled = true;
 
@@ -59,6 +68,12 @@ public class FeatureEnablementProperties implements InitializingBean {
                 Duration.ofMinutes(60));
         requireRange("app.feature-enablement.journal-reverify-interval", journalReverifyInterval,
                 Duration.ofMinutes(1), Duration.ofMinutes(60));
+        requireRange("app.feature-enablement.evaluation-initial-delay", evaluationInitialDelay, Duration.ZERO,
+                Duration.ofMinutes(60));
+        if (signOffPurgeCron == null || !org.springframework.scheduling.support.CronExpression.isValidExpression(
+                signOffPurgeCron)) {
+            throw new IllegalStateException("app.feature-enablement.sign-off-purge-cron は cron の式で指定してください");
+        }
         if (refreshInterval.multipliedBy(2).compareTo(maxStaleness) >= 0) {
             throw new IllegalStateException(
                     "app.feature-enablement.refresh-interval は max-staleness の半分より短くしてください");

@@ -48,6 +48,8 @@ public class HoldSubjectResolver {
     static final String APPLICATION_TABLE_PREFIX = "t_";
     /** provider の無い取込原本（catalog は UNKNOWN。DATA_ELEMENT hold の保存先だけを解決する）。 */
     static final String PROJECT_INGESTION_ORIGINAL = "PROJECT_INGESTION_ORIGINAL";
+    /** 機能の開放の署名の文書（V203。保存名は {@code t_feature_sign_off.stored_name}。消去の経路 D17。review rb-fe-a1 P2-1）。 */
+    public static final String FEATURE_SIGN_OFF_DOCUMENT = "FEATURE_SIGN_OFF_DOCUMENT";
 
     private final JdbcTemplate jdbc;
     private final ProductionPrivacyProviderRegistry registry;
@@ -223,6 +225,10 @@ public class HoldSubjectResolver {
         } else if (EngineerProfileProvider.PHOTO.equals(dataElementId)) {
             names = jdbc.queryForList("SELECT photo_url FROM t_engineer WHERE tenant_id = ? AND photo_url IS NOT NULL",
                     String.class, tenantId);
+        } else if (FEATURE_SIGN_OFF_DOCUMENT.equals(dataElementId)) {
+            // 状態に依らず保存名の残る全ての行（PURGED は保存名が NULL）。DATA_ELEMENT hold の間は消去（D17）も止まる
+            names = jdbc.queryForList("SELECT stored_name FROM t_feature_sign_off WHERE tenant_id = ? "
+                    + "AND stored_name IS NOT NULL", String.class, tenantId);
         } else if (PROJECT_INGESTION_ORIGINAL.equals(dataElementId)) {
             names = jdbc.queryForList("SELECT stored_file_name FROM t_project_ingestion WHERE tenant_id = ? "
                     + "AND stored_file_name IS NOT NULL", String.class, tenantId);

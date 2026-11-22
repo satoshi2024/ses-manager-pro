@@ -46,8 +46,10 @@ public interface FeatureSignOffMapper extends BaseMapper<FeatureSignOff> {
     @Select("SELECT stored_name FROM t_feature_sign_off WHERE status <> 'PURGED' AND stored_name IS NOT NULL")
     List<String> selectLiveStoredNames();
 
-    /** 消去の期日（{@code purge_after}）を迎えた終わった署名（全 tenant。古い順に {@code limit} 件）。 */
-    @Select("SELECT * FROM t_feature_sign_off WHERE status IN ('SUPERSEDED', 'EXPIRED', 'REVOKED', 'REJECTED') "
+    /** 消去の期日（{@code purge_after}）を迎えた終わった署名（tenant の中で古い順に {@code limit} 件。review rb-fe-a1 P3-10）。 */
+    @Select("SELECT * FROM t_feature_sign_off WHERE tenant_id = #{tenantId} "
+            + "AND status IN ('SUPERSEDED', 'EXPIRED', 'REVOKED', 'REJECTED') "
             + "AND purge_after IS NOT NULL AND purge_after <= #{today} ORDER BY purge_after, id LIMIT #{limit}")
-    List<FeatureSignOff> selectPurgeDue(@Param("today") LocalDate today, @Param("limit") int limit);
+    List<FeatureSignOff> selectPurgeDue(@Param("tenantId") String tenantId, @Param("today") LocalDate today,
+                                        @Param("limit") int limit);
 }

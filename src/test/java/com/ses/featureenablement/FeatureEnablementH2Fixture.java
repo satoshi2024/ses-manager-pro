@@ -5,6 +5,7 @@ import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.catalog.SignOffKind;
 import com.ses.featureenablement.condition.SignOffRequirements;
 import com.ses.featureenablement.service.FeatureEnablementActor;
+import com.ses.featureenablement.service.FeatureEnablementNotifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -43,7 +44,7 @@ public final class FeatureEnablementH2Fixture {
         jdbc.update("INSERT INTO sys_user (tenant_id, username, password, real_name, role, status, failed_count, "
                 + "deleted_flag) VALUES (?, ?, 'pw', 'FE試験', ?, 1, 0, 0)", TENANT, username, role);
         Long id = jdbc.queryForObject("SELECT id FROM sys_user WHERE username = ?", Long.class, username);
-        return new FeatureEnablementActor(id, username);
+        return com.ses.featureenablement.service.FeatureEnablementActors.of(id, username);
     }
 
     /**
@@ -156,19 +157,38 @@ public final class FeatureEnablementH2Fixture {
                 + "AND subject_type = ? AND event_type = ?", Long.class, TENANT, subjectType, eventType);
     }
 
-    public long countNotifications(Long userId) {
-        return jdbc.queryForObject("SELECT COUNT(*) FROM t_notification WHERE recipient_user_id = ? AND type = 'FEATURE_ENABLEMENT'",
-                Long.class, userId);
+    /**
+     * 試験の transaction に登録された、commit の後に送る通知（{@code FeatureEnablementNotifier.AfterCommitDelivery}）。通知は commit の
+     * 後に REQUIRES_NEW の新しい transaction で書くため、試験の transaction の中では送らずに登録の内容（事象・宛先・引数）を確かめる
+     * （実際の送付と outbox の即時配信は {@code FeatureEnablementNotificationDeliveryTest} が commit する専用 DB で確かめる）。
+     */
+    public static List<FeatureEnablementNotifier.Notice> notices() {
+        List<FeatureEnablementNotifier.Notice> notices = new java.util.ArrayList<>();
+        for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+            if (synchronization instanceof FeatureEnablementNotifier.AfterCommitDelivery delivery) {
+                notices.add(delivery.notice());
+            }
+        }
+        return notices;
+    }
+
+    /** 利用者へ登録された、事象の通知の件数。 */
+    public static long countNotices(Long userId, String eventKey) {
+        return notices().stream()
+                .filter(notice -> notice.eventKey().equals(eventKey) && notice.recipients().contains(userId))
+                .count();
     }
 
     /**
-     * 試験の transaction に登録された afterCommit を呼ぶ（試験の transaction は commit しないため、commit の後の通知と snapshot の
-     * 読直しを同じ transaction の中で確かめる）。本機能の部品が登録したものだけを1回ずつ呼ぶ（MyBatis・接続の後始末の登録には触れない。
-     * rollback では afterCommit は呼ばれないため二重にならない）。
+     * 試験の transaction に登録された afterCommit を呼ぶ（試験の transaction は commit しないため、commit の後の snapshot の読直し・
+     * 文書の削除を同じ transaction の中で確かめる）。本機能の部品が登録したものだけを1回ずつ呼ぶ（MyBatis・接続の後始末の登録には
+     * 触れない。rollback では afterCommit は呼ばれないため二重にならない）。通知は REQUIRES_NEW で共有の DB に commit するため呼ばず、
+     * {@link #notices()} で確かめる。
      */
     public static void runAfterCommit() {
         for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
             if (synchronization.getClass().getName().startsWith("com.ses.featureenablement.")
+                    && !(synchronization instanceof FeatureEnablementNotifier.AfterCommitDelivery)
                     && INVOKED.add(synchronization)) {
                 synchronization.afterCommit();
             }

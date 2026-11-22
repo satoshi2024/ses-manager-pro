@@ -41,6 +41,14 @@ public interface FileStorageService {
         return load(storedName);
     }
 
+    /**
+     * 専用の経路だけの種別（{@link FileKind#isDedicatedPathOnly()}）で、持ち主の行と metadata が登録の transaction の rollback で
+     * 消えた実体を消す（metadata が無いため {@link #delete} では消せない。review rb-fe-a1 P3-1）。呼ぶ側は、同じ要求で自分が保存し
+     * rollback で持ち主を失った保存名だけを渡す。既定は何もしない（孤児の清掃が消す）。
+     */
+    default void discardUnregistered(String storedName, FileKind kind) {
+    }
+
     /** 保持期限到達等の認可済み処理で、現在tenantの保存実体を消去する。 */
     void delete(String storedName);
 

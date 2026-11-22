@@ -38,6 +38,13 @@ public final class FeatureEnablementCatalog {
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
 
     /**
+     * 手動の閉鎖の理由の区分（{@code closed_reason} に入る。system の理由（{@code SIGN_OFF_REVOKED}・{@code MASTER_SWITCH_CLOSED} 等）と
+     * 混ざらないよう {@code MANUAL_} で始まる値だけ。画面は選択肢で出す。review rb-fe-a1 P3-4）。
+     */
+    public static final List<String> MANUAL_CLOSE_REASONS = List.of("MANUAL_OWNER_DECISION", "MANUAL_SECURITY_INCIDENT",
+            "MANUAL_CONDITION_DOUBT", "MANUAL_OPERATION_ERROR", "MANUAL_VERIFICATION", "MANUAL_OTHER");
+
+    /**
      * 「評価できない類」の code（design §4.2。review P2-1）。既存の検査が照会の失敗を違反 code に変えて返す場合も、registry が
      * {@code UNVERIFIABLE} に直す。{@code *.unverifiable}、{@code *.unverifiable[...]}、{@code journal.unreachable}、
      * {@code journal.timeout}、{@code evaluator.*}、{@code state=STATE_IO_ERROR}。
@@ -321,7 +328,9 @@ public final class FeatureEnablementCatalog {
                 privacyEvidence("NF07_DSAR_SELF_DELIVERY", "D06_OWNER"),
                 privacyEvidence("NF07_DSAR_I10", "PRIVACY"),
                 privacyEvidence("NF07_DSAR_REDACTION", "D06_OWNER"));
-        b.bundle(new BundleKind(BUNDLE_NF07_DECISION_BINDING, List.of("NF07_D01", "NF07_D09"), List.of("NF07_D06"), true));
+        // D-09 の digest の整合の検査（FE-C01）を要する。実装が無い間は組の確認を拒む
+        b.bundle(new BundleKind(BUNDLE_NF07_DECISION_BINDING, List.of("NF07_D01", "NF07_D09"), List.of("NF07_D06"), true,
+                true));
 
         // NF10（§6.13）。scheduler 無効は警告だけ（ADVISORY。評価器は FE-A11）
         b.unit(Feature.NF10, false, false, false, List.of(),

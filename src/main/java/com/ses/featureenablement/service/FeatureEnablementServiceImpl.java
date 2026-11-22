@@ -268,6 +268,9 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
         FeatureEnablementActor checked = actorPolicy.requireActiveAdministrator(actor == null ? null : actor.userId());
         actorPolicy.requirePrivacyAdminIfRequired(catalog.unit(feature).privacyUnit(), checked);
         String reasonCode = requiredReasonCode(reason);
+        if (!FeatureEnablementCatalog.MANUAL_CLOSE_REASONS.contains(reasonCode)) {
+            throw BusinessException.of(400, "error.featureEnablement.reasonCodeInvalid");
+        }
         FeatureEnablementWriteSupport.WriteContext context = write.begin(FeatureEnablementWriteSupport.Actor.of(checked));
         Set<Feature> affected = EnumSet.of(feature);
         affected.addAll(catalog.children(feature));
@@ -294,11 +297,7 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
         write.lockStates(context, affected);
         boolean closed = write.closeUnit(context, feature, reasonCode, null);
         write.finish(context);
-        if (closed) {
-            write.notifier().notifyAdministrators("autoClosed", new Object[]{feature.name(), feature.displayName(),
-                    reasonCode}, "FEATURE_ENABLEMENT:AUTO_CLOSED:" + feature.name() + ":" + context.correlationId(),
-                    List.of());
-        }
+        // 自動閉鎖の通知は closeUnit が開放単位ごとに登録する（世代の lock の直後の失効の先行の閉鎖も含む）
         return closed;
     }
 

@@ -116,6 +116,13 @@ class FeatureSignOffExtensionH2Test {
         BusinessException unconfirmed = catchThrowableOfType(() -> signOffs.requestExtension(registered,
                 LocalDate.of(2028, 1, 1), null, requester), BusinessException.class);
         assertThat(unconfirmed.getMessageKey()).isEqualTo("error.featureEnablement.signOffNotExtendable");
+
+        // 失効日（当日から無効）を迎えた確認済みの証拠は、日の始まりの EXPIRED の前でも延ばさない（review rb-fe-a1 P3-2）
+        long lapsed = fixture.signOff("NF04_DEVICE_ACCEPTANCE", "CONFIRMED", SIGNED, LocalDate.of(2026, 11, 23));
+        BusinessException expired = catchThrowableOfType(() -> signOffs.requestExtension(lapsed, LocalDate.of(2027, 6, 1),
+                null, requester), BusinessException.class);
+        assertThat(expired.getCode()).isEqualTo(409);
+        assertThat(expired.getMessageKey()).isEqualTo("error.featureEnablement.signOffAlreadyExpired");
     }
 
     @Test

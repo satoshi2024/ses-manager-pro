@@ -11,7 +11,9 @@ import com.ses.featureenablement.state.FeatureEnablementTenant;
 import com.ses.mapper.FeatureSignOffMapper;
 import com.ses.privacy.production.retention.hold.PrivacyHoldGate;
 import com.ses.privacy.production.retention.hold.PrivacyHoldPath;
+import com.ses.privacy.production.retention.catalog.SubjectAttribution;
 import com.ses.privacy.production.retention.hold.PrivacyHoldPathGuard;
+import com.ses.privacy.production.retention.hold.PrivacyHoldTestGuards;
 import com.ses.service.FileStorageService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -53,6 +56,8 @@ class FeatureSignOffPurgeSchedulerTest {
 
     @Autowired
     private FeatureSignOffPurgeScheduler scheduler;
+    @Autowired
+    private PrivacyHoldPathGuard holdGuard;
     @Autowired
     private FeatureSignOffService signOffs;
     @Autowired
@@ -96,7 +101,8 @@ class FeatureSignOffPurgeSchedulerTest {
         assertThat(row(rejected.getId())).as("期日の前は消さない").containsEntry("STATUS", "REJECTED");
 
         clock.set(Instant.parse("2029-11-23T01:00:00Z"));
-        scheduler.purgeDue();
+        FileStorageService storage = mock(FileStorageService.class);
+        assertThat(scheduler(holdGuard, storage).purgeDue()).isEqualTo(1);
 
         Map<String, Object> purged = row(rejected.getId());
         assertThat(purged).containsEntry("STATUS", "PURGED").containsEntry("SIGNER_NAME", null)
@@ -106,10 +112,11 @@ class FeatureSignOffPurgeSchedulerTest {
         assertThat(purged.get("PURGED_AT")).isNotNull();
         assertThat(fixture.countAudit("FEATURE_SIGN_OFF_PURGED")).isEqualTo(1);
 
-        // commit の後に文書の実体と metadata を消す
+        // commit の後に REQUIRES_NEW の transaction で文書の実体と metadata を消す（実際の削除は
+        // FeatureEnablementNotificationDeliveryTest が commit する専用 DB で確かめる）
+        verify(storage, org.mockito.Mockito.never()).delete(stored);
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(jdbc.queryForObject("SELECT deleted_flag FROM t_file_security_metadata WHERE stored_name = ?",
-                Integer.class, stored)).isEqualTo(1);
+        verify(storage).delete(stored);
     }
 
     @Test
@@ -133,14 +140,38 @@ class FeatureSignOffPurgeSchedulerTest {
         when(batch.elementVerdict("FEATURE_SIGN_OFF_SIGNER_NAME")).thenReturn(PrivacyHoldGate.Verdict.ALLOW);
         when(batch.elementVerdict("FEATURE_SIGN_OFF_DOCUMENT")).thenReturn(PrivacyHoldGate.Verdict.HELD);
 
-        assertThat(scheduler(guard).purgeDue()).isZero();
+        assertThat(scheduler(guard, fileStorage).purgeDue()).isZero();
 
         assertThat(row(ended)).containsEntry("STATUS", "REJECTED");
         verify(batch).skip(eq(PrivacyHoldGate.Verdict.HELD), org.mockito.ArgumentMatchers.anyInt());
         verify(batch).close();
         // gate の Bean が無ければ何も消さない
-        assertThat(scheduler(null).purgeDue()).isZero();
+        assertThat(scheduler(null, fileStorage).purgeDue()).isZero();
         assertThat(row(ended)).containsEntry("STATUS", "REJECTED");
+    }
+
+    /**
+     * review rb-fe-a1 P2-1: 本物の guard（gate だけ差し替え）で、署名の文書の DATA_ELEMENT hold の間は消さず、SUBJECT hold だけなら
+     * 帰属できない（NOT_ATTRIBUTABLE）署名の氏名・文書は消す（SUBJECT hold で守られない残余は D-05 の受理事項。RB §4.5）。
+     */
+    @Test
+    void 署名の文書のDATA_ELEMENT_holdの間は消さずSUBJECT_holdだけなら消す() {
+        long ended = fixture.signOff("NF04_SRE", "REJECTED", SIGNED, LocalDate.of(2027, 11, 1));
+        jdbc.update("UPDATE t_feature_sign_off SET purge_after = ? WHERE id = ?", LocalDate.of(2026, 11, 1), ended);
+        Map<String, SubjectAttribution> attribution = Map.of(
+                "FEATURE_SIGN_OFF_SIGNER_NAME", SubjectAttribution.NOT_ATTRIBUTABLE,
+                "FEATURE_SIGN_OFF_DOCUMENT", SubjectAttribution.NOT_ATTRIBUTABLE);
+        PrivacyHoldTestGuards.Stub elementHold = PrivacyHoldTestGuards.stub().tenant(FeatureEnablementH2Fixture.TENANT,
+                PrivacyHoldTestGuards.verified(Set.of(), Set.of("FEATURE_SIGN_OFF_DOCUMENT"), attribution));
+
+        assertThat(scheduler(elementHold.guard, fileStorage).purgeDue()).isZero();
+        assertThat(row(ended)).containsEntry("STATUS", "REJECTED");
+        assertThat(elementHold.skipped(PrivacyHoldPath.D17, PrivacyHoldGate.Verdict.HELD)).isEqualTo(1.0);
+
+        PrivacyHoldTestGuards.Stub subjectHold = PrivacyHoldTestGuards.stub().tenant(FeatureEnablementH2Fixture.TENANT,
+                PrivacyHoldTestGuards.verified(Set.of("ENGINEER:990001"), Set.of(), attribution));
+        assertThat(scheduler(subjectHold.guard, mock(FileStorageService.class)).purgeDue()).isEqualTo(1);
+        assertThat(row(ended)).containsEntry("STATUS", "PURGED");
     }
 
     @Test
@@ -155,10 +186,10 @@ class FeatureSignOffPurgeSchedulerTest {
     // ---------------------------------------------------------------- helper
 
     @SuppressWarnings("unchecked")
-    private FeatureSignOffPurgeScheduler scheduler(PrivacyHoldPathGuard guard) {
+    private FeatureSignOffPurgeScheduler scheduler(PrivacyHoldPathGuard guard, FileStorageService storage) {
         ObjectProvider<PrivacyHoldPathGuard> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(guard);
-        return new FeatureSignOffPurgeScheduler(signOffMapper, write, fileStorage, provider,
+        return new FeatureSignOffPurgeScheduler(signOffMapper, write, storage, provider,
                 FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT), transactionManager, clock);
     }
 

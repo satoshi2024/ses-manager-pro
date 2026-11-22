@@ -76,8 +76,11 @@ class SysUserServiceImplTest {
                 + "'FEATURE_ADMIN_ROLE_GRANTED_NOTICE' ORDER BY id DESC LIMIT 1", String.class))
                 .contains("\"grantedUserId\":" + created.getId()).doesNotContain("付与試験");
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(fixture.countNotifications(other.userId())).as("他の有効な管理者へ").isEqualTo(1);
-        assertThat(fixture.countNotifications(operator.userId())).as("付与した管理者へも").isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.countNotices(other.userId(), "adminGranted")).as("他の有効な管理者へ").isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.countNotices(operator.userId(), "adminGranted")).as("付与した管理者へも")
+                .isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.countNotices(created.getId(), "adminGranted")).as("同じ transaction で管理者になった利用者へも")
+                .isEqualTo(1);
 
         // role を変えない更新では通知しない。role の変更で管理者になれば通知する
         FeatureEnablementActor sales = fixture.user("営業");
@@ -90,6 +93,12 @@ class SysUserServiceImplTest {
         promote.setRole("管理者");
         sysUserService.updateUser(sales.userId(), promote, authentication);
         assertThat(fixture.countAudit("FEATURE_ADMIN_ROLE_GRANTED_NOTICE")).isEqualTo(before + 2);
+
+        // 無効にした管理者を有効に戻すことも管理者の能力を得ることとして通知する（review rb-fe-a1 P3-8）。無効化では通知しない
+        sysUserService.updateUserStatus(sales.userId(), 0, authentication);
+        assertThat(fixture.countAudit("FEATURE_ADMIN_ROLE_GRANTED_NOTICE")).isEqualTo(before + 2);
+        sysUserService.updateUserStatus(sales.userId(), 1, authentication);
+        assertThat(fixture.countAudit("FEATURE_ADMIN_ROLE_GRANTED_NOTICE")).isEqualTo(before + 3);
     }
 
     private Authentication authentication(FeatureEnablementActor actor) {

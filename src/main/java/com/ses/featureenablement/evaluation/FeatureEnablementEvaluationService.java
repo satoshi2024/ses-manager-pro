@@ -181,7 +181,9 @@ public class FeatureEnablementEvaluationService {
         Instant since = unit.unverifiableSince();
         if (since == null) {
             try {
-                writer.markUnverifiable(feature, code, startup);
+                Instant local = localUnverifiableSince.get(feature);
+                writer.markUnverifiable(feature, code, startup, local == null ? null
+                        : java.time.LocalDateTime.ofInstant(local, java.time.ZoneId.systemDefault()));
                 holder.reload();
                 since = holder.get().unit(feature).unverifiableSince();
                 localUnverifiableSince.remove(feature);
@@ -235,11 +237,14 @@ public class FeatureEnablementEvaluationService {
     private void closeAllForMaster(boolean startup, Map<Feature, String> result) {
         log.error("[機能の開放] 緊急の総スイッチが閉じているため、開いている全ての開放単位を閉じます: "
                 + "errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED");
+        List<String> closed = new ArrayList<>();
         for (Feature feature : orderedUnits()) {
             FeatureEnablementSnapshot.UnitView unit = holder.get().unit(feature);
             if (unit.state().openLike() || overlay.has(feature, FeatureEnablementOverlay.AUTO_CLOSE_PENDING)) {
                 overlay.markAutoClosePending(feature, MASTER_SWITCH_CLOSED);
-                writeAutoClose(feature, MASTER_SWITCH_CLOSED, startup);
+                if (writeAutoClose(feature, MASTER_SWITCH_CLOSED, startup) && unit.state().openLike()) {
+                    closed.add(feature.name());
+                }
             }
             FeatureEnablementSnapshot.UnitView after = holder.get().unit(feature);
             if (after.version() >= 0 || overlay.contains(feature)) {
@@ -247,6 +252,9 @@ public class FeatureEnablementEvaluationService {
             }
         }
         runSafely("総スイッチによる未決の申請の取消し", () -> writer.cancelAllPending(MASTER_SWITCH_CLOSED, startup));
+        if (!closed.isEmpty()) {
+            runSafely("総スイッチによる閉鎖の監査", () -> writer.recordMasterClosed(closed, startup));
+        }
     }
 
     // ---------------------------------------------------------------- 日の始まりの警告

@@ -11,16 +11,22 @@ import org.apache.ibatis.annotations.Update;
 import java.time.LocalDateTime;
 
 /**
- * 機能の開放の世代（V203）。全ての書込みの transaction は、最初に {@link #insertIgnore} で行を作ってから
- * {@link #selectForUpdate} で lock し、{@link #increment} で1つ上げる（design §2.2・§5.1 の (1)）。
+ * 機能の開放の世代（V203）。全ての書込みの transaction は、最初に {@link #lockRow} で行を作るか排他 lock を取り、続けて
+ * {@link #selectForUpdate} で読み、{@link #increment} で1つ上げる（design §2.2・§5.1 の (1)）。
+ *
+ * <p>{@code INSERT IGNORE} を使わない: 重複した行への {@code INSERT IGNORE} は共有 lock（duplicate-key の S lock）を取り、その後の
+ * {@code FOR UPDATE} で排他 lock へ昇格する。二つの書き手が共に S lock を持った後にそれぞれ昇格を待つと deadlock（1213）になる
+ * （review rb-fe-a1 P1-1。同じ理由の先例: {@code PrivacyHoldProjectionStore.ensureStateLocked}・
+ * {@code JdbcPrivacyJournalAdapter}・{@code JdbcPrivacyPartitionFence}・{@code ProductionPrivacyJournalAdapter}）。no-op の upsert は
+ * 重複の時に初めから排他 lock を取るため、二つ目の書き手は一つ目の commit まで待ち、昇格が起きない。</p>
  */
 @Mapper
 public interface FeatureEnablementGenerationMapper extends BaseMapper<FeatureEnablementGeneration> {
 
-    /** 行が無ければ世代 0 で作る（既にあれば何もしない）。 */
-    @Insert("INSERT IGNORE INTO t_feature_enablement_generation (tenant_id, generation, updated_at) "
-            + "VALUES (#{tenantId}, 0, #{now})")
-    int insertIgnore(@Param("tenantId") String tenantId, @Param("now") LocalDateTime now);
+    /** 行が無ければ世代 0 で作り、あれば値を変えずに排他 lock だけを取る（no-op の upsert）。 */
+    @Insert("INSERT INTO t_feature_enablement_generation (tenant_id, generation, updated_at) "
+            + "VALUES (#{tenantId}, 0, #{now}) ON DUPLICATE KEY UPDATE generation = generation")
+    int lockRow(@Param("tenantId") String tenantId, @Param("now") LocalDateTime now);
 
     /** 世代の行を X lock して読む。 */
     @Select("SELECT tenant_id, generation, updated_at FROM t_feature_enablement_generation "

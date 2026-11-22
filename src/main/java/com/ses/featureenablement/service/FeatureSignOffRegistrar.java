@@ -145,6 +145,11 @@ public class FeatureSignOffRegistrar {
         }
     }
 
+    /**
+     * 登録の transaction が rollback すれば、保存した文書の実体を消す。metadata も同じ transaction で rollback するため
+     * {@code delete} ではなく {@code discardUnregistered}（DB を読まずに実体だけを消す）を使う（review rb-fe-a1 P3-1）。消せなければ
+     * 孤児の清掃が消す（持ち主の行が無く、どの provider も claim しない）。
+     */
     private void deleteOnRollback(String storedName) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             return;
@@ -156,7 +161,7 @@ public class FeatureSignOffRegistrar {
                     return;
                 }
                 try {
-                    AccountingTenantContextHolder.runWithTenant(tenant.tenantId(), () -> fileStorage.delete(storedName));
+                    fileStorage.discardUnregistered(storedName, FileKind.FEATURE_SIGN_OFF);
                 } catch (RuntimeException e) {
                     log.warn("[機能の開放] 登録を取り消した署名の文書を消せません（孤児の清掃が消す）: exceptionClass={}",
                             e.getClass().getSimpleName());

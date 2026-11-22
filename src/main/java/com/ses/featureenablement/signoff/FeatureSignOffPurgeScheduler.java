@@ -57,6 +57,8 @@ public class FeatureSignOffPurgeScheduler {
     private final ObjectProvider<PrivacyHoldPathGuard> guards;
     private final FeatureEnablementTenant tenant;
     private final TransactionTemplate transactions;
+    /** commit の後の実体と metadata の削除の transaction（afterCommit の中は REQUIRES_NEW。review rb-fe-a1 P2-2）。 */
+    private final TransactionTemplate requiresNew;
     private final Clock clock;
 
     public FeatureSignOffPurgeScheduler(FeatureSignOffMapper signOffMapper, FeatureEnablementWriteSupport write,
@@ -70,6 +72,8 @@ public class FeatureSignOffPurgeScheduler {
         this.tenant = tenant;
         this.transactions = new TransactionTemplate(transactionManager);
         this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.requiresNew = new TransactionTemplate(transactionManager);
+        this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clock;
     }
 
@@ -90,7 +94,7 @@ public class FeatureSignOffPurgeScheduler {
     /** 期日を過ぎた行を消去する（消した件数）。 */
     public int purgeDue() {
         LocalDate today = FeatureEvaluationContext.businessDate(clock);
-        List<FeatureSignOff> due = signOffMapper.selectPurgeDue(today, BATCH_LIMIT).stream()
+        List<FeatureSignOff> due = signOffMapper.selectPurgeDue(tenant.tenantId(), today, BATCH_LIMIT).stream()
                 .filter(row -> tenant.tenantId().equals(row.getTenantId())).toList();
         if (due.isEmpty()) {
             return 0;
@@ -163,7 +167,8 @@ public class FeatureSignOffPurgeScheduler {
         }
         Runnable delete = () -> {
             try {
-                AccountingTenantContextHolder.runWithTenant(tenantId, () -> fileStorage.delete(storedName));
+                requiresNew.executeWithoutResult(status -> AccountingTenantContextHolder.runWithTenant(tenantId,
+                        () -> fileStorage.delete(storedName)));
             } catch (RuntimeException e) {
                 log.warn("[機能の開放] 消去した署名の文書の実体を消せません（孤児の清掃が消す）: exceptionClass={}",
                         e.getClass().getSimpleName());

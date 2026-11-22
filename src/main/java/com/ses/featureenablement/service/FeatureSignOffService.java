@@ -63,7 +63,7 @@ public interface FeatureSignOffService {
     FeatureEnablementRequest requestExtension(long id, LocalDate newExpiresOn, String reason, FeatureEnablementActor actor);
 
     /** 一覧（氏名を含めない）。 */
-    List<Summary> list();
+    List<Summary> list(FeatureEnablementActor actor);
 
     /** 詳細（氏名を含む。管理者だけ）。 */
     FeatureSignOff detail(long id, FeatureEnablementActor actor);

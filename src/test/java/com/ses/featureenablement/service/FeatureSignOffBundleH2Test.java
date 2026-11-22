@@ -176,6 +176,25 @@ class FeatureSignOffBundleH2Test {
         assertThat(status(newA)).isEqualTo("REGISTERED");
     }
 
+    /** review rb-fe-a1 P3-3: 整合の検査を要する組の種類で検査の実装が無ければ、組の確認は 409 で何も変えない（fail-closed）。 */
+    @Test
+    void 整合の検査を要する組の種類で検査の実装が無ければ確認は409() {
+        long oldBundle = fixture.confirmedBundleId(BUNDLE);
+        FeatureSignOffBundle bundle = bundles.register(BUNDLE, List.of(newMember(A, "BO-2026-1124")),
+                Map.of(B, fixture.confirmedId(B)), registrant);
+
+        BusinessException missing = catchThrowableOfType(() -> withCatalogAndChecks(
+                FeatureEnablementTestConfiguration.testCatalog(true)).confirm(bundle.getId(), 0, confirmer),
+                BusinessException.class);
+
+        assertThat(missing.getCode()).isEqualTo(409);
+        assertThat(missing.getMessageKey()).isEqualTo("error.featureEnablement.bundleCheckMissing");
+        assertThat(bundleStatus(bundle.getId())).isEqualTo("REGISTERED");
+        assertThat(bundleStatus(oldBundle)).isEqualTo("CONFIRMED");
+        assertThat(FeatureEnablementCatalog.standard().bundleKind(FeatureEnablementCatalog.BUNDLE_NF07_DECISION_BINDING)
+                .orElseThrow().consistencyCheckRequired()).as("NF07 の組は検査を要する").isTrue();
+    }
+
     @Test
     void 組の取消しで組の種類を要する開放単位が自動閉鎖する() {
         fixture.confirmedSignOffs(Feature.NF03, SIGNED, EXPIRES);
@@ -225,10 +244,15 @@ class FeatureSignOffBundleH2Test {
     // ---------------------------------------------------------------- helper
 
     private FeatureSignOffBundleService withChecks(FeatureSignOffBundleConsistencyCheck... checks) {
+        return withCatalogAndChecks(catalog, checks);
+    }
+
+    private FeatureSignOffBundleService withCatalogAndChecks(FeatureEnablementCatalog bundleCatalog,
+                                                             FeatureSignOffBundleConsistencyCheck... checks) {
         @SuppressWarnings("unchecked")
         ObjectProvider<FeatureSignOffBundleConsistencyCheck> provider = mock(ObjectProvider.class);
         when(provider.orderedStream()).thenAnswer(invocation -> Stream.of(checks));
-        return new FeatureSignOffBundleServiceImpl(write, transitions, registrar, actorPolicy, catalog, signOffMapper,
+        return new FeatureSignOffBundleServiceImpl(write, transitions, registrar, actorPolicy, bundleCatalog, signOffMapper,
                 bundleMapper, memberMapper, FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT), provider);
     }
 

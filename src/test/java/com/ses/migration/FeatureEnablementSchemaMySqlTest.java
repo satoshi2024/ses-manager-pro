@@ -56,6 +56,29 @@ class FeatureEnablementSchemaMySqlTest {
                 + "AND event_object_table LIKE 't\\_feature\\_%'", Integer.class)).isEqualTo(6);
     }
 
+    /**
+     * review rb-fe-a1 P3-11: MySQL 8.4 の既定（{@code restrict_fk_on_non_standard_key=ON}）の下で V203 を適用でき、3つの複合 FK は
+     * {@code uk_fe_request_actors}（申請の id・申請者・決定者の UNIQUE の全ての列）を参照する。8.0 の image で流す回帰の確認では
+     * 変数が無いため、版が 8.4 以上の時だけ変数を確かめる（skip しない）。
+     */
+    @Test
+    void MySQL84の非標準keyへのFKの制限の下で適用され複合FKはUNIQUEの全ての列を参照する() {
+        String version = jdbc.queryForObject("SELECT VERSION()", String.class);
+        String[] parts = version.split("[.-]");
+        int major = Integer.parseInt(parts[0]);
+        int minor = Integer.parseInt(parts[1]);
+        if (major > 8 || (major == 8 && minor >= 4)) {
+            assertThat(jdbc.queryForObject("SELECT @@GLOBAL.restrict_fk_on_non_standard_key", Integer.class))
+                    .as("8.4 の既定は ON（%s）", version).isEqualTo(1);
+        }
+        assertThat(jdbc.queryForList("SELECT constraint_name FROM information_schema.referential_constraints "
+                + "WHERE constraint_schema = DATABASE() AND unique_constraint_name = 'uk_fe_request_actors' "
+                + "ORDER BY constraint_name", String.class))
+                .containsExactly("fk_fe_extension_request", "fk_fe_setting_request", "fk_fe_state_request");
+        assertThat(jdbc.queryForObject("SELECT success FROM flyway_schema_history WHERE version = '203'", Integer.class))
+                .isEqualTo(1);
+    }
+
     @Test
     void 申請者本人の承認と却下と申請者以外の取下げと未決の2件目は拒否される() {
         String tenant = tenant();

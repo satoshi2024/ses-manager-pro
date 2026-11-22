@@ -84,6 +84,11 @@ public class FeatureSignOffExtensionApprover implements FeatureEnablementRequest
             return new FeatureEnablementApprovalResult(FeatureEnablementApprovalResult.Outcome.STALE, request.getId(),
                     List.of());
         }
+        if (!row.getExpiresOn().isAfter(context.today())) {
+            // 承認の時に既に失効していれば延ばさない（日の始まりの EXPIRED の前でも。review rb-fe-a1 P3-2）
+            return new FeatureEnablementApprovalResult(FeatureEnablementApprovalResult.Outcome.CONDITIONS_UNSATISFIED,
+                    request.getId(), List.of("signoff." + row.getKindCode() + ".expired"));
+        }
         if (!newExpiresOn.isAfter(row.getExpiresOn())
                 || ChronoUnit.DAYS.between(context.today(), newExpiresOn) > SignOffKindClass.EVIDENCE.maxValidityDays()) {
             return new FeatureEnablementApprovalResult(FeatureEnablementApprovalResult.Outcome.CONDITIONS_UNSATISFIED,

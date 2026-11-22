@@ -112,15 +112,6 @@ public class FeatureSignOffTransitions {
         return closed;
     }
 
-    /** 自動閉鎖を全ての管理者へ通知する（commit の後）。 */
-    public void notifyAutoClosed(FeatureEnablementWriteSupport.WriteContext context, List<Feature> closed,
-                                 String reasonCode) {
-        for (Feature feature : closed) {
-            write.notifier().notifyAdministrators("autoClosed", new Object[]{feature.name(), feature.displayName(),
-                    reasonCode}, "FEATURE_ENABLEMENT:AUTO_CLOSED:" + feature.name() + ":" + context.correlationId(), List.of());
-        }
-    }
-
     /**
      * 署名の行を終える（CAS。{@code ended_*} と消去の期日を書く）。
      *

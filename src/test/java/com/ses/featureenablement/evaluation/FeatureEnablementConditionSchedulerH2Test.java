@@ -125,8 +125,8 @@ class FeatureEnablementConditionSchedulerH2Test {
         assertThat(fixture.countAudit("FEATURE_AUTO_CLOSED")).isEqualTo(1);
         assertThat(overlay.has(Feature.NF04, FeatureEnablementOverlay.AUTO_CLOSE_PENDING)).as("書けたら外す").isFalse();
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_notification WHERE recipient_user_id = ? AND type = "
-                + "'FEATURE_ENABLEMENT' AND title LIKE '%NF04%'", Long.class, requester.userId())).isPositive();
+        assertThat(FeatureEnablementH2Fixture.notices()).filteredOn(notice -> notice.eventKey().equals("autoClosed")
+                && notice.recipients().contains(requester.userId()) && "NF04".equals(notice.args()[0])).isNotEmpty();
     }
 
     @Test
@@ -157,6 +157,22 @@ class FeatureEnablementConditionSchedulerH2Test {
         assertThat(fixture.closedReason(Feature.NF10)).isEqualTo("EVALUATION_UNVERIFIABLE");
         assertThat(jdbc.queryForObject("SELECT unverifiable_since FROM t_feature_enablement_state WHERE tenant_id = "
                 + "'default' AND feature_key = 'NF10'", java.sql.Timestamp.class)).isNull();
+    }
+
+    /** review rb-fe-a1 P3-9: DB に書けなかった間の memory の始まりがあれば、書けた時はその時刻を始まりにする（自動閉鎖を遅らせない）。 */
+    @Test
+    void DBに書けなかった間の始まりがあればunverifiable_sinceはその時刻で監査も残す() {
+        fixture.confirmedSignOffs(Feature.NF10, SIGNED, EXPIRES);
+        open(Feature.NF10);
+        java.time.LocalDateTime earlier = java.time.LocalDateTime.of(2026, 11, 23, 9, 50);
+
+        writer.markUnverifiable(Feature.NF10, "journal.unreachable", false, earlier);
+
+        assertThat(jdbc.queryForObject("SELECT unverifiable_since FROM t_feature_enablement_state WHERE tenant_id = "
+                + "'default' AND feature_key = 'NF10'", java.time.LocalDateTime.class)).isEqualTo(earlier);
+        assertThat(fixture.countAudit("FEATURE_EVALUATION_UNVERIFIABLE")).isEqualTo(1);
+        writer.clearUnverifiable(Feature.NF10, false);
+        assertThat(fixture.countAudit("FEATURE_EVALUATION_RECOVERED")).isEqualTo(1);
     }
 
     @Test
@@ -245,8 +261,9 @@ class FeatureEnablementConditionSchedulerH2Test {
         FeatureEnablementH2Fixture.runAfterCommit();
 
         assertThat(fixture.state(Feature.NF04)).isEqualTo("OPEN");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_notification WHERE recipient_user_id = ? AND type = "
-                + "'FEATURE_ENABLEMENT' AND message LIKE '%NF04_SRE%'", Long.class, approver.userId())).isEqualTo(1);
+        assertThat(FeatureEnablementH2Fixture.notices()).filteredOn(notice -> notice.eventKey().equals("expiryWarning")
+                && notice.recipients().contains(approver.userId())).singleElement()
+                .satisfies(notice -> assertThat(notice.args()).contains("NF04", "NF04_SRE"));
     }
 
     @Test
@@ -272,8 +289,9 @@ class FeatureEnablementConditionSchedulerH2Test {
         assertThat(fixture.state(Feature.NF02)).isEqualTo("OPEN");
         assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_EXPIRING")).isEqualTo(1);
         FeatureEnablementH2Fixture.runAfterCommit();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_notification WHERE recipient_user_id = ? AND type = "
-                + "'FEATURE_ENABLEMENT' AND title LIKE '%NF02%'", Long.class, requester.userId())).isEqualTo(2);
+        assertThat(FeatureEnablementH2Fixture.notices()).filteredOn(notice -> notice.recipients().contains(requester.userId())
+                && "NF02".equals(notice.args()[0])).extracting(FeatureEnablementNotifier.Notice::eventKey)
+                .containsExactlyInAnyOrder("openConditionLost", "openConditionExpiring");
     }
 
     @Test

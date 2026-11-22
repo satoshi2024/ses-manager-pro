@@ -55,8 +55,14 @@ public class FeatureEnablementTestConfiguration {
 
     /** 試験の目録（Spring 管理外の試験でも使う）。 */
     public static FeatureEnablementCatalog testCatalog() {
+        return testCatalog(false);
+    }
+
+    /** 試験の目録（{@code bundleCheckRequired} は試験用の組の種類が整合の検査を要するか。review rb-fe-a1 P3-3）。 */
+    public static FeatureEnablementCatalog testCatalog(boolean bundleCheckRequired) {
         return FeatureEnablementCatalog.standard()
-                .withBundle(new BundleKind(TEST_BUNDLE, List.of(TEST_BUNDLE_A, TEST_BUNDLE_B), List.of(), false),
+                .withBundle(new BundleKind(TEST_BUNDLE, List.of(TEST_BUNDLE_A, TEST_BUNDLE_B), List.of(), false,
+                                bundleCheckRequired),
                         List.of(new SignOffKind(TEST_BUNDLE_A, SignOffKindClass.DECISION, List.of("BUSINESS_OWNER"),
                                         SignOffKind.ReferenceRule.GENERIC, List.of(), TEST_BUNDLE, false),
                                 new SignOffKind(TEST_BUNDLE_B, SignOffKindClass.EVIDENCE, List.of("SRE"),

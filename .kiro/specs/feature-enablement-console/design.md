@@ -72,7 +72,7 @@ CREATE TABLE t_feature_enablement_generation (
 );
 ```
 
-- 行は最初の書込みで作る（`INSERT IGNORE` の後に `SELECT … FOR UPDATE`）。全ての書込みの transaction はこの行を最初に lock し、`generation` を 1 つ上げる。tenant の中の変更は直列になる（量が少ないため直列で足りる。§5.1 の lock の順）。
+- 行は最初の書込みで作る（no-op の upsert `INSERT … ON DUPLICATE KEY UPDATE generation = generation` の後に `SELECT … FOR UPDATE`。`INSERT IGNORE` は重複の時に共有 lock を取り、`FOR UPDATE` での排他 lock への昇格で二つの書き手が deadlock（1213）するため使わない。実装 review rb-fe-a1 P1-1。repo の先例は `PrivacyHoldProjectionStore.ensureStateLocked` 等）。全ての書込みの transaction はこの行を最初に lock し、`generation` を 1 つ上げる。tenant の中の変更は直列になる（量が少ないため直列で足りる。§5.1 の lock の順）。
 - snapshot はこの値で新旧を判断する。
 
 ### 2.3 `t_feature_enablement_state`
@@ -340,7 +340,7 @@ FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 't_feature_enablement_ev
 ### 2.8 menu・権限・data element の seed（V203 の後半）
 
 - `m_menu`: `feature-enablement`（名称「機能の開放」、`path_prefix` `/feature-enablement`、`api_prefix` `/api/feature-enablement`）。`t_role_menu`: `管理者` だけ。**`t_permission_group_action` に行を足さない**（管理者は `role-admin` の `*`。管理者以外の group に `feature-enablement.*` を seed しない。CLAUDE.md）。
-- `m_pii_data_element`: `FEATURE_SIGN_OFF_SIGNER_NAME`（`t_feature_sign_off.signer_name`）と `FEATURE_SIGN_OFF_DOCUMENT`（署名の文書）の 2 件を V198（:25-28）と同じ列で登録する（分類・owner・inventory 状態は UNKNOWN、保持期間は持たない。D-02 の署名で確定する）。`subject_attribution` だけは、消去の経路（§6.6 の D17）を hold の gate が判定できるよう `NOT_ATTRIBUTABLE` にする（署名者は F2 provider で本人を導出できず、DATA_ELEMENT hold がある時だけ消去を止める。UNKNOWN のままだと、hold 機構を使った tenant で消去が止まり続け、`PrivacyHoldPathClassificationTest` の「接続した経路の data element は分類済み」の規則にも反する。FE-A01 の実装の判断）。`privacy-retention-dsar/pii-inventory.md` に DB-1xx の行を足す。
+- `m_pii_data_element`: `FEATURE_SIGN_OFF_SIGNER_NAME`（`t_feature_sign_off.signer_name`）と `FEATURE_SIGN_OFF_DOCUMENT`（署名の文書）の 2 件を V198（:25-28）と同じ列で登録する（分類・owner・inventory 状態は UNKNOWN、保持期間は持たない。D-02 の署名で確定する）。`subject_attribution` だけは、消去の経路（§6.6 の D17）を hold の gate が判定できるよう `NOT_ATTRIBUTABLE` にする（署名者は F2 provider で本人を導出できず、DATA_ELEMENT hold がある時だけ消去を止める。UNKNOWN のままだと、hold 機構を使った tenant で消去が止まり続け、`PrivacyHoldPathClassificationTest` の「接続した経路の data element は分類済み」の規則にも反する。FE-A01 の実装の判断）。署名者が SUBJECT hold の本人でもこの2件は SUBJECT hold で守られない残余があり、D-05 owner の受理事項・Plan Review で Privacy が確認する項目として扱う（privacy plan の R-18・RB §4.5。実装 review rb-fe-a1 P3-12）。DATA_ELEMENT hold の保存名は `HoldSubjectResolver` が `t_feature_sign_off.stored_name` から解決する（D10。同 P2-1）。`privacy-retention-dsar/pii-inventory.md` に DB-1xx の行を足す。
 
 ### 2.9 条件の評価結果は永続化しない（推奨）
 
@@ -412,6 +412,7 @@ return true
 - **同じ instance**: 書込みの transaction に `TransactionSynchronization.afterCommit` を登録し、commit の後に snapshot を読み直して差し替える（要求の応答より前）。読み直しに失敗したら、変更した開放単位を一時の閉鎖にし、次の poll に任せる。
 - **他の instance**: `FeatureEnablementSnapshotRefresher` が専用の thread で `app.feature-enablement.refresh-interval`（既定 5 秒）ごとに世代の 1 行を読み、変わっていれば snapshot を読み直す。`@Scheduled` を使わない（`app.scheduling.enabled=false` で scheduler を一括で止めた時に、全ての開放単位が古さで閉じないため。読むだけで書かない）。`SchedulingDisabledDrainTest` の既知の一覧に理由つきで足す（RB-QUIESCE の `BackupQuiesceTicker` と同じ扱い）。
 - **古さ**: 最後に読めた時刻（`verifiedAt`）から `app.feature-enablement.max-staleness`（既定 60 秒、10 秒〜300 秒）を超えたら、全ての開放単位を閉とする。DB の状態は変えず、読めれば戻る。`refresh-interval`（既定 5 秒、1 秒〜30 秒）は `max-staleness` の半分より短いことを bind の時に検査する（`@Validated`。review P3-13）。
+- **差替えの順**: 読込みは読み始めの順番を採り、後に読み始めた snapshot を差し替えた後は、それより前に読み始めた snapshot で上書きしない（poll の読込みが commit の前に始まり、commit の後の読直しより後に終わった時に旧い世代へ戻さない。実装 review rb-fe-a1 P2-3）。世代の値でなく読み始めの順で比べるのは、PITR の後（§13.1）や試験の rollback で DB の世代が小さくなっても読み直せるようにするため（DB の世代は commit の順に増えるため、後に読み始めた snapshot の世代は前のものより小さくならない）。
 - 多 instance の版の失効は世代で行う（TTL ではなく版。TTL は古さの上限としてだけ使う）。現在は単一 instance（SRE-5）。
 
 ### 3.4 `FeatureSwitches` の変更
@@ -512,7 +513,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 
 ### 5.1 lock の順と transaction
 
-- 全ての書込みは次の順で lock する: (1) 世代の行、(2) 開放状態の行（親→子、同じ階層は key の昇順）、(3) 申請の行、(4) 署名の行（id の昇順）、(5) 設定の行、(6) NF05 outbound の barrier の行（`m_system_config` の `integration.hub.outbound.runtime.v1`）。(1) で tenant の中の変更が直列になるため、本機能の表どうしでは deadlock しない。
+- 全ての書込みは次の順で lock する: (1) 世代の行、(2) 開放状態の行（親→子、同じ階層は key の昇順）、(3) 申請の行、(4) 署名の行（id の昇順）、(5) 設定の行、(6) NF05 outbound の barrier の行（`m_system_config` の `integration.hub.outbound.runtime.v1`）。(1) で tenant の中の変更が直列になるため、本機能の表どうしでは deadlock しない。(1) は最初から排他 lock で取る（§2.2 の no-op の upsert。共有 lock を経て昇格させると (1) 自身が deadlock する）。実 MySQL では `FeatureEnablementConcurrencyMySqlTest` が、二つ目の書き手が一つ目の commit まで排他 lock を待ち、deadlock しないことを lock の待ちの観測で確かめる。
 - 分離レベルは READ COMMITTED（条件の評価で他の表の最新の commit を読むため。`WriterIsolationPolicyTest` の `READ_COMMITTED_WRITERS` に足す）。
 - 監査は同じ transaction の `recordDomainEventRequired`（`AuditLogServiceImpl:160-176`）。失敗すれば遷移ごと rollback する。
 - 世代の行を lock した直後に、同じ transaction の中で snapshot を読み直す（§3.2）。続けて、読み直した状態で `openUntil` を過ぎた開いている開放単位（scheduler が止まっていて自動閉鎖が書かれていないもの）を先に `AUTO_CLOSED`（`SIGN_OFF_EXPIRED`。要る署名が欠けて `openUntil` が無い時は `SIGN_OFF_MISSING`。FE-A07 で区別した）にする。その後に要求の遷移を行う（署名の差替えで、失効した開放単位を承認なしに戻さない。review P2-2 (b)）。
@@ -619,7 +620,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 ### 7.2 定期
 
 - `FeatureEnablementConditionScheduler`:
-  - `evaluateAll()`: `@Scheduled(fixedDelayString = "${app.feature-enablement.evaluation-interval:PT5M}")`（1 分〜60 分）、`@SchedulerLock(name = "featureEnablementEvaluation")`、`void`。開いている開放単位と副入口を評価し、自動閉鎖の書込み待ちを再試行する。
+  - `evaluateAll()`: `@Scheduled(fixedDelayString = "${app.feature-enablement.evaluation-interval:PT5M}")`（1 分〜60 分）、`@SchedulerLock(name = "featureEnablementEvaluation")`、`void`。開いている開放単位と副入口を評価し、自動閉鎖の書込み待ちを再試行する。初回の遅延は `app.feature-enablement.evaluation-initial-delay`（既定 1 分、0〜60 分。起動時の評価は §7.1 が web server の前に行うため重ねない。実装 review rb-fe-a1 P3-5）。署名の消去（§6.6）の cron は `app.feature-enablement.sign-off-purge-cron`（既定 `0 40 3 * * *`、Asia/Tokyo）。どちらも `FeatureEnablementProperties` の範囲・式の検査に入れ、A08 の prod の上書きの拒否の対象にする。
   - `evaluateAtBusinessDayStart()`: `@Scheduled(cron = "5 0 0 * * *", zone = "Asia/Tokyo")`、`@SchedulerLock(name = "featureEnablementDayStart")`、`void`。失効の反映・申請の期限切れ・失効の接近の通知・開放の時だけの条件（NF02 の暦）の期限の接近と喪失の警告（§7.4）。
   - どちらも `FeatureSwitchRouteCoverageTest` の `UNGATED_SCHEDULERS` に理由つきで登録する（機能スイッチで止めない）。
 - scheduler が無効（`app.scheduling.enabled=false`）の間は、期限による閉鎖（hot path）と変更時の評価だけが働く（FS 4.1 に書く）。
@@ -842,10 +843,13 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 ### 11.4 監査
 
 - `method`: `FEAT_EN`（7 文字。`t_audit_log.method` は `VARCHAR(10)`。`AuditLogMethodLengthGuardTest`）。
-- `application_code`（`VARCHAR(64)`）: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`・`FEATURE_OPEN_STALE`・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`・`FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`・`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`・`FEATURE_SIGNOFF_REGISTERED`・`FEATURE_SIGNOFF_CONFIRMED`・`FEATURE_SIGNOFF_REJECTED`・`FEATURE_SIGNOFF_REVOKED`・`FEATURE_SIGNOFF_SUPERSEDED`・`FEATURE_SIGNOFF_EXPIRED`・`FEATURE_SIGNOFF_PURGED`・`FEATURE_SIGNOFF_DOWNLOADED`・`FEATURE_SUBGATE_CHANGED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`。
+- `application_code`（`VARCHAR(64)`。A1 の実装の名前に揃えた。実装 review rb-fe-a1 P3-6）:
+  - 開放の申請と開放単位: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`（延長の申請の期限切れも同じ code）・`FEATURE_OPEN_STALE`・`FEATURE_REQUEST_CANCELLED`（閉鎖・総スイッチで未決を取り消した）・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`（総スイッチで開放単位を閉じた回だけ）・`FEATURE_EVALUATION_UNVERIFIABLE`・`FEATURE_EVALUATION_RECOVERED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`・`FEATURE_SUBGATE_OPENED`・`FEATURE_SUBGATE_CLOSED`・`FEATURE_ADMIN_ROLE_GRANTED_NOTICE`（通知の送付の記録）。
+  - 署名: `FEATURE_SIGN_OFF_REGISTERED`・`FEATURE_SIGN_OFF_CONFIRMED`・`FEATURE_SIGN_OFF_REJECTED`・`FEATURE_SIGN_OFF_REVOKED`・`FEATURE_SIGN_OFF_SUPERSEDED`・`FEATURE_SIGN_OFF_EXPIRED`・`FEATURE_SIGN_OFF_PURGED`・`FEATURE_SIGN_OFF_DOCUMENT_READ`（文書の取得）・`FEATURE_SIGN_OFF_EXTENSION_REQUESTED`・`FEATURE_SIGN_OFF_EXTENSION_STALE`・`FEATURE_SIGN_OFF_EXTENDED`。
+  - 組: `FEATURE_SIGN_OFF_BUNDLE_REGISTERED`・`FEATURE_SIGN_OFF_BUNDLE_CONFIRMED`・`FEATURE_SIGN_OFF_BUNDLE_REJECTED`・`FEATURE_SIGN_OFF_BUNDLE_SUPERSEDED`・`FEATURE_SIGN_OFF_BUNDLE_REVOKED`。
+  - 後の段階で足す: `FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`（段階 D の NF05）、`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（設定の変更。A08・A11）。
 - 本文（`before_state`・`after_state`）: 開放単位・状態・理由の code・申請 ID・署名 ID だけ。
-- 自動の遷移は actor SYSTEM、`confirmationSource` は `STARTUP` / `SCHEDULER_POLL`（既存の値を使う。無ければ足す。`confirmation_source` は VARCHAR(32) で CHECK が無い）。
-- 追加の `application_code`: `FEATURE_EVALUATION_UNVERIFIABLE`・`FEATURE_EVALUATION_RECOVERED`・`FEATURE_SIGNOFF_BUNDLE_REGISTERED`・`FEATURE_SIGNOFF_BUNDLE_CONFIRMED`・`FEATURE_SIGNOFF_BUNDLE_REVOKED`・`FEATURE_SIGNOFF_EXTENDED`・`FEATURE_ADMIN_ROLE_GRANTED_NOTICE`（通知の送付の記録）。
+- 自動の遷移は actor SYSTEM、`confirmationSource` は `SCHEDULER_POLL`（起動時の評価も同じ値で、uri `system:feature-enablement/startup`・`…/scheduler` で区別する。`ConfirmationSource` に `STARTUP` を足すと、`ExternalAccountReferenceDto`・`ExternalAccountReferenceMapper` の switch 式と V136 の `t_external_account_reference` の CHECK が既存の値の集合を前提にしているため、A1 では足さない。実装 review rb-fe-a1 P3-6）。
 - 全ての遷移を INFO log `FEATURE_ENABLEMENT_EVENT`（code と ID だけ）にも出す（§2.7・§13.1）。
 - 履歴（§2.7）と監査は同じ transaction で書く。
 

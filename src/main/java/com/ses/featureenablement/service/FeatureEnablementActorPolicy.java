@@ -78,8 +78,8 @@ public class FeatureEnablementActorPolicy {
         return requireActiveAdministrator(userId);
     }
 
-    /** 有効な管理者を DB から読み直して確かめる（transaction の中で毎回呼ぶ）。 */
-    public FeatureEnablementActor requireActiveAdministrator(Long userId) {
+    /** 有効な管理者を DB から読み直して確かめる（transaction の中で毎回呼ぶ。同じ package の service だけが使う。P3-7）。 */
+    FeatureEnablementActor requireActiveAdministrator(Long userId) {
         if (userId == null) {
             throw denied();
         }
