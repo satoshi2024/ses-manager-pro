@@ -600,7 +600,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
   - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。backup account が書込み静止の要求の表 `sys_backup_quiesce_request` だけを書くこと（U-11）を含める。production owner。この writer の受理は BQ-1 の署名）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否、backup の host が uploads と staging を同じ mount で使う access point と POSIX user（app と同じ）、restore の書き戻しと pointer（A に決定済み）。§1.6 の11 の (d)・(f)。storage owner。要る証跡: 2つの access point の設定（root・POSIX user・CreationInfo）、目録の `ls -la` と `readlink <uploads>/current` の出力、staging での device 番号の一致（`stat -L -c %d`）の記録。どれも**未取得**）、004a（replica・scheduler・drain・DDL change-lock の実際の手段の inventory。RB-QUIESCE で 004 を 004a・004b に分けた。deployment owner。次を含め、どれも**未取得**: ECS service の desired count と deployment configuration（SRE-5）、app の container の `stopTimeout`（雛形は 120。Fargate の既定と上限を確かめ、graceful の停止が STOPPED を書くまでに収まること）、通常の起動時間（`healthCheck.startPeriod` が `BACKUP_QUIESCE_STARTUP_WAIT_MAX`＋120 秒を満たし余裕があること）、アプリの DB 接続が中継（RDS Proxy 等）を経由しないこと、アプリ account の host の型が1つであること（§1.2）、backup host の定期起動（15分ごとの checkpoint・02:00 の full）の止め方と再開の仕方（§2 の0・§4.7）、静止中の 503 を利用者へ伝える方法（§4.7）、staging の EFS での uploads の snapshot の時間の実測（BQ-2。U-1））、005（S3 互換 backend とその IAM・versioning/immutability・容量と throughput。baseline §4 のとおり。infra owner）と、上の `.env.backup`。
   - EFS の file system policy・access point・task role の権限（§1.6 の11 の (a)〜(f)）は 003・005 には含めず、Security が確かめる（**未取得**）。backup の host はその access point が無いと uploads と staging を同じ mount で使えず、policy を後から当てると mount の可否が変わるため、初回 backup の前に揃える。
   - §4 の後（初回 backup の条件にしない）: 004b（app の起動の後の最初の ONLINE の checkpoint（`quiesce-db`）が VALID になった記録。§4.7 の4。deployment owner。**未取得**）。初回 backup（§2 の5）は app が動く前に `--app-stopped` で取るため、最初の ONLINE の checkpoint は §4 の後にしか取れない。004b が揃うまで、本番の RPO 15分の達成を宣言しない。
-  - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner。運用組織）。
+  - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner。運用組織）。004b・006・007・008 の担当は未指定（下の「owner 未指定の事項」）。
   - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み。security owner）、007（代表 profile。RTO の実測に使う。production owner）。uploads の切替えの手順（stage・switch・status と、DB の cutover・rollback との順序、起動前の DB と pointer の対の確認）は `ops/backup/runbooks/restore-cutover.md` §4.5.1 に書いてある（RB-W）。初回の restore drill でこの順序を一度通し、記録する（**未取得**）。
 - 初回 backup の前の手順（`ops/backup/README.md`「ツールイメージの build・配布」と「実行」）: backup tool image の content ID（v2。RB-W）で compose の pin をし直し、配布先で `tool-image.sh load` → `tool-image.sh check` が一致し、`tool-image.sh compose run --rm preflight` が 0 で終わること。
   - **RB-QUIESCE で tool image の content ID が変わった**（image に入る `providers/`・`lib/`・job の script が変わったため）。RB-QUIESCE より前の commit から build・記録した image（RB-W の検証で作ったもの等）は、content ID が compose の pin と一致せず使えず、`quiesce-db`・`quiesce-app-stopped` の provider も持たない。配備する commit から README「ツールイメージの build・配布」の手順の 2〜5（`build-record` → compose の `x-ses-backup-tool-content-id` の pin の commit → `save` → 各 host で `load` → `check`）をやり直し、記録した content ID・tar の SHA-256 を配備記録に残す（lock を変える場合だけ 1 から）。
@@ -608,6 +608,20 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 - 解除の条件: 項目ごとに owner の証跡を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力）、DBA がまとめた記録を確かめた時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜003・004a・005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。004b は §4 の後の最初の ONLINE の checkpoint で揃うもので、初回 backup と §4 の条件にしない（条件が循環しない。backup-write-quiesce requirements BWQ-AC-011-02）。
 - **backup tool の MySQL 8.4 への適合（RB-W）は合入済み**（§1.1）: `ops/backup/preflight.sh` は 8.4 系列の server と client を受け付ける。8.4 での backup・PITR は CI の backup integration（実 MySQL 8.4.13）で取得済みで、本番相当の実測は**未取得**（§1.7 の W 表の前の段落）。初回 backup の前に production に対する `preflight` が 0 で終わること（001 の証跡）を確かめ、0 にならなければ §4 へ進まない。
 - 正本: `.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値・owner・確定に要る証跡）、`ops/backup/README.md`。
+
+**owner 未指定の事項（初回リリースの後に揃える事項。2026-11-22 利用者回答: 担当者がまだ居ないため、先に owner を指定する）**
+
+下の役割は、どれも担当者がまだ決まっていない（**owner 未指定**）。事項の内容と証跡の正本は baseline §4 の各行で、本表は担当を決めるための索引である。owner を指定したら、名前ではなく役割の担当として配備記録に残す。
+
+| 事項 | 役割 | 何をする | いつまでに | 状態 |
+|---|---|---|---|---|
+| HFP-03-PROD-004b | deployment owner | app の起動（§4）の後の最初の ONLINE の checkpoint（`quiesce-db`）が VALID になったことを配備記録に残す（§4.7 の4）。揃うまで本番の RPO 15分の達成を宣言しない | §4 の後の最初の checkpoint（初回 backup と §4 の条件にはしない） | **owner 未指定** |
+| HFP-03-PROD-008 | alert routing の owner | backup の監視（`check --json`）と書込み静止の alert（`backup-write-quiesce/design.md` §13.3）の通知先・経路を決めて設定する | backup の監視を運用に入れる前 | **owner 未指定** |
+| HFP-03-PROD-008 | 運用 owner | backup の日々の運用（15分ごとの checkpoint・02:00 の full の定期起動、失敗の時の再実行、§4.7 の確認）に責任を持つ | 同上 | **owner 未指定** |
+| HFP-03-PROD-008 | incident commander | restore・cutover を判断する（RPO・RTO を超えた場合も含む。`ops/backup/runbooks/restore-cutover.md` §1）。D15 の旧版の保存の延長も判断する（`d15-uploads-old-versions-options.md` の a-1） | 同上。遅くとも初回の restore（restore drill を含む）の前 | **owner 未指定** |
+| HFP-03-PROD-008 | drill owner | 四半期ごとの restore drill を計画し、実施・記録する（RTO の実測。uploads の切替えの順序を通す。上の「初回の restore の前」） | 初回の restore drill の前 | **owner 未指定** |
+| HFP-03-PROD-006 | security owner | 二者承認の identity・署名の検証と change-ticket の仕組みを決める（restore の承認に使う） | 初回の restore（restore drill・本番の restore）の前 | **owner 未指定** |
+| HFP-03-PROD-007 | production owner | 代表 profile（DB と uploads の大きさ・binlog の量・環境の性能等。RTO の実測に使う）を決める | 初回の restore（restore drill・本番の restore）の前 | **owner 未指定** |
 
 **backup の書込み静止（RB-QUIESCE）の署名・受理と、本番の前の実測**（どれも人・Runner・CI が行う。設計は `.kiro/specs/backup-write-quiesce/design.md`、手順は `tasks.md`）
 
