@@ -106,6 +106,46 @@ public class BackupQuiesceMetrics implements MeterBinder {
         timer(HOLD, jobKind, duration);
     }
 
+    /**
+     * 回数の counter の今の値（静止の1回の間の件数を {@code BACKUP_QUIESCE_RESUMED} の log に出すため。design.md §13.1）。
+     * 新しい数え方は作らず、上の counter を label を問わずに合計して読む。registry に結び付く前は全て 0。
+     */
+    public Totals totals() {
+        return new Totals(sum(REJECTED, null), sum(DEFERRED, "scheduler"), sum(SKIPPED, null));
+    }
+
+    /**
+     * {@link #totals()} の値: 拒否した要求（{@code rejected_requests} の全 kind）、待たせた定期実行（{@code deferred} の
+     * {@code scheduler}）、省いた書込み（{@code skipped_writes} の全 kind）。
+     */
+    public record Totals(long rejected, long waitedSchedulers, long skippedWrites) {
+
+        static final Totals ZERO = new Totals(0, 0, 0);
+
+        /** {@code start} からの増分（負にはしない）。 */
+        public Totals since(Totals start) {
+            Totals from = start == null ? ZERO : start;
+            return new Totals(Math.max(0, rejected - from.rejected), Math.max(0, waitedSchedulers - from.waitedSchedulers),
+                    Math.max(0, skippedWrites - from.skippedWrites));
+        }
+    }
+
+    private long sum(String name, String kind) {
+        MeterRegistry current = registry;
+        if (current == null) {
+            return 0;
+        }
+        io.micrometer.core.instrument.search.Search search = current.find(name);
+        if (kind != null) {
+            search = search.tag("kind", kind);
+        }
+        double total = 0;
+        for (Counter counter : search.counters()) {
+            total += counter.count();
+        }
+        return (long) total;
+    }
+
     private void counter(String name, String... tags) {
         MeterRegistry current = registry;
         if (current != null) {

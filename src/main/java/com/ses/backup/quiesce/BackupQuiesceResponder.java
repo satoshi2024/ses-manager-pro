@@ -87,6 +87,8 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         String resumeReason;
         int resumeAttempts;
         boolean reopened;
+        /** 要求を読んだ時の回数の counter（解除の log に、この静止の間の件数を出すため。design.md §13.1）。 */
+        BackupQuiesceMetrics.Totals countersAtStart;
 
         Work(RequestView request, long now) {
             this.request = request;
@@ -218,10 +220,10 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
                 + "待ちます（最長 {} 秒）", request.id(), request.jobKind(), properties.getStartupWaitMax().getSeconds());
         metrics.deferred("startup");
         startThreads();
-        startupPermit = awaitStartupPermit();
+        startupPermit = awaitStartupPermit(request.id());
     }
 
-    private BackupWritePermit awaitStartupPermit() {
+    private BackupWritePermit awaitStartupPermit(long requestId) {
         long deadline = gate.nanoTime() + properties.getStartupWaitMax().toNanos();
         while (true) {
             long remaining = deadline - gate.nanoTime();
@@ -231,9 +233,17 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
             }
             try {
                 if (gate.awaitWritable(Duration.ofNanos(Math.min(remaining, Duration.ofSeconds(1).toNanos())))) {
+                    // 書込みを許した理由を permit を取る前に見る: prod 以外は登録の前（UNARMED）でも書込みを許す（design.md
+                    // §6.2・D-P3-3）ため待たずに通る。その場合、静止は解除されていない（log を事実に合わせる。挙動は変えない）
+                    boolean unarmedOutsideProd = gate.state() == BackupWriteGate.State.UNARMED && !gate.isProdProfile();
                     BackupWritePermit permit = gate.tryAcquire(BackupWritePermit.Kind.STARTUP, "startup");
                     if (permit != null) {
-                        log.info("backup の静止が解除されたため、起動を続けます");
+                        if (unarmedOutsideProd) {
+                            log.info("prod 以外の profile では登録の前（UNARMED）でも書込みを許すため、backup の静止（要求の番号 {}）"
+                                    + "の解除を待たずに起動を続けます（静止は解除されていません）", requestId);
+                        } else {
+                            log.info("backup の静止が解除されたため、起動を続けます");
+                        }
                         return permit;
                     }
                 }
@@ -415,6 +425,7 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         log.info("errorCode=BACKUP_QUIESCE_REQUESTED backup の静止要求を読みました（番号 {}、{}、{}）", request.id(),
                 request.mode(), request.jobKind());
         work = new Work(request, now);
+        work.countersAtStart = metrics.totals();
         if (gate.mode() == BackupWriteGate.Mode.DISABLED) {
             beginRefuse("DISABLED");
             return;
@@ -780,6 +791,7 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
         // 件数は開く前に読む（開くと保留した処理と解除後の書込みが直ちに投入される。2a review P3-8）
         int pendingTasks = gate.pendingTaskCount();
         int pendingWrites = gate.deferredWrites().pending();
+        BackupQuiesceMetrics.Totals during = metrics.totals().since(work.countersAtStart);
         boolean opened = work.reopened || gate.reopen(work.id());
         if (!opened) {
             log.warn("backup の静止の解除の条件（I-3）を満たさないため、まだ開けません（番号 {}）", work.id());
@@ -793,9 +805,12 @@ public class BackupQuiesceResponder implements SmartInitializingSingleton, Dispo
                 log.info("backup の静止の応答を拒否で確定したため、更新を再開しました（番号 {}、保持 {} 秒）", work.id(),
                         held.getSeconds());
             } else if ("RELEASED".equals(reason)) {
+                // 件数は design.md §13.1 の順（拒否・待機・保留・省略・解除後の書込み）。拒否・待機・省略は metric の
+                // counter の、要求を読んでからの増分（registry に結び付いていなければ 0）
                 log.info("errorCode=BACKUP_QUIESCE_RESUMED backup の静止の解除で更新を再開しました（番号 {}、保持 {} 秒、"
-                                + "保留した非同期の処理 {} 件、解除後の書込み {} 件）", work.id(), held.getSeconds(),
-                        pendingTasks, pendingWrites);
+                                + "拒否した要求 {} 件、待たせた定期実行 {} 件、保留した非同期の処理 {} 件、省いた書込み {} 件、"
+                                + "解除後の書込み {} 件）", work.id(), held.getSeconds(), during.rejected(),
+                        during.waitedSchedulers(), pendingTasks, during.skippedWrites(), pendingWrites);
                 metrics.resumed(reason);
             } else {
                 log.error("errorCode=BACKUP_QUIESCE_AUTO_RESUMED backup の解除を待たずに更新を再開しました（番号 {}、理由 {}、"

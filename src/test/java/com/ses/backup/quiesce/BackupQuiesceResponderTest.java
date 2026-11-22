@@ -351,6 +351,30 @@ class BackupQuiesceResponderTest {
         assertThat(failure.get()).isNull();
         assertThat(gate.permitCount()).as("startup permit を取った").isEqualTo(1);
         assertThat(messages(Level.WARN)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_STARTUP_WAIT"));
+        assertThat(messages(Level.INFO)).as("prod は解除を待ってから続ける")
+                .contains("backup の静止が解除されたため、起動を続けます")
+                .noneMatch(m -> m.contains("解除を待たずに"));
+    }
+
+    /**
+     * 本機の確認（2026-11-22）の F-1: prod 以外は登録の前（UNARMED）でも書込みを許す（design.md §6.2・D-P3-3）ため、静止中の起動は
+     * 待たずに続く。その log は「解除された」と言わない（挙動は変えない）。
+     */
+    @Test
+    void prod以外では静止中の起動は解除を待たずに続きlogは解除されたと言わない() {
+        build(BackupWriteGate.Mode.ARMED, false);
+        long id = repository.request("ONLINE", "CHECKPOINT", 60);
+
+        responder.afterSingletonsInstantiated();
+
+        assertThat(gate.permitCount()).as("startup permit を取った").isEqualTo(1);
+        assertThat(repository.get(id).status).as("静止は解除されていない").isEqualTo("REQUESTED");
+        assertThat(messages(Level.WARN)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_STARTUP_WAIT"));
+        assertThat(messages(Level.INFO))
+                .anyMatch(m -> m.startsWith("prod 以外の profile では登録の前（UNARMED）でも書込みを許すため")
+                        && m.contains("要求の番号 " + id) && m.contains("解除を待たずに起動を続けます")
+                        && m.contains("静止は解除されていません"))
+                .noneMatch(m -> m.contains("解除されたため、起動を続けます"));
     }
 
     @Test
@@ -869,5 +893,31 @@ class BackupQuiesceResponderTest {
 
         assertThat(messages(Level.INFO)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_RESUMED")
                 && m.contains("保留した非同期の処理 2 件") && m.contains("解除後の書込み 1 件"));
+    }
+
+    /**
+     * 本機の確認（2026-11-22）の F-2: 解除の log に design.md §13.1 の拒否・待機・省略の件数を出す。値は既存の metric の counter の、
+     * 要求を読んでからの増分（要求の前の数は含めない。待機は {@code deferred} の {@code scheduler} だけ）。
+     */
+    @Test
+    void 解除のlogにこの静止の間の拒否と待機と省略の件数を出す() {
+        started();
+        registry.counter(BackupQuiesceMetrics.REJECTED, "kind", "api").increment(5);
+        registry.counter(BackupQuiesceMetrics.DEFERRED, "kind", "scheduler").increment(2);
+        registry.counter(BackupQuiesceMetrics.SKIPPED, "kind", "session_touch").increment();
+        long id = acked("CHECKPOINT", 60);
+        registry.counter(BackupQuiesceMetrics.REJECTED, "kind", "api").increment(2);
+        registry.counter(BackupQuiesceMetrics.REJECTED, "kind", "external").increment();
+        registry.counter(BackupQuiesceMetrics.DEFERRED, "kind", "scheduler").increment(4);
+        registry.counter(BackupQuiesceMetrics.DEFERRED, "kind", "logout").increment();
+        registry.counter(BackupQuiesceMetrics.SKIPPED, "kind", "session_touch").increment(3);
+        registry.counter(BackupQuiesceMetrics.SKIPPED, "kind", "best_effort_audit").increment();
+        repository.get(id).status = "RELEASED";
+        run(Duration.ofSeconds(2));
+
+        assertThat(messages(Level.INFO)).anyMatch(m -> m.startsWith("errorCode=BACKUP_QUIESCE_RESUMED")
+                && m.contains("拒否した要求 3 件") && m.contains("待たせた定期実行 4 件")
+                && m.contains("保留した非同期の処理 0 件") && m.contains("省いた書込み 4 件")
+                && m.contains("解除後の書込み 0 件"));
     }
 }
