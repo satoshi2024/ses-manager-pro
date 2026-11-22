@@ -2,8 +2,8 @@
 
 ## 実行規約
 
-- 本書は第 1 段階（spec）で書いた（第 2 版: 独立 review `rb-feature-enablement-spec-96be3af4-review.md` の P1 2・P2 7・P3 21 と統括の決定 J-08・J-10・J-20 を反映。指摘と設計の対応は `design.md` §19）。実装は delta review の後、統括の指示で段階ごとに始める。
-- 利用者の決定（`requirements.md` §2 の D-1〜D-9。D-7〜D-9 は `design.md` §18 の J-01・J-09・J-16 の決定済みの値）、統括の決定（J-08・J-10）と、§18 の残りの判断点（複審で同意した推奨）に従う。判断点が推奨と違う値に決まったら、先に `design.md` とこの task を直してから進める。
+- 本書は第 1 段階（spec）で書いた（第 3 版: 独立 review `rb-feature-enablement-spec-96be3af4-review.md` の P1 2・P2 7・P3 21、`85840936` の delta review の P2 3・P3 10 と統括の決定 J-08・J-10・J-20 を反映。指摘と設計の対応は `design.md` §19）。実装は delta review の後、統括の指示で段階ごとに始める。
+- 利用者の決定（`requirements.md` §2 の D-1〜D-9。D-7〜D-9 は `design.md` §18 の J-01・J-09・J-16 の決定済みの値）、統括の決定（J-08・J-10）と、§18 の残りの判断点（独立 review で同意した推奨）に従う。判断点が推奨と違う値に決まったら、先に `design.md` とこの task を直してから進める。
 - checkbox は、実装・自動試験・Demo が全て終わった時だけ `- [x]` にする（CLAUDE.md の spec の手順）。
 - 試験は各 task の対象だけを流す（`mvn test -Dtest=…`。MySQL は `-Pmysql-tests -Dtest=…`、browser は `-Pbrowser-tests`）。全 gate の実行の時期は統括が決める。migration の file を足した後は `mvn clean test` にする。
 - **新しい `@Tag("mysql")` の試験は、足す commit と同じ commit で `scripts/test-suites/mysql-shard-{1,2,3}.txt` のどれかに登録する**（`MySqlTestShardInventoryTest`。shard は着手の時に統括の指示を受ける。後回しにしない）。
@@ -16,7 +16,7 @@
 
 | 段階 | 内容 | 依存 | 並行 | file の数の目安（新規＋変更） | 難所 |
 |---|---|---|---|---|---|
-| A | 判定層・データモデル（V203）・署名の登録（組を含む）・申請と承認・継続評価・総閘・画面・権限・容易な 7 件 | なし | A 内は各 task の依存に従う | 新規 約 52（main 約 34、test 約 18）、変更 約 30 | snapshot の反映と fail-closed、transaction の中の読直し、`unverifiable_since` の共有、書込み待ちの sticky、lock の順、session の種別の判定、file の 2 箇所の登録、H2 の生成列と複合 FK |
+| A | 判定層・データモデル（V203）・署名の登録（組を含む）・申請と承認・継続評価・総スイッチ・画面・権限・容易な 7 件 | なし | A 内は各 task の依存に従う | 新規 約 52（main 約 34、test 約 18）、変更 約 30 | snapshot の反映と fail-closed、transaction の中の読直し、`unverifiable_since` の共有、書込み待ちの sticky、lock の順、session の種別の判定、file の 2 箇所の登録、H2 の生成列と複合 FK |
 | B | NF01 二者確認・NF06・NF02 の公開範囲 | A | B01・B02・B03 は互いに並行。C・D とも並行 | 新規 約 8、変更 約 15 | 証跡種別の BINARY 比較の H2 互換、admission の源の差替え、NF06 の権限の実効の判定 |
 | C | NF07（承認の値の源・組・期間の範囲・直接の読取り・Journal の 2 つの結果・trust・評価器・PR #130 の guard） | A | C02〜C04 は C01 の後に並行。B・D と並行 | 新規 約 12、変更 約 26 | 組の digest の整合、capability ごとの期間、Monitor の再帰の回避、hold gate を下げない Journal の分離、guard の意味の変更 |
 | D | NF05（policy と digest の純粋化・起動前の読取り・purge の property・runtime switch・閉鎖と barrier・遷移の前提） | A | D03・D04 は D02 の後に並行。B・C と並行 | 新規 約 10、変更 約 22 | `EnvironmentPostProcessor` の実装の条件、`OPEN_TRANSITION` と再起動、barrier の起動時と実行時の分離 |
@@ -33,22 +33,22 @@
 - [ ] **FE-A01 — V203・H2 の schema・版番号の連動**
   - **依存:** なし
   - **対応要求:** FE-RQ-002・003・004・012・013・015・017
-  - **Objective:** `design.md` §2 の 8 表・4 trigger・menu の seed・data element の 2 件を、本番の MySQL 8.4 と試験の H2 の両方に同じ形で作る。
-  - **対象 file:** `src/main/resources/db/migration/V203__feature_enablement_console.sql`（新規）、`src/test/resources/sql/schema-feature-enablement-h2.sql`（新規）、`src/test/resources/application-test.yml`（`schema-locations`）、`src/test/resources/sql/engineer-schema-h2.sql`、`src/test/java/com/ses/migration/LatestMigrationVersion.java`、`ProductionSchemaVersionGuardTest`、`src/test/java/com/ses/migration/FeatureEnablementSchemaContractTest.java`（新規）、`FlywayProdFreshInstallMySqlTest`、`.kiro/specs/production-launch/deploy-runbook.md`（版・件数・trigger 数・表の件数が出る全ての箇所: 冒頭、§1.2、§1.7 の DBA-1・W-1 の行、§3.4 等）、`.kiro/specs/database-backup-recovery/dba-prelaunch-draft.md`（件数）、`.kiro/specs/privacy-retention-dsar/pii-inventory.md`。
+  - **Objective:** `design.md` §2 の 9 表・6 trigger・menu の seed・data element の 2 件を、本番の MySQL 8.4 と試験の H2 の両方に同じ形で作る。
+  - **対象 file:** `src/main/resources/db/migration/V203__feature_enablement_console.sql`（新規）、`src/test/resources/sql/schema-feature-enablement-h2.sql`（新規）、`src/test/resources/application-test.yml`（`schema-locations`）、`src/test/resources/sql/engineer-schema-h2.sql`、`src/test/java/com/ses/migration/LatestMigrationVersion.java`、`ProductionSchemaVersionGuardTest`、`src/test/java/com/ses/migration/FeatureEnablementSchemaContractTest.java`（新規）、`FlywayProdFreshInstallMySqlTest`、`.kiro/specs/production-launch/deploy-runbook.md`（版・件数・trigger 数・表の件数が出る全ての箇所: 冒頭、§1.2、§1.7 の DBA-1・W-1 の行、§3.4 等）、`.kiro/specs/production-launch/dba-prelaunch-draft.md`（件数）、`.kiro/specs/privacy-retention-dsar/pii-inventory.md`。
   - **Implementation:**
-    1. `design.md` §2.2〜§2.8 の列・CHECK・生成列・一意索引・FK（参照動作なし。開放状態・設定から申請への複合 FK を含む）で V203 を書く。作成の順は §2.1。trigger は event と組の member の各 2 件。時刻の DEFAULT に `CURRENT_TIMESTAMP` を使わない。
+    1. `design.md` §2.2〜§2.8 の列・CHECK・生成列・一意索引・FK（参照動作なし。開放状態・設定から申請への複合 FK を含む）で V203 を書く。作成の順は §2.1。trigger は event・組の member・延長の記録の各 2 件。時刻の DEFAULT に `CURRENT_TIMESTAMP` を使わない。
     2. menu `feature-enablement` と `t_role_menu`（`管理者` だけ）を足す。`t_permission_group_action` には足さない。
     3. `m_pii_data_element` に 2 件（V198 と同じ列。分類等は UNKNOWN）。
     4. H2 の変種（trigger なし・同じ生成式（`STORED` なし）・複合 FK・menu と data element の seed）。`engineer-schema-h2.sql` は §2.10 の順に DROP して作る。
     5. 版と件数の連動（grep `202`、trigger と表の件数は grep `67`・`285` 等で全ての箇所を探す）。
-  - **Automated test:** `MigrationScriptIntegrityTest`、`DeployRunbookMigrationCountTest`、`ProductionSchemaVersionGuardTest`、`FeatureEnablementSchemaContractTest`（V203 と H2 の一致）、`AllMappersSchemaSweepTest`。MySQL（`FeatureEnablementSchemaMySqlTest`。shard の登録を同じ commit で）: 申請者＝承認者の `APPROVED`・`REJECTED`、申請者以外の `WITHDRAWN`、未決 2 件、確認済み 2 件（署名・組）、`confirmed_by = registered_by`（署名・組）、`OPEN` で `opened_by = approved_by`、開放状態・設定の申請者・承認者が参照する申請と違う行（複合 FK）、設定の `requested_by = approved_by`、NF05 以外の `OPEN_PENDING_RESTART`、`expires_on <= signed_on`、`PURGED` で `original_name` が残る行が全て拒否され（3819 は `MySqlConstraintRejections.assertRejectedBy`）、event・member の更新・削除が trigger で拒否される。`FlywayProdFreshInstallMySqlTest` の trigger 数が 4 増える。
+  - **Automated test:** `MigrationScriptIntegrityTest`、`DeployRunbookMigrationCountTest`、`ProductionSchemaVersionGuardTest`、`FeatureEnablementSchemaContractTest`（V203 と H2 の一致）、`AllMappersSchemaSweepTest`。MySQL（`FeatureEnablementSchemaMySqlTest`。shard の登録を同じ commit で）: 申請者＝承認者の `APPROVED`・`REJECTED`、申請者以外の `WITHDRAWN`、未決 2 件、確認済み 2 件（署名・組）、`confirmed_by = registered_by`（署名・組）、`OPEN` で `opened_by = approved_by`、開放状態・設定の申請者・承認者が参照する申請と違う行（複合 FK）、設定の `requested_by = approved_by`、NF05 以外の `OPEN_PENDING_RESTART`、`expires_on <= signed_on`、`PURGED` で `original_name` が残る行が全て拒否され（3819 は `MySqlConstraintRejections.assertRejectedBy`）、event・member の更新・削除が trigger で拒否される。延長の記録の `confirmed_by = requested_by`・`new_expires_on <= old_expires_on`、組の member の種別・tenant が署名の行と違う行（複合 FK）も拒否される。`FlywayProdFreshInstallMySqlTest` の trigger 数が 6 増える。
   - **Demo:** local の MySQL 8.4 の空の DB で `mvn spring-boot:run`（dev）を起動し、`SHOW CREATE TABLE t_feature_enablement_state\G` で複合 FK を、`flyway_schema_history` の最大が 203 であることを見る。
   - **失敗/rollback:** 版番号が衝突したら上の空き番号へ振り直す（空き番号を埋めない）。
 
 - [ ] **FE-A02 — entity・mapper・署名の文書の file 種別と 2 箇所の登録**
   - **依存:** FE-A01
   - **対応要求:** FE-RQ-004・013・017
-  - **Objective:** 8 表の entity と mapper（event と組の member は `AppendOnlyMapper`）、`FileKind.FEATURE_SIGN_OFF`、汎用の upload・取得・再 scan の拒否、`FileReferenceProvider` を用意する。
+  - **Objective:** 9 表の entity と mapper（event・組の member・延長の記録は `AppendOnlyMapper`）、`FileKind.FEATURE_SIGN_OFF`、汎用の upload・取得・再 scan の拒否、`FileReferenceProvider` を用意する。
   - **対象 file:** `src/main/java/com/ses/entity/FeatureEnablement*.java`・`FeatureSignOff*.java`（新規）、`src/main/java/com/ses/mapper/FeatureEnablement*Mapper.java`・`FeatureSignOff*Mapper.java`（新規。追記専用の 2 つも `com.ses.mapper` に置き、`AppendOnlyMapper` を継承して `appendOnlyTable()` を実装する。先例 `LifecycleDualEventMapper`）、`common/enums/FileKind.java`（`FEATURE_SIGN_OFF`（pdf・10 MB）・`isDedicatedPathOnly()`）、`controller/api/FileApiController.java`（:36-44）、`service/impl/FileStorageServiceImpl.java`（汎用の `load`・`rescan` の種別の拒否、`loadDedicated`）、`service/security/impl/FileScopeValidationService.java`（:255 と `assertRescanAllowed` :504-506 の前置きの拒否）、`service/impl/FeatureSignOffFileReferenceProvider.java`（新規）。
   - **Implementation:** entity に `deletedFlag` を置かない。`selectByIdForUpdate`・状態ごとの CAS 更新（`UpdateWrapper` で列を名指し。NULL に戻す列は `set(col, null)`。CLAUDE.md の `FieldStrategy.ALWAYS` の注意）。`FileScopeValidationService` に `assertFeatureSignOffNotAccessibleThroughGenericFilePath`（先例 :519）。
   - **Automated test:** `FeatureEnablementEventMapperImmutabilityTest`・`FeatureSignOffBundleMemberMapperImmutabilityTest`（全ての更新・削除が例外）、`FileApiControllerTest` に `FEATURE_SIGN_OFF` の upload が 400 の case（server 生成の種別の拒否の試験が無い穴も同時に埋める）、`FileStorageServiceImplTest` に汎用の `load`・`rescan` が種別で 403・`loadDedicated` は種別の一致を要する case、`FileScopeValidationServiceTest` に署名の保存名が全 role で取得・再 scan とも 403 の case、`FeatureSignOffFileReferenceProviderTest`（`PURGED` 以外を claim）、`FileKindTest`（pdf だけ・10 MB）、`AllMappersSchemaSweepTest`。
@@ -57,7 +57,7 @@
 - [ ] **FE-A03 — 目録・評価器の interface・共通の評価器**
   - **依存:** FE-A01
   - **対応要求:** FE-RQ-001・004・005
-  - **Objective:** `FeatureEnablementCatalog`（13 件、署名の種別と類（決定・証拠）、組、鍵、親、副入口、DB 管理の印、評価できない類の code）と、`FeatureConditionEvaluator`・`FeatureConditionCheck`・`FeatureEvaluationContext`・`FeatureConditionRegistry`、共通の評価器（総閘・親・署名・鍵）、指紋を作る。
+  - **Objective:** `FeatureEnablementCatalog`（13 件、署名の種別と類（決定・証拠）、組、鍵、親、副入口、DB 管理の印、評価できない類の code）と、`FeatureConditionEvaluator`・`FeatureConditionCheck`・`FeatureEvaluationContext`・`FeatureConditionRegistry`、共通の評価器（総スイッチ・親・署名・鍵）、指紋を作る。
   - **対象 file:** `src/main/java/com/ses/featureenablement/catalog/*`・`condition/*`（新規）、`config/feature/Feature.java`（`NF05_INBOUND`・`NF05_OUTBOUND` を足す。`propertyName`・`environmentVariable`）、`config/feature/FeatureSwitchProperties.java`（`toggle` の NF05 の case は NF05 の property を返す）、`FeatureSwitchRouteCoverageTest`・`FeatureSwitchDefaultsTest`（一覧の追加だけ）。
   - **Implementation:** `design.md` §4。check は `Scope`（`CONTINUOUS` / `OPEN_ONLY` / `OPEN_TRANSITION`）を持つ。`OPEN_ONLY` は申請・承認の時だけ開閉を左右する（D-9）。`OPEN_TRANSITION` は申請・承認・`BOOT_PENDING` でだけ判定する（review P1-1）。違反 code は固定の文字列だけ。評価器の例外と「評価できない類」の code は registry が `UNVERIFIABLE` にする（review P2-1）。固有の評価器を要する開放単位に評価器が無ければ `evaluator.missing`。`remoteChecksAllowed=false` では外部への検査をしない。指紋の正規形は §4.5（組を含む）。
   - **Automated test:** `FeatureEnablementCatalogCoverageTest`（13 件・NF08 なし・種別の一意・類の付与・親の循環なし・`OPEN_ONLY` は NF02 の暦だけ・`OPEN_TRANSITION` は NF05 outbound の barrier の OFF の記録だけ）、`FeatureConditionRegistryTest`（`OPEN_ONLY` の不成立は申請・承認では不成立、起動時・定期では閉鎖の根拠にならない。`OPEN_TRANSITION` は定期で評価されない。評価できない類の code が `UNVERIFIABLE` になる）、`FeatureConditionCodeClassificationTest`、`SignOffConditionEvaluatorTest`（JST の境・署名日前・条件付きの種別・組の member）、`FeatureConditionFingerprintTest`（golden vector）。
@@ -69,7 +69,7 @@
   - **Objective:** `FeatureEnablementStateSource`（property・database・段階の間の合成）、snapshot の loader・holder（最初の読込みは初期化の時）・refresher（専用 thread。`verifiedAt` の更新）、overlay（書込み待ちの sticky を含む）、`FeatureSwitches.isConfiguredOn` の差替え、`logStates` の変化ごとの出力、実効値と閉じている理由の照会、metric を作る。
   - **対象 file:** `featureenablement/state/*`（新規）、`config/feature/FeatureSwitches.java`（:40・:90-97）、`config/feature/FeatureRuntimeCondition.java`（`unsatisfiedReason`）、`application.yml`・`application-prod.yml`・`application-dev.yml`（`app.feature-enablement.*`。範囲は `@Validated`）、`SchedulingDisabledDrainTest`（refresher の thread を理由つきで既知の一覧へ）。
   - **Implementation:** `design.md` §3。hot path は `AtomicReference` と日付の比較だけ。要る署名の欠落で `openUntil` が閉。`unverifiable_since` の行は閉。古さは `verifiedAt` で判定し、世代の行が無いのは世代 0。commit の後の差替えは `TransactionSynchronization.afterCommit`。`new FeatureSwitches(properties)` を残す。
-  - **Automated test:** `FeatureEnablementSnapshotTest`、`DatabaseFeatureEnablementStateSourceTest`（照会 0 回を mapper の mock の呼出し回数で確かめる。JST 0:00 の境。要る署名の欠落。古さと `verifiedAt`。世代の行なし。総閘。`unverifiable_since`）、`FeatureEnablementSnapshotHolderStartupTest`（`FeatureSwitches.logStates` と `SmartInitializingSingleton` が読込みの後の状態を見る）、`FeatureEnablementAfterCommitRefreshTest`（非 transaction。専用 DB で後始末）、`FeatureSwitchRuntimeConditionTest`（既存の case が通る）、`FeatureSwitchFilterTest`・`FeatureSwitchMenuAndViewTest`・`FeatureSwitchSchedulerGateTest` に DB の源の変種（閉じた機能の応答が property の源と同じ）。
+  - **Automated test:** `FeatureEnablementSnapshotTest`、`DatabaseFeatureEnablementStateSourceTest`（照会 0 回を mapper の mock の呼出し回数で確かめる。JST 0:00 の境。要る署名の欠落。古さと `verifiedAt`。世代の行なし。総スイッチ。`unverifiable_since`）、`FeatureEnablementSnapshotHolderStartupTest`（`FeatureSwitches.logStates` と `SmartInitializingSingleton` が読込みの後の状態を見る）、`FeatureEnablementAfterCommitRefreshTest`（非 transaction。専用 DB で後始末）、`FeatureSwitchRuntimeConditionTest`（既存の case が通る）、`FeatureSwitchFilterTest`・`FeatureSwitchMenuAndViewTest`・`FeatureSwitchSchedulerGateTest` に DB の源の変種（閉じた機能の応答が property の源と同じ）。
   - **Demo:** dev で `APP_FEATURE_ENABLEMENT_SOURCE=database` を付けて起動し、`/api/lifecycle/cases` が 404 で、起動の log に `[機能スイッチ] 状態: NF01=OFF, …` が出ることを見る。
 
 - [ ] **FE-A05 — 申請・承認・却下・取下げ・閉鎖・cascade（`FeatureEnablementService`）**
@@ -77,7 +77,7 @@
   - **対応要求:** FE-RQ-002・003・013
   - **Objective:** `design.md` §5 の遷移を、lock の順・transaction の中の読直し・失効の先行の閉鎖・指紋・評価し直し・監査・履歴・DB の外への log・通知とともに実装する。行為者の判定（§11.2）を部品 `FeatureEnablementActorPolicy` にまとめる。後の段階の拡張点（申請の種類・閉鎖の hook）を用意する。管理者の role の付与の通知（§11.1）を足す。
   - **対象 file:** `featureenablement/service/FeatureEnablementService(Impl).java`・`FeatureEnablementActorPolicy.java`（新規）、`service/impl/SysUserServiceImpl.java`（管理者の role を得た時の通知）、`WriterIsolationPolicyTest`（`READ_COMMITTED_WRITERS` に足す）、`messages*.properties`（誤りと通知の文言）。
-  - **Implementation:** 申請の時も条件の全成立を要し、同じ対象の期限切れの未決を先に `EXPIRED` にする（review P3-7）。承認は `expectedVersion` と、transaction の中で読み直した状態の指紋（review P2-3）。`STALE` は commit してから 409（service は結果の値を返す。review P3-8）。却下は申請者以外、取下げは申請者だけ。閉鎖は管理者 1 名で理由が必須、子を `AUTO_CLOSED(PARENT_CLOSED)`、未決を `CANCELLED`、全ての管理者へ通知。NF07 の行為者は privacy-admin（段階 C で有効にする印を置く）。監査は `recordDomainEventRequired`（method `FEAT_EN`）と INFO log `FEATURE_ENABLEMENT_EVENT`。通知は commit の後。
+  - **Implementation:** 申請の時も条件の全成立を要し、同じ対象の期限切れの未決を先に `EXPIRED` にする（review P3-7）。承認は `expectedVersion` と、transaction の中で読み直した状態の指紋（review P2-3）。承認は申請を先に `APPROVED` にしてから開放状態・設定の行を書く（複合 FK。review P3-N7）。`STALE` は commit してから 409（service は結果の値を返す。review P3-8）。却下は申請者以外、取下げは申請者だけ。閉鎖は管理者 1 名で理由が必須、子を `AUTO_CLOSED(PARENT_CLOSED)`、未決を `CANCELLED`、全ての管理者へ通知。NF07 の行為者は privacy-admin（段階 C で有効にする印を置く）。監査は `recordDomainEventRequired`（method `FEAT_EN`）と INFO log `FEATURE_ENABLEMENT_EVENT`。通知は commit の後。
   - **Automated test:** `FeatureEnablementServiceH2Test`（全遷移と許さない遷移の 409、申請者による承認・却下の 403、未決 2 件の 409、申請の時の遅延の期限切れ、指紋の違いで `STALE` が commit されて 409、条件の不成立で承認 409 のまま未決、要る署名の欠落で承認 409、変更の transaction の最初の失効の閉鎖、cascade、監査と履歴と log が 1 件ずつ、監査の失敗で rollback）、`FeatureEnablementActorPolicyTest`（OIDC＋MFA は可、break-glass の属性・bootstrap の session・break-glass の username・lock 中・無効・削除済み・管理者以外は不可、prod 以外の form login は可）、`SysUserServiceImplTest` に管理者の role の付与で全ての管理者へ通知の case、`AuditLogMethodLengthGuardTest`。MySQL（`FeatureEnablementConcurrencyMySqlTest`。shard の登録を同じ commit で）: 同じ申請の並行承認で 1 件だけ成功、承認と閉鎖の並行、世代の lock で deadlock しない。
   - **Demo:** なし（試験の結果）。画面の流れの Demo は署名を登録できる FE-A06・FE-A10 の後に行う（review P3-21）。
 
@@ -86,8 +86,8 @@
   - **対応要求:** FE-RQ-004・017
   - **Objective:** `design.md` §6 の 1 件の署名の流れを実装する（組は FE-A12）。
   - **対象 file:** `featureenablement/service/FeatureSignOffService(Impl).java`、`featureenablement/signoff/*`（種別ごとの検査。placeholder の規則の共通部品化）、`FeatureSignOffPurgeScheduler.java`（新規）、`PrivacyHoldPathGuard` の呼出し、`.kiro/specs/production-launch/deploy-runbook.md` §4.4（D17）。
-  - **Implementation:** upload は `FileStorageService.store(byte[], …, FEATURE_SIGN_OFF)`、SHA-256 は bytes から計算、scan が `CLEAN` でなければ実体を消して拒否。確認は登録者以外（NF07 の種別は privacy-admin。段階 C で有効）、署名日が今日以前、類の上限（決定 366 日・証拠 1,095 日）。差替えは §5.1 の失効の先行の閉鎖の後に旧い行を先に `SUPERSEDED`。延長は証拠の類だけ（同じ文書・同じ署名日）。取消し・差替えで開いている開放単位を同じ transaction で評価し直し（`remoteChecksAllowed=false`）、成り立たなければ `AUTO_CLOSED`。取消しは全ての管理者へ通知。取得は hash を照合し監査。DG-05 は登録の時に形式だけ、現在の部署の設定との一致・不一致を返す。消去の scheduler は `@SchedulerLock`・`void`・`PrivacyHoldPathGuard` を通し、氏名と元の file 名を NULL にする。一覧の応答に氏名を出さない。
-  - **Automated test:** `FeatureSignOffServiceH2Test`（scan の拒否と実体の削除、hash の照合と不一致の 409、登録者による確認の 403、署名日が未来の確認の 400 と旧い署名の維持、差替えで開いたまま・成り立たなければ自動閉鎖、scheduler が止まっていた間に失効した旧い署名の差替えで先に自動閉鎖、取消しで自動閉鎖と通知、延長、`active_slot`、一覧に氏名なし）、`FeatureSignOffKindValidationTest`（種別ごとの参照・構造化された値・類の上限・役割・DG-05 は形式だけ）、`FeatureSignOffPurgeSchedulerTest`（3 年・氏名と元の file 名・hold の対象は消さない・`void`）、`PrivacyHoldPathGuardTest` の経路の一覧。MySQL（`FeatureEnablementConcurrencyMySqlTest` に追加）: 署名の取消し・差替え × 承認。
+  - **Implementation:** upload は `FileStorageService.store(byte[], …, FEATURE_SIGN_OFF)`、SHA-256 は bytes から計算、scan が `CLEAN` でなければ実体を消して拒否。確認は登録者以外（NF07 の種別は privacy-admin。段階 C で有効）、署名日が今日以前、類の上限（決定 366 日・証拠 1,095 日）。差替えは §5.1 の失効の先行の閉鎖の後に旧い行を先に `SUPERSEDED`。延長は証拠の類だけで、新しい行を作らず、延長の申請（`SIGN_OFF_EXTENSION`）の承認で同じ行の `expires_on` を更新し `t_feature_sign_off_extension` に 1 行を足す（申請を先に `APPROVED`。上限は承認の日から 1,095 日。review P2-N2）。消去はその行の最後の状態と失効日で判定する。取消し・差替えで開いている開放単位を同じ transaction で評価し直し（`remoteChecksAllowed=false`）、成り立たなければ `AUTO_CLOSED`。取消しは全ての管理者へ通知。取得は hash を照合し監査。DG-05 は登録の時に形式だけ、現在の配備の設定との一致・不一致を返す。消去の scheduler は `@SchedulerLock`・`void`・`PrivacyHoldPathGuard` を通し、氏名と元の file 名を NULL にする。一覧の応答に氏名を出さない。
+  - **Automated test:** `FeatureSignOffServiceH2Test`（scan の拒否と実体の削除、hash の照合と不一致の 409、登録者による確認の 403、署名日が未来の確認の 400 と旧い署名の維持、差替えで開いたまま・成り立たなければ自動閉鎖、scheduler が止まっていた間に失効した旧い署名の差替えで先に自動閉鎖、取消しで自動閉鎖と通知、`active_slot`、一覧に氏名なし）、`FeatureSignOffExtensionH2Test`（延長で同じ行の期限が延びて延長の記録が 1 行、申請者本人の承認 403、決定の類は延長できない、上限、延長の後に旧い期限から 3 年を過ぎても文書を取得できる）、`FeatureSignOffKindValidationTest`（種別ごとの参照・構造化された値・類の上限・役割・DG-05 は形式だけ）、`FeatureSignOffPurgeSchedulerTest`（3 年・氏名と元の file 名・hold の対象は消さない・`void`）、`PrivacyHoldPathGuardTest` の経路の一覧。MySQL（`FeatureEnablementConcurrencyMySqlTest` に追加）: 署名の取消し・差替え × 承認。
   - **Demo:** dev（DB の源）で合成の PDF を `NF04_BUSINESS_OWNER` として登録 → 別の管理者が確認 → 専用の経路で取得でき、`/api/files/…` では 403 になることを見る。
 
 - [ ] **FE-A12 — 署名の組（`t_feature_sign_off_bundle`）の登録・確認・差替え・取消し**
@@ -96,7 +96,7 @@
   - **Objective:** `design.md` §2.6.1・§6.5 の組の流れを、組の種類に依らない形で実装する（NF07 の組の種類の定義と digest の整合の検査は FE-C01 で足す）。
   - **対象 file:** `featureenablement/service/FeatureSignOffBundleService(Impl).java`（新規）、目録（組の種類の定義の器）。
   - **Implementation:** 組の登録（新しい署名と引き継ぐ確認済みの署名）、組の確認（1 回、登録者と別の確認者、全ての member の署名日が今日以前、組の種類ごとの整合の検査の hook）、旧い組と置き換わる署名の `SUPERSEDED` と新しい組・署名の `CONFIRMED` を同じ transaction で、組に属する種別の 1 件ずつの確認の拒否、組の取消し。
-  - **Automated test:** `FeatureSignOffBundleH2Test`（試験用の組の種類で: 1 回の確認、引継ぎ、組の一部だけの確認の拒否、整合の hook の拒否で何も変わらない、組の取消しで依存する開放単位が自動閉鎖）。
+  - **Automated test:** `FeatureSignOffBundleH2Test`（試験用の組の種類で: 1 回の確認、引継ぎ、組の一部だけの確認の拒否、整合の hook の拒否で何も変わらない、組の取消しで依存する開放単位が自動閉鎖、member の 1 件の取消しで組は `CONFIRMED` のままその種別を要する開放単位だけが閉じる、member の種別・tenant の複合 FK）。
   - **Demo:** なし（試験の結果。NF07 の組の Demo は FE-C05）。
 
 - [ ] **FE-A07 — 継続評価（起動時・定期・日の始まり）と自動閉鎖**
@@ -104,17 +104,17 @@
   - **対応要求:** FE-RQ-005
   - **Objective:** `FeatureEnablementStartupEvaluator`（`SmartLifecycle`、web server の前）、`FeatureEnablementConditionScheduler`（`evaluateAll`・`evaluateAtBusinessDayStart`。`@SchedulerLock`・`void`）、`unverifiable_since` の共有と時間での 3 回、書込み待ちの sticky と再試行、申請の期限切れ、失効の接近の通知、副入口の変化の履歴、DSAR が閉じている間の未完了の請求の通知の器。
   - **対象 file:** `featureenablement/evaluation/*`（新規）、`FeatureSwitchRouteCoverageTest`（`UNGATED_SCHEDULERS` に理由つき）、`SystemConfigServiceImpl`（`SCHEMAS` に `feature-enablement.expiry-warning-days`）、`messages*.properties`（通知の文言）。
-  - **Implementation:** `design.md` §7（§7.4 の擬似 code）。`OPEN_ONLY`・`OPEN_TRANSITION` は閉鎖の根拠にしない。評価できない時は `unverifiable_since` を DB に書き（書けなければ memory）、評価の間隔の 3 倍で自動閉鎖。自動閉鎖を書けなければ `AUTO_CLOSE_PENDING` を残し、条件の成否に関係なく次の周期で再試行。WARN `errorCode=FEATURE_AUTO_CLOSED`。
-  - **Automated test:** `FeatureEnablementConditionSchedulerH2Test`（不成立で自動閉鎖・他の開放単位は不変・通知、評価できない類の code（`journal.unreachable` 等）で `unverifiable_since` だけ・評価の間隔の 3 倍で自動閉鎖・回復で消える、自動閉鎖の書込みの失敗の後に条件が戻っても閉じたまま・次の周期で書かれる、失効日の 0:00 の後の最初の評価、期限切れの申請、`OPEN_ONLY` の check が外れても閉じず監査 `FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST` と通知だけ、`OPEN_TRANSITION` を評価しない）、`FeatureEnablementStartupEvaluatorTest`（起動時の自動閉鎖・総閘・書けない時の書込み待ち）、`ScheduledMethodsHaveSchedulerLockTest`、`SchedulerLockProxyInvocationTest`。MySQL（`FeatureEnablementConcurrencyMySqlTest` に追加）: 定期の自動閉鎖 × 承認、2 つの instance 相当の snapshot が `unverifiable_since` で同じに閉じる。
+  - **Implementation:** `design.md` §7（§7.4 の擬似 code）。`OPEN_ONLY`・`OPEN_TRANSITION` は閉鎖の根拠にしない。評価できない時は `unverifiable_since` を DB に書き（書けなければ memory）、評価の間隔の 3 倍で自動閉鎖。自動閉鎖を書けなければ `AUTO_CLOSE_PENDING` を残し、条件の成否に関係なく次の周期で再試行し、毎周期 WARN `errorCode=FEATURE_AUTO_CLOSE_PENDING` を出す（再起動で失われるため。review P3-N1）。WARN `errorCode=FEATURE_AUTO_CLOSED`。
+  - **Automated test:** `FeatureEnablementConditionSchedulerH2Test`（不成立で自動閉鎖・他の開放単位は不変・通知、評価できない類の code（`journal.unreachable` 等）で `unverifiable_since` だけ・評価の間隔の 3 倍で自動閉鎖・回復で消える、自動閉鎖の書込みの失敗の後に条件が戻っても閉じたまま・次の周期で書かれる、失効日の 0:00 の後の最初の評価、期限切れの申請、`OPEN_ONLY` の check が外れても閉じず監査 `FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST` と通知だけ、`OPEN_TRANSITION` を評価しない）、`FeatureEnablementStartupEvaluatorTest`（起動時の自動閉鎖・総スイッチ・書けない時の書込み待ち）、`ScheduledMethodsHaveSchedulerLockTest`、`SchedulerLockProxyInvocationTest`。MySQL（`FeatureEnablementConcurrencyMySqlTest` に追加）: 定期の自動閉鎖 × 承認、2 つの instance 相当の snapshot が `unverifiable_since` で同じに閉じる。
   - **Demo:** dev（DB の源）で開いた NF04 の署名の失効日を翌日にした合成の署名へ差し替え、clock を進めた試験で自動閉鎖と通知を確かめる（試験の結果を見る）。
 
-- [ ] **FE-A08 — 総閘・旧い変数と運用値の上書きの拒否・prod の源の固定（段階 A の範囲）**
+- [ ] **FE-A08 — 総スイッチ・旧い変数と運用値の上書きの拒否・prod の源の固定（段階 A の範囲）**
   - **依存:** FE-A04、FE-A07
   - **対応要求:** FE-RQ-007・016
   - **Objective:** `FEATURE_ENABLEMENT_ALLOWED` と `FeatureEnablementProductionValidator`（prod の判定は `Environment.acceptsProfiles`）を作り、段階 A で DB 管理にした 7 件の旧い変数と、`app.feature-enablement.*` の運用値の上書きを拒否する。CLAUDE.md の規則どおり、RB §1.0 の行と雛形の名前を同じ change で足す。
   - **対象 file:** `featureenablement/config/FeatureEnablementProperties.java`・`FeatureEnablementProductionValidator.java`（新規）、`application.yml`・`application-prod.yml`、`infra/ecs/task-definition.prod.json`（`FEATURE_ENABLEMENT_ALLOWED=true`）、`infra/ecs/offline/validate-task-definition.ps1`（`mustBeVisible` に足す・原文の値の検査・運用値の上書きの FAIL）、`infra/ecs/offline/test-validate-task-definition.ps1`、`ProductionTaskDefinitionTemplateTest`、`deploy-runbook.md` §1.0。
-  - **Implementation:** `design.md` §10。総閘は原文の文字列が `true`/`false` のどちらかだけ。旧い変数の名前の正規化は ps1 の `NameKey` と同じで、環境変数・system property・`SPRING_APPLICATION_JSON` を見る。message は変数名だけ。総閘が閉なら起動時に `AUTO_CLOSED(MASTER_SWITCH_CLOSED)`・未決を `CANCELLED`・ERROR・gauge。
-  - **Automated test:** `FeatureEnablementProductionValidatorTest`（`@ActiveProfiles("prod")` 相当で、旧い変数・system property・`SPRING_APPLICATION_JSON` の各綴りで起動が止まる、`yes`・`1` の総閘で止まる、`APP_FEATURE_ENABLEMENT_MAX_STALENESS` 等の上書きで止まる、値が message に出ない、源が `database` でなければ止まる）、`FeatureEnablementPropertiesTest`（範囲と相互の関係）、`FeatureEnablementMasterSwitchH2Test`（閉で全て閉・申請 409・署名の登録は可・開に戻しても閉のまま）、ps1 の試験（雛形 PASS、`FEATURE_ENABLEMENT_ALLOWED` を secrets に置くと FAIL、`yes` で FAIL）。
+  - **Implementation:** `design.md` §10。総スイッチは原文の文字列が `true`/`false` のどちらかだけ。旧い変数の名前の正規化は ps1 の `NameKey` と同じで、環境変数・system property・`SPRING_APPLICATION_JSON` を見る。message は変数名だけ。総スイッチが閉なら起動時に `AUTO_CLOSED(MASTER_SWITCH_CLOSED)`・未決を `CANCELLED`・ERROR・gauge。
+  - **Automated test:** `FeatureEnablementProductionValidatorTest`（`@ActiveProfiles("prod")` 相当で、旧い変数・system property・`SPRING_APPLICATION_JSON` の各綴りで起動が止まる、`yes`・`1` の総スイッチで止まる、`APP_FEATURE_ENABLEMENT_MAX_STALENESS` 等の上書きで止まる、値が message に出ない、源が `database` でなければ止まる）、`FeatureEnablementPropertiesTest`（範囲と相互の関係）、`FeatureEnablementMasterSwitchH2Test`（閉で全て閉・申請 409・署名の登録は可・開に戻しても閉のまま）、ps1 の試験（雛形 PASS、`FEATURE_ENABLEMENT_ALLOWED` を secrets に置くと FAIL、`yes` で FAIL）。
   - **Demo:** dev（DB の源）で `FEATURE_ENABLEMENT_ALLOWED=false` で起動し、開いていた NF04 が閉じ、画面の申請が 409 になることを見る。
 
 - [ ] **FE-A09 — API・権限の配線**
@@ -181,7 +181,7 @@
   - **Objective:** `privacy.approval.*` と DSAR の `due-days`・`package-max-age` を、property か確認済みの組・署名から読む源に置き換える。組の種類 `NF07_DECISION_BINDING` と digest の整合の検査を足す。期間による閉鎖を開放単位が要る決定だけにする。
   - **対象 file:** `privacy/production/PrivacyApprovalSource.java`（新規。property・DB の実装）、`PrivacyDecisionBinding.java`（:145・:202 の overload と、期間を判定する capability の引数）、`retention/hold/PrivacyHoldDecisions.java`（:47-83）、`dsar/PrivacyDsarDecisions.java`（:49-88）、`retention/policy/PrivacyPolicyRegistrationService.java`（:134-150）、`redaction/ThirdPartyRedactor.java`（:48-53）、目録（`NF07_D01`〜`NF07_D09`、組、構造化された値の検査）、`src/test/java/com/ses/architecture/ApprovalValueReadGuardTest.java`（新規）。
   - **Implementation:** `design.md` §2.6.1・§8.5 の 1・7。digest の正規形 v1 は変えない。構造（digest を含む）は承認 capability の決定の全てで、署名日前・失効は評価する開放単位の capability の決定だけで判定する。
-  - **Automated test:** `PrivacyDecisionBindingTest`（既存の golden vector `a4ce05f1…` が源の経由でも同じ、D-06 の失効で retention の評価は成立・dsar は不成立）、`PrivacyApprovalSourceTest`、`PrivacyHoldDecisionsTest`・`PrivacyDsarDecisionsTest`・`ThirdPartyRedactorTest`（組の差替えが次の呼出しから効く）、`FeatureSignOffBundleH2Test` に NF07 の組（D-01 の更新で D-06 を引き継ぐ、D-09 の digest の不一致で 400）、`ApprovalValueReadGuardTest`。
+  - **Automated test:** `PrivacyDecisionBindingTest`（既存の golden vector `a4ce05f1…` が源の経由でも同じ、D-06 の失効で retention の評価は成立・dsar は不成立）、`PrivacyApprovalSourceTest`、`PrivacyHoldDecisionsTest`・`PrivacyDsarDecisionsTest`・`ThirdPartyRedactorTest`（組の差替えが次の呼出しから効く、決定の束縛の入力は `CONFIRMED` の組の全 member で member の状態に依らない）、`FeatureSignOffBundleH2Test` に NF07 の組（D-01 の更新で D-06 を引き継ぐ、D-09 の digest の不一致で 400）、`ApprovalValueReadGuardTest`。
   - **Demo:** なし（試験の結果）。
 
 - [ ] **FE-C02 — 5 箇所の直接の読取りと Monitor の cache**
@@ -215,7 +215,7 @@
   - **対象 file:** `PrivacyProductionConfigurationValidator.java`（:130-194）、`FeatureEnablementActorPolicy`、`service/security/AdministratorContinuityGuard.java`（:234-254 の呼出し側）、`AdministratorConditionCheck` の javadoc、目録（NF07 の 2 件を DB 管理に。評価できない類の code: `privacyAdmins.unverifiable` 等）、`FeatureEnablementProductionValidator`（`PRIVACY_*` の旧い変数）、`application-prod.yml`（placeholder の削除）。
   - **Implementation:** `design.md` §8.5 の 6・8 と §14（NF07 に再起動待ちは無い。guard が表を読めない時は利用者の管理の変更を全て拒否する）。
   - **Automated test:** `PrivacyProductionConfigurationValidatorTest`（既存の全ての違反 code が評価器でも同じ code になる、`privacyAdmins.unverifiable` が `UNVERIFIABLE`、prod でも起動を止めない）、`AdministratorContinuityGuardTest`・`AdministratorContinuityGuardH2Test`（NF07 が閉じていれば privacy-admin の減少を拒否しない、開いている・未決なら拒否、表を読めなければ拒否）、`FeatureEnablementActorPolicyTest`（NF07 で privacy-admin 以外は 403）、DSAR が閉じている間の未完了の請求の通知。MySQL の `AdministratorContinuityGuardMySqlTest` に申請との並行の case。
-  - **Demo:** prod の profile の試験の構成で、合成の D-01・D-09（・D-06）を組で登録・確認し、privacy-admin 2 名で保持・保全と DSAR を開き、1 名を外す変更が拒否されること、D-01 の更新の組を確認しても両方が開いたままであること、D-06 を失効させると DSAR だけが閉じることを確かめる。
+  - **Demo:** prod の profile の試験の構成で、合成の D-01・D-09（・D-06）を組で登録・確認し、privacy-admin 2 名で保持・保全と DSAR を開き、1 名を外す変更が拒否されること、D-01 の更新の組を確認しても両方が開いたままであること、D-06 を失効させると DSAR だけが閉じること、D-06 の行が `EXPIRED` になった後の次の定期の評価と、D-06 を 1 件だけ `REVOKED` にした後も保持・保全は `OPEN` のままで DSAR は閉じていることを確かめる（review P2-N1。試験は `FeatureSignOffBundleH2Test`）。
 
 - [ ] **FE-C06 — NF07 の起動の停止の撤去の確認と文書**
   - **依存:** FE-C05
@@ -240,15 +240,15 @@
   - **対応要求:** FE-RQ-008
   - **Objective:** `design.md` §9.1（0 の実装の条件、5 の barrier の分岐、5a の purge の property）・§9.2（法人の未解決は起動時の評価器へ）。
   - **対象 file:** `featureenablement/nf05/IntegrationHubEnablementBootResolver.java`（新規、`META-INF/spring.factories`）、`featureenablement/nf05/IntegrationHubBootDecisionRecorder.java`（新規）、`service/integrationhub/IntegrationHubRetentionPurgeCondition.java`（:15-22）・`ExternalApiReadSnapshotPurgeScheduler` の条件・`IntegrationHubDeliveryMetrics` の条件、`config/LegalEntityReadinessStartupValidator.java`（:21-27。NF05 の部分を `FeatureEnablementStartupEvaluator` へ）、目録（NF05 の 2 件を DB 管理に）、`deploy-runbook.md` §1.2（起動前の読取りの受理）、`application-prod.yml`（placeholder の削除）。
-  - **Automated test:** `IntegrationHubEnablementBootResolverTest`（順序が `ConfigDataEnvironmentPostProcessor` の後、enabled を常に書く、状態・署名・総閘・違反の組合せで property の値、`OPEN` は barrier の指紋だけ・`OPEN_PENDING_RESTART` は OFF の記録も、DB に届かない・表が無いと閉と `READ_FAILED`、purge の property、値を log に出さない）、`IntegrationHubBootDecisionRecorderTest`、`LegalEntityReadinessStartupValidatorTest`（NF05 は port を開く前に自動閉鎖、copilot は例外のまま）、`IntegrationHubRetentionPurgeConditionTest`。MySQL（`IntegrationHubEnablementRestartMySqlTest`。shard の登録を同じ commit で）: 承認 → 再起動で `OPEN` → 定期の評価の後も `OPEN` → もう一度再起動しても `OPEN` で隔離が走らない、`AUTO_CLOSED` の後の再起動で purge の scheduler が作られる。
+  - **Automated test:** `IntegrationHubEnablementBootResolverTest`（順序が `ConfigDataEnvironmentPostProcessor` の後、enabled を常に書く、状態・署名・総スイッチ・違反の組合せで property の値、`OPEN` は barrier の指紋だけ・`OPEN_PENDING_RESTART` は OFF の記録も、DB に届かない・表が無いと閉と `READ_FAILED`、purge の property（`READ_FAILED` では `true`。review P3-N3）、`NF05_OUTBOUND_OFF` の照会が `reference_type='NF05'` を付けて索引を使う（review P3-N8）、値を log に出さない）、`IntegrationHubBootDecisionRecorderTest`、`LegalEntityReadinessStartupValidatorTest`（NF05 は port を開く前に自動閉鎖、copilot は例外のまま）、`IntegrationHubRetentionPurgeConditionTest`。MySQL（`IntegrationHubEnablementRestartMySqlTest`。shard の登録を同じ commit で）: 承認 → 再起動で `OPEN` → 定期の評価の後も `OPEN` → もう一度再起動しても `OPEN` で隔離が走らない、`AUTO_CLOSED` の後の再起動で purge の scheduler が作られる。
   - **Demo:** prod の profile の試験の構成で、outbound を承認 → 再起動 → 起動の log に結果、画面で `OPEN`、もう一度再起動しても `OPEN` を確かめる。
 
 - [ ] **FE-D03 — 実行時の NF05 の判定を runtime switch に置き換える**
   - **依存:** FE-D02
   - **対応要求:** FE-RQ-008
-  - **Objective:** `design.md` §9.3 の `IntegrationHubRuntimeSwitch`（一時の閉鎖からの同じ process での再開を含む）と静的な試験。
-  - **対象 file:** `IntegrationHubRuntimeSwitch.java`（新規）、`ExternalApiDisabledFilter.java`、`ExternalApiAuthenticationFilter.java`、`ExternalApiAuditBoundary.java`、`backup/quiesce/BackupWriteGateFilter.java`、`IntegrationHubResourceChangedProducer.java`、`IntegrationHubWebhookDeliveryWorker.java`、`src/test/java/com/ses/architecture/IntegrationHubFlagReadGuardTest.java`（新規）。
-  - **Automated test:** 各 class の既存の試験（kill switch の挙動のまま）、`IntegrationHubRuntimeSwitchTest`（一時の閉鎖が解ければ戻る、DB の遷移を伴う閉鎖では戻らない）、`IntegrationHubFlagReadGuardTest`、`BackupWriteGateMockMvcTest`（外部 API の静止の扱いが変わらない）。
+  - **Objective:** `design.md` §9.3 の `IntegrationHubRuntimeSwitch`（閉鎖の 2 種類 `TRANSIENT` / `DEFINITIVE`）と静的な試験。一時の閉鎖では producer が outbox への書込みを続け、worker は claim を止め、処理中の配信を DLQ にせず PENDING へ戻す。確定の閉鎖は現在の kill switch のまま（review P2-N3）。
+  - **対象 file:** `IntegrationHubRuntimeSwitch.java`（新規）、`mapper/ApiDeliveryMapper.java`（claim を外して PENDING に戻し試行の回数を増やさない method。`holdPending` :81-86 は確定の閉鎖だけで使う）、`ExternalApiDisabledFilter.java`、`ExternalApiAuthenticationFilter.java`、`ExternalApiAuditBoundary.java`、`backup/quiesce/BackupWriteGateFilter.java`、`IntegrationHubResourceChangedProducer.java`、`IntegrationHubWebhookDeliveryWorker.java`、`src/test/java/com/ses/architecture/IntegrationHubFlagReadGuardTest.java`（新規）。
+  - **Automated test:** 各 class の既存の試験（確定の閉鎖で kill switch の挙動のまま）、`IntegrationHubRuntimeSwitchTest`（`unverifiable_since`・snapshot の古さは `TRANSIENT`、`AUTO_CLOSED`・手動・総スイッチ・書込み待ちは `DEFINITIVE`、一時の閉鎖が解ければ戻る、確定の閉鎖では戻らない）、`IntegrationHubResourceChangedProducerTest`（一時の閉鎖の間も積む、確定の閉鎖では積まない）、`IntegrationHubWebhookDeliveryWorkerTest`（一時の閉鎖で処理中は PENDING へ戻る、確定の閉鎖で DLQ `KILL_SWITCH`）、MySQL（`IntegrationHubDeliveryTransientClosureMySqlTest`。shard の登録を同じ commit で）: 一時の閉鎖の間の変更の配信が回復の後に送られ、処理中だった配信も DLQ にならず送られる、`IntegrationHubFlagReadGuardTest`、`BackupWriteGateMockMvcTest`（外部 API の静止の扱いが変わらない）。
   - **Demo:** なし。
 
 - [ ] **FE-D04 — 閉鎖での barrier の書き直しと起動時・実行時の分離**
@@ -256,7 +256,7 @@
   - **対応要求:** FE-RQ-008
   - **Objective:** `design.md` §9.3 の barrier の部分。
   - **対象 file:** `service/integrationhub/IntegrationHubOutboundStartupBarrier.java`（:55-150。`bootEnabled`・`recordRuntimeOff`）、`FeatureEnablementService`（A05 の閉鎖の hook から呼ぶ）。
-  - **Automated test:** `IntegrationHubOutboundStartupBarrierTest`（閉鎖で行が `v1|OFF|0|<指紋>` と `NF05_OUTBOUND_OFF`、memory の `ready` が false、起動時の経路は起動時の値で分岐）。MySQL: 閉鎖 → ON の再起動で隔離が走る、`continueRecovery` と閉鎖の並行で deadlock しない。
+  - **Automated test:** `IntegrationHubOutboundStartupBarrierTest`（閉鎖で行が `v1|OFF|0|<指紋>` と `NF05_OUTBOUND_OFF`、memory の `ready` が false、起動時の経路は起動時の値で分岐）。MySQL: 閉鎖 → ON の再起動で隔離が走る、`continueRecovery` と閉鎖の並行で deadlock しない。`IntegrationHubOutboundStartupBarrierTest` に、起動時の初期化が失敗した後に確定の閉鎖で行が OFF になった時、`continueRecovery` が初期化を再試行せず行を `QUARANTINING` に書き換えない case（review P3-N2）。
   - **Demo:** なし（MySQL の試験の結果）。
 
 - [ ] **FE-D05 — NF05 の評価器（継続の条件と開放の遷移の前提）**
@@ -287,7 +287,7 @@
 - [ ] **FE-E03 — FS と RB と関連の文書の書直し**
   - **依存:** 段階 A〜D
   - **対応要求:** FE-RQ-014
-  - **Objective:** `design.md` §17 の文書の更新を行う。RB §1.7 は「go-live の前提は基盤と中核だけ。各機能の署名は system の中で開く前提」に書き直し、署名表の各行の署名を目録の種別 code と類（決定・証拠）と対応させる。NF05 の truststore 等の差替えの流れ（再起動 2 回）、総閘を誤って `false` にした代償、DSAR が閉じている間の法定の期限の扱い、二人の承認の残る穴（§11.1）、guard が表を読めない時の挙動を書く。
+  - **Objective:** `design.md` §17 の文書の更新を行う。RB §1.7 は「go-live の前提は基盤と中核だけ。各機能の署名は system の中で開く前提」に書き直し、署名表の各行の署名を目録の種別 code と類（決定・証拠）と対応させる。NF05 の truststore 等の差替えの流れ（再起動 2 回）、総スイッチを誤って `false` にした代償、DSAR が閉じている間の法定の期限の扱い、二人の承認の残る穴（§11.1）と RB §5.6 の運用の規則「承認の前に、直近に管理者の role を得た利用者が承認者でないことを確かめる」、付与の記録の DDL を go-live の後の backlog に記録すること（review P3-N10）、自動閉鎖の書込み待ちの間は再起動しないことと再起動した後の確認（review P3-N1）、guard が表を読めない時の挙動を書く。
   - **対象 file:** `feature-switches.md`、`deploy-runbook.md`（冒頭・§1.0・§1.2・§1.7・§1.7.1・§3.4・§4.2・§4.4・§5.5 の後・§5.6、件数が出る全ての箇所）、`engineer-lifecycle-workflow/runbook.md`、`privacy-retention-dsar/production-bridge-phased-plan.md`、`integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md`、`data-migration-import-center/a1a-ingress-operations.md`、`certification-learning-skill-gap/first-release-scope-confirmation.md`、`mobile-pwa-self-service/first-release-user-and-operations-notes.md`。
   - **Automated test:** `DeployRunbookMigrationCountTest`、runbook を読む既存の試験。
   - **Demo:** なし（文書の review）。CLAUDE.md の更新は統括へ依頼する。
@@ -295,8 +295,8 @@
 - [ ] **FE-E04 — PITR の後の手順と `CONTENT_HASH_TABLES`**
   - **依存:** 段階 A〜D
   - **対応要求:** FE-RQ-014・015
-  - **Objective:** `design.md` §13.1 の手順を restore の runbook に書き、`CONTENT_HASH_TABLES` の候補に本機能の 4 表を足す。
-  - **対象 file:** `ops/backup/runbooks/restore-cutover.md`（復旧の後の最初の起動は総閘を閉、`FEATURE_ENABLEMENT_EVENT` との照合と Logs Insights の query の例、総閘を戻して二人で開き直す）、`.kiro/specs/database-backup-recovery/dba-prelaunch-draft.md` §1（候補 B に `t_feature_enablement_state`・`t_feature_sign_off`・`t_feature_sign_off_bundle`・`t_feature_sign_off_bundle_member`）、`deploy-runbook.md`（restore の後の手順への参照）。
+  - **Objective:** `design.md` §13.1 の手順を restore の runbook に書き、`CONTENT_HASH_TABLES` の候補に本機能の 5 表を足す。
+  - **対象 file:** `ops/backup/runbooks/restore-cutover.md`（必須の checklist に「次の起動の task definition は `FEATURE_ENABLEMENT_ALLOWED=false`」、復旧の後の最初の起動は総スイッチを閉、復旧の時点より後に手動・自動で閉じた開放単位と理由の一覧と確認、CloudWatch Logs の log group の保存期間を PITR で戻れる期間以上にする SRE の設定（review P3-N4）、`FEATURE_ENABLEMENT_EVENT` との照合と Logs Insights の query の例、総スイッチを戻して二人で開き直す）、`.kiro/specs/production-launch/dba-prelaunch-draft.md` §1（候補 B に `t_feature_enablement_state`・`t_feature_sign_off`・`t_feature_sign_off_extension`・`t_feature_sign_off_bundle`・`t_feature_sign_off_bundle_member`）、`deploy-runbook.md`（restore の後の手順への参照）。
   - **Automated test:** backup tool の既存の shell の試験（`CONTENT_HASH_TABLES` の候補の書式を検査するものがあれば）、文書の review。
   - **Demo:** 復旧の演習（DBA・SRE。staging。人が行う。未取得）で、復旧の後の最初の起動が全ての開放単位を `AUTO_CLOSED(MASTER_SWITCH_CLOSED)` にし、barrier が OFF になることを確かめる。
 
