@@ -583,7 +583,8 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 - **DBA-4**: MySQLの版・collation・parameter group を確定する（§1.1・§1.6 の3）。版は決定済み（2026-11-18）: 8.4 LTS（exact 版の候補は 8.4.13。recovery target も同じ exact 版・同じ `lower_case_table_names`。違うと schema fingerprint が一致せず cutover できない。RB-W の W-1 の前提をここに統合した）。試験側（RB-MYSQL84。#122）と backup tool 側（RB-W）の 8.4 への適合は合入済みで、8.4 での backup・PITR は CI（実 MySQL 8.4.13）で取得済み、本番相当の実測は**未取得**（§1.1）。parameter group には `innodb_print_all_deadlocks = ON`（SRE-8・RR-15）も入れる。確認SQLは §1.1。
 - **Backup・PITR**:
   - **DBA-5**: RPO 15分・RTO 4時間（2026-11-13 決定）の署名。署名の方法は決定済み（2026-11-18。§1.6 の10）: 配備日に目標値として署名し、達成は restore drill の実測待ちと注記する。DBA Lead と Operations の署名は**未取得**（PENDING）。
-  - **DBA-6**: prodの `.env.backup` の `CONTENT_HASH_TABLES` の本番値を決める（未設定ではvalidateがFAILする）。本番の値はまだ文書に無い。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+  - **DBA-6**: prodの `.env.backup` の `CONTENT_HASH_TABLES` の本番値を決める（未設定ではvalidateがFAILする）。本番の値はまだ決まっていない（**未取得**）。主キーを持つ表のカンマ区切りで、`flyway_schema_history` を含め、少数に保つ。
+    - 草案: `dba-prelaunch-draft.md` §1（統括の起草。候補 A（最小）・B（推奨）、選んだ理由、表の存在・主キー・行数の確認 SQL。DBA の確認の前で、値は DBA が確定する）。DBA-1〜DBA-4 の確認 SQL の一覧（runbook の節の引用と、runbook に無い SQL の補い）も同 §2 にある。
   - 正本: `ops/backup/runbooks/restore-cutover.md`（RPO/RTO と署名欄、`CONTENT_HASH_TABLES` の要求）、`ops/backup/README.md`（`.env.backup` の形式）。
 
 **Backup 開始の前提（BLOCKED の解除。初回 backup（§2 の5。§3 の完了直後）の前）**
