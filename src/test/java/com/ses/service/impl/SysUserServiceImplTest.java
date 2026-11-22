@@ -20,6 +20,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 @Import(FeatureEnablementTestConfiguration.class)
 @Transactional
+@Sql(scripts = "/sql/permission-group-seed-h2.sql")
 class SysUserServiceImplTest {
 
     @Autowired
@@ -77,18 +79,16 @@ class SysUserServiceImplTest {
         assertThat(fixture.countNotifications(other.userId())).as("他の有効な管理者へ").isEqualTo(1);
         assertThat(fixture.countNotifications(operator.userId())).as("付与した管理者へも").isEqualTo(1);
 
-        // 管理者以外の role の付与では通知しない。role の変更で管理者になれば通知する
-        SysUser sales = new SysUser();
-        sales.setUsername("fesales" + UUID.randomUUID().toString().substring(0, 8));
-        sales.setPassword("Grant-Password-2026!");
-        sales.setRealName("営業試験");
-        sales.setRole("営業");
-        sysUserService.createUser(sales, authentication);
+        // role を変えない更新では通知しない。role の変更で管理者になれば通知する
+        FeatureEnablementActor sales = fixture.user("営業");
+        SysUser rename = new SysUser();
+        rename.setRealName("営業試験");
+        sysUserService.updateUser(sales.userId(), rename, authentication);
         assertThat(fixture.countAudit("FEATURE_ADMIN_ROLE_GRANTED_NOTICE")).isEqualTo(before + 1);
 
         SysUser promote = new SysUser();
         promote.setRole("管理者");
-        sysUserService.updateUser(sales.getId(), promote, authentication);
+        sysUserService.updateUser(sales.userId(), promote, authentication);
         assertThat(fixture.countAudit("FEATURE_ADMIN_ROLE_GRANTED_NOTICE")).isEqualTo(before + 2);
     }
 
