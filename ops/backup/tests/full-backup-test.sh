@@ -494,6 +494,16 @@ case_backup_full_schema_fingerprint_failure_fails_closed() {
 
 # ------------------------------------------------------------ RB-QUIESCE BWQ-009（quiesce-db の full）
 
+# fake の mysql が受けた SQL の名前を、job の本体が呼んだ順に並べる。保持 process（lease の延長 `renew` と
+# full の最中の新しい instance の確認 `full-new-instance`）は別の process から timer で呼ぶため、解除の直後に
+# 停止までの間の1回が本体の呼出しの間に入ることがある（CI で release と resume-check の間に入った）。
+# 本体の順を確かめる assertion はこの関数の出力を使う。保持 process の振舞い（延長・延長の停止・新しい instance
+# による中止）は quiesce-db-test.sh の case_hold_keeps_renewing_after_acquire_returns 等で確かめる。解除の後の1回は
+# renew.sql・full-new-instance.sql とも `status = 'REQUESTED'` の条件で0行の更新になり、要求を戻さない。
+qdb_main_calls() {
+  cut -f2 "$FAKE_QDB_DIR/calls.log" | grep -v -x -e renew -e full-new-instance | tr '\n' ' '
+}
+
 # quiesce-db の設定（fake の mysql が DB の protocol に応答する。heartbeat の directory は要らない）
 setup_full_qdb() {
   setup_full
@@ -554,7 +564,7 @@ case_backup_full_quiesce_db_verifies_before_release() {
   steps=$(cut -f1 "$QUIESCE_STATE_DIR/window.steps" | tr '\n' ' ')
   assert_eq "acquire dump uploads table_counts schema_fingerprint verify release " "$steps" \
     "verify は静止区間の採取の後・解除の直前に呼ぶ（内訳の順）"
-  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "verify-request verify-check release resume-check" \
+  assert_contains "$(qdb_main_calls)" "verify-request verify-check release resume-check" \
     "verify の後に解除し、再開を確かめる"
   assert_contains "$(awk -F'\t' '$2 == "release" { print $3 }' "$FAKE_QDB_DIR/calls.log")" "reason = 'COMPLETED';" \
     "verify 済みの解除は COMPLETED"
@@ -648,7 +658,7 @@ case_backup_full_app_stopped() {
   assert_eq quiesce-app-stopped "$(jq -r .quiesce.provider <<< "$out" 2>/dev/null)" "結果に provider を記録"
   assert_eq APP_STOPPED "$(jq -r '.quiesce.mode' "$(compgen -G "$T/work/index/full-*.json" | head -n 1)" 2>/dev/null)" \
     "index（metadata）に mode APP_STOPPED を記録"
-  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "ddl-lock stopped-precheck insert-request stopped-check" \
+  assert_contains "$(qdb_main_calls)" "ddl-lock stopped-precheck insert-request stopped-check" \
     "停止確認の手順（§9.2）"
   assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log" | tr '\n' ' ')" "preflight" "preflight は信号表と権限を検査する"
   teardown_full
