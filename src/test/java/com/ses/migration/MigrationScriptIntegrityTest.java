@@ -997,7 +997,8 @@ class MigrationScriptIntegrityTest {
     void メニューを持つresourceには権限seedがあること() throws Exception {
         // 管理者専用resource。menuはあるが非管理者groupへは意図的に付与しない。
         // import（NF-06取込センター、V193）は管理者専用groupへ import.metadata.manage を明示許可し、他groupはdenyする。
-        java.util.Set<String> adminOnly = java.util.Set.of("user", "permission", "audit", "import");
+        // feature-enablement（機能の開放、V203）は管理者だけ（role-admin の '*' で通る。非管理者groupへ seed しない。FE-RQ-012）。
+        java.util.Set<String> adminOnly = java.util.Set.of("user", "permission", "audit", "import", "feature-enablement");
 
         List<String> allSql = new ArrayList<>();
         Map<String, String> resourceOrigin = new LinkedHashMap<>();

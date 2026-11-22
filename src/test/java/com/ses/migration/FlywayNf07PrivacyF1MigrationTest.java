@@ -388,10 +388,10 @@ class FlywayNf07PrivacyF1MigrationTest {
     }
 
     /**
-     * tenant ごとに入る文書以外の固定の data element の件数（V196 の27件と、V198 の NF01 二者確認（B0）の9件。
+     * tenant ごとに入る文書以外の固定の data element の件数（V196 の27件と、V198 の NF01 二者確認（B0）の9件と、V203 の機能の開放の2件。
      * DOCUMENT:<code> は文書種別ごとに数える）。
      */
-    private static final long CATALOG_FIXED_ELEMENTS = 36L;
+    private static final long CATALOG_FIXED_ELEMENTS = 38L;
 
     // ---------------------------------------------------------------- helper
 

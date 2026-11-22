@@ -112,6 +112,10 @@ spring:
         # V202: backup の書込み静止の信号表（要求・instance・ack。生成列 active_slot と一意索引）。V202 は ENGINE・COMMENT・
         #       生成列の STORED を含むため H2 変種を使う（IF NOT EXISTS で context ごとの再実行に備える）
         - classpath:sql/schema-backup-quiesce-h2.sql
+        # V203: 機能の開放の9表（生成列 pending_slot・active_slot と一意索引、開放状態・設定・延長・組の member の複合 FK）と
+        #       menu・data element の seed。V203 は ENGINE・COMMENT・生成列の STORED・trigger を含むため H2 変種を使う
+        #       （trigger は作らない。IF NOT EXISTS・NOT EXISTS で context ごとの再実行に備える。V202 の変種より後）
+        - classpath:sql/schema-feature-enablement-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

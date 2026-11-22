@@ -205,7 +205,9 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         return ADMIN_ONLY_ACTIONS.contains(actionKey)
                 || actionKey.startsWith("user.")
                 || actionKey.startsWith("identity-provider.")
-                || actionKey.startsWith("system-config.");
+                || actionKey.startsWith("system-config.")
+                // 機能の開放は管理者だけ（FE-RQ-012。group の無い利用者の legacyRoleAllows でも管理者以外を拒否する）
+                || actionKey.startsWith("feature-enablement.");
     }
 
     private boolean matches(Set<Long> enabledGroupIds, Set<String> candidates, int denyFlag) {

@@ -141,6 +141,7 @@ class FlywayProdFreshInstallMySqlTest {
             assertInitialRepairAndLedgerTables(st);
             assertNf07PrivacyFreshInstall(st);
             assertBackupQuiesceSignalTables(st);
+            assertFeatureEnablementFreshInstall(st);
             assertEquals(List.of(), rows(st, "SELECT routine_name FROM information_schema.routines "
                             + "WHERE routine_schema = DATABASE() ORDER BY routine_name"),
                     "migration用のhelper procedure（V102_1の残置分・admin scriptの一時procedureを含む）が残らないこと");
@@ -528,8 +529,8 @@ class FlywayProdFreshInstallMySqlTest {
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table),
                     "NF07 F1表はfresh installで0件であること（法的な値をseedしない）: " + table);
         }
-        assertEquals(36L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "catalog は文書以外が固定36件（V196 の27件と V198 の9件）");
+        assertEquals(38L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'"), "catalog は文書以外が固定38件（V196 の27件と V198 の9件と V203 の2件）");
         // V198: NF01 二者確認（B0）の7表と自由記述2列は provider 未登録・分類 UNKNOWN の構造行（保持期間は持たない）
         assertEquals(9L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
                 + "AND data_element_id LIKE 'LIFECYCLE_DUAL_%' AND storage_kind = 'DB_COLUMN' AND provider_id IS NULL "
@@ -571,6 +572,50 @@ class FlywayProdFreshInstallMySqlTest {
                 + "AND NOT EXISTS (SELECT 1 FROM t_permission_group_action d WHERE d.tenant_id = g.tenant_id "
                 + "AND d.group_id = g.id AND d.action_key = 'privacy.*' AND d.deny_flag = 1 AND d.deleted_flag = 0)"),
                 "prod起動検査のprivacy deny不変条件を満たすこと");
+    }
+
+    /**
+     * V203（FE-A01）: 機能の開放の9表が空で作られ、未決の申請・確認済みの署名・確認済みの組の生成列は STORED（本番の job の接続で
+     * 作った生成式の introducer は utf8mb4）で、追記専用の3表に UPDATE・DELETE の trigger が各1件（計6件）あり、列は DEFAULT に
+     * CURRENT_TIMESTAMP を持たない。menu は管理者だけに付き、data element の catalog 行が2件ある。全体の trigger 件数は
+     * deploy-runbook §1.2・§3.4 の73件（{@code DeployRunbookMigrationCountTest} が migration から数えた値と照合する）。
+     * CHECK・複合 FK・trigger の拒否の負例は {@code FeatureEnablementSchemaMySqlTest}（mysql shard 1）が確かめる。
+     */
+    private void assertFeatureEnablementFreshInstall(Statement st) throws Exception {
+        List<String> tables = List.of("t_feature_enablement_generation", "t_feature_enablement_request",
+                "t_feature_enablement_state", "t_feature_enablement_setting", "t_feature_sign_off",
+                "t_feature_sign_off_extension", "t_feature_sign_off_bundle", "t_feature_sign_off_bundle_member",
+                "t_feature_enablement_event");
+        for (String table : tables) {
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table), "V203 の表は空で作られる: " + table);
+        }
+        assertEquals(9L, scalar(st, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() "
+                + "AND table_name LIKE 't\\_feature\\_%'"), "V203 の9表");
+        assertEquals(3L, scalar(st, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                + "AND table_name LIKE 't\\_feature\\_%' AND column_name IN ('pending_slot', 'active_slot') "
+                + "AND extra = 'STORED GENERATED' AND generation_expression LIKE '%_utf8mb4%' "
+                + "AND generation_expression NOT LIKE '%_latin1%'"), "生成列3件は STORED で introducer は utf8mb4");
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                + "AND table_name LIKE 't\\_feature\\_%' AND UPPER(COALESCE(column_default, '')) LIKE '%CURRENT_TIMESTAMP%'"),
+                "時刻の列は DEFAULT に CURRENT_TIMESTAMP を使わない");
+        assertEquals(List.of(
+                        "t_feature_enablement_event|DELETE", "t_feature_enablement_event|UPDATE",
+                        "t_feature_sign_off_bundle_member|DELETE", "t_feature_sign_off_bundle_member|UPDATE",
+                        "t_feature_sign_off_extension|DELETE", "t_feature_sign_off_extension|UPDATE"),
+                rows(st, "SELECT CONCAT_WS('|', event_object_table, event_manipulation) FROM information_schema.triggers "
+                        + "WHERE trigger_schema = DATABASE() AND event_object_table LIKE 't\\_feature\\_%' "
+                        + "AND action_timing = 'BEFORE' ORDER BY event_object_table, event_manipulation"),
+                "追記専用の3表の BEFORE UPDATE・DELETE の trigger");
+        assertEquals(73L, scalar(st, "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()"),
+                "trigger の総数（deploy-runbook §1.2・§3.4）");
+        assertEquals(List.of("管理者"), rows(st, "SELECT r.role FROM t_role_menu r JOIN m_menu m ON m.id = r.menu_id "
+                + "WHERE m.menu_key = 'feature-enablement' ORDER BY r.role"), "menu は管理者だけ");
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM t_permission_group_action WHERE action_key LIKE 'feature-enablement%'"),
+                "権限 group の action は足さない");
+        assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = 'default' "
+                + "AND data_element_id IN ('FEATURE_SIGN_OFF_SIGNER_NAME', 'FEATURE_SIGN_OFF_DOCUMENT') AND provider_id IS NULL "
+                + "AND subject_attribution = 'NOT_ATTRIBUTABLE' AND inventory_ref = 'pii-inventory.md#DB-151'"),
+                "V203 の data element 2件");
     }
 
     /**

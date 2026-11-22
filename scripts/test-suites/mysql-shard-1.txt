@@ -41,3 +41,4 @@ FlywayV194DispatchClaimLedgerMySqlTest
 PrivacyHoldServiceMySqlTest
 PrivacyHoldProjectionReconcilerMySqlTest
 PrivacyRequestApprovalMySqlTest
+FeatureEnablementSchemaMySqlTest

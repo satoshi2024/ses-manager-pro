@@ -339,7 +339,7 @@ FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 't_feature_enablement_ev
 ### 2.8 menu・権限・data element の seed（V203 の後半）
 
 - `m_menu`: `feature-enablement`（名称「機能の開放」、`path_prefix` `/feature-enablement`、`api_prefix` `/api/feature-enablement`）。`t_role_menu`: `管理者` だけ。**`t_permission_group_action` に行を足さない**（管理者は `role-admin` の `*`。管理者以外の group に `feature-enablement.*` を seed しない。CLAUDE.md）。
-- `m_pii_data_element`: `FEATURE_SIGN_OFF_SIGNER_NAME`（`t_feature_sign_off.signer_name`）と `FEATURE_SIGN_OFF_DOCUMENT`（署名の文書）の 2 件を V198（:25-28）と同じ列で登録する（分類・owner・inventory 状態は UNKNOWN、保持期間は持たない。D-02 の署名で確定する）。`privacy-retention-dsar/pii-inventory.md` に DB-1xx の行を足す。
+- `m_pii_data_element`: `FEATURE_SIGN_OFF_SIGNER_NAME`（`t_feature_sign_off.signer_name`）と `FEATURE_SIGN_OFF_DOCUMENT`（署名の文書）の 2 件を V198（:25-28）と同じ列で登録する（分類・owner・inventory 状態は UNKNOWN、保持期間は持たない。D-02 の署名で確定する）。`subject_attribution` だけは、消去の経路（§6.6 の D17）を hold の gate が判定できるよう `NOT_ATTRIBUTABLE` にする（署名者は F2 provider で本人を導出できず、DATA_ELEMENT hold がある時だけ消去を止める。UNKNOWN のままだと、hold 機構を使った tenant で消去が止まり続け、`PrivacyHoldPathClassificationTest` の「接続した経路の data element は分類済み」の規則にも反する。FE-A01 の実装の判断）。`privacy-retention-dsar/pii-inventory.md` に DB-1xx の行を足す。
 
 ### 2.9 条件の評価結果は永続化しない（推奨）
 
@@ -773,6 +773,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
   - **確定の閉鎖 `DEFINITIVE`**: `AUTO_CLOSED`・手動の閉鎖・総スイッチ（DB に書けない間の自動閉鎖の書込み待ち `AUTO_CLOSE_PENDING` を含む。条件の不成立が確かめられているため）。現在の kill switch と同じ: producer は積まず、worker は送信しない（未送信は PENDING のまま、処理中は DLQ `KILL_SWITCH`）。barrier の行を OFF に書き直し（上）、memory の `ready` を false にする。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
   - inbound は、どちらの閉鎖でも実効値が閉じている間は 404 `DISABLED_DENY`（client が再試行する。SES 側に失うものは無い）。
   - bean は次の起動まで残る（runtime switch で眠る）。
+- **注記（micro review 88630af1 の P3-M2）**: 一時の閉鎖で処理中の配信を PENDING へ戻す更新は、claim の持ち主（lease の token）と状態を条件にした CAS で行い、`attempt_count` を増やさない（一時の閉鎖が続いても回数の上限で DLQ に落とさない）。`TRANSIENT` と `DEFINITIVE` の境の細部（`AUTO_CLOSE_PENDING` を確定の閉鎖として扱う時点、古さが続いて自動閉鎖に変わる時の処理中の配信の扱い）は段階 D（FE-D03）の着手時に確定する。
 - 同じ process での再開は一時の閉鎖からだけ（上）。第 2 版の「一時の閉鎖は ON→ON と同じ」の説明は、producer が配信を捨て、処理中の配信が DLQ に入るため成り立たなかった（review P2-N3）。上の 2 種類の区別で置き換えた。
 - `IntegrationHubApprovalDigest.canonicalInbound`・`canonicalOutbound`（:79・:104）は決定 ID を properties から読むため、`IntegrationHubApprovals`（§9.5）から受け取るように改める（DB の源では properties の決定 ID が空になり、digest が必ず合わなくなるため。review P3-15）。
 
