@@ -260,6 +260,73 @@ try {
   Case 'SMTP_PASSWORD in environment' $Initial 'names that look like secrets must come from the secret store' {
     $td = New-Initial; Set-Env (App $td) 'SMTP_PASSWORD' 'plain-text'; $td }
 
+  # ---- backup write quiesce (RB-QUIESCE BWQ-007; deploy-runbook 1.0 rows 31-41, backup-write-quiesce design 12.3)
+  Case 'actual, backup quiesce emergency stop with a change ticket' $SteadyOn 'PASS' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; Set-Env (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET' 'CHG-1234'; $td }
+  Case 'actual, backup quiesce values within range' $Initial 'PASS' {
+    $td = New-Initial; $app = App $td
+    Set-Env $app 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT' '900s'; Set-Env $app 'BACKUP_QUIESCE_MAX_HOLD_FULL' '4h'
+    Set-Env $app 'BACKUP_QUIESCE_POLL_INTERVAL' '500ms'; Set-Env $app 'BACKUP_QUIESCE_RETENTION' '365d'
+    Set-Env $app 'BACKUP_QUIESCE_STARTUP_WAIT_MAX' '60s'; $td }
+  Case 'actual, longer startup wait with a longer startPeriod' $Initial 'PASS' {
+    $td = New-Initial; $app = App $td; Set-Env $app 'BACKUP_QUIESCE_STARTUP_WAIT_MAX' '2m'; $app.healthCheck.startPeriod = 240; $td }
+  Case 'BACKUP_QUIESCE_ENABLED missing in the template' @() 'BACKUP_QUIESCE_ENABLED must be given once' {
+    $td = Read-Template; Remove-Env (App $td) 'BACKUP_QUIESCE_ENABLED'; $td }
+  Case 'BACKUP_QUIESCE_ENABLED missing' $Initial 'BACKUP_QUIESCE_ENABLED must be given once' {
+    $td = New-Initial; Remove-Env (App $td) 'BACKUP_QUIESCE_ENABLED'; $td }
+  Case 'BACKUP_QUIESCE_ENABLED=false in the template even with a ticket' @() 'the template must state BACKUP_QUIESCE_ENABLED=true' {
+    $td = Read-Template; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; Set-Env (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET' 'CHG-1234'; $td }
+  Case 'BACKUP_QUIESCE_ENABLED=TRUE (other spelling of the value)' $Initial 'BACKUP_QUIESCE_ENABLED must be true or false' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'TRUE'; $td }
+  Case 'emergency stop without a ticket' $SteadyOn 'needs BACKUP_QUIESCE_DISABLED_TICKET in the change-ticket form' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; $td }
+  Case 'emergency stop with an empty ticket' $SteadyOn 'needs BACKUP_QUIESCE_DISABLED_TICKET in the change-ticket form' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; Set-Env (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET' ''; $td }
+  Case 'emergency stop with a malformed ticket' $SteadyOn 'needs BACKUP_QUIESCE_DISABLED_TICKET in the change-ticket form' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; Set-Env (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET' 'chg-1234'; $td }
+  Case 'ticket left with BACKUP_QUIESCE_ENABLED=true' $SteadyOn 'belongs only to BACKUP_QUIESCE_ENABLED=false' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET' 'CHG-1234'; $td }
+  Case 'BACKUP_QUIESCE_ENABLED from the secret store' $Initial 'settings checked by value must be in environment' {
+    $td = New-Initial; Remove-Env (App $td) 'BACKUP_QUIESCE_ENABLED'; Add-Secret (App $td) 'BACKUP_QUIESCE_ENABLED'; $td }
+  Case 'BACKUP_QUIESCE_DISABLED_TICKET from the secret store' $SteadyOn 'settings checked by value must be in environment' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'BACKUP_QUIESCE_ENABLED' 'false'; Add-Secret (App $td) 'BACKUP_QUIESCE_DISABLED_TICKET'; $td }
+  Case 'APP_BACKUP_QUIESCE_ENABLED (canonical name)' $Initial 'guarded property trees must use the short names' {
+    $td = New-Initial; Set-Env (App $td) 'APP_BACKUP_QUIESCE_ENABLED' 'false'; $td }
+  Case 'APP_BACKUPQUIESCE_DISABLEDTICKET (canonical name)' $SteadyOn 'guarded property trees must use the short names' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'APP_BACKUPQUIESCE_DISABLEDTICKET' 'CHG-1234'; $td }
+  Case 'app.backup-quiesce.enabled in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"backup-quiesce":{"enabled":false}}}'; $td }
+  Case 'backup_quiesce_enabled in lower case' $Initial 'backup quiesce settings must use the documented names' {
+    $td = New-Initial; Remove-Env (App $td) 'BACKUP_QUIESCE_ENABLED'; Set-Env (App $td) 'backup_quiesce_enabled' 'true'; $td }
+  Case 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT out of range' $Initial 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT must be 30s to 900s' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT' '901s'; $td }
+  Case 'BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL not shorter than the full hold' $Initial 'BACKUP_QUIESCE_MAX_HOLD_FULL must be 60s to 4h' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL' '3600s'; $td }
+  Case 'BACKUP_QUIESCE_FENCE_AFTER too close to the heartbeat' $Initial 'must be longer than 13 seconds' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_FENCE_AFTER' '18s'; $td }
+  Case 'BACKUP_QUIESCE_POLL_INTERVAL below 200ms' $Initial 'BACKUP_QUIESCE_POLL_INTERVAL must be at least 200ms' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_POLL_INTERVAL' '100ms'; $td }
+  Case 'BACKUP_QUIESCE_RETENTION out of range' $Initial 'BACKUP_QUIESCE_RETENTION must be 1d to 365d' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_RETENTION' '400d'; $td }
+  Case 'BACKUP_QUIESCE_STARTUP_WAIT_MAX out of range' $Initial 'BACKUP_QUIESCE_STARTUP_WAIT_MAX must be 10s to 120s' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_STARTUP_WAIT_MAX' '5s'; $td }
+  Case 'BACKUP_QUIESCE_MAX_HOLD_FULL without a unit' $Initial 'must be a whole number with a unit' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_MAX_HOLD_FULL' '3600'; $td }
+  Case 'startPeriod shorter than the startup wait + 120 s' $Initial 'startPeriod must be at least BACKUP_QUIESCE_STARTUP_WAIT_MAX \+ 120' {
+    $td = New-Initial; (App $td).healthCheck.startPeriod = 120; $td }
+  Case 'startPeriod too short for a longer startup wait' $Initial 'startPeriod must be at least BACKUP_QUIESCE_STARTUP_WAIT_MAX \+ 120' {
+    $td = New-Initial; Set-Env (App $td) 'BACKUP_QUIESCE_STARTUP_WAIT_MAX' '120s'; $td }
+  Case 'stopTimeout missing in the template' @() 'stopTimeout must be at least SHUTDOWN_TIMEOUT \+ 60' {
+    $td = Read-Template; $null = (App $td).PSObject.Properties.Remove('stopTimeout'); $td }
+  Case 'stopTimeout too short' $Initial 'stopTimeout must be at least SHUTDOWN_TIMEOUT \+ 60' {
+    $td = New-Initial; (App $td).stopTimeout = 60; $td }
+  Case 'stopTimeout too short for a longer SHUTDOWN_TIMEOUT' $Initial 'stopTimeout must be at least SHUTDOWN_TIMEOUT \+ 60' {
+    $td = New-Initial; Set-Env (App $td) 'SHUTDOWN_TIMEOUT' '61s'; $td }
+  Case 'SHUTDOWN_TIMEOUT from the secret store' $Initial 'settings checked by value must be in environment' {
+    $td = New-Initial; Remove-Env (App $td) 'SHUTDOWN_TIMEOUT'; Add-Secret (App $td) 'SHUTDOWN_TIMEOUT'; $td }
+  Case 'SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE replaces SHUTDOWN_TIMEOUT' $Initial 'guarded property trees must use the short names' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE' '100s'; $td }
+
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_PROFILES_ACTIVE' 'prod,dev'; $td }

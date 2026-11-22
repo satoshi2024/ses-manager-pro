@@ -80,6 +80,9 @@ public class SecurityConfig {
             oidcTokenResponseClientProvider;
     private final MetricsScraperProperties metricsScraperProperties;
     private final PasswordEncoder passwordEncoder;
+    /** backup の書込み静止の gate と metric（RB-QUIESCE U-8）。無い context（slice の試験等）では従来どおり直ちに書く。 */
+    private final ObjectProvider<com.ses.backup.quiesce.BackupWriteGate> backupWriteGateProvider;
+    private final ObjectProvider<com.ses.backup.quiesce.BackupQuiesceMetrics> backupQuiesceMetricsProvider;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -401,11 +404,15 @@ public class SecurityConfig {
         }
 
         // ログアウトの設定。OIDC endpointが利用可能な場合だけRP initiated logoutへ遷移する。
+        // backup の書込み静止の間は、session の行の失効と LOGOUT の監査を解除の後へ回す（U-8。HTTP session は直ちに無効にする）。
+        com.ses.backup.quiesce.BackupQuiesceLogoutDeferral logoutDeferral =
+                new com.ses.backup.quiesce.BackupQuiesceLogoutDeferral(persistentSessionService, auditLogService,
+                        backupWriteGateProvider::getIfAvailable, backupQuiesceMetricsProvider::getIfAvailable);
         http.logout(logout -> {
             // POST 限定: GET /logout による外部サイトからの強制ログアウト（A7-27）を防ぐ。
             logout.logoutRequestMatcher(new AntPathRequestMatcher("/logout", "POST"))
                 .addLogoutHandler((request, response, authentication) ->
-                    persistentSessionService.revokeCurrent(request, authentication, "LOGOUT"))
+                    logoutDeferral.revokeOnLogout(request, authentication))
                 .invalidateHttpSession(true)
                 .deleteCookies("JSESSIONID")
                 .permitAll();
@@ -418,8 +425,7 @@ public class SecurityConfig {
             }
             final OidcClientInitiatedLogoutSuccessHandler selectedOidcHandler = oidcHandler;
             logout.logoutSuccessHandler((request, response, authentication) -> {
-                String username = authentication == null ? null : authentication.getName();
-                auditLogService.record(username, "AUTH", "/logout", 302, "LOGOUT", true);
+                logoutDeferral.recordLogoutAudit(authentication);
                 if (selectedOidcHandler != null) {
                     selectedOidcHandler.onLogoutSuccess(request, response, authentication);
                 } else {

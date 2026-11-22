@@ -28,6 +28,8 @@
   - NF01 二者確認の NF07 catalog 登録（RB-NF01）: `V198__nf01_dual_confirmation_privacy_catalog.sql`（`m_pii_data_element` に、B0 の7表と自由記述2列（`business_comment`・`decision_comment`）の9件を `sys_user` に存在する tenant ごとに入れる。V196 と同じく構造行だけで、provider は未登録（NULL）、`subject_attribution`・owner・データ分類・inventory 状態は UNKNOWN、保持期間は持たない。既にある行は入れない）。新規導入では tenant `default` の文書以外の catalog 行は36件（V196 の27件＋9件）になる。値の正本は `privacy-retention-dsar/pii-inventory.md` の DB-141〜DB-147 で、保存期間等の値は D-02 の署名で確定する（署名は未取得。§1.7）。DSAR の検索ではこの9件が「要手動確認」（`PROVIDER_UNREGISTERED`）として出る。分類が UNKNOWN のため、NF07 hold 画面の「未分類の data element」（`unclassifiedElements`）と coverage report の未分類件数（`PrivacyCoverageReport` の `unknownAttributionCount`）にもこの9件が加わり、D-02 で分類を決めるまで0にならない（回帰ではない。B0 は hold の gate に接続する破壊的経路を持たないため、他の経路の判定は変わらない）。
   - NF-06 取込 stage 照合の索引（RB-NF05、FINAL review b-14）: `V200__nf06_document_version_storage_key_index.sql`（`t_document_version.storage_key` に非一意の索引 `idx_dv_storage_key` を足す。V1・V67 は変えない。行は変えない）。照合 batch（`ImportStageReconcileScheduler`、NF06 の OFF でも動く）は台帳1件ごとに同じ storage key の版を数えるため、従来は全件走査だった。V199 は欠番（RB で使わなかった予約番号）。
   - NF07 F1 の状態の CHECK（RB-NF07-HOLD）: `V201__nf07_privacy_status_check_constraints.sql`（`t_privacy_request` の `status`（`PrivacyCaseState` の全値）・`channel`・`delivery_method`（NULL 可）と `t_legal_hold.hold_kind`（D-05 で種類が決まるまで `UNKNOWN` だけ）に、コードの enum と同じ値の集合の CHECK を足す。行は作らない）。表は新規導入で空のため適用は失敗しない。V199 は欠番。
+  - backup の書込み静止の信号表（RB-QUIESCE BWQ-001）: `V202__backup_write_quiesce_signal.sql`（静止要求 `sys_backup_quiesce_request`・app の instance `sys_backup_quiesce_instance`・応答 `sys_backup_quiesce_ack` の3表。行・trigger・routine は作らない。時刻の列は全て UTC の `DATETIME(6)` で、DEFAULT に `CURRENT_TIMESTAMP` を使わない。同時に有効な要求を1件に限る生成列 `active_slot`（STORED）と一意索引 `uk_bq_request_active` を持つ。tenant 列・個人データは持たない）。表は新規導入で空のため適用は失敗しない。backup account の表単位の権限（要求の表への `INSERT`・`UPDATE`）は V202 の適用の後（§3.4）・初回 backup（§2 の5）の前に付ける（§1.2・§3.4）。設計は `.kiro/specs/backup-write-quiesce/`。
+  - backup の書込み静止（RB-QUIESCE BWQ-002〜012・015。migration は上の V202 だけ）: app は `com.ses.backup.quiesce` の gate（`BackupWriteGate`）と静止応答（`BackupQuiesceResponder`。専用の thread と、業務の pool と別の制御用・heartbeat 用の接続 pool）で信号表の静止要求を読み、更新の要求を 503 にし（`BackupWriteGateFilter`。参照は続く）、scheduler・async を待たせ、処理中の書込みを排水してから応答（ack）し、解除で再開する。静止中の業務の接続は読取り専用になり（`BackupQuiesceAwareDataSource`。最後の防線）、uploads の変更は storage 層でも拒否する。prod の起動時検査は `BackupQuiesceProductionValidator`（停止口の ticket と `readOnlyPropagatesToServer`）。設定は §1.0 の31〜41。Flyway job の callback `ProductionBackupDdlFreezeFlywayCallback` は backup と同じ DDL 凍結の lock を取る（§3.3）。backup tool の provider は `quiesce-db`（ONLINE。定期の checkpoint・full。`.env.backup` の `QUIESCE_PROVIDER=quiesce-db`。§1.7）と `quiesce-app-stopped`（app の停止を DB の信号表で確かめる。`--app-stopped` の明示でだけ選ぶ。§2 の5）。配備の手順は §2 の0（backup の定期起動の停止）・§2 の4・5・§3.4（表単位の GRANT）・§4.7（instance の確認・backup の再開・障害の切分け）、監視は `ops/backup/runbooks/backup-health-monitoring.md`、署名と本番の前の実測は §1.7 の BQ-1〜BQ-5。試験: `BackupWriteGateTest`・`BackupQuiesceResponderTest`・`BackupWriteGateMockMvcTest`・`BackupQuiesceProductionContextStartTest`・`UploadsMutationInventoryTest`（fast）、`BackupQuiesceResponderMySqlTest`・`BackupWriteQuiesceMySqlTest`・`BackupQuiesceProviderContractMySqlTest`・`ProductionBackupDdlFreezeFlywayCallbackMySqlTest`（mysql shard 3）、`ops/backup/tests/quiesce-db-test.sh` ほかの shell の試験、CI の backup integration（DB の protocol を話す shell の responder）。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -35,9 +37,9 @@
 | 順 | 作業 | 実施者 | 完了条件 |
 |---|---|---|---|
 | 1 | 前提条件の確認（§1） | DBA / SRE / Security | §1の全項目が確認済み |
-| 2 | 全停止とdrain（§2） | SRE | アプリ接続0件・scheduler停止 |
-| 3 | 専用Flyway jobの実行と確認（§3） | SRE（DBA立会い） | §3.4の確認SQLが全て期待値 |
-| 4 | アプリ起動（§4。初回はbootstrap mode） | SRE | schema guardのINFO log、bootstrapのWARN log、readiness OK |
+| 2 | 全停止とdrain（§2） | SRE | backup の定期起動の停止・アプリ接続0件・scheduler停止・`--app-stopped` の full が VALID（初回の full は §3.4 の後） |
+| 3 | 専用Flyway jobの実行と確認（§3） | SRE（DBA立会い） | §3.4の確認SQLが全て期待値、backup account の表単位の GRANT |
+| 4 | アプリ起動（§4。初回はbootstrap mode） | SRE | schema guardのINFO log、bootstrapのWARN log、readiness OK、backup の再開と最初の ONLINE の checkpoint が VALID（§4.7） |
 | 5 | 初回bootstrap（§5） | 初期管理者担当 / IdP管理者 / Security | §5.5の完全な起動検査が通り、完了markerが書かれる |
 | 6 | 失敗時・ロールバック（§6） | SRE / DBA | — |
 
@@ -45,7 +47,7 @@
 
 ### 1.0 prod 必須設定（無い・形式が違うとアプリが起動しない。一覧の正本）
 
-`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。
+`SPRING_PROFILES_ACTIVE=prod` で起動するとき、次の1〜26の26項目のどれかが無い・形式が違うと、アプリは起動を中止する。機能スイッチの ON/OFF には関係しない。freee連携を使う場合（`FREEE_ENABLED=true`）は、さらに27〜30の4項目が要る。backup の書込み静止の31〜41の11項目は既定値を持つため無くても起動するが、値・組合せ・範囲が違うと起動しない（雛形は31を `true` で明示する）。
 
 - 一覧はコードを走査して作った（FINAL-FIX、2026-11-17）。走査した出処は3つ: prod profile の validator の必須項目、`@Value` のうち既定値が空・開発用で prod では拒否されるもの、`application-prod.yml` の `${...}` のうち既定値が空で prod では拒否されるもの。
 - 既定値を全く持たない `@Value` と、既定値の無い `application-prod.yml` の `${...}` は、どちらも0件だった。どの項目も空か開発用の既定値を持つため、Spring の解決では止まらない。止めるのは validator である。
@@ -56,7 +58,7 @@
 
 | # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
 |---|---|---|---|---|---|
-| 1 | `DB_URL`（`spring.datasource.url`） | アプリDBのJDBC URL | `jdbc:mysql://<host>:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo`。`autoReconnect=true` / `autoReconnectForPools=true`（`yes` も。百分率符号化した値も）を付けない。host は1つだけ書く: multi-host（`h1,h2`・`[h1,h2]`・`address=(...)`）、`jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`・`jdbc:mysqlx://` は使わない（どれも起動を中止する。RB-NF05）。query に `useConfigs`・`propertiesTransform`・切替え系の key（`failOverReadOnly`・`maxReconnects` 等）も書かない（driver が展開した後の有効な属性も検査し、`(effectiveAutoReconnect)` / `(connectionTopology)` で起動を中止する。RB-HYG）。staging で本番と同じ形式の `DB_URL` で起動し、guard が通ることを一度確かめる。未設定だと開発用の localhost へ接続し、起動時 schema guard（§4）で止まる | 〇（接続先） | `application.yml:122`、`ImportJdbcReconnectGuard`（`violations`・`multiHost`） |
+| 1 | `DB_URL`（`spring.datasource.url`） | アプリDBのJDBC URL | `jdbc:mysql://<host>:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo`。`autoReconnect=true` / `autoReconnectForPools=true`（`yes` も。百分率符号化した値も）を付けない。host は1つだけ書く: multi-host（`h1,h2`・`[h1,h2]`・`address=(...)`）、`jdbc:mysql:loadbalance://`・`jdbc:mysql:replication://`・`jdbc:mysql+srv://`・`jdbc:mysqlx://` は使わない（どれも起動を中止する。RB-NF05）。query に `useConfigs`・`propertiesTransform`・切替え系の key（`failOverReadOnly`・`maxReconnects` 等）も書かない（driver が展開した後の有効な属性も検査し、`(effectiveAutoReconnect)` / `(connectionTopology)` で起動を中止する。RB-HYG）。`readOnlyPropagatesToServer=false`（`no` 等の有効でない値も）を query・`spring.datasource.hikari.data-source-properties` のどちらにも付けない: backup の書込み静止の最後の防線（静止中の業務の接続の読取り専用）が DB に届かなくなるため、driver の展開後の属性まで見て起動を中止する（`BackupQuiesceProductionValidator`。RB-QUIESCE）。staging で本番と同じ形式の `DB_URL` で起動し、guard が通ることを一度確かめる。未設定だと開発用の localhost へ接続し、起動時 schema guard（§4）で止まる | 〇（接続先） | `application.yml:122`、`ImportJdbcReconnectGuard`（`violations`・`multiHost`） |
 | 2 | `DB_USERNAME`（`spring.datasource.username`） | アプリaccount（§1.2。DDL権限なし） | 既定は開発用の値。必ず上書きする | 〇 | `application.yml:123` |
 | 3 | `DB_PASSWORD`（`spring.datasource.password`） | 同上 | 同上 | 〇 | `application.yml:124` |
 | 4 | `TRUSTED_PROXIES`（`app.security.trusted-proxies`） | 転送ヘッダーを信頼する接続元（ALBのsubnet） | カンマ区切りのCIDR。IPv4は private（10/8・172.16/12・192.168/16）か 100.64/10 で /16 以下、IPv6は /48 以下、host部は0。`127.0.0.1` を入れない（SRE-3） | × | `application-prod.yml:76`、`ForwardedHeaderProductionValidator.java:67-105` |
@@ -65,13 +67,13 @@
 
 | # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
 |---|---|---|---|---|---|
-| 5 | `OIDC_TENANT_ID`（`app.security.oidc.tenant-id`） | OIDC login・外部identity・MFA・sessionの照合tenant | `default`（SRE-1） | × | `application.yml:269`、validator `:120-122` |
-| 6〜10 | `OIDC_ISSUER_URI`・`OIDC_AUTHORIZATION_URI`・`OIDC_TOKEN_URI`・`OIDC_JWK_SET_URI`・`OIDC_USER_INFO_URI` | IdPの固定metadata（5項目） | どれもHTTPS、hostがあり、userinfo（`user:pass@`）を含まない | × | `application-prod.yml:83-87`、validator `:355-385` |
-| 11 | `OIDC_CLIENT_ID` | OIDC client | 空でない | × | `application-prod.yml:88`、validator `:358-366` |
-| 12 | `OIDC_CLIENT_SECRET` | 同上 | 空でない | 〇 | `application-prod.yml:89`、validator `:358-366` |
-| 13 | `MFA_ENCRYPTION_KEY` | MFA secretの暗号鍵（`MFA_CURRENT_KEY_VERSION` の既定 `v1` の鍵） | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:97`、validator `:150,284-298,400-404` |
-| 14 | `SESSION_HASH_KEY` | 永続sessionのhash鍵 | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:101`、validator `:151,400-404` |
-| 15 | `BREAK_GLASS_USERNAMES` | break-glass管理者のusername | bootstrap中（§4.2）は**空**でなければ起動しない。bootstrap終了後（§5.5）は**ちょうど2件**（カンマ区切り）。各名は ASCII の `[A-Za-z0-9._-]+` だけで、有効な管理者の `sys_user.username` と大文字小文字まで完全一致し、MFA登録済みであること | × | `application-prod.yml:82`、validator `:312-352` |
+| 5 | `OIDC_TENANT_ID`（`app.security.oidc.tenant-id`） | OIDC login・外部identity・MFA・sessionの照合tenant | `default`（SRE-1） | × | `application.yml:287`、validator `:125-127` |
+| 6〜10 | `OIDC_ISSUER_URI`・`OIDC_AUTHORIZATION_URI`・`OIDC_TOKEN_URI`・`OIDC_JWK_SET_URI`・`OIDC_USER_INFO_URI` | IdPの固定metadata（5項目） | どれもHTTPS、hostがあり、userinfo（`user:pass@`）を含まない | × | `application-prod.yml:83-87`、validator `:360-390` |
+| 11 | `OIDC_CLIENT_ID` | OIDC client | 空でない | × | `application-prod.yml:88`、validator `:363-371` |
+| 12 | `OIDC_CLIENT_SECRET` | 同上 | 空でない | 〇 | `application-prod.yml:89`、validator `:363-371` |
+| 13 | `MFA_ENCRYPTION_KEY` | MFA secretの暗号鍵（`MFA_CURRENT_KEY_VERSION` の既定 `v1` の鍵） | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:97`、validator `:155,289-303,405-409` |
+| 14 | `SESSION_HASH_KEY` | 永続sessionのhash鍵 | 32文字以上で、開発用の既定値でない | 〇 | `application-prod.yml:101`、validator `:156,405-409` |
+| 15 | `BREAK_GLASS_USERNAMES` | break-glass管理者のusername | bootstrap中（§4.2）は**空**でなければ起動しない。bootstrap終了後（§5.5）は**ちょうど2件**（カンマ区切り）。各名は ASCII の `[A-Za-z0-9._-]+` だけで、有効な管理者の `sys_user.username` と大文字小文字まで完全一致し、MFA登録済みであること | × | `application-prod.yml:82`、validator `:317-357` |
 
 **アプリの secret**
 
@@ -89,9 +91,9 @@
 |---|---|---|---|---|---|
 | 19 | `CERTIFICATION_NUMBER_CRYPTO_CURRENT_KEY_VERSION`（`certification.number-crypto.current-key-version`） | 資格番号の暗号鍵の現行version。NF03の子スイッチがOFFでも必要（`feature-switches.md` 4.1） | 上記のversion | × | ymlに定義なし。`CertificationNumberKeyProviderImpl.java:26,45,54-58` |
 | 20 | `CERTIFICATION_NUMBER_CRYPTO_KEYS_<VERSION>`（`certification.number-crypto.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | `CertificationNumberKeyProviderImpl.java:89,111-126` |
-| 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:529`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
-| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。この名前で渡す（以前 `application.yml` のcommentにあった `COMPLIANCE_CREDENTIAL_KEY_V1` は配線されておらず、読まれなかった。FINAL-FIX でcommentを直した） | 〇 | `application.yml:530-532`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
-| 23 | `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS`（`compliance.gate.fingerprint-key-tenants`） | reviewer fingerprintの鍵を持つtenantの一覧 | `default`（カンマ区切り） | × | `application.yml:542`、`ComplianceReviewerFingerprintKeyProviderImpl.java:167-199` |
+| 21 | `COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION`（`compliance.gate.credential-crypto.current-key-version`） | G2外部Review資格credentialの暗号鍵の現行version | 上記のversion | × | `application.yml:547`、`ComplianceGateCredentialKeyProviderImpl.java:28,49-68` |
+| 22 | `COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_<VERSION>`（`compliance.gate.credential-crypto.keys.<version>`） | 同 鍵 | 上記の鍵。この名前で渡す（以前 `application.yml` のcommentにあった `COMPLIANCE_CREDENTIAL_KEY_V1` は配線されておらず、読まれなかった。FINAL-FIX でcommentを直した） | 〇 | `application.yml:548-550`、`ComplianceGateCredentialKeyProviderImpl.java:58-63,120-136` |
+| 23 | `COMPLIANCE_GATE_FINGERPRINT_KEY_TENANTS`（`compliance.gate.fingerprint-key-tenants`） | reviewer fingerprintの鍵を持つtenantの一覧 | `default`（カンマ区切り） | × | `application.yml:560`、`ComplianceReviewerFingerprintKeyProviderImpl.java:167-199` |
 | 24 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION`（`compliance.gate.fingerprint-keys.default.current-key-version`） | reviewer fingerprintのHMAC鍵の現行version（tenant `default`） | 上記のversion | × | `ComplianceReviewerFingerprintKeyProviderImpl.java:65-75,141-160` |
 | 25 | `COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_<VERSION>`（`compliance.gate.fingerprint-keys.default.keys.<version>`） | 同 鍵 | 上記の鍵 | 〇 | 同上 |
 | 26 | `ACCOUNTING_TENANT_IDS`（`app.accounting.tenants.ids`） | 定期処理の対象tenant（freeeの有無に関係しない） | 1件以上（SRE-1 により `default` の1件）。test以外の全profileで検査する | × | `application.yml:230`、`AccountingTenantInventoryStartupValidator.java:7-13` |
@@ -117,10 +119,35 @@
 
 | # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
 |---|---|---|---|---|---|
-| 27 | `FREEE_CLIENT_ID`（`freee.client-id`） | freee会計・給与のOAuth client | 空でなく `dummy-client-id` でない | × | `application.yml:514`、`FreeeAccountingProvider.java:79-107`、`FreeeIntegrationServiceImpl.java:199-221` |
-| 28 | `FREEE_CLIENT_SECRET`（`freee.client-secret`） | 同上 | 空でなく `dummy-client-secret` でない | 〇 | `application.yml:515`、同上 |
+| 27 | `FREEE_CLIENT_ID`（`freee.client-id`） | freee会計・給与のOAuth client | 空でなく `dummy-client-id` でない | × | `application.yml:532`、`FreeeAccountingProvider.java:79-107`、`FreeeIntegrationServiceImpl.java:199-221` |
+| 28 | `FREEE_CLIENT_SECRET`（`freee.client-secret`） | 同上 | 空でなく `dummy-client-secret` でない | 〇 | `application.yml:533`、同上 |
 | 29 | `FREEE_REDIRECT_URI`（`freee.redirect-uri`） | OAuthのredirect URI | HTTPS | × | `application-prod.yml:163`、`FreeeIntegrationServiceImpl.java:199-221` |
-| 30 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数 | 〇 | `application.yml:520`、`FreeeIntegrationServiceImpl.java:199-221`、`IntegrationConnectionServiceImpl.java:46` |
+| 30 | `FREEE_TOKEN_ENCRYPTION_KEY`（`freee.token-encryption-key`） | freee tokenの暗号鍵。会計接続も、専用鍵 `freee.token.encryption-key` を設定しなければ同じ鍵を使う | `change-me` で始まらない十分な長さの乱数 | 〇 | `application.yml:538`、`FreeeIntegrationServiceImpl.java:199-221`、`IntegrationConnectionServiceImpl.java:46` |
+
+**backup の書込み静止**（RB-QUIESCE。設計は `.kiro/specs/backup-write-quiesce/design.md` §12。31〜41 は既定値を持ち、無くても起動する）
+
+- 範囲と相互の関係は全 profile で bind の時に `BackupQuiesceProperties` が検査し、外れると起動を中止する。停止口（31・32）と最後の防線の JDBC 設定（1 の `readOnlyPropagatesToServer`）は prod の起動時検査 `BackupQuiesceProductionValidator` が port を開く前（instance の登録の前）に検査する。prod の判定は有効な profile で行う。
+- どれも secret ではない（×）。secrets・正規名（`APP_BACKUP_QUIESCE_*`・`APP_BACKUPQUIESCE_*`）・`SPRING_APPLICATION_JSON` の `app.backup-quiesce` で渡すと、task definition の照合（`validate-task-definition.ps1`）が FAIL にする。時間の値は照合のため `<整数><単位>`（単位は `ms`・`s`・`m`・`h`・`d`）で書く（アプリは ISO-8601 と単位の無い数（ミリ秒）も読むが、照合は拒否する）。
+- 雛形（`infra/ecs/task-definition.prod.json`）は `BACKUP_QUIESCE_ENABLED=true` を明示し、app の container に `stopTimeout: 120` を置く。照合は雛形・実値のどちらの mode でも、`healthCheck.startPeriod` が 40 の値＋120 秒以上（既定の値で 180）、`stopTimeout` が `SHUTDOWN_TIMEOUT`＋60 秒以上（既定 90。graceful 停止・`taskExecutor` の待ち 30 秒・STOPPED の前の排水の待ち 10 秒の余裕。Fargate の上限は 120 のため `SHUTDOWN_TIMEOUT` は 60 秒以下にする）であることを確かめる。`SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` 等の正規名で停止の時間を変えることも FAIL にする。**`SHUTDOWN_TIMEOUT` も照合の対象**で、app の container の `environment` に（secrets ではなく）、31〜41 と同じ `<整数><単位>`（例 `30s`。雛形の値）で置く。`PT30S`（ISO-8601）・`30S`（大文字の単位）・単位の無い数は、アプリは起動しても照合が FAIL にする（`stopTimeout` の計算に使うため。2c review P3-6）。
+
+| # | 環境変数（property） | 用途 | 形式・条件 | secret | 出処 |
+|---|---|---|---|---|---|
+| 31 | `BACKUP_QUIESCE_ENABLED`（`app.backup-quiesce.enabled`） | backup の書込み静止の静止応答 | 本番は `true`（既定 `true`。雛形も `true`）。`false` は停止口で、prod では 32 と組でだけ起動する（下の「停止口の使い方」）。値は `true` / `false` で書く | × | `application.yml:250`、`BackupQuiesceProductionValidator` |
+| 32 | `BACKUP_QUIESCE_DISABLED_TICKET`（`app.backup-quiesce.disabled-ticket`） | 停止口を使う承認済みの変更 ticket | `^[A-Z][A-Z0-9]+-[0-9]+$`（例 `CHG-1234`）。31 が `false` のときだけ設定する（`true` に戻したら消す。照合は `true` と組の ticket を FAIL にする）。ticket が無い・形式が違うと prod は起動しない | × | `application.yml:251`、`BackupQuiesceProductionValidator` |
+| 33 | `BACKUP_QUIESCE_POLL_INTERVAL` | 静止要求の読取り間隔 | 既定 `1s`。200ms 以上で 34 より短い | × | `application.yml:252`、`BackupQuiesceProperties` |
+| 34 | `BACKUP_QUIESCE_HEARTBEAT_INTERVAL` | heartbeat の間隔 | 既定 `5s`。35 より短い | × | `application.yml:253`、同上 |
+| 35 | `BACKUP_QUIESCE_FENCE_AFTER` | heartbeat を書けない時に自分で更新を止める（self-fence）までの時間 | 既定 `20s`。30 秒以下で、35 − 34 が 13 秒（制御用の接続の取得 3 秒＋socket 10 秒）より長い | × | `application.yml:254`、同上 |
+| 36 | `BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT` | checkpoint の排水の上限（U-3） | 既定 `30s`。正の値で 38 より短い | × | `application.yml:255`、同上 |
+| 37 | `BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL` | full の排水の上限（U-3） | 既定 `600s`。正の値で 39 より短い | × | `application.yml:256`、同上 |
+| 38 | `BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT` | checkpoint の最大保持時間（U-1） | 既定 `300s`。30 秒〜900 秒 | × | `application.yml:257`、同上 |
+| 39 | `BACKUP_QUIESCE_MAX_HOLD_FULL` | full の最大保持時間（U-1） | 既定 `3600s`。60 秒〜4 時間 | × | `application.yml:258`、同上 |
+| 40 | `BACKUP_QUIESCE_STARTUP_WAIT_MAX` | 静止の最中に起動した時に解除を待つ上限 | 既定 `60s`。10 秒〜120 秒。ECS の `healthCheck.startPeriod` はこの値＋120 秒以上にする | × | `application.yml:259`、同上 |
+| 41 | `BACKUP_QUIESCE_RETENTION` | 信号表の解除済みの行の保存期間（U-12） | 既定 `30d`。1 日〜365 日 | × | `application.yml:260`、同上 |
+
+**停止口の使い方**（U-7。31 を `false` にする緊急の手段）
+- 使う場面: 静止応答の不具合で業務に支障が出て、修正の release まで静止応答を外す必要がある時だけ。承認済みの変更 ticket を取り、task definition に `BACKUP_QUIESCE_ENABLED=false` と `BACKUP_QUIESCE_DISABLED_TICKET=<ticket>` を入れ、`validate-task-definition.ps1 -Mode Actual` で組を確かめてから配備し直す。
+- 停止口の間: アプリは instance の登録と heartbeat を続け（`sys_backup_quiesce_instance.gate_state='DISABLED'`）、gate は閉じず、静止の要求には `REFUSED`（`DISABLED`）を返す。backup の provider は ONLINE・停止確認（`--app-stopped`）のどちらも、停止口の行があれば失敗する。**そのため停止口の間は checkpoint と full が全て失敗し、RPO の alert になる**。起動の時に ERROR `errorCode=BACKUP_QUIESCE_DISABLED`（ticket を含む）を出し、gauge `ses_backup_quiesce_disabled` が 1 になる（どちらも critical の alert の条件）。ticket と期間を配備記録に残す。
+- 戻す手順: `BACKUP_QUIESCE_ENABLED=true` にして `BACKUP_QUIESCE_DISABLED_TICKET` を消し、配備し直す。停止口の task が通常に停止すれば instance の行は `STOPPED` になる。異常に止まった（SIGKILL・task の喪失等で `STOPPED` にならない）停止口の行が残ると、heartbeat の古さによらず全ての backup が失敗し続ける。この場合は DBA が ECS で task の停止と processlist の0件を確かめてから、その行だけを手の SQL で `STOPPED` にする（SQL と手順は §4.7 の「停止口の行の片付け」。§1.8 の RR-10 の例外の一覧にある。設計は `backup-write-quiesce/design.md` §9.4）。その後、次の checkpoint が成功することを確かめる。
 
 **検査の効き方と試験の範囲（注意）**
 - 18 の検査は、prod かどうかを property `spring.profiles.active` の値で判定する。そのため `@ActiveProfiles("prod")` で起動する試験ではこの検査が走らず、CI はその未設定を検出しない。配備では task definition の `SPRING_PROFILES_ACTIVE=prod` で効く。
@@ -131,12 +158,15 @@
 
 **設定してはいけない値**（設定すると起動しない）:
 - `SPRING_FLYWAY_ENABLED=true`（§4）。
-- `LOCAL_LOGIN_ENABLED=true`、`OIDC_ENABLED=false`、`BREAK_GLASS_LOGIN_ENABLED=false`、`OIDC_REQUIRE_MFA_ASSURANCE=false`、`MFA_ENABLED=false`、`MFA_REQUIRED_FOR_BREAK_GLASS=false`、`ALLOW_UNTRACKED_SESSIONS=true`（validator `:114-148`）。
+- `LOCAL_LOGIN_ENABLED=true`、`OIDC_ENABLED=false`、`BREAK_GLASS_LOGIN_ENABLED=false`、`OIDC_REQUIRE_MFA_ASSURANCE=false`、`MFA_ENABLED=false`、`MFA_REQUIRED_FOR_BREAK_GLASS=false`、`ALLOW_UNTRACKED_SESSIONS=true`（validator `:119-153`）。
 - `server.forward-headers-strategy` を `framework` 以外にする（`ForwardedHeaderProductionValidator.java:77`）。
 - `ai.outbound-probe.enabled=true`（`AiOutboundProbeProdGuardConfig.java:18-22`）。
 - `AI_EXTERNAL_SEND_ENABLED=true`（B2c-2 の完了まで常に拒否。冒頭の NF08 B2c-1 の項）。
 - `freee.*-base-url` を公式host以外にする（`FreeeIntegrationServiceImpl.java:192-195`）。
 - `CLOUDSIGN_ENABLED=true` のまま `CLOUDSIGN_CLIENT_ID` を設定しない、または `cloudsign.base-url` を公式のallow-list外にする（`CloudSignProperties.java:86-112`）。
+- `BACKUP_QUIESCE_DISABLED_TICKET`（形式 `^[A-Z][A-Z0-9]+-[0-9]+$`）無しの `BACKUP_QUIESCE_ENABLED=false`（31・32。`BackupQuiesceProductionValidator`）。
+- `DB_URL` の query または `spring.datasource.hikari.data-source-properties` の `readOnlyPropagatesToServer=false`（driver の展開後の属性を含む。1。`BackupQuiesceProductionValidator`）。
+- `BACKUP_QUIESCE_*` を範囲の外・相互の関係に反する値にする（33〜41。`BackupQuiesceProperties`）。
 
 **ONにした時だけ必須になる設定**（OFFのままなら不要。手順は各正本）:
 - bootstrap: `SECURITY_BOOTSTRAP_EXPIRES_AT`（§4.2）。
@@ -242,6 +272,11 @@ migrator（job専用）とアプリ用を分ける。
     - 理由: NF06 の取込 stage 照合（`ImportStageReconciler`）は、結果不明の COMMIT を送った接続がまだ文を実行しているかを `information_schema.PROCESSLIST` で確かめる。PROCESS 権限の無い account には**同じ user 名の thread だけ**が見えるため、別の user で張った接続は見えず、照合は黙って時間だけの判定へ戻る（`feature-switches.md` 4.8.2 #10、a1a §6）。
     - PROCESS 権限は渡さない（同じ user なら不要。`ImportCsvIngestionRealMySqlTest` が業務権限だけの専用 user で確かめる）。`SHOW GLOBAL STATUS`（server の起動時刻）と `@@server_uuid` も権限なしで読める。
     - DBA が配備前に確認する（§1.7 NF06 行。未取得）。
+  - **backup の書込み静止の制御用・heartbeat 用の接続も同じアプリ account を使う**（RB-QUIESCE。backup-write-quiesce design.md §4・§5.2）。静止応答は業務の pool と別の小さな pool（`ses-backup-quiesce-control` 最大2、`ses-backup-quiesce-heartbeat` 最大1。業務の pool とは別に、task ごとに最大3本の接続が加わる。`max_connections` の見積りに足す）を持つが、user は `DB_USERNAME` と同じで、別の user を作らない（別にすると SRE-5 の (a)・上の processlist の確認・NF06 の照合・静止応答の接続元の観測が崩れる）。
+  - **アプリ account の host の型は1つにする**（RB-QUIESCE）。PROCESS の無い account に見えるのは同じ account（`user@host` の組）の thread だけで、同じ user 名でも host の型が違う別の account の thread は見えない。静止応答は同じ account の接続元を観測して応答に書き、backup の provider は観測した接続元が応答した instance の接続元だけであることを確かめる（同 design §5.4）。DBA が配備前に確かめる（§1.7 の 004a）。
+    ```sql
+    SELECT user, host FROM mysql.user WHERE user = '<アプリaccount>';   -- 1行
+    ```
   - **password の rotation**（決定済み（2026-11-18）。§1.6 の9）: 手動の single-user rotation と MySQL の二重 password で行う。保守の時間帯に、release の節目に合わせて行う。DBA が general log を無効にした接続で実行し、password は記録しない。
     ```sql
     -- 1. 新しい password を足す（古い password も有効なまま残る）
@@ -253,8 +288,11 @@ migrator（job専用）とアプリ用を分ける。
     ```
 - **backup 用の account**（正本は `ops/backup/README.md`「権限分離」の2つの表。権限の一覧はそこから写さず、表のとおりに与える）:
   - **source 側の account**（「source 側の account の権限」）: 対象 DB の `SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`、global の `SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`・`REPLICATION SLAVE`。**`PROCESS` は与えない**（mysqldump に `--no-tablespaces` を付けるため要らない。2026-11-18 利用者決定）。dump role と binlog role の分離は上線後で、現状は1つの account が表の全権限を持つ。
+    - **書込み静止の要求の表への表単位の `INSERT`・`UPDATE`**（RB-QUIESCE。U-11 決定済み（2026-11-21）。README の同じ表の行）: `GRANT INSERT, UPDATE ON ses_manager_db.sys_backup_quiesce_request TO '<backup account>'@'<host>';`。provider（`quiesce-db`・`quiesce-app-stopped`）が静止要求の登録・lease の延長・verify の要求・解除に使う。信号表の他の2表（`sys_backup_quiesce_instance`・`sys_backup_quiesce_ack`）は schema 単位の `SELECT` で読む。他の表への書込み・`DELETE`・`PROCESS` は足さない（`GET_LOCK` は権限が要らない）。専用の account は作らない。
+    - **付ける時期は §3.4**（V202 が表を作った後・初回 backup（§2 の5）の前）。存在しない表への表単位の GRANT は通らない場合があるため（MySQL の文書による。実測は**未取得**。backup-write-quiesce design.md §19）、配備の前の DBA-1 の確認には含めない。restore で新しい source にした後も、backup の再開の前に付け直す（`mysql.tables_priv` は dump に入らない。`ops/backup/runbooks/restore-cutover.md` §4.6）。
+    - backup account が業務 DB の1表の書き手になることは baseline の PROD-002 に記録し、Security と DBA が署名する（§1.7 の BQ-1。**未取得**）。
   - **restore target role**（「restore target role の権限」。recovery target 側）: 対象 DB の `CREATE`・`DROP`・`ALTER`・`INDEX`・`REFERENCES`・`SELECT`・`INSERT`・`UPDATE`・`DELETE`・`LOCK TABLES`・`CREATE VIEW`・`SHOW VIEW`・`TRIGGER`・`CREATE ROUTINE`・`ALTER ROUTINE`・`EXECUTE`・`EVENT`、`ses_recovery_control.*` の `ALL`、global の `RELOAD`・`SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER`・`SHOW_ROUTINE`・`SET_ANY_DEFINER`（DEFINER の account が復元先に無いときは `ALLOW_NONEXISTENT_DEFINER` も）。recovery target の前提は DBA-1・DBA-4。
-  - 確認は上と同じく `SHOW GRANTS FOR '<backup account>'@'<host>';` と `mysql.role_edges`（DBA-1 と同じ日に DBA が確かめる）。preflight は権限を検査しないため、不足は最初の full・checkpoint・archive の失敗で分かる（本番相当の権限での実測は**未取得**）。
+  - 確認は上と同じく `SHOW GRANTS FOR '<backup account>'@'<host>';` と `mysql.role_edges`（DBA-1 と同じ日に DBA が確かめる。要求の表への表単位の権限は §3.4 で付けた後に確かめる）。preflight が検査する権限は要求の表への表単位の `INSERT`・`UPDATE` だけで（`QUIESCE_PROVIDER` が `quiesce-db` 等の DB の provider のとき。無ければ exit 19 で `checks.quiesce.request_table_grant` が `false`）、他の権限は検査しないため、不足は最初の full・checkpoint・archive の失敗で分かる（本番相当の権限での実測は**未取得**。provider の SQL が README の権限だけで動き、業務の表と応答の表へは書けないことは `BackupQuiesceProviderContractMySqlTest`（mysql shard 3）が確かめる。Runner の証跡は**未取得**）。
 
 ### 1.3 secretの注入（Security / SRE）
 
@@ -334,11 +372,11 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
      - (b) trust の access point（読取り用・書込み用。どちらも root は `/ses-manager/privacy-trust`）の root は、他のどの access point の root とも包含関係に無い。uploads と backup の access point の root は互いを含んでよい（例: backup は `/ses-manager/files`、uploads は `/ses-manager/files/uploads`。(d)）。
      - (c) task role は最小の権限にする（app は AWS の API を呼ばない。上の EFS の権限の他に要るものは、使う場合の ECS Exec 等に限る）。
      - (d) backup の経路（HFP-03-PROD-003 と一緒に決める。§1.7 の「Backup 開始の前提」）:
-       - backup tool は書込み静止の間に uploads を staging（`UPLOADS_STAGING_PARENT`）へ `cp -a` で写す（`ops/backup/backup-full.sh:157`。15分ごとの checkpoint も同じ。`create-checkpoint.sh:175`）。uploads と staging は同じ filesystem でなければならず、この判定は2つの path の device 番号（`stat -L -c %d`）の一致で行う（`providers/uploads-local.sh:96-106`。preflight も `UPLOADS_STAGING_PARENT` が設定されていれば同じ判定をし、違えば exit 16。`preflight.sh:258-294`）。同じ EFS でも access point を別々に mount すると mount ごとに device 番号が分かれる見込みで（Linux の NFS client と efs-utils の挙動からの推定。実測は未取得）、uploads と staging を別の mount から渡すと初回 backup が FAIL する。そのため uploads と staging は**同じ mount** から backup の container へ渡す。
+       - backup tool は書込み静止の間に uploads を staging（`UPLOADS_STAGING_PARENT`）へ `cp -a` で写す（`ops/backup/backup-full.sh` の `uploads-local.sh snapshot` の呼出し。15分ごとの checkpoint も同じ。`create-checkpoint.sh` の同じ呼出し）。uploads と staging は同じ filesystem でなければならず、この判定は2つの path の device 番号（`stat -L -c %d`）の一致で行う（`providers/uploads-local.sh:96-106`。preflight も `UPLOADS_STAGING_PARENT` が設定されていれば同じ判定をし、違えば exit 16。`preflight.sh` の uploads topology の検査）。同じ EFS でも access point を別々に mount すると mount ごとに device 番号が分かれる見込みで（Linux の NFS client と efs-utils の挙動からの推定。実測は未取得）、uploads と staging を別の mount から渡すと初回 backup が FAIL する。そのため uploads と staging は**同じ mount** から backup の container へ渡す。
        - backup は access point を1つだけ使う。例: backup の access point の root を `/ses-manager/files` とし、その下に `uploads/`（app の uploads の access point の root）と `backup-staging/` を置く。trust（`/ses-manager/privacy-trust`）はこの下に置かない（(b)）。backup の host はこの access point を1回だけ IAM で `/mnt/ses-files` に mount し（例: efs-utils の `tls,iam,accesspoint=<fsap-backup-files>`）、compose の uploads（`:ro`）と staging には、その mount の下の2つの directory を bind で渡す（同じ mount の下なら device 番号は同じ）。mount 先の `/mnt/ses-files` は `ops/backup/docker-compose.yml` が固定で使う path で、変えるなら compose も同じ change で変える。host にこの mount が無いまま起動すると docker が空の directory を作り、backup と preflight は「current がありません」で失敗する（fail-closed）。staging は `backup-data`（container の `/var/lib/ses-backup`。named volume で、uploads とは別の filesystem）の下に置かない。
        - 対応（`ops/backup/docker-compose.yml:45-46` が固定で bind する）: host の `/mnt/ses-files/uploads` → container の `/app/uploads`（`:ro`）、host の `/mnt/ses-files/backup-staging` → container の `/var/lib/ses-uploads-staging`。`.env.backup` は `UPLOADS_ROOT=/app/uploads`・`UPLOADS_POINTER=current`・`UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging` にする。`UPLOADS_DIR` は廃止した（残っていると full・checkpoint・preflight が失敗する）。`current` の解き方は (f)。`.env.backup` の key と compose の書き方の正本は `ops/backup/README.md`「設定」「uploads の配置と mount」。
        - backup の access point の POSIX user（uid・gid）は、uploads の access point と同じ app の uid・gid にする（**決定済み（2026-11-18）**。例: image の `ses` user の uid 10001 とその gid。`Dockerfile:12,21`）。backup の access point の root は uploads を含み、POSIX user も同じため、backup の host は EFS 上の uploads を app と同じ権限で読み書きできる。backup が uploads を変えないことは、IAM でも POSIX の権限でも止まらず、compose の uploads を `:ro` で bind すること（container の中だけの制約）と、backup の host の運用上の管理（host に入れる者、host 上の mount の扱い）だけによる。これは Security が受け入れる事項である（**未取得**）。
-       - 同じ uid のため、次は問題にならない。app は普通の file・directory を container の umask に従って作るが、取込の照合台帳（`ImportStageReconciliationLedger.java:195,200`）と取込の一時 file（`ImportRawTempFileStore.java:69`）は `Files.createTempFile` のため 0600 になる。backup は同じ uid でこれも読める。backup の container は root で動き（`ops/backup/Dockerfile` に `USER` が無い）、`cp -a` は所有者を保てないと失敗するが、staging の file は同じ uid・gid で作られ、同じ値への chown になる。restore の書き戻しや backup tool の `umask 077` で 0700 になった directory も、同じ uid のため backup と app が読める。
+       - 同じ uid のため、次は問題にならない。app は普通の file・directory を container の umask に従って作るが、取込の照合台帳（`ImportStageReconciliationLedger` の書込み）と取込の一時 file（`ImportRawTempFileStore.create`）は `Files.createTempFile` のため 0600 になる。backup は同じ uid でこれも読める。backup の container は root で動き（`ops/backup/Dockerfile` に `USER` が無い）、`cp -a` は所有者を保てないと失敗するが、staging の file は同じ uid・gid で作られ、同じ値への chown になる。restore の書き戻しや backup tool の `umask 077` で 0700 になった directory も、同じ uid のため backup と app が読める。
        - 目録（例）: `/ses-manager/files`（backup の access point の root）、`/ses-manager/files/uploads`（uploads の access point の root）、`/ses-manager/files/backup-staging`、`/ses-manager/files/uploads/v0` と `current -> v0`（(f)）。owner はどれも app の uid・gid、mode は例えば 0750（`backup-staging` は 0700）。
          - 誰が・いつ: storage owner（SRE が兼ねてよい）が、§2 より前（初回 backup（§2 の5）と app の初回起動（§4）より前）に作る。
          - 作り方: access point の root は各 access point の CreationInfo（owner・mode）で作る（EFS は、無い root directory を、その access point を通した最初の mount で作る。`/ses-manager/files` から作るため backup の access point を先に使う。親の directory が無い場合の作られ方は SRE が確かめる）。`backup-staging` は backup の host から backup の access point を通して作る。`v0` と `current` は uploads の access point を通して作る（(f)）。
@@ -346,19 +384,19 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
        - **SRE が staging で確かめること（未取得）**: compose で渡した uploads と staging の device 番号が一致すること（host で `stat -L -c %d /mnt/ses-files/uploads/current /mnt/ses-files/backup-staging`。別の access point を別々に mount すると一致しないことも記録する）。container の中の証拠は `ops/backup/image/tool-image.sh compose run --rm preflight` の JSON の `checks.uploads` で、期待は `status: "ok"`・`version: "v0"`（初回）・`staging_same_filesystem: true`。0600 の file（NF06 の取込台帳）と restore の後の 0700 の directory を含む uploads で backup（full・checkpoint）が通ること、container の中の uploads が読取り専用であること（書込みが `Read-only file system` で失敗すること）、空の uploads（初回の `v0`）で backup が通ること（RB-W で修正済み（X-1）。staging での実測は未取得）。
      - (e) 設計の選択肢（SRE・Security が確かめる。未決）: trust 文書を uploads と別の EFS file system に置く。backup・restore の主体が trust の file system に一切触れず、backup は uploads を含む上の directory の access point を mount しても trust に届かないため、policy も単純になる。その場合 trust の file system の backup は別に決める（EFS の backup か、D-03 owner の手元の正本から書き直す）。選ぶ場合は task definition の `privacy-trust` の `fileSystemId` を別の file system にする。validator の実値の mode はそのまま通るが、雛形（`infra/ecs/task-definition.prod.json`）は2つの volume が同じ `fs-PLACEHOLDER` で、validator の Template mode もそれを求める（`validate-task-definition.ps1:270`）ため、雛形の placeholder と validator を一緒に変える。
      - (f) restore の書き戻しと uploads の pointer（HFP-03-PROD-003）: **決定済み（2026-11-18）: A（`current` symlink）**。
-       - app の upload root は `UPLOAD_BASE_PATH=/app/uploads/current`（§1.0。雛形に入れ、validator が両方の mode で一致を求める）。`current` は uploads の access point の root の下の symlink で、version directory を指す（初回は `current -> v0`）。restore は新しい version directory（例 `v1`）を uploads の access point から書き（`ops/backup/uploads-cutover.sh stage`）、app と scheduler の停止中に1回の rename で切り替える（`uploads-cutover.sh switch`。中身は `ln -sT` の一時 symlink と `mv -T`。戻すときは逆向きの switch）。DB の接続先の切替えと同じ change で行う（`database-backup-recovery/requirements.md:130,133`、`design.md:272`）。DB の cutover・rollback との順序と、起動前の DB と pointer の対の確認は `ops/backup/runbooks/restore-cutover.md` §4.5.1 を正本とする（switch は `cutover.sh` の前、rollback は `rollback-cutover.sh` と逆向きの switch を対で、`write-enabled` の後は uploads も戻さない）。
+       - app の upload root は `UPLOAD_BASE_PATH=/app/uploads/current`（§1.0。雛形に入れ、validator が両方の mode で一致を求める）。`current` は uploads の access point の root の下の symlink で、version directory を指す（初回は `current -> v0`）。restore は新しい version directory（例 `v1`）を uploads の access point から書き（`ops/backup/uploads-cutover.sh stage`）、app と scheduler の停止中に1回の rename で切り替える（`uploads-cutover.sh switch`。中身は `ln -sT` の一時 symlink と `mv -T`。戻すときは逆向きの switch）。DB の接続先の切替えと同じ change で行う（`database-backup-recovery/requirements.md:130,133`、同 `design.md` §10）。DB の cutover・rollback との順序と、起動前の DB と pointer の対の確認は `ops/backup/runbooks/restore-cutover.md` §4.5.1 を正本とする（switch は `cutover.sh` の前、rollback は `rollback-cutover.sh` と逆向きの switch を対で、`write-enabled` の後は uploads も戻さない）。
        - symlink の前提: 相対で単段の名前（`^[A-Za-z0-9][A-Za-z0-9._-]*$`。`/` と `..` を含まない）。絶対 path は backup の host や container で別のものを指し、`..` は解いた側の namespace で mount の外へ出る。app の path の検査は字句の比較（`toAbsolutePath().normalize()` と `startsWith`）で、`current` は kernel が解く。
        - 初回の配備: app の**初回起動より前に**、uploads の access point を通して空の `v0` と `current -> v0` を作る（作る者・時期・policy との関係は (d) の目録）。app は起動時に `<upload root>/documents/quarantine` 等を `createDirectories` で作る（`LocalDocumentStorage.java:34-35`）ため、`current` が無いまま起動すると `current` が実体の directory として作られ、pointer が黙って失われる。確かめ方は §2 の5・§4（`current` が symlink で、指す先が単段の名前の実体の directory であること。下の command か `ops/backup/uploads-cutover.sh status --root <uploads の根>`）。validator は EFS の中身を見ない。
          ```bash
          t=$(readlink /mnt/ses-files/uploads/current) && [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
            && test -d "/mnt/ses-files/uploads/$t" && ! test -L "/mnt/ses-files/uploads/$t" && echo "current -> $t OK"
          ```
-       - app 側の事実: DB に保存される path（`t_contract_document.pdf_path` は upload root を頭に付けた path。`ContractDocumentServiceImpl.java:82-98`）は `/app/uploads/current/...` になり、切り替えても有効なまま。孤児 file の掃除（`FileCleanupServiceImpl.cleanupOrphanFiles`、`:53-91`）と旧 upload の移行（`LegacyUploadMigrationService.migrate`、`:84`）は `current` の先（その時の version）の直下・`quarantine`・`published` の regular file だけを再帰せずに見るため、兄弟の旧版は走査されず消されない。
+       - app 側の事実: DB に保存される path（`t_contract_document.pdf_path` は upload root を頭に付けた path。`ContractDocumentServiceImpl.create`）は `/app/uploads/current/...` になり、切り替えても有効なまま。孤児 file の掃除（`FileCleanupServiceImpl.cleanupOrphanFiles`、`:53-91`）と旧 upload の移行（`LegacyUploadMigrationService.migrate`、`:84`）は `current` の先（その時の version）の直下・`quarantine`・`published` の regular file だけを再帰せずに見るため、兄弟の旧版は走査されず消されない。
        - backup・restore・cutover の実装（RB-W。合入済み）: backup は `current` がその時に指す version directory を写し、どの version かを metadata・index・結果に `uploads_pointer` として残す（`lib/uploads-pointer.sh`）。`current` は container の中の `:ro` の bind で単段の名前として解き、host の側では symlink を辿らない（compose の bind 元に `current` を含めない）。version directory の実 path を固定で渡すと、切替えの後に直し忘れたとき旧版を黙って写し続けるため、そうしない。restore は `restore.sh` が作業 directory に `uploads_ready` を作り、backup した時の pointer と版を `uploads_backup_pointer` として出す（`restore.sh:240-272`）。本番の uploads へは `uploads-cutover.sh` の stage（新しい version directory を作る）・switch（pointer を切り替える）・status（確かめる。読むだけ）で出す。手順と順序の正本は `ops/backup/runbooks/restore-cutover.md` §4.5.1、command の性質は `ops/backup/README.md`「uploads の版の切替え」。旧版と残りの削除は §4.4 の D15。
        - backup の role と restore の主体は別の role にする（同じ role にすると、下の例の `DenyBackupWriteOutsideFiles` と `DenyRestoreWriteOutsideUploads` が全ての書込みを止める）。restore の書き戻し先が別の file system（recovery target 側）なら、restore の主体の許可はその file system の policy に置く。
        - 採らなかった選択肢:
-         - B（access point を pointer にする）: 切り替えるたびに uploads の access point を作り直し、file system policy を書き換え（`TaskWritesUploads` 等の条件が uploads の access point の ARN を持つため `PutFileSystemPolicy` が要る）、ECS の revision を作り、restore 専用の access point も要る。RTO の中で IAM・ECS・EFS を変えることになる。また `UPLOAD_BASE_PATH` を使わない構成のため、後から A・C に移ると既存の file の移動と、DB に保存した path（`t_contract_document.pdf_path` 等。読むときに `startsWith(root)` で検査する。`ContractDocumentServiceImpl.java:223-225,277-280`）の書換えが要る。
-         - C（固定名の実体 directory を停止中に rename で入れ替える）: 2回の rename になり原子的でない（`design.md:272` の atomic rename と合わない）。2回の間に app が起動すると空の directory を作り、file の無い状態で動く。
+         - B（access point を pointer にする）: 切り替えるたびに uploads の access point を作り直し、file system policy を書き換え（`TaskWritesUploads` 等の条件が uploads の access point の ARN を持つため `PutFileSystemPolicy` が要る）、ECS の revision を作り、restore 専用の access point も要る。RTO の中で IAM・ECS・EFS を変えることになる。また `UPLOAD_BASE_PATH` を使わない構成のため、後から A・C に移ると既存の file の移動と、DB に保存した path（`t_contract_document.pdf_path` 等。読むときに `startsWith(root)` で検査する。`ContractDocumentServiceImpl` の `verifySourcePdf`・`download`）の書換えが要る。
+         - C（固定名の実体 directory を停止中に rename で入れ替える）: 2回の rename になり原子的でない（`database-backup-recovery/design.md` §10 の atomic rename と合わない）。2回の間に app が起動すると空の directory を作り、file の無い状態で動く。
      - file system policy の例（uploads と trust を同じ file system に置く場合。ARN・ID は placeholder。各 role は別に決める。実 AWS では検証していないため、Security が確かめる）。否定の条件（`StringNotEquals`）は条件 key が無い要求（access point を通らない mount）にも当たるため、主体ごとの Deny は root への直接の mount の書込みも止める。例に無い主体（identity policy で書込みを許された role 等）の root への書込みは `DenyWriteWithoutAccessPoint` が止める。
        ```json
        {
@@ -501,14 +539,14 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | SRE-5 | **単一instance、またはsticky session**で運用する。新旧artifactを同時に稼働させない（rolling禁止）。確認: (a) DB: 起動後に `SELECT COUNT(DISTINCT SUBSTRING_INDEX(host, ':', 1)) FROM information_schema.processlist WHERE user = '<アプリaccount>';` が1（接続元の task が1つ。PROCESS を持つ管理用の account で実行する。RDS Proxy 等の中継を挟むと全接続が中継の IP に見えて数えられないため、その場合は (b) だけで確かめる）。(b) クラウドの管理画面／CLI: ECS service の desired count と running count が1、進行中の deployment が1件だけ、deployment configuration の maximum percent が100（新旧の task を重ねない。そのため minimum healthy percent は0になる） | sessionはin-memory（Spring Session無し）で、再起動で全員がlogoutする。NF04（B-NF04-3）、NF06の照合台帳（instance local）、NF08の外部送信（開放後も単一instance運用）が前提にする。NF10の定期レポートは新旧versionの混在を許さない | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §2.1、`feature-switches.md` 4.8.2 の9、`ai-management-copilot/external-send-approval-gate.md` §6、`scheduler-claim-fence-plan.md` §10、本書 §6（ロールバック） |
 | SRE-6 | **表単位のrestore・rollbackをしない**（DBを戻すときは全体のPITRだけ。RR-13） | anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すと認可epochが巻き戻り、旧提出が復活し得る。全体のPITRは前後で一貫する | NF01細粒度epoch計画 §9 RR-13、`engineer-lifecycle-workflow/runbook.md`、`ops/backup/runbooks/` |
 | SRE-7 | **転送ヘッダーの清浄化の公開前の措置**（SRE-3 以外の §3 の項目） | 次の4つ。<br>(1) WAFで `X-Forwarded-Prefix`・`X-Forwarded-Host`・`Forwarded`・`X-Forwarded-Ssl` のどれかを持つrequestを403にする。headerの有無で判定し、COUNTで始めてBLOCKにする（§3.1）。<br>(2) ALB: XFFは `append`、`xff_client_port` は無効、公開Host以外は既定404、ALBだけを許すsecurity group、target groupのhealth checkは `/actuator/health/readiness`（§3.2）。<br>(3) deploy前後の確認0〜5（§3.4）。2（OIDC の `redirect_uri`）は、IdP への redirect の URL 自体は deploy 直後でも見られるが、login を最後まで通すには §5.3 の IdP 登録と外部 identity link が要るため、初回は本書 §5.3 の5でまとめて行う。6・7 は staging で行う項目で、本番の配備日には行わない（staging で人が実測する。**未取得**）。<br>(4) Prometheusのscrape経路（§3.6。plain HTTPでは302になる。`TRUSTED_PROXIES` に127.0.0.1を入れない）: ALB 経由の HTTPS に決定済み（2026-11-18。§1.6 の7）。設定する項目は SRE-9 | `forwarded-header-sanitize-notes.md` §3.1・§3.2・§3.4・§3.6 |
-| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま。<br>**方式は決定済み（2026-11-18。§1.6 の8）**: CloudWatch Logs の metric filter で数え、5分間に5件以上で運用担当へ通知し、日次で集計する。運用2週間後に実測で閾値を見直す。設定の例（名前は例。通知先の SNS topic 等は SRE の配備項目）:<br>・log group `/ecs/ses-manager-prod` に filter pattern `"errorCode=LOCK_CONFLICT"`（PWA の503も同じ文字列を出す。`errorCode=OPTIMISTIC_LOCK_CONFLICT` には一致しない）、metric `SES/App` の `LockConflictCount`（値1、既定値0）。<br>・alarm: 統計 Sum、期間300秒、5以上で1回、欠損は閾値未満として扱う → 運用担当の通知先。<br>・日次の集計: Logs Insights で `filter @message like /errorCode=LOCK_CONFLICT/ \| stats count(*) by bin(1d)` | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.java:73-88` |
-| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。<br>**scrape 経路は決定済み（2026-11-18。§1.6 の7）: ALB 経由の HTTPS**。設定する項目:<br>・Prometheus: `scheme: https`、`metrics_path: /actuator/prometheus`、target は公開FQDNの443（ALB は公開FQDNの Host だけを forward する。SRE-7(2)）、`basic_auth` は scraper 口座（password は secret store から file で渡す）。<br>・ALB の HTTPS listener rule: path `/actuator/prometheus` かつ送信元が採集端の CIDR（source IP 条件）のときだけ forward し、同じ path のそれ以外は固定の 404（または WAF の IP set で採集端以外を block）。<br>・確認: 採集端から scraper 口座で 200、他の送信元からは 404（WAF なら 403）、`admin`・break-glass 名の Basic は 401 | `SecurityConfig.java:565-592`（`BreakGlassBasicRejectingProvider`） |
+| SRE-8 | **`LOCK_CONFLICT` の監視とalert**（初回配備から） | `/api/**` の 1213（deadlock）・1205（lock待ちtimeout）は409（PWAの書込みは503）へ変換され、WARN log `errorCode=LOCK_CONFLICT` だけが残る。5xxを数える監視では見えないため、この件数の監視とalertを置く。DBAは `innodb_print_all_deadlocks=ON`（RR-15）。`TransactionSystemException` に包まれた場合は500のまま。<br>**方式は決定済み（2026-11-18。§1.6 の8）**: CloudWatch Logs の metric filter で数え、5分間に5件以上で運用担当へ通知し、日次で集計する。運用2週間後に実測で閾値を見直す。設定の例（名前は例。通知先の SNS topic 等は SRE の配備項目）:<br>・log group `/ecs/ses-manager-prod` に filter pattern `"errorCode=LOCK_CONFLICT"`（PWA の503も同じ文字列を出す。`errorCode=OPTIMISTIC_LOCK_CONFLICT` には一致しない）、metric `SES/App` の `LockConflictCount`（値1、既定値0）。<br>・alarm: 統計 Sum、期間300秒、5以上で1回、欠損は閾値未満として扱う → 運用担当の通知先。<br>・日次の集計: Logs Insights で `filter @message like /errorCode=LOCK_CONFLICT/ \| stats count(*) by bin(1d)` | `engineer-lifecycle-workflow/runbook.md` §6.6、NF01細粒度epoch計画 §10（SRE）、`GlobalExceptionHandler.handleLockConflict` |
+| SRE-9 | **metricsの取得は scraper 口座で行う**（`METRICS_SCRAPER_*`。§1.0） | `GET /actuator/prometheus` のHTTP Basic chainは、`admin` とbreak-glass名を、bootstrapの状態に関係なく常に401で拒否する（大小文字・前後空白を無視して照合。DOC-FINAL N-2）。admin口座でscrapeを設定しない。<br>**scrape 経路は決定済み（2026-11-18。§1.6 の7）: ALB 経由の HTTPS**。設定する項目:<br>・Prometheus: `scheme: https`、`metrics_path: /actuator/prometheus`、target は公開FQDNの443（ALB は公開FQDNの Host だけを forward する。SRE-7(2)）、`basic_auth` は scraper 口座（password は secret store から file で渡す）。<br>・ALB の HTTPS listener rule: path `/actuator/prometheus` かつ送信元が採集端の CIDR（source IP 条件）のときだけ forward し、同じ path のそれ以外は固定の 404（または WAF の IP set で採集端以外を block）。<br>・確認: 採集端から scraper 口座で 200、他の送信元からは 404（WAF なら 403）、`admin`・break-glass 名の Basic は 401 | `SecurityConfig`（`BreakGlassBasicRejectingProvider`） |
 | SRE-10 | **§1.0 の1〜26を全て設定する**（secretはsecret storeから）。freeeを使う場合（`FREEE_ENABLED=true`）は27〜30も設定する | 1つでも欠けると初回起動が必ず失敗する（復旧はできるが停止が延びる）。登録する task definition を起動の前に `infra/ecs/offline/validate-task-definition.ps1` の実値の mode で照合する（呼出し方と検査の範囲は §4） | 本書 §1.0、`infra/ecs/task-definition.prod.json` |
 | SRE-11 | **job実行環境（Maven・JDK・依存の取得経路）を決め、local repositoryを揃える** | 別の機械・別の `.m2` で job を動かすと、片方にだけ無い artifact で job が止まる。推奨は build と同じ機械・同じ `.m2`。要決定（§1.6 の4） | 本書 §1.5・§1.6 の4 |
 
 **DBA の前提**（番号は署名一覧の DBA-1〜DBA-6 と同じ）
 - **DBA-1**: migrator accountのtrigger権限は §1.2 にある。binlogが有効なときの `log_bin_trust_function_creators`・SUPER相当の扱いと、DEFINERとmigrator accountを残すことを含む。
-  - backup 用の account も同じ日に確かめる（§1.2 の「backup 用の account」。権限は `ops/backup/README.md`「権限分離」の「source 側の account の権限」（`PROCESS` は与えない）と「restore target role の権限」（`SET_ANY_DEFINER` 等を含む）の2つの表のとおり）。
+  - backup 用の account も同じ日に確かめる（§1.2 の「backup 用の account」。権限は `ops/backup/README.md`「権限分離」の「source 側の account の権限」（`PROCESS` は与えない）と「restore target role の権限」（`SET_ANY_DEFINER` 等を含む）の2つの表のとおり）。ただし書込み静止の要求の表（`sys_backup_quiesce_request`）への表単位の `INSERT`・`UPDATE` は、配備の前には表が無いためここでは確かめず、§3.4 で付けて確かめる（RB-QUIESCE）。
   - **recovery target（restore 先）の前提**（RB-W の W-1 の DBA の前提をここに統合した。**DBA の確認は未取得**）: binlog が有効なら `log_bin_trust_function_creators = ON`（restore target role は SUPER を持たないため。stored function と trigger の再現に要る）。DEFINER の account（migrator）を復元先に作るか、restore target role に `ALLOW_NONEXISTENT_DEFINER` を与える（作ることを推奨。account が無い trigger・view は実行時に失敗する）。migrator には `SYSTEM_USER` を与えない（与えると restore target role にも `SYSTEM_USER` が要る）。版と `lower_case_table_names` は DBA-4。
   - 配備前の検証（**未実施**）: 決めた設定と同じ条件（binlog 有効、`log_bin_trust_function_creators` を決めた値、root でない migrator account と §1.2 の権限）の検証用MySQL（本番ではない）に §3.3 の job を1回通し、§3.4 の routine 0件・trigger 67件を確かめる。CI の MySQL 試験は `--skip-log-bin` かつ root で動き、この条件を検証しない。
 - **DBA-2**: serverタイムゾーン `+09:00` と空schemaは §1.1 にある。
@@ -528,18 +566,34 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 署名一覧の DBA-6 とは別の項目である。`ops/backup/README.md` は、production 固有値（HFP-03-PROD-001〜008。`.kiro/specs/database-backup-recovery/baseline.md` §4）が未確定の間、production への接続・復元を BLOCKED としている。各値は baseline §4 の owner が確定して証跡を出し、DBA がまとめて配備記録に残す（SRE・DBA を兼ねる場合も、006・008 は Security・運用組織の事項である）。
 - `.env.backup`（形式は `ops/backup/README.md` の「前提」「設定」）:
   - `CONTENT_HASH_TABLES`（DBA-6）。
-  - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `201`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
+  - `FLYWAY_VERSION`: §3.4 の最新version照会の値を Flyway 形式（`V`・`_` を使わない）で書く。本 release は `202`。release ごとに §3 の後で更新する。未設定（`unknown`）や古い値で取った checkpoint は、復元検証で `flyway_schema_history` の成功行の最大と一致せず、通らない。
   - `BACKUP_REPOSITORY`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_DATABASE`・`MYSQL_USER`。password は `secrets/` の 0600 の file（MySQL と restic）、CA は hashed CA の directory（`secrets/mysql-capath/`）。
   - uploads: `UPLOADS_ROOT=/app/uploads`・`UPLOADS_POINTER=current`・`UPLOADS_STAGING_PARENT=/var/lib/ses-uploads-staging`（§1.6 の11 (d)。compose の bind 先と同じ値）。`UPLOADS_DIR` は書かない（廃止した。残っていると full・checkpoint・preflight が失敗する）。
+  - 書込み静止（RB-QUIESCE。変数の一覧と既定は `ops/backup/README.md`「設定」の「書込み静止の provider と設定」）: `QUIESCE_PROVIDER=quiesce-db`（定期の checkpoint・full。未設定の既定 `quiesce-local` は隔離環境向けで、heartbeat の directory を求めるため本番では失敗する）。`QUIESCE_PROVIDER=quiesce-app-stopped` は書かない（書くと job が始まらない。app の停止を確かめる full は §2 の5 で `--app-stopped` を付けて明示する）。閾値（`QUIESCE_STALE_SECONDS`・`QUIESCE_DEAD_SECONDS`・`QUIESCE_LEASE_*` 等）は既定のままにする（app 側の §1.0 の33〜41 を変えたときは README の式を満たすか確かめる。preflight の `checks.quiesce` と provider が app の申告値と式を照合し、合わなければ失敗する）。`REPLICA_HEARTBEAT_DIR`・`SCHEDULER_ACK_DIR` は書かない（`quiesce-local` だけが使う）。
 - 確定する時点と owner（baseline §4 の「確定に必要な証跡」の欄）:
-  - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。production owner）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否、backup の host が uploads と staging を同じ mount で使う access point と POSIX user（app と同じ）、restore の書き戻しと pointer（A に決定済み）。§1.6 の11 の (d)・(f)。storage owner。要る証跡: 2つの access point の設定（root・POSIX user・CreationInfo）、目録の `ls -la` と `readlink <uploads>/current` の出力、staging での device 番号の一致（`stat -L -c %d`）の記録。どれも**未取得**）、004（replica・scheduler・drain・DDL change-lock の実際の手段。§2・SRE-5。deployment owner）、005（S3 互換 backend とその IAM・versioning/immutability・容量と throughput。baseline §4 のとおり。infra owner）と、上の `.env.backup`。
+  - 初回 backup の前: 001（MySQL の版・`@@server_uuid`・GTID・binlog・checksum・compression・TLS・保持期間。DBA-3・DBA-4 と同じ値。production owner）、002（全表の engine とアプリ以外の writer の有無。backup account が書込み静止の要求の表 `sys_backup_quiesce_request` だけを書くこと（U-11）を含める。production owner。この writer の受理は BQ-1 の署名）、003（uploads の置き場所（task definition の EFS）と atomic snapshot・versioning の可否、backup の host が uploads と staging を同じ mount で使う access point と POSIX user（app と同じ）、restore の書き戻しと pointer（A に決定済み）。§1.6 の11 の (d)・(f)。storage owner。要る証跡: 2つの access point の設定（root・POSIX user・CreationInfo）、目録の `ls -la` と `readlink <uploads>/current` の出力、staging での device 番号の一致（`stat -L -c %d`）の記録。どれも**未取得**）、004a（replica・scheduler・drain・DDL change-lock の実際の手段の inventory。RB-QUIESCE で 004 を 004a・004b に分けた。deployment owner。次を含め、どれも**未取得**: ECS service の desired count と deployment configuration（SRE-5）、app の container の `stopTimeout`（雛形は 120。Fargate の既定と上限を確かめ、graceful の停止が STOPPED を書くまでに収まること）、通常の起動時間（`healthCheck.startPeriod` が `BACKUP_QUIESCE_STARTUP_WAIT_MAX`＋120 秒を満たし余裕があること）、アプリの DB 接続が中継（RDS Proxy 等）を経由しないこと、アプリ account の host の型が1つであること（§1.2）、backup host の定期起動（15分ごとの checkpoint・02:00 の full）の止め方と再開の仕方（§2 の0・§4.7）、静止中の 503 を利用者へ伝える方法（§4.7）、staging の EFS での uploads の snapshot の時間の実測（BQ-2。U-1））、005（S3 互換 backend とその IAM・versioning/immutability・容量と throughput。baseline §4 のとおり。infra owner）と、上の `.env.backup`。
   - EFS の file system policy・access point・task role の権限（§1.6 の11 の (a)〜(f)）は 003・005 には含めず、Security が確かめる（**未取得**）。backup の host はその access point が無いと uploads と staging を同じ mount で使えず、policy を後から当てると mount の可否が変わるため、初回 backup の前に揃える。
+  - §4 の後（初回 backup の条件にしない）: 004b（app の起動の後の最初の ONLINE の checkpoint（`quiesce-db`）が VALID になった記録。§4.7 の4。deployment owner。**未取得**）。初回 backup（§2 の5）は app が動く前に `--app-stopped` で取るため、最初の ONLINE の checkpoint は §4 の後にしか取れない。004b が揃うまで、本番の RPO 15分の達成を宣言しない。
   - backup の監視（`check --json`）を運用に入れる前: 008（alert routing・運用 owner・incident commander・drill owner。運用組織）。
   - 初回の restore（restore drill・本番の restore）の前: 006（二者承認の identity・署名の検証と change-ticket の仕組み。security owner）、007（代表 profile。RTO の実測に使う。production owner）。uploads の切替えの手順（stage・switch・status と、DB の cutover・rollback との順序、起動前の DB と pointer の対の確認）は `ops/backup/runbooks/restore-cutover.md` §4.5.1 に書いてある（RB-W）。初回の restore drill でこの順序を一度通し、記録する（**未取得**）。
 - 初回 backup の前の手順（`ops/backup/README.md`「ツールイメージの build・配布」と「実行」）: backup tool image の content ID（v2。RB-W）で compose の pin をし直し、配布先で `tool-image.sh load` → `tool-image.sh check` が一致し、`tool-image.sh compose run --rm preflight` が 0 で終わること。
-- 解除の条件: 項目ごとに owner の証跡を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力）、DBA がまとめた記録を確かめた時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。
+  - **RB-QUIESCE で tool image の content ID が変わった**（image に入る `providers/`・`lib/`・job の script が変わったため）。RB-QUIESCE より前の commit から build・記録した image（RB-W の検証で作ったもの等）は、content ID が compose の pin と一致せず使えず、`quiesce-db`・`quiesce-app-stopped` の provider も持たない。配備する commit から README「ツールイメージの build・配布」の手順の 2〜5（`build-record` → compose の `x-ses-backup-tool-content-id` の pin の commit → `save` → 各 host で `load` → `check`）をやり直し、記録した content ID・tar の SHA-256 を配備記録に残す（lock を変える場合だけ 1 から）。
+  - 書込み静止の preflight（§3.4 の GRANT の後。初回は §2 の5 の前）: JSON の `checks.quiesce` が `provider: "quiesce-db"`・`status: "ok"`・`signal_tables: 3`・`request_table_grant: true`。V202 の前と GRANT の前は exit 19 になる。
+- 解除の条件: 項目ごとに owner の証跡を配備記録に残し（001・002 は production に対する `preflight` の redacted な `--json` 出力）、DBA がまとめた記録を確かめた時点で、その項目の BLOCKED を解除する。解除するのは production への接続（full・binlog の archive・checkpoint）で、復元は従来どおり production とは別の recovery target へ行う（`ops/backup/README.md`「復元」）。001〜003・004a・005 が揃うまでは初回 backup を取れず、§2 の5 を満たさないため §4 へ進まない。004b は §4 の後の最初の ONLINE の checkpoint で揃うもので、初回 backup と §4 の条件にしない（条件が循環しない。backup-write-quiesce requirements BWQ-AC-011-02）。
 - **backup tool の MySQL 8.4 への適合（RB-W）は合入済み**（§1.1）: `ops/backup/preflight.sh` は 8.4 系列の server と client を受け付ける。8.4 での backup・PITR は CI の backup integration（実 MySQL 8.4.13）で取得済みで、本番相当の実測は**未取得**（§1.7 の W 表の前の段落）。初回 backup の前に production に対する `preflight` が 0 で終わること（001 の証跡）を確かめ、0 にならなければ §4 へ進まない。
 - 正本: `.kiro/specs/database-backup-recovery/baseline.md` §4（production 固有値・owner・確定に要る証跡）、`ops/backup/README.md`。
+
+**backup の書込み静止（RB-QUIESCE）の署名・受理と、本番の前の実測**（どれも人・Runner・CI が行う。設計は `.kiro/specs/backup-write-quiesce/design.md`、手順は `tasks.md`）
+
+| # | 事項 | 要るもの | 状態 | 正本 |
+|---|---|---|---|---|
+| BQ-1 | backup account が業務 DB の1表（`sys_backup_quiesce_request`）の書き手になること（U-11。§1.2） | Security と DBA の署名（baseline の PROD-002 の記録の上で） | **未取得** | design §4、baseline PROD-002 |
+| BQ-2 | staging の EFS での uploads の snapshot の時間（U-1。004a の一部） | SRE が 1,000件・5,000件の fixture で測り、実測の件数の上限と uploads の増え方から checkpoint の上限（300秒）に届く時期の見込みを配備記録に書く。届く前に uploads の方式の見直し（後の batch）を始める | **未取得**（本番の前・BQ-4 の前） | design §10.1・§19 |
+| BQ-3 | MySQL 8.4 での prod の起動（prod profile・`BACKUP_QUIESCE_ENABLED=true`・bootstrap の再開 ticket `SECURITY_BOOTSTRAP_REOPEN_TICKET` 付き。2b review 第8点 c） | SRE が staging で（BQ-4 と同じ機会でよい）起動し、readiness が UP になること、起動の監査 `BOOTSTRAP_REOPENED` が書けること（instance の登録の前は業務の接続が読取り専用で、起動の途中の書込みが拒否されれば起動が止まる）、instance の行が `RUNNING`・`OPEN` になることを記録する。tasks の BWQ-005・BWQ-015 を完了にする条件 | **未取得** | tasks BWQ-005・BWQ-015、design L-13 |
+| BQ-4 | staging での通しの Demo（tasks BWQ-014。**2026-11-22 利用者決定: RB-QUIESCE の PR では行わず、本番の前（go-live の前）に SRE が staging で行う**）: §2 の0 → drain → 停止 → GRANT の確認 → `--app-stopped` の full → §3 → §4 → 定期起動の再開 → 最初の ONLINE の checkpoint の順を、staging の MySQL 8.4 と app で通す。隔離環境（Runner の Docker 等）で通しても、この項は満たさない | SRE の実施記録と各段の log・JSON の証跡（`quiesce.json` は投影だけ。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」） | **未取得**（取れるまで本番は NO-GO のまま） | tasks BWQ-014 |
+| BQ-5 | 実装の時に実測で確かめる前提（design §19）のうち CI で取るもの: 表を作る前の表単位の GRANT（mysql shard 3 の `BackupQuiesceProviderContractMySqlTest` の log）、mysqldump 8.4 の `--single-transaction --source-data=2` の起点の lock の取り方と待ち（backup integration の `full-dump-start-lock.txt`）、STORED の生成列 `active_slot` の dump・復元・schema fingerprint（同 `quiesce-generated-column.txt`） | CI の証跡（統括が CI の後に design §19 へ書き戻す） | **未取得**（CI で取得予定） | design §19 |
+
+- NF05 の外部 API の静止中の 503 は NF05 の行（下の「機能スイッチをONにする前」の表）に書く（U-6 の NF05 owner の受理）。
 
 **初回配備から有効になる部分の署名・受理**（機能スイッチでは止まらない。scheduler・通常運用の前提）
 
@@ -559,7 +613,7 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | NF04 本人セルフサービス（`FEATURE_NF04_ENABLED`。Service Worker・manifest） | 署名表の全行（現在すべて空欄）。<br>(1) 業務Owner: 利用者向けの文言（1章）。<br>(2) SRE/Ops: 単一instance・sticky session。<br>(3) Privacy: 端末内30日保存（P3-13）。<br>(4) Owner/Security: B-NF04-4 の決定、P1-N4-1 の案A、P1-W309-1 (a)。<br>(5) 業務の受入担当: 真機受入 S-01〜S-15。<br>スイッチOFFでも有効な部分の署名は、上の「初回配備から有効になる部分」の表にある | `mobile-pwa-self-service/first-release-user-and-operations-notes.md` §4、`mobile-pwa-self-service/real-device-browser-acceptance-template.md`、`feature-switches.md` 4.4 |
 | NF10 定期管理レポート（`FEATURE_NF10_ENABLED`） | 全て**未取得**（一覧の詳細は `feature-switches.md` 4.5.1）。<br>(1) Report Owner の署名（ONの前）。<br>(2) alert rule の閾値・評価窓・重要度・通知経路（決める人: SRE。未決）と、`RETRY_EXHAUSTED_DISABLED` を受ける業務側の宛先と対応手順（決める人: Report Owner。未決）。計画 §10.6 はプレースホルダの草案だけで、値は決めていない。<br>(3) NTP の前提と、許容する本node・DBの時刻差（決める人: SRE。未決）。差は gauge `ses_report_schedule_clock_skew_seconds` で見える。WARN のコード既定5秒は決定ではない。<br>(4) tenant のタイムゾーンを変えるときの方針と、決まるまでの暫定の扱い（決める人: Report Owner、運用手順はSREと合意。未決）。<br>(5) 確定版の配布方針（決める人: Report Owner。未決）。<br>(6) 「12回」の数え方の確認: 引き継ぎ（completionに至らずlease期限を超えた試行）も連続失敗1回と数える（RB-NF10。Report Owner。未取得）。回数は同一論理runの中でだけ累積し、成功で0へ戻る（月を跨いで累積しない）。単一instanceでは実行中の処理は引き継がれない（process停止・再起動の後と、多instanceの他nodeだけが引き継ぐ）。<br>(7) 生成・配布の所要時間の見込み（Report Owner。未取得）: 正常な実行が30分（lease）を超え得るなら、数え方の定義ではなく B-NF10-2（lease延長はしない）を見直す（lease更新またはより長いlease）。数え方の定義は統括の判断で現状のままとした（計画 §14.2）。<br>(8) 排水草案の SRE/DBA 承認（計画 §10）。<br>completion-matrix の未完了の行も参照する。新旧versionを同時に動かさない（SRE-5） | `scheduled-management-reporting/scheduler-claim-fence-plan.md` §10・§10.6・§11・§14・§15、`scheduled-management-reporting/completion-matrix.md`、`feature-switches.md` 4.5・4.5.1 |
 | NF02（`FEATURE_NF02_ENABLED`。子の顧客ポータルを含む） | DG-02（CS Owner。B3 休日の運用事項 H-1・H-2 を含む）と、当年度を含む全社共通カレンダーの登録 | `customer-success-service-desk/dg-02-first-release-decision-package.md`、`feature-switches.md` 4.3 |
-| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる。<br>FINAL review b-13 の項目（RB-NF05 で DG-05 草案 §1.1・§6 に反映）:<br>(a) 決定IDの承認内容 digest への束縛: **実装済み**。開ける方向の `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST` / `INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST` が要る（§1.0）。署名者と転記者の二人が草案 §1.1 の正規形から再計算して照合する（**未実施**。署名の時に行う）。<br>(b) ownership の MySQL 試験: project・contract-status・invoice-status の分岐を `IntegrationHubV192AuditRetentionMySqlTest`（shard 3）に追加した。**Runner の証跡は未取得**。<br>(c) 実wireの TLS・XFF: JVM 内の loopback で fast 試験を追加した（`HttpsIntegrationHubWebhookTransportWireTlsTest`・`ExternalApiForwardedHeaderConnectorTest`）。実ネットワークの peer・ALB 経由の XFF・WAF の証跡は代替しない（**SRE が staging で取得、未取得**）。<br>(d) **SRE の負荷実測: 未取得**（人が行う。認証前の body 読取・AES-GCM・HMAC、rate 行と client 行の `FOR UPDATE`、5秒周期の状態 lock、bulk 検索を含む）。<br>あわせて N5-P3-2（credential hash を pepper 付き HMAC に。`INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER` が開放時に必須）と N5-P3-7（要求経路の lease 一括回収を間引き）を実装した。<br>RB-NF05 review で残った判断・受理（草案 §1.1）:<br>(e) **Security/Owner の判断（未取得）**: digest は鍵も有効期間も持たないため、**撤回・置換された旧決定（旧ID＋旧digest）を再び設定しても起動検査を通る**。防ぐのは配備記録と変更管理だけである。NF06・NF07 のように署名日・失効日を正規形へ入れる（正規形 v2）かを決める。<br>(f) **Owner/SRE の受理（未取得）**: truststore file の byte が変わること（同じ証明書の作り直しを含む）、`batch-size`・`fixed-delay-ms`・`unauthenticated-audit-max-per-minute` を変えることは、どれも新しい DG-05 決定（新しい決定ID・digest・署名）が要る運用負担になる | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md` |
+| NF05 公開API（`integration.hub.public-api.enabled`・`integration.hub.external-transport.enabled`） | DG-05（inbound `DG-05-IN-*` と outbound `DG-05-OUT-*` を別々に署名・開放）。G3r の追加署名条件（未署名）を含む: **OUT-7**（G3sで置換。永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持と at-least-once、結果不明CLAIMEDの照合。**OFF書込成功と同じ bound-tenant fingerprint の確認がON変更の必須gate**）と **OUT-9**（P1-1/P1-2・P2-1〜3 の正式証拠を最終SHAで取得）。inboundはSRE-2の遮断の置換と合わせる。<br>FINAL review b-13 の項目（RB-NF05 で DG-05 草案 §1.1・§6 に反映）:<br>(a) 決定IDの承認内容 digest への束縛: **実装済み**。開ける方向の `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST` / `INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST` が要る（§1.0）。署名者と転記者の二人が草案 §1.1 の正規形から再計算して照合する（**未実施**。署名の時に行う）。<br>(b) ownership の MySQL 試験: project・contract-status・invoice-status の分岐を `IntegrationHubV192AuditRetentionMySqlTest`（shard 3）に追加した。**Runner の証跡は未取得**。<br>(c) 実wireの TLS・XFF: JVM 内の loopback で fast 試験を追加した（`HttpsIntegrationHubWebhookTransportWireTlsTest`・`ExternalApiForwardedHeaderConnectorTest`）。実ネットワークの peer・ALB 経由の XFF・WAF の証跡は代替しない（**SRE が staging で取得、未取得**）。<br>(d) **SRE の負荷実測: 未取得**（人が行う。認証前の body 読取・AES-GCM・HMAC、rate 行と client 行の `FOR UPDATE`、5秒周期の状態 lock、bulk 検索を含む）。<br>あわせて N5-P3-2（credential hash を pepper 付き HMAC に。`INTEGRATION_HUB_CRYPTO_CREDENTIAL_HASH_PEPPER` が開放時に必須）と N5-P3-7（要求経路の lease 一括回収を間引き）を実装した。<br>RB-NF05 review で残った判断・受理（草案 §1.1）:<br>(e) **Security/Owner の判断（未取得）**: digest は鍵も有効期間も持たないため、**撤回・置換された旧決定（旧ID＋旧digest）を再び設定しても起動検査を通る**。防ぐのは配備記録と変更管理だけである。NF06・NF07 のように署名日・失効日を正規形へ入れる（正規形 v2）かを決める。<br>(f) **Owner/SRE の受理（未取得）**: truststore file の byte が変わること（同じ証明書の作り直しを含む）、`batch-size`・`fixed-delay-ms`・`unauthenticated-audit-max-per-minute` を変えることは、どれも新しい DG-05 決定（新しい決定ID・digest・署名）が要る運用負担になる。<br>RB-QUIESCE（backup の書込み静止。U-6 決定済み（2026-11-21））で開放の前に要るもの:<br>(g) **NF05 owner の受理（未取得）**: 開放した公開 API（`/external-api/**`）は、backup の静止の間（15分ごとの checkpoint は通常数秒・最長300秒、02:00 の full は最長60分）、`ExternalApiErrorWriter` の 503（error code `BACKUP_QUIESCED`、`retryable: true`、`Retry-After`、`X-Correlation-ID`）を返す。監査行は書かず、`integration_hub_external_api_audit_suppressed_total` を理由 `BACKUP_QUIESCED` で数える。OFF の間は静止中も平時の 404 のまま（2b review P3-2）。<br>(h) **開放の前の対応（未対応。2b review 第8点 b）**: `integration-hub-public-api/openapi-candidate.yaml` の `x-error-status-code-map` に 503 が無く、これに従う外部の client は `Retry-After` と再試行を扱わない。開放の前に `'503': [BACKUP_QUIESCED]` と `Retry-After`・`retryable` の扱いを足し、client へ周知する（`IntegrationHubOpenApiContractTest` で `ExternalApiErrorWriter` の code が全て map にあることを確かめる案も review にある） | `integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md`、`backup-write-quiesce/design.md` §6.3・§6.10 |
 | NF06（`FEATURE_NF06_ENABLED`） | Data Ownerのadmission承認（設定の承認digestの照合）、Privacyによるraw CSVの保持期間とpreviewのマスク分類の書面受容。あわせて行参照鍵・V193の付与・単一法人・SRE-4・SRE-5。<br>FINAL review b-14 の項目（RB-NF05）:<br>(a) multi-host・failover・loadbalance・replication・SRV の JDBC URL: `ImportJdbcReconnectGuard` が起動時に拒否するようにし、4.8.2 #7 に書いた。透過再接続 proxy と Hikari 以外の pool は引き続き DBA/SRE が確認する。<br>(b) **W3-12 §6 の人手確認のうち未了のもの（未取得）**: LB の timeout 後の回復（検証中に LB が 504 や HTML の 503 を返した後、画面の「開く」で状態を取り直せること）、行参照鍵が欠けたときの preview・エラーCSV の 503（`error.import.rowReferenceUnavailable`）の画面表示。staging（実 MySQL）で人が確かめる。<br>(c) digest 正規形の golden vector: 4.8.2 #1 と a1a §10 に追加した（source code は ASCII 順）。二人による再計算そのものは署名の時に行う（未実施）。<br>(d) **DBA の確認（未取得）**: 全 instance が同じアプリ account（同じ user 名）を使い、alternating-users 方式の rotation をしないこと（§1.2、4.8.2 #10）。別の user で張った COMMIT 接続は照合から見えず、時間だけの判定へ戻る。<br>実装で埋めたもの: 照合器が COMMIT 接続の server thread の実行中は回収しない（記録後に server が再起動・切替えされた場合は接続IDを使わない。a1a §6）、`t_document_version.storage_key` の索引（V200）、エラーCSVの最終行 `#END`（集計時の除外は 4.8.2・a1a §11）、host 部に `;` を含む JDBC URL の拒否。MySQL の試験は追加したが **Runner の証跡は未取得** | `feature-switches.md` 4.8.2 |
 | NF07 保持・保全（`PRIVACY_RETENTION_ENABLED`） | 決定ID束縛 D-01・D-09。hold開始の開放は、D-05 ownerの受理事項（§4.4末尾）と合わせる。<br>**解除の開放は、D-03・D-05 の署名だけでなく trust 文書（§4.6）が要る**（§4.5）。trust 文書を設定するまでは trust anchor registry が空で、失効 provider は常に UNKNOWN を返すため、解除の API は404のままである。<br>NF07-TRUST のうち方式に依存しない部分は実装済み（RB-NF07-REG）: 接続点 `PrivacyTrustSource`（REG・REL・説明照会が共用）、REL の P3-6（Journal の解除 event に claim の digest、監査に claim）・P3-8（Ed25519 以外の鍵を登録で拒否）・P3-9（失効 provider が ACTIVE と答えるまで入口を閉じる）・P3-10（partition の一致）。**D-03 の方式は AWS KMS 非対称署名・鍵 version 単位の失効に決定（2026-11-18。CRL/OCSP は使わない）。その adapter（`KmsPrivacyTrustSource`。trust 文書を判定のたびに読む）は RB-NF07-TRUST-KMS で実装済み（§4.6）。D-03 の署名は未取得**（方式は決まったが署名は無い）。verifier は Ed25519 だけを検証し、他の算法の鍵は anchor として扱わない。gate は有効期間外・授権 tenant の外の anchor を数えない。<br>開放の前に人が行うこと（全て**未取得・未実施**）: (a) D-03 の署名と `PRIVACY_APPROVAL_D03_*`。(b) KMS key（`ECC_NIST_EDWARDS25519`）の作成と key policy（`kms:Sign` を署名者だけに許す。Security・D-03 owner）。(c) trust 文書の置き場所は **EFS の volume、application は読取り専用で mount**（2026-11-18 利用者決定。task definition の雛形の mount は RB-DEPLOY）。残るのは、書込みの経路と権限（access point・IAM・security group）、Fargate の実際の mount option の確認と失効の反映の遅れ・EFS に届かないときに閉じるまでの時間の実測、更新の担当と周期、`PRIVACY_TRUST_KMS_MAX_DOCUMENT_AGE` の値（SRE・Security・D-03 owner。§4.6）。**EFS に届かないとき、trust は各判定で最長0.3秒しか待たず、最長でおよそ `PRIVACY_TRUST_KMS_RELOAD_INTERVAL` の2倍（既定で約60秒）で閉じる**（I/O を要求ごとに止めない修正は実装済み。delta review P2-A）。(d) staging で、実 KMS key の署名（policy の digest 声明と解除の claim）を application が検証できることの確認（KMS の Ed25519 の署名が 64 bytes の RFC 8032 の形であることを含む）。(e) 退役した鍵の公開鍵・ARN の保管と、KMS key の削除の方針。<br>あわせて D-05 owner が「holdを開放した後、D-03 の署名と trust 文書が揃うまで解除できない」ことを受理する（未取得）。<br>**policy の登録・有効化（NF07-REG。`POST /api/privacy/policies`・`/{id}/activate`）の開放は、D-01・D-02・D-03 の署名（D-02・D-03 は未取得）と trust 文書（§4.6）が要る**。解除と同じく、trust 文書を設定するまでは registry が空・失効 provider が常に UNKNOWN のため404のままで、決定IDだけを設定しても開かない。登録者と有効化者は別の privacy-admin（2名以上）。current より前に署名された revision への巻戻しは409（戻すには新しい revision として署名し直す。D-02 owner が別の運用を望む場合は再検討）。誤って登録した CANDIDATE は取り下げられる（`/{id}/withdraw`）。NF08 の外部送信はこの登録・有効化で対象 policy が `APPROVED_ACTIVE` になることを前提にする（計画 §8） | `feature-switches.md` 4.7・4.7.6、§4.4・§4.5 |
 | NF07 本人請求（`PRIVACY_DSAR_ENABLED`） | 決定ID束縛 D-01・D-06・D-09（D-06 は DSAR SOP）と計画 §5.1 の追加前提（NF07-A2b で起動時の実検査に置換）: `privacy.dsar.due-days`（`PRIVACY_DSAR_DUE_DAYS`、1〜366）と `privacy.dsar.package-max-age`（`PRIVACY_DSAR_PACKAGE_MAX_AGE`、1時間〜366日）を D-06 の署名値で設定し、F2 provider を1件以上登録する（欠ければ `dsar.dueDaysUnset` / `dsar.packageMaxAgeUnset` / `dsar.providersUnregistered` で起動しない）。あわせて D-05 受理事項の (8)・(9) を D-06 owner と受理する。(8): D14 の開示 package は hold で止めず、system は `package-max-age` を超えて内容を残さない（内容 hash と交付記録だけを残す。内容を残すなら交付の時点で system の外の保全手続で保管する）。(9): D15 の uploads の旧版には DSAR の削除と保持期限の purge が届かない（§4.4 の D15）。<br>さらに次も要る（**いずれも未取得**。人が行う確認・受理で、実装では代えられない）。<br>(a) SELF 交付区分の確認（D-06 owner。F2 r4 P3-I）: WORK_REPORT・RECEIPT は第三者の情報を含み得る。**未取得**。<br>(b) 「承認者は承認の前に草案の全内容を取得できる」という不変条件の Privacy の受理。不変条件は計画 §1 の I-10 に記載済み（RB-NF07-HOLD）。**受理は未取得**。<br>(c) `feature-switches.md` 4.7.2 の人手確認 (a)(c) を行う。(a) は起動時の INFO log `DSARの設定値（D-06 の決定書と照合する）` の `dueDays`・`packageMaxAge` を D-06 の決定書と人が照合する（この2値は approval digest に入らない。digest に入れる v2 正規形の案は計画 §3.5.2 にあるが、決定書の digest の手順が変わるため未実装）。(c) は D-06 の redaction 規則を、承認者による承認前の確認が使える状態にしてから設定する。**未取得**。<br>`POST /resolution` の応答の警告（HYG-FINAL P3-F の残り）は実装済み（RB-NF07-HOLD）: 本人が HELD で結果が削除・利用停止なら、応答の `holdConflict` と画面の警告 toast で知らせる（記録は止めない）。<br>性能の残り（開放の条件ではない。後続の backlog）: 開示 package の孤児の照会（`PrivacyExportPackageMapper.selectOrphanFiles`、毎時 :15）は `t_file_security_metadata` の全表走査のまま（`file_kind` に索引が無く、消すには DDL が要る。HYG-FINAL P3-D の残り） | `feature-switches.md` 4.7.2 の #5 と人手確認、計画 §1 I-10、§4.4（D14 と受理事項） |
@@ -600,7 +654,7 @@ W1-B1 で「書面での受理が要る」とされた事項である（FINAL re
 NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規則を書くとしたもの。表単位のrestoreの禁止（RR-13）は §1.7 の SRE-6 にある。
 
 - **本番DBへ手作業の変更（DML・DDL）をしない（RR-10）**。NF01 の writer の閉包は guard test（Java・注釈SQL）で守っており、手動のSQLやDBの直接操作による変更は検出できない（認可epochが進まず、確認時の判定が古い前提のまま通り得る）。
-  - 例外は、本書が手順として書いたものだけ: §1.2 のアプリ account の password の rotation（`ALTER USER … RETAIN CURRENT PASSWORD` / `DISCARD OLD PASSWORD`）、§3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の各手順（侵害の疑い、TOTP の喪失、break-glass 保持者の交代、`admin` の lock 解除）。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（password・hash 等の値は残さない。password を含む文は値を `<...>` に置き換えて残す）。
+  - 例外は、本書が手順として書いたものだけ: §1.2 のアプリ account の password の rotation（`ALTER USER … RETAIN CURRENT PASSWORD` / `DISCARD OLD PASSWORD`）、§3.5・§6 の初回導入の失敗時に schema を作り直すこと、§3.6 の Journal の作り直し、§4.5 の hold の開始者の書換え（D-05 owner の承認）、§5.1 の初期パスワード紛失時の `UPDATE`、§5.8 の各手順（侵害の疑い、TOTP の喪失、break-glass 保持者の交代、`admin` の lock 解除）、§3.4 の backup account への表単位の GRANT（restore で新しい source にした後の付け直しを含む）、§4.7 の backup の書込み静止の保持（静止要求）の手での終了と停止口の行の片付けの2つの SQL（RB-QUIESCE。backup-write-quiesce design.md §9.4。信号表は業務データでも認可 epoch の対象でもなく、NF01 の writer の閉包に関わらない）。どれも DBA が行い、general log を無効にした接続で実行し、実行した文と結果を配備記録に残す（password・hash 等の値は残さない。password を含む文は値を `<...>` に置き換えて残す）。
   - 参照（SELECT）は本書の確認SQLの範囲で行ってよい。
   - 画面・API（監査が残る）で直せないデータの誤りは、手で直さずに Owner と DBA へ上げる。
 - **権限に関わる設定を変える配備では、未確認の二者確認の提出を差し戻す（RR-2）**。`ORGANIZATION_SCOPE_ENABLED`（`organization.scope.enabled`）や機能スイッチ等の property の変更は認可epochを進めない。確認時の再評価で拒否側には効くが、2回の配備をまたいで元へ戻る変更（例: ある配備で外し、次の配備で戻す）は検出しない。
@@ -617,14 +671,33 @@ NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規�
 
 初回導入では稼働中のinstanceは無い。§2.1〜§2.3は2回目以降のreleaseの手順で、初回は「アプリinstanceが1台も起動していないこと」の確認だけを行う。
 
+0. **backup の定期起動を止める**（RB-QUIESCE。U-5。backup-write-quiesce design.md §8・§11）: backup host の checkpoint（15分ごと）と full（02:00）の定期起動を止め（止め方は §1.7 の 004a の inventory で決めたもの）、実行中の job が終わったことを確かめる（`ops/backup/image/tool-image.sh compose ps` に `checkpoint`・`backup` の container が無いこと）。binlog の archive（`binlog`）は止めない。止めた時刻を配備記録に残し、§4.7 で再開するまでの checkpoint の停止による RPO の alert（`check-backup.sh` の checkpoint 30分超）は計画停止として抑止する。初回導入では、定期起動がまだ動いていないことを確かめる。
+   - 理由: backup の静止と Flyway job（§3）の DDL を重ねない。Flyway job は backup の保持 process と同じ DDL 凍結の lock（`ses_backup_ddl_freeze`）を取るため、止め忘れても DDL と静止は重ならない（job が最長120秒待つか、取れずに1件も適用せずに失敗する。§3.5）が、止めてから進める。DBA の手作業の DDL も同じ lock を先に取る（§3.5）。
+   - ONLINE の checkpoint・full の最中に app を止めると、その回は VALID にならない（必要な instance が0になる）。job の終わりを待ってから 1 へ進む。
 1. LB/ingressを保守表示にし、新しいrequestを止める。
 2. **scheduler drain**: 全instanceを `APP_SCHEDULING_ENABLED=false`（`app.scheduling.enabled=false`）で再起動し、`@Scheduled` を止める。定期管理レポートの実行中leaseが無いことを `scheduler-claim-fence-plan.md` §10.3 のQ1で確認する（0件、または全件がlease期限30分を超過）。手動でclearしない。drain 用の task definition は `-Phase Steady -Scheduler Disabled` で照合し（§4）、release の後に常態へ戻す revision は、scheduler を有効化した後（§4）なら `-Scheduler Enabled` で照合する（戻し忘れると中核jobが黙って止まる）。
-3. 全instanceを停止する（SIGTERM。`server.shutdown: graceful` で処理中requestを排水してから終了する）。
+3. 全instanceを停止する（SIGTERM。`server.shutdown: graceful` で処理中requestを排水してから終了する）。graceful の停止では、業務の接続 pool を閉じた後に信号表の instance の行が `STOPPED` になる（RB-QUIESCE。停止の時の排水が10秒で終わらなければ `STOPPED` を書かず WARN `errorCode=BACKUP_QUIESCE_STOP_UNCONFIRMED` を出す。`stopTimeout` の内に終わらず SIGKILL された場合も `STOPPED` にならない）。
 4. DBへのアプリ接続が0件であることを確認する。
    ```sql
    SELECT COUNT(*) FROM information_schema.processlist WHERE user = '<アプリaccount>';  -- 0
    ```
-5. 2回目以降のreleaseではbackupを取得する（full dumpまたはPITR基準点。`ops/backup/runbooks/`）。初回は§3完了直後に取得する（前提は §1.7 の「Backup 開始の前提」: `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新versionにし、production 固有値の BLOCKED を解除してから取る）。
+   2回目以降の release では、信号表の instance の行も確かめる（RB-QUIESCE。5 の `--app-stopped` の判定と同じ。参照だけ）。
+   ```sql
+   SELECT instance_id, status, gate_state, TIMESTAMPDIFF(SECOND, last_beat_at, UTC_TIMESTAMP(6)) AS beat_age_seconds
+     FROM sys_backup_quiesce_instance WHERE status <> 'STOPPED';
+   -- 期待は0行（全て STOPPED）。行がある場合は beat_age_seconds が 300 を超えるまで待つ
+   ```
+   - `STOPPED` にならずに止まった instance（SIGKILL・task の喪失・3 の `BACKUP_QUIESCE_STOP_UNCONFIRMED`）の行が残ると、5 は最後の heartbeat から `QUIESCE_DEAD_SECONDS`（300秒）の間「停止していない app の instance があります」で失敗する。300秒を待ってから 5 へ進む（backup-write-quiesce design.md L-19）。
+   - `gate_state = 'DISABLED'` の行（停止口で動いていた instance）は待っても外れない。§4.7 の「停止口の行の片付け」を行う。
+5. **backup を取る**。2回目以降の release は §3 の前、初回は §3 の完了直後（§3.4 の表単位の GRANT の後、§4 の前）。どちらも app の停止を DB の信号表で確かめる full（RB-QUIESCE。provider `quiesce-app-stopped`。backup-write-quiesce design.md §9）で取る。
+   ```bash
+   ops/backup/image/tool-image.sh compose run --rm backup --app-stopped
+   ```
+   - 前提: 0〜4 が済んでいること（アプリ接続0件と instance の行）。§1.7 の「Backup 開始の前提」（production 固有値の BLOCKED の解除。`.env.backup` の `FLYWAY_VERSION` は、初回は §3.4 の最新 version、2回目以降は §3 の前なので今の version のまま）。backup account の要求の表への表単位の `INSERT`・`UPDATE`（初回は §3.4 で付ける。2回目以降は付いたままで、full の前に `ops/backup/image/tool-image.sh compose run --rm preflight` を実行し、`checks.quiesce` の `status: "ok"`・`request_table_grant: true` で確かめる。restore の後は付け直す。full も始めに同じ preflight を実行し、不合格なら始めない）。
+   - `--app-stopped` は明示の引数でだけ選ぶ（`.env.backup` の `QUIESCE_PROVIDER` は `quiesce-db` のまま。`QUIESCE_PROVIDER=quiesce-app-stopped` を環境変数で渡すと job は始まらない）。定期の full・checkpoint には付けない。
+   - 成功の確認: 結果の JSON（job の stdout）の `status: "VALID"`・`quiesce.provider: "quiesce-app-stopped"`・`quiesce.mode: "APP_STOPPED"`・`quiesce.request_id` を配備記録に残す（`quiesce.json` の全体は貼らない。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」）。
+   - 失敗した場合: 「停止していない app の instance があります」は 4 の instance の行（300秒の待ち）、「停止口…の instance の行があります」は §4.7 の片付け、「他の静止要求が有効です」は残った要求（§4.7 の確認の SQL。backup の job が落ちた後なら lease の60秒で切れる）を確かめる。「DDL 凍結の lock（ses_backup_ddl_freeze）を取得できません」は、Flyway job（§3）・DBA の DDL・他の backup の job が lock を持っていないかを確かめる。
+   - **この full が終わるまで app を起動しない**: 保持の間に起動した app は port を開く前に `errorCode=BACKUP_QUIESCE_STARTUP_ABORT`（「app の停止を確かめる backup（APP_STOPPED、要求の番号 …）の保持中です」）で起動を中止する（ECS が起動し直す。§4.7）。
    - 初回の backup の前に、uploads の目録（§1.6 の11 の (d)・(f)）ができていることを backup の host で確かめる。`current` が symlink で、指す先が単段の名前で、その名前の実体の directory（symlink でない）があること。
      ```bash
      test -L /mnt/ses-files/uploads/current && readlink /mnt/ses-files/uploads/current   # 期待: v0（「/」と「..」を含まない名前）
@@ -633,7 +706,7 @@ NF01細粒度epoch計画 §9 の残留リスクのうち、配備runbookに規�
      test -d /mnt/ses-files/backup-staging
      ```
      （path は `ops/backup/docker-compose.yml` が bind する固定の path。`readlink` に `-f` を付けない。同じ確認は `ops/backup/uploads-cutover.sh status --root /mnt/ses-files/uploads` でもでき、期待は rc 0・`target=v0`、`leftover=` と `error=` が無いこと。読むだけ）
-   - 続けて backup の host で `ops/backup/image/tool-image.sh compose run --rm preflight` を実行し、0 で終わり、JSON の `checks.uploads` が `status: "ok"`・`version: "v0"`・`staging_same_filesystem: true` であることを配備記録に残す（§1.6 の11 (d) の SRE の確認。§1.7 の「Backup 開始の前提」の 001 と同じ出力）。
+   - 続けて backup の host で `ops/backup/image/tool-image.sh compose run --rm preflight` を実行し、0 で終わり、JSON の `checks.uploads` が `status: "ok"`・`version: "v0"`・`staging_same_filesystem: true` であることを配備記録に残す（§1.6 の11 (d) の SRE の確認。§1.7 の「Backup 開始の前提」の 001 と同じ出力）。同じ出力の `checks.quiesce` が `provider: "quiesce-db"`・`status: "ok"`・`signal_tables: 3`・`request_table_grant: true` であることも残す（RB-QUIESCE。初回は §3.4 の GRANT の後に実行する。V202 の前・GRANT の前は exit 19）。
 
 - 権限に関わる設定（`ORGANIZATION_SCOPE_ENABLED`・機能スイッチ等）を変える release では、4の後（アプリ接続0件）、§3 の前に §1.8 の RR-2 の1を行い、配備の後に2を行う。
 
@@ -663,8 +736,10 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V201（versioned 200件。SQL 199件＋Java migration `V74_3` 1件。V199 は欠番）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
-- callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
+- 実行順: V1〜V202（versioned 201件。SQL 200件＋Java migration `V74_3` 1件。V199 は欠番）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `ProductionBackupDdlFreezeFlywayCallback`（backup の DDL 凍結の lock）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
+- **backup の DDL 凍結の lock（RB-QUIESCE BWQ-008。U-5）**: migrate（と repair）の前に、job は専用の DB 接続で `SELECT GET_LOCK('ses_backup_ddl_freeze', 120)` を実行し、backup の保持 process が同じ lock を持っていれば最長 120 秒待つ。取れなければ `backup が実行中のため migration を始めません（ses_backup_ddl_freeze）` で始まる message で失敗し、migration は1件も適用しない（§3.5）。lock は job の終わり（成功と migration の失敗のどちらでも）で返し、job の process が落ちた場合は MySQL が返す。待ち時間はコードの定数で、環境変数では変えない。§2 の0 で backup の定期起動を止め、実行中の job の終わりを確かめていれば待たずに取れる。2回目以降の release では §2 の5 の full（`--app-stopped`）が終わった後に job を始める（full の保持 process が lock を持つ間は job が待つ）。
+- 注意: Flyway は履歴表（`flyway_schema_history`）が無い DB では、migrate の前（lock を取る前）に履歴表を作る。これは初回の空の DB だけで起き、業務の表には触れない。
 
 ### 3.4 適用結果の確認（DBA立会い）
 
@@ -680,9 +755,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '201'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '202'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 200
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 201
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -784,6 +859,17 @@ SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schem
 SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
    AND table_name = 't_document_version' AND index_name = 'idx_dv_storage_key'
    AND column_name = 'storage_key' AND non_unique = 1;                                         -- 1
+-- backup の書込み静止の信号表（V202）: 3表があり空で、有効枠 active_slot は STORED の生成列で一意索引を持つ
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
+ ('sys_backup_quiesce_request', 'sys_backup_quiesce_instance', 'sys_backup_quiesce_ack');   -- 3
+SELECT (SELECT COUNT(*) FROM sys_backup_quiesce_request) + (SELECT COUNT(*) FROM sys_backup_quiesce_instance)
+     + (SELECT COUNT(*) FROM sys_backup_quiesce_ack);                                         -- 0
+SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE()
+   AND table_name = 'sys_backup_quiesce_request' AND column_name = 'active_slot'
+   AND extra LIKE '%STORED GENERATED%';                                                        -- 1
+SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
+   AND table_name = 'sys_backup_quiesce_request' AND index_name = 'uk_bq_request_active'
+   AND column_name = 'active_slot' AND non_unique = 0;                                         -- 1
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
@@ -794,9 +880,19 @@ SELECT event_object_table, COUNT(*) FROM information_schema.triggers WHERE trigg
 ```
 
 - `R__remove_v2_sample_data.sql` は「本scriptの成功履歴が無い」かつ「sample 5表がV2の行だけ」のときだけ削除する。条件を満たさない場合は何も削除せず成功扱いになるため、上の件数が0でなければ実データ混入の可能性として停止し、DBAと調査する（手作業で消さない）。
+- **backup account への表単位の GRANT**（RB-QUIESCE。U-11。§1.2）: 初回は、上の確認が全て期待値になった後、§2 の5 の初回 backup の前に、DBA が管理用の account で付ける（general log を無効にした接続で行い、実行した文と結果を配備記録に残す。§1.8 の RR-10 の例外）。V202 が表を作った後でなければ付けない（存在しない表への表単位の GRANT は通らない場合がある）。2回目以降の release では付いたままで、確かめるだけ（restore で新しい source にした後は付け直す。`ops/backup/runbooks/restore-cutover.md` §4.6）。
+  ```sql
+  GRANT INSERT, UPDATE ON ses_manager_db.sys_backup_quiesce_request TO '<backup account>'@'<host>';
+  SHOW GRANTS FOR '<backup account>'@'<host>';
+  -- §1.2 の schema 単位・global の行に加えて、sys_backup_quiesce_request への表単位の INSERT, UPDATE の行が1つある。
+  -- 他の表への INSERT・UPDATE・DELETE と PROCESS が無い
+  ```
+  続けて backup の host で `ops/backup/image/tool-image.sh compose run --rm preflight` を実行し、0 で終わり、JSON の `checks.quiesce` が `provider: "quiesce-db"`・`status: "ok"`・`signal_tables: 3`・`request_table_grant: true` であることを配備記録に残す（§2 の5 の preflight と同じ）。初回はこの後に §2 の5 の full を取る。
 
 ### 3.5 jobが失敗した場合
 
+- **backup の DDL 凍結の lock を取れずに失敗した場合**（`backup が実行中のため migration を始めません（ses_backup_ddl_freeze）`）: migration は1件も適用されていない（初回の空の DB では履歴表だけが空のまま在り得る）。backup の timer が止まり、実行中の backup job が終わったこと（`tool-image.sh compose ps`）を確かめてから §3.3 を再実行する。`flyway repair` は不要。`lock（ses_backup_ddl_freeze）を確かめられないため` で始まる message は DB の接続・権限の失敗で、接続を直してから再実行する。DBA の手作業の DDL も、同じ lock を先に取ってから行う（`SELECT GET_LOCK('ses_backup_ddl_freeze', 0);` が 1 を返すこと。backup-write-quiesce design.md §8）。
+- **migration は終わったが job の log に `errorCode=BACKUP_DDL_FREEZE_LOST`（`migration の途中で DDL 凍結の lock（ses_backup_ddl_freeze）が失われた可能性があります`）の WARN が出た場合**（RB-QUIESCE。2c review P3-1）: job の終わりの `RELEASE_LOCK` で lock を持ち続けていたと確かめられなかった（lock の接続が migration の途中で閉じられた等。job は lock の session の `wait_timeout` を 86400 秒にしているが、network の切断等では閉じ得る）。migration の結果は Flyway の出力のとおりで、job の失敗にはしない。(1) backup の timer が止まっていたこと（§2 の初め）と、job の開始から終了までの間に backup の job（checkpoint・full）が動いていないこと（backup host の job の記録と index の `consistency_time_utc`）を確かめる。(2) その間に VALID になった checkpoint・full があれば、DDL の途中の schema を写した可能性があるため、配備記録に「復元に使わない」と番号つきで残し、§4 の後に full を手で取り直す（`tool-image.sh compose run --rm backup`）。(3) DBA が DB の `wait_timeout`・接続の経路（idle の接続を切る中継が無いこと）を確かめる。
 - **hash検査・placeholder未設定で失敗した場合**: migrationは1件も実行されていない（履歴表は空、またはそもそも無い）。環境変数を直して§3.3を再実行する。`flyway repair` は不要。
 - **migrationの途中で失敗した場合（初回導入）**: MySQLのDDLはtransactionで戻らないため、失敗行（`success = 0`）と途中までのschemaが残る。初回は業務dataが無いので、`flyway repair` で続行せず、**DBAがschemaを削除して空で作り直し**、原因を直してから§3.3を最初からやり直す。`flyway clean` は使わない（設定で拒否している）。
 - **2回目以降のreleaseで失敗した場合**: §2.5で取得したbackupから戻すことを基本とする。`CLAUDE.md` のrepair手順はlocal開発DB向けであり、本番では許可済みscriptの確認・backup・DBA承認を経てだけ使う。
@@ -837,6 +933,7 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - 起動logの `Picked up JAVA_TOOL_OPTIONS: ...` で確認する。
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定タイムゾーンの `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定タイムゾーンで日時を作る箇所は他にもある。testは `argLine` でタイムゾーンを固定しているが、本番は配備側で固定しない限り固定されない。DB側のタイムゾーン（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する（task definition の雛形の値。`SchedulingConfig` は未設定を有効とみなすため、外すと scheduler が動く）。
+- **§2 の5 の full（`--app-stopped`）が終わってから起動する**（RB-QUIESCE）。保持の間に起動した app は port を開く前に `errorCode=BACKUP_QUIESCE_STARTUP_ABORT` で起動を中止する（§4.7）。`BACKUP_QUIESCE_ENABLED` は `true`（§1.0 の31。雛形の値）のまま起動する。
 - **起動の前に upload root の `current` を確かめる（初回は必須。restore の切替えの後も同じ）**。uploads の access point を mount した host（backup の host なら `/mnt/ses-files/uploads`）で `test -L <uploads>/current && readlink <uploads>/current` を実行し、symlink であって、指す先が単段の名前（`^[A-Za-z0-9][A-Za-z0-9._-]*$`。`/` と `..` を含まない。初回は `v0`）で、その名前の実体の directory（symlink でない）があることを確かめる（§1.6 の11 (f) の command、または `ops/backup/uploads-cutover.sh status --root <uploads>` が rc 0 で `target=<版>`、`leftover=` と `error=` が無いこと）。無い・実体の directory・絶対 path・`..` を含む・指す先が無い場合は起動しない。`current` が無いまま起動すると app が実体の directory として作り、pointer が黙って失われる（§1.6 の11 (f)）。restore の切替えの後は、あわせて DB と pointer が一対であること（`ops/backup/runbooks/restore-cutover.md` §4.5.1 の 7）を確かめてから app と scheduler を起動する。task definition の `UPLOAD_BASE_PATH=/app/uploads/current` は validator が見るが、EFS の中身は見ない。
 - **起動の前に、登録する task definition を照合する（SRE-10）**。`infra/ecs/offline/validate-task-definition.ps1` を実値の mode で実行し、0 で終わることを確かめる。証跡は既定で OS の一時 directory の下に作り、repository には書かない。証跡には設定の名前と期待した状態だけを書き、設定の値（ID・host・ARN 等）は書き写さない。`-EvidenceRoot` で配備記録の保管場所を指定する。PowerShell 7.5 以降か Windows PowerShell 5.1 で実行する（内蔵の負例自己検査は実行中と同じ PowerShell で子 process を起こすため、pwsh の無い 5.1 だけの環境でもそのまま動く。省くなら `-SkipInlineNegativeSelfTest`）。登録する JSON からは `_offlineAcceptanceNotes` を消しておく（ECS は未知の field を拒否し、実値の mode も FAIL にする）。
   ```powershell
@@ -857,10 +954,11 @@ NF07 の hold の正本となる独立 Journal インスタンス（schema `priv
   - `-D` は `-Duser.timezone` 以外を全て FAIL にする（設定は環境変数で渡す）。`-Dfile.encoding` 等の正当な JVM の設定が必要になったら、validator の許可を変える（変更は復審を経る）。
   - validator を変えたときは、`infra/ecs/offline/test-validate-task-definition.ps1` で規則ごとの正例・負例を pwsh と Windows PowerShell 5.1 の両方で流し、`0 mismatched` を確かめる（AWS・Docker 不要。CI では動かない）。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V201 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V202 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。UPであれば §1.0 の18 の鍵検査も通っている（検査に失敗した起動はUPにならずに停止する）。
+- **readiness が UP になった後、backup の書込み静止の instance の行を確かめ、backup を再開する**（RB-QUIESCE。§4.7 の1〜4）: instance の行（1行、`RUNNING`、heartbeat が10秒以内、`gate_state = 'OPEN'`）を確かめ、`.env.backup` の `FLYWAY_VERSION` を §3.4 の最新 version にしてから §2 の0 で止めた定期起動を再開し、再開後の最初の ONLINE の checkpoint が VALID になることを確かめて配備記録に残す（初回は §1.7 の 004b）。
 - schedulerは、Report Owner等の署名後に `APP_SCHEDULING_ENABLED=true` で再起動して有効化する。この task definition は `-Phase Steady -Scheduler Enabled` で照合し、以後の常態の revision も同じく照合する。
   - scheduler は file 清掃・契約更新・freee・消込等の中核jobと共用なので、有効化は通常運用の再開を意味する。
   - 履歴取込の清掃（02:00）は、文書台帳の副本を廃棄候補にする。ただし処分には管理者の承認と執行が要るため、V197 の署名事項は scheduler の有効化の前提にしない。
@@ -959,7 +1057,7 @@ SELECT d.tenant_id, d.id, d.status, d.retention_until FROM t_document d
  ORDER BY d.tenant_id, d.id;
 ```
 
-### 4.4 NF07 保全holdと破壊的経路（D1〜D15。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W）
+### 4.4 NF07 保全holdと破壊的経路（D1〜D16。NF07-A1H-2、D14 は NF07-A2b、D15 は RB-W、D16 は RB-QUIESCE）
 
 hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も使っていない間は、どの経路も従来どおり動き、増える照会は gate の1回だけである（journal の設定が無い prod でも同じ）。hold を使った tenant では、gate が Journal と一致を確かめられない（`UNAVAILABLE`）と、その tenant の gate 対象の削除が止まる。gate と経路は `privacy.retention.enabled` に依存しない（OFF に戻しても掛けた hold は守る）。plan §3.4.1・§3.4.3。
 
@@ -975,6 +1073,7 @@ hold 機構（`t_privacy_projection_state` に行がある tenant）を一度も
 | D10 | `FileCleanupService.cleanupOrphanFiles`（両 scheduler） | `PrivacyHoldFileReferenceProvider` が hold の対象の保存名を参照に足す | gate が UNAVAILABLE・catalog に行の無い element・保存先が表の列なのに解決できない element の場合は例外で清掃のその回を中止（1件も消さない）。実体が外部 service 側にある element は清掃を止めない（下の「外部にある実体」） |
 | D14 | DSAR の開示 package の削除（`PrivacyExportPackagePurgeScheduler` 毎時 :15、交付の記録、期限切れ草案の作り直し。NF07-A2b） | 接続しない（対象外。下の「D14」） | — |
 | D15 | uploads の旧版 directory（`v<n>`）と切替えの残り（`.stage-*`・`.<pointer>.switch-*`）の削除（人手。RB-W） | 接続しない（app の経路ではない。下の「D15」の手順で守る） | — |
+| D16 | backup の書込み静止の信号表の保存期間の削除（`BackupQuiesceResponder` が1日1回、有効な要求が無い時に `JdbcBackupQuiesceSignalRepository.purgeRequests`・`purgeInstances` で物理削除する。30日。U-12。RB-QUIESCE） | 接続しない（対象外。下の「D16」） | — |
 
 - **監視**: metric `ses.privacy.hold.path.skipped`（tag `path`＝D1〜D9、`verdict`＝`HELD`/`UNCLASSIFIED`/`UNAVAILABLE`）、`ses.privacy.hold.file.cleanup.aborted`（tag `stage`＝`gate`/`resolve`。D10 の中止）、`ses.privacy.hold.file.unprotectable`（tag `element`。D10 で守れない外部の実体）、gate の `ses.privacy.hold.gate.unavailable`。WARN `NF07_PRIVACY_HOLD_PATH_SKIPPED`（batch）・`NF07_PRIVACY_HOLD_PATH_REFUSED`（D1・D2）・`NF07_PRIVACY_HOLD_SUBJECTS_UNRESOLVED`・`NF07_PRIVACY_HOLD_FILE_CLEANUP_ABORTED`・`NF07_PRIVACY_HOLD_FILE_UNPROTECTABLE`。`UNAVAILABLE` が続くと期限超過の保持になるため、閾値と通報先は SRE が決める（plan §3.4.3 の7、UNKNOWN）。D7・D9 は1つの tenant の停止で全 tenant の kind が止まるため、`path=D7`・`path=D9` も監視に入れる。D10 の中止が続くと孤児清掃（PII を含む取込の一時 CSV・quarantine の失敗実体を含む）が全 tenant で止まるため、`ses.privacy.hold.file.cleanup.aborted` も同じく監視する。log に tenant・subject は出ない。
 - **app DB の照会が戻らないとき（RB-NF07-HOLD delta review D-P3-1）**: gate は application DB の `@@server_uuid` を照会する（query timeout 10秒、接続の network timeout 15秒）。これが戻らず上限を超えると、同じ transaction の中で gate を呼ぶ手動の経路（D1・D2 等）はその操作が接続切断のエラーで失敗として終わり、batch はその回が失敗する（UNAVAILABLE の通常の skip ではない。削除はしない）。続く場合は application DB への接続（half-open の TCP 等）を調べる。
@@ -1055,9 +1154,18 @@ held な本人・element の実体は、論理削除・却下・link の削除�
 - **保持**: 旧版は switch の後も消さずに残す（write-enable の前の rollback（逆向きの switch。`ops/backup/runbooks/restore-cutover.md` §4.5.1）の先であり、復旧点より後の実体の唯一の写しになり得る）。保持期間（いつまで残すか）は**未決定**（DBA・Privacy Owner の確認項）。決まるまで旧版は消さない。
 - **hold**: hold を使った tenant（`t_privacy_projection_state` に行がある tenant）があるときは、旧版を消す前に privacy-admin が、有効な hold の対象の実体が旧版に無いこと（または有効な hold が無いこと）を確かめる。確かめ方（照会と記録の形）は D-05 owner が決める（**未決定**）。確かめられない間は消さない（fail-closed）。
 - **DSAR・保持期間の purge との関係**: 旧版は孤児清掃（D10。`current` が指す版だけを見る）・保持期間の purge（D3〜D7）・DSAR の削除の範囲の外にある。旧版に残る個人データは保持期間を過ぎても自動では消えず、DSAR の削除も届かない。保持期間を過ぎた旧版を D15 で消すこと、DSAR の削除の範囲に旧版を含めるかは、D-05・D-06 owner の受理が要る（**未取得**）。
-- **`database-backup-recovery/design.md:272`「旧 version は retention 期限まで read-only で保持」**: read-only 化も retention の期限も実装していない（`uploads-cutover.sh` は mode を変えず、旧版は restore 主体と app の uid で書ける）。app は `current` が指す版だけを使うため、app が旧版へ書くことはない。運用では、保持期間の間は旧版を変更も削除もせず、削除は D15 の確認を経る。read-only 化（書込みの mode を外す等）を行うかは DBA・Privacy Owner の確認項（**未決定**）。
+- **`database-backup-recovery/design.md` §10「旧 version は retention 期限まで read-only で保持」**: read-only 化も retention の期限も実装していない（`uploads-cutover.sh` は mode を変えず、旧版は restore 主体と app の uid で書ける）。app は `current` が指す版だけを使うため、app が旧版へ書くことはない。運用では、保持期間の間は旧版を変更も削除もせず、削除は D15 の確認を経る。read-only 化（書込みの mode を外す等）を行うかは DBA・Privacy Owner の確認項（**未決定**）。
 - **残り（`.stage-*`・`.<pointer>.switch-*`）**: 中身は restore の staging（`uploads_ready`）の写しか版を指す symlink で、唯一の写しではない（restic の repository と restore の staging に同じものがある）。`status` で確かめ、作った change の中で restore 主体が消してよい。
 - **記録**: 消した版・残りの名前、日時、確かめた者（hold の確認を含む）、消す前後の `status` の出力を change ticket と配備記録に残す。
+
+**D16: backup の書込み静止の信号表の保存期間の削除（RB-QUIESCE。gate に接続しない＝対象外）**
+
+`privacy-retention-dsar/pii-inventory.md` の DB-148〜DB-150 に登録した3表（`sys_backup_quiesce_request`・`sys_backup_quiesce_instance`・`sys_backup_quiesce_ack`）の、app による保存期間の削除である。`PrivacyHoldPathGuard` に接続しない理由は次のとおり（backup-write-quiesce design.md §3.9）。
+
+1. **hold の対象になり得る data subject が無い。** 3表は backup の静止要求・app の instance（JVM の起動ごとの UUID）・その応答の記録で、利用者・要員・顧客の誰にも結び付かない（tenant 列も本人の ID も持たない。同 §3.4）。catalog（`m_pii_data_element`）にも data element を置かない（同 §3.9）ため、subject の hold・DATA_ELEMENT の hold のどちらも当たらない。
+2. **個人データを持たない。内容も最小化してある。** 持つのは app の container の host 名・DB から見た接続元の IP・job 名・時刻・状態だけで、`requested_by` は job 名と backup host の形式（`^[A-Za-z0-9._:-]{1,64}$`。個人名を書かない）だけを受け付ける。backup の job が残す記録（restic・index の metadata）も、instance の ID と件数だけに絞った（2d review P3-4。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」）。ただし最小化したのは metadata だけで、DB の full の dump と binlog には信号表の行そのもの（`host_name`・`db_client_host`・`observed_app_hosts`・`request_token` を含む。保存期間の分）が入り、backup の保存期間まで残る（個人データではない。restore-cutover.md §4.6 はこれを前提にする）。
+3. **削除の範囲は保存期間の古い行だけ。** 保存期間（既定 30日。U-12。§1.0 の41 の `BACKUP_QUIESCE_RETENTION` で 1〜365日）より古い解除済み（RELEASED・ABORTED・EXPIRED）の要求（応答の行は CASCADE）と、`last_beat_at` が保存期間より古い instance だけを消し、有効な要求がある間は消さない。停止口で動いていた行（`gate_state = 'DISABLED'` かつ `STOPPED` でない）は古さによらず消さない（§4.7 の片付けまで backup を失敗させ続ける行のため）。消した件数は INFO の log に出す。
+4. **手作業の変更は別。** §4.7 の停止口の行の片付けは行を `STOPPED` にする UPDATE で、行を消さない（§1.8 の RR-10 の例外）。
 
 **D-05 owner の受理事項（A1H-2。hold 開始の開放の署名と合わせて受理する）**: (1) 原本と副本の DATA_ELEMENT hold は別 element（上の「DATA_ELEMENT hold の対」）、(2) 外部にある実体は D10 の範囲外（上の「外部にある実体」）、(3) D7・D9 は1つの tenant の停止で全 tenant の kind を止める（過剰停止）、(4) D1 の READ_COMMITTED による最初の hold との順序の窓と、D1・D2 の本人の導出が文書行の lock より前であること（plan §3.4 A1H-2 実装記録の残余）、(5) 帰属できない element の行は SUBJECT hold で守られない（plan §3.4.3 規則6）、(6) D13 の PWA の台帳と freee の従業員対応の物理削除（上の表）、(7) 参照元の行が物理削除された実体は D10 で守れない（D11、plan §9 R-15）、(8) D14 の開示 package は hold で止めない（NF07-A2b。D-06 owner と合わせて受理する）。本人請求そのものが争いになり、交付した内容が証拠になる場合でも、system は `package-max-age` を超えて内容を残さず、内容 hash と交付記録だけを残す。内容を残すなら、交付の時点で system の外の保全手続で保管する。(9) D15 の uploads の旧版（`v<n>`・`.stage-*`・`.current.switch-*`）の人による削除は gate に接続しない（上の D15）。保持期間、hold の対象が旧版に無いことの確かめ方、read-only 化は未決定で、DSAR の削除と保持期限の purge が旧版に届かないことは D-06 owner と合わせて受理する（**未取得**）。
 
@@ -1236,9 +1344,84 @@ aws kms sign --key-id <key の ARN> --message fileb://claim.bin --message-type R
 
 **鮮度**: 内容が変わらなくても、鮮度の上限の内に `generatedAt` を更新した文書を置き直す。更新が止まると失効状態は UNKNOWN になり、入口は閉じる（失効を確かめられない状態として扱う）。更新の担当と周期は D-03 で決める（**未決**）。
 
+### 4.7 backup の書込み静止の確認・backup の再開・障害の切分け（RB-QUIESCE）
+
+設計は `.kiro/specs/backup-write-quiesce/design.md`。app は起動ごとに信号表 `sys_backup_quiesce_instance` に1行を登録し（instance ID は起動ごとの UUID）、5秒ごとに heartbeat を書き、静止要求（`sys_backup_quiesce_request`）を1秒ごとに読む。backup の provider は要求を登録し、全ての instance の応答（`sys_backup_quiesce_ack`）を確かめてから整合点を取る。本節の SELECT は参照だけで、アプリ account・backup account の schema 単位の `SELECT` でも読める（processlist を見る SQL だけは PROCESS を持つ管理用の account で行う）。信号表の時刻の列は全て UTC で、比べるときは `UTC_TIMESTAMP(6)` を使う（`NOW()` は server の `+09:00` の時刻で、9時間ずれる）。
+
+**利用者への影響**（伝え方は §1.7 の 004a で決める）: 静止の間（15分ごとの checkpoint は通常数秒・最長300秒。02:00 の full は排水が最長600秒、静止が最長60分）、更新の要求（画面・API の保存、login の送信、download、bootstrap・break-glass の session の要求）は 503 になる（画面は統一エラーページ、API は `X-SES-Error-Code: BACKUP_QUIESCED` と `Retry-After`）。参照（一覧・詳細の GET）と logout は続き、customer portal の参照も続く（portal の logout と更新は 503）。PWA の送信が 503 の後に queue に残り解除の後に送られることは、backup-write-quiesce tasks の BWQ-005 の Demo で確かめる（**未取得**）。
+
+**起動の後の確認と backup の再開**（初回・以後の release とも。§4 の readiness が UP になった後）
+
+1. instance の行を確かめる。
+   ```sql
+   SELECT instance_id, status, gate_state, scheduling_enabled,
+          TIMESTAMPDIFF(SECOND, last_beat_at, UTC_TIMESTAMP(6)) AS beat_age_seconds
+     FROM sys_backup_quiesce_instance WHERE status <> 'STOPPED';
+   -- beat_age_seconds が10以下の行が1行（SRE-5）。その行は status = 'RUNNING'、gate_state = 'OPEN'、
+   -- scheduling_enabled が task definition の APP_SCHEDULING_ENABLED と同じ（初回は 0）
+   SELECT COUNT(*) FROM sys_backup_quiesce_request WHERE status = 'REQUESTED';   -- 0
+   ```
+   `gate_state` が `DISABLED` なら停止口で起動している（§1.0 の「停止口の使い方」。backup は全て失敗する）。heartbeat の新しい行が2行以上なら task が重なっている（SRE-5 の (b) を確かめる）。heartbeat の古い前の task の行（§2 の4）は、300秒を過ぎれば backup は無視する。
+2. `.env.backup` の `FLYWAY_VERSION` を §3.4 の最新 version にする（§1.7 の「Backup 開始の前提」。初回は §2 の5 の前に済んでいる）。
+3. §2 の0 で止めた定期起動（15分ごとの checkpoint と 02:00 の full）を再開し、§2 の0 で抑止した RPO の alert を戻す。再開した時刻を配備記録に残す。
+4. 再開後の最初の checkpoint（`quiesce-db`。ONLINE）が VALID になることを確かめる。定期起動を待つか、`ops/backup/image/tool-image.sh compose run --rm checkpoint` を1回流す。
+   - job の結果の JSON（stdout）: `status: "VALID"`、`quiesce.provider: "quiesce-db"`、`quiesce.mode: "ONLINE"`、`quiesce.verified_at_utc` が null でない、`quiesce.window_seconds`（静止区間の秒数。`QUIESCE_WINDOW_WARN_SECONDS` の既定60秒を超えると job が WARN を出す）。
+   - app の log: 同じ要求の番号で `errorCode=BACKUP_QUIESCE_REQUESTED`・`BACKUP_QUIESCE_ACKED`・`BACKUP_QUIESCE_RESUMED` が1行ずつ出る。
+   - 配備記録に checkpoint の `consistency_time_utc`・`restic_snapshot_id`・`quiesce.request_id`・`quiesce.window_seconds` を残す（`quiesce.json` の全体は貼らない。`ops/backup/README.md`「書込み静止の記録（quiesce.json）」）。初回はこれが §1.7 の 004b の記録で、揃うまで本番の RPO 15分の達成を宣言しない。
+   - VALID にならなければ下の障害の切分けと `ops/backup/runbooks/backup-health-monitoring.md` に従う。定期起動は止めなくてよい（次の checkpoint が VALID になれば RPO の判定は戻る）。
+
+**障害の切分け**（log は固定の `errorCode=`。alert の条件と backup の側の対応は `ops/backup/runbooks/backup-health-monitoring.md`）
+
+- **起動が `errorCode=BACKUP_QUIESCE_STARTUP_ABORT`（ERROR）で止まる**（port を開く前。ECS が task を起動し直す）。message で分ける。
+  - 「app の停止を確かめる backup（APP_STOPPED、要求の番号 …）の保持中です」: §2 の5 の `--app-stopped` の job がまだ動いている。backup の host で job の終わり（`tool-image.sh compose ps`）を待つ。job が落ちても保持は lease（60秒）で切れ、次の起動は通る。
+  - 「最長 … 秒待っても backup の静止が解除されません」: ONLINE の静止の最中に起動し、`BACKUP_QUIESCE_STARTUP_WAIT_MAX`（既定60秒）の内に解除されなかった（先に WARN `errorCode=BACKUP_QUIESCE_STARTUP_WAIT` が出る）。checkpoint の静止は通常数秒で解ける。ONLINE の full の最中に起動した instance では provider がその full を中止して静止を解く（U-13。WARN `BACKUP_QUIESCE_FULL_ABORTED`。その日の full は欠け、`ops/backup/runbooks/backup-health-monitoring.md` の「WARN: full の中止（取り直し）」で取り直す）ため、通常は待ちの内に解ける。解けない場合は下の SQL で要求を確かめる。
+  - 「最初の heartbeat（instance の登録）を書けません: 信号表（V202 の sys_backup_quiesce_instance 等）がありません」: V202 が適用されていない。§3.4 の結果と、起動時 schema guard の log を確かめる。
+  - 「有効な静止要求を読めません」と、信号表がある場合の「最初の heartbeat（instance の登録）を書けません」: 制御用・heartbeat 用の接続（アプリ account・`DB_URL`・DB への到達）を確かめる。
+  - 静止要求の確認:
+    ```sql
+    SELECT id, mode, job_kind, status, requested_by, requested_at, lease_expires_at, UTC_TIMESTAMP(6) AS now_utc
+      FROM sys_backup_quiesce_request WHERE status = 'REQUESTED';
+    -- 有効な要求は同時に1件だけ。lease_expires_at が now_utc より前なら期限切れ（app は無効として扱い、次の provider が EXPIRED にする）。
+    -- requested_by は job 名と backup host（個人名を含まない）
+    ```
+- **起動が `[backup quiesce] 起動を中止します:` の例外で止まる**（prod の起動時検査 `BackupQuiesceProductionValidator`。instance の登録の前）: message の項目（停止口の ticket が無い・形式が違う、`readOnlyPropagatesToServer` が有効でない）を §1.0 の1・31・32 に従って直す。
+- **`errorCode=BACKUP_QUIESCE_FENCED`（ERROR）**: app が heartbeat を `BACKUP_QUIESCE_FENCE_AFTER`（既定20秒）の間書けず、自分で更新を止めた（更新の要求は 503、参照は続く）。制御用・heartbeat 用の接続 pool（`ses-backup-quiesce-control`・`ses-backup-quiesce-heartbeat`。アプリ account）、DB への到達、`max_connections`、アプリ account の lock を確かめる。heartbeat を書けるようになれば WARN `errorCode=BACKUP_QUIESCE_UNFENCED` を出して自動で戻る。戻らなければ DB 側を直してから task を起動し直す。
+- **`errorCode=BACKUP_QUIESCE_DISABLED`（ERROR）・`gate_state = 'DISABLED'`**: 停止口（§1.0 の「停止口の使い方」）で起動している。承認済みの ticket が配備記録にあることを確かめる。停止口の間は backup が全て失敗する。
+- **`errorCode=BACKUP_QUIESCE_STOPPED_HOLD_SEEN`（ERROR）**: 動いている instance が `--app-stopped` の保持を読み、更新を止めた（参照は続く）。app を止めずに `--app-stopped` の backup を流した手順の誤りで、その backup は VALID にならない。backup の host のその job を止める。保持が解かれると（job の終わり、または lease の60秒）app は自動で更新を再開する。
+- **`errorCode=BACKUP_QUIESCE_AUTO_RESUMED`（ERROR）・`BACKUP_QUIESCE_REFUSED`（WARN）・`BACKUP_QUIESCE_FULL_ABORTED`（WARN）**: その回の backup は VALID にならない。**`BACKUP_QUIESCE_ACK_UNKNOWN`（WARN）**: 応答の書込みの結果が不明で、app は閉じたまま確かめている（その回の成否は backup の job の結果で決まる）。どれも `backup-health-monitoring.md` の対応に従う。
+- **停止口を戻した後も、backup が「停止口（BACKUP_QUIESCE_ENABLED=false）で動いている、または異常に止まった停止口の instance の行があります」で失敗し続ける**: 異常に止まった停止口の行が残っている（下の片付け）。
+
+**本書が手順として書いた手作業の変更**（§1.8 の RR-10 の例外。DBA が管理用の account で、general log を無効にした接続で行い、実行した文と変わった行数を配備記録に残す）
+
+- **保持（静止要求）を手で終わらせる**（design §9.4）: backup の host や job が落ちても保持は lease（60秒）で切れるため、通常は要らない。要求の lease の延長が続いているのに backup の host にその job が見当たらない等、要求が解かれずに app の起動・更新が止まり続ける場合だけ、上の SQL で番号を確かめてから行う。
+  ```sql
+  UPDATE sys_backup_quiesce_request
+     SET status = 'ABORTED', released_at = UTC_TIMESTAMP(6), release_reason = 'ABORTED'
+   WHERE id = <番号> AND status = 'REQUESTED';
+  -- 1行だけが変わること（0行なら既に解かれている）
+  ```
+  app は要求の消失を読んで再開する（ERROR `errorCode=BACKUP_QUIESCE_AUTO_RESUMED`、理由 `REQUEST_GONE`）。その回の backup は verify で失敗し、VALID にならない。
+- **停止口の行の片付け**（design §9.4・L-18）: 停止口で動いていた app が SIGKILL・task の喪失等で異常に止まり、行が `STOPPED` にならずに残ると、heartbeat の古さによらず全ての backup が失敗し続ける（停止口を外して app を起動し直した後も同じ）。次の2つを確かめてから、その行だけを `STOPPED` にする。
+  1. ECS で、その行の task が止まっていること（クラウドの管理画面／CLI。task の接続元の IP は行の `db_client_host`）。
+  2. PROCESS を持つ管理用の account で、その接続元からのアプリ account の接続が0件であること。
+  ```sql
+  SELECT instance_id, db_client_host, status, gate_state, last_beat_at
+    FROM sys_backup_quiesce_instance WHERE gate_state = 'DISABLED' AND status <> 'STOPPED';
+  SELECT COUNT(*) FROM information_schema.processlist
+   WHERE user = '<アプリaccount>' AND SUBSTRING_INDEX(host, ':', 1) = '<その行の db_client_host>';   -- 0
+  -- （IPv4 の接続元の場合。IPv6 では SUBSTRING_INDEX が値を途中で切るため、host の末尾の :<port> だけを外した値で比べる）
+  UPDATE sys_backup_quiesce_instance
+     SET status = 'STOPPED', stopped_at = UTC_TIMESTAMP(6)
+   WHERE instance_id = '<instance_id>' AND gate_state = 'DISABLED' AND status <> 'STOPPED';
+  -- 1行だけが変わること
+  ```
+  その後 `ops/backup/image/tool-image.sh compose run --rm preflight` の `checks.quiesce.status` が `ok` になり、次の checkpoint が VALID になることを確かめる。片付けるまで backup は失敗し続ける（安全側）。
+
 ## 5. 初回bootstrap（期限付きbootstrap mode）
 
 §4.1・§4.2の設定で起動した後、次の順に行う。bootstrap中にlocal password loginできるのは初期管理者 `admin` だけで、他のユーザーのlocal loginは拒否される。OIDC loginは通常どおり使える。
+
+- **backup の静止の間の 503（RB-QUIESCE。§4.7）**: bootstrap の間も backup の checkpoint は動く（§4.7 の3 で定期起動を再開した後）。checkpoint の静止の間（通常数秒、最長300秒）は、bootstrap session の要求が参照を含めて全て 503 になる（bootstrap・break-glass の session の要求は監査を必ず書く特権の要求として扱うため。break-glass の session も同じ）。`POST /logout` だけは静止中も終わり、session の失効と監査は解除の後に書かれる。503 になったら少し待ってから操作し直す（画面は統一エラーページ、API は `Retry-After`）。02:00 の full の間（最長60分）は bootstrap の作業をしない。
 
 ### 5.0 準備する管理者（5名）と役割
 
@@ -1503,6 +1686,7 @@ break-glass管理者のlocal passwordに初回変更要求（`password_change_re
 - **初回導入**: 業務dataが無いため、アプリを停止し、DBAがschemaを削除して空で作り直せば導入前の状態へ戻る。artifactを差し替えて§3から再実行する。
 - **2回目以降のrelease**: Flyway Community版にundoは無い。§2.5のbackup（PITR）からDBを戻し、旧artifactを起動する。
   - DBを戻さずに旧artifactだけを起動することはできない。DBが旧artifactより新しいと、起動時schema guardが「artifactに無いmigrationが適用済み」として起動を止める（意図した挙動）。
+  - 戻した DB には backup の時点の信号表（RB-QUIESCE）が残り、backup account の表単位の権限は DB の復元では戻らない。扱いと付け直しは `ops/backup/runbooks/restore-cutover.md` §4.6。
   - 新旧artifactを同時に稼働させない（rolling禁止。`scheduler-claim-fence-plan.md` §10.1）。
   - uploads（RB-W）: DB を PITR で戻すとき、uploads の pointer をどうするかは次のどちらかで、**未決定**（DBA・SRE の確認項）。(1) DB を戻した plan と同じ checkpoint から `ops/backup/uploads-cutover.sh stage` で版を作り、`ops/backup/runbooks/restore-cutover.md` §4.5.1 の順序で switch する。DB と pointer が一対になる。(2) uploads は戻さず今の版のまま起動する。この場合、戻した DB が参照しない file（戻した点より後に置かれた file）は孤児清掃が safety-hours の後に消し、戻した点より後に app が消した file を戻した DB が参照していれば、その file は無いままになる。決まるまでは、DB を戻す change の中で DBA・SRE がどちらにするかを決めて記録する。
 

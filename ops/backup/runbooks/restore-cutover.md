@@ -151,6 +151,37 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
 - `status` は読むだけで、根の下に何も書かない。
 - `switch` は切替え先の版の来歴（どの plan・checkpoint から stage したか）を確かめない。4.5.1 の 7 の記録で人が確かめる。
 
+## 4.6 復元した DB の書込み静止の信号表と、backup の再開の前の権限（RB-QUIESCE）
+
+復元した DB には、checkpoint の時点の書込み静止の信号表（V202 の `sys_backup_quiesce_request`・`sys_backup_quiesce_instance`・
+`sys_backup_quiesce_ack`）の行が残り、backup account の権限は残らない（設計は `.kiro/specs/backup-write-quiesce/design.md` §3.8）。
+
+1. **信号表の残りの行は手で消さない**。
+   - 残る行: その checkpoint を取った静止要求（`REQUESTED` のまま。replay は checkpoint の閉じた binlog の coordinate までのため、解除の
+     UPDATE は入らない）、その時に動いていた instance の行（`STOPPED` でない）と、その応答（`QUIESCED`）の行。
+   - cutover の後に起動する app は、新しい UUID で instance を登録し、残った要求を lease の期限切れ（checkpoint の時刻から 60 秒で切れて
+     いる）として無視する（INFO の log に要求の番号を出す。起動は待たない）。残った instance の行は heartbeat が古い（`QUIESCE_DEAD_SECONDS`
+     の 300 秒を超える）ため、backup の provider は無視する。
+   - cutover の後に最初に動く provider（最初の full・checkpoint）が、残った `REQUESTED` の要求を `EXPIRED` にしてから新しい要求を
+     登録する（有効な要求は同時に 1 件だけ）。解除済みの行は 30 日（U-12）を過ぎると app が消す。
+   - 停止口の行（`STOPPED` でない `gate_state = 'DISABLED'`）は、VALID な checkpoint の時点の DB には無い（あれば verify が失敗するため）。
+     preflight の `checks.quiesce` が停止口の行を報告したら、復元に使った checkpoint を確かめる（片付けの SQL は deploy-runbook §4.7。その
+     instance の task が止まっていることを確かめてから行う）。
+2. **backup account と、要求の表への表単位の権限を付け直す**（backup を再開する前。DBA）。account と権限（`mysql.user`・`mysql.tables_priv`
+   等）は対象 DB の dump に入らないため、復元先を新しい source にした後、その server に backup account（README「権限分離」の「source 側の
+   account の権限」）があることを確かめ（無ければ作り）、要求の表への表単位の権限を付ける（deploy-runbook §3.4 と同じ文。同 §1.8 の
+   RR-10 の例外。restore target role は backup に使わない）。
+   ```sql
+   GRANT INSERT, UPDATE ON <db>.sys_backup_quiesce_request TO '<backup account>'@'<host>';
+   SHOW GRANTS FOR '<backup account>'@'<host>';   -- 要求の表への表単位の INSERT, UPDATE の行がある
+   ```
+3. **確かめてから backup を再開する**: `.env.backup` の接続先（`MYSQL_HOST` 等）を新しい source にし、`FLYWAY_VERSION` を復元した DB の
+   `flyway_schema_history` の成功行の最大の version にする。`ops/backup/image/tool-image.sh compose run --rm preflight` が 0 で終わり、
+   `checks.quiesce` が `status: "ok"`・`signal_tables: 3`・`request_table_grant: true` であることを確かめる（権限が無ければ exit 19）。
+   新しい source の最初の backup は full にする（source が変わると lineage が変わり、旧 source の full は新しい source の PITR の基点に
+   ならない）。app の起動の前なら `--app-stopped` を付け、起動の後なら付けない。その後に定期起動を再開し、最初の ONLINE の checkpoint が
+   VALID になることを確かめる（deploy-runbook §4.7 の4 と同じ確認）。
+
 ## 5. 判定早見表
 
 | 状況 | 対応 | コマンド |

@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.config.LegacyDatabaseFlywayCallback;
 import com.ses.config.ProductionAdminInitialPasswordFlywayCallback;
+import com.ses.config.ProductionBackupDdlFreezeFlywayCallback;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.callback.Callback;
 import org.junit.jupiter.api.Test;
@@ -87,7 +88,41 @@ class ProductionFlywayJobConfigurationTest {
 
         assertThat(Arrays.stream(callbacks).map(callback -> callback.getClass().getName()).toList())
                 .containsExactly(ProductionAdminInitialPasswordFlywayCallback.class.getName(),
+                        ProductionBackupDdlFreezeFlywayCallback.class.getName(),
                         LegacyDatabaseFlywayCallback.class.getName());
+    }
+
+    /**
+     * RB-QUIESCE BWQ-008（U-5・design.md §8）: Flyway は同じ event の callback を名前の昇順で動かす（DefaultCallbackExecutor）。
+     * DB に触れない初期管理者 hash の検査の次、補償の DDL を行い得る {@code LegacyDatabaseFlywayCallback} より前に、backup の
+     * DDL 凍結の lock を取る。hash の検査が先に失敗すれば lock を取らない（BEFORE_MIGRATE の失敗では AFTER_MIGRATE_ERROR が
+     * 呼ばれないため、lock を取った後に失敗させない）。
+     */
+    @Test
+    void BEFORE_MIGRATEはhashの検査の次にDDL凍結のlockを取りDDLを行い得るcallbackより前に動く() {
+        Callback[] callbacks = Flyway.configure()
+                .configuration(ProductionFlywayJobConfig.load())
+                .getCallbacks();
+        List<String> executionOrder = Arrays.stream(callbacks)
+                .filter(callback -> callback.supports(org.flywaydb.core.api.callback.Event.BEFORE_MIGRATE, null))
+                .sorted(java.util.Comparator.comparing(Callback::getCallbackName))
+                .map(callback -> callback.getClass().getName())
+                .toList();
+
+        assertThat(executionOrder).containsExactly(ProductionAdminInitialPasswordFlywayCallback.class.getName(),
+                ProductionBackupDdlFreezeFlywayCallback.class.getName(), LegacyDatabaseFlywayCallback.class.getName());
+        // 解放の event を持つのは lock の callback だけ（成功・失敗の両方で返す）
+        for (org.flywaydb.core.api.callback.Event release : List.of(org.flywaydb.core.api.callback.Event.AFTER_MIGRATE,
+                org.flywaydb.core.api.callback.Event.AFTER_MIGRATE_ERROR,
+                org.flywaydb.core.api.callback.Event.AFTER_REPAIR,
+                org.flywaydb.core.api.callback.Event.AFTER_REPAIR_ERROR)) {
+            assertThat(Arrays.stream(callbacks).filter(callback -> callback.supports(release, null))
+                    .map(callback -> callback.getClass().getName()))
+                    .as(release.name()).containsExactly(ProductionBackupDdlFreezeFlywayCallback.class.getName());
+        }
+        // lock の callback は Spring の bean にしない（dev・test の起動時 migrate で lock を取らない）
+        assertThat(AnnotatedElementUtils.hasAnnotation(ProductionBackupDdlFreezeFlywayCallback.class, Component.class))
+                .isFalse();
     }
 
     /**

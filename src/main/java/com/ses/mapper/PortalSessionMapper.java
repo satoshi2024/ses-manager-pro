@@ -28,6 +28,15 @@ public interface PortalSessionMapper extends BaseMapper<PortalSession> {
                      @Param("idleExpiresAt") LocalDateTime idleExpiresAt);
 
     /**
+     * backup の静止の解除の後の最初の要求（RB-QUIESCE U-15）: 行の idle 期限は静止の間に過ぎたが、静止中の最終利用（memory の
+     * 持越し）から idle の長さの内なので touch する。失効・絶対期限切れなら0件（idle 期限だけは呼出し側が持越しで判定済み）。
+     */
+    @Update("UPDATE t_portal_session SET last_seen_at = #{now}, idle_expires_at = #{idleExpiresAt}"
+            + " WHERE id = #{id} AND revoked_at IS NULL AND expires_at > #{now}")
+    int touchCarriedOver(@Param("id") Long id, @Param("now") LocalDateTime now,
+                         @Param("idleExpiresAt") LocalDateTime idleExpiresAt);
+
+    /**
      * userの全有効sessionを失効させる（user停止・MFA reset・password変更・管理者操作）。
      */
     @Update("UPDATE t_portal_session SET revoked_at = #{now}, revoked_reason = #{reason}"

@@ -52,9 +52,10 @@ production 固有値を推測せず、unit/Docker 隔離での実装と検証の
 | Baseline ID | 未確定値 | 状態 | 確定に必要な証跡 |
 |---|---|---|---|
 | HFP-03-PROD-001 | MySQL server exact version/image、`@@server_uuid`、GTID/binlog/checksum/compression/TLS/retention。 | BLOCKED | production owner による `preflight.sh --json` 出力（redacted） |
-| HFP-03-PROD-002 | 全 table engine と非 app writer の有無。 | BLOCKED | 同上（engine 検査含む） |
+| HFP-03-PROD-002 | 全 table engine と非 app writer の有無。**既知の非 app writer: backup account が書込み静止の要求の表 `sys_backup_quiesce_request` だけに表単位の `INSERT`・`UPDATE` で書く**（RB-QUIESCE。2026-11-21 利用者決定 U-11。`.kiro/specs/backup-write-quiesce/design.md` §4。GRANT は deploy-runbook §3.4、restore の後は付け直す） | BLOCKED | 同上（engine 検査含む）。backup account の writer の受理は Security と DBA の署名（deploy-runbook §1.7 の BQ-1。**未取得**） |
 | HFP-03-PROD-003 | uploads が Docker volume/LVM/EBS/S3 等のどれか、atomic snapshot と versioning の可否。 | BLOCKED | storage owner の inventory |
-| HFP-03-PROD-004 | app replica/scheduler/traffic drain/DDL change-lock の実運用手段。 | BLOCKED | deployment owner の inventory |
+| HFP-03-PROD-004a | app replica/scheduler/traffic drain/DDL change-lock の実運用手段（初回 backup の前に揃える inventory）。RB-QUIESCE で PROD-004 を 004a・004b に分けた。手段は実装済み: app 内の静止応答と DB の信号表の provider `quiesce-db`、停止の確認の `quiesce-app-stopped`（`--app-stopped`）、Flyway job の DDL 凍結の lock（`.kiro/specs/backup-write-quiesce/`）。残るのは本番の inventory: ECS service の desired count と deployment configuration、`stopTimeout`、通常の起動時間（`startPeriod` の余裕）、DB 接続が中継を経由しないこと、app account の host の型が 1 つであること、backup host の定期起動の止め方と再開の仕方、静止中の 503 を利用者へ伝える方法、staging の EFS での uploads の snapshot の時間の実測（U-1） | 実装済み・inventory 待ち（BLOCKED） | deployment owner の inventory（deploy-runbook §1.7 の「Backup 開始の前提」の 004a。**未取得**） |
+| HFP-03-PROD-004b | app の起動の後の最初の ONLINE の checkpoint（`quiesce-db`）が VALID になった記録（deploy-runbook §4 の後。初回 backup の条件にしない）。揃うまで本番の RPO 15 分の達成を宣言しない | 実装済み・inventory 待ち（BLOCKED） | deployment owner の配備記録（deploy-runbook §4.7 の4。**未取得**） |
 | HFP-03-PROD-005 | S3 互換 backend、IAM、versioning/immutability、repository size/throughput。 | BLOCKED | infra owner の inventory |
 | HFP-03-PROD-006 | 二者承認 identity/signature verifier と change-ticket system。 | BLOCKED | security owner の決定 |
 | HFP-03-PROD-007 | 匿名化した代表profile ID/SHA。DB総bytes/rowsと上位table分布、uploads file数/総bytes/size分布、15分/日次binlog量、CPU/RAM/storage IOPS・throughput/network、利用可能maintenance window、RTO区間予算。synthetic fixtureは各容量をbaseline未満にせず上限+10%以内、上位分布は±10%、restore環境はproductionより高性能にしない。 | BLOCKED | production owner の匿名 profile + ID/SHA |

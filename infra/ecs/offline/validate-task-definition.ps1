@@ -325,9 +325,10 @@ $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY
   'SECURITY_BOOTSTRAP_REOPEN_TICKET', 'BREAK_GLASS_USERNAMES', 'TRUSTED_PROXIES', 'TZ', 'FILE_SCANNER_HOST', 'FILE_SCANNER_PORT',
   'METRICS_SCRAPER_ENABLED', 'METRICS_SCRAPER_USERNAME', 'PRIVACY_TRUST_KMS_ANCHOR_FILE', 'FREEE_ENABLED', 'CLOUDSIGN_ENABLED',
   'LOCAL_LOGIN_ENABLED', 'OIDC_ENABLED', 'BREAK_GLASS_LOGIN_ENABLED', 'OIDC_REQUIRE_MFA_ASSURANCE', 'MFA_ENABLED',
-  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED', 'UPLOAD_BASE_PATH')
+  'MFA_REQUIRED_FOR_BREAK_GLASS', 'ALLOW_UNTRACKED_SESSIONS', 'AI_EXTERNAL_SEND_ENABLED', 'UPLOAD_BASE_PATH', 'SHUTDOWN_TIMEOUT')
 $visibleKeys = @($mustBeVisible | ForEach-Object { NameKey $_ })
-$hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' })
+# BACKUP_QUIESCE_* (deploy-runbook 1.0 rows 31-41) are all judged by value.
+$hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' -or $k.StartsWith('BACKUPQUIESCE') })
 if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
 
 # deploy-runbook.md section 4: prod alone, and no other profile or configuration source the validator cannot read.
@@ -355,7 +356,10 @@ foreach ($yml in @('application.yml', 'application-prod.yml')) {
   foreach ($m in [regex]::Matches((Get-Content $ymlPath -Raw), '\$\{([A-Z][A-Z0-9_]*)')) { $null = $declared.Add($m.Groups[1].Value) }
 }
 $null = $declared.Add('APP_SCHEDULING_ENABLED')
-$guardedTrees = @('APPFEATURES', 'APPSECURITY', 'APPSCHEDULING', 'APPUPLOAD', 'MANAGEMENT', 'SPRINGMAIN', 'SERVERFORWARDHEADERSSTRATEGY')
+# APPBACKUPQUIESCE: APP_BACKUP_QUIESCE_* / APP_BACKUPQUIESCE_* would bypass the BACKUP_QUIESCE_* checks below.
+# SPRINGLIFECYCLE: SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE would replace SHUTDOWN_TIMEOUT behind the stopTimeout check.
+$guardedTrees = @('APPFEATURES', 'APPSECURITY', 'APPSCHEDULING', 'APPUPLOAD', 'APPBACKUPQUIESCE', 'MANAGEMENT', 'SPRINGMAIN',
+  'SPRINGLIFECYCLE', 'SERVERFORWARDHEADERSSTRATEGY')
 $canonical = @($allNames | Where-Object {
     $n = $_
     $k = NameKey $n
@@ -445,6 +449,86 @@ if (((EnvValues 'CLOUDSIGN_ENABLED') | ForEach-Object { $_.ToLowerInvariant() })
 }
 Ok 'no value that deploy-runbook 1.0 forbids'
 
+# Backup write quiesce (deploy-runbook 1.0 rows 31-41; .kiro/specs/backup-write-quiesce design 12.1-12.3). The app checks the
+# same ranges when it binds them and refuses BACKUP_QUIESCE_ENABLED=false without a change ticket (U-7); checked here so that
+# the definition fails before it is registered. Durations must be written as <number><unit> (ms, s, m, h, d): Spring would
+# also take ISO-8601 and a bare number (milliseconds), which this validator refuses rather than guess.
+$quiesceNames = @('BACKUP_QUIESCE_ENABLED', 'BACKUP_QUIESCE_DISABLED_TICKET', 'BACKUP_QUIESCE_POLL_INTERVAL',
+  'BACKUP_QUIESCE_HEARTBEAT_INTERVAL', 'BACKUP_QUIESCE_FENCE_AFTER', 'BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT',
+  'BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL', 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT', 'BACKUP_QUIESCE_MAX_HOLD_FULL',
+  'BACKUP_QUIESCE_STARTUP_WAIT_MAX', 'BACKUP_QUIESCE_RETENTION')
+$quiesceOdd = @($allNames | Where-Object { (NameKey $_).StartsWith('BACKUPQUIESCE') -and $quiesceNames -cnotcontains $_ })
+if ($quiesceOdd.Count -gt 0) { Fail ('backup quiesce settings must use the documented names (deploy-runbook 1.0 rows 31-41): ' + ($quiesceOdd -join ',')) }
+$quiesceEnabled = @(EnvValues 'BACKUP_QUIESCE_ENABLED')
+$quiesceTicket = @(EnvValues 'BACKUP_QUIESCE_DISABLED_TICKET' | Where-Object { $_ -ne '' })
+if ($quiesceEnabled.Count -ne 1) { Fail 'BACKUP_QUIESCE_ENABLED must be given once in environment: true, or false only with BACKUP_QUIESCE_DISABLED_TICKET (deploy-runbook 1.0 row 31)' }
+if ($Mode -eq 'Template') {
+  if ($quiesceEnabled[0] -cne 'true' -or $quiesceTicket.Count -gt 0) {
+    Fail 'the template must state BACKUP_QUIESCE_ENABLED=true without BACKUP_QUIESCE_DISABLED_TICKET (deploy-runbook 1.0 row 31)'
+  }
+} elseif ($quiesceEnabled[0] -ceq 'true') {
+  if ($quiesceTicket.Count -gt 0) { Fail 'BACKUP_QUIESCE_DISABLED_TICKET belongs only to BACKUP_QUIESCE_ENABLED=false: remove it when the emergency stop ends (deploy-runbook 1.0 row 32)' }
+} elseif ($quiesceEnabled[0] -ceq 'false') {
+  if ($quiesceTicket.Count -ne 1 -or $quiesceTicket[0] -cnotmatch '^[A-Z][A-Z0-9]+-[0-9]+$') {
+    Fail 'BACKUP_QUIESCE_ENABLED=false needs BACKUP_QUIESCE_DISABLED_TICKET in the change-ticket form ^[A-Z][A-Z0-9]+-[0-9]+$ such as CHG-1234 (the emergency stop; deploy-runbook 1.0 row 32)'
+  }
+  Info 'BACKUP_QUIESCE_ENABLED=false with a change ticket: the emergency stop is in effect, every backup fails and the RPO alert fires until it is set back to true (deploy-runbook 1.0)'
+} else {
+  Fail 'BACKUP_QUIESCE_ENABLED must be true or false (deploy-runbook 1.0 row 31)'
+}
+function DurationSeconds([string]$name, [string]$default) {
+  $given = @(EnvValues $name)
+  $value = if ($given.Count -gt 0) { $given[0] } else { $default }
+  $m = [regex]::Match($value, '^([0-9]{1,9})(ms|s|m|h|d)$')
+  if (-not $m.Success) { Fail "$name must be a whole number with a unit ms, s, m, h or d, such as 300s (deploy-runbook 1.0)" }
+  $n = [double]$m.Groups[1].Value
+  switch -CaseSensitive ($m.Groups[2].Value) {
+    'ms' { return $n / 1000 }
+    's' { return $n }
+    'm' { return $n * 60 }
+    'h' { return $n * 3600 }
+    'd' { return $n * 86400 }
+  }
+}
+$poll = DurationSeconds 'BACKUP_QUIESCE_POLL_INTERVAL' '1s'
+$heartbeat = DurationSeconds 'BACKUP_QUIESCE_HEARTBEAT_INTERVAL' '5s'
+$fence = DurationSeconds 'BACKUP_QUIESCE_FENCE_AFTER' '20s'
+$drainCheckpoint = DurationSeconds 'BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT' '30s'
+$drainFull = DurationSeconds 'BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL' '600s'
+$holdCheckpoint = DurationSeconds 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT' '300s'
+$holdFull = DurationSeconds 'BACKUP_QUIESCE_MAX_HOLD_FULL' '3600s'
+$startupWait = DurationSeconds 'BACKUP_QUIESCE_STARTUP_WAIT_MAX' '60s'
+$retention = DurationSeconds 'BACKUP_QUIESCE_RETENTION' '30d'
+$shutdown = DurationSeconds 'SHUTDOWN_TIMEOUT' '30s'
+if (-not ($poll -ge 0.2 -and $poll -lt $heartbeat -and $heartbeat -lt $fence -and $fence -le 30)) {
+  Fail 'BACKUP_QUIESCE_POLL_INTERVAL must be at least 200ms and shorter than BACKUP_QUIESCE_HEARTBEAT_INTERVAL, which must be shorter than BACKUP_QUIESCE_FENCE_AFTER, at most 30s (deploy-runbook 1.0 rows 33-35)'
+}
+if (-not (($fence - $heartbeat) -gt 13)) {
+  Fail 'BACKUP_QUIESCE_FENCE_AFTER minus BACKUP_QUIESCE_HEARTBEAT_INTERVAL must be longer than 13 seconds, the longest a control statement can block (deploy-runbook 1.0 row 35)'
+}
+if (-not ($holdCheckpoint -ge 30 -and $holdCheckpoint -le 900 -and $drainCheckpoint -gt 0 -and $drainCheckpoint -lt $holdCheckpoint)) {
+  Fail 'BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT must be 30s to 900s and BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT positive and shorter (deploy-runbook 1.0 rows 36 and 38)'
+}
+if (-not ($holdFull -ge 60 -and $holdFull -le 14400 -and $drainFull -gt 0 -and $drainFull -lt $holdFull)) {
+  Fail 'BACKUP_QUIESCE_MAX_HOLD_FULL must be 60s to 4h and BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL positive and shorter (deploy-runbook 1.0 rows 37 and 39)'
+}
+if (-not ($startupWait -ge 10 -and $startupWait -le 120)) { Fail 'BACKUP_QUIESCE_STARTUP_WAIT_MAX must be 10s to 120s (deploy-runbook 1.0 row 40)' }
+if (-not ($retention -ge 86400 -and $retention -le 31536000)) { Fail 'BACKUP_QUIESCE_RETENTION must be 1d to 365d (deploy-runbook 1.0 row 41)' }
+# A start that waits for a running quiesce must not be killed by the container health check (design 12.3).
+$startPeriod = 0
+if ($null -ne $c.healthCheck.startPeriod) { $startPeriod = [double]$c.healthCheck.startPeriod }
+if ($startPeriod -lt ($startupWait + 120)) {
+  Fail 'ses-manager healthCheck startPeriod must be at least BACKUP_QUIESCE_STARTUP_WAIT_MAX + 120 seconds (deploy-runbook 1.0 row 40)'
+}
+# ECS stops the container after stopTimeout: graceful shutdown (SHUTDOWN_TIMEOUT), the task executor (30 s) and a margin
+# for the 10-second drain before the instance row is set to STOPPED (design 12.3). Fargate allows at most 120 seconds.
+$stopTimeout = 0
+if ($null -ne $c.stopTimeout) { $stopTimeout = [double]$c.stopTimeout }
+if ($stopTimeout -lt ($shutdown + 60)) {
+  Fail 'ses-manager stopTimeout must be at least SHUTDOWN_TIMEOUT + 60 seconds (90 with the default 30s; at most 120 on Fargate, so keep SHUTDOWN_TIMEOUT at 60s or less; deploy-runbook 1.0)'
+}
+Ok 'backup write quiesce: BACKUP_QUIESCE_ENABLED as required, BACKUP_QUIESCE_* within range, startPeriod >= startup wait + 120 s, stopTimeout >= SHUTDOWN_TIMEOUT + 60 s'
+
 # Settings must reach the app as environment variables so that this validator sees them: no system property
 # other than the time zone in the JVM option variables, and no guarded property in SPRING_APPLICATION_JSON.
 foreach ($name in @('JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS')) {
@@ -468,7 +552,7 @@ if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
 }
 $guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
   'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main',
-  'compliance', 'app.upload')
+  'compliance', 'app.upload', 'app.backupquiesce', 'spring.lifecycle')
 function Get-JsonKeys([object]$node, [string]$prefix) {
   if ($node -is [System.Management.Automation.PSCustomObject]) {
     foreach ($p in $node.PSObject.Properties) {

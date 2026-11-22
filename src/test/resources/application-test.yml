@@ -109,6 +109,9 @@ spring:
         # V201: NF07 F1 の状態・区分の列の CHECK（request の status・channel・delivery_method、hold の hold_kind）。
         #       context ごとの再実行で重複しないよう H2 変種は IF NOT EXISTS で足す（V190 の H2 変種より後）
         - classpath:sql/schema-privacy-status-check-h2.sql
+        # V202: backup の書込み静止の信号表（要求・instance・ack。生成列 active_slot と一意索引）。V202 は ENGINE・COMMENT・
+        #       生成列の STORED を含むため H2 変種を使う（IF NOT EXISTS で context ごとの再実行に備える）
+        - classpath:sql/schema-backup-quiesce-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -165,6 +168,10 @@ mybatis-plus:
 app:
   # scheduler専用テスト以外では定期実行を止め、テスト中のDB更新と非決定性を防ぐ。
   scheduling:
+    enabled: false
+  # backup の書込み静止の応答は test profile では動かさない（登録・heartbeat の背景 thread を作らず、gate は常に OPEN）。
+  # 静止応答を確かめる試験は専用の context で明示に有効にする（design.md §12.1）。
+  backup-quiesce:
     enabled: false
   scheduler:
     lock:

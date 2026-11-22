@@ -179,6 +179,26 @@ class ProductionTaskDefinitionTemplateTest {
         assertThat(names(app.path("secrets"))).doesNotContain("UPLOAD_BASE_PATH");
     }
 
+    /**
+     * backup の書込み静止（RB-QUIESCE BWQ-007。deploy-runbook §1.0 の31〜41、design.md §12.3）: 雛形は静止を有効と明示し、停止口の
+     * ticket を持たない。起動の待ち（{@code startup-wait-max} 既定 60 秒）の間に health check で殺されないよう
+     * {@code startPeriod >= 60 + 120}、停止の排水（graceful 30 秒＋executor 30 秒＋余裕）のため {@code stopTimeout >= 90}。
+     */
+    @Test
+    void 雛形はbackupの書込み静止を有効と明示しstopTimeoutとstartPeriodを持つ() throws IOException {
+        JsonNode app = appContainer();
+
+        assertThat(environment(app, "BACKUP_QUIESCE_ENABLED")).as("雛形は true を明示する（U-7 の停止口は実値の mode だけ）")
+                .isEqualTo("true");
+        assertThat(names(app.path("environment"))).doesNotContain("BACKUP_QUIESCE_DISABLED_TICKET");
+        assertThat(names(app.path("secrets")).stream().filter(name -> name.startsWith("BACKUP_QUIESCE_"))).isEmpty();
+        assertThat(environment(app, "SHUTDOWN_TIMEOUT")).isEqualTo("30s");
+        assertThat(app.path("stopTimeout").asInt()).as("SHUTDOWN_TIMEOUT 30 秒＋executor 30 秒＋余裕。Fargate の上限は 120")
+                .isGreaterThanOrEqualTo(90).isLessThanOrEqualTo(120);
+        assertThat(app.path("healthCheck").path("startPeriod").asInt()).as("startup-wait-max（60 秒）＋120 秒")
+                .isGreaterThanOrEqualTo(60 + 120);
+    }
+
     @Test
     void APP_SCHEDULING_ENABLEDはschedulerの条件propertyへ束縛される() {
         SystemEnvironmentPropertySource env = new SystemEnvironmentPropertySource("env",
@@ -196,9 +216,14 @@ class ProductionTaskDefinitionTemplateTest {
                 "SECURITY_BOOTSTRAP_REOPEN_TICKET", "FILE_SCANNER_HOST", "FILE_SCANNER_PORT", "METRICS_SCRAPER_ENABLED",
                 "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "clamav",
                 "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE", "entryPoint",
-                "management", "UPLOAD_BASE_PATH", "/app/uploads/current")) {
+                "management", "UPLOAD_BASE_PATH", "/app/uploads/current", "BACKUP_QUIESCE_ENABLED",
+                "BACKUP_QUIESCE_DISABLED_TICKET", "BACKUP_QUIESCE_STARTUP_WAIT_MAX", "SHUTDOWN_TIMEOUT", "APPBACKUPQUIESCE",
+                "app.backupquiesce")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
+        // RB-QUIESCE BWQ-007: 停止口の ticket の形式、startPeriod と stopTimeout の下限（design.md §12.3）
+        assertThat(validator).contains("^[A-Z][A-Z0-9]+-[0-9]+$").contains("$c.stopTimeout")
+                .contains("$c.healthCheck.startPeriod");
         // 実値を入れた定義の検査と、repository の外への証跡出力（RB-DEPLOY、配備日確認表の #9）。
         // §5.5 以後は scheduler の期待値を必ず指定させる（RB-DEPLOY 復審 P2-1）
         assertThat(validator).contains("ValidateSet('Template', 'Actual')").contains("ValidateSet('Initial', 'Steady')")

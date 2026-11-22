@@ -3,6 +3,9 @@
 # metadata.json 生成（HFP-03-003 / RQ-003）
 # 秘密、接続 URL、個人データ、生の host/user/DB 名を含めない。
 # DB 名は非可逆 fingerprint（database_fingerprint）でのみ表現する。
+# 書込み静止の記録（quiesce）は quiesce.json の投影だけを入れる（metadata は restic と index に backup の保存期間まで残るため。
+# app の host 名・接続元（db_client_host）・要求の token・state dir の path は入れず、instance は ID と件数だけ。2d review P3-4）。
+# quiesce.json の全体は job の state dir にだけあり、container とともに消える（ops/backup/README.md「書込み静止の記録」）。
 # 入力変数は未設定でも安全に動作する（unknown / 空文字へフォールバック）。
 # ============================================================
 
@@ -18,13 +21,23 @@ metadata::lineage() { # server_uuid db_fingerprint
   printf '%s' "$1|$2" | sha256sum | awk '{print $1}'
 }
 
+# quiesce.json から metadata に入れる値だけを取り出す（provider・mode・job の種類・要求の番号・時刻・静止区間の秒数と内訳、
+# instance の件数と ID）。host_name・db_client_host・request_token・state_dir・instance ごとの時刻は入れない（2d review P3-4）
+metadata::quiesce_projection() { # quiesce.json
+  jq -c '{provider, mode, job_kind, request_id, requested_at_utc, started_at_utc, verified_at_utc,
+          released_at_utc, release_reason, window_seconds, window_breakdown_seconds,
+          instance_count: ((.instances // .replicas // []) | length),
+          verified_instance_count,
+          instance_ids: [(.instances // [])[] | .instance_id]}' "$1"
+}
+
 # metadata.json を生成する（引数は全て build 済みの値）
 metadata::build() { # staging_dir out_json
   local staging=$1 out_json=$2
   local quiesce_json="${QUIESCE_STATE_DIR:-/tmp}/quiesce.json"
   local quiesce="{}"
   if [[ -f "$quiesce_json" ]]; then
-    quiesce=$(cat "$quiesce_json")
+    quiesce=$(metadata::quiesce_projection "$quiesce_json") || return 1
   fi
   local uploads_json="{}"
   if [[ -f "$staging/uploads-snapshot.json" ]]; then

@@ -41,8 +41,145 @@ setup_env() {
   export PREFLIGHT_MIN_FREE_BYTES=1
   export TMPDIR="$T/tmp"
   export FAKE_ARGV_LOG="$T/argv.log"
-  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_MISSING_VARIABLES
+  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_MISSING_VARIABLES QUIESCE_PROVIDER FAKE_QDB_DIR \
+    QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS
   reset_fake
+}
+
+# ------------------------------------------------------------ RB-QUIESCE BWQ-009: checks.quiesce（exit 19）
+
+setup_quiesce_env() {
+  setup_env
+  export QUIESCE_PROVIDER=quiesce-db FAKE_QDB_DIR="$T/qdb"
+  mkdir -p "$FAKE_QDB_DIR"
+}
+
+preflight_grants_without_request_table() {
+  printf 'TABLES\t3\nGRANTS_BEGIN\n'
+  printf 'GRANT USAGE ON *.* TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANT SELECT, SHOW VIEW, TRIGGER, EVENT ON `ses_manager_db`.* TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANT INSERT ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+  printf 'GRANTS_END\n'
+  printf 'VERDICT\tOK\t2026-11-22T00:00:06Z\t1763769606000000\t1\tdisabled=0,fresh=1,protocol=0,threshold=0\n'
+}
+
+case_preflight_quiesce_skipped_for_local() {
+  setup_env
+  run_preflight
+  assert_zero "$code" "quiesce-local（既定）では書込み静止の検査をしない"
+  assert_eq skipped "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は skipped"
+}
+
+case_preflight_quiesce_ok() {
+  setup_quiesce_env
+  run_preflight
+  assert_zero "$code" "信号表・表単位の権限・instance が揃えば exit 0"
+  assert_eq ok "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は ok"
+  assert_eq 3 "$(jq -r .checks.quiesce.signal_tables <<< "$out")" "信号表は 3 表"
+  assert_eq true "$(jq -r .checks.quiesce.request_table_grant <<< "$out")" "要求の表への表単位の INSERT・UPDATE がある"
+  assert_contains "$(cut -f2 "$FAKE_QDB_DIR/calls.log")" "preflight" "読むだけの SQL（preflight.sql）を実行する"
+  assert_not_contains "$out" 'ses_manager_db' "DB 名を出力しない"
+  assert_not_contains "$out" 'bkp-user-7x9' "user を出力しない（SHOW GRANTS の行を出さない）"
+  assert_eq 0 "$(find "$T/tmp" -type f 2>/dev/null | wc -l)" "一時 file（SQL・option file）を残さない"
+}
+
+case_preflight_quiesce_failures_exit_19() {
+  local kind expect
+  for kind in grant tables disabled protocol settings; do
+    setup_quiesce_env
+    case "$kind" in
+      grant)
+        preflight_grants_without_request_table > "$FAKE_QDB_DIR/preflight.out"
+        expect="表単位の INSERT・UPDATE がありません" ;;
+      tables)
+        printf 'TABLES\t2\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+        printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+        expect="信号表" ;;
+      disabled)
+        { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+          printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+          printf 'GRANTS_END\nVERDICT\tFAIL_DISABLED\t2026-11-22T00:00:06Z\t1763769606000000\t0\tdisabled=1\n'
+          printf 'INSTANCE\tdead-0001\tDISABLED\t0\t-\t-\t-\tapp-host-9\t10.0.0.9\t2026-11-01T00:00:00.000000Z\t-\t-\t-\t0\t300000\t900000\tRUNNING\tDISABLED\n'
+        } > "$FAKE_QDB_DIR/preflight.out"
+        expect="停止口" ;;
+      protocol)
+        { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+          printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+          printf 'GRANTS_END\nVERDICT\tFAIL_PROTOCOL\t2026-11-22T00:00:06Z\t1763769606000000\t1\tprotocol=1\n'
+        } > "$FAKE_QDB_DIR/preflight.out"
+        expect="protocol の版" ;;
+      settings)
+        export QUIESCE_STALE_SECONDS=300 QUIESCE_DEAD_SECONDS=300
+        expect="QUIESCE_STALE_SECONDS" ;;
+    esac
+    run_preflight
+    assert_eq 19 "$code" "checks.quiesce の不合格（$kind）は exit 19"
+    assert_eq fail "$(jq -r .checks.quiesce.status <<< "$out")" "checks.quiesce は fail（$kind）"
+    assert_contains "$out" "$expect" "理由を出す（$kind）"
+    assert_no_secret "$out"
+    if [[ "$kind" == disabled ]]; then
+      # 2d review P3-4: instance は ID と件数だけで示し、app の host 名・接続元を出力 JSON に出さない
+      assert_contains "$out" "1 件（dead-0001）" "停止口の instance を ID と件数で示す"
+      assert_not_contains "$out" "app-host-9" "app の host 名を出力しない"
+      assert_not_contains "$out" "10.0.0.9" "app の接続元を出力しない"
+    fi
+    unset QUIESCE_STALE_SECONDS QUIESCE_DEAD_SECONDS
+  done
+}
+
+# 2d review P2-1: SQL の失敗の文が理由に出る（command substitution で失われない）。password と接続の識別子
+# （user@host・MYSQL_HOST・DB 名・user）は伏せる
+case_preflight_quiesce_sql_error_is_shown_without_identifiers() {
+  local kind
+  for kind in tables instances; do
+    setup_quiesce_env
+    if [[ "$kind" == tables ]]; then
+      printf 'TABLES\t0\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+      printf '%s\n' "ERROR 1146 (42S02) at line 18: Table 'ses_manager_db.sys_backup_quiesce_instance' doesn't exist" \
+        > "$FAKE_QDB_DIR/preflight.err"
+    else
+      { printf 'TABLES\t3\nGRANTS_BEGIN\n'
+        printf 'GRANT INSERT, UPDATE ON `ses_manager_db`.`sys_backup_quiesce_request` TO `bkp-user-7x9`@`%%`\n'
+        printf 'GRANTS_END\n'
+      } > "$FAKE_QDB_DIR/preflight.out"
+      printf '%s\n' "ERROR 1142 (42000) at line 21: SELECT command denied to user 'bkp-user-7x9'@'10.1.2.3' for table 'sys_backup_quiesce_instance'" \
+        "password=$FAKE_PW 127.0.0.1" > "$FAKE_QDB_DIR/preflight.err"
+    fi
+    printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+    run_preflight
+    assert_eq 19 "$code" "SQL の失敗は exit 19（$kind）"
+    if [[ "$kind" == tables ]]; then
+      assert_contains "$out" "doesn't exist" "MySQL の失敗の文を理由に出す（$kind）"
+      assert_contains "$out" "<db>.sys_backup_quiesce_instance" "DB 名を伏せて表の名前は残す（$kind）"
+    else
+      assert_contains "$out" "instance の検査を実行できません: ERROR 1142 (42000)" "MySQL の失敗の文を理由に出す（$kind）"
+      assert_contains "$out" "SELECT command denied" "失敗の理由（権限の不足）が分かる（$kind）"
+      assert_not_contains "$out" "10.1.2.3" "接続元を出力しない（$kind）"
+      assert_not_contains "$out" "127.0.0.1" "MYSQL_HOST を出力しない（$kind）"
+    fi
+    assert_not_contains "$out" "ses_manager_db" "DB 名を出力しない（$kind）"
+    assert_not_contains "$out" "bkp-user-7x9" "user を出力しない（$kind）"
+    assert_no_secret "$out"
+  done
+}
+
+# 最終 review P3-4: user 名が表の名前の一部（例: backup と sys_backup_quiesce_instance）でも、伏せるのは前後が識別子の
+# 文字でない所だけで、表の名前は変えない（本番の backup account の名前は backup を含み得る）
+case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring() {
+  setup_quiesce_env
+  export MYSQL_USER=backup
+  printf 'TABLES\t0\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+  printf '%s\n' "ERROR 1146 (42S02) at line 18: Table 'ses_manager_db.sys_backup_quiesce_instance' doesn't exist" \
+    "Access denied for user backup to database ses_manager_db; user 'backup'@'10.1.2.3'" > "$FAKE_QDB_DIR/preflight.err"
+  printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+  run_preflight
+  assert_eq 19 "$code" "SQL の失敗は exit 19"
+  assert_contains "$out" "Table '<db>.sys_backup_quiesce_instance' doesn't exist" "user 名を含む表の名前は変えない"
+  assert_not_contains "$out" "sys_<user>_quiesce" "表の名前の一部を user として伏せない"
+  assert_contains "$out" "user <user> to database <db>" "区切られた user 名と DB 名は伏せる"
+  assert_contains "$out" "'<user>'@'<host>'" "user@host の形は伏せる"
+  assert_not_contains "$out" "10.1.2.3" "接続元を出力しない"
+  assert_no_secret "$out"
 }
 
 run_preflight() {
@@ -356,6 +493,11 @@ run_case case_preflight_disk_full
 run_case case_preflight_mysql_pwd_env
 run_case case_preflight_tls_config_missing
 run_case case_preflight_help
+run_case case_preflight_quiesce_skipped_for_local
+run_case case_preflight_quiesce_ok
+run_case case_preflight_quiesce_failures_exit_19
+run_case case_preflight_quiesce_sql_error_is_shown_without_identifiers
+run_case case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring
 
 # 全 case 出力の秘密 grep（framework log 含む）
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

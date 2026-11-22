@@ -1,5 +1,8 @@
 package com.ses.service.security.impl;
 
+import com.ses.backup.quiesce.BackupQuiesceMetrics;
+import com.ses.backup.quiesce.BackupQuiesceProperties;
+import com.ses.backup.quiesce.BackupWriteGate;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
@@ -22,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -47,6 +51,28 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         if (clientIpResolver != null) {
             this.clientIpResolver = clientIpResolver;
         }
+    }
+
+    /** backup の書込み静止の gate（RB-QUIESCE U-14）。無い context（slice の試験等）では従来どおり毎回 touch する。 */
+    private BackupWriteGate backupWriteGate;
+    private BackupQuiesceProperties backupQuiesceProperties = new BackupQuiesceProperties();
+    private BackupQuiesceMetrics backupQuiesceMetrics;
+
+    @Autowired(required = false)
+    public void setBackupWriteGate(BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceProperties(BackupQuiesceProperties backupQuiesceProperties) {
+        if (backupQuiesceProperties != null) {
+            this.backupQuiesceProperties = backupQuiesceProperties;
+        }
+    }
+
+    @Autowired(required = false)
+    public void setBackupQuiesceMetrics(BackupQuiesceMetrics backupQuiesceMetrics) {
+        this.backupQuiesceMetrics = backupQuiesceMetrics;
     }
 
     @Override
@@ -121,12 +147,62 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         LocalDateTime now = LocalDateTime.now(clock);
         UserSession entity = userSessionMapper.selectBySessionHash(tenantId(), sessionHash);
         if (entity == null || !userId.equals(entity.getUserId()) || entity.getRevokedAt() != null
-                || entity.getIdleExpiresAt() == null || !entity.getIdleExpiresAt().isAfter(now)
+                || entity.getIdleExpiresAt() == null
                 || entity.getExpiresAt() == null || !entity.getExpiresAt().isAfter(now)) {
             return false;
         }
-        return userSessionMapper.touch(entity.getId(), now,
-                now.plusMinutes(Math.max(1, properties.getIdleTimeoutMinutes()))) == 1;
+        int idleMinutes = Math.max(1, properties.getIdleTimeoutMinutes());
+        LocalDateTime carriedIdleDeadline = carriedIdleDeadline(session, idleMinutes);
+        boolean quiesced = backupWriteGate != null && backupWriteGate.writesBlockedForCurrentThread();
+        LocalDateTime idleReference = quiesced ? quiescedIdleReference(now) : now;
+        boolean idleValid = entity.getIdleExpiresAt().isAfter(idleReference)
+                || carriedIdleDeadline != null && carriedIdleDeadline.isAfter(idleReference);
+        if (!idleValid) {
+            return false;
+        }
+        if (quiesced) {
+            // backup の静止中は touch を省き、通した時刻を HTTP session に持ち越す（U-14。design.md §6.4）
+            session.setAttribute(QUIESCE_LAST_USE_ATTRIBUTE, now);
+            if (backupQuiesceMetrics != null) {
+                backupQuiesceMetrics.skippedWrite("session_touch");
+            }
+            return true;
+        }
+        LocalDateTime nextIdle = now.plusMinutes(idleMinutes);
+        boolean touched;
+        if (entity.getIdleExpiresAt().isAfter(now)) {
+            touched = userSessionMapper.touch(entity.getId(), now, nextIdle) == 1;
+        } else {
+            // 行の idle 期限は過ぎたが、静止中の最終利用から idle の長さの内（解除の後の最初の要求）
+            touched = userSessionMapper.touchCarriedOver(entity.getId(), now, nextIdle) == 1;
+        }
+        if (touched && carriedIdleDeadline != null) {
+            session.removeAttribute(QUIESCE_LAST_USE_ATTRIBUTE);
+        }
+        return touched;
+    }
+
+    /** 静止中の最終利用 + idle の長さ（属性が無ければ null）。 */
+    private static LocalDateTime carriedIdleDeadline(HttpSession session, int idleMinutes) {
+        Object lastUse = session.getAttribute(QUIESCE_LAST_USE_ATTRIBUTE);
+        return lastUse instanceof LocalDateTime time ? time.plusMinutes(idleMinutes) : null;
+    }
+
+    /**
+     * 静止中の idle の判定の基準の時刻: gate が閉じた時刻（閉じた時点で有効だった session を静止の間は失効させない）。
+     * 緩和は静止の最長の保持時間までにし、それより前に閉じた（FENCED が続く等）なら「今 − 最長の保持時間」にする。
+     */
+    private LocalDateTime quiescedIdleReference(LocalDateTime now) {
+        Instant closedSince = backupWriteGate.closedSince();
+        LocalDateTime floor = now.minus(backupQuiesceProperties.longestHold());
+        if (closedSince == null) {
+            return now;
+        }
+        LocalDateTime closedAt = LocalDateTime.ofInstant(closedSince, clock.getZone());
+        if (closedAt.isAfter(now)) {
+            return now;
+        }
+        return closedAt.isBefore(floor) ? floor : closedAt;
     }
 
     @Override
@@ -185,6 +261,35 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         }
         userSessionMapper.revoke(current.getId(), LocalDateTime.now(clock),
                 StringUtils.hasText(reason) ? reason : "LOGOUT");
+    }
+
+    @Override
+    public CapturedRevocation captureCurrent(HttpServletRequest request, Authentication authentication, String reason) {
+        if (!properties.isEnabled() || request == null || authentication == null) {
+            return null;
+        }
+        HttpSession session = request.getSession(false);
+        String hash = session == null ? null : (String) session.getAttribute(SESSION_HASH_ATTRIBUTE);
+        Long userId = authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser
+                ? loginUser.getSysUser().getId() : SecurityUtils.currentUserId();
+        if (!StringUtils.hasText(hash) || userId == null) {
+            return null;
+        }
+        return new CapturedRevocation(tenantId(), hash, userId, LocalDateTime.now(clock),
+                StringUtils.hasText(reason) ? reason : "LOGOUT");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void revokeCaptured(CapturedRevocation captured) {
+        if (captured == null) {
+            return;
+        }
+        UserSession current = userSessionMapper.selectBySessionHash(captured.tenantId(), captured.sessionHash());
+        if (current == null || !captured.userId().equals(current.getUserId()) || current.getRevokedAt() != null) {
+            return;
+        }
+        userSessionMapper.revoke(current.getId(), captured.revokedAt(), captured.reason());
     }
 
     private Long requireUser(Authentication authentication) {

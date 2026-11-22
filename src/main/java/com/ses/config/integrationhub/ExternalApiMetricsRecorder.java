@@ -36,7 +36,9 @@ public class ExternalApiMetricsRecorder {
         /** public-api無効時。DISABLED_DENYはDBへ書かずcounterだけを残す。 */
         PUBLIC_API_DISABLED,
         /** 有効時の未認証rejectがnode単位の1分上限を超えた。 */
-        UNAUTHENTICATED_BUDGET
+        UNAUTHENTICATED_BUDGET,
+        /** backupの書込み静止の間の503（RB-QUIESCE U-6）。監査行を書かずcounterだけを残す。 */
+        BACKUP_QUIESCED
     }
 
     public void recordAuditSuppressed(AuditSuppressionReason reason) {

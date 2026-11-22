@@ -38,8 +38,25 @@ public class LocalDocumentStorage implements DocumentStorage {
         }
     }
 
+
+    /** backup の書込み静止の gate（RB-QUIESCE BWQ-015。upload root の下の file の変更の最後の防線）。無い context では何もしない。 */
+    private com.ses.backup.quiesce.BackupWriteGate backupWriteGate;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBackupWriteGate(com.ses.backup.quiesce.BackupWriteGate backupWriteGate) {
+        this.backupWriteGate = backupWriteGate;
+    }
+
+    /** upload root の下の file を変える前に呼ぶ（静止中に permit が無ければ BackupWriteQuiescedException）。 */
+    private void assertUploadsWritable(String operation) {
+        com.ses.backup.quiesce.BackupWriteGate gate = backupWriteGate;
+        if (gate != null) {
+            gate.assertUploadsMutationAllowed(operation);
+        }
+    }
     @Override
     public void put(String key, InputStream content, boolean quarantine) {
+        assertUploadsWritable("document-storage.put");
         Path target = resolvePath(key, quarantine);
         try {
             Files.createDirectories(target.getParent());
@@ -65,6 +82,7 @@ public class LocalDocumentStorage implements DocumentStorage {
 
     @Override
     public void promote(String key) {
+        assertUploadsWritable("document-storage.promote");
         Path src = resolvePath(key, true);
         Path dest = resolvePath(key, false);
         try {
@@ -102,6 +120,7 @@ public class LocalDocumentStorage implements DocumentStorage {
 
     @Override
     public void delete(String key) {
+        assertUploadsWritable("document-storage.delete");
         Path qFile = resolvePath(key, true);
         Path pFile = resolvePath(key, false);
         try {
@@ -122,6 +141,7 @@ public class LocalDocumentStorage implements DocumentStorage {
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("削除対象のkeyが必要です");
         }
+        assertUploadsWritable("document-storage.delete-strict");
         Path qFile = resolvePath(key, true);
         Path pFile = resolvePath(key, false);
         IOException failure = null;

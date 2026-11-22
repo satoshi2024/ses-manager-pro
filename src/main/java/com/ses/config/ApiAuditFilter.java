@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.AuditedDownloadPaths;
 import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
@@ -108,7 +109,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
                                 : bootstrapWrite ? "BOOTSTRAP_WRITE"
                                 : bootstrapRead ? "BOOTSTRAP_READ"
-                                : "GET".equals(method) && isDownloadUri(path)
+                                : "GET".equals(method) && AuditedDownloadPaths.isDownloadUri(path)
                                 ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
                                 : "ses-manager";
                         auditLogService.record(username, method, auditPath, status, applicationCode,
@@ -117,18 +118,6 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 }
             }
         }
-    }
-
-    private static boolean isDownloadUri(String uri) {
-        if (uri == null) return false;
-        return uri.startsWith("/api/files/")
-                || uri.endsWith("/download") || uri.contains("/download/")
-                || uri.matches("/api/contract-documents/\\d+/artifacts/\\w+")
-                || uri.matches("/api/sales-orders/\\d+/documents/\\d+/download")
-                || uri.matches("/api/sales-orders/\\d+/acknowledgement-pdf/download")
-                || uri.matches("/api/acceptances/\\d+/document/download")
-                || uri.matches("/api/my/change-requests/\\d+/attachment")
-                || uri.matches("/api/engineer-change-requests/\\d+/attachment");
     }
 
     private static String context(String key) {
@@ -154,7 +143,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         }
         String method = request.getMethod();
         return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method)
-                || ("GET".equals(method) && isDownloadUri(uri));
+                || ("GET".equals(method) && AuditedDownloadPaths.isDownloadUri(uri));
     }
 
     /** bootstrap session（{@link ProductionBootstrapMode}）の書込操作（画面・APIとも。静的資源とERRORは除く）か。 */

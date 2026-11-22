@@ -14,6 +14,8 @@
 # - パスワードは env（INTEGRATION_SRC_PW / INTEGRATION_TGT_PW）から注入する
 #   synthetic secret（repo には値を書かない）
 # - tool イメージは ops/backup/Dockerfile から build（Dockerfile の SHA-256 / fingerprint 検証込み）
+# - 書込み静止は DB の protocol（quiesce-db・quiesce-app-stopped）で取る。app の instance の代わりに responder（tool image の
+#   shell の loop）が信号表（V202）に応答する（RB-QUIESCE BWQ-012。file の heartbeat・ack の fake は使わない）
 # - 共有 work ディレクトリ（INTEGRATION_WORK_DIR）に evidence を出力
 name: ses-backup-integration
 
@@ -69,44 +71,20 @@ services:
       WORK_DIR: /work
     command: ["sleep", "infinity"]
 
-  # quiesce protocol の scheduler 相当（stop 要求に ack を返すデーモン）
-  scheduler:
+  # 書込み静止の app の instance 相当（RB-QUIESCE BWQ-012。design.md §16）。app の静止応答と同じ信号表の SQL を、専用の合成
+  # user で mysql client から実行する shell の loop（tests/integration-responder.sh。run-integration.sh が WORK の
+  # responder/ へ写す）。integration-pitr.sh が user を作り、最初の full（--app-stopped）の後に /work/responder/start を
+  # 置くまで DB に接続しない。負例では freeze-after-ack で静止の途中に応答を止める。
+  responder:
     image: ses-backup-tool:integration
-    container_name: ses-bkup-int-schedule
+    container_name: ses-bkup-int-responder
     networks: [ses-bkup]
+    restart: "no"
     volumes:
       - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw
-    command:
-      - bash
-      - -c
-      - |
-        while :; do
-          if [[ -f /work/scheduler/scheduler.stop-request ]]; then
-            touch /work/scheduler/scheduler.stopped
-            rm -f /work/scheduler/scheduler.stop-request
-          fi
-          sleep 1
-        done
-
-  # quiesce protocol の replica 相当（heartbeat 更新 + 静止 ack）
-  replica:
-    image: ses-backup-tool:integration
-    container_name: ses-bkup-int-replica
-    networks: [ses-bkup]
-    volumes:
-      - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw
-    command:
-      - bash
-      - -c
-      - |
-        while :; do
-          touch /work/heartbeats/app1.heartbeat
-          if [[ -f /work/heartbeats/app1.quiesce-requested ]]; then
-            touch /work/heartbeats/app1.quiesced
-            rm -f /work/heartbeats/app1.quiesce-requested
-          fi
-          sleep 1
-        done
+    environment:
+      RESPONDER_DIR: /work/responder
+    command: ["bash", "/work/responder/integration-responder.sh"]
 
 networks:
   ses-bkup:

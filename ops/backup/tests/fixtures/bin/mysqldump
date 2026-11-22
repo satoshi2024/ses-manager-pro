@@ -14,6 +14,17 @@ for arg in "$@"; do
   fi
 done
 
+# 長い dump の再現（RB-QUIESCE: full の中止で止められること）。FAKE_DUMP_PID_FILE に PID を書き、FAKE_DUMP_SLEEP 秒待つ。
+# 待ちは 0.2 秒ごとの sleep で、kill（SIGTERM）されたら直ちに終わる。
+if [[ -n "${FAKE_DUMP_PID_FILE:-}" ]]; then
+  printf '%s\n' "$$" > "$FAKE_DUMP_PID_FILE"
+fi
+if [[ -n "${FAKE_DUMP_SLEEP:-}" ]]; then
+  for ((fake_i = 0; fake_i < FAKE_DUMP_SLEEP * 5; fake_i++)); do
+    sleep 0.2
+  done
+fi
+
 if [[ -n "${FAKE_DUMP_FILE:-}" && -f "$FAKE_DUMP_FILE" ]]; then
   cat "$FAKE_DUMP_FILE"
   exit "${FAKE_DUMP_RC:-0}"

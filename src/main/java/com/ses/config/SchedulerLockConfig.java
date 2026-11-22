@@ -1,8 +1,13 @@
 package com.ses.config;
 
+import com.ses.backup.quiesce.BackupQuiesceLockProvider;
+import com.ses.backup.quiesce.BackupQuiesceMetrics;
+import com.ses.backup.quiesce.BackupQuiesceProperties;
+import com.ses.backup.quiesce.BackupWriteGate;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +26,9 @@ import javax.sql.DataSource;
  *
  * <p>ロック行は {@code shedlock} テーブル（V58）。単一インスタンス運用でも
  * 動作は変わらない（常にロックを取得できる）ため、構成によらず有効化しておく。
+ *
+ * <p>backup の書込み静止（RB-QUIESCE BWQ-006。design.md §6.6）: provider を {@link BackupQuiesceLockProvider} で包み、静止中は
+ * ShedLock の表へ書く前で job の開始を解除まで待たせる（飛ばさない。停止・割込みでは待たない）。
  */
 @Configuration
 @EnableSchedulerLock(defaultLockAtMostFor = "PT30M")
@@ -29,7 +37,10 @@ public class SchedulerLockConfig {
     @Bean
     public LockProvider lockProvider(
             DataSource dataSource,
-            @Value("${app.scheduler.lock.use-db-time:true}") boolean useDbTime) {
+            @Value("${app.scheduler.lock.use-db-time:true}") boolean useDbTime,
+            ObjectProvider<BackupWriteGate> backupWriteGate,
+            ObjectProvider<BackupQuiesceMetrics> backupQuiesceMetrics,
+            ObjectProvider<BackupQuiesceProperties> backupQuiesceProperties) {
         JdbcTemplateLockProvider.Configuration.Builder builder = JdbcTemplateLockProvider.Configuration.builder()
                 .withJdbcTemplate(new JdbcTemplate(dataSource));
         if (useDbTime) {
@@ -38,6 +49,8 @@ public class SchedulerLockConfig {
         }
         // test profileのH2ではJVM時刻を使う。H2/プロキシDataSourceが未知のDB productを返す場合、
         // ShedLock 5.10.2のusingDbTime()はUnsupportedOperationExceptionを投げるためである。
-        return new JdbcTemplateLockProvider(builder.build());
+        BackupQuiesceProperties quiesce = backupQuiesceProperties.getIfAvailable(BackupQuiesceProperties::new);
+        return new BackupQuiesceLockProvider(new JdbcTemplateLockProvider(builder.build()),
+                backupWriteGate::getIfAvailable, backupQuiesceMetrics::getIfAvailable, quiesce.longestHold());
     }
 }

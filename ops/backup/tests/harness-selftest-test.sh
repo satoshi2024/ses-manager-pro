@@ -297,11 +297,23 @@ write_controller_marker_ps7_crlf() { # <parent> <workDir 値> <parentDir 値>
     "$SELFTEST_RUN_TOKEN" "$ROOT" "$parent_value" "$work_value" > "$parent/.ses-pitr-owner.json"
 }
 
+# runner の複製を <ops/backup/tests にあたる directory> に置く。runner が WORK へ写す repository の入力（responder の loop と
+# 信号表の migration の V202。RB-QUIESCE BWQ-012）も、repository と同じ相対の場所へ写す。
+copy_runner_into() { # <ops/backup/tests にあたる directory>
+  local tests_dir=$1 root migration
+  root=$(cd "$tests_dir/../../.." && pwd) || return 1
+  migration="$root/src/main/resources/db/migration"
+  mkdir -p "$migration"
+  cp "$RUNNER" "$tests_dir/run-integration.sh"
+  cp "$ROOT/ops/backup/tests/integration-responder.sh" "$tests_dir/integration-responder.sh"
+  cp "$ROOT/src/main/resources/db/migration/V202__backup_write_quiesce_signal.sql" "$migration/"
+}
+
 # 既定 WORK を使う runner の複製を <temp>/<name>/ops/backup/tests に置き、RUNNER_UNDER_TEST に設定する。
 setup_copied_runner() { # <temp> <name> → stdout: tests ディレクトリ
   local tests_dir="$1/$2/ops/backup/tests"
   mkdir -p "$tests_dir"
-  cp "$RUNNER" "$tests_dir/run-integration.sh"
+  copy_runner_into "$tests_dir"
   printf '%s\n' "$tests_dir"
 }
 
@@ -336,8 +348,8 @@ case_integration_failure_capture_contract() {
   local runner
   runner=$(cat "$ROOT/ops/backup/tests/run-integration.sh")
   assert_contains "$runner" "upAttempted=1" "compose up 前に所有状態を記録"
-  assert_contains "$runner" "count <= 5" "部分起動の診断対象を5サービス以下に制限"
-  assert_contains "$runner" 'for service in target source tool scheduler replica' "targetを先に診断"
+  assert_contains "$runner" "count <= 4" "部分起動の診断対象を4サービス（source・target・tool・responder）以下に制限"
+  assert_contains "$runner" 'for service in target source tool responder' "targetを先に診断"
   assert_contains "$runner" '-k 1s' "Docker診断に終了猶予付きtimeoutを設定"
   assert_contains "$runner" 'GNU coreutils' "GNU coreutils の timeout だけを採用"
   assert_not_contains "$runner" 'EPOCHREALTIME' "壁時計EPOCHREALTIMEで硬い期限を主張しない"
@@ -711,7 +723,7 @@ case_integration_p1_network_id_and_pitr_native_rc() {
   assert_contains "$diag_content" "pitr-normal-tail-after-pem" "PEMブロック後のPITR通常ログを保持"
   assert_contains "$diag_content" "mock-after-pem-tail" "END RSA PRIVATE KEY同一行の後続ログを保持"
   assert_not_contains "$diag_content" "mock-key-body-unique" "PITR出力の秘密鍵本文を診断に出さない"
-  for svc in target source tool scheduler replica; do
+  for svc in target source tool responder; do
     assert_contains "$diag_content" "[$svc-state-health-image-mounts]" "所有確認済み${svc}のstateを収集"
     assert_contains "$diag_content" "[$svc-logs tail=200]" "所有確認済み${svc}のlogsを収集"
   done
@@ -760,8 +772,7 @@ case_integration_compose_partial_up_capture() {
   assert_contains "$diag_content" "[target-state-health-image-mounts]" "起動済みtargetを診断"
   assert_contains "$diag_content" "[source-state-health-image-mounts]" "起動済みsourceを診断"
   assert_not_contains "$diag_content" "[tool-state" "未作成toolを診断しない"
-  assert_not_contains "$diag_content" "[scheduler-state" "未作成schedulerを診断しない"
-  assert_not_contains "$diag_content" "[replica-state" "未作成replicaを診断しない"
+  assert_not_contains "$diag_content" "[responder-state" "未作成responderを診断しない"
   assert_not_contains "$RUNNER_DOCKER_LOG" "up --wait" "compose up失敗後にwaitへ進まない"
   assert_contains "$diag_content" "target-same-line-tail" "EC PEM END同一行の後続を保持"
   assert_contains "$diag_content" "target-normal-error-after-pem" "EC PEM後の通常エラーログを保持"
@@ -988,7 +999,7 @@ case_integration_work_path_boundary_fails_closed() {
 
   repo="$temp/repo"
   mkdir -p "$repo/ops/backup/tests"
-  cp "$RUNNER" "$repo/ops/backup/tests/run-integration.sh"
+  copy_runner_into "$repo/ops/backup/tests"
   RUNNER_UNDER_TEST="$repo/ops/backup/tests/run-integration.sh"
   expect_work_rejected "$temp" "$repo/ops/inside-work" "リポジトリ配下" "許可ルート内でもリポジトリ配下" \
     TMPDIR="$temp" TMP="$temp" TEMP="$temp"
@@ -1026,7 +1037,7 @@ case_integration_work_path_accepts_owned_dirs() {
 
   repo="$temp/repo"
   mkdir -p "$repo/ops/backup/tests"
-  cp "$RUNNER" "$repo/ops/backup/tests/run-integration.sh"
+  copy_runner_into "$repo/ops/backup/tests"
   RUNNER_UNDER_TEST="$repo/ops/backup/tests/run-integration.sh"
   runner_mock_run "$temp" up-fail "-"
   RUNNER_UNDER_TEST=""
@@ -1053,6 +1064,164 @@ case_integration_full_success_no_diagnostics() {
   foreign_chmod=$(grep -v -F -- "$work" "$temp/chmod.log" 2>/dev/null || true)
   assert_eq "" "$foreign_chmod" "成功時のchmodも検証済みWORKだけを対象にする"
   assert_no_secret_leak "$RUNNER_OUT" "成功時のコンソール出力"
+  # RB-QUIESCE BWQ-012: responder の loop と V202 を compose up の前に WORK へ写し、PITR の container に DB の protocol を渡す
+  assert_contains "$(cmp "$ROOT/ops/backup/tests/integration-responder.sh" "$work/responder/integration-responder.sh" 2>&1 && echo same)" \
+    same "responder の loop を WORK の responder/ へそのまま写す"
+  assert_contains "$(cmp "$ROOT/src/main/resources/db/migration/V202__backup_write_quiesce_signal.sql" \
+    "$work/schema/V202__backup_write_quiesce_signal.sql" 2>&1 && echo same)" same "信号表の migration（V202）を WORK の schema/ へそのまま写す"
+  assert_contains "$RUNNER_DOCKER_LOG" "-e QUIESCE_PROVIDER=quiesce-db -e RESPONDER_DIR=/work/responder" \
+    "PITR の container に quiesce-db と responder の制御の directory を渡す"
+  assert_contains "$RUNNER_DOCKER_LOG" "-e QUIESCE_SCHEMA_FILE=/work/schema/V202__backup_write_quiesce_signal.sql" \
+    "PITR の container に WORK の V202 を渡す"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "REPLICA_HEARTBEAT_DIR" "file の heartbeat（quiesce-local）を PITR の container に渡さない"
+  rm -rf "$temp"
+}
+
+# 22b) RB-QUIESCE BWQ-012: CI の integration は DB の protocol（quiesce-db・quiesce-app-stopped）で静止を取る（静的契約）。
+case_integration_quiesce_db_protocol_contract() {
+  local compose runner pitr responder bad
+  compose=$(cat "$ROOT/ops/backup/tests/docker-compose.integration.yml")
+  runner=$(cat "$RUNNER")
+  pitr=$(cat "$ROOT/ops/backup/tests/integration-pitr.sh")
+  responder=$(cat "$ROOT/ops/backup/tests/integration-responder.sh")
+  assert_contains "$compose" $'\n  responder:\n' "compose に responder service がある"
+  assert_contains "$compose" "container_name: ses-bkup-int-responder" "responder の固定名"
+  assert_contains "$compose" 'command: ["bash", "/work/responder/integration-responder.sh"]' "responder は WORK に写した loop を動かす"
+  assert_not_contains "$compose" $'\n  scheduler:\n' "file の ack の scheduler の fake を残さない"
+  assert_not_contains "$compose" $'\n  replica:\n' "file の heartbeat の replica の fake を残さない"
+  assert_not_contains "$compose" "/work/heartbeats" "file の heartbeat の directory を使わない"
+  assert_contains "$runner" 'ses-bkup-int-tool ses-bkup-int-responder; do' "固定名の事前確認に responder を含める"
+  assert_not_contains "$runner" "ses-bkup-int-schedule" "旧 scheduler の固定名を残さない"
+  assert_file "$ROOT/src/main/resources/db/migration/V202__backup_write_quiesce_signal.sql" "runner が写す V202 が repository にある"
+  assert_contains "$pitr" '/usr/local/bin/backup-full.sh --app-stopped' "最初の full は --app-stopped"
+  assert_contains "$pitr" "GRANT INSERT, UPDATE ON \\\`\$MYSQL_DATABASE\\\`.\\\`sys_backup_quiesce_request\\\`" \
+    "backup account に要求の表の表単位の INSERT・UPDATE を付ける"
+  assert_contains "$pitr" 'freeze-after-ack' "負例: 静止の途中で応答の止まった app"
+  assert_contains "$pitr" '"ABORTED VERIFY_FAILED"' "負例の要求は ABORTED（VERIFY_FAILED）"
+  assert_contains "$pitr" 'STORED GENERATED' "生成列 active_slot の往復を確かめる（D-P3-7）"
+  assert_contains "$pitr" 'events_statements_summary_by_digest' "mysqldump の起点の採取の lock の待ちを記録する（§19）"
+  bad=$(grep -nE 'NOW[[:space:]]*\(|CURRENT_TIMESTAMP|LOCALTIMESTAMP|SYSDATE|CURDATE|CURTIME|UNIX_TIMESTAMP' \
+    "$ROOT/ops/backup/tests/integration-responder.sh" | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+  assert_eq "" "$bad" "responder の SQL は UTC_TIMESTAMP(6) の外の時刻の関数を使わない（§3.10）"
+  assert_contains "$responder" "UTC_TIMESTAMP(6)" "responder の時刻は UTC_TIMESTAMP(6)"
+  assert_contains "$responder" "SET SESSION time_zone = '+09:00';" "responder の session の time_zone は app の JVM と同じ +09:00"
+  assert_not_contains "$responder" "bash -c" "responder は任意の command 文字列を shell に渡さない"
+}
+
+# responder の試験用の fake の mysql: SQL の 1 行目の印（-- responder:<名前>）ごとに呼出しを記録し、
+# <名前>.<回数>.out・<名前>.out を出力する（無ければ空）。<名前>.rc があればその終了コード。
+write_responder_fake_mysql() { # <bin dir>
+  cat > "$1/mysql" <<'MOCK'
+#!/usr/bin/env bash
+sql=${*: -1}
+name=$(sed -n '1s/^-- responder:\([a-z_]*\).*$/\1/p' <<< "$sql")
+[[ -n "$name" ]] || name=unknown
+n=$(( $(cat "$FAKE_RESPONDER_DIR/$name.count" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "$n" > "$FAKE_RESPONDER_DIR/$name.count"
+printf '%s\t%s\n' "$name" "$(tr '\n' ' ' <<< "$sql")" >> "$FAKE_RESPONDER_DIR/calls.log"
+if [[ -f "$FAKE_RESPONDER_DIR/$name.$n.out" ]]; then
+  cat "$FAKE_RESPONDER_DIR/$name.$n.out"
+elif [[ -f "$FAKE_RESPONDER_DIR/$name.out" ]]; then
+  cat "$FAKE_RESPONDER_DIR/$name.out"
+fi
+exit "$(cat "$FAKE_RESPONDER_DIR/$name.rc" 2>/dev/null || echo 0)"
+MOCK
+  "$REAL_CHMOD" +x "$1/mysql"
+}
+
+# 条件が成り立つまで 0.1 秒ごとに待つ（最長 <回数> × 0.1 秒）
+wait_until() { # <回数> <command...>
+  local n=$1 i
+  shift
+  for (( i = 0; i < n; i++ )); do
+    "$@" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+responder_state_is() { [[ "$(cat "$1/state" 2>/dev/null)" == "$2" ]]; }
+fake_called() { [[ -f "$1/$2.count" ]]; }
+
+# 22c) RB-QUIESCE BWQ-012: responder の loop が app と同じ順で信号表の SQL を実行する（fake の mysql）。
+#   start の前は接続しない → 登録・RUNNING → 要求の読取り → 観測（port を外して host=件数）→ QUIESCED（hold 期限）→
+#   freeze-after-ack で止まる → 解くと hold 期限の延長・verify の後の観測し直し → 解除で RESUMED（RELEASED）→ stop で STOPPED
+case_integration_responder_follows_protocol() {
+  local temp dir fake pid rc calls ack
+  temp=$(mktemp -d)
+  dir="$temp/responder"
+  fake="$temp/fake"
+  mkdir -p "$temp/bin" "$dir" "$fake"
+  write_responder_fake_mysql "$temp/bin"
+  printf '[mysql]\nuser=selftest\n' > "$dir/client.cnf"
+  # 要求 7（ONLINE の checkpoint）。follow の 1 回目は hold 期限の延長と verify の要求、2 回目は解除
+  printf '7\tONLINE\tCHECKPOINT\tREQUESTED\t-\t1\t1\t0\t0\t2026-11-22 01:00:30.000000\t30000000\t-\n' > "$fake/poll.out"
+  cp "$fake/poll.out" "$fake/hold.out"
+  printf '%s\t%s\n' '2026-11-22 01:00:01.000000' '172.18.0.5:41234' '2026-11-22 01:00:01.000000' '[fe80::1]:3306' \
+    '2026-11-22 01:00:01.000000' '172.18.0.5:41236' > "$fake/observe.out"
+  printf '7\tONLINE\tCHECKPOINT\tREQUESTED\t-\t1\t1\t0\t0\t2026-11-22 01:00:45.000000\t44000000\t2026-11-22 01:00:20.000000\n' \
+    > "$fake/follow.1.out"
+  printf '7\tONLINE\tCHECKPOINT\tRELEASED\tCOMPLETED\t1\t1\t0\t0\t2026-11-22 01:00:45.000000\t40000000\t2026-11-22 01:00:20.000000\n' \
+    > "$fake/follow.2.out"
+  : > "$dir/freeze-after-ack"
+  FAKE_RESPONDER_DIR="$fake" MYSQL_CLIENT_BIN="$temp/bin/mysql" RESPONDER_DIR="$dir" RESPONDER_TICK_SECONDS=0.1 \
+    bash "$ROOT/ops/backup/tests/integration-responder.sh" > "$temp/responder.log" 2>&1 &
+  pid=$!
+  wait_until 50 responder_state_is "$dir" WAITING || test_fail "responder が start を待つ" "state=$(cat "$dir/state" 2>/dev/null)"
+  sleep 0.3
+  assert_no_file "$fake/calls.log" "start の file の前は DB に接続しない"
+  : > "$dir/start"
+  wait_until 50 fake_called "$fake" ack || test_fail "responder が QUIESCED を書く" "$(cat "$temp/responder.log")"
+  wait_until 50 responder_state_is "$dir" FROZEN || test_fail "freeze-after-ack で QUIESCED の直後に止まる" "$(cat "$dir/state" 2>/dev/null)"
+  sleep 0.3
+  assert_no_file "$fake/follow.count" "freeze の間は要求を読まない"
+  assert_no_file "$dir/freeze-after-ack" "freeze-after-ack は 1 回だけ働く"
+  rm -f "$dir/freeze"
+  wait_until 80 fake_called "$fake" resumed || test_fail "解除で RESUMED を書く" "$(cat "$temp/responder.log")"
+  : > "$dir/stop"
+  rc=0
+  wait_until 50 responder_state_is "$dir" STOPPED || test_fail "stop で終わる" "$(cat "$dir/state" 2>/dev/null)"
+  wait "$pid" || rc=$?
+  assert_eq 0 "$rc" "stop で STOPPED を書いて 0 で終わる"
+  calls=$(cut -f1 "$fake/calls.log" | tr '\n' ' ')
+  assert_contains "$calls" "register startup heartbeat poll hold observe ack " "登録 → 起動の確認 → RUNNING → 要求 → hold 期限 → 観測 → ack の順"
+  # 5 秒ごとの heartbeat は試験の機械の速さで間に入り得るため、順の確認から除く
+  calls=$(cut -f1 "$fake/calls.log" | grep -vx heartbeat | tr '\n' ' ')
+  assert_contains "$calls" "follow extend observe observation follow resumed " "延長 → 観測し直し → 解除で RESUMED の順"
+  assert_contains "$calls" " stopped " "停止で STOPPED を書く"
+  ack=$(grep -E '^ack	' "$fake/calls.log")
+  assert_contains "$ack" "VALUES (7, '" "ack は要求 7 に対して書く"
+  assert_contains "$ack" "'QUIESCED', 'PAUSED', 0, '2026-11-22 01:00:30.000000', '172.18.0.5=2,fe80::1=1', '2026-11-22 01:00:01.000000', UTC_TIMESTAMP(6)" \
+    "QUIESCED は要求の hold 期限・port を外した host=件数（host の昇順）・観測の時刻で書く"
+  assert_contains "$(grep -E '^extend	' "$fake/calls.log")" "SET hold_until = '2026-11-22 01:00:45.000000'" "延長された hold 期限を書く"
+  assert_contains "$(grep -E '^extend	' "$fake/calls.log")" "AND hold_until < '2026-11-22 01:00:45.000000'" "hold 期限は延ばすだけ"
+  assert_contains "$(grep -E '^observation	' "$fake/calls.log")" "observed_app_hosts = '172.18.0.5=2,fe80::1=1'" "verify の要求の後に観測し直しを書く"
+  assert_contains "$(grep -E '^resumed	' "$fake/calls.log")" "resume_reason = 'RELEASED'" "解除で RESUMED（RELEASED）"
+  assert_contains "$(grep -E '^register	' "$fake/calls.log")" "SUBSTRING_INDEX(USER(), '@', -1), CONNECTION_ID()" \
+    "db_client_host は USER() の host 部、db_connection_id は CONNECTION_ID()"
+  assert_contains "$(grep -E '^heartbeat	' "$fake/calls.log" | head -n 1)" "status = 'RUNNING'" "起動の後の heartbeat は RUNNING"
+  assert_eq "$(grep -c . "$fake/calls.log")" "$(grep -c "SET SESSION time_zone = '+09:00';" "$fake/calls.log")" \
+    "全ての SQL で session の time_zone を +09:00 にする"
+  rm -rf "$temp"
+}
+
+# 22d) RB-QUIESCE BWQ-012: app の停止を確かめる保持（APP_STOPPED）が有効な間は、responder は起動を中止して STOPPED を書く。
+case_integration_responder_aborts_startup_under_stopped_hold() {
+  local temp dir fake rc=0 calls
+  temp=$(mktemp -d)
+  dir="$temp/responder"
+  fake="$temp/fake"
+  mkdir -p "$temp/bin" "$dir" "$fake"
+  write_responder_fake_mysql "$temp/bin"
+  printf '[mysql]\nuser=selftest\n' > "$dir/client.cnf"
+  printf '3\tAPP_STOPPED\tFULL\tREQUESTED\t-\t1\t1\t0\t0\t2026-11-22 01:00:30.000000\t30000000\t-\n' > "$fake/startup.out"
+  : > "$dir/start"
+  FAKE_RESPONDER_DIR="$fake" MYSQL_CLIENT_BIN="$temp/bin/mysql" RESPONDER_DIR="$dir" RESPONDER_TICK_SECONDS=0.1 \
+    timeout 20 bash "$ROOT/ops/backup/tests/integration-responder.sh" > "$temp/responder.log" 2>&1 || rc=$?
+  assert_eq 1 "$rc" "保持の間の起動は非 0 で中止する"
+  assert_eq ABORTED_STARTUP "$(cat "$dir/state" 2>/dev/null)" "起動の中止を state に残す"
+  calls=$(cut -f1 "$fake/calls.log" | tr '\n' ' ')
+  assert_eq "register startup stopped " "$calls" "登録 → 保持の確認 → STOPPED の順で、RUNNING を書かない"
   rm -rf "$temp"
 }
 
@@ -1125,7 +1294,7 @@ case_integration_default_work_rerun_rotates_previous_run() {
   tests_dir="$repo/ops/backup/tests"
   default="$tests_dir/.integration-work"
   mkdir -p "$tests_dir"
-  cp "$RUNNER" "$tests_dir/run-integration.sh"
+  copy_runner_into "$tests_dir"
   RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
 
   runner_mock_run "$temp" success "-"
@@ -1269,7 +1438,7 @@ case_integration_default_work_marker_mismatch_rejected() {
   tests_dir="$repo/ops/backup/tests"
   default="$tests_dir/.integration-work"
   mkdir -p "$default"
-  cp "$RUNNER" "$tests_dir/run-integration.sh"
+  copy_runner_into "$tests_dir"
   RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
   printf 'keep me\n' > "$default/legacy-evidence.txt"
 
@@ -1784,6 +1953,9 @@ run_case case_integration_missing_inputs_fail_safe
 run_case case_integration_work_path_boundary_fails_closed
 run_case case_integration_work_path_accepts_owned_dirs
 run_case case_integration_full_success_no_diagnostics
+run_case case_integration_quiesce_db_protocol_contract
+run_case case_integration_responder_follows_protocol
+run_case case_integration_responder_aborts_startup_under_stopped_hold
 run_case case_integration_late_stage_failure_records_stage
 run_case case_integration_redactor_failure_after_command_success
 run_case case_integration_tampered_work_is_not_normalized

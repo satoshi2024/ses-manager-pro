@@ -8,7 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -50,10 +54,17 @@ import java.util.regex.Pattern;
  * （{@code app.security.bootstrap.reopen-ticket}）が無ければ起動を拒否する。ticketが有れば必須監査
  * {@code BOOTSTRAP_REOPENED}（ticket・期限）を残してから起動し、監査を永続化できなければ起動を拒否する（review P2-A）。
  * 完了markerを確認できない場合（latch不在・DBを読めない）も起動を拒否する（fail-closed）。
+ *
+ * <p>再開の必須監査は bean 生成時（{@code @PostConstruct}）ではなく、起動の最後の {@link ApplicationRunner}（main の thread。
+ * backup の書込み静止の startup permit の下）で書く（RB-QUIESCE 2a review P1-1・design.md L-13）。prod の profile では静止応答の
+ * 登録の前（UNARMED）に業務の接続が読取り専用になり、bean 生成時の書込みは失敗するため。Tomcat はこの runner より前に要求を
+ * 受け始めるので、監査を書けるまでは再開を有効にしない（{@link #isActive()} は false）。監査を書けなければ従来どおり起動を
+ * 拒否する。期限・ticket の形式・完了 marker の確認（読むだけ）は bean 生成時のまま行う。
  */
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @EnableConfigurationProperties(ProductionBootstrapProperties.class)
-public class ProductionBootstrapMode {
+public class ProductionBootstrapMode implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ProductionBootstrapMode.class);
 
@@ -84,6 +95,12 @@ public class ProductionBootstrapMode {
     private final Supplier<ProductionBootstrapCompletionLatch> completionLatchSupplier;
     private volatile Instant expiresAt;
     private volatile String reopenTicket;
+    /** 監査を書く前の再開（bean 生成時に検査し、{@link #run} で監査を書いてから有効にする）。 */
+    private volatile PendingReopen pendingReopen;
+
+    /** 再開の監査に書く値。 */
+    private record PendingReopen(String ticket, Instant deadline, String completedAt) {
+    }
 
     /**
      * 完了marker（{@link ProductionBootstrapCompletionLatch}）は、prodでbootstrapを有効化した時だけ取得する
@@ -108,8 +125,8 @@ public class ProductionBootstrapMode {
     }
 
     /**
-     * 期限と再開承認の検査。prodで有効化されているのに期限が不正、または完了済みなのに承認ticketが無い・
-     * 再開の監査を残せない場合は起動を拒否する。
+     * 期限と再開承認の検査（読むだけ）。prodで有効化されているのに期限が不正、または完了済みなのに承認ticketが無い
+     * 場合は起動を拒否する。再開の必須監査は {@link #run} で書く。
      */
     @PostConstruct
     void validateAtStartup() {
@@ -134,20 +151,65 @@ public class ProductionBootstrapMode {
                     + MAX_WINDOW_HOURS + "時間以内でなければなりません。bootstrap modeは起動しません");
         }
         String ticket = parseReopenTicket(properties.getReopenTicket());
-        boolean reopened = requireReopenApprovalIfCompleted(parsed, ticket);
-        this.reopenTicket = reopened ? ticket : null;
+        Optional<String> completedAt = requireReopenApprovalIfCompleted(ticket);
+        if (completedAt.isPresent()) {
+            // 再開の必須監査は起動の最後（run）に書き、書けるまで再開を有効にしない（review P1-1）
+            this.pendingReopen = new PendingReopen(ticket, parsed, completedAt.get());
+            log.warn("[bootstrap] 完了済みのbootstrapを承認ticket {} で再開します。必須監査（BOOTSTRAP_REOPENED）を"
+                    + "起動の最後に書いてから有効にします（期限: {}）", ticket, parsed);
+            return;
+        }
+        this.reopenTicket = null;
         this.expiresAt = parsed;
-        log.warn("[bootstrap] 期限付きbootstrap modeが有効です（期限: {}）。初期管理者 {} のlocal loginだけを許可し、"
-                + "break-glass登録の起動時検査を省略します。完了後は必ず無効にして再起動してください",
-                parsed, BOOTSTRAP_USERNAME);
+        logActivated(parsed);
     }
 
     /**
-     * 初回bootstrapの完了markerが有れば、承認済みticketを要求し、再開を必須監査に残す。
-     *
-     * @return 完了済みのbootstrapを再開した場合はtrue（初回bootstrapならfalse）
+     * 起動の最後（{@link ApplicationRunner}。main の thread で backup の書込み静止の startup permit を持つ）に、bean 生成時に
+     * 検査した再開の必須監査を書き、書けたら再開を有効にする。書けなければ起動を拒否する（fail-closed）。
+     * {@link ProductionSecurityConfigurationValidator} もこの判定の前に呼ぶ（何度呼んでも1回だけ書く）。
      */
-    private boolean requireReopenApprovalIfCompleted(Instant deadline, String ticket) {
+    @Override
+    public void run(ApplicationArguments args) {
+        completePendingReopen();
+    }
+
+    /** 保留中の再開があれば必須監査を書いて有効にする（冪等）。 */
+    public synchronized void completePendingReopen() {
+        PendingReopen pending = pendingReopen;
+        if (pending == null) {
+            return;
+        }
+        ProductionBootstrapCompletionLatch latch = completionLatchSupplier.get();
+        if (latch == null) {
+            throw new IllegalStateException("[bootstrap] 初回bootstrapの完了markerを確認できないため、bootstrap modeは起動しません");
+        }
+        try {
+            latch.recordReopened(pending.ticket(), pending.deadline(), pending.completedAt());
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("[bootstrap] bootstrap再開の必須監査（BOOTSTRAP_REOPENED）を永続化できないため、"
+                    + "bootstrap modeは起動しません", e);
+        }
+        this.pendingReopen = null;
+        this.reopenTicket = pending.ticket();
+        this.expiresAt = pending.deadline();
+        log.warn("[bootstrap] 完了済みのbootstrapを承認ticket {} で再開しました（期限: {}、初回完了: {}）",
+                pending.ticket(), pending.deadline(), pending.completedAt());
+        logActivated(pending.deadline());
+    }
+
+    private static void logActivated(Instant deadline) {
+        log.warn("[bootstrap] 期限付きbootstrap modeが有効です（期限: {}）。初期管理者 {} のlocal loginだけを許可し、"
+                + "break-glass登録の起動時検査を省略します。完了後は必ず無効にして再起動してください",
+                deadline, BOOTSTRAP_USERNAME);
+    }
+
+    /**
+     * 初回bootstrapの完了markerが有れば、承認済みticketを要求する（読むだけ。再開の必須監査は {@link #run} で書く）。
+     *
+     * @return 完了済みのbootstrapを再開する場合は完了日時（初回bootstrapなら空）
+     */
+    private Optional<String> requireReopenApprovalIfCompleted(String ticket) {
         ProductionBootstrapCompletionLatch latch = completionLatchSupplier.get();
         if (latch == null) {
             throw new IllegalStateException("[bootstrap] 初回bootstrapの完了markerを確認できないため、bootstrap modeは起動しません");
@@ -164,7 +226,7 @@ public class ProductionBootstrapMode {
                 log.warn("[bootstrap] 初回bootstrapの完了markerが無いため初回bootstrapとして起動します"
                         + "（app.security.bootstrap.reopen-ticket は使いません）");
             }
-            return false;
+            return Optional.empty();
         }
         if (ticket == null) {
             throw new IllegalStateException("[bootstrap] 初回bootstrapは完了済みです（completed-at="
@@ -172,15 +234,7 @@ public class ProductionBootstrapMode {
                     + "承認不要のbreak-glassに等しいため、承認済みの変更ticketを app.security.bootstrap.reopen-ticket"
                     + "（SECURITY_BOOTSTRAP_REOPEN_TICKET）に指定しない限り、bootstrap modeは起動しません");
         }
-        try {
-            latch.recordReopened(ticket, deadline, completedAt.get());
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("[bootstrap] bootstrap再開の必須監査（BOOTSTRAP_REOPENED）を永続化できないため、"
-                    + "bootstrap modeは起動しません", e);
-        }
-        log.warn("[bootstrap] 完了済みのbootstrapを承認ticket {} で再開します（期限: {}、初回完了: {}）",
-                ticket, deadline, completedAt.get());
-        return true;
+        return completedAt;
     }
 
     private static String parseReopenTicket(String value) {

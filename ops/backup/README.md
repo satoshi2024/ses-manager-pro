@@ -107,6 +107,82 @@ pointer を介さずに backup しないため）。`UPLOADS_ROOT` と `UPLOADS_
   ops/backup の script の `umask 077` で restore が作る 0700 の directory も app が読み書きできる。mode の正規化はしない
   （uid が分かれると成り立たない。分ける場合は provider・restore の所有者と mode の扱いを見直す）。
 
+### 書込み静止の provider と設定（RB-QUIESCE。`.kiro/specs/backup-write-quiesce/design.md` §7・§9・§12.4）
+
+full と checkpoint は整合点を取る前に書込みの静止を取り、静止区間の終わりに verify してから解く。provider は次の 3 つだけで、
+`lib/quiesce.sh` が振り分ける（どれも repository の固定の executable。任意の `bash -c` は受け付けない）。
+
+| provider | 選び方 | 使う場面 | 静止の確かめ方 |
+|---|---|---|---|
+| `quiesce-db` | `.env.backup` の `QUIESCE_PROVIDER=quiesce-db`（本番） | 定期の checkpoint・full（app が動いている時。ONLINE） | DB の信号表（V202 の `sys_backup_quiesce_request`・`_instance`・`_ack`）に静止要求を登録し、全ての app の instance が排水して応答（QUIESCED）したことを確かめる。要求の前に保持 process が DDL 凍結の lock（`GET_LOCK('ses_backup_ddl_freeze')`）を取り、静止区間の間持つ。区間の終わりの verify（応答の時刻・app の hold 期限・接続元の観測し直し）が通らなければ VALID にしない |
+| `quiesce-app-stopped` | `backup-full.sh --app-stopped`・`create-checkpoint.sh --app-stopped` の明示の引数だけ（`QUIESCE_PROVIDER=quiesce-app-stopped` を環境変数で渡すと job は始まらない） | app が動いていない時（初回 backup・配備の時・app を止めた保守。deploy-runbook §2 の5） | APP_STOPPED の保持を登録してから、全ての instance が停止済み（`STOPPED`、または heartbeat が `QUIESCE_DEAD_SECONDS` より古い）であることを確かめる。保持の間に起動した app は起動を中止する。heartbeat を止めたまま書き続ける instance は機械では見つけられないため、DBA が processlist でアプリ接続 0 件を確かめてから実行する（deploy-runbook §2 の4） |
+| `quiesce-local` | 既定（`QUIESCE_PROVIDER` 未設定） | 隔離・ローカル環境の試験だけ | file の heartbeat（`REPLICA_HEARTBEAT_DIR`）と scheduler の ack（`SCHEDULER_ACK_DIR`）。本番では使わない |
+
+- どちらの DB の provider も、停止口（app の `BACKUP_QUIESCE_ENABLED=false`。deploy-runbook §1.0）で動いている instance の行（STOPPED でない
+  `gate_state = 'DISABLED'`。heartbeat の古さによらない）があれば失敗する。停止口の間は backup が全て失敗する。
+- ONLINE の full の最中に新しい app の instance が登録されたら（task の置き換え等）、provider はその full を中止して静止を解く（U-13。
+  下の「欠けた full の取り直し」）。APP_STOPPED の full は中止しない（起動しようとした instance の方が起動を中止する）。checkpoint の
+  最中に登録した instance は、排水して応答するのを待つ。
+- 保持 process: DB の provider の job は、provider の `hold` を job 本体の pipe に結び付けて起動し（process substitution。bash 4.4 以上）、
+  DDL 凍結の lock の session を持ち、15 秒ごとに要求の lease を延ばす。job 本体が終わる（正常・異常・SIGKILL）と pipe が閉じて
+  保持 process も終わり、lock が返る（app は lease の期限で再開する）。保持 process の出力は state dir の `hold.log` に出る（結果の
+  JSON に混ぜない）。job が起動する長い子 process（mysqldump・`cp -a`・restic 等）は pipe の書き口を閉じて起動する
+  （`tests/script-contract-test.sh` が確かめる）。DDL 凍結の lock を待つ秒数は 30 秒の固定値（変数は無い）。
+- 静止区間の秒数と内訳は `quiesce.json` の `window_seconds`・`window_breakdown_seconds`（metadata.json と index にも入る）と、結果の
+  JSON の `quiesce.window_seconds` に残り、`QUIESCE_WINDOW_WARN_SECONDS` を超えると WARN を出す。
+
+`.env.backup` の変数（既定のままでよい。app 側の設定（deploy-runbook §1.0 の33〜41）と式が合わなければ provider と preflight が
+失敗する）:
+
+| 変数 | 既定 | 内容 |
+|---|---|---|
+| `QUIESCE_PROVIDER` | `quiesce-local` | 本番は `quiesce-db`。`quiesce-app-stopped` は環境変数では拒否する |
+| `QUIESCE_STALE_SECONDS` | 60 | heartbeat がこれより古く応答の無い instance は状態不明として失敗する。app の `fence-after` + 2 × `heartbeat-interval` 以上 |
+| `QUIESCE_DEAD_SECONDS` | 300 | heartbeat がこれより古い instance は停止済みとして無視する（停止口の行を除く）。`QUIESCE_STALE_SECONDS` より大きい |
+| `QUIESCE_DEADLINE_SECONDS` | checkpoint 90・full 660 | 応答を待つ上限（app の排水の上限 checkpoint 30 秒・full 600 秒より長くする） |
+| `QUIESCE_LEASE_SECONDS` | 60 | 要求の lease。app の `fence-after` + `poll-interval` < `QUIESCE_LEASE_SECONDS` − `QUIESCE_LEASE_RENEW_SECONDS` |
+| `QUIESCE_LEASE_RENEW_SECONDS` | 15 | 保持 process が lease を延ばす間隔（`QUIESCE_LEASE_SECONDS` より短い） |
+| `QUIESCE_LEASE_MARGIN_SECONDS` | 5 | verify は、今が app の hold 期限よりこの秒数以上前であることを求める |
+| `QUIESCE_LEASE_MAX_SECONDS` | checkpoint 300・full 3600 | 延長の上限（app の最大保持時間と小さい方を使う） |
+| `QUIESCE_FULL_NEW_INSTANCE_CHECK_SECONDS` | 5 | ONLINE の full の最中に新しい instance を調べる間隔（U-13） |
+| `QUIESCE_VERIFY_OBSERVE_SECONDS` | 10 | verify の前に app の接続元の観測し直しを待つ上限 |
+| `QUIESCE_RESUME_CONFIRM_SECONDS` | 15 | 解除の後に app の再開（RESUMED）を待つ上限。確かめられなければ exit 3（重大。`runbooks/backup-health-monitoring.md`） |
+| `QUIESCE_WINDOW_WARN_SECONDS` | 60 | 静止区間がこれを超えたら WARN |
+| `QUIESCE_REQUESTED_BY` | `<job>:<hostname>` | 要求の `requested_by`（`^[A-Za-z0-9._:-]{1,64}$`。個人名・秘密を書かない） |
+
+- `REPLICA_HEARTBEAT_DIR`・`SCHEDULER_ACK_DIR` は `quiesce-local` のときだけ必須で、本番（`quiesce-db`）では書かない。
+- preflight の `checks.quiesce`（DB の provider の時だけ。読むだけ）: 信号表の 3 表（`signal_tables`）、要求の表への表単位の
+  `INSERT`・`UPDATE`（`SHOW GRANTS FOR CURRENT_USER()`。`request_table_grant`）、停止口の instance の行が無いこと、新しい instance の
+  protocol の版と閾値の式。不合格は exit 19。`quiesce-local` では `status: "skipped"`。
+- `CONTENT_HASH_TABLES` に信号表（`sys_backup_quiesce_` で始まる表）を書くと backup が失敗する（静止区間の中でも heartbeat・観測・
+  lease の延長で書かれ、復元検証が必ず FAIL になるため。design.md §3.7）。`CRITICAL_TABLES` に書くことも勧めない。
+
+### 書込み静止の記録（quiesce.json）
+
+- **`quiesce.json` の全体は job の state dir にだけある**: 静止を取った job が state dir（`QUIESCE_STATE_DIR`。既定は container の中の
+  `/tmp/ses-quiesce-<pid>`）に `quiesce.json`（0600）と `hold.log` を書く。state dir は job の container とともに消え、`run --rm` では job
+  の終わりに消える（compose の command そのものが強制終了されて container が止まったまま残った場合は、その container を消すまで残る。
+  `tool-image.sh compose ps` で確かめ、SRE が消す）。`QUIESCE_STATE_DIR` を volume 等の残る場所へ向けない。
+- **内容（state dir の全体）**: provider・mode・job_kind・要求の番号（`request_id`）・`request_token`（要求ごとの 16 byte の乱数の hex。
+  秘密ではないが要求を特定する値）・時刻（`requested_at_utc`・整合時刻 `started_at_utc`・`verified_at_utc`・`released_at_utc`）・静止区間の
+  秒数と内訳・DDL lock の名前・state dir の path、instance ごとの ID・`host_name`（app の container の host 名）・`db_client_host`（DB から
+  見た app の接続元の IP）・時刻。個人データは含まないが、内部の host 名と IP を含む。
+- **backup の metadata には投影だけを入れる**（2d review P3-4）: full・checkpoint の `metadata.json` の `quiesce`（restic repository の
+  snapshot と、backup-data の volume の index `$BACKUP_WORK_DIR/index/full-*.json`・`checkpoint-*.json` に、backup の保存期間まで残る。
+  snapshot は下の「retention」（PITR 30 日と代表）で消え、index の file は volume の上に残る）は、`lib/metadata.sh` の
+  `metadata::quiesce_projection` が作る投影で、provider・mode・job_kind・`request_id`・時刻（requested・started・verified・released）・
+  `release_reason`・静止区間の秒数と内訳・instance の件数（`instance_count`・`verified_instance_count`）と ID（`instance_ids`）だけを持つ。
+  `host_name`・`db_client_host`・`request_token`・`state_dir`・instance ごとの時刻は入れない（`tests/full-backup-test.sh` が確かめる）。
+- **最小化したのは metadata だけ**: DB の full の dump と binlog には信号表（`sys_backup_quiesce_*`）の行そのものが入る（mysqldump に
+  `--ignore-table` を付けない。行は `host_name`・`db_client_host`・`observed_app_hosts`・`request_token` を含み、app の保存期間（既定
+  30 日）の分がある）。これらは backup そのものの保存期間まで残る。個人データではない（`.kiro/specs/backup-write-quiesce/design.md`
+  §3.9）。restore の後の扱いは `runbooks/restore-cutover.md` §4.6。
+- **ticket・chat・配備記録に state dir の `quiesce.json` をそのまま貼らない**。記録には job の結果の JSON（stdout）の `quiesce` の欄
+  （provider・mode・`request_id`・時刻・`window_seconds`）か、index の `quiesce`（上の投影。`jq '.quiesce' <index の file>`）を使う。
+  CI の backup integration の証跡（`quiesce-full.json`・`quiesce-checkpoint.json`）も同じ考え方の投影である。障害の調査で instance ごとの
+  host 名・接続元が要るときは、job の stderr（provider の失敗の message には instance ごとの host 名が出る）か job の最中の state dir を
+  backup host の上で見て、ticket には instance ID と結論だけを書く（preflight の JSON の理由は instance ID と件数だけを出す）。
+
 ## 実行
 
 job は必ず `image/tool-image.sh compose` 経由で起動する。docker-compose.yml の
@@ -151,8 +227,36 @@ ops/backup/image/tool-image.sh compose run --rm snapshot-binlog
 
 # 4. 監視（watermark 基準。alert は外部へ routing）
 ops/backup/image/tool-image.sh compose run --rm check --json
+
+# 5. app が動いていない時の full（初回 backup・配備の時・app を止めた保守。deploy-runbook §2 の5）。
+#    app の停止を DB の信号表で確かめる（provider quiesce-app-stopped）。定期の job には付けない
+ops/backup/image/tool-image.sh compose run --rm backup --app-stopped
 ```
 `MYSQL_PWD` 環境変数は使わない。秘密は 0600 の一時 option file 経由で渡す。
+
+- 定期の full・checkpoint は `.env.backup` の `QUIESCE_PROVIDER=quiesce-db`（ONLINE）で動く。`--app-stopped` は app を止めた後にだけ
+  手で付ける（app が動いている間に流すと、app は更新を止め（ERROR `BACKUP_QUIESCE_STOPPED_HOLD_SEEN`）、その backup は VALID に
+  ならない）。app を止めた保守の checkpoint も `create-checkpoint.sh --app-stopped`（`tool-image.sh compose run --rm checkpoint --app-stopped`）で取れる。
+- 配備の間は backup の定期起動を止める（deploy-runbook §2 の0。Flyway job と DBA の DDL は同じ DDL 凍結の lock を取るため重ならないが、
+  止めてから進める）。§4 の後に再開し、最初の ONLINE の checkpoint が VALID になることを確かめる（deploy-runbook §4.7）。
+
+### 欠けた full の取り直し（U-13）
+
+- ONLINE の full（02:00）の最中に新しい app の instance が登録されると（task の置き換え・再起動）、provider はその full を中止して静止を
+  解く（要求は `ABORTED`・`release_reason = 'NEW_INSTANCE'`。backup tool と app の両方が WARN `BACKUP_QUIESCE_FULL_ABORTED` を出し、
+  `backup-full.sh` は mysqldump を止めて非 0 で終わる）。その日の full は欠ける。PITR の基点は前日の full のままで、RPO は checkpoint で
+  保たれる。
+- 取り直し: app の起動が落ち着いた（readiness が UP で、heartbeat の新しい instance が 1 つ。deploy-runbook §4.7 の1）後に、運用担当が
+  手で流す（app は動いているので `--app-stopped` は付けない）。
+  ```bash
+  ops/backup/image/tool-image.sh compose run --rm backup
+  ```
+- **期限: 中止を知ったら 2 時間以内に取り直す**。full の CRITICAL の閾値は最新の VALID な full から 26 時間（`lib/health.sh` の
+  `HEALTH_FULL_CRITICAL_SECONDS=93600`）で、前日の 02:00 の full から数えるため、当日のおよそ 04:00 までに取り直しが VALID に
+  ならなければ `check-backup.sh` が CRITICAL になる。間に合わなければ CRITICAL を計画外の既知の事象として記録し、取り直しの VALID で
+  解消を確かめる（閾値は変えない）。
+- 取り直しの最中にも新しい instance が登録されれば同じく中止される。task の置き換えが続く間は、落ち着くのを待ってから流す。
+- 対応の手順の正本は `runbooks/backup-health-monitoring.md` の「WARN: full の中止（取り直し）」。
 
 ## ツールイメージの build・配布（registry を使わない運用）
 
@@ -230,6 +334,15 @@ ops/backup/image/tool-image.sh compose run --rm check --json
    ops/backup/image/tool-image.sh check      # compose の pin とローカル image の一致確認
    ```
 
+**image に入る file を変えたときの pin のし直し（RB-QUIESCE で該当）**: content ID は image の layer（`COPY` した `lib/`・`providers/`・
+job の script を含む）から計算するため、それらを変えた commit から build した image は content ID が変わる。RB-QUIESCE は `providers/`
+（`quiesce-db.sh`・`quiesce-app-stopped.sh`・`quiesce-db.d/*.sql`）・`lib/`（`quiesce.sh`・`quiesce-db-common.sh`・`content-hash.sh`）・
+`backup-full.sh`・`create-checkpoint.sh`・`preflight.sh`・`tests/integration-pitr.sh` を変えた。それより前の commit から build・記録した
+image（RB-W の検証で作ったもの等）は使わない（content ID が pin と合わず `check`・`compose` が拒否し、DB の provider も持たない）。
+配備する commit から上の手順の 2（`build-record`）・3（pin の commit）・4（`save`）・5（各 host で `load` と `check`）をやり直す
+（lock を変える場合だけ 1 から）。3 の commit は compose だけを変え image は変わらないため、2 で作った image がそのまま配布の対象に
+なる。記録した content ID と tar の SHA-256 は配備記録に残す（deploy-runbook §1.7 の「Backup 開始の前提」）。
+
 production の `docker-compose.yml` は `build:` を持たず、全 service が `pull_policy: never` で同名 image を registry から
 取得させない（`check` が service ごとに確かめる）。
 
@@ -237,7 +350,7 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 
 | role | DB 権限 | repository 権限 | 用途 |
 |---|---|---|---|
-| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`） | writer（backup 可・delete 不可） | full/checkpoint |
+| dump role | 下の「source 側の account の権限」のうち full・checkpoint の行（`SELECT`・`SHOW VIEW`・`TRIGGER`・`EVENT`・`SHOW_ROUTINE`・`RELOAD`・`REPLICATION CLIENT`、書込み静止の要求の表への表単位の `INSERT`・`UPDATE`） | writer（backup 可・delete 不可） | full/checkpoint |
 | binlog role | 下の「source 側の account の権限」のうち archive・snapshot・check の行（`REPLICATION SLAVE`・`REPLICATION CLIENT`） | writer | archive/snapshot |
 | retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
 | restore target role | recovery target 新規 DB のみ（source 権限なし）。下の「restore target role の権限」を全部持つこと | read | restore/validate |
@@ -254,11 +367,13 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
 | `RELOAD` | global | full・checkpoint | mysqldump `--source-data=2`（起点を取る間の `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK`）、create-checkpoint の `FLUSH BINARY LOGS` |
 | `REPLICATION CLIENT` | global | full・checkpoint・archive・snapshot・check | mysqldump `--source-data=2` が 8.4 で発行する `SHOW BINARY LOG STATUS`、`SHOW BINARY LOGS`（create-checkpoint・archive-binlog・snapshot-binlog・check-backup） |
 | `REPLICATION SLAVE` | global | archive | `mysqlbinlog --read-from-remote-server`（source から binlog を受け取る） |
+| `INSERT`・`UPDATE` | 書込み静止の要求の表（`<db>.sys_backup_quiesce_request`）だけ。**表単位**で、deploy-runbook §3.4（V202 の Flyway の後・初回 backup の前）に付け、restore で新しい source にした後は付け直す（RB-QUIESCE。U-11） | full・checkpoint（`quiesce-db`・`quiesce-app-stopped`）。preflight は有無を検査する | 静止要求の登録・lease の延長・verify の要求・解除（`providers/quiesce-db.d/*.sql`）。信号表の他の 2 表（`sys_backup_quiesce_instance`・`sys_backup_quiesce_ack`）は対象 DB の `SELECT` で読む。backup account が業務 DB の 1 表の書き手になることは baseline の PROD-002 に記録し、Security と DBA が署名する（deploy-runbook §1.7 の BQ-1。未取得） |
 
 要らないもの: `PROCESS`（mysqldump に `--no-tablespaces` を付けるため不要。付けないと mysqldump 8.0.21 以降は tablespace の情報を
-読むのに `PROCESS` が要る。2026-11-18 利用者決定で上線前に付けた）、`LOCK TABLES`（`--single-transaction` のため table lock を
+読むのに `PROCESS` が要る。2026-11-18 利用者決定で上線前に付けた。書込み静止も使わない: app の接続元は app 自身が観測して応答に
+書き、app の停止は heartbeat と DBA の processlist の確認で確かめる。U-2）、`LOCK TABLES`（`--single-transaction` のため table lock を
 取らない）、`SUPER`、DDL 凍結の `GET_LOCK`（権限不要）、`SELECT @@server_uuid`・`SHOW GLOBAL VARIABLES`・`SHOW SESSION STATUS`
-（権限不要）。
+（権限不要）、`DELETE`（静止要求の行は消さない。保存期間（30 日）を過ぎた行は app が消す）、要求の表以外への書込み。
 
 - `--no-tablespaces` の前提: production に入る migration（`src/main/resources/db/migration`・`db/migration-prod` の SQL と
   `src/main/java/db/migration` の Java migration）は `CREATE TABLESPACE` などの general tablespace を使わない
@@ -270,9 +385,12 @@ production の `docker-compose.yml` は `build:` を持たず、全 service が 
   integration）で確認した（2026-11-21。この option の組合せの `backup-full.sh` の full が PASS）。
 - dump role と binlog role の分離（account を分ける）は上線後に行う（2026-11-18 利用者決定）。現状は一つの account が上の表の
   全権限を持つ（`docker-compose.yml` の全 service が同じ `.env.backup` の `MYSQL_USER` を使う。分けるには service ごとの env が要る）。
-- preflight は権限を検査しない。不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は source 側を
-  root で動かすため、この表で足りることは CI でも確かめられない（**本番相当の権限での実測は未取得**。DBA が本番の account で
-  初回の full・checkpoint・archive を流して確かめる）。
+- preflight が検査する権限は、書込み静止の要求の表への表単位の `INSERT`・`UPDATE` だけ（`QUIESCE_PROVIDER` が DB の provider の
+  とき。無ければ exit 19）。他の権限は検査せず、不足は最初の full・checkpoint・archive の失敗で分かる（fail-closed）。integration は
+  source 側を root で動かすため、この表で足りることは CI の integration では確かめられない（**本番相当の権限での実測は未取得**。DBA が
+  本番の account で初回の full・checkpoint・archive を流して確かめる）。書込み静止の provider の SQL がこの表の権限（対象 DB の
+  `SELECT` と要求の表への表単位の `INSERT`・`UPDATE`）だけで動き、業務の表と応答の表へは書けないことは、Java の MySQL 契約試験
+  `BackupQuiesceProviderContractMySqlTest`（RB-QUIESCE BWQ-011。mysql-test の shard 3）が確かめる（Runner の証跡は未取得）。
 
 #### restore target role の権限（RB-W P2-2。integration の `restore-svc` はこれだけで復元・検証する）
 
@@ -295,12 +413,20 @@ account が `SYSTEM_USER` を持つなら restore role にも `SYSTEM_USER` が�
 一致しない場合がある）。
 
 - repository の S3 versioning/immutability を有効化し、通常 backup credential だけで全世代を削除できないようにする。
-- 書込み静止（quiesce）は `providers/quiesce-local.sh`（version 管理された executable）のみ。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
-- 静止 protocol: 全 replica の heartbeat fresh / scheduler ack / MySQL `GET_LOCK('ses_backup_ddl_freeze')` の三者を bounded deadline 内に確認。app の DDL/deploy は同じ lock 名を尊重する規約。
+- 書込み静止（quiesce）の provider は version 管理された executable の `providers/quiesce-db.sh`（本番の定期の job）・
+  `providers/quiesce-app-stopped.sh`（`--app-stopped` の明示だけ）・`providers/quiesce-local.sh`（隔離環境）の 3 つだけ（「設定」の
+  「書込み静止の provider と設定」）。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
+- 静止 protocol（`quiesce-db`。RB-QUIESCE）: DB の信号表で静止要求を受け渡し、MySQL `GET_LOCK('ses_backup_ddl_freeze')` を保持 process が
+  持った上で、全ての app の instance の応答（排水の後の QUIESCED）を bounded deadline 内に確かめ、静止区間の終わりに verify する。
+  app 側の正本は `.kiro/specs/backup-write-quiesce/design.md`。本番の Flyway job は同じ lock を callback（`ProductionBackupDdlFreezeFlywayCallback`）
+  で取り、DBA の手作業の DDL も同じ lock を先に取る（deploy-runbook §3.3・§3.5）。`quiesce-local` は従来の file の protocol（全 replica の
+  heartbeat fresh・scheduler ack・同じ lock の三者）。
 
 ## 復元
 
 復元は **production source とは別の recovery target** へ行う。手順は `runbooks/restore-cutover.md`。
+復元した DB に残る書込み静止の信号表の行の扱いと、新しい source での backup account と要求の表への表単位の権限の付け直し（backup を
+再開する前に行う）は同 §4.6（RB-QUIESCE）。
 
 ```bash
 # plan（read-only）: 要求時刻は RFC3339 UTC（末尾 Z）
@@ -427,6 +553,10 @@ v1（r2・RB-W 初版。DB の既定値と `DATABASE_COLLATION` を含まない�
 `check-backup.sh --json` は最新 watermark（full/checkpoint/closed binlog の repository 到達点）と
 source 現行 coordinate の差で判定する。古い file の存在だけでは FAIL にしない。
 
+app 側の書込み静止の log（`errorCode=BACKUP_QUIESCE_*`）と metric（`ses_backup_quiesce_*`）の alert の条件と対応は
+`runbooks/backup-health-monitoring.md` の「書込み静止（RB-QUIESCE）」。checkpoint が静止で続けて失敗すると、ここの checkpoint age が
+30 分を超えて CRITICAL（RPO 不達）になる。
+
 ## retention（依存グラフに基づく削除）
 
 - `retention.sh --dry-run`（変更なし。PITR 30 日 + 日次/週次/月次代表 + full-only）
@@ -450,6 +580,23 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
   その正規化規則（コメントだけの変更・列の並び順・索引・既定値・trigger の本体・view の定義・外部キーの `ON DELETE`・
   DB の既定の照合順序）の実 MySQL での確認、migrator 相当の利用者が作った trigger・view・routine・外部キー・CHECK を
   restore role の権限だけで DEFINER ごと復元できること。CI の `backup-integration` job と同一）
+- 書込み静止の integration（RB-QUIESCE BWQ-012）: app の代わりに DB の protocol を話す shell の responder
+  （`tests/integration-responder.sh`。compose の service `responder`。app と同じ SQL を session の time_zone `+09:00` で実行する）を動かし、
+  source に V202 の file を適用し、最初の full を `--app-stopped`、checkpoint を `quiesce-db` で取る。responder が応答の後に止まる負例で
+  checkpoint が VALID にならないこと、STORED の生成列 `active_slot` の dump・復元・schema fingerprint の往復も確かめる。証跡の
+  `quiesce-full.json`・`quiesce-checkpoint.json` は `quiesce.json` から host 名・接続元・`request_token` を外した投影（「書込み静止の記録」）、
+  `full-dump-start-lock.txt`（mysqldump 8.4 の起点の lock の待ち）は記録だけで判定しない。
+- **integration の backup account は root で、最小権限は確かめない**。preflight が表単位の GRANT の行を求めるため、本番と同じ要求の表への
+  表単位の `GRANT INSERT, UPDATE` を root にも付けるが、root は全権限を持つ。provider の SQL が「source 側の account の権限」の表の権限
+  だけで動くことは `BackupQuiesceProviderContractMySqlTest`（BWQ-011。mysql-test の shard 3）が確かめる。本番は専用の backup account
+  （上の表の権限）に、deploy-runbook §3.4（Flyway の後）で表単位の GRANT を付けてから初回 backup を取る。responder の合成 user
+  （`ses-int-app`）は信号表の表単位の権限だけを持ち、PROCESS を持たない（自分の接続だけを観測する）。
+- 書込み静止の unit（tool image の中）: `tests/quiesce-db-test.sh`（fake の mysql で provider の手順・保持 process・verify・release・
+  U-13 の中止・停止口）、`full-backup-test.sh`・`binlog-checkpoint-test.sh`（verify を解除の前に呼ぶ、verify の失敗で VALID にしない、
+  `--app-stopped`、full の中止）、`preflight-test.sh`（exit 19）、`tool-image-test.sh`（bash 4.4 以上、`--app-stopped` の引数の受け渡し）、
+  `script-contract-test.sh`（長い子 process の `{QUIESCE_HOLD_FD}>&-`、信号表の SQL に `NOW(` が無いこと等）。fake の mysql は provider の
+  SQL を解釈しないため、SQL の判定（`VERDICT` の行）は `BackupQuiesceProviderContractMySqlTest` が同じ SQL file を実 MySQL 8.4 で実行して
+  固定する。
 - ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`
 - unit の fake の限界（RB-W P3-4・P3-7）: fake の mysql は schema fingerprint の SQL を解釈せず、fake の docker は
   content ID の template を解釈しない。そのため「SQL から列（例: `column_default`）を消す」「template から項目

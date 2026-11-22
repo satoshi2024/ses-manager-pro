@@ -370,4 +370,39 @@ class FileStorageServiceImplTest {
             throw new AssertionError(e);
         }
     }
+
+    // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-015）
+
+    @Test
+    void store_静止中にpermitの無いthreadの保存と削除は拒否しfileを変えずpermitを持つthreadは保存できる() throws Exception {
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        service.setBackupWriteGate(gate);
+        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", image("png"));
+        com.ses.backup.quiesce.BackupWritePermit permit = gate.tryAcquire(
+                com.ses.backup.quiesce.BackupWritePermit.Kind.HTTP, "POST /api/files");
+        StoredFile stored;
+        try {
+            com.ses.backup.quiesce.BackupQuiesceTestSupport.close(gate, 1, java.time.Duration.ofMinutes(5));
+            stored = service.store(file, FileKind.PHOTO);
+        } finally {
+            permit.close();
+        }
+        Path published = tempDir.resolve("published").resolve(stored.getStoredName());
+        assertTrue(java.nio.file.Files.exists(published), "閉じる前に permit を取った要求は保存できる");
+
+        assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> service.store(file, FileKind.PHOTO));
+        assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> AccountingTenantContextHolder.runWithTenant("default",
+                        () -> service.delete(stored.getStoredName())));
+
+        assertTrue(java.nio.file.Files.exists(published), "静止中の削除で消えない");
+        try (var files = java.nio.file.Files.list(tempDir.resolve("published"))) {
+            assertEquals(1, files.count(), "静止中の保存で増えない");
+        }
+        try (var files = java.nio.file.Files.list(tempDir.resolve("quarantine"))) {
+            assertEquals(0, files.count());
+        }
+    }
 }

@@ -30,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>対象（監査を書く経路）:
  * <ol>
  *   <li>{@code AuditLogService} 型の receiver（field・引数・局所変数、{@code ObjectProvider<AuditLogService>} の
- *       {@code getIfAvailable()}・{@code getObject()}）の {@code record} / {@code recordRequired} の第2引数</li>
+ *       {@code getIfAvailable()}・{@code getObject()}）の {@code record} / {@code recordRequired} / {@code recordCaptured}
+ *       （RB-QUIESCE の解除後の監査。D4-P3-3）の第2引数</li>
  *   <li>{@code AuditLog} 型の変数の {@code setMethod(...)} の引数（{@code recordDomainEventRequired} へ渡す entry）</li>
  *   <li>{@code AuditLog.builder()} を使う file の {@code .method("...")}</li>
  *   <li>上の経路を持つ file の、名前に {@code METHOD} を含む String 定数</li>
@@ -38,6 +39,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 引数が文字列 literal か String 定数（同じ file、または {@code Class.NAME} で参照する main の class）なら値を解決する。
  * 連結・method 呼出し・変数は実行時の値なので対象外とする（HTTP method をそのまま書く filter 等）。他の型の receiver
  * （例: {@code PrivacyHoldAudit.record(username, EVENT, ...)}、{@code ExternalApiAudit.setMethod}）は対象にしない。
+ *
+ * <p>{@code recordCaptured}（取っておいた時刻・主体で書く監査）と {@code revokeCaptured}（取っておいた時刻で書く session の失効）を
+ * 呼んでよいのは、backup の静止の解除後の書込みの一覧 {@code BackupQuiesceDeferredWrites}（と入れ子の class）だけである。過去の時刻の
+ * 監査の行を任意の場所から作れないよう、main の bytecode の呼出し（method 参照を含む）を走査して固定する。
  */
 class AuditLogMethodLengthGuardTest {
 
@@ -155,13 +160,122 @@ class AuditLogMethodLengthGuardTest {
                     void f() { auditLogService.record(u, "POST", "/x", 200); auditLogService.record(u, request.getMethod(), "/x", 1); }
                 }
                 """);
+        sources.put("x/Captured.java", """
+                class Captured {
+                    void f(AuditLogService audit, ObjectProvider<AuditLogService> p) {
+                        audit.recordCaptured(u, "CAPTURED_LONG_5", "/logout", 302, "LOGOUT", true, context);
+                        p.getObject().recordCaptured(u, method, "/logout", 302, "LOGOUT", true, context);
+                    }
+                }
+                """);
 
         List<Finding> findings = scan(sources);
 
         assertThat(findings).extracting(Finding::value).containsExactlyInAnyOrder(
-                "DIRECT_LONG_1", "CONST_LONG_2", "CONST_LONG_2", "ENTRY_LONG_3", "OTHER_LONG_4", "POST");
+                "DIRECT_LONG_1", "CONST_LONG_2", "CONST_LONG_2", "ENTRY_LONG_3", "OTHER_LONG_4", "POST",
+                "CAPTURED_LONG_5");
         assertThat(findings).filteredOn(finding -> finding.value().equals("DIRECT_LONG_1"))
                 .extracting(Finding::location).containsExactly("x/Direct.java:3");
+    }
+
+    // ---------------------------------------------------------------- 取っておいた値で書く呼出しの呼出し元（D4-P3-3）
+
+    /** 取っておいた値で書く method（owner の内部名 → method 名）。 */
+    private static final Map<String, String> CAPTURED_WRITERS = Map.of(
+            "com/ses/service/AuditLogService", "recordCaptured",
+            "com/ses/service/impl/AuditLogServiceImpl", "recordCaptured",
+            "com/ses/service/security/PersistentSessionService", "revokeCaptured",
+            "com/ses/service/security/impl/PersistentSessionServiceImpl", "revokeCaptured");
+    /** 呼んでよい class（入れ子の class を含む）。 */
+    private static final String CAPTURED_WRITER_CALLER = "com/ses/backup/quiesce/BackupQuiesceDeferredWrites";
+
+    @Test
+    void 取っておいた値で監査と失効を書く呼出しは解除後の書込みの一覧だけにある() throws IOException {
+        List<String> callers = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(Path.of("target/classes"))) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".class")).sorted().toList()) {
+                callers.addAll(capturedWriterCalls(Files.readAllBytes(file)));
+            }
+        }
+
+        assertThat(callers).as("解除後の書込みの一覧が呼んでいない（走査の空振り）")
+                .anyMatch(call -> call.startsWith(CAPTURED_WRITER_CALLER + "$") && call.endsWith("recordCaptured"))
+                .anyMatch(call -> call.startsWith(CAPTURED_WRITER_CALLER + "$") && call.endsWith("revokeCaptured"));
+        assertThat(callers.stream().filter(call -> !isAllowedCapturedCaller(call)).toList())
+                .as("recordCaptured・revokeCaptured を BackupQuiesceDeferredWrites の外から呼んでいます")
+                .isEmpty();
+    }
+
+    @Test
+    void 一覧の外からの呼出しとmethod参照を検出する() throws IOException {
+        List<String> calls = new ArrayList<>();
+        for (Class<?> fixture : List.of(CapturedAuditFixture.class, CapturedReferenceFixture.class)) {
+            try (var stream = fixture.getResourceAsStream("/" + fixture.getName().replace('.', '/') + ".class")) {
+                assertThat(stream).isNotNull();
+                calls.addAll(capturedWriterCalls(stream.readAllBytes()));
+            }
+        }
+
+        assertThat(calls).hasSize(2).noneMatch(AuditLogMethodLengthGuardTest::isAllowedCapturedCaller);
+        assertThat(calls).anyMatch(call -> call.contains("CapturedAuditFixture") && call.endsWith("recordCaptured"))
+                .anyMatch(call -> call.contains("CapturedReferenceFixture") && call.endsWith("revokeCaptured"));
+    }
+
+    private static boolean isAllowedCapturedCaller(String call) {
+        String caller = call.substring(0, call.indexOf(' '));
+        return caller.equals(CAPTURED_WRITER_CALLER) || caller.startsWith(CAPTURED_WRITER_CALLER + "$");
+    }
+
+    /** class の bytecode の中の、取っておいた値で書く method の呼出し（{@code <caller> -> <owner>.<name>}）。 */
+    static List<String> capturedWriterCalls(byte[] classBytes) {
+        List<String> calls = new ArrayList<>();
+        org.springframework.asm.ClassReader reader = new org.springframework.asm.ClassReader(classBytes);
+        String caller = reader.getClassName();
+        reader.accept(new org.springframework.asm.ClassVisitor(org.springframework.asm.SpringAsmInfo.ASM_VERSION) {
+            @Override
+            public org.springframework.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                                    String signature, String[] exceptions) {
+                return new org.springframework.asm.MethodVisitor(org.springframework.asm.SpringAsmInfo.ASM_VERSION) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String method, String desc,
+                                                boolean isInterface) {
+                        record(owner, method);
+                    }
+
+                    @Override
+                    public void visitInvokeDynamicInsn(String method, String desc,
+                                                       org.springframework.asm.Handle bootstrap, Object... arguments) {
+                        for (Object argument : arguments) {
+                            if (argument instanceof org.springframework.asm.Handle handle) {
+                                record(handle.getOwner(), handle.getName());
+                            }
+                        }
+                    }
+
+                    private void record(String owner, String method) {
+                        if (method.equals(CAPTURED_WRITERS.get(owner))) {
+                            calls.add(caller + " -> " + owner + "." + method);
+                        }
+                    }
+                };
+            }
+        }, org.springframework.asm.ClassReader.SKIP_DEBUG | org.springframework.asm.ClassReader.SKIP_FRAMES);
+        return calls;
+    }
+
+    /** 一覧の外から recordCaptured を直接呼ぶ fixture（検出されることを確かめる）。 */
+    static final class CapturedAuditFixture {
+        void write(com.ses.service.AuditLogService audit) {
+            audit.recordCaptured("u", "AUTH", "/logout", 302, "LOGOUT", true, null);
+        }
+    }
+
+    /** 一覧の外から revokeCaptured を method 参照で渡す fixture。 */
+    static final class CapturedReferenceFixture {
+        java.util.function.Consumer<com.ses.service.security.PersistentSessionService.CapturedRevocation> write(
+                com.ses.service.security.PersistentSessionService sessions) {
+            return sessions::revokeCaptured;
+        }
     }
 
     // ---------------------------------------------------------------- 走査
@@ -219,7 +333,7 @@ class AuditLogMethodLengthGuardTest {
             }
             for (String service : services) {
                 Matcher call = Pattern.compile("\\b" + Pattern.quote(service)
-                        + "\\s*\\.\\s*(?:record|recordRequired)\\s*\\(").matcher(code);
+                        + "\\s*\\.\\s*(?:record|recordRequired|recordCaptured)\\s*\\(").matcher(code);
                 while (call.find()) {
                     argument(code, call.end(), 1).ifPresent(argument -> resolve(argument, constants, constantsByClass)
                             .ifPresent(value -> add(findings, seen, path, code, call.start(), value)));
@@ -227,7 +341,7 @@ class AuditLogMethodLengthGuardTest {
             }
             for (String provider : providers) {
                 Matcher call = Pattern.compile("\\b" + Pattern.quote(provider)
-                        + "\\s*\\.\\s*(?:getIfAvailable|getObject)\\s*\\(\\s*\\)\\s*\\.\\s*(?:record|recordRequired)\\s*\\(")
+                        + "\\s*\\.\\s*(?:getIfAvailable|getObject)\\s*\\(\\s*\\)\\s*\\.\\s*(?:record|recordRequired|recordCaptured)\\s*\\(")
                         .matcher(code);
                 while (call.find()) {
                     argument(code, call.end(), 1).ifPresent(argument -> resolve(argument, constants, constantsByClass)

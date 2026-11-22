@@ -35,8 +35,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>{@code @Transactional} でもテストTXの外でcommitする経路（REQUIRES_NEW / TestTransaction の commit）を
  *       持つクラスは、専用 H2 DB か、commitした行を削除する明示cleanupを持つ</li>
  * </ul>
- * <p>注: ソースに {@code @Tag}{@code mysql} の連結文字列を置かないこと。
- * {@code MySqlTestShardInventoryTest} は素朴な部分一致で mysql タグ付き test を列挙する。
+ * <p>注: {@code MySqlTestShardInventoryTest} は compile 済みの class の JUnit の注釈で mysql タグ付き test を列挙する
+ * （以前は source の部分一致だった。RB-QUIESCE 2b review P3-9）。
  */
 class TestIsolationAuditTest {
 

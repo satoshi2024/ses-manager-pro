@@ -74,4 +74,66 @@ class LocalDocumentStorageStrictDeleteTest {
 
         assertThrows(IllegalArgumentException.class, () -> storage.deleteStrict(" "));
     }
+
+    // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-015）
+
+    @Test
+    void 静止中にpermitの無いthreadからの保存と移動と削除は拒否しfileを変えない() throws Exception {
+        LocalDocumentStorage storage = new LocalDocumentStorage(base.toString());
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        storage.setBackupWriteGate(gate);
+        storage.put("abc/kept", "q".getBytes(StandardCharsets.UTF_8), true);
+        storage.put("abc/pub", "p".getBytes(StandardCharsets.UTF_8), false);
+        com.ses.backup.quiesce.BackupQuiesceTestSupport.close(gate, 1, java.time.Duration.ofMinutes(5));
+
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.put("abc/new", "n".getBytes(StandardCharsets.UTF_8), true));
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.promote("abc/kept"));
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.delete("abc/pub"));
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.deleteStrict("abc/pub"));
+
+        assertFalse(Files.exists(base.resolve("documents/quarantine/abc/new")));
+        org.junit.jupiter.api.Assertions.assertTrue(Files.exists(base.resolve("documents/quarantine/abc/kept")));
+        assertFalse(Files.exists(base.resolve("documents/published/abc/kept")));
+        org.junit.jupiter.api.Assertions.assertTrue(Files.exists(base.resolve("documents/published/abc/pub")));
+    }
+
+    @Test
+    void 閉じる前にpermitを取ったthreadは静止中もfileを変えられる() throws Exception {
+        LocalDocumentStorage storage = new LocalDocumentStorage(base.toString());
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        storage.setBackupWriteGate(gate);
+        com.ses.backup.quiesce.BackupWritePermit permit = gate.tryAcquire(
+                com.ses.backup.quiesce.BackupWritePermit.Kind.HTTP, "POST /api/documents");
+        try {
+            com.ses.backup.quiesce.BackupQuiesceTestSupport.beginClosing(gate, 1);
+            storage.put("abc/one", "a".getBytes(StandardCharsets.UTF_8), true);
+            storage.promote("abc/one");
+            org.junit.jupiter.api.Assertions.assertTrue(Files.exists(base.resolve("documents/published/abc/one")));
+            storage.deleteStrict("abc/one");
+        } finally {
+            permit.close();
+        }
+        assertFalse(Files.exists(base.resolve("documents/published/abc/one")));
+    }
+
+    @Test
+    void prodの登録の前でもbeanの初期化のdirectoryの作成は拒否しない() {
+        com.ses.backup.quiesce.BackupWriteGate unarmed = com.ses.backup.quiesce.BackupQuiesceTestSupport.unarmedGate(
+                true, () -> 0L, java.time.Clock.systemUTC());
+        org.junit.jupiter.api.Assertions.assertTrue(unarmed.writesBlockedForCurrentThread());
+
+        LocalDocumentStorage storage = new LocalDocumentStorage(base.resolve("prod").toString());
+        storage.setBackupWriteGate(unarmed);
+
+        org.junit.jupiter.api.Assertions.assertTrue(Files.isDirectory(base.resolve("prod/documents/quarantine")));
+        org.junit.jupiter.api.Assertions.assertTrue(Files.isDirectory(base.resolve("prod/documents/published")));
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.backup.quiesce.BackupWriteQuiescedException.class,
+                () -> storage.put("x", new byte[] {1}, true), "file の変更は prod の登録の前は拒否する");
+    }
 }

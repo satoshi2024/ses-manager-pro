@@ -3717,3 +3717,83 @@ ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_c
 ALTER TABLE t_privacy_request ADD CONSTRAINT IF NOT EXISTS chk_privacy_request_delivery_method
   CHECK (delivery_method IS NULL OR delivery_method IN ('EMAIL', 'POSTAL', 'IN_PERSON', 'SECURE_TRANSFER', 'OTHER'));
 ALTER TABLE t_legal_hold ADD CONSTRAINT IF NOT EXISTS chk_legal_hold_kind CHECK (hold_kind IN ('UNKNOWN'));
+
+-- V202（backup の書込み静止の信号表。RB-QUIESCE BWQ-001）。schema-backup-quiesce-h2.sql と同じ定義（ack → instance → request の順に消して作り直す）。
+CREATE ALIAS IF NOT EXISTS UTC_TIMESTAMP FOR 'com.ses.test.H2MySqlTimeFunctions.utcTimestamp';
+CREATE ALIAS IF NOT EXISTS CONNECTION_ID FOR 'com.ses.test.H2MySqlTimeFunctions.connectionId';
+DROP TABLE IF EXISTS sys_backup_quiesce_ack CASCADE;
+DROP TABLE IF EXISTS sys_backup_quiesce_instance CASCADE;
+DROP TABLE IF EXISTS sys_backup_quiesce_request CASCADE;
+CREATE TABLE sys_backup_quiesce_request (
+    id                  BIGINT       NOT NULL AUTO_INCREMENT,
+    request_token       CHAR(32)     NOT NULL,
+    mode                VARCHAR(16)  NOT NULL,
+    job_kind            VARCHAR(16)  NOT NULL,
+    status              VARCHAR(16)  NOT NULL,
+    active_slot         TINYINT GENERATED ALWAYS AS (CASE WHEN status = 'REQUESTED' THEN 1 ELSE NULL END),
+    lease_seconds       INT          NOT NULL,
+    requested_by        VARCHAR(64)  NOT NULL,
+    protocol_version    SMALLINT     NOT NULL,
+    requested_at        DATETIME(6)  NOT NULL,
+    lease_expires_at    DATETIME(6)  NOT NULL,
+    verify_requested_at DATETIME(6)  NULL,
+    released_at         DATETIME(6)  NULL,
+    release_reason      VARCHAR(32)  NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_bq_request_token UNIQUE (request_token),
+    CONSTRAINT uk_bq_request_active UNIQUE (active_slot),
+    CONSTRAINT ck_bq_request_mode CHECK (mode IN ('ONLINE', 'APP_STOPPED')),
+    CONSTRAINT ck_bq_request_kind CHECK (job_kind IN ('FULL', 'CHECKPOINT')),
+    CONSTRAINT ck_bq_request_status CHECK (status IN ('REQUESTED', 'RELEASED', 'ABORTED', 'EXPIRED')),
+    CONSTRAINT ck_bq_request_reason CHECK (release_reason IS NULL
+        OR release_reason IN ('COMPLETED', 'ABORTED', 'VERIFY_FAILED', 'EXPIRED', 'NEW_INSTANCE'))
+);
+CREATE INDEX idx_bq_request_requested_at ON sys_backup_quiesce_request (requested_at);
+
+CREATE TABLE sys_backup_quiesce_instance (
+    instance_id            CHAR(36)     NOT NULL,
+    host_name              VARCHAR(255) NOT NULL,
+    db_client_host         VARCHAR(255) NOT NULL,
+    db_connection_id       BIGINT       NOT NULL,
+    app_commit             VARCHAR(64)  NOT NULL,
+    protocol_version       SMALLINT     NOT NULL,
+    poll_interval_ms       INT          NOT NULL,
+    heartbeat_interval_ms  INT          NOT NULL,
+    fence_after_ms         INT          NOT NULL,
+    max_hold_checkpoint_ms INT          NOT NULL,
+    max_hold_full_ms       INT          NOT NULL,
+    scheduling_enabled     TINYINT      NOT NULL,
+    status                 VARCHAR(16)  NOT NULL,
+    gate_state             VARCHAR(16)  NOT NULL,
+    started_at             DATETIME(6)  NOT NULL,
+    last_beat_at           DATETIME(6)  NOT NULL,
+    stopped_at             DATETIME(6)  NULL,
+    PRIMARY KEY (instance_id),
+    CONSTRAINT ck_bq_instance_status CHECK (status IN ('STARTING', 'RUNNING', 'STOPPED')),
+    CONSTRAINT ck_bq_instance_gate CHECK (gate_state IN ('UNARMED', 'OPEN', 'CLOSING', 'CLOSED', 'FENCED',
+        'SHUTDOWN', 'DISABLED'))
+);
+CREATE INDEX idx_bq_instance_last_beat ON sys_backup_quiesce_instance (last_beat_at);
+
+CREATE TABLE sys_backup_quiesce_ack (
+    request_id         BIGINT        NOT NULL,
+    instance_id        CHAR(36)      NOT NULL,
+    state              VARCHAR(16)   NOT NULL,
+    scheduler_state    VARCHAR(16)   NOT NULL,
+    drain_millis       INT           NOT NULL,
+    hold_until         DATETIME(6)   NULL,
+    observed_app_hosts VARCHAR(1024) NOT NULL,
+    observed_at        DATETIME(6)   NOT NULL,
+    refuse_reason      VARCHAR(64)   NULL,
+    acked_at           DATETIME(6)   NOT NULL,
+    resumed_at         DATETIME(6)   NULL,
+    resume_reason      VARCHAR(32)   NULL,
+    PRIMARY KEY (request_id, instance_id),
+    CONSTRAINT fk_bq_ack_request FOREIGN KEY (request_id) REFERENCES sys_backup_quiesce_request (id) ON DELETE CASCADE,
+    CONSTRAINT ck_bq_ack_state CHECK (state IN ('QUIESCED', 'REFUSED', 'RESUMED')),
+    CONSTRAINT ck_bq_ack_scheduler CHECK (scheduler_state IN ('PAUSED', 'DISABLED')),
+    CONSTRAINT ck_bq_ack_refuse CHECK (refuse_reason IS NULL
+        OR refuse_reason IN ('DRAIN_TIMEOUT', 'ERROR', 'UNSUPPORTED_PROTOCOL', 'DISABLED')),
+    CONSTRAINT ck_bq_ack_resume CHECK (resume_reason IS NULL
+        OR resume_reason IN ('RELEASED', 'LEASE_EXPIRED', 'MAX_HOLD', 'REQUEST_GONE', 'SHUTDOWN'))
+);

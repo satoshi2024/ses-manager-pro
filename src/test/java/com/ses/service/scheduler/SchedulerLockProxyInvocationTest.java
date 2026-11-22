@@ -83,4 +83,66 @@ class SchedulerLockProxyInvocationTest {
     void removeLockRows() {
         jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (?, ?, ?)", (Object[]) LOCK_NAMES);
     }
+
+    // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-006）
+
+    /** 最小の context の定期実行の入口（ShedLock の proxy を通る）。 */
+    static class QuiesceProbe {
+        final java.util.concurrent.atomic.AtomicInteger invocations = new java.util.concurrent.atomic.AtomicInteger();
+
+        @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "backup-quiesce-scheduler-probe",
+                lockAtMostFor = "PT1M")
+        public void run() {
+            invocations.incrementAndGet();
+        }
+
+        /** proxy（CGLIB）の field ではなく対象の数を読む。 */
+        public int count() {
+            return invocations.get();
+        }
+    }
+
+    /**
+     * 静止中に発火した定期実行は ShedLock の表へ書かずに待ち、解除の後に実行される（design.md §6.6。BWQ-AC-002-04）。
+     * test profile の gate は INERT で閉じられないため、ShedLock の設定と静止の gate だけの最小の context で確かめる。
+     */
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
+    void 静止中はshedlockの行を書かずに待ち解除の後にmethodを実行する() {
+        com.ses.backup.quiesce.BackupWriteGate gate = com.ses.backup.quiesce.BackupQuiesceTestSupport.openGate(false,
+                () -> 0L, java.time.Clock.systemUTC());
+        String url = "jdbc:h2:mem:bq_shedlock_" + java.util.UUID.randomUUID().toString().replace("-", "")
+                + ";MODE=MySQL;DB_CLOSE_DELAY=-1;INIT=RUNSCRIPT FROM 'classpath:sql/schema-shedlock-h2.sql'";
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withConfiguration(org.springframework.boot.autoconfigure.AutoConfigurations.of(
+                        org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration.class,
+                        org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class))
+                .withUserConfiguration(com.ses.config.SchedulerLockConfig.class)
+                .withBean(com.ses.backup.quiesce.BackupWriteGate.class, () -> gate)
+                .withBean(QuiesceProbe.class)
+                .withPropertyValues("spring.datasource.url=" + url, "spring.datasource.username=sa",
+                        "spring.datasource.password=", "app.scheduler.lock.use-db-time=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    QuiesceProbe probe = context.getBean(QuiesceProbe.class);
+                    JdbcTemplate jdbc = new JdbcTemplate(context.getBean(javax.sql.DataSource.class));
+                    com.ses.backup.quiesce.BackupQuiesceTestSupport.close(gate, 1, java.time.Duration.ofMinutes(5));
+
+                    java.util.concurrent.CompletableFuture<Void> fired =
+                            java.util.concurrent.CompletableFuture.runAsync(probe::run);
+                    Thread.sleep(500);
+                    assertThat(fired).as("静止中は開始を待つ").isNotDone();
+                    assertThat(probe.count()).isZero();
+                    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock", Integer.class))
+                            .as("待っている間は ShedLock の表へ書かない").isZero();
+
+                    com.ses.backup.quiesce.BackupQuiesceTestSupport.reopen(gate, 1);
+                    fired.get(10, java.util.concurrent.TimeUnit.SECONDS);
+
+                    assertThat(probe.count()).as("解除の後に飛ばさず実行する").isEqualTo(1);
+                    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock WHERE name = ?", Integer.class,
+                            "backup-quiesce-scheduler-probe")).isEqualTo(1);
+                    assertThat(gate.permitCount()).as("unlock の後で permit を返す").isZero();
+                });
+    }
 }

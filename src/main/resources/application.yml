@@ -241,6 +241,24 @@ app:
     lock:
       # 本番の共有DBロックはDBサーバ時刻を使う。H2 test profileだけfalseで上書きする。
       use-db-time: ${SCHEDULER_LOCK_USE_DB_TIME:true}
+  # ===== backup の書込み静止（RB-QUIESCE。.kiro/specs/backup-write-quiesce/design.md §12.1） =====
+  # backup の provider（ops/backup の quiesce-db）が DB の信号表（V202）へ静止を求めると、app は更新を止めて排水し ack する。
+  # 値の範囲と相互の関係は BackupQuiesceProperties が起動時に検査する（範囲外は起動しない。deploy-runbook §1.0）。
+  #   - 最大保持時間 checkpoint 300 秒・full 60 分（U-1）、排水の上限 checkpoint 30 秒・full 600 秒（U-3）、保存期間 30 日（U-12）
+  #   - prod の enabled=false（停止口）は BACKUP_QUIESCE_DISABLED_TICKET と組でだけ使う（U-7）。停止口の間は backup が全て失敗する
+  backup-quiesce:
+    enabled: ${BACKUP_QUIESCE_ENABLED:true}
+    disabled-ticket: ${BACKUP_QUIESCE_DISABLED_TICKET:}
+    poll-interval: ${BACKUP_QUIESCE_POLL_INTERVAL:1s}
+    heartbeat-interval: ${BACKUP_QUIESCE_HEARTBEAT_INTERVAL:5s}
+    fence-after: ${BACKUP_QUIESCE_FENCE_AFTER:20s}
+    drain-timeout-checkpoint: ${BACKUP_QUIESCE_DRAIN_TIMEOUT_CHECKPOINT:30s}
+    drain-timeout-full: ${BACKUP_QUIESCE_DRAIN_TIMEOUT_FULL:600s}
+    max-hold-checkpoint: ${BACKUP_QUIESCE_MAX_HOLD_CHECKPOINT:300s}
+    max-hold-full: ${BACKUP_QUIESCE_MAX_HOLD_FULL:3600s}
+    startup-wait-max: ${BACKUP_QUIESCE_STARTUP_WAIT_MAX:60s}
+    retention: ${BACKUP_QUIESCE_RETENTION:30d}
+    deferred-writes-max: 10000
   # ===== 一覧エクスポート =====
   # 大量データはキーセットページング＋レスポンス直書きで処理し、同時実行数も制限する。
   export:

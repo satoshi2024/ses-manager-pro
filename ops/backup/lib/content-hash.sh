@@ -107,6 +107,13 @@ content_hash::collect() { # <tables_csv> <mysql args...>
   for t in "${tables[@]}"; do
     t=${t//[[:space:]]/}
     [[ -n "$t" ]] || continue
+    # 書込み静止の信号表（sys_backup_quiesce_*）は対象にできない（RB-QUIESCE design.md §3.7）: 静止区間の中でも heartbeat・
+    # 観測・lease の延長・verify の要求で書かれ、checkpoint の FLUSH BINARY LOGS の後の書込みは復元（closed coordinate までの
+    # replay）に現れないため、記録したハッシュと復元後の値が合わず復元検証が必ず FAIL になる。計算の前に失敗する。
+    if [[ "${t,,}" == sys_backup_quiesce_* ]]; then
+      echo "content-hash: 書込み静止の信号表は CONTENT_HASH_TABLES に指定できません（静止区間の中でも書かれ、復元検証が必ず失敗するため。design.md §3.7）: $t" >&2
+      return 1
+    fi
     content_hash::describe "$t" "$@" || return 1
     sum=$(content_hash::table "$t" "$CONTENT_HASH_COLUMNS" "$CONTENT_HASH_PK" "$@") || return 1
     json=$(jq -c --arg t "$t" --arg s "$sum" --arg o "$CONTENT_HASH_PK" --arg a "$CONTENT_HASH_ALGORITHM" \
