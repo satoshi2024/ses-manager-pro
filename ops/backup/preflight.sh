@@ -121,15 +121,30 @@ preflight::quiesce_grants_ok() { # <結果> <DB 名>
 }
 
 # SQL の失敗の文（quiesce_db::run_sql が password を伏せたもの）から、出力 JSON に入れない接続の識別子を伏せる
-# （`'user'@'host'` の形と、MYSQL_HOST・MYSQL_DATABASE・MYSQL_USER の値。3 文字未満の値は文を壊すため伏せない）
+# （`'user'@'host'` の形と、MYSQL_HOST・MYSQL_DATABASE・MYSQL_USER の値。3 文字未満の値は文を壊すため伏せない）。
+# 値は前後が識別子の文字（英数字・_・$）でない所だけを伏せ、表の名前の一部（例: user が backup のときの
+# sys_backup_quiesce_instance）は変えない（最終 review P3-4）
 preflight::sanitize_sql_error() { # <文>
   local t=$1
   [[ -n "$t" ]] || return 0
   t=$(sed -E "s/'[^']*'@'[^']*'/'<user>'@'<host>'/g" <<< "$t")
-  if (( ${#MYSQL_HOST} >= 3 )); then t=${t//"$MYSQL_HOST"/<host>}; fi
-  if (( ${#MYSQL_DATABASE} >= 3 )); then t=${t//"$MYSQL_DATABASE"/<db>}; fi
-  if (( ${#MYSQL_USER} >= 3 )); then t=${t//"$MYSQL_USER"/<user>}; fi
+  t=$(preflight::mask_token "$t" "${MYSQL_HOST:-}" '<host>')
+  t=$(preflight::mask_token "$t" "${MYSQL_DATABASE:-}" '<db>')
+  t=$(preflight::mask_token "$t" "${MYSQL_USER:-}" '<user>')
   printf '%s\n' "$t"
+}
+
+# <文> の中の <値> を、前後が識別子の文字（英数字・_・$）でない所だけ <置換> にする（値の正規表現の特殊文字は逃がす）
+preflight::mask_token() { # <文> <値> <置換>
+  local text=$1 value=$2 repl=$3 re
+  if (( ${#value} < 3 )); then
+    printf '%s\n' "$text"
+    return 0
+  fi
+  re=$(sed 's/[][\.*^$(){}?+|/#]/\\&/g' <<< "$value")
+  # 連続した出現（区切りの 1 文字を共有するもの）も伏せるため 2 回当てる
+  sed -E -e "s#(^|[^A-Za-z0-9_\$])${re}([^A-Za-z0-9_\$]|\$)#\\1${repl}\\2#g" \
+    -e "s#(^|[^A-Za-z0-9_\$])${re}([^A-Za-z0-9_\$]|\$)#\\1${repl}\\2#g" <<< "$text"
 }
 
 # 書込み静止の検査（RB-QUIESCE design.md §12.4。読むだけ。QUIESCE_PROVIDER が DB の provider の時だけ）。

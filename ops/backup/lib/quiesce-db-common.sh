@@ -5,6 +5,9 @@
 # providers/quiesce-db.sh（ONLINE）と providers/quiesce-app-stopped.sh（APP_STOPPED。BWQ-010）と preflight.sh が source する。
 # - SQL は providers/quiesce-db.d/*.sql の固定の file だけを実行する。値は検査した整数・hex・列挙だけを
 #   「SET @p_<名前> = <値>;」の前置きで渡す（任意の文字列を SQL に埋め込まない。requested_by も hex にして渡す）。
+#   例外は保持 process が DDL の session へ毎秒流す lock の確認の固定の文（IS_USED_LOCK と CONNECTION_ID の比較。
+#   lock の名前の定数だけを含み、外からの値を埋め込まない）。file ではないため Java の契約試験（BWQ-011）の外にあり、
+#   CI の backup integration が実 client で通す。
 #   時刻は全て UTC_TIMESTAMP(6) で書き・比べる（§3.10）。session の time_zone は +00:00 にする（値には効かない）。
 # - 各 file の先頭行は fake の mysql が見分ける印（-- ses-backup:quiesce-db:<名前>）で、前置きはその後に置く。
 # - 結果は mysql -N -B の tab 区切りで、各行の 1 欄目が行の種類（VERDICT・INSTANCE 等）。SQL は空の欄を作らない
@@ -454,7 +457,7 @@ quiesce_db::last_ddl_held() { # <state_dir>
 
 # 保持 process の loop（pipe の左）。標準出力は DDL の session への pipe で、診断は全て hold.log（標準エラー）へ書く。
 quiesce_db::hold_loop() { # <state_dir>
-  local d=$1 ddl_fd line line_rc lock=WAITING session_pid="" now lock_deadline res out sql_rc held
+  local d=$1 ddl_fd line line_rc lock=WAITING session_pid="" now lock_deadline res out sql_rc held lost
   local request_id="" renewing=0 checking=0 renew_due=0 check_due=0
   local -a lease=()
   exec {ddl_fd}>&1 1>&2
@@ -507,12 +510,19 @@ quiesce_db::hold_loop() { # <state_dir>
         # 前の確認の結果が 1 でない・session が終わった・文を送れない場合は lock を失ったとみなし、印を書いて保持 process を
         # 終える（verify は hold_problem で失敗し、app は lease の期限で再開する）
         held=$(quiesce_db::last_ddl_held "$d")
-        if [[ -n "$held" && "$held" != 1 ]] || ! quiesce_db::session_alive "$session_pid" \
-          || ! printf "SELECT 'DDL_HELD', COALESCE(IS_USED_LOCK('%s') = CONNECTION_ID(), 0);\n" "$QUIESCE_DB_LOCK_NAME" \
+        lost=""
+        if [[ -n "$held" && "$held" != 1 ]]; then
+          lost="この session が lock を持たない（IS_USED_LOCK の確認=$held）"
+        elif ! quiesce_db::session_alive "$session_pid"; then
+          lost="DDL の session が終わった"
+        elif ! printf "SELECT 'DDL_HELD', COALESCE(IS_USED_LOCK('%s') = CONNECTION_ID(), 0);\n" "$QUIESCE_DB_LOCK_NAME" \
             >&"$ddl_fd" 2>/dev/null; then
+          lost="DDL の session へ確認の文を送れない"
+        fi
+        if [[ -n "$lost" ]]; then
           lock=LOST
-          quiesce_db::mark "$d/ddl-lock.lost" "${held:+IS_USED_LOCK の確認=$held}"
-          quiesce_db::log "ERROR: DDL 凍結の lock を失いました（${held:+この session が lock を持たない（$held）。}session の終わり・文の送信の失敗を含む。この静止区間の backup は VALID にしません。保持 process を終えます）"
+          quiesce_db::mark "$d/ddl-lock.lost" "$lost"
+          quiesce_db::log "ERROR: DDL 凍結の lock を失いました（$lost。この静止区間の backup は VALID にしません。保持 process を終えます）"
           break
         fi
         ;;

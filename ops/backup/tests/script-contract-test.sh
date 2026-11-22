@@ -678,7 +678,57 @@ case_quiesce_sql_files_contract() {
   assert_contains "$all" "GET_LOCK('ses_backup_ddl_freeze'" "DDL 凍結の lock の名前は Flyway の callback と同じ"
 }
 
+# 2d review P2-1 の回帰の守り（最終 review P3-8）: quiesce_db::run_sql を command substitution（$( ) と ` `）の中で呼ぶと、
+# 失敗の文（QDB_SQL_ERROR）が親の shell に届かない。provider・preflight・保持 process は quiesce_db::query で呼び、run_sql を
+# 直接呼ぶのは lib/quiesce-db-common.sh（query の中）だけにする。行全体のコメントは見ない。
+# 出力: <file>:<行番号>: <理由>
+quiesce_run_sql_misuse() { # <file...>
+  awk '
+    /^[[:space:]]*#/ { next }
+    /\$\([[:space:]]*quiesce_db::run_sql/ || /`[[:space:]]*quiesce_db::run_sql/ {
+      print FILENAME ":" FNR ": command substitution の中の quiesce_db::run_sql"; next
+    }
+    /quiesce_db::run_sql/ && FILENAME !~ /\/lib\/quiesce-db-common\.sh$/ {
+      print FILENAME ":" FNR ": lib/quiesce-db-common.sh の外の quiesce_db::run_sql"
+    }
+  ' "$@"
+}
+
+case_quiesce_run_sql_is_not_called_in_command_substitution() {
+  local -a files=()
+  local f out fx
+  fx=$(mktemp -d)
+  mkdir -p "$fx/lib" "$fx/providers"
+  # 走査器の見本: 検出すべき書き方（command substitution の 3 つの形と、lib の外の直接の呼出し）と、検出しない書き方
+  cat > "$fx/providers/bad.sh" <<'FIXTURE'
+out=$(quiesce_db::run_sql precheck "int:x=1") || rc=$?
+out=$( quiesce_db::run_sql renew "int:x=1" {ddl_fd}>&- ) || rc=$?
+out=`quiesce_db::run_sql release "int:x=1"`
+FIXTURE
+  cat > "$fx/providers/good.sh" <<'FIXTURE'
+quiesce_db::query out precheck "int:x=1" || rc=$?
+# out=$(quiesce_db::run_sql precheck) はコメントなので数えない
+quiesce_db::log "失敗: ${QDB_SQL_ERROR:-rc=$rc}"
+FIXTURE
+  cat > "$fx/lib/quiesce-db-common.sh" <<'FIXTURE'
+  quiesce_db::run_sql "$@" > "$__qdb_out" || __qdb_rc=$?
+FIXTURE
+  cat > "$fx/providers/direct.sh" <<'FIXTURE'
+quiesce_db::run_sql precheck > "$tmp"
+FIXTURE
+  out=$(quiesce_run_sql_misuse "$fx/providers/bad.sh" "$fx/providers/good.sh" "$fx/lib/quiesce-db-common.sh" \
+    "$fx/providers/direct.sh")
+  assert_eq 4 "$(grep -c . <<< "$out")" "走査器は command substitution の 3 つと lib の外の直接の呼出し 1 つを検出する（$out）"
+  assert_not_contains "$out" "good.sh" "query・コメント・log は検出しない"
+  assert_not_contains "$out" "$fx/lib/quiesce-db-common.sh:" "lib の中の query からの呼出しは検出しない"
+  rm -rf "$fx"
+  while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
+  out=$(quiesce_run_sql_misuse "${files[@]}")
+  assert_eq "" "$out" "本番 script は quiesce_db::run_sql を command substitution の中で呼ばず、lib の外で直接呼ばない"
+}
+
 run_case case_long_children_close_hold_fd
+run_case case_quiesce_run_sql_is_not_called_in_command_substitution
 run_case case_quiesce_providers_are_enumerated
 run_case case_production_scripts_do_not_use_shell_c
 run_case case_quiesce_sql_files_contract

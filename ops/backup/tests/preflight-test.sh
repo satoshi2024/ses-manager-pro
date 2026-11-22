@@ -163,6 +163,25 @@ case_preflight_quiesce_sql_error_is_shown_without_identifiers() {
   done
 }
 
+# 最終 review P3-4: user 名が表の名前の一部（例: backup と sys_backup_quiesce_instance）でも、伏せるのは前後が識別子の
+# 文字でない所だけで、表の名前は変えない（本番の backup account の名前は backup を含み得る）
+case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring() {
+  setup_quiesce_env
+  export MYSQL_USER=backup
+  printf 'TABLES\t0\nGRANTS_BEGIN\nGRANTS_END\n' > "$FAKE_QDB_DIR/preflight.out"
+  printf '%s\n' "ERROR 1146 (42S02) at line 18: Table 'ses_manager_db.sys_backup_quiesce_instance' doesn't exist" \
+    "Access denied for user backup to database ses_manager_db; user 'backup'@'10.1.2.3'" > "$FAKE_QDB_DIR/preflight.err"
+  printf '1\n' > "$FAKE_QDB_DIR/preflight.rc"
+  run_preflight
+  assert_eq 19 "$code" "SQL の失敗は exit 19"
+  assert_contains "$out" "Table '<db>.sys_backup_quiesce_instance' doesn't exist" "user 名を含む表の名前は変えない"
+  assert_not_contains "$out" "sys_<user>_quiesce" "表の名前の一部を user として伏せない"
+  assert_contains "$out" "user <user> to database <db>" "区切られた user 名と DB 名は伏せる"
+  assert_contains "$out" "'<user>'@'<host>'" "user@host の形は伏せる"
+  assert_not_contains "$out" "10.1.2.3" "接続元を出力しない"
+  assert_no_secret "$out"
+}
+
 run_preflight() {
   out=$(env BACKUP_TOOL_IMAGE_DIGEST='sha256:test-digest-001' "$PREFLIGHT" --json 2>&1)
   code=$?
@@ -478,6 +497,7 @@ run_case case_preflight_quiesce_skipped_for_local
 run_case case_preflight_quiesce_ok
 run_case case_preflight_quiesce_failures_exit_19
 run_case case_preflight_quiesce_sql_error_is_shown_without_identifiers
+run_case case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring
 
 # 全 case 出力の秘密 grep（framework log 含む）
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
