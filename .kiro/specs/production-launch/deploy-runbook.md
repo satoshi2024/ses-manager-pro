@@ -551,6 +551,9 @@ jobはflyway-maven-pluginとそのplugin依存（`flyway-mysql`・`mysql-connect
 | NF07 の Journal instance | DBA | application DB・Witness と別の instance を用意し、耐久設定・空の `privacy_journal` schema・job と application の principal と GRANT を整える（外部作業 G-DBA / G-BKP） | §3.6、`journal-witness-grant-design.md` §3 | **未取得** |
 | NF07 の Journal の専用 Flyway job | DBA・SRE | 上の instance に専用の job を実行し、適用結果を確かめる（DBA 立会い）。application の `PRIVACY_JOURNAL_*` を ON の起動の task definition に入れる | §3.6、§1.0「ONにした時だけ必須になる設定」 | **未取得** |
 | NF05 outbound の OFF の記録 | SRE（確認 SQL は DBA） | 上の1から全ての起動に同じ `INTEGRATION_HUB_BOUND_TENANT_ID` を設定し（outbound は OFF のまま）、**ON の起動の前の最後の OFF の起動の後**に、下の SQL で状態の行と監査を確かめる | 下の表の NF05 の行、`ops/security/runbooks/integration-hub-public-api.md` §13.1、`integration-hub-public-api/g3s-restart-barrier-and-replay.md` | **未取得** |
+| NF07 の privacy-admin の有効な OIDC 管理者2名以上（推奨は §5.0 の C〜E の3名） | DBA・SRE（利用者が手配する。割当は管理者の画面の操作、対象者の事前の確認は Owner と Security、人数の確認 SQL は DBA） | bootstrap の後に OIDC 管理者を privacy-admin に割り当て、確認 SQL で2名以上を確かめる | `feature-switches.md` 4.7.4 の2 | **未取得** |
+| NF06 の法人を持つ組織（単一法人） | DBA・SRE（利用者が手配する） | 法人を持つ組織を登録し、論理削除されていない組織の法人 ID がちょうど1種類であることを確かめる | `feature-switches.md` 4.8.2 | **未取得** |
+| NF02 の全社共通カレンダー | DBA・SRE（利用者が手配する） | 当年度を含む全社共通カレンダーを登録し、法人既定の有無と祝日・会社休日を確かめる | `feature-switches.md` 4.3、DG-02 の決定 package | **未取得** |
 
 NF05 outbound の OFF の記録の確認 SQL（DBA。ON の起動の前の最後の OFF の起動の後に、本番の DB で読むだけ）:
 
@@ -563,10 +566,6 @@ SELECT id, created_at, after_state FROM t_audit_log
 -- 期待: after_state = 'OFF' の行がある。行は状態の値が変わった OFF の起動のときだけ書かれる（初回の起動から同じ値なら
 --       初回の起動の1行。created_at は UTC）。上の行が期待どおりでも監査の行が無ければ ON にしない
 ```
-
-| NF07 の privacy-admin の有効な OIDC 管理者2名以上（推奨は §5.0 の C〜E の3名） | DBA・SRE（利用者が手配する。割当は管理者の画面の操作、対象者の事前の確認は Owner と Security、人数の確認 SQL は DBA） | bootstrap の後に OIDC 管理者を privacy-admin に割り当て、確認 SQL で2名以上を確かめる | `feature-switches.md` 4.7.4 の2 | **未取得** |
-| NF06 の法人を持つ組織（単一法人） | DBA・SRE（利用者が手配する） | 法人を持つ組織を登録し、論理削除されていない組織の法人 ID がちょうど1種類であることを確かめる | `feature-switches.md` 4.8.2 | **未取得** |
-| NF02 の全社共通カレンダー | DBA・SRE（利用者が手配する） | 当年度を含む全社共通カレンダーを登録し、法人既定の有無と祝日・会社休日を確かめる | `feature-switches.md` 4.3、DG-02 の決定 package | **未取得** |
 
 **初回リリースのスイッチと、ONの起動時検査が要る値の所在**（決定済み（2026-11-22、利用者）。値は署名の後に人が設定する。AI・実装者は設定しない）
 

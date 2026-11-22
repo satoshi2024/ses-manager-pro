@@ -357,7 +357,7 @@ class BackupQuiesceResponderTest {
     }
 
     /**
-     * 本機の確認（2026-11-22）の F-1: prod 以外は登録の前（UNARMED）でも書込みを許す（design.md §6.2・D-P3-3）ため、静止中の起動は
+     * 手元の環境の確認（2026-11-22）の F-1: prod 以外は登録の前（UNARMED）でも書込みを許す（design.md §6.2・D-P3-3）ため、静止中の起動は
      * 待たずに続く。その log は「解除された」と言わない（挙動は変えない）。
      */
     @Test
@@ -896,7 +896,7 @@ class BackupQuiesceResponderTest {
     }
 
     /**
-     * 本機の確認（2026-11-22）の F-2: 解除の log に design.md §13.1 の拒否・待機・省略の件数を出す。値は既存の metric の counter の、
+     * 手元の環境の確認（2026-11-22）の F-2: 解除の log に design.md §13.1 の拒否・待機・省略の件数を出す。値は既存の metric の counter の、
      * 要求を読んでからの増分（要求の前の数は含めない。待機は {@code deferred} の {@code scheduler} だけ）。
      */
     @Test
