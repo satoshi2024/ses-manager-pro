@@ -561,8 +561,9 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
   - 値の正規化: 前後の空白を除き、空・null は未設定（`proposed_value`・`setting_value` は NULL）。offset 付き ISO-8601 で 100 文字以内でなければ 400 `settingValueInvalid`。今の値と同じ値は 409 `settingUnchanged`。値の同一は解釈した `OffsetDateTime` の `equals`（同じ日時と offset。秒の `:00` の有無の表記の違いは同じとみなす）。
   - 条件の code（固定の文字列。値を含めない）: `setting.visibleSince.decision.{valid|missing|signedOn.future|expiresOn.expired|valueMismatch}`・`setting.visibleSince.inventory.{valid|missing|signedOn.future|expiresOn.expired}`。決定の構造化された値 `visibleSince` が空・無しは「未設定の決定」。申請の時に成り立たなければ 409 `conditionsUnsatisfied`、承認の時は `CONDITIONS_UNSATISFIED`（申請は未決のまま）。
   - 指紋は §4.5 の正規形を `unit=<設定の key>`・`type=SETTING_CHANGE`・`value=<値か空>`・要る署名（決定、値を設定する時は棚卸し）の `id:version` で計算する（親は含めない。NF02 の開閉で陳腐化させない）。
-  - 承認は申請を先に `APPROVED` にしてから設定の行を lock（§5.1 の (5)）し、無ければ挿入・あれば版の CAS で `setting_value`（NULL は `set(col, null)`）・`request_id`・`requested_by`・`approved_by`・`approved_at` を書く。履歴 `SETTING`/`CHANGED`、監査 `FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（設定の値は秘密でないため監査の前後に含める）、通知 `settingChangeRequested`・`settingChanged`。世代を上げ、commit の後に snapshot を読み直す。
-  - 画面: 「設定」tab（今の値・決定の署名の値・棚卸しの有無・未決の申請・「変更を申請」）。承認・却下は「申請」tab の既存の行で行う。読取りは `GET /api/feature-enablement/settings`。
+  - 承認は申請を先に `APPROVED` にしてから設定の行を lock（§5.1 の (5)）し、無ければ挿入・あれば版の CAS で `setting_value`（NULL は `set(col, null)`）・`request_id`・`requested_by`・`approved_by`・`approved_at` を書く。履歴 `SETTING`/`CHANGED`、監査 `FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（本文は key・設定の有無・申請 ID だけで値を含めない。§11.4。値は設定の行と申請の行にある）、通知 `settingChangeRequested`・`settingChanged`。世代を上げ、commit の後に snapshot を読み直す。
+  - 画面: 「設定」tab（今の値・決定の署名の値・棚卸しの有無・未決の申請・「変更を申請」）。承認・却下は「申請」tab の既存の行で行う。読取りは `GET /api/feature-enablement/settings`。各行の `effective` は承認した値が portal の判定に効く源か（DB の源で NF02 顧客ポータルが DB 管理）で、property の源（dev の既定）では tab に「この源では効かない」と出す（復審 rb-fe-b-656d71b8 の P3-5）。
+- **継続の条件（§18 J-21。段階 B の復審 rb-fe-b-656d71b8 の P3-1、統括の決定）**: NF02 顧客ポータルの固有の評価器 `PortalVisibleSinceConditionEvaluator`（`Scope.CONTINUOUS`）が、snapshot の今の設定と確認済みの決定の `visibleSince` を比べる。未設定は成立（detail `setting.unset`）、設定の日時が決定の日時と同じか後なら成立（`decision.covers`）、設定の日時が決定より前（`decision.narrower`）・決定が未設定（`decision.unset`）・決定が無い（`decision.missing`）・値を読めない（`decision.unreadable`・`setting.unreadable`）は不成立（code `setting.visibleSince.outsideDecision`）。決定の差替えの確認（§6.5）は依存する開放単位を同じ transaction で評価し直すため、より狭い決定を確認すると顧客ポータルだけが `AUTO_CLOSED(SIGN_OFF_REPLACED_INVALID)` になり、監査 `FEATURE_AUTO_CLOSED`・WARN・管理者への通知が出る（D-4。親の NF02 は開いたまま）。DB を直接変えた場合は次の定期の評価で閉じる。開き直す申請・承認も同じ check を通るため、設定を新しい決定の値へ変える（二人の承認）までは 409。照会は snapshot だけ（0 回）。目録の `specificEvaluatorRequired` は変えない（評価器が無くても共通の条件で判定できる開放単位のまま）。
 
 ## 6. 署名の登録と確認
 
@@ -640,12 +641,15 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 |---|---|
 | 共通（総スイッチ・親・署名） | snapshot から（0） |
 | NF02 | 暦 1（日の始まりの警告だけ。閉鎖の根拠にしない） |
+| NF02 顧客ポータル | 公開範囲の設定が決定の範囲の内か（snapshot から 0。復審 rb-fe-b-656d71b8 の P3-1） |
 | NF01 二者確認 | 証跡種別 2 |
 | NF06 | 権限の行 1、法人 1 |
 | NF07（保持・保全・DSAR の両方を開いた場合） | group 1、管理者 2、許可行 1、provider 0（memory）、Journal の権限（10 分に 1 回まで。Journal への 1〜2）、trust（memory の文書） |
 | NF05 | barrier の行 1（tenant の指紋だけ。OFF の記録は見ない）、法人の未解決 1 |
 
 合計は 5 分ごとに約 15 回で、接続の pool（20）への影響は無視できる。画面の表示は最後の評価の結果を出し、利用者の「再評価」で 1 件だけ評価する（全件をその場で評価しない）。
+
+- NF01 二者確認の証跡種別の2回（FE-B01）は、バイト列の比較（`CAST(CONCAT(...)) NOT IN (...)`）のため索引を使えず、`m_lifecycle_template_task` と `t_lifecycle_task`（論理削除を除く全ての行）を毎回走査する。`EXISTS`・`LIMIT 1` に替えても、揺れの無い通常の状態では全ての行を見て「無い」ことを確かめるため費用は同じで、件数（画面の detail）を残すため `COUNT(*)` のままにした（復審 rb-fe-b-656d71b8 の P3-6）。この照会は定期の評価（5 分ごと）と、署名の確認・差替え等の `Purpose.CHANGE` の評価で世代の行の排他 lock を持ったまま走る。走査の時間は `t_lifecycle_task` の行数に比例し、その間は他の機能の開放の書込みが lock を待つ。初回リリースの規模（タスクは数千〜数万行）では問題にならない見込みで、行数が 10 万を超える、または評価の時間が SRE の負荷の実測（NF05 と共用の `NF05_SRE_LOAD` の範囲外のため別に要る）で目立つ場合は、(1) `Purpose.CHANGE`（`remoteChecksAllowed=false`）では最後の定期の評価の結果を使う、(2) 証跡種別の正規化した列と索引を足す（DDL）、のどちらかで直す（段階 E の後の backlog の候補）。
 
 ### 7.4 自動閉鎖の処理
 
@@ -881,7 +885,8 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
   - 開放の申請と開放単位: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`（延長の申請の期限切れも同じ code）・`FEATURE_OPEN_STALE`・`FEATURE_REQUEST_CANCELLED`（閉鎖・総スイッチで未決を取り消した）・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`（総スイッチで開放単位を閉じた回だけ）・`FEATURE_EVALUATION_UNVERIFIABLE`・`FEATURE_EVALUATION_RECOVERED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`・`FEATURE_SUBGATE_OPENED`・`FEATURE_SUBGATE_CLOSED`・`FEATURE_ADMIN_ROLE_GRANTED_NOTICE`（通知の送付の記録）。
   - 署名: `FEATURE_SIGN_OFF_REGISTERED`・`FEATURE_SIGN_OFF_CONFIRMED`・`FEATURE_SIGN_OFF_REJECTED`・`FEATURE_SIGN_OFF_REVOKED`・`FEATURE_SIGN_OFF_SUPERSEDED`・`FEATURE_SIGN_OFF_EXPIRED`・`FEATURE_SIGN_OFF_PURGED`・`FEATURE_SIGN_OFF_DOCUMENT_READ`（文書の取得）・`FEATURE_SIGN_OFF_EXTENSION_REQUESTED`・`FEATURE_SIGN_OFF_EXTENSION_STALE`・`FEATURE_SIGN_OFF_EXTENDED`。
   - 組: `FEATURE_SIGN_OFF_BUNDLE_REGISTERED`・`FEATURE_SIGN_OFF_BUNDLE_CONFIRMED`・`FEATURE_SIGN_OFF_BUNDLE_REJECTED`・`FEATURE_SIGN_OFF_BUNDLE_SUPERSEDED`・`FEATURE_SIGN_OFF_BUNDLE_REVOKED`。
-  - 後の段階で足す: `FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`（段階 D の NF05）、`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（設定の変更。A08・A11）。
+  - 後の段階で足す: `FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`（段階 D の NF05）。
+  - 設定の変更（FE-B03 で足した）: `FEATURE_SETTING_REQUESTED`（申請）・`FEATURE_SETTING_CHANGED`（承認。本文は key・設定の有無・申請 ID だけ）・`FEATURE_SETTING_CHANGE_STALE`（承認の時の指紋の違い）。却下・取下げ・期限切れ・取消しは開放の申請と同じ共通の処理のため `FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`・`FEATURE_REQUEST_CANCELLED` を使い、申請の種類は参照する申請の行（`request_type`）で区別する（復審 rb-fe-b-656d71b8 の P3-7）。
 - 本文（`before_state`・`after_state`）: 開放単位・状態・理由の code・申請 ID・署名 ID だけ。
 - 自動の遷移は actor SYSTEM、`confirmationSource` は `SCHEDULER_POLL`（起動時の評価も同じ値で、uri `system:feature-enablement/startup`・`…/scheduler` で区別する。`ConfirmationSource` に `STARTUP` を足すと、`ExternalAccountReferenceDto`・`ExternalAccountReferenceMapper` の switch 式と V136 の `t_external_account_reference` の CHECK が既存の値の集合を前提にしているため、A1 では足さない。実装 review rb-fe-a1 P3-6）。
 - 全ての遷移を INFO log `FEATURE_ENABLEMENT_EVENT`（code と ID だけ）にも出す（§2.7・§13.1）。
@@ -1047,6 +1052,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 | J-18 | 親の閉鎖で子を閉じるか | (a) 子も自動閉鎖（再承認が要る）。(b) 子の状態は残し、実効値だけ閉 | 推奨 (a)。**独立 review で同意（2026-11-22）**。D-4（条件「親が開」が外れたら閉じる）に合う |
 | J-19 | 閉鎖の人数 | (a) 管理者 1 名。(b) 二人 | 推奨 (a)。**独立 review で同意（2026-11-22）**。閉じる方向は安全側で、緊急に遅らせない。手動の閉鎖と署名の取消しは有効な管理者全員へ通知する（§7.5。review P3-9） |
 | J-20 | NF05 の起動前の DB の読取り | (a) `EnvironmentPostProcessor` で生の JDBC 接続 1 本。(b) NF05 の bean を常に作り実行時に開閉する大改修 | 推奨 (a)。**独立 review で同意（2026-11-22。条件つき）**: §9.1 の 0 の実装の条件（順序、enabled を常に書く、schema の違いは `READ_FAILED`、test・H2 での挙動、判定は純粋な関数の共用）を満たし、`OPEN` の outbound は barrier の tenant の指紋だけを見る（review P3-14・P1-1）。D-2（NF05 は再起動で反映）の範囲で最小。DBA・Security の受理を RB §1.2 に足す |
+| J-21 | NF02 の公開範囲の決定を差し替えた後の設定との食い違い（段階 B の復審 rb-fe-b-656d71b8 の P3-1） | (a) 顧客ポータルの継続の条件にする（範囲の外なら自動閉鎖）。(b) 警告だけ | **決定済み（2026-11-23、統括。D-4 に従う）: (a)**。今の設定が確認済みの決定の範囲の内でなければ顧客ポータルの問い合わせだけを自動閉鎖して警告し、開き直しも範囲の内を要する（§5.6） |
 
 ## 19. 独立 review（`96be3af4`）の指摘と対応箇所
 

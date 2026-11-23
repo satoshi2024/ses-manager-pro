@@ -147,6 +147,16 @@ class FeatureEnablementApiControllerTest {
         mockMvc.perform(get("/api/feature-enablement/units/NF04").with(as(admin, "管理者")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.closeWarnings").isEmpty());
+        // 親の NF01 本体の閉鎖は開いている二者確認も閉じるため、二者確認が開いている間は NF01 の詳細にも同じ警告を出す（復審 P3-2）
+        mockMvc.perform(get("/api/feature-enablement/units/NF01").with(as(admin, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closeWarnings").isEmpty());
+        fixture.openDirectly(Feature.NF01_DUAL_CONFIRMATION, admin, otherAdmin);
+        holder.reload();
+        mockMvc.perform(get("/api/feature-enablement/units/NF01").with(as(admin, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closeWarnings[0].code").value("dualConfirmation.activeDualTemplates"))
+                .andExpect(jsonPath("$.data.closeWarnings[0].count").value(before + 1));
     }
 
     @Test
@@ -169,6 +179,41 @@ class FeatureEnablementApiControllerTest {
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_request WHERE tenant_id = 'default' "
                 + "AND target_key = 'NF03'", Long.class)).isZero();
+    }
+
+    /**
+     * FE-B03（復審 rb-fe-b-656d71b8 の P3-4）: 設定の一覧（{@code GET /settings}）と設定の変更の申請（{@code SETTING_CHANGE}）も、
+     * 営業・HR・マネージャーは group の有無に関わらず 403、CSRF の無い POST は管理者でも 403、未認証は 401。管理者の一覧は 200 で、
+     * 承認した値が portal に効く源かを返す。
+     */
+    @Test
+    void 設定の一覧と設定の変更の申請も管理者だけでCSRFが要る() throws Exception {
+        String body = "{\"type\":\"SETTING_CHANGE\",\"target\":\"nf02-customer-portal.visible-since\","
+                + "\"value\":\"2027-04-01T00:00:00+09:00\"}";
+        long copiedAdminGroup = copiedAdminGroup();
+        for (String role : List.of("営業", "HR", "マネージャー")) {
+            FeatureEnablementActor withoutGroup = fixture.user(role);
+            FeatureEnablementActor withGroup = fixture.user(role);
+            jdbc.update("INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_at, deleted_flag) "
+                    + "VALUES ('default', ?, ?, CURRENT_TIMESTAMP, 0)", withGroup.userId(), copiedAdminGroup);
+            for (FeatureEnablementActor user : List.of(withoutGroup, withGroup)) {
+                mockMvc.perform(get("/api/feature-enablement/settings").with(as(user, role)))
+                        .andExpect(status().isForbidden());
+                mockMvc.perform(post("/api/feature-enablement/requests").with(as(user, role)).with(csrf())
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isForbidden());
+            }
+        }
+        mockMvc.perform(get("/api/feature-enablement/settings")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/feature-enablement/requests").with(as(admin, "管理者"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/feature-enablement/settings").with(as(admin, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].key").value("nf02-customer-portal.visible-since"))
+                .andExpect(jsonPath("$.data[0].effective").value(true));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_request WHERE tenant_id = 'default' "
+                + "AND request_type = 'SETTING_CHANGE'", Long.class)).isZero();
     }
 
     @Test

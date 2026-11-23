@@ -3,6 +3,7 @@ package com.ses.featureenablement.service;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.feature.Feature;
 import com.ses.entity.FeatureEnablementRequest;
+import com.ses.entity.FeatureSignOff;
 import com.ses.featureenablement.FeatureEnablementH2Fixture;
 import com.ses.featureenablement.FeatureEnablementTestConfiguration;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
@@ -68,6 +69,10 @@ class FeatureEnablementSettingChangeH2Test {
     private FeatureEnablementOverlay overlay;
     @Autowired
     private FeatureEnablementTestConfiguration.MutableTestClock clock;
+    @Autowired
+    private FeatureSignOffService signOffs;
+    @Autowired
+    private com.ses.config.feature.FeatureSwitches switches;
 
     private FeatureEnablementH2Fixture fixture;
     private FeatureEnablementActor requester;
@@ -195,7 +200,70 @@ class FeatureEnablementSettingChangeH2Test {
                 Long.class)).isZero();
     }
 
+    /**
+     * 復審 rb-fe-b-656d71b8 の P3-1（統括の決定。D-4）: 公開範囲 V1 を承認して顧客ポータルを開いた後に、公開範囲の決定をより狭い決定
+     * （V2。V1 より後）へ差し替えて確認すると、今の設定が決定の範囲の外になるため顧客ポータルだけが同じ transaction で
+     * {@code AUTO_CLOSED} になり（親の NF02 は開いたまま）、監査と管理者への通知が残り、顧客へ見せる範囲は決定を超えない。開き直す
+     * 申請も範囲の内を要し、設定を新しい決定の値へ変える（二人の承認）までは 409。承認の前に範囲は広がらない。
+     */
+    @Test
+    void 公開範囲の決定をより狭い決定へ差し替えると顧客ポータルは自動閉鎖し開き直しは範囲の内を要する() {
+        fixture.confirmedSignOffs(Feature.NF02, SIGNED, EXPIRES);
+        Map<String, Long> portalSignOffs = fixture.confirmedSignOffs(Feature.NF02_CUSTOMER_PORTAL, SIGNED, EXPIRES);
+        jdbc.update("UPDATE t_feature_sign_off SET structured_values = ? WHERE id = ?", "{\"visibleSince\":\"" + V1 + "\"}",
+                portalSignOffs.get(FeatureEnablementSettingChangeApprover.KIND_DECISION));
+        inventory();
+        fixture.openDirectly(Feature.NF02, requester, approver);
+        fixture.openDirectly(Feature.NF02_CUSTOMER_PORTAL, requester, approver);
+        approvedSetting(V1);
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isTrue();
+        long autoClosedAudits = fixture.countAudit("FEATURE_AUTO_CLOSED");
+
+        FeatureSignOff narrower = signOffs.register(new FeatureSignOffService.Registration(
+                        FeatureEnablementSettingChangeApprover.KIND_DECISION, "CS-2026-1201", "CS_OWNER", null, SIGNED, EXPIRES,
+                        Map.of("visibleSince", V2)), pdf(), "visible-since-decision.pdf", requester);
+        signOffs.confirm(narrower.getId(), 0, approver);
+
+        assertThat(fixture.state(Feature.NF02_CUSTOMER_PORTAL)).isEqualTo("AUTO_CLOSED");
+        assertThat(fixture.closedReason(Feature.NF02_CUSTOMER_PORTAL)).isEqualTo("SIGN_OFF_REPLACED_INVALID");
+        assertThat(fixture.state(Feature.NF02)).as("親は開いたまま（その機能だけを閉じる）").isEqualTo("OPEN");
+        assertThat(fixture.countAudit("FEATURE_AUTO_CLOSED")).isEqualTo(autoClosedAudits + 1);
+        assertThat(FeatureEnablementH2Fixture.notices()).anyMatch(notice -> "autoClosed".equals(notice.eventKey())
+                && Feature.NF02_CUSTOMER_PORTAL.name().equals(notice.args()[0]));
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isFalse();
+
+        assertRejected(() -> service.requestOpen(Feature.NF02_CUSTOMER_PORTAL, null, requester), 409,
+                "error.featureEnablement.conditionsUnsatisfied", "setting.visibleSince.outsideDecision");
+
+        FeatureEnablementRequest change = settingChanges.request(KEY, V2, null, requester);
+        assertThat(service.approve(change.getId(), 0, null, approver).approved()).isTrue();
+        holder.reload();
+        FeatureEnablementRequest reopen = service.requestOpen(Feature.NF02_CUSTOMER_PORTAL, null, requester);
+        assertThat(reopen.getStatus()).isEqualTo("PENDING");
+        assertThat(reopen.getConditionSummary()).contains("setting.visibleSince.withinDecision=SATISFIED");
+    }
+
     // ---------------------------------------------------------------- helper
+
+    /** 承認済みの申請と設定の行を直接入れる（申請者・承認者は申請の行と一致。複合 FK）。 */
+    private void approvedSetting(String value) {
+        jdbc.update("INSERT INTO t_feature_enablement_request (tenant_id, request_type, target_key, proposed_value, status, "
+                        + "condition_fingerprint, condition_summary, requested_by, requested_at, expires_at, decided_by, "
+                        + "decided_at, version) VALUES ('default', 'SETTING_CHANGE', ?, ?, 'APPROVED', ?, 'fixture', ?, "
+                        + "TIMESTAMP '2026-11-20 09:00:00', TIMESTAMP '2026-11-27 09:00:00', ?, TIMESTAMP '2026-11-20 10:00:00', 1)",
+                KEY, value, "e".repeat(64), requester.userId(), approver.userId());
+        Long requestId = jdbc.queryForObject("SELECT MAX(id) FROM t_feature_enablement_request WHERE target_key = ?",
+                Long.class, KEY);
+        jdbc.update("INSERT INTO t_feature_enablement_setting (tenant_id, setting_key, setting_value, version, request_id, "
+                        + "requested_by, approved_by, approved_at) VALUES ('default', ?, ?, 0, ?, ?, ?, TIMESTAMP '2026-11-20 10:00:00')",
+                KEY, value, requestId, requester.userId(), approver.userId());
+    }
+
+    private static byte[] pdf() {
+        return ("%PDF-1.7\n1 0 obj<<>>endobj\n% visible-since\n%%EOF\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+    }
 
     private long decision(String visibleSince) {
         long id = fixture.signOff(FeatureEnablementSettingChangeApprover.KIND_DECISION, "CONFIRMED", SIGNED, EXPIRES);

@@ -19,7 +19,6 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
@@ -132,9 +131,10 @@ public class FeatureEnablementSettingChangeApprover implements FeatureEnablement
         }
         write.event(context, "SETTING", settingKey, row.getId(), "CHANGED", null, null, "REQUEST_" + request.getId(),
                 null);
+        // 監査の本文は key・設定の有無・申請 ID だけ（design §11.4。値は設定の行と申請の行にある）
         write.audit(context, "FEATURE_SETTING_CHANGED", request.getId(),
-                "{\"setting\":\"" + settingKey + "\",\"value\":" + json(before) + "}",
-                "{\"setting\":\"" + settingKey + "\",\"value\":" + json(value) + ",\"request\":" + request.getId() + "}");
+                "{\"setting\":\"" + settingKey + "\",\"set\":" + (before != null) + "}",
+                "{\"setting\":\"" + settingKey + "\",\"set\":" + (value != null) + ",\"request\":" + request.getId() + "}");
         context.markChanged(Feature.NF02_CUSTOMER_PORTAL);
         write.notifier().notifyAdministrators("settingChanged", new Object[]{settingKey},
                 "FEATURE_ENABLEMENT:SETTING_CHANGED:" + settingKey + ":" + request.getId(), List.of());
@@ -239,9 +239,5 @@ public class FeatureEnablementSettingChangeApprover implements FeatureEnablement
         } catch (DateTimeParseException | NullPointerException invalid) {
             return null;
         }
-    }
-
-    private static String json(String value) {
-        return value == null ? "null" : "\"" + Objects.requireNonNull(value).replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }

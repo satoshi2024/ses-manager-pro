@@ -7,7 +7,9 @@ import com.ses.featureenablement.condition.FeatureConditionCheck;
 import com.ses.featureenablement.condition.FeatureEvaluationContext;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
 import com.ses.featureenablement.state.FeatureEnablementSnapshot;
+import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.state.FeatureEnablementSnapshotHolder;
+import com.ses.featureenablement.state.FeatureEnablementStateSource;
 import com.ses.featureenablement.state.FeatureEnablementTenant;
 import com.ses.mapper.FeatureEnablementRequestMapper;
 import com.ses.mapper.FeatureEnablementSettingMapper;
@@ -48,13 +50,17 @@ public class FeatureEnablementSettingChangeService {
     private final FeatureEnablementTenant tenant;
     private final FeatureEnablementProperties properties;
     private final Clock clock;
+    private final FeatureEnablementStateSource stateSource;
+    private final FeatureEnablementCatalog catalog;
 
     public FeatureEnablementSettingChangeService(FeatureEnablementWriteSupport write,
                                                  FeatureEnablementActorPolicy actorPolicy,
                                                  FeatureEnablementRequestMapper requestMapper,
                                                  FeatureEnablementSettingMapper settingMapper,
                                                  FeatureEnablementSnapshotHolder holder, FeatureEnablementTenant tenant,
-                                                 FeatureEnablementProperties properties, Clock clock) {
+                                                 FeatureEnablementProperties properties, Clock clock,
+                                                 FeatureEnablementStateSource stateSource,
+                                                 FeatureEnablementCatalog catalog) {
         this.write = write;
         this.actorPolicy = actorPolicy;
         this.requestMapper = requestMapper;
@@ -63,13 +69,19 @@ public class FeatureEnablementSettingChangeService {
         this.tenant = tenant;
         this.properties = properties;
         this.clock = clock;
+        this.stateSource = stateSource;
+        this.catalog = catalog;
     }
 
-    /** 画面「設定」tab の1行（値は秘密ではない。署名者の氏名を含めない）。 */
+    /**
+     * 画面「設定」tab の1行（値は秘密ではない。署名者の氏名を含めない）。{@code effective} は承認した設定が portal の判定に効く源か
+     * （DB の源で NF02 顧客ポータルが DB 管理。property の源（dev の既定）では承認しても portal は property の値のまま。復審
+     * rb-fe-b-656d71b8 の P3-5）。
+     */
     public record SettingView(String key, String value, Integer version, Long requestId, Long requestedBy, Long approvedBy,
                               LocalDateTime approvedAt, boolean decisionConfirmed, String decisionValue,
                               LocalDate decisionExpiresOn, boolean inventoryConfirmed, Long pendingRequestId,
-                              String pendingValue, boolean pendingMine) {
+                              String pendingValue, boolean pendingMine, boolean effective) {
     }
 
     /** 設定の変更を申請する（値は null・空で未設定へ戻す）。 */
@@ -165,9 +177,15 @@ public class FeatureEnablementSettingChangeService {
                     valid(decision, today), decisionValue == null || decisionValue.isBlank() ? null : decisionValue,
                     decision == null ? null : decision.expiresOn(), valid(inventory, today),
                     pending == null ? null : pending.getId(), pending == null ? null : pending.getProposedValue(),
-                    pending != null && actor.userId().equals(pending.getRequestedBy())));
+                    pending != null && actor.userId().equals(pending.getRequestedBy()), effective()));
         }
         return List.copyOf(views);
+    }
+
+    /** 承認した設定が portal の判定に効く源か（DB の源で NF02 顧客ポータルが DB 管理）。 */
+    private boolean effective() {
+        return stateSource != null && stateSource.database()
+                && catalog != null && catalog.databaseManaged(com.ses.config.feature.Feature.NF02_CUSTOMER_PORTAL);
     }
 
     private static boolean valid(FeatureEnablementSnapshot.ConfirmedSignOff signOff, LocalDate today) {

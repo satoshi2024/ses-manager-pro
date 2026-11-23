@@ -41,7 +41,7 @@ class LifecycleDualConfirmationEvidenceTypeMySqlTest {
     private static final AtomicLong SEQUENCE = new AtomicLong();
     /** 照合順序で許可値と同一視され得る揺れ（小文字・全角英字・末尾の空白・NBSP・ゼロ幅空白・末尾の NUL）。 */
     private static final List<String> VARIANTS = List.of("dual_confirmation", "Dual_Confirmation",
-            "ＤＵＡＬ＿ＣＯＮＦＩＲＭＡＴＩＯＮ", "NONE ", "NONE ", "DOCUMENT​_LINK", "NONE\u0000");
+            "ＤＵＡＬ＿ＣＯＮＦＩＲＭＡＴＩＯＮ", "NONE ", "NONE\u00A0", "DOCUMENT\u200B_LINK", "NONE\u0000");
 
     private static JdbcTemplate jdbc;
 

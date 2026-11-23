@@ -71,7 +71,9 @@ class FeatureConditionCodeClassificationTest {
             "importCenter.permission.adminGroup.missing[group=role-admin]",
             "importCenter.permission.adminGroup.notAllowed[group=privacy-admin]",
             "importCenter.permission.otherGroupAllowed[count=2]", "importCenter.legalEntity.single",
-            "importCenter.legalEntity.notSingle");
+            "importCenter.legalEntity.notSingle",
+            // 段階 B（復審 rb-fe-b P3-1）: NF02 顧客ポータルの公開範囲の設定が決定の範囲の内か
+            PortalVisibleSinceConditionEvaluator.CODE_WITHIN, PortalVisibleSinceConditionEvaluator.CODE_OUTSIDE);
 
     @Test
     void 一覧のcodeは分類と一致する() {

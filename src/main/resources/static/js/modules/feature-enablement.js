@@ -135,8 +135,11 @@ const FeatureEnablement = (function () {
             const button = !s.pendingRequestId && !masterClosed()
                 ? '<button type="button" class="btn btn-sm btn-primary" data-fe-action="settingChange" data-key="' + esc(s.key)
                 + '">' + esc(t('featureEnablement.btn.requestSettingChange')) + '</button>' : '';
+            // property の源（dev の既定）では承認しても portal は配備の設定の値のまま（復審 rb-fe-b P3-5）
+            const notEffective = s.effective ? '' : '<div class="small text-warning mt-1">'
+                + esc(t('featureEnablement.setting.notEffective')) + '</div>';
             return '<tr><td class="ps-3"><div>' + esc(t('featureEnablement.setting.label.' + s.key, s.key))
-                + '</div><div class="small text-muted"><code>' + esc(s.key) + '</code></div></td>'
+                + '</div><div class="small text-muted"><code>' + esc(s.key) + '</code></div>' + notEffective + '</td>'
                 + '<td>' + settingValue(s.value) + (s.approvedAt ? '<div class="small text-muted">' + dateTime(s.approvedAt)
                     + '</div>' : '') + '</td>'
                 + '<td>' + decision + '</td><td>' + inventory + '</td><td>' + pending + '</td>'

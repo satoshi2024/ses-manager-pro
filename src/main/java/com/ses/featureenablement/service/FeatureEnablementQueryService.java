@@ -234,10 +234,26 @@ public class FeatureEnablementQueryService {
         List<RequestView> requests = recent.stream().map(request -> requestView(request, actor)).toList();
         List<String> subgates = unit.subgates().stream().map(subgate -> subgate.code()).toList();
         return new UnitDetail(summary(unit, snapshot, pendingRequest, actor), signOffs, keys, children, requests,
-                subgates, closeWarnings(feature));
+                subgates, closeWarnings(feature, snapshot));
     }
 
-    /** 閉鎖の警告（拡張点の件数。読めない拡張点は飛ばす。閉鎖そのものは妨げない）。 */
+    /**
+     * 閉鎖の警告（拡張点の件数。読めない拡張点は飛ばす。閉鎖そのものは妨げない）。親を閉じると開いている子も
+     * {@code AUTO_CLOSED(PARENT_CLOSED)} になるため、DB で開いている子の警告も合わせて出す（例: NF01 本体の閉鎖で二者確認の DUAL template
+     * の件数。復審 rb-fe-b-656d71b8 の P3-2）。
+     */
+    private List<FeatureEnablementCloseWarningSource.CloseWarning> closeWarnings(Feature feature,
+                                                                               FeatureEnablementSnapshot snapshot) {
+        List<FeatureEnablementCloseWarningSource.CloseWarning> warnings = new ArrayList<>(closeWarnings(feature));
+        for (Feature child : catalog.children(feature)) {
+            if (snapshot.unit(child).state().openLike()) {
+                warnings.addAll(closeWarnings(child, snapshot));
+            }
+        }
+        return List.copyOf(warnings);
+    }
+
+    /** 1つの開放単位の閉鎖の警告。 */
     private List<FeatureEnablementCloseWarningSource.CloseWarning> closeWarnings(Feature feature) {
         if (closeWarningSources == null) {
             return List.of();

@@ -105,7 +105,9 @@ class LifecycleDualConfirmationEnablementConditionsTest {
         assertThat(taskMapper.countEvidenceTypesOutsideAllowed()).isEqualTo(baseTasks);
 
         // 小文字・全角英字・NBSP・ゼロ幅空白・末尾の NUL（BINARY(N) の 0x00 の埋めと同じ byte）
-        List<String> variants = List.of("dual_confirmation", "ＮＯＮＥ", "NONE ", "DOCUMENT​_LINK", "NONE\u0000");
+        // 見えない文字は escape で書く（編集・整形で正規化されて case が消えないように。復審 rb-fe-b P3-7）
+        List<String> variants = List.of("dual_confirmation", "ＮＯＮＥ", "NONE\u00A0",
+                "DOCUMENT\u200B_LINK", "NONE\u0000");
         for (String variant : variants) {
             templateTask(template, variant);
         }

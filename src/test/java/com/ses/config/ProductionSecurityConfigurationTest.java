@@ -28,7 +28,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     // 起動時に admission の承認・行参照鍵・Privacy署名の参照で起動を止める検査も無くなった（各機能の開放の条件の評価器）。
     "spring.flyway.enabled=false",
     "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
-    "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",
+    // FE-B01・FE-B02: NF01 二者確認と NF06 を DB で開き、その条件を満たさない状態から起動する（sql/production-security-nf01-nf06-open-h2.sql）
+    "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql,"
+            + "classpath:sql/production-security-nf01-nf06-open-h2.sql",
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
@@ -95,6 +97,31 @@ class ProductionSecurityConfigurationTest {
 
     @Autowired
     private com.ses.service.FreeeIntegrationService freeeIntegrationService;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    /**
+     * FE-B01・FE-B02（requirements §7「機能を閉じる」、復審 rb-fe-b-656d71b8 の P3-4）: NF01 二者確認と NF06 が DB で開いていて
+     * （要る署名は有効期間の内で起動の時点の実効値は開）、固有の条件（Privacy 署名の参照・admission の値と行参照の鍵）を満たさなくても、
+     * prod の完全な context は起動する（以前は {@code LifecycleDualConfirmationReleaseGate}・{@code ImportAdmissionStartupValidator}・
+     * {@code ImportRowReferenceKeyStartupValidator} が起動を止めた）。起動時の評価が二者確認と NF06 だけを {@code AUTO_CLOSED} にし、
+     * 条件を満たす親の NF01 本体は開いたまま（D-4）。seed は {@code sql/production-security-nf01-nf06-open-h2.sql}。
+     */
+    @Test
+    void NF01二者確認とNF06の条件を満たさないDBでもprodの完全なcontextは起動し起動時の評価がその2件だけを閉じる() {
+        java.util.Map<String, java.util.Map<String, Object>> states = new java.util.HashMap<>();
+        jdbcTemplate.queryForList("SELECT feature_key, state, closed_reason FROM t_feature_enablement_state "
+                + "WHERE tenant_id = 'default' AND feature_key IN ('NF01', 'NF01_DUAL_CONFIRMATION', 'NF06')")
+                .forEach(row -> states.put(String.valueOf(row.get("FEATURE_KEY")), row));
+        org.assertj.core.api.Assertions.assertThat(states.get("NF01_DUAL_CONFIRMATION"))
+                .containsEntry("STATE", "AUTO_CLOSED")
+                .containsEntry("CLOSED_REASON", "dualConfirmation.privacySignOff.invalid");
+        org.assertj.core.api.Assertions.assertThat(states.get("NF06")).containsEntry("STATE", "AUTO_CLOSED");
+        org.assertj.core.api.Assertions.assertThat(String.valueOf(states.get("NF06").get("CLOSED_REASON")))
+                .startsWith("importCenter.");
+        org.assertj.core.api.Assertions.assertThat(states.get("NF01")).containsEntry("STATE", "OPEN");
+    }
 
     @Test
     void freee連携を使わない既定のprodはclient設定が無くても起動しMISCONFIGUREDになる() {

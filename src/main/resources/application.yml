@@ -322,7 +322,7 @@ app:
     contract-backfill-enabled: ${CONTRACT_BACKFILL_ENABLED:true}
   # ===== NF-06 取込センターの本番admission（Q-5） =====
   # 値は署名済みData Owner決定書の転記（秘密値を置かない）。既定は全て未設定＝全sourceの取込を拒否する。
-  # NF-06スイッチがONのprodは、時間経過（署名日前・失効）以外の不備があれば起動しない。OFFなら起動を止めない。
+  # dev・test の property の源の値。prod は確認済みの署名 NF06_ADMISSION から読み（IMPORT_ADMISSION_* を設定すると prod は起動しない）、不備・期間の外は NF-06 を閉じる（起動は止めない。FE-B02）。
   # 手順・digestの正規形: .kiro/specs/data-migration-import-center/a1a-ingress-operations.md §10
   import-center:
     admission:
@@ -415,7 +415,7 @@ app:
     nf01:
       enabled: ${FEATURE_NF01_ENABLED:false}
     # NF-01の子: 二者確認（DUAL_CONFIRMATION）の提出・確認・差戻し。NF-01がOFFなら本値に関係なくOFF。
-    # 業務commentを保存するため、prodではPrivacy署名の参照（privacy-sign-off-ref）が無いとONで起動しない（計画 §10・§12 O-8）
+    # 業務commentを保存するため、Privacy署名（計画 §10・§12 O-8）が確認されていなければ開けない（prod は画面の署名。privacy-sign-off-ref は dev・test の property の源だけ。FE-B01）
     nf01-dual-confirmation:
       enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
       privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
@@ -438,8 +438,8 @@ app:
     # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
-    # NF-06 データ移行・取込センター（画面・API。apply系は含まない）。ONにするprodはimport-center.admissionの
-    # 承認設定と行参照鍵（import-center.row-reference.hmac-key）が必須
+    # NF-06 データ移行・取込センター（画面・API。apply系は含まない）。開くには admission の承認（prod は署名 NF06_ADMISSION）と
+    # 使える行参照鍵（import-center.row-reference.hmac-key）が要る（不備は NF-06 を閉じる。起動は止めない。FE-B02）
     nf06:
       enabled: ${FEATURE_NF06_ENABLED:false}
     # NF-10 定期管理レポート
