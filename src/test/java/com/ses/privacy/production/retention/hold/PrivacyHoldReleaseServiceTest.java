@@ -217,6 +217,26 @@ class PrivacyHoldReleaseServiceTest {
         assertThat(fixture.gate.evaluate(TENANT).state()).isEqualTo(PrivacyHoldGate.State.VERIFIED);
     }
 
+    /**
+     * review rb-fe-c P3-1（判断点 4）: Journal が append の権限の拒否を返せば（reader の principal 等。append は起きていない）、ACK 不明に
+     * せず 503 で返し、pending を戻して gate を UNAVAILABLE にしない（hold は ACTIVE のまま）。
+     */
+    @Test
+    void appendが権限の拒否ならpendingを戻して503とし_gateはUNAVAILABLEにしない() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7049");
+        fixture.journal.beforeAppend = () -> {
+            throw new com.ses.privacy.foundation.JournalAccessDeniedException("test: append denied", null);
+        };
+
+        assertBusiness(() -> release.release(started.holdId(), request(started.holdId(), newCommandId(), REASON)), 503,
+                "error.privacy.journalUnavailable");
+        assertThat(fixture.state().pendingCommandId()).as("pending を残さない").isNull();
+        assertThat(fixture.store.hold(TENANT, started.holdId()).orElseThrow().status()).isEqualTo("ACTIVE");
+        assertThat(fixture.gate.evaluate(TENANT).state()).isNotEqualTo(PrivacyHoldGate.State.UNAVAILABLE);
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains("RELEASE_REJECTED")
+                && uri.contains("reason=JOURNAL_ACCESS_DENIED"));
+    }
+
     // --- gate と reconciler が解除後の状態を扱う ---
 
     @Test

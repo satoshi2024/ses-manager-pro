@@ -91,7 +91,8 @@ class PrivacyTrustSourceTest {
                         org.mockito.Mockito.mock(com.ses.service.AuditLogService.class),
                         org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class),
                         beans.getBeanProvider(Clock.class), registry, prod, trust,
-                        beans.getBeanProvider(PrivacyTrustStructureState.class));
+                        beans.getBeanProvider(PrivacyTrustStructureState.class),
+                        beans.getBeanProvider(com.ses.privacy.production.PrivacySubgateSignOffs.class));
         assertThat(calls.get()).as("Bean の構築時には trust を読まない").isZero();
 
         assertThat(service.isOpen()).isTrue();
@@ -107,6 +108,16 @@ class PrivacyTrustSourceTest {
         assertThat(service.isOpen()).as("構造の不足で REL だけが閉じる").isFalse();
         unsound.record(java.util.List.of());
         assertThat(service.isOpen()).as("構造が直れば再開する（副入口は自動で開く。D-4 の例外）").isTrue();
+        // review rb-fe-c P2-1: REL の署名（D-03・D-05・NF07_TRUST_KMS・NF07_TRUST_STAGING）が取消し・失効なら REL は閉じる
+        com.ses.privacy.production.PrivacySubgateSignOffs signOffs =
+                org.mockito.Mockito.mock(com.ses.privacy.production.PrivacySubgateSignOffs.class);
+        java.util.concurrent.atomic.AtomicBoolean signOffsValid = new java.util.concurrent.atomic.AtomicBoolean(false);
+        org.mockito.Mockito.when(signOffs.valid(com.ses.privacy.production.PrivacySubgateSignOffs.RELEASE))
+                .thenAnswer(invocation -> signOffsValid.get());
+        beans.registerSingleton("privacySubgateSignOffs", signOffs);
+        assertThat(service.isOpen()).as("REL の署名が有効でなければ閉じる").isFalse();
+        signOffsValid.set(true);
+        assertThat(service.isOpen()).as("新しい署名の二者確認の後は自動で再開する（2026-11-23 の利用者の決定）").isTrue();
 
         com.ses.privacy.foundation.HoldReleaseVerifier verifier = ProductionPrivacyComponents.holdReleaseVerifier(prod,
                 registry, PrivacyTrustSource.revocationsOf(trust), clock);

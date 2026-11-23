@@ -8,6 +8,7 @@ import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitches;
 import com.ses.entity.privacy.PrivacyRequest;
 import com.ses.featureenablement.evaluation.FeatureEnablementDayStartHook;
+import com.ses.featureenablement.service.FeatureEnablementNotifier;
 import com.ses.featureenablement.state.FeatureEnablementSnapshot;
 import com.ses.mapper.privacy.PrivacyRequestMapper;
 import com.ses.privacy.production.PrivacyDecisionBinding;
@@ -28,7 +29,8 @@ import java.util.Objects;
  * DSAR が閉じている間止まる。そこで日の始まりの評価の後（{@link FeatureEnablementDayStartHook}）に、DSAR の実効値が閉で、期限を追う状態
  * （{@link PrivacyDsarVocabulary#DEADLINE_TRACKED_STATES}）の請求があれば、privacy-admin（{@link PrivacyDsarRecipientResolver}）へ
  * 件数と最も近い期限日だけを通知する（受付番号・subject 参照・氏名を入れない。同じ業務日・宛先は1回だけ）。DSAR が開いていれば何もしない
- * （期限の通知は scheduler が出す）。</p>
+ * （期限の通知は scheduler が出す）。遷移先は画面「機能の開放」（{@link NotificationLinks#FEATURE_ENABLEMENT}。閉じている間の
+ * {@code /privacy/dsar} は 404 のため。宛先の privacy-admin は管理者で、この画面に入れる。review rb-fe-c P2-5）。</p>
  */
 public class PrivacyDsarClosedNotifier implements FeatureEnablementDayStartHook {
 
@@ -94,13 +96,13 @@ public class PrivacyDsarClosedNotifier implements FeatureEnablementDayStartHook 
         String title = "本人請求の機能が閉じている間に未完了の請求があります";
         String message = "未完了の請求 " + pending + " 件"
                 + (nearestDue == null ? "（期限日の無い請求だけ）" : "。最も近い期限日は " + nearestDue + " です。")
-                + "機能を開き直すか、期限の管理を手で行ってください。";
+                + "画面『機能の開放』で開き直すか、期限の管理を手で行ってください。";
         String dedupeKey = NOTIFICATION_TYPE + ":" + tenantId + ":" + today;
         int attempted = 0;
         for (Long userId : recipients) {
             try {
                 notificationService.publishToUser(userId, NOTIFICATION_TYPE, title, message,
-                        NotificationLinks.PRIVACY_DSAR, dedupeKey, PrivacyDsarDeadlineScheduler.MENU_KEY);
+                        NotificationLinks.FEATURE_ENABLEMENT, dedupeKey, FeatureEnablementNotifier.MENU_KEY);
                 attempted++;
             } catch (RuntimeException e) {
                 log.warn("[privacy-dsar] 閉じている間の通知を登録できません: exceptionClass={}", e.getClass().getSimpleName());

@@ -547,12 +547,30 @@ class PrivacyPolicyRegistrationServiceTest {
         PrivacyPolicyRegistrationService structured = new PrivacyPolicyRegistrationService(guard, oidc,
                 com.ses.privacy.production.PrivacyApprovalSource.properties(approval, null), verifier, policyMapper,
                 dataElementMapper, new PrivacyPolicyAudit(mock(AuditLogService.class)),
-                new TransactionTemplate(transactionManager), clock, actor::get, sound::get);
+                new TransactionTemplate(transactionManager), clock, actor::get, sound::get, () -> true);
 
         assertThat(structured.isOpen()).isFalse();
         assertThat(structured.readiness().missing()).containsExactly(PrivacyPolicyRegistrationService.REASON_TRUST_STRUCTURE);
         sound.set(true);
         assertThat(structured.isOpen()).as("構造が直れば再開する").isTrue();
+    }
+
+    /**
+     * review rb-fe-c P2-1（requirements §6.11）: 副入口 REG の署名（取消し・失効）が有効でなければ、決定・verifier・anchor・trust 文書の
+     * 構造が揃っていても入口は 404 のまま。署名が有効に戻れば（新しい署名の二者確認の後）自動で再開する（2026-11-23 の利用者の決定）。
+     */
+    @Test
+    void 副入口の署名が有効でなければ登録の入口は404のまま() {
+        java.util.concurrent.atomic.AtomicBoolean signOffs = new java.util.concurrent.atomic.AtomicBoolean(false);
+        PrivacyPolicyRegistrationService gated = new PrivacyPolicyRegistrationService(guard, oidc,
+                com.ses.privacy.production.PrivacyApprovalSource.properties(approval, null), verifier, policyMapper,
+                dataElementMapper, new PrivacyPolicyAudit(mock(AuditLogService.class)),
+                new TransactionTemplate(transactionManager), clock, actor::get, () -> true, signOffs::get);
+
+        assertThat(gated.isOpen()).isFalse();
+        assertThat(gated.readiness().missing()).containsExactly(PrivacyPolicyRegistrationService.REASON_SIGN_OFFS);
+        signOffs.set(true);
+        assertThat(gated.isOpen()).as("署名が有効に戻れば再開する").isTrue();
     }
     // --- helpers ---
 

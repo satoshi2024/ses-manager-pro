@@ -26,7 +26,9 @@ import java.util.TreeMap;
  *   <li>D-06 の {@code dueDays}・{@code packageMaxAge}、D-09 の {@code tenantId}・{@code capabilities}・{@code approvalDigest} は
  *       署名の構造化された値（approval digest には D-06 の2つの値を入れない。正規形 v1 を変えない。§18 J-15）。</li>
  * </ul>
- * 失効の警告日数は承認内容ではないため property の源の値を使う。
+ * 失効の警告日数は承認内容ではない運用値で、署名の失効の接近の通知と同じ system 設定 {@code feature-enablement.expiry-warning-days}
+ * （画面 {@code /system-config}）を読む（FE-RQ-004 の「引き継ぐ」。review rb-fe-c P3-4）。prod の {@code PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS}
+ * は旧い変数として起動を拒否する。
  */
 public class DatabasePrivacyApprovalSource implements PrivacyApprovalSource {
 
@@ -34,21 +36,21 @@ public class DatabasePrivacyApprovalSource implements PrivacyApprovalSource {
     private static final List<Decision> STANDALONE = List.of(Decision.D02, Decision.D03, Decision.D05);
 
     private final FeatureEnablementSnapshotHolder holder;
-    private final PrivacyApprovalSource operational;
+    private final java.util.function.IntSupplier expiryWarningDays;
 
     /**
-     * @param holder      開放状態の snapshot
-     * @param operational 運用値（失効の警告日数）を読む源（property の源）
+     * @param holder            開放状態の snapshot
+     * @param expiryWarningDays 失効の警告日数（system 設定。読めなければ既定の30日を返すこと）
      */
-    public DatabasePrivacyApprovalSource(FeatureEnablementSnapshotHolder holder, PrivacyApprovalSource operational) {
+    public DatabasePrivacyApprovalSource(FeatureEnablementSnapshotHolder holder,
+                                         java.util.function.IntSupplier expiryWarningDays) {
         this.holder = Objects.requireNonNull(holder, "holder");
-        this.operational = operational;
+        this.expiryWarningDays = expiryWarningDays;
     }
 
     @Override
     public PrivacyApprovalSource resolve() {
-        return of(holder.get(), operational == null ? PrivacyDecisionWindowMonitor.DEFAULT_WARNING_DAYS
-                : operational.expiryWarningDays());
+        return of(holder.get(), expiryWarningDays());
     }
 
     @Override
@@ -111,7 +113,12 @@ public class DatabasePrivacyApprovalSource implements PrivacyApprovalSource {
 
     @Override
     public int expiryWarningDays() {
-        return operational == null ? PrivacyDecisionWindowMonitor.DEFAULT_WARNING_DAYS : operational.expiryWarningDays();
+        try {
+            return expiryWarningDays == null ? PrivacyDecisionWindowMonitor.DEFAULT_WARNING_DAYS
+                    : expiryWarningDays.getAsInt();
+        } catch (RuntimeException e) {
+            return PrivacyDecisionWindowMonitor.DEFAULT_WARNING_DAYS;
+        }
     }
 
     /** 構造化された値の JSON を読む（読めなければ空。束縛は欠けた値の違反になる）。 */

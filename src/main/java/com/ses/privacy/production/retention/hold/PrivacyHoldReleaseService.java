@@ -10,6 +10,7 @@ import com.ses.privacy.foundation.HoldReleaseRejection;
 import com.ses.privacy.foundation.HoldReleaseRules;
 import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.HoldReleaseVerifier;
+import com.ses.privacy.foundation.JournalAccessDeniedException;
 import com.ses.privacy.foundation.JournalConflictException;
 import com.ses.privacy.foundation.PrivacyJournalPort;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalAck;
@@ -53,6 +54,8 @@ import java.util.regex.Pattern;
  *       REL review P3-9、RB-NF07-REG delta review P3-1）。</li>
  *   <li>trust 文書の構造に不足が無い（{@code PrivacyTrustStructureState}。KMS の trust を設定した prod の起動時に flag と関係なく
  *       検査した結果。不足は起動を止めず、この入口だけを閉じる。feature-enablement-console design §8.5 の 4。FE-C04）。</li>
+ *   <li>DB の開放状態で管理する間は、REL の署名（D-03・D-05・{@code NF07_TRUST_KMS}・{@code NF07_TRUST_STAGING}）が確認済みで有効
+ *       （証拠の類の取消し・失効でも閉じる。review rb-fe-c P2-1）。</li>
  * </ul>
  * 開放の後も、要求ごとに verifier が両 anchor の失効状態を確かめる（{@code REVOCATION_UNKNOWN} / {@code REVOKED}）。
  *
@@ -103,7 +106,7 @@ public class PrivacyHoldReleaseService {
     private final Supplier<PrivacyHoldService.Actor> actorSource;
     private final HoldReleaseVerifier verifier;
     private final HoldReleaseTrustRegistry registry;
-    private final java.util.function.BooleanSupplier trustStructureSound;
+    private final java.util.function.BooleanSupplier subgateConditions;
 
     PrivacyHoldReleaseService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                               PrivacyHoldDecisions decisions, PrivacyHoldJournal journal,
@@ -116,15 +119,16 @@ public class PrivacyHoldReleaseService {
     }
 
     /**
-     * @param trustStructureSound trust 文書の構造に不足が無いか（判定できなければ false を返すこと）
+     * @param subgateConditions 副入口 REL の追加の条件: trust 文書の構造に不足が無く（FE-C04）、REL の署名（D-03・D-05・{@code NF07_TRUST_KMS}・
+     *                          {@code NF07_TRUST_STAGING}）が有効（DB の開放状態で管理する間。review rb-fe-c P2-1）。判定できなければ false を返すこと
      */
     PrivacyHoldReleaseService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                               PrivacyHoldDecisions decisions, PrivacyHoldJournal journal,
                               PrivacyHoldProjectionStore store, HoldSubjectResolver resolver,
                               PrivacyHoldProjector projector, PrivacyHoldAudit audit, TransactionTemplate requiresNew,
                               Clock clock, Supplier<PrivacyHoldService.Actor> actorSource, HoldReleaseVerifier verifier,
-                              HoldReleaseTrustRegistry registry, java.util.function.BooleanSupplier trustStructureSound) {
-        this.trustStructureSound = trustStructureSound == null ? () -> false : trustStructureSound;
+                              HoldReleaseTrustRegistry registry, java.util.function.BooleanSupplier subgateConditions) {
+        this.subgateConditions = subgateConditions == null ? () -> false : subgateConditions;
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
         this.decisions = Objects.requireNonNull(decisions, "decisions");
@@ -147,7 +151,7 @@ public class PrivacyHoldReleaseService {
      */
     public boolean isOpen() {
         try {
-            return verifier != null && structureSound() && anchorsConfigured() && decisions.releaseReadiness().ready()
+            return verifier != null && subgateConditionsHold() && anchorsConfigured() && decisions.releaseReadiness().ready()
                     && trustReady();
         } catch (RuntimeException e) {
             return false;
@@ -166,7 +170,7 @@ public class PrivacyHoldReleaseService {
             throw BusinessException.of(403, "error.accessDenied");
         }
         PrivacyHoldDecisions.ReleaseReadiness readiness = decisions.releaseReadiness();
-        if (!readiness.ready() || verifier == null || !structureSound() || !anchorsConfigured() || !trustReady()) {
+        if (!readiness.ready() || verifier == null || !subgateConditionsHold() || !anchorsConfigured() || !trustReady()) {
             // 開放の前（D-03・D-05 の署名前・placeholder・失効、trust anchor 未登録・失効状態を ACTIVE と確認できない、prod 以外）は
             // 入口が無いのと同じ404
             throw new PrivacyAccessGuard.PrivacyEntryNotFoundException();
@@ -261,6 +265,10 @@ public class PrivacyHoldReleaseService {
         } catch (SecurityException e) {
             releasePending(tenantId, holdId, commandId, actor, "JOURNAL_REFUSED", 403);
             throw BusinessException.of(403, "error.privacy.holdReleaseProofRejected");
+        } catch (JournalAccessDeniedException e) {
+            // principal に append の権限が無い（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）
+            releasePending(tenantId, holdId, commandId, actor, "JOURNAL_ACCESS_DENIED", 503);
+            throw BusinessException.of(503, "error.privacy.journalUnavailable");
         } catch (RuntimeException e) {
             ackUnknown(holdId, actor);
             throw BusinessException.of(503, "error.privacy.holdReleaseAckUnknown");
@@ -423,7 +431,7 @@ public class PrivacyHoldReleaseService {
                                                  String commandId) {
         try {
             return port.appendHoldRelease(proof);
-        } catch (JournalConflictException | SecurityException e) {
+        } catch (JournalConflictException | SecurityException | JournalAccessDeniedException e) {
             throw e;
         } catch (RuntimeException firstUnknown) {
             if (!refreshPendingSince(tenantId, commandId)) {
@@ -573,9 +581,9 @@ public class PrivacyHoldReleaseService {
         return BusinessException.of(400, "error.privacy.holdReleaseInvalidRequest");
     }
 
-    private boolean structureSound() {
+    private boolean subgateConditionsHold() {
         try {
-            return trustStructureSound.getAsBoolean();
+            return subgateConditions.getAsBoolean();
         } catch (RuntimeException e) {
             return false;
         }

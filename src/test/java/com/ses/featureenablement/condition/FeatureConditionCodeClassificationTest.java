@@ -44,7 +44,9 @@ class FeatureConditionCodeClassificationTest {
             FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE,
             // FE-C05: NF07 の評価器（PrivacyProductionConfigurationValidator）の照会の失敗
             "privacyAdminGroup.unverifiable", "privacyAllow.unverifiable", "journal.verifier.unverifiable",
-            "journal.unverifiable", "journal.privilege.unverifiable", "journal.instance.serverUuid.unverifiable");
+            "journal.unverifiable", "journal.privilege.unverifiable", "journal.instance.serverUuid.unverifiable",
+            // review rb-fe-c P2-2: Flyway の履歴の照会の失敗（瞬断・timeout）
+            "journal.flyway.history.unverifiable", "journal.schema.unverifiable", "journal.projection.unverifiable");
 
     /** 条件の不成立を表す code（評価できない類であってはならない）。 */
     private static final List<String> UNSATISFIED = List.of(
@@ -62,7 +64,9 @@ class FeatureConditionCodeClassificationTest {
             "privacyAdmins.oidcProviderUnavailable", "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.valid",
             "privacyAllow.outsidePrivacyAdmin[custom-policy-viewer]", "dsar.prerequisites", "dsar.providersUnregistered",
             "journal.appender", "journal.notConfigured", "journal.privilege.missing:pj_head.INSERT",
-            "journal.durability.syncBinlog", "journal.contract.datasource.url.autoReconnect");
+            "journal.durability.syncBinlog", "journal.contract.datasource.url.autoReconnect",
+            // 版を解釈できない履歴の行と classpath の migration を読めないことは実際の不一致（不成立）
+            "journal.flyway.historyUnreadable", "journal.flyway.artifactUnreadable");
 
     @Test
     void 一覧のcodeは分類と一致する() {

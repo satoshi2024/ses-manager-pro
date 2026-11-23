@@ -3,6 +3,7 @@ package com.ses.privacy.production.retention.hold;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.privacy.foundation.JournalAccessDeniedException;
 import com.ses.privacy.foundation.JournalConflictException;
 import com.ses.privacy.foundation.PrivacyJournalPort;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalAck;
@@ -99,6 +100,7 @@ public class PrivacyHoldService {
     private final Clock clock;
     private final Supplier<Actor> actorSource;
     private final BooleanSupplier releaseOpen;
+    private final BooleanSupplier startSignOffsValid;
 
     PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                        PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
@@ -116,6 +118,20 @@ public class PrivacyHoldService {
                        HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
                        PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource,
                        BooleanSupplier releaseOpen) {
+        this(accessGuard, oidcProperties, decisions, journal, store, resolver, gate, projector, audit, requiresNew, clock,
+                actorSource, releaseOpen, () -> true);
+    }
+
+    /**
+     * @param startSignOffsValid 副入口「hold 開始」の署名（{@code NF07_D05}・{@code NF07_D05_OWNER_ACCEPTANCE}）が有効か（DB の
+     *                           開放状態で管理する間だけ判定する。判定できなければ false を返すこと。review rb-fe-c P2-1）
+     */
+    PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
+                       PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
+                       HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
+                       PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource,
+                       BooleanSupplier releaseOpen, BooleanSupplier startSignOffsValid) {
+        this.startSignOffsValid = startSignOffsValid == null ? () -> false : startSignOffsValid;
         this.releaseOpen = releaseOpen == null ? () -> false : releaseOpen;
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
@@ -182,6 +198,9 @@ public class PrivacyHoldService {
             unattributable.add(new PrivacyHoldOverview.ElementEntry(elementId, count, heldElements.contains(elementId)));
         }
         List<String> missing = new ArrayList<>(readiness.missing());
+        if (!startSignOffsValidQuietly()) {
+            missing.add("subgateSignOffs");
+        }
         if (availability != PrivacyHoldJournal.Availability.AVAILABLE
                 || journal.appendAvailability() != PrivacyHoldJournal.Availability.AVAILABLE) {
             missing.add("journal");
@@ -199,6 +218,14 @@ public class PrivacyHoldService {
                 related, holdable, releaseOpenQuietly(), tenantId,
                 viewer.userId() == null || viewer.userId() <= 0 ? null
                         : PrivacyHoldReleaseService.REQUESTER_PREFIX + viewer.userId());
+    }
+
+    private boolean startSignOffsValidQuietly() {
+        try {
+            return startSignOffsValid.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private boolean releaseOpenQuietly() {
@@ -221,7 +248,8 @@ public class PrivacyHoldService {
             throw BusinessException.of(403, "error.accessDenied");
         }
         PrivacyHoldDecisions.Readiness readiness = decisions.evaluate();
-        if (!readiness.ready()) {
+        if (!readiness.ready() || !startSignOffsValidQuietly()) {
+            // D-05 と副入口の署名（D-05・D-05 owner の受理）の取消し・失効は副入口だけを閉じる（review rb-fe-c P2-1）
             throw BusinessException.of(409, "error.privacy.decisionUnknown");
         }
         if (request == null) {
@@ -285,10 +313,14 @@ public class PrivacyHoldService {
             ack = appendWithRefreshedReplay(port, command, tenantId, ids.commandId());
         } catch (JournalConflictException e) {
             // Journal の transaction 内で拒否された（append されていない）ので pending を戻してよい
-            releasePending(tenantId, ids, actor);
+            releasePending(tenantId, ids, actor, "JOURNAL_CONFLICT", 409);
             // held なら同じ対象の hold が既にある。それ以外（revision の競合）は再試行を求める（Review P3-7）
             throw BusinessException.of(409, headHeldQuietly(partition)
                     ? "error.privacy.holdAlreadyActive" : "error.privacy.holdStartInProgress");
+        } catch (JournalAccessDeniedException e) {
+            // principal に append の権限が無い（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）
+            releasePending(tenantId, ids, actor, "JOURNAL_ACCESS_DENIED", 503);
+            throw BusinessException.of(503, "error.privacy.journalUnavailable");
         } catch (RuntimeException e) {
             ackUnknown(ids, actor);
             throw BusinessException.of(503, "error.privacy.holdAckUnknown");
@@ -397,7 +429,7 @@ public class PrivacyHoldService {
                                                  String commandId) {
         try {
             return port.append(command);
-        } catch (JournalConflictException e) {
+        } catch (JournalConflictException | JournalAccessDeniedException e) {
             throw e;
         } catch (RuntimeException firstUnknown) {
             if (!refreshPendingSince(tenantId, commandId)) {
@@ -442,12 +474,13 @@ public class PrivacyHoldService {
         }
     }
 
-    private void releasePending(String tenantId, PrivacyHoldPartitions.Ids ids, Actor actor) {
+    private void releasePending(String tenantId, PrivacyHoldPartitions.Ids ids, Actor actor, String reason,
+                                int rejectedStatus) {
         try {
             requiresNew.executeWithoutResult(status -> {
                 store.clearPending(tenantId, journal.journalId(), ids.commandId());
                 audit.record(actor.username(), PrivacyHoldAudit.START_REJECTED,
-                        PrivacyHoldAudit.fields("hold", ids.holdId(), "reason", "JOURNAL_CONFLICT"), 409, false);
+                        PrivacyHoldAudit.fields("hold", ids.holdId(), "reason", reason), rejectedStatus, false);
             });
         } catch (RuntimeException e) {
             // pending が残っても reconciler が「Journal に command が無い」ことを確かめてから消す

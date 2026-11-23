@@ -90,6 +90,7 @@ public class PrivacyPolicyRegistrationService {
     static final String REASON_VERIFIER = "verifier";
     static final String REASON_TRUST = "trust";
     static final String REASON_TRUST_STRUCTURE = "trustStructure";
+    static final String REASON_SIGN_OFFS = "subgateSignOffs";
     /** canonical bytes の上限（64KB）の base64 の長さ。 */
     static final int MAX_ENVELOPE_BASE64 = 87_384;
     /** 署名の上限（1024 byte）の base64 の長さ。 */
@@ -103,6 +104,7 @@ public class PrivacyPolicyRegistrationService {
     private final OidcSecurityProperties oidcProperties;
     private final PrivacyApprovalSource approvalSource;
     private final BooleanSupplier trustStructureSound;
+    private final BooleanSupplier subgateSignOffsValid;
     private final PolicyRegistrationVerifier verifier;
     private final RetentionPolicyMapper policyMapper;
     private final PiiDataElementMapper dataElementMapper;
@@ -118,21 +120,25 @@ public class PrivacyPolicyRegistrationService {
                                      PrivacyPolicyAudit audit, TransactionTemplate transaction, Clock clock,
                                      Supplier<Actor> actorSource) {
         this(accessGuard, oidcProperties, PrivacyApprovalSource.properties(approvalProperties, null), verifier,
-                policyMapper, dataElementMapper, audit, transaction, clock, actorSource, () -> true);
+                policyMapper, dataElementMapper, audit, transaction, clock, actorSource, () -> true, () -> true);
     }
 
     /**
-     * @param trustStructureSound trust 文書の構造に不足が無いか（判定できなければ false を返すこと）
+     * @param trustStructureSound  trust 文書の構造に不足が無いか（判定できなければ false を返すこと）
+     * @param subgateSignOffsValid 副入口 REG の署名（D-01・D-02・D-03）が確認済みで有効か（DB の開放状態で管理する間。判定できなければ
+     *                             false を返すこと。review rb-fe-c P2-1）
      */
     PrivacyPolicyRegistrationService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                                      PrivacyApprovalSource approvalSource, PolicyRegistrationVerifier verifier,
                                      RetentionPolicyMapper policyMapper, PiiDataElementMapper dataElementMapper,
                                      PrivacyPolicyAudit audit, TransactionTemplate transaction, Clock clock,
-                                     Supplier<Actor> actorSource, BooleanSupplier trustStructureSound) {
+                                     Supplier<Actor> actorSource, BooleanSupplier trustStructureSound,
+                                     BooleanSupplier subgateSignOffsValid) {
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
         this.approvalSource = approvalSource;
         this.trustStructureSound = trustStructureSound == null ? () -> false : trustStructureSound;
+        this.subgateSignOffsValid = subgateSignOffsValid == null ? () -> false : subgateSignOffsValid;
         this.verifier = verifier;
         this.policyMapper = Objects.requireNonNull(policyMapper, "policyMapper");
         this.dataElementMapper = Objects.requireNonNull(dataElementMapper, "dataElementMapper");
@@ -165,6 +171,9 @@ public class PrivacyPolicyRegistrationService {
         if (!structureSound()) {
             missing.add(REASON_TRUST_STRUCTURE);
         }
+        if (!signOffsValid()) {
+            missing.add(REASON_SIGN_OFFS);
+        }
         if (verifier == null) {
             missing.add(REASON_VERIFIER);
         } else if (missing.isEmpty() && !trustReady()) {
@@ -172,6 +181,14 @@ public class PrivacyPolicyRegistrationService {
             missing.add(REASON_TRUST);
         }
         return new Readiness(missing.isEmpty(), List.copyOf(missing));
+    }
+
+    private boolean signOffsValid() {
+        try {
+            return subgateSignOffsValid.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private boolean structureSound() {

@@ -293,8 +293,6 @@ class PrivacyJournalStartupVerifierMySqlTest {
         }
     }
 
-    // ---------------------------------------------------------------- helper
-
     /**
      * FE-C03（design §8.5 の 3。review P2-4）: reader の principal は1回の検査で、hold の効力の結果（gate が読む）では適合し、開放の
      * 条件の結果（保持・保全の開放と hold の開始が読む）では appender の権限の不足になる。保持・保全は開けないが、既存の hold を守る
@@ -318,6 +316,9 @@ class PrivacyJournalStartupVerifierMySqlTest {
             assertThat(inspection.enablement()).isEmpty();
         }
     }
+
+    // ---------------------------------------------------------------- helper
+
     private static List<String> inspect(MySQLContainer<?> container, String user, String password,
                                         boolean appenderRequired) {
         return inspect(container, user, password, appenderRequired, applicationRoot, SCHEMA);

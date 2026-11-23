@@ -32,6 +32,18 @@ class PrivacyFeatureFlagReadGuardTest {
     /** 読んでよい file（property の源。{@code FeatureSwitchProperties#toggle} の Toggle を読む）。 */
     private static final Set<String> ALLOWED = Set.of(
             "com/ses/featureenablement/state/PropertyFeatureEnablementStateSource.java");
+    /**
+     * {@code PrivacyFeatureProperties.Retention}・{@code Dsar} の型で宣言した名前（{@code Retention r = props.getRetention();}）と、
+     * {@code var} で {@code getRetention()}・{@code getDsar()} を受けた名前（review rb-fe-c P3-5）。型の単純名は他の class
+     * （{@code AiConfig.Retention}）と重なるため、{@code PrivacyFeatureProperties} を参照する file だけを見る。
+     */
+    static final Pattern TOGGLE_DECLARATION = Pattern.compile(
+            "(?:(?<![\\w<])(?:PrivacyFeatureProperties\\s*\\.\\s*)?(?:Retention|Dsar)|\\bvar)\\s+(\\w+)\\s*=\\s*[^;]*?"
+                    + "get(?:Retention|Dsar)\\(\\)\\s*;|(?<![\\w<.])(?:PrivacyFeatureProperties\\s*\\.\\s*)?(?:Retention|Dsar)"
+                    + "\\s+(\\w+)\\s*[,)]");
+    /** 設定名の直接の読取り（{@code getProperty}・{@code @Value}・{@code @ConditionalOnProperty}。review rb-fe-c P3-5）。 */
+    static final Pattern PROPERTY_READ = Pattern.compile("(?:getProperty\\s*\\(\\s*|@Value\\s*\\(\\s*\"\\$\\{\\s*"
+            + "|@ConditionalOnProperty\\s*\\([^)]*)\"?(privacy\\.(?:retention|dsar)\\.enabled)");
 
     @Test
     void NF07のflagを直接読むのはpropertyの源だけである() throws IOException {
@@ -48,6 +60,19 @@ class PrivacyFeatureFlagReadGuardTest {
                 while (matcher.find()) {
                     violations.add(relative + ": " + matcher.group());
                 }
+                if (source.contains("PrivacyFeatureProperties")) {
+                    for (String name : toggleNames(source)) {
+                        Matcher read = Pattern.compile("\\b" + Pattern.quote(name) + "\\s*\\.\\s*isEnabled\\s*\\(")
+                                .matcher(source);
+                        while (read.find()) {
+                            violations.add(relative + ": " + name + ".isEnabled(");
+                        }
+                    }
+                }
+                Matcher property = PROPERTY_READ.matcher(source);
+                while (property.find()) {
+                    violations.add(relative + ": " + property.group(1));
+                }
             }
         }
         assertThat(violations).as("NF07 の開閉は FeatureSwitches か開放状態の源から読む").isEmpty();
@@ -58,5 +83,28 @@ class PrivacyFeatureFlagReadGuardTest {
         assertThat(FLAG_READ.matcher("features.getRetention()\n        .isEnabled()").find()).isTrue();
         assertThat(FLAG_READ.matcher("features.getDsar().isEnabled()").find()).isTrue();
         assertThat(FLAG_READ.matcher("features.getDsar().getDueDays()").find()).isFalse();
+    }
+
+    /** review rb-fe-c P3-5: 変数に受けてからの読取りと、設定名の直接の読取りも検出する。 */
+    @Test
+    void 走査は変数に受けた読取りと設定名の読取りも検出する() {
+        assertThat(toggleNames("PrivacyFeatureProperties.Retention r = props.getRetention(); var d = props.getDsar(); "
+                + "void f(PrivacyFeatureProperties.Dsar given) {}")).containsExactly("r", "d", "given");
+        assertThat(toggleNames("private Retention retention = new Retention();")).as("field の生成は読取りではない").isEmpty();
+        assertThat(PROPERTY_READ.matcher("environment.getProperty(\"privacy.retention.enabled\", Boolean.class)").find())
+                .isTrue();
+        assertThat(PROPERTY_READ.matcher("@Value(\"${privacy.dsar.enabled:false}\")").find()).isTrue();
+        assertThat(PROPERTY_READ.matcher("@ConditionalOnProperty(name = \"privacy.retention.enabled\")").find()).isTrue();
+        assertThat(PROPERTY_READ.matcher("return \"privacy.retention.enabled\";").find()).as("名前を返すだけは読取りではない")
+                .isFalse();
+    }
+
+    private static List<String> toggleNames(String source) {
+        List<String> names = new ArrayList<>();
+        Matcher matcher = TOGGLE_DECLARATION.matcher(source);
+        while (matcher.find()) {
+            names.add(matcher.group(1) != null ? matcher.group(1) : matcher.group(2));
+        }
+        return names;
     }
 }

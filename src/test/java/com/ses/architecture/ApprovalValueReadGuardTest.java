@@ -44,6 +44,19 @@ class ApprovalValueReadGuardTest {
             "com/ses/privacy/production/PrivacyFeatureProperties.java",
             "com/ses/privacy/production/PropertyPrivacyApprovalSource.java");
 
+    /**
+     * 決定の参照の getter（{@code getD01()}〜{@code getD09()}。{@code PrivacyApprovalProperties} の外に同名が無い）は名前で探す。宣言を
+     * 追えない読み方（{@code var}・provider からの連鎖）も拾う（review rb-fe-c P3-5）。
+     */
+    private static final Pattern DECISION_GETTER = Pattern.compile("\\.\\s*(getD0[1-9])\\s*\\(");
+
+    /**
+     * 承認の値の property 名の直接の読取り（{@code @Value("${privacy.approval…}")}・{@code Environment#getProperty("privacy.approval…")}・
+     * DSAR の期限規則・保存期間。review rb-fe-c P3-5）。{@code @ConfigurationProperties(prefix = …)} は数えない。
+     */
+    static final Pattern PROPERTY_READ = Pattern.compile("(?:@Value\\s*\\(\\s*\"\\$\\{\\s*|getProperty\\s*\\(\\s*\")"
+            + "(privacy\\.(?:approval\\.|dsar\\.due-days|dsar\\.package-max-age)[\\w.-]*)");
+
     @Test
     void 承認の値のpropertiesのgetterを呼ぶのはpropertyの源だけである() throws IOException {
         List<String> violations = new ArrayList<>();
@@ -54,7 +67,18 @@ class ApprovalValueReadGuardTest {
                 if (guarded.allowed().contains(relative) || !source.contains(guarded.type())) {
                     continue;
                 }
-                for (String variable : declaredNames(source, guarded.type())) {
+                Set<String> variables = declaredNames(source, guarded.type());
+                Set<String> holders = holderNames(source, guarded.type());
+                variables.addAll(varNames(source, guarded.type(), holders));
+                for (String holder : holders) {
+                    // ObjectProvider<型>・Optional<型> から取り出して getter を呼ぶ連鎖（p.getIfAvailable().getD06()）
+                    Matcher chained = Pattern.compile("\\b" + Pattern.quote(holder) + "\\s*\\.\\s*\\w+\\s*\\([^()]*\\)\\s*\\.\\s*("
+                            + guarded.getters() + ")\\s*\\(").matcher(source);
+                    while (chained.find()) {
+                        violations.add(relative + ": " + holder + "...." + chained.group(1) + "(");
+                    }
+                }
+                for (String variable : variables) {
                     Matcher call = Pattern.compile("\\b" + Pattern.quote(variable) + "\\s*\\.\\s*(" + guarded.getters()
                             + ")\\s*\\(").matcher(source);
                     while (call.find()) {
@@ -73,6 +97,16 @@ class ApprovalValueReadGuardTest {
                     violations.add(relative + ": ." + getter.group(1) + "(");
                 }
             }
+            if (!GUARDED.get(0).allowed().contains(relative)) {
+                Matcher decision = DECISION_GETTER.matcher(source);
+                while (decision.find()) {
+                    violations.add(relative + ": ." + decision.group(1) + "(");
+                }
+            }
+            Matcher property = PROPERTY_READ.matcher(source);
+            while (property.find()) {
+                violations.add(relative + ": " + property.group(1));
+            }
         }
         assertThat(violations).as("承認の値の properties の getter は property の源だけが呼ぶ（他は PrivacyApprovalSource を読む）")
                 .isEmpty();
@@ -88,6 +122,50 @@ class ApprovalValueReadGuardTest {
                 .isTrue();
         assertThat(DSAR_VALUE_GETTER.matcher("features.getDsar().getDueDays()").find()).isTrue();
         assertThat(stripComments("/** approval.getD06() */ int a; // approval.getD01()")).doesNotContain("getD0");
+    }
+
+    /** review rb-fe-c P3-5: provider からの連鎖・{@code var}・property 名の直接の読取りも検出する。 */
+    @Test
+    void 走査はproviderの連鎖とvarとproperty名の読取りも検出する() {
+        String chained = "class A { A(ObjectProvider<PrivacyApprovalProperties> approvals, Optional<com.x.PrivacyApprovalProperties> o) "
+                + "{ approvals.getIfAvailable().getApprovalDigest(); } }";
+        assertThat(holderNames(chained, "PrivacyApprovalProperties")).containsExactly("approvals", "o");
+        assertThat(Pattern.compile("\\bapprovals\\s*\\.\\s*\\w+\\s*\\([^()]*\\)\\s*\\.\\s*(get\\w+|reference)\\s*\\(")
+                .matcher(chained).find()).isTrue();
+
+        String declaredVar = "class A { void f(ObjectProvider<PrivacyApprovalProperties> p) { var a = p.getObject(); "
+                + "var b = new PrivacyApprovalProperties(); a.getTenantId(); } }";
+        assertThat(varNames(declaredVar, "PrivacyApprovalProperties",
+                holderNames(declaredVar, "PrivacyApprovalProperties"))).containsExactly("a", "b");
+        assertThat(DECISION_GETTER.matcher("var d = source.approval().getD05().getDecisionId();").find()).isTrue();
+
+        assertThat(PROPERTY_READ.matcher("@Value(\"${privacy.approval.d05.decision-id:}\") String id;").find()).isTrue();
+        assertThat(PROPERTY_READ.matcher("environment.getProperty(\"privacy.approval.approval-digest\")").find()).isTrue();
+        assertThat(PROPERTY_READ.matcher("env.getProperty(\"privacy.dsar.due-days\", Integer.class)").find()).isTrue();
+        assertThat(PROPERTY_READ.matcher("@ConfigurationProperties(prefix = \"privacy.approval\")").find()).isFalse();
+    }
+
+    /** {@code ObjectProvider<型> 名前}・{@code Optional<型> 名前} など、型を1つだけ包む generic で宣言した名前。 */
+    private static Set<String> holderNames(String source, String type) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher matcher = Pattern.compile("<\\s*(?:\\w+\\.)*" + Pattern.quote(type) + "\\s*>\\s+(\\w+)").matcher(source);
+        while (matcher.find()) {
+            names.add(matcher.group(1));
+        }
+        return names;
+    }
+
+    /** {@code var} で宣言した名前のうち、型の生成か包みの取り出しで初期化したもの。 */
+    private static Set<String> varNames(String source, String type, Set<String> holders) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher matcher = Pattern.compile("\\bvar\\s+(\\w+)\\s*=\\s*(?:new\\s+(?:\\w+\\.)*" + Pattern.quote(type)
+                + "\\s*\\(|(\\w+)\\s*\\.\\s*\\w+\\s*\\()").matcher(source);
+        while (matcher.find()) {
+            if (matcher.group(2) == null || holders.contains(matcher.group(2))) {
+                names.add(matcher.group(1));
+            }
+        }
+        return names;
     }
 
     /** {@code 型 名前} で宣言した名前（field・変数・引数。generic の型引数の中は数えない）。 */

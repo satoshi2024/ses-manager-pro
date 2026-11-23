@@ -41,6 +41,37 @@ class PrivacyHoldJournalInstanceCheckTest {
         executor.shutdownNow();
     }
 
+    /**
+     * review rb-fe-c P3-2: reconciler の実行ごとに起動時検査の結果を再検査する（保持・保全が閉じていて評価器が呼ばなくても、Journal が
+     * 直れば hold の効力の結果が回復する）。再検査の失敗は結果を変えず、比べ直しを止めない。
+     */
+    @Test
+    void reconcilerの実行ごとに起動時検査の結果を再検査し失敗しても続ける() {
+        java.util.concurrent.atomic.AtomicReference<PrivacyJournalStartupVerifier.Result> result =
+                new java.util.concurrent.atomic.AtomicReference<>(new PrivacyJournalStartupVerifier.Result(
+                        PrivacyJournalStartupVerifier.Availability.UNAVAILABLE, List.of("journal.unreachable")));
+        PrivacyHoldJournal recovering = new PrivacyHoldJournal(result::get, () -> index, index,
+                PrivacyHoldTestFixture.JOURNAL_ID, Duration.ofMinutes(2), Duration.ofSeconds(35), () -> APPLICATION_UUID,
+                clock);
+        AtomicInteger refreshed = new AtomicInteger();
+        recovering.resultRefresher = () -> {
+            refreshed.incrementAndGet();
+            result.set(new PrivacyJournalStartupVerifier.Result(PrivacyJournalStartupVerifier.Availability.AVAILABLE,
+                    List.of()));
+        };
+        assertThat(recovering.availability()).isNotEqualTo(PrivacyHoldJournal.Availability.AVAILABLE);
+
+        recovering.refreshInstanceCheck();
+
+        assertThat(refreshed).hasValue(1);
+        assertThat(recovering.availability()).isEqualTo(PrivacyHoldJournal.Availability.AVAILABLE);
+        recovering.resultRefresher = () -> {
+            throw new IllegalStateException("journal down");
+        };
+        org.assertj.core.api.Assertions.assertThatCode(recovering::refreshInstanceCheck).doesNotThrowAnyException();
+        assertThat(recovering.availability()).isEqualTo(PrivacyHoldJournal.Availability.AVAILABLE);
+    }
+
     @Test
     void 間隔を過ぎた比較は1つのthreadだけが行い他のthreadは待たずに前回の結果を使う() throws Exception {
         assertThat(journal.availability()).isEqualTo(PrivacyHoldJournal.Availability.AVAILABLE);

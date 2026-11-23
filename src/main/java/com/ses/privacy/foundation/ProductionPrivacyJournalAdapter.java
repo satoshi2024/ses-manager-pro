@@ -108,6 +108,11 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort, HoldR
         } catch (JournalConflictException | SecurityException e) {
             throw e;
         } catch (RuntimeException e) {
+            if (JournalAccessDeniedException.isAccessDenied(e)) {
+                // 権限の拒否は文の実行の前に返り transaction は rollback される（append は起きていない）。ACK 不明にせず確定の拒否にする
+                // （呼出し側は pending を戻す。review rb-fe-c P3-1）
+                throw new JournalAccessDeniedException("journal principalにappendの権限がありません", null);
+            }
             throw new JournalUnavailableException("journal durable appendに失敗しました", e);
         }
     }

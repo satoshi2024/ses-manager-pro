@@ -73,9 +73,11 @@ class PrivacyDsarClosedNotifierTest {
 
         ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
         verify(notifications, times(2)).publishToUser(any(), eq(PrivacyDsarClosedNotifier.NOTIFICATION_TYPE), anyString(),
-                message.capture(), anyString(), eq(PrivacyDsarClosedNotifier.NOTIFICATION_TYPE + ":tenant-a:" + TODAY),
-                eq(PrivacyDsarDeadlineScheduler.MENU_KEY));
-        assertThat(message.getValue()).contains("3 件").contains("2026-12-01").doesNotContain("DSAR-SECRET-0007");
+                message.capture(), eq(com.ses.common.constant.NotificationLinks.FEATURE_ENABLEMENT),
+                eq(PrivacyDsarClosedNotifier.NOTIFICATION_TYPE + ":tenant-a:" + TODAY),
+                eq(com.ses.featureenablement.service.FeatureEnablementNotifier.MENU_KEY));
+        assertThat(message.getValue()).contains("3 件").contains("2026-12-01").contains("機能の開放")
+                .doesNotContain("DSAR-SECRET-0007");
     }
 
     @Test

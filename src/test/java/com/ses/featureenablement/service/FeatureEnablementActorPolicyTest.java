@@ -142,6 +142,23 @@ class FeatureEnablementActorPolicyTest {
         assertDenied(() -> policy(broken).requirePrivacyAdminIfRequired(true, privacyAdmin));
     }
 
+    /**
+     * review rb-fe-c P3-3: privacy-admin の所属者でも、{@code '*'}・{@code privacy.} の拒否行を持つ有効な group にも所属する者は NF07 の
+     * 行為者にしない（開放の条件の privacy-admin の数え方と揃える）。
+     */
+    @Test
+    void NF07ではprivacyの拒否groupにも所属するprivacy_adminは403() {
+        com.ses.mapper.UserPermissionGroupMapper members = mock(com.ses.mapper.UserPermissionGroupMapper.class);
+        when(members.selectActiveUserIdsByGroupKey(TENANT, FeatureEnablementActorPolicy.PRIVACY_ADMIN_GROUP_KEY))
+                .thenReturn(List.of(1L, 3L));
+        when(members.countPrivacyDenyMemberships(TENANT, 3L)).thenReturn(1);
+        when(members.countPrivacyDenyMemberships(TENANT, 1L)).thenReturn(0);
+
+        policy(members).requirePrivacyAdminIfRequired(true, new FeatureEnablementActor(1L, "admin"));
+        assertDenied(() -> policy(members).requirePrivacyAdminIfRequired(true, new FeatureEnablementActor(3L, "admin3")));
+        policy(members).requirePrivacyAdminIfRequired(false, new FeatureEnablementActor(3L, "admin3"));
+    }
+
     @Test
     void 通知の宛先は有効な管理者だけ() {
         SysUser active = user(1L, "管理者");

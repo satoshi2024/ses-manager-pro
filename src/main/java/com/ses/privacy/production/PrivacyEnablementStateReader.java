@@ -1,6 +1,7 @@
 package com.ses.privacy.production;
 
 import com.ses.config.feature.Feature;
+import com.ses.entity.FeatureEnablementRequest;
 import com.ses.entity.FeatureEnablementState;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
@@ -35,8 +36,6 @@ public class PrivacyEnablementStateReader {
         NOT_DATABASE_MANAGED
     }
 
-    private static final List<Feature> NF07 = List.of(Feature.NF07_RETENTION, Feature.NF07_DSAR);
-
     private final FeatureEnablementProperties properties;
     private final FeatureEnablementCatalog catalog;
     private final FeatureEnablementStateMapper stateMapper;
@@ -69,8 +68,14 @@ public class PrivacyEnablementStateReader {
                     return Result.ACTIVE;
                 }
             }
-            for (Feature feature : NF07) {
-                if (requestMapper.selectPendingByTarget(tenantId, feature.name()) != null) {
+            // 対象ごとの 1 行の照会（selectPendingByTarget）は未決が複数行あると例外になり、利用者の管理の変更を全て拒否してしまう
+            // （review rb-fe-c P2-4）。tenant の未決を全て読んで NF07 の対象だけを数える
+            List<FeatureEnablementRequest> pending = requestMapper.selectPending(tenantId);
+            if (pending == null) {
+                return Result.UNREADABLE;
+            }
+            for (FeatureEnablementRequest request : pending) {
+                if (request != null && isNf07(request.getTargetKey())) {
                     return Result.ACTIVE;
                 }
             }

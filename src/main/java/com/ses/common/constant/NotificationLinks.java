@@ -70,6 +70,9 @@ public final class NotificationLinks {
     /** NF07 本人請求（DSAR）一覧（/privacy/dsar）— 期限通知の遷移先。 */
     public static final String PRIVACY_DSAR = "/privacy/dsar";
 
+    /** 画面「機能の開放」（/feature-enablement）— DSAR が閉じている間の未完了の請求の通知の遷移先（閉じている間 /privacy/dsar は 404）。 */
+    public static final String FEATURE_ENABLEMENT = "/feature-enablement";
+
     private NotificationLinks() {
     }
 

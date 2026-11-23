@@ -7,6 +7,7 @@ import com.ses.privacy.foundation.PolicyRegistrationVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.PrivacySubgateSignOffs;
 import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
 import com.ses.privacy.production.retention.trust.PrivacyTrustStructureState;
 import com.ses.service.AuditLogService;
@@ -47,7 +48,8 @@ public class PrivacyPolicyRegistrationConfiguration {
             ObjectProvider<Clock> clock,
             Environment environment,
             PrivacyTrustSource privacyTrustSource,
-            ObjectProvider<PrivacyTrustStructureState> trustStructure) {
+            ObjectProvider<PrivacyTrustStructureState> trustStructure,
+            ObjectProvider<PrivacySubgateSignOffs> subgateSignOffs) {
         Clock resolvedClock = clock.getIfAvailable(Clock::systemDefaultZone);
         // foundation の guard と同じく active profile だけで判定する（default profile の prod では生成しない）
         boolean activeProd = Arrays.asList(environment.getActiveProfiles()).contains("prod");
@@ -63,6 +65,10 @@ public class PrivacyPolicyRegistrationConfiguration {
                 transaction, resolvedClock, null, () -> {
                     PrivacyTrustStructureState state = trustStructure.getIfAvailable();
                     return state == null || state.sound();
+                }, () -> {
+                    // REG の署名（D-01・D-02・D-03）の取消し・失効でも閉じる（review rb-fe-c P2-1）
+                    PrivacySubgateSignOffs signOffs = subgateSignOffs.getIfAvailable();
+                    return signOffs == null || signOffs.valid(PrivacySubgateSignOffs.REGISTRATION);
                 });
     }
 }

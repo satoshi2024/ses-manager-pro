@@ -27,7 +27,14 @@ import java.util.stream.Stream;
  * 構造・anchor・verifier）を確かめ、成否が前回から変わったら履歴 {@code SUBGATE_CLOSED}・{@code SUBGATE_OPENED} と通知を出す
  * （最初の観測は記録だけ）。条件が戻れば自動で開く（D-4 の例外。要件 FE-RQ-005 の理由: 署名は二人の確認を経ており、trust の鮮度は
  * 一時の要因）。要求ごとの gate は今のまま各機能が 404・409 を返す（本 class は入口を開閉しない）。副入口の署名（{@code NF07_D05} 等）の
- * 失効は副入口だけを閉じ、開放単位を閉じない（review P3-16）。</p>
+ * 失効は副入口だけを閉じ、開放単位を閉じない（review P3-16）。署名の部分（{@link #signOffsValid}）は各入口の gate も読む（REL・REG・
+ * hold 開始。review rb-fe-c P2-1）。</p>
+ *
+ * <p>条件が戻った時に自動で開くのは、利用者が確認した D-4 の例外（2026-11-23）。署名に依る回復（D-05・D-03・D-02 の更新、証拠の
+ * 類の再登録）は新しい署名の二人の確認を要し、自動で戻るのは技術の条件（trust 文書の鮮度・anchor・verifier・Journal の appender）だけ。</p>
+ *
+ * <p>監視の限界（review rb-fe-c P3-11。gate には影響しない）: 成否は memory に持つため、再起動の後の最初の観測は記録だけで通知しない。
+ * 親の開放単位は DB の状態（{@code openLike}）で判定し、総スイッチ・一時の閉鎖の実効値は見ない（入口の gate は実効値で 404 にする）。</p>
  */
 @Slf4j
 @Component
@@ -96,9 +103,15 @@ public class SubgateMonitor {
                     }
                 }
                 if (notifier != null) {
-                    notifier.notifyAdministrators(open ? "subgateOpened" : "subgateClosed",
-                            new Object[]{subgate.code(), subgate.unit().displayName()},
-                            "FEATURE_ENABLEMENT:SUBGATE:" + subgate.code() + ":" + open + ":" + today, List.of());
+                    try {
+                        notifier.notifyAdministrators(open ? "subgateOpened" : "subgateClosed",
+                                new Object[]{subgate.code(), subgate.unit().displayName()},
+                                "FEATURE_ENABLEMENT:SUBGATE:" + subgate.code() + ":" + open + ":" + today, List.of());
+                    } catch (RuntimeException e) {
+                        // 1件の通知の失敗で残りの副入口の評価を止めない（review rb-fe-c P3-11）
+                        log.warn("[機能の開放] 副入口の変化の通知に失敗しました: subgate={} exceptionClass={}", subgate.code(),
+                                e.getClass().getSimpleName());
+                    }
                 }
             }
         }
@@ -110,10 +123,8 @@ public class SubgateMonitor {
         if (!snapshot.unit(subgate.unit()).state().openLike()) {
             return false;
         }
-        for (String kind : subgate.signOffKinds()) {
-            if (!valid(snapshot, kind, today)) {
-                return false;
-            }
+        if (!signOffsValid(snapshot, subgate, today)) {
+            return false;
         }
         for (Condition condition : conditionsFor(subgate.code())) {
             try {
@@ -125,6 +136,34 @@ public class SubgateMonitor {
             }
         }
         return true;
+    }
+
+    /**
+     * 副入口の目録の署名（決定の類と証拠の類）が全て確認済みで有効か（固有の条件は呼ばない。入口の gate が使うため、固有の条件から
+     * 呼んでも再帰しない。review rb-fe-c P2-1）。
+     */
+    public boolean signOffsValid(FeatureEnablementSnapshot snapshot, Subgate subgate, LocalDate today) {
+        if (snapshot == null || subgate == null || today == null) {
+            return false;
+        }
+        for (String kind : subgate.signOffKinds()) {
+            if (!valid(snapshot, kind, today)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 目録の副入口（無ければ空）。 */
+    public java.util.Optional<Subgate> subgate(String code) {
+        for (UnitDefinition unit : catalog.units()) {
+            for (Subgate subgate : unit.subgates()) {
+                if (subgate.code().equals(code)) {
+                    return java.util.Optional.of(subgate);
+                }
+            }
+        }
+        return java.util.Optional.empty();
     }
 
     private List<Condition> conditionsFor(String code) {

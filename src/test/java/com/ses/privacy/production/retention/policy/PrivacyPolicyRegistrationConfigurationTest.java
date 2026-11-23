@@ -72,7 +72,8 @@ class PrivacyPolicyRegistrationConfigurationTest {
                 .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
                                 oidc), PrivacyApprovalSource.properties(approval(), null), mock(RetentionPolicyMapper.class),
                         mock(PiiDataElementMapper.class), mock(AuditLogService.class), mock(PlatformTransactionManager.class),
-                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null));
+                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null),
+                        provider(com.ses.privacy.production.PrivacySubgateSignOffs.class, null));
         assertThat(trust.calls.get()).as("Bean の構築時には trust を読まない").isZero();
 
         assertThat(service.isOpen()).isTrue();
@@ -81,7 +82,8 @@ class PrivacyPolicyRegistrationConfigurationTest {
                 .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
                                 null), PrivacyApprovalSource.properties(approval(), null), mock(RetentionPolicyMapper.class),
                         mock(PiiDataElementMapper.class), mock(AuditLogService.class), mock(PlatformTransactionManager.class),
-                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null));
+                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null),
+                        provider(com.ses.privacy.production.PrivacySubgateSignOffs.class, null));
         assertThat(otherTenant.isOpen()).isFalse();
         assertThat(otherTenant.readiness().missing()).containsExactly("trust");
         assertThat(trust.calls.get()).isPositive();

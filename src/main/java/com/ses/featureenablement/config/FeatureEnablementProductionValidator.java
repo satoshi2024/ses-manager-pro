@@ -65,18 +65,21 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
 
     /**
      * 開閉以外の旧い変数（DB 管理にした開放単位の、署名へ移した承認の値。正規化した名前の接頭辞）。段階ごとに自分の開放単位の行を足す
-     * （A2 の報告の拡張点）。
+     * （A2 の報告の拡張点）。行の開放単位のどれかが DB 管理なら拒否する（review rb-fe-c P3-8）。
      * <ul>
-     *   <li>NF07（FE-C05）: {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05。署名の組と署名へ移した）と、D-06 の
-     *       {@code PRIVACY_DSAR_DUE_DAYS}・{@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。運用値の
-     *       {@code PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS} と {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は配備の設定に残す。</li>
+     *   <li>NF07（FE-C05）: {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05 は署名の組と署名へ、失効の警告日数は system 設定
+     *       {@code feature-enablement.expiry-warning-days} へ移した。review rb-fe-c P3-4）と、D-06 の {@code PRIVACY_DSAR_DUE_DAYS}・
+     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。運用値の
+     *       {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は配備の設定に残す（接頭辞に当たらない）。</li>
      * </ul>
      */
-    static final Map<Feature, List<String>> ADDITIONAL_LEGACY_PREFIXES = Map.of(
-            Feature.NF07_RETENTION, List.of("PRIVACYAPPROVAL", "PRIVACYDSARDUEDAYS", "PRIVACYDSARPACKAGEMAXAGE"));
-    /** 接頭辞に当たっても旧い変数としない運用値（正規化した名前）。 */
-    static final Set<String> ADDITIONAL_LEGACY_EXCEPTIONS = Set.of("PRIVACYAPPROVALEXPIRYWARNINGDAYS");
+    static final List<LegacyRule> ADDITIONAL_LEGACY_RULES = List.of(
+            new LegacyRule(Set.of(Feature.NF07_RETENTION, Feature.NF07_DSAR),
+                    List.of("PRIVACYAPPROVAL", "PRIVACYDSARDUEDAYS", "PRIVACYDSARPACKAGEMAXAGE")));
 
+    /** 開閉以外の旧い変数の規則（開放単位のどれかが DB 管理なら、正規化した名前が接頭辞で始まる変数を拒否する）。 */
+    record LegacyRule(Set<Feature> units, List<String> prefixes) {
+    }
     private final Environment environment;
     private final FeatureEnablementProperties properties;
     private final FeatureEnablementCatalog catalog;
@@ -171,13 +174,14 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         return keys;
     }
 
-    /** DB 管理にした開放単位の、開閉以外の旧い変数か（{@link #ADDITIONAL_LEGACY_PREFIXES}）。 */
+    /** DB 管理にした開放単位の、開閉以外の旧い変数か（{@link #ADDITIONAL_LEGACY_RULES}）。 */
     boolean additionalLegacy(String key) {
-        if (key == null || ADDITIONAL_LEGACY_EXCEPTIONS.contains(key)) {
+        if (key == null) {
             return false;
         }
-        for (Map.Entry<Feature, List<String>> entry : ADDITIONAL_LEGACY_PREFIXES.entrySet()) {
-            if (catalog.databaseManaged(entry.getKey()) && entry.getValue().stream().anyMatch(key::startsWith)) {
+        for (LegacyRule rule : ADDITIONAL_LEGACY_RULES) {
+            if (rule.units().stream().anyMatch(catalog::databaseManaged)
+                    && rule.prefixes().stream().anyMatch(key::startsWith)) {
                 return true;
             }
         }

@@ -113,6 +113,9 @@ class ProductionSecurityConfigurationTest {
     @Autowired
     private com.ses.privacy.production.retention.trust.PrivacyTrustStructureState privacyTrustStructureState;
 
+    @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationResults featureEnablementEvaluationResults;
+
     /**
      * FE-C06（requirements §7「機能を閉じる」）: NF07 保持・保全が DB で開いていて、その条件（決定ID束縛・privacy-admin・Journal・鍵）を
      * 満たさなくても、prod の完全な context は起動する（NF07 の3つの起動時検査 validator・Journal・trust は起動を止めない）。
@@ -123,6 +126,17 @@ class ProductionSecurityConfigurationTest {
         org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject("SELECT state FROM t_feature_enablement_state "
                 + "WHERE tenant_id = 'default' AND feature_key = 'NF07_RETENTION'", String.class))
                 .isEqualTo("AUTO_CLOSED");
+        // 閉じた根拠が NF07 の固有の評価器の検査であること（評価器が無い evaluator.missing や、鍵の条件だけで閉じたのではない。
+        // review rb-fe-c P3-6）。起動時の WARN（NF07_PRIVACY_STOPPED_AT_STARTUP）は context の生成の中で出るため、ここでは
+        // 評価の結果の code で確かめる
+        java.util.List<String> codes = featureEnablementEvaluationResults.latest(com.ses.config.feature.Feature.NF07_RETENTION)
+                .orElseThrow().checks().stream()
+                .filter(check -> !check.passing())
+                .map(com.ses.featureenablement.condition.FeatureConditionCheck::code).toList();
+        org.assertj.core.api.Assertions.assertThat(codes)
+                .contains("journal.notConfigured")
+                .anyMatch(code -> code.startsWith("decisionBinding."))
+                .doesNotContain(com.ses.featureenablement.condition.FeatureConditionRegistry.CODE_EVALUATOR_MISSING);
         org.assertj.core.api.Assertions.assertThatCode(privacyProductionConfigurationValidator::validate)
                 .doesNotThrowAnyException();
         org.assertj.core.api.Assertions.assertThat(privacyJournalStartupVerifier.protectionResult().availability())

@@ -38,7 +38,9 @@ import java.util.Objects;
  *       {@code SecurityContextCallerContextProvider.isCurrentActiveAccount} と同じ判定）。</li>
  *   <li>NF07 の開放単位（申請・承認・却下・取下げ・閉鎖）と、NF07 の署名の種別・組の登録・確認・却下・取消し・延長の行為者は、
  *       有効な privacy-admin group の所属者に限る（J-05・design §11.3。FE-C05）。所属は要求ごとに DB から読み直す（照会できなければ
- *       拒否）。</li>
+ *       拒否）。{@code '*'}・{@code privacy.} の拒否行を持つ有効な group にも所属する者は除く（開放の条件の数え方
+ *       {@code UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames} と揃える。OIDC の session と break-glass の除外は上の
+ *       session の規則が受け持つ。review rb-fe-c P3-3）。</li>
  * </ul>
  * 判定に失敗すれば 403 {@code error.featureEnablement.actorNotAllowed}（理由の詳細は返さない）。
  */
@@ -130,7 +132,9 @@ public class FeatureEnablementActorPolicy {
         }
         try {
             List<Long> members = mapper.selectActiveUserIdsByGroupKey(tenant.tenantId(), PRIVACY_ADMIN_GROUP_KEY);
-            return members != null && members.contains(actor.userId());
+            // privacy の拒否行を持つ group にも所属する者は除く（開放の条件の privacy-admin の数え方と揃える。review rb-fe-c P3-3）
+            return members != null && members.contains(actor.userId())
+                    && mapper.countPrivacyDenyMemberships(tenant.tenantId(), actor.userId()) == 0;
         } catch (RuntimeException e) {
             return false;
         }

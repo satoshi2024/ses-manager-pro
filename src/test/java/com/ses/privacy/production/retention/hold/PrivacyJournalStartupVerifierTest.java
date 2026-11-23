@@ -536,6 +536,23 @@ class PrivacyJournalStartupVerifierTest {
         }
     }
 
+    /** review rb-fe-c P2-2: Flyway の履歴の照会の失敗は評価できない類の code（一度の瞬断で保持・保全を閉じない）。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void Flywayの履歴を照会できなければ評価できない類のcodeにする() {
+        JdbcTemplate journal = mock(JdbcTemplate.class);
+        org.mockito.Mockito.when(journal.query(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(org.springframework.jdbc.core.RowMapper.class)))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("timeout"));
+        java.util.Set<String> violations = new java.util.TreeSet<>();
+
+        PrivacyJournalStartupVerifier.checkFlywayHistory(journal,
+                () -> List.of(migration("1", "V1__privacy_journal_core.sql")), violations);
+
+        assertThat(violations).containsExactly("flyway.history.unverifiable");
+        assertThat(com.ses.featureenablement.catalog.FeatureEnablementCatalog.isUnverifiableCode(
+                "journal.flyway.history.unverifiable")).isTrue();
+    }
     /** FE-C03: reader の権限の結果は hold の効力では適合、開放の条件（appender を要する）では不適合になる。 */
     @Test
     void readerのprincipalはhold効力の結果では適合し開放の条件の結果では不適合() {

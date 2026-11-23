@@ -554,7 +554,7 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         return List.copyOf(violations);
     }
 
-    private static void checkFlywayHistory(JdbcTemplate journal,
+    static void checkFlywayHistory(JdbcTemplate journal,
                                            Supplier<List<PrivacyJournalMigrations.Migration>> artifactMigrations,
                                            Set<String> violations) {
         List<PrivacyJournalMigrations.Migration> artifact;
@@ -574,7 +574,9 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                                 rs.getBoolean(4));
                     });
         } catch (RuntimeException e) {
-            violations.add("flyway.historyUnreadable");
+            // 照会の失敗（接続の切断・timeout）は評価できない類（一度の瞬断で保持・保全を閉じない。review rb-fe-c P2-2）。版を解釈できない
+            // 行（下の historyUnreadable）は実際の不一致で不成立のまま
+            violations.add("flyway.history.unverifiable");
             return;
         }
         violations.addAll(historyViolations(artifact, history));

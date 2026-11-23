@@ -59,7 +59,8 @@ import java.util.TreeSet;
  * {@code FeatureEnablementStartupEvaluator} の起動時の評価）。開いている capability は開放状態の源から読む。</p>
  *
  * <p>{@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する。読むだけで DB へは書かない。</p>
- */@Component
+ */
+@Component
 @Profile("prod")
 public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton,
         AdministratorStartupConditions, FeatureConditionEvaluator {
@@ -283,7 +284,23 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         return checks;
     }
 
-    /** Journal の開放の条件の結果（appender の権限。requirements §6.11 の (e)）。 */
+    /**
+     * 申請・承認の世代の行の lock の前に Journal を再検査する（間隔の下限は再検査の側が守る。lock の中の評価は最後の結果を読む。
+     * review rb-fe-c P2-6）。保持・保全だけ。
+     */
+    @Override
+    public void refreshRemote(Feature feature) {
+        PrivacyJournalStartupVerifier verifier = journalVerifier;
+        if (feature == Feature.NF07_RETENTION && verifier != null) {
+            verifier.reverify();
+        }
+    }
+
+    /**
+     * Journal の開放の条件の結果（appender の権限。requirements §6.11 の (e)）。外部への検査（再検査）は {@code remoteChecksAllowed}
+     * の評価（起動時・定期・画面の再評価。lock を持たない）だけで行い、申請・承認（lock の中）は {@link #refreshRemote} の後の最後の
+     * 結果を読む。
+     */
     private List<FeatureConditionCheck> journalChecks(boolean remoteChecksAllowed) {
         PrivacyJournalStartupVerifier verifier = journalVerifier;
         if (verifier == null) {

@@ -8,6 +8,10 @@ package com.ses.config;
  * （{@code AdministratorContinuityGuard}）が変更の前後で比べる。guardは条件の写しを持たないため、起動時検査の条件を
  * 変えるとguardの判定も同じに変わる。</p>
  *
+ * <p>privacy-admin の条件（{@link Condition#PRIVACY_ADMINISTRATORS}）は、機能の開放の段階 C（feature-enablement-console FE-C05）の後は
+ * 起動を止めず、NF07 の開放の条件（評価器）として判定する。この条件では、下の「起動時検査」は開放の条件の評価、「起動を止める」は
+ * 「開けない・開いていれば自動閉鎖する」と読む（guard の比べ方は変わらない。review rb-fe-c P3-7）。</p>
+ *
  * @param condition  条件の種類
  * @param evaluated  起動時検査がこの条件を判定するか（bootstrap中、OIDCのtenant・issuerが未設定、NF07 を DB で管理していて保持・保全・
  *                   DSAR が閉じていて未決の申請も無い（privacy-admin。feature-enablement-console design §14）など、起動時検査が

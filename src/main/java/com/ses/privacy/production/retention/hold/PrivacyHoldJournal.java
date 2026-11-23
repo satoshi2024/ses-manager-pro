@@ -86,6 +86,11 @@ public class PrivacyHoldJournal {
     private volatile boolean portResolved;
     private volatile PrivacyJournalPort port;
     private volatile InstanceCheckResult lastInstanceCheck;
+    /**
+     * 起動時検査の結果の再検査（reconciler の実行ごと。保持・保全の開閉に関係なく呼ぶ。再検査は Journal を読むだけで、hold の効力の
+     * 結果は成功の時だけ上がる。間隔の下限は再検査の側が守る。review rb-fe-c P3-2）。試験の手組みでは無い。
+     */
+    volatile Runnable resultRefresher;
 
     /** hold の効力の結果を開放の条件の結果にも使う（試験用。appender で検査した結果を渡す）。 */
     PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
@@ -124,10 +129,12 @@ public class PrivacyHoldJournal {
         Objects.requireNonNull(verifier, "verifier");
         PrivacyHoldJournalIndex index = connections.isPoolCreated()
                 ? new JdbcPrivacyHoldJournalIndex(connections.dataSource()) : null;
-        return new PrivacyHoldJournal(verifier::protectionResult, verifier::enablementResult,
+        PrivacyHoldJournal journal = new PrivacyHoldJournal(verifier::protectionResult, verifier::enablementResult,
                 () -> connections.openJournalPort(environment, clock),
                 index, connections.journalId(), properties == null ? null : properties.getPendingTimeout(),
                 connections.appendInFlightUpperBound(), applicationServerUuid, clock);
+        journal.resultRefresher = verifier::reverify;
+        return journal;
     }
 
     /** 現在の可用性（起動時検査の結果・adapter の生成可否・索引の有無・journal ID の形式・instance の別）。 */
@@ -164,10 +171,21 @@ public class PrivacyHoldJournal {
     }
 
     /**
-     * reconciler の実行ごとに {@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。比較中の thread が
+     * reconciler の実行ごとに起動時検査の結果を再検査し（{@link #resultRefresher}。起動時に Journal を使えず保持・保全が閉じたままでも、
+     * Journal が直れば hold の効力の結果が回復する。review rb-fe-c P3-2）、{@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。比較中の thread が
      * あればその終了を待ってから比べ直す（同時に2つ比べない。A1H-1 delta review P3-N1）。
      */
     void refreshInstanceCheck() {
+        Runnable refresher = resultRefresher;
+        if (refresher != null) {
+            try {
+                refresher.run();
+            } catch (RuntimeException e) {
+                // 再検査の失敗は hold の効力の結果を下げない（起動時の結果か直前の成功の結果のまま）
+                log.warn("[privacy-journal] Journal の再検査に失敗しました（結果は変えません）: exceptionClass={}",
+                        e.getClass().getSimpleName());
+            }
+        }
         if (baseAvailability() != Availability.AVAILABLE) {
             return;
         }
