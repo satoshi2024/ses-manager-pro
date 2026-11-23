@@ -10,7 +10,7 @@ import java.sql.SQLSyntaxErrorException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * review rb-fe-c P3-1: 権限の拒否（MySQL 1142・1143・1044）は文の実行の前に返り append は起きていないため、ACK 不明ではなく確定の拒否と
+ * review rb-fe-c P3-1: 権限の拒否（MySQL 1142・1143・1044・1227・1370）は文の実行の前に返り append は起きていないため、ACK 不明ではなく確定の拒否と
  * 判定する。接続の切断や timeout は ACK 不明のまま（確定の拒否にしない）。
  */
 class JournalAccessDeniedExceptionTest {

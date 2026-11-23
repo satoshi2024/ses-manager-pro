@@ -80,6 +80,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     /** 開閉以外の旧い変数の規則（開放単位のどれかが DB 管理なら、正規化した名前が接頭辞で始まる変数を拒否する）。 */
     record LegacyRule(Set<Feature> units, List<String> prefixes) {
     }
+
     private final Environment environment;
     private final FeatureEnablementProperties properties;
     private final FeatureEnablementCatalog catalog;

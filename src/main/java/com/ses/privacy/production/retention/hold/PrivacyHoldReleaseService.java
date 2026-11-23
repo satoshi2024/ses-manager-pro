@@ -266,11 +266,12 @@ public class PrivacyHoldReleaseService {
             releasePending(tenantId, holdId, commandId, actor, "JOURNAL_REFUSED", 403);
             throw BusinessException.of(403, "error.privacy.holdReleaseProofRejected");
         } catch (JournalAccessDeniedException e) {
-            // principal に append の権限が無い（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）
+            // 最初の試行が権限で拒否された（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）。ACK 不明の後の
+            // 再送の拒否は JournalRetryDeniedAfterUnknown で下の ACK 不明になる（P3-N1）
             releasePending(tenantId, holdId, commandId, actor, "JOURNAL_ACCESS_DENIED", 503);
             throw BusinessException.of(503, "error.privacy.journalUnavailable");
         } catch (RuntimeException e) {
-            ackUnknown(holdId, actor);
+            ackUnknown(holdId, actor, e instanceof JournalRetryDeniedAfterUnknown);
             throw BusinessException.of(503, "error.privacy.holdReleaseAckUnknown");
         }
 
@@ -437,7 +438,12 @@ public class PrivacyHoldReleaseService {
             if (!refreshPendingSince(tenantId, commandId)) {
                 throw firstUnknown;
             }
-            return port.appendHoldRelease(proof);
+            try {
+                return port.appendHoldRelease(proof);
+            } catch (JournalAccessDeniedException deniedAfterUnknown) {
+                // 先の試行は ACK 不明のまま（commit 済みかもしれない）。確定の拒否にせず ACK 不明として扱う（review rb-fe-c P3-N1）
+                throw new JournalRetryDeniedAfterUnknown(deniedAfterUnknown);
+            }
         }
     }
 
@@ -485,11 +491,17 @@ public class PrivacyHoldReleaseService {
     }
 
     private void ackUnknown(String holdId, PrivacyHoldService.Actor actor) {
-        log.warn("[privacy-hold] hold解除のACKを確認できません。pendingを残してreconcilerに任せます: code={}",
-                LOG_CODE_ACK_UNKNOWN);
+        ackUnknown(holdId, actor, false);
+    }
+
+    /** @param deniedAfterUnknown 再送が権限で拒否された（先の試行の結果は不明。監査の理由で拒否と区別する。review rb-fe-c P3-N1） */
+    private void ackUnknown(String holdId, PrivacyHoldService.Actor actor, boolean deniedAfterUnknown) {
+        String reason = deniedAfterUnknown ? JournalRetryDeniedAfterUnknown.AUDIT_REASON : null;
+        log.warn("[privacy-hold] hold解除のACKを確認できません。pendingを残してreconcilerに任せます: code={} reason={}",
+                LOG_CODE_ACK_UNKNOWN, reason);
         try {
             requiresNew.executeWithoutResult(tx -> audit.record(actor.username(), PrivacyHoldAudit.RELEASE_ACK_UNKNOWN,
-                    PrivacyHoldAudit.fields("hold", holdId), 503, false));
+                    PrivacyHoldAudit.fields("hold", holdId, "reason", reason), 503, false));
         } catch (RuntimeException e) {
             log.warn("[privacy-hold] 解除のACK不明の監査を記録できません: exceptionClass={}", e.getClass().getSimpleName());
         }

@@ -30,8 +30,9 @@ import java.util.stream.Stream;
  * 失効は副入口だけを閉じ、開放単位を閉じない（review P3-16）。署名の部分（{@link #signOffsValid}）は各入口の gate も読む（REL・REG・
  * hold 開始。review rb-fe-c P2-1）。</p>
  *
- * <p>条件が戻った時に自動で開くのは、利用者が確認した D-4 の例外（2026-11-23）。署名に依る回復（D-05・D-03・D-02 の更新、証拠の
- * 類の再登録）は新しい署名の二人の確認を要し、自動で戻るのは技術の条件（trust 文書の鮮度・anchor・verifier・Journal の appender）だけ。</p>
+ * <p>条件が戻った時に自動で開くのは D-4 の例外。REL・REG は利用者が確認した（2026-11-23。技術の条件は trust 文書の鮮度・anchor・
+ * verifier）。hold 開始（技術の条件は Journal の appender）は J-03 の推奨（独立 review で同意）で、利用者の確認の範囲外。どの副入口も、
+ * 署名に依る回復（D-05・D-03・D-02 の更新、証拠の類の再登録）は新しい署名の二人の確認を要する。</p>
  *
  * <p>監視の限界（review rb-fe-c P3-11。gate には影響しない）: 成否は memory に持つため、再起動の後の最初の観測は記録だけで通知しない。
  * 親の開放単位は DB の状態（{@code openLike}）で判定し、総スイッチ・一時の閉鎖の実効値は見ない（入口の gate は実効値で 404 にする）。</p>

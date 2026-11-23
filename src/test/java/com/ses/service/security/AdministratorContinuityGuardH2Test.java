@@ -334,6 +334,7 @@ class AdministratorContinuityGuardH2Test {
                         + "TIMESTAMP '2026-11-20 10:00:00', TIMESTAMP '2026-11-20 10:00:00')", TENANT, featureKey, requestId,
                 operator.getId(), approver);
     }
+
     @Test
     void 本番でも前から満たさない条件は拒否せず作成も通す() {
         // OIDC管理者は2名（bootstrapで揃えている途中）。break-glass・privacy-adminも前から満たさない。

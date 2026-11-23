@@ -8,7 +8,8 @@ import java.sql.SQLException;
  * <p>権限の拒否（MySQL の 1142 {@code ER_TABLEACCESS_DENIED_ERROR}・1143 {@code ER_COLUMNACCESS_DENIED_ERROR}・1044
  * {@code ER_DBACCESS_DENIED_ERROR}・1227 {@code ER_SPECIFIC_ACCESS_DENIED_ERROR}・1370 {@code ER_PROCACCESS_DENIED_ERROR}）は文の実行の前に返り、transaction は rollback されるため、append は起きていない。ACK 不明
  * （{@link JournalUnavailableException}）と違い、呼出し側は pending を戻してよい（reader の principal で hold の開始・解除を試みても、
- * pending と gate の {@code UNAVAILABLE} を残さない）。</p>
+ * pending と gate の {@code UNAVAILABLE} を残さない）。ただし ACK 不明の後の再送で返った時は、先の試行が効いたか分からないため、呼出し側は
+ * 確定の拒否にせず ACK 不明として扱う（review rb-fe-c P3-N1）。</p>
  */
 public final class JournalAccessDeniedException extends RuntimeException {
 

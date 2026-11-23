@@ -189,6 +189,7 @@ class FeatureEnablementProductionValidatorTest {
         return new FeatureEnablementProductionValidator(environment, properties, catalog, () -> env,
                 () -> systemProperties);
     }
+
     private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {
         Map<String, String> environment = new LinkedHashMap<>(env);
         assertThatThrownBy(() -> validator(prod(), environment, systemProperties).validate())

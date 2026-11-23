@@ -237,6 +237,36 @@ class PrivacyHoldReleaseServiceTest {
                 && uri.contains("reason=JOURNAL_ACCESS_DENIED"));
     }
 
+    /**
+     * review rb-fe-c P3-N1: 先の解除の append が ACK 不明（commit 済み・ACK 喪失）の後、再送が権限で拒否されても確定の拒否にしない。
+     * pending を残し（gate は UNAVAILABLE のまま）、監査は ACK 不明に理由を添え、reconciler が Journal の解除を projection へ補う。
+     */
+    @Test
+    void ACK不明の後の再送が権限で拒否されても拒否とせずpendingを残し_reconcilerが解除を補う() {
+        PrivacyHoldStartResult started = startSubject("ENGINEER:7098");
+        String command = newCommandId();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        fixture.journal.commitThenFail.set(1);
+        fixture.journal.beforeAppend = () -> {
+            if (calls.incrementAndGet() == 2) {
+                throw new com.ses.privacy.foundation.JournalAccessDeniedException("test: denied on retry", null);
+            }
+        };
+
+        assertBusiness(() -> release.release(started.holdId(), request(started.holdId(), command, REASON)), 503,
+                "error.privacy.holdReleaseAckUnknown");
+        assertThat(fixture.state().pendingCommandId()).isEqualTo(command);
+        assertThat(fixture.gate.evaluate(TENANT).state()).isEqualTo(PrivacyHoldGate.State.UNAVAILABLE);
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.RELEASE_ACK_UNKNOWN)
+                && uri.contains("reason=" + JournalRetryDeniedAfterUnknown.AUDIT_REASON));
+        assertThat(fixture.auditUris).noneMatch(uri -> uri.contains("RELEASE_REJECTED"));
+
+        fixture.reconciler.reconcileAll();
+
+        assertThat(fixture.store.hold(TENANT, started.holdId()).orElseThrow().status()).as("先の試行は効いていた")
+                .isEqualTo("RELEASED");
+    }
+
     // --- gate と reconciler が解除後の状態を扱う ---
 
     @Test

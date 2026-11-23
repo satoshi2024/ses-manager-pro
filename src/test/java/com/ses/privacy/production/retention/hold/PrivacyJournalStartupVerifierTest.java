@@ -553,6 +553,7 @@ class PrivacyJournalStartupVerifierTest {
         assertThat(com.ses.featureenablement.catalog.FeatureEnablementCatalog.isUnverifiableCode(
                 "journal.flyway.history.unverifiable")).isTrue();
     }
+
     /** FE-C03: reader の権限の結果は hold の効力では適合、開放の条件（appender を要する）では不適合になる。 */
     @Test
     void readerのprincipalはhold効力の結果では適合し開放の条件の結果では不適合() {

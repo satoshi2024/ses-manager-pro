@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 /**
  * review rb-fe-c P2-1（requirements §6.11）: NF07 を DB の開放状態で管理する間、副入口（hold 開始・REL・REG）の入口の gate は目録の
  * 署名（証拠の類 {@code NF07_D05_OWNER_ACCEPTANCE}・{@code NF07_TRUST_KMS}・{@code NF07_TRUST_STAGING} を含む）を要求ごとに読み、取消し・
- * 失効なら副入口だけを閉じる（保持・保全の開放単位は閉じない）。新しい署名の確認の後は自動で再開する（2026-11-23 の利用者の決定）。
+ * 失効なら副入口だけを閉じる（保持・保全の開放単位は閉じない）。新しい署名の確認の後は自動で再開する（REL・REG は 2026-11-23 の利用者の確認、hold 開始は J-03 の推奨）。
  */
 class PrivacySubgateSignOffsTest {
 

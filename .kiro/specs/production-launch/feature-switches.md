@@ -323,7 +323,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 
 - **失効前（推奨）**: 署名の失効の接近の警告（画面・通知・WARN `FEATURE_SIGN_OFF_EXPIRING`、metric `state="EXPIRING"`）を受けたら、失効する決定の署名者から新しい決定を得て、**新しい組**を登録・確認する（D-01 を更新するなら新しい D-01 と、その digest を記載した新しい D-09。D-06 は引き継げる）。確認の直後から新しい値で判定し、開いたままになる（再起動は要らない。digest が組と合わなければ 400 で何も変えない）。新しい署名日が未来の署名は、その日まで確認できない。
 - **失効後**: 失効した決定を要する開放単位は失効日（JST）から閉じ、`AUTO_CLOSED` になる。新しい組を確認してから、申請と二人の承認で開き直す（D-4）。D-06 の失効・取消しは DSAR だけを閉じる。
-- **副入口の署名**: hold 開始（D-05・`NF07_D05_OWNER_ACCEPTANCE`）・REL（D-03・D-05・`NF07_TRUST_KMS`・`NF07_TRUST_STAGING`）・REG（D-01・D-02・D-03）の署名の取消し・失効は、その副入口だけを閉じる（保持・保全は開いたまま。hold 開始は 409 `error.privacy.decisionUnknown`、REL・REG は404）。入口の gate は要求ごとに確認済みの署名を読むため、新しい署名を privacy-admin の二人で確認した直後から自動で開く（D-4 の例外。2026-11-23 に利用者が確認した。review rb-fe-c P2-1）。
+- **副入口の署名**: hold 開始（D-05・`NF07_D05_OWNER_ACCEPTANCE`）・REL（D-03・D-05・`NF07_TRUST_KMS`・`NF07_TRUST_STAGING`）・REG（D-01・D-02・D-03）の署名の取消し・失効は、その副入口だけを閉じる（保持・保全は開いたまま。hold 開始は 409 `error.privacy.decisionUnknown`、REL・REG は404）。入口の gate は要求ごとに確認済みの署名を読むため、新しい署名を privacy-admin の二人で確認した直後から自動で開く（D-4 の例外。REL・REG は 2026-11-23 に利用者が確認した。hold 開始は J-03 の推奨（独立 review で同意）で、利用者の確認の範囲外。review rb-fe-c P2-1）。
 - **閉鎖**: privacy-admin が画面で閉じる（即時。開き直しは申請と二人の承認）。privacy-admin の割当と hold は残り、hold は閉じた後も既存の hold を守り続ける（文書の処分・purge・孤児 file の掃除の hold gate は開閉に影響されない。FE-C03）。DSAR が閉じている間に未完了の請求があれば、日の始まりに privacy-admin へ件数と最も近い期限日を通知する（期限の通知の scheduler は閉じている間止まるため）。通知の link は画面「機能の開放」で、本文は「画面『機能の開放』で開き直すか、期限の管理を手で行ってください。」（閉じている間の `/privacy/dsar` は404のため。review rb-fe-c P2-5）。
 #### 4.7.6 policy の登録・有効化（NF07-REG。開放は D-01・D-02・D-03 の署名と NF07-TRUST の後）
 
