@@ -44,7 +44,12 @@ class BusinessConnectionBypassGuardTest {
             "com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier:SingleConnectionDataSource.<init>",
             "Journal の起動時検査が Journal の pool から借りた1接続を JdbcTemplate で使うための包み（別 instance。業務の接続ではない）",
             "com.ses.nf01.preflight.LifecycleAuthorizationPreflight:DriverManager.getConnection",
-            "NF01 の配備前の読取り専用の CLI（app の context の外で、表を読むだけ）");
+            "NF01 の配備前の読取り専用の CLI（app の context の外で、表を読むだけ）",
+            "com.ses.featureenablement.nf05.IntegrationHubEnablementBootResolver:DriverManager.getConnection",
+            "NF05 の起動の前の読取り（feature-enablement-console design §9.1・FE-D02。spec review P3-14 の条件）。"
+                    + "EnvironmentPostProcessor で context の refresh の前（DataSource の bean も静止の包みもまだ無く、静止の"
+                    + "対象の前）に、pool を作らず接続を1本だけ開き、setReadOnly(true) で SELECT だけを行い書かない。接続・socket・"
+                    + "照会の timeout は5秒で、終われば閉じる");
 
     private static final Set<String> DATA_SOURCE_TYPES = Set.of("com/zaxxer/hikari/HikariDataSource",
             "org/springframework/jdbc/datasource/DriverManagerDataSource",

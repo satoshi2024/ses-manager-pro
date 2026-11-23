@@ -14,6 +14,20 @@ const FeatureEnablement = (function () {
     const state = {catalog: null, units: [], signOffs: [], bundles: [], settings: [], requestsPage: 1, eventsPage: 1};
     const SIGN_OFF_REASONS = ['DOCUMENT_MISMATCH', 'ROLE_MISMATCH', 'DATE_MISMATCH', 'REFERENCE_MISMATCH', 'OTHER'];
     const REVOKE_REASONS = ['DECISION_WITHDRAWN', 'DOCUMENT_ERROR', 'SECURITY_CONCERN', 'OTHER'];
+    /**
+     * 署名・組の確認・却下・取下げ・取消しの dialog の題と本文の key（操作ごとの完全な key。接頭辞に変数を連結しないため、
+     * ComposedMessageKeyCoverageTest が key の有無を確かめられる）。
+     */
+    const DECISION_DIALOG_KEYS = {
+        signOffConfirm: {title: 'featureEnablement.confirm.signOff.confirm', text: 'featureEnablement.confirm.signOff.confirm.text'},
+        signOffReject: {title: 'featureEnablement.confirm.signOff.reject', text: 'featureEnablement.confirm.signOff.reject.text'},
+        signOffWithdraw: {title: 'featureEnablement.confirm.signOff.withdraw', text: 'featureEnablement.confirm.signOff.withdraw.text'},
+        signOffRevoke: {title: 'featureEnablement.confirm.signOff.revoke', text: 'featureEnablement.confirm.signOff.revoke.text'},
+        bundleConfirm: {title: 'featureEnablement.confirm.bundle.confirm', text: 'featureEnablement.confirm.bundle.confirm.text'},
+        bundleReject: {title: 'featureEnablement.confirm.bundle.reject', text: 'featureEnablement.confirm.bundle.reject.text'},
+        bundleWithdraw: {title: 'featureEnablement.confirm.bundle.withdraw', text: 'featureEnablement.confirm.bundle.withdraw.text'},
+        bundleRevoke: {title: 'featureEnablement.confirm.bundle.revoke', text: 'featureEnablement.confirm.bundle.revoke.text'}
+    };
 
     function t(key) {
         const args = Array.prototype.slice.call(arguments, 1);
@@ -670,16 +684,16 @@ const FeatureEnablement = (function () {
     function decideSignOff(kind, id, version) {
         const base = kind.indexOf('bundle') === 0 ? '/sign-off-bundles/' : '/sign-offs/';
         const action = kind.replace(/^signOff|^bundle/, '').toLowerCase();
-        const titleKey = (kind.indexOf('bundle') === 0 ? 'featureEnablement.confirm.bundle.' : 'featureEnablement.confirm.signOff.')
-            + action;
+        const dialogKeys = DECISION_DIALOG_KEYS[kind];
+        if (!dialogKeys) return;
         const reasons = action === 'revoke' ? REVOKE_REASONS : action === 'reject' ? SIGN_OFF_REASONS : null;
         const options = {};
         (reasons || []).forEach(function (code) {
             options[code] = label('featureEnablement.signOffReason.', code);
         });
         const dialog = {
-            titleText: t(titleKey, id),
-            text: t(titleKey + '.text'),
+            titleText: t(dialogKeys.title, id),
+            text: t(dialogKeys.text),
             icon: action === 'revoke' ? 'warning' : 'question',
             showCancelButton: true,
             confirmButtonText: t('featureEnablement.btn.' + action),
