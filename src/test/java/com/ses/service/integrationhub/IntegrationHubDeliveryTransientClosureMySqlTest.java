@@ -34,7 +34,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -125,10 +129,11 @@ class IntegrationHubDeliveryTransientClosureMySqlTest {
     @Test
     void 一時の閉鎖の間の配信は回復の後に送られ処理中だった配信もDLQにならず送られる() {
         long inFlight = insertDelivery();
-        // 送信の直前に一時の閉鎖になる（claim の時は開いていた）
-        when(transport.send(any())).thenAnswer(invocation -> {
+        // 送信の直前に一時の閉鎖になる（claim の時は開いていた）。stub の差し替えは doAnswer・doReturn で書く（when(mock.send(..)) は
+        // 差し替えの時に前の stub を呼ぶため、送っていないのに下の AssertionError が試験の本体から投げられていた。MySQL の Runner の失敗）
+        doAnswer(invocation -> {
             throw new AssertionError("一時の閉鎖の間は送らない");
-        });
+        }).when(transport).send(any());
         IntegrationHubRuntimeSwitch runtime = (IntegrationHubRuntimeSwitch) ReflectionTestUtils.getField(worker, "runtimeSwitch");
         when(runtime.outboundClosure()).thenReturn(IntegrationHubRuntimeSwitch.Closure.NONE,
                 IntegrationHubRuntimeSwitch.Closure.TRANSIENT);
@@ -144,8 +149,10 @@ class IntegrationHubDeliveryTransientClosureMySqlTest {
         assertThat(worker.dispatchDue()).isZero();
         assertThat(status(duringClosure)).isEqualTo("PENDING");
 
+        verify(transport, never()).send(any());
+
         // 回復の後に両方が送られる（at-least-once）
-        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.success(202, "provider-1"));
+        doReturn(IntegrationHubWebhookTransportResult.success(202, "provider-1")).when(transport).send(any());
         closure.set(IntegrationHubRuntimeSwitch.Closure.NONE);
         worker.dispatchDue();
         assertThat(status(inFlight)).isEqualTo("SUCCEEDED");

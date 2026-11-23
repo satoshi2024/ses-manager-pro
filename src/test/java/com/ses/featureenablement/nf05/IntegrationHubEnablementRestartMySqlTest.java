@@ -75,7 +75,10 @@ import static org.mockito.Mockito.when;
  *       再起動は隔離を経る。</li>
  *   <li>{@code continueRecovery} と閉鎖の並行で deadlock しない（行の lock だけで直列になる）。</li>
  * </ul>
- * commit した行は class 専用の container DB に残る。
+ * commit した行は class 専用の container DB に残る。DB は prod の初回導入と同じ状態にする: Flyway の {@code db/migration} の後に、
+ * prod の Flyway の job が適用する {@code db/migration-prod/R__remove_v2_sample_data.sql} を流して V2 の sample（法人が未設定の
+ * 顧客・要員・案件・契約）を消す（{@code FlywayProdFreshInstallMySqlTest} の配備決定-1）。sample を残すと NF05 の法人の条件
+ * （{@code LEGAL_ENTITY_UNRESOLVED}）で開かない。法人の条件そのものは外さない。
  */
 @SpringBootTest(properties = {
         "app.feature-enablement.source=database",
@@ -315,11 +318,30 @@ class IntegrationHubEnablementRestartMySqlTest {
 
     /** 他の試験の行を消し、承認の前の状態（行なし・barrier は OFF）に戻す（class 専用の DB。試験の順に依らない）。 */
     private void reset() {
+        removeV2SampleLikeProductionJob();
         jdbc.update("DELETE FROM t_feature_enablement_state WHERE tenant_id = 'default' AND feature_key = 'NF05_OUTBOUND'");
         jdbc.update("DELETE FROM m_system_config WHERE config_key = ?", IntegrationHubOutboundStartupBarrier.CONFIG_KEY);
         overlay.open(Feature.NF05_OUTBOUND, FeatureEnablementOverlay.AUTO_CLOSE_PENDING);
         holder.reload();
     }
+
+    /**
+     * prod の Flyway の job と同じ script で V2 の sample を消す（prod の初回導入の状態。script は初回導入の直後の時だけ消し、2回目
+     * からは何もしない）。1本の接続で流す（script は接続の変数で判定を持ち回る）。消した後に法人の未解決が無いことを前提として確かめる。
+     */
+    private void removeV2SampleLikeProductionJob() {
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                    new org.springframework.core.io.support.EncodedResource(new org.springframework.core.io.ClassPathResource(
+                            PROD_SAMPLE_REMOVAL_SCRIPT), StandardCharsets.UTF_8));
+            return null;
+        });
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_customer", Long.class))
+                .as("prod の初回導入と同じく V2 の sample が無い").isZero();
+        assertThat(readiness.isReady()).as("prod の初回導入の状態では法人の未解決の行が無い").isTrue();
+    }
+
+    static final String PROD_SAMPLE_REMOVAL_SCRIPT = "db/migration-prod/R__remove_v2_sample_data.sql";
 
     /** 未送信（PENDING）の配信を1行入れる（client と購読も作る。行の ID を返す）。 */
     private long insertPendingDelivery() {
