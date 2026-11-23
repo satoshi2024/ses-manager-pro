@@ -366,6 +366,39 @@ class FeatureEnablementProductionValidatorTest {
                 () -> systemProperties);
     }
 
+    /**
+     * FE-D05（design §10）: NF05 を DB 管理にした目録では、開閉と承認の値（決定 ID・digest）の旧い変数を全ての綴りで止める。許可する
+     * 送信元・送信先の一覧は digest の内容で配備の設定に残すため止めない。
+     */
+    @Test
+    void NF05の開閉と承認の値の旧い変数を止め許可の一覧は止めない() {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        java.util.function.BiFunction<Map<String, String>, Properties, FeatureEnablementProductionValidator> standard =
+                (env, system) -> new FeatureEnablementProductionValidator(prod(), properties,
+                        FeatureEnablementCatalog.standard(), () -> env, () -> system);
+        assertThat(standard.apply(Map.of(), new Properties()).legacyKeys()).contains("INTEGRATIONHUBPUBLICAPIENABLED",
+                "INTEGRATIONHUBEXTERNALTRANSPORTENABLED", "INTEGRATIONHUBINBOUNDDECISIONID",
+                "INTEGRATIONHUBINBOUNDAPPROVALDIGEST", "INTEGRATIONHUBOUTBOUNDDECISIONID",
+                "INTEGRATIONHUBOUTBOUNDAPPROVALDIGEST", "INTEGRATIONHUBPUBLICAPIAPPROVALDECISIONID",
+                "INTEGRATIONHUBEXTERNALTRANSPORTAPPROVALAPPROVALDIGEST");
+        for (Map<String, String> env : List.of(Map.of("INTEGRATION_HUB_PUBLIC_API_ENABLED", "true"),
+                Map.of("INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST", SECRET_LIKE_VALUE),
+                Map.of("INTEGRATIONHUB_INBOUND_DECISIONID", "DG-05-IN-20261201-01"),
+                Map.of("SPRING_APPLICATION_JSON", "{\"integration\":{\"hub\":{\"external-transport\":{\"approval\":"
+                        + "{\"decision-id\":\"DG-05-OUT-20261201-01\"}}}}}"))) {
+            assertThatThrownBy(() -> standard.apply(env, new Properties()).validate()).as(env.keySet().toString())
+                    .isInstanceOf(IllegalStateException.class).hasMessageNotContaining(SECRET_LIKE_VALUE);
+        }
+        Properties system = new Properties();
+        system.setProperty("integration.hub.public-api.approval.approval-digest", SECRET_LIKE_VALUE);
+        assertThatThrownBy(() -> standard.apply(Map.of(), system).validate()).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("integration.hub.public-api.approval.approval-digest");
+        assertThatCode(() -> standard.apply(Map.of("SPRING_APPLICATION_JSON", "{\"integration\":{\"hub\":{\"public-api\":"
+                + "{\"approval\":{\"allowed-client-cidrs\":[\"203.0.113.0/24\"]}}}}}"), new Properties()).validate())
+                .doesNotThrowAnyException();
+    }
+
     private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {
         Map<String, String> environment = new LinkedHashMap<>(env);
         assertThatThrownBy(() -> validator(prod(), environment, systemProperties).validate())

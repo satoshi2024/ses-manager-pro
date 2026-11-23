@@ -243,13 +243,14 @@
 
 ### 段階 D
 
-- [ ] **FE-D01 — `IntegrationHubProductionEnablementPolicy`・`IntegrationHubApprovalDigest` の純粋化と mode の規則**
+- [x] **FE-D01 — `IntegrationHubProductionEnablementPolicy`・`IntegrationHubApprovalDigest` の純粋化と mode の規則**
   - **依存:** 段階 A
   - **対応要求:** FE-RQ-008
   - **Objective:** `design.md` §9.5 と §9.3 の digest の部分、§9.1 の 0 の純粋な関数 `IntegrationHubEnablementDecision.decide(BootInputs)`。
   - **対象 file:** `config/integrationhub/IntegrationHubProductionEnablementPolicy.java`（:38-207）、`IntegrationHubApprovalDigest.java`（:79・:104）、`IntegrationHubExternalApiProperties.java`（:35-125）、`IntegrationHubApprovals.java`・`IntegrationHubEnablementDecision.java`（新規）。
   - **Automated test:** `IntegrationHubProductionEnablementPolicyTest`（既存の case が引数の経由で同じ違反、方向の引数、outbound 閉で HTTPS を許す、truststore の検査に副作用が無い）、`IntegrationHubApprovalDigestTest`（golden vector のまま、決定 ID を引数で受ける）、`IntegrationHubEnablementDecisionTest`（`OPEN` は指紋だけ、`OPEN_PENDING_RESTART` は OFF の記録も要る、purge の property の判定）。
   - **Demo:** なし。
+  - **実装（段階 D）:** 違反は固定の code と従来の文言の組。DB の源の prod の安全網は違反のある方向を閉じて code を残す。細部は `design.md` §9.6。
 
 - [ ] **FE-D02 — 起動の前の読取り（`IntegrationHubEnablementBootResolver`）・purge の property・起動の後の反映**
   - **依存:** FE-D01
@@ -258,6 +259,7 @@
   - **対象 file:** `featureenablement/nf05/IntegrationHubEnablementBootResolver.java`（新規、`META-INF/spring.factories`）、`featureenablement/nf05/IntegrationHubBootDecisionRecorder.java`（新規）、`service/integrationhub/IntegrationHubRetentionPurgeCondition.java`（:15-22）・`ExternalApiReadSnapshotPurgeScheduler` の条件・`IntegrationHubDeliveryMetrics` の条件、`config/LegalEntityReadinessStartupValidator.java`（:21-27。NF05 の部分を `FeatureEnablementStartupEvaluator` へ）、目録（NF05 の 2 件を DB 管理に）、`deploy-runbook.md` §1.2（起動前の読取りの受理）、`application-prod.yml`（placeholder の削除）。
   - **Automated test:** `IntegrationHubEnablementBootResolverTest`（順序が `ConfigDataEnvironmentPostProcessor` の後、enabled を常に書く、状態・署名・総スイッチ・違反の組合せで property の値、`OPEN` は barrier の指紋だけ・`OPEN_PENDING_RESTART` は OFF の記録も、DB に届かない・表が無いと閉と `READ_FAILED`、purge の property（`READ_FAILED` では `true`。review P3-N3）、`NF05_OUTBOUND_OFF` の照会が `reference_type='NF05'` を付けて索引を使う（review P3-N8）、値を log に出さない）、`IntegrationHubBootDecisionRecorderTest`、`LegalEntityReadinessStartupValidatorTest`（NF05 は port を開く前に自動閉鎖、copilot は例外のまま）、`IntegrationHubRetentionPurgeConditionTest`。MySQL（`IntegrationHubEnablementRestartMySqlTest`。shard の登録を同じ commit で）: 承認 → 再起動で `OPEN` → 定期の評価の後も `OPEN` → もう一度再起動しても `OPEN` で隔離が走らない、`AUTO_CLOSED` の後の再起動で purge の scheduler が作られる。
   - **Demo:** prod の profile の試験の構成で、outbound を承認 → 再起動 → 起動の log に結果、画面で `OPEN`、もう一度再起動しても `OPEN` を確かめる。
+  - **実装（段階 D）:** 法人の未解決は起動時の評価でなく起動の後の反映（`IntegrationHubBootDecisionRecorder`。同じく port を開く前）で判定した。起動時の値は実行時条件にもし、画面の閉じている理由に `nf05.boot.*` が出る。MySQL の再起動の試験は boot resolver・barrier の起動時の経路・起動の後の反映を同じ順で組み立てて再現する（context の refresh は試験の context のまま）。`application-prod.yml` に NF05 の開閉の placeholder は無い（固定の `false` を boot resolver が上書きする）。Demo は prod の profile と実 MySQL が要るため統括が行う（未実施）。細部は `design.md` §9.6。
 
 - [ ] **FE-D03 — 実行時の NF05 の判定を runtime switch に置き換える**
   - **依存:** FE-D02
@@ -266,6 +268,7 @@
   - **注記（micro review 88630af1 の P3-M2。段階 D の着手時に詰める）:** `TRANSIENT` と `DEFINITIVE` の境の細部（`AUTO_CLOSE_PENDING` を確定の閉鎖として扱う時点、snapshot の古さが続いて自動閉鎖に変わる時の処理中の配信の扱い）と、処理中の配信を PENDING へ戻す更新は claim の持ち主（lease の token）と状態の CAS で行い `attempt_count` を増やさないこと（回数の上限で DLQ に落とさない）を、着手時に design §9.3 と合わせて確定する。
   - **対象 file:** `IntegrationHubRuntimeSwitch.java`（新規）、`mapper/ApiDeliveryMapper.java`（claim を外して PENDING に戻し試行の回数を増やさない method。`holdPending` :81-86 は確定の閉鎖だけで使う）、`ExternalApiDisabledFilter.java`、`ExternalApiAuthenticationFilter.java`、`ExternalApiAuditBoundary.java`、`backup/quiesce/BackupWriteGateFilter.java`、`IntegrationHubResourceChangedProducer.java`、`IntegrationHubWebhookDeliveryWorker.java`、`src/test/java/com/ses/architecture/IntegrationHubFlagReadGuardTest.java`（新規）。
   - **Automated test:** 各 class の既存の試験（確定の閉鎖で kill switch の挙動のまま）、`IntegrationHubRuntimeSwitchTest`（`unverifiable_since`・snapshot の古さは `TRANSIENT`、`AUTO_CLOSED`・手動・総スイッチ・書込み待ちは `DEFINITIVE`、一時の閉鎖が解ければ戻る、確定の閉鎖では戻らない）、`IntegrationHubResourceChangedProducerTest`（一時の閉鎖の間も積む、確定の閉鎖では積まない）、`IntegrationHubWebhookDeliveryWorkerTest`（一時の閉鎖で処理中は PENDING へ戻る、確定の閉鎖で DLQ `KILL_SWITCH`）、MySQL（`IntegrationHubDeliveryTransientClosureMySqlTest`。shard の登録を同じ commit で）: 一時の閉鎖の間の変更の配信が回復の後に送られ、処理中だった配信も DLQ にならず送られる、`IntegrationHubFlagReadGuardTest`、`BackupWriteGateMockMvcTest`（外部 API の静止の扱いが変わらない）。
+  - **実装（段階 D）:** `TRANSIENT`・`DEFINITIVE` の境（P3-M2）は `design.md` §9.6 で確定した。PENDING への戻しは `ApiDeliveryMapper.releaseClaim`（lease の token の CAS・`attempt_count` を戻す・送信の前だけ）。静的な試験は承認の値の getter も `IntegrationHubApprovals` だけに固定した（review P3-15）。MySQL の試験は未実行（Runner）。
   - **Demo:** なし。
 
 - [ ] **FE-D04 — 閉鎖での barrier の書き直しと起動時・実行時の分離**
@@ -275,6 +278,7 @@
   - **対象 file:** `service/integrationhub/IntegrationHubOutboundStartupBarrier.java`（:55-150。`bootEnabled`・`recordRuntimeOff`）、`FeatureEnablementService`（A05 の閉鎖の hook から呼ぶ）。
   - **Automated test:** `IntegrationHubOutboundStartupBarrierTest`（閉鎖で行が `v1|OFF|0|<指紋>` と `NF05_OUTBOUND_OFF`、memory の `ready` が false、起動時の経路は起動時の値で分岐）。MySQL: 閉鎖 → ON の再起動で隔離が走る、`continueRecovery` と閉鎖の並行で deadlock しない。`IntegrationHubOutboundStartupBarrierTest` に、起動時の初期化が失敗した後に確定の閉鎖で行が OFF になった時、`continueRecovery` が初期化を再試行せず行を `QUARANTINING` に書き換えない case（review P3-N2）。
   - **Demo:** なし（MySQL の試験の結果）。
+  - **実装（段階 D）:** 閉鎖の hook `IntegrationHubOutboundClosureHook`。MySQL の試験（閉鎖 → ON の再起動で隔離、`continueRecovery` と閉鎖の並行）は `IntegrationHubEnablementRestartMySqlTest`（shard 3）に入れた。FE-D03 と同じ commit（barrier の実行時の判定が runtime switch を要し、静的な試験が同時に成り立つため）。未実行（Runner）。
 
 - [ ] **FE-D05 — NF05 の評価器（継続の条件と開放の遷移の前提）**
   - **依存:** FE-D03、FE-D04
@@ -283,6 +287,7 @@
   - **対象 file:** `featureenablement/nf05/IntegrationHubEnablementConditions.java`（新規）、目録（評価できない類の code: `state=STATE_IO_ERROR` 等）、`FeatureEnablementProductionValidator`（`INTEGRATION_HUB_*_ENABLED`・`*_DECISION_ID`・`*_APPROVAL_DIGEST`）。
   - **Automated test:** `IntegrationHubEnablementConditionsTest`（指紋の不一致で継続の条件が不成立、`QUARANTINING`・`ON` の行で継続の条件は成立、申請・承認では OFF の行と監査が要る、行なしで不成立、digest の不一致、鍵の欠落）。
   - **Demo:** prod の profile の試験の構成で、bound-tenant-id を変えた起動の後に outbound を申請すると条件が不成立になることを確かめる。
+  - **実装（段階 D）:** 法人の未解決（`legalEntity.unresolved`）も評価器の check にした。旧い変数は開閉と承認の値（決定 ID・digest）の全ての綴りを止め、許可の一覧（`allowed-client-cidrs`・`allowed-destinations`）は止めない。DG-05 の一致・不一致は check の code（`nf05.<方向>.approvalDigest.mismatch`）で画面の最後の評価に出る（署名の登録の応答で返す FE-A06 の残りは未実装）。Demo は統括が行う（未実施）。実装の独立 review（rb-fe-d 8aadee14）の P2-1〜P2-3・P3 の修正は `design.md` §9.6 の末尾（評価器の試験 `IntegrationHubEnablementConditionsTest` は P2-3 で足した）。
 
 ### 段階 E
 

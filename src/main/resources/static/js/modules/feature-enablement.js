@@ -241,6 +241,10 @@ const FeatureEnablement = (function () {
         if (code.indexOf('parent.') === 0) {
             return t('featureEnablement.reason.parent', code) + ' (' + code.split('.')[1] + ')';
         }
+        if (code.indexOf('nf05.boot.') === 0) {
+            // NF05 の「この起動では閉」（feature-enablement-console design §9.2・§9.6）
+            return t('featureEnablement.reason.' + code, code);
+        }
         return code;
     }
 

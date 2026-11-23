@@ -385,6 +385,48 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         verify(transport).send(any());
     }
 
+    /** FE-D03（design §9.3・micro review P3-M2）: 一時の閉鎖では処理中の配信を DLQ にせず、lease の CAS で PENDING へ戻す。 */
+    @Test
+    void 一時の閉鎖で処理中の配信はPENDINGへ戻り送信もDLQもしない() {
+        ApiDelivery claimed = claimed(1);
+        arrangeClaim(claimed);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("test-webhook-secret");
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        when(runtime.outboundClosure()).thenReturn(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.NONE,
+                com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "runtimeSwitch", runtime);
+        when(deliveryMapper.releaseClaim(eq(7L), eq(1), eq(1), any(), eq(now))).thenReturn(1);
+
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(deliveryMapper).releaseClaim(eq(7L), eq(1), eq(1), any(), eq(now));
+        verify(transport, never()).send(any());
+        verify(deliveryService, never()).markTerminal(anyLong(), anyInt(), anyInt(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 一時の閉鎖ではclaimせず確定の閉鎖の処理中はDLQのKILL_SWITCH() {
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        when(runtime.outboundClosure()).thenReturn(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "runtimeSwitch", runtime);
+        assertFalse(worker.dispatchOne(7L, now));
+        verify(deliveryService, never()).claim(any(), any(), any(), any());
+        verify(deliveryMapper, never()).holdPending(any(), any(), any());
+
+        ApiDelivery claimed = claimed(1);
+        arrangeClaim(claimed);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("test-webhook-secret");
+        when(runtime.outboundClosure()).thenReturn(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.NONE,
+                com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.DEFINITIVE);
+        when(deliveryService.markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("DLQ"), eq("KILL_SWITCH"), eq(now)))
+                .thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(deliveryService).markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("DLQ"), eq("KILL_SWITCH"), eq(now));
+        verify(deliveryMapper, never()).releaseClaim(any(), any(), any(), any(), any());
+        verify(transport, never()).send(any());
+    }
+
     private void arrangeClaim(ApiDelivery claimed) {
         var barrier = mock(IntegrationHubOutboundStartupBarrier.class);
         when(barrier.isReady()).thenReturn(true);

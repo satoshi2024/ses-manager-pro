@@ -37,6 +37,9 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
     private final ObjectProvider<IntegrationHubExternalApiProperties> propertiesProvider;
     private final ObjectProvider<ExternalApiUnauthenticatedAuditBudget> unauthenticatedBudgetProvider;
     private final ObjectMapper objectMapper;
+    /** NF05 の実行時の判定（起動時の値 AND 実効値。feature-enablement-console design §9.3）。slice の試験では無く、properties の値を使う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -47,6 +50,8 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
         }
         ExternalApiAuditTrail.start(request);
         ExternalApiAuditTrail trail = ExternalApiAuditTrail.get(request);
+        // 1つの要求の inbound の開閉をここで決める（backup の静止の filter が先に決めていればその値。review rb-fe-d P2-1）
+        publicApiEnabled(request);
         ContentCachingResponseWrapper bufferedResponse = new ContentCachingResponseWrapper(response);
         try {
             filterChain.doFilter(request, bufferedResponse);
@@ -88,8 +93,12 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                 response.getStatus() >= 200 && response.getStatus() < 400 ? "SUCCESS" : "HTTP_REJECTED");
         int status = response.getStatus();
         ExternalApiMetricsRecorder metrics = metricsProvider.getIfAvailable();
-        if (!publicApiEnabled()) {
-            // 無効時はDBへ書かない。D-1（LB遮断）が効いていればこのcounterは増えない。
+        if (com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundClosedSinceBoot(request, runtimeSwitch,
+                propertiesProvider.getIfAvailable())) {
+            // 起動時の値で無効の間はDBへ書かない。D-1（LB遮断）が効いていればこのcounterは増えない。
+            // 要求の開閉は要求の始めに一度だけ決めた値で、途中で実効値が閉じても実行した要求は下で監査する（review rb-fe-d P2-1）。
+            // 実行時の閉鎖（起動時の値は開で LB は開いている）の拒否は、下の未認証の上限の中で永続化する（同 P3-12）。backup の静止の
+            // filter も同じ判定式で、この時だけ読取りとして扱う（それ以外は permit を求める。P2-N1）。
             recordWithoutPersistence(metrics, ExternalApiMetricsRecorder.AuditSuppressionReason.PUBLIC_API_DISABLED,
                     trail, request, status, decision, principal);
             return true;
@@ -154,13 +163,15 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                 principal == null ? null : principal.clientTier());
     }
 
-    /** properties未取得は無効扱い。ExternalApiDisabledFilterと同じ判定でdeny-only chainと揃える。 */
-    private boolean publicApiEnabled() {
+    /**
+     * properties未取得は無効扱い。ExternalApiDisabledFilterと同じ判定でdeny-only chainと揃える（1つの要求の中で一度だけ決めた値。
+     * review rb-fe-d P2-1）。
+     */
+    private boolean publicApiEnabled(HttpServletRequest request) {
         IntegrationHubExternalApiProperties properties = propertiesProvider.getIfAvailable();
-        return properties != null && properties.getPublicApi() != null
-                && Boolean.TRUE.equals(properties.getPublicApi().getEnabled());
+        return properties != null
+                && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request, runtimeSwitch, properties);
     }
-
     /** budget beanが無いslice等では従来どおり永続化する（監査の欠落側へ倒さない）。 */
     private boolean unauthenticatedBudgetAvailable() {
         ExternalApiUnauthenticatedAuditBudget budget = unauthenticatedBudgetProvider.getIfAvailable();

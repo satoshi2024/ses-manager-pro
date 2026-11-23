@@ -10,11 +10,14 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 
-/** 公開read requestと独立してA1 snapshotを有限batch purgeするscheduler。 */
+/**
+ * 公開read requestと独立してA1 snapshotを有限batch purgeするscheduler。NF05 が閉じた後の起動でも作る（生成条件は
+ * {@link IntegrationHubRetentionPurgeCondition}。feature-enablement-console design §9.1 の 5a）。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@org.springframework.context.annotation.Conditional(IntegrationHubInboundCondition.class)
+@org.springframework.context.annotation.Conditional(IntegrationHubRetentionPurgeCondition.class)
 public class ExternalApiReadSnapshotPurgeScheduler {
     private final ExternalApiReadSnapshotPurgeService purgeService;
     private final IntegrationHubExternalApiProperties properties;

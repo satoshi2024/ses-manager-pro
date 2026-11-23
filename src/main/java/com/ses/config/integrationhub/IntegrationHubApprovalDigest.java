@@ -67,8 +67,16 @@ final class IntegrationHubApprovalDigest {
     private IntegrationHubApprovalDigest() {
     }
 
-    /** inbound 承認内容の正規形。tenant が digest の形式に合わなければ null。 */
+    /** inbound 承認内容の正規形（決定 ID は配備の設定。property の源）。tenant が digest の形式に合わなければ null。 */
     static String canonicalInbound(IntegrationHubExternalApiProperties properties) {
+        return canonicalInbound(properties, IntegrationHubApprovals.fromProperties(properties).inbound().decisionId());
+    }
+
+    /**
+     * inbound 承認内容の正規形。決定 ID は引数で受ける（DB の源では確認済みの署名の参照で、properties の決定 ID は空のため。
+     * feature-enablement-console design §9.3・review P3-15）。tenant が digest の形式に合わなければ null。
+     */
+    static String canonicalInbound(IntegrationHubExternalApiProperties properties, String decisionId) {
         IntegrationHubExternalApiProperties.InboundApproval approval = properties.getPublicApi().getApproval();
         String tenant = tenant(properties);
         if (tenant == null) {
@@ -76,7 +84,7 @@ final class IntegrationHubApprovalDigest {
         }
         StringBuilder sb = new StringBuilder();
         line(sb, null, INBOUND_FORMAT_VERSION);
-        line(sb, "decision-id", trim(approval == null ? null : approval.getDecisionId()));
+        line(sb, "decision-id", trim(decisionId));
         line(sb, "bound-tenant-id", tenant);
         line(sb, "allowed-client-cidrs", list(approval == null ? null : approval.getAllowedClientCidrs(), true));
         line(sb, "trusted-proxies", list(properties.getSecurity().getTrustedProxies(), true));
@@ -94,6 +102,16 @@ final class IntegrationHubApprovalDigest {
      * @param truststoreSha256 {@link #truststoreSha256} の値
      */
     static String canonicalOutbound(IntegrationHubExternalApiProperties properties, String truststoreSha256) {
+        return canonicalOutbound(properties, IntegrationHubApprovals.fromProperties(properties).outbound().decisionId(),
+                truststoreSha256);
+    }
+
+    /**
+     * outbound 承認内容の正規形。決定 ID は引数で受ける（review P3-15）。tenant が digest の形式に合わない、または truststore の
+     * digest が無ければ null。
+     */
+    static String canonicalOutbound(IntegrationHubExternalApiProperties properties, String decisionId,
+                                    String truststoreSha256) {
         IntegrationHubExternalApiProperties.OutboundApproval approval = properties.getExternalTransport().getApproval();
         String tenant = tenant(properties);
         if (tenant == null || truststoreSha256 == null) {
@@ -103,7 +121,7 @@ final class IntegrationHubApprovalDigest {
         IntegrationHubExternalApiProperties.ProviderMode mode = properties.getProvider().getMode();
         StringBuilder sb = new StringBuilder();
         line(sb, null, OUTBOUND_FORMAT_VERSION);
-        line(sb, "decision-id", trim(approval == null ? null : approval.getDecisionId()));
+        line(sb, "decision-id", trim(decisionId));
         line(sb, "bound-tenant-id", tenant);
         line(sb, "provider-mode", mode == null ? "" : mode.name());
         line(sb, "allowed-destinations", list(approval == null ? null : approval.getAllowedDestinations(), true));

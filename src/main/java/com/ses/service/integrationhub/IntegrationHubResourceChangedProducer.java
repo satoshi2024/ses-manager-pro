@@ -33,10 +33,16 @@ public class IntegrationHubResourceChangedProducer {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(IntegrationHubResourceChangedProducer.class);
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> registries;
+    /**
+     * NF05 の実行時の判定（feature-enablement-console design §9.3）。一時の閉鎖の間も outbox へ書き（閉じていた間の業務の変更を失わない）、
+     * 確定の閉鎖では書かない。Spring 管理外で {@code new} した試験では無く、properties の値を使う。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
     public void changed(String type, Long id) {
-        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) return;
+        if (!com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.outboundProducerOpen(runtimeSwitch, properties)) return;
         if (id == null) throw new IllegalArgumentException("resource IDが必要です");
         String tenant = AccountingTenantContextHolder.getExplicitTenantId();
         if (tenant == null) tenant = com.ses.common.util.SecurityUtils.currentTenantId();

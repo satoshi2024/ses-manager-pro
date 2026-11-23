@@ -105,6 +105,26 @@ class IntegrationHubApprovalDigestTest {
                 IntegrationHubApprovalDigest.digest(IntegrationHubApprovalDigest.canonicalOutbound(properties, truststore)));
     }
 
+    /**
+     * FE-D01・review P3-15: 決定 ID を引数で受ける（DB の源では properties の決定 ID が空で、確認済みの署名の参照を渡す）。golden vector は
+     * 変わらない。
+     */
+    @Test
+    void 決定IDを引数で受けても草案の例のdigestのまま() throws Exception {
+        IntegrationHubExternalApiProperties inbound = inboundExample();
+        inbound.getPublicApi().getApproval().setDecisionId(null);
+        assertEquals(INBOUND_GOLDEN_DIGEST, IntegrationHubApprovalDigest.digest(
+                IntegrationHubApprovalDigest.canonicalInbound(inbound, "DG-05-IN-20261201-01")));
+        assertNotEquals(INBOUND_GOLDEN_DIGEST, IntegrationHubApprovalDigest.digest(
+                IntegrationHubApprovalDigest.canonicalInbound(inbound)), "配備の設定の決定 ID は空のため合わない");
+
+        IntegrationHubExternalApiProperties outbound = outboundExample(truststore("nf05-synthetic-truststore"));
+        outbound.getExternalTransport().getApproval().setDecisionId(null);
+        String truststore = IntegrationHubApprovalDigest.truststoreSha256(outbound.getExternalTransport().getTruststorePath());
+        assertEquals(OUTBOUND_GOLDEN_DIGEST, IntegrationHubApprovalDigest.digest(
+                IntegrationHubApprovalDigest.canonicalOutbound(outbound, "DG-05-OUT-20261215-01", truststore)));
+    }
+
     @Test
     void 読めないtruststoreと形式外のtenantとdigestはnullになり照合を通さない() throws Exception {
         assertNull(IntegrationHubApprovalDigest.truststoreSha256(null));

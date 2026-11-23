@@ -114,7 +114,7 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 
 - 外部 HTTP は DB transaction 外。DB 停止中も in-flight lease は expiry 後に recovery 可能。
 - provider 停止時: MOCK/STUB（無接続）または LOOPBACK（development/test のみ）。production は STUB/LOOPBACK を常に拒否し、
-  outbound無効時はMOCK固定。本番outboundはHTTPSだけを許可し、承認不足・不正な専用truststoreで起動を拒否する。
+  outbound無効時はMOCKかHTTPS（承認の前にHTTPSと承認の内容を配備の設定へ入れるため。transport のbeanはoutboundが閉なら作らない。feature-enablement-console FE-D01）。本番outboundはHTTPSだけを許可し、承認不足・不正な専用truststoreで起動を拒否する。
 - restore 後: `advanceRestoreEpoch` により purge checkpoint を invalid 化し、retention 対象を先頭から再評価する。
 - legal hold 中は purge を停止する。hold 解除後に cursor reset で再 purge する。
 
@@ -225,7 +225,10 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
   5分継続またはQUARANTINE_PENDINGがlease最大時間を超えたらOwnerと運用管理者にもSEV-2として通知し、DB・監査・leaseを確認する。
 - enabled=ON予定の配備でintegration_hub_outbound_ready=0が続く場合も同じ宛先へ通知する。OFF予定のready=0自体は異常ではない。
   OFF予定でもpending=1は永続化未確認なので、ON移行を禁止する。
-- reason labelは上記4種だけ。metricはメモリのgate状態で、scrapeからDBの反復走査を行わない。WARNはcomponentごと最大1分間隔。
+- reason labelは上記4種（STATE_IO_ERROR／MISSING_STATE／TENANT_STATE_MISMATCH／QUARANTINE_PENDING）と、CLOSED_DLQ_FAILEDの5種だけ。
+  CLOSED_DLQ_FAILEDは、確定の閉鎖の間に未送信の配信をDLQにする処理（§13.3）の失敗で、次の周期で再試行する。outboundは閉じたままで送信は起きない。
+  続く場合は未送信の写しが保存期間のpurgeの対象にならないため、SREはDB・監査を確認する（feature-enablement-console design §9.6）。
+  metricはメモリのgate状態で、scrapeからDBの反復走査を行わない。WARNはcomponentごと最大1分間隔。
 - 通知方式はPrometheus/Alertmanager等からSREの連絡先への運用alert。アプリからのアプリ内通知や実際の通知配送を本修正で実装・実行したとは扱わない。
   SREは宛先、routing、閾値、テスト通知、ack責任を設定して証拠化する。未接続のalertや未署名のOUT-7のままoutboundを開放しない。
 
@@ -235,6 +238,10 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
 - bodyはtenantId（現在のtenantと完全一致）、subscriptionId、legalEntityId、from／until（UTC Instant、created_atの半開区間、最大31日）、
   failureClass、reasonCode（大文字の有限code、最大64文字）、limit（1〜20）。failureClassはSTARTUP_REVALIDATION_REQUIRED／TLS_CERTIFICATE／TLS_IDENTITY_REJECTED／PEER_REJECTED／DESTINATION_REJECTED／UNSENT_AGE_EXCEEDED／MAX_ATTEMPTSだけ。
   subscriptionと現在のclient/法人の境界をTLSより前に検査し、DLQの最新generationだけをid順で選ぶ。上位generationまたは既存replay監査がある元行は選ばない。
+- 機能の開放の確定の閉鎖（AUTO_CLOSED、手動の閉鎖、総スイッチ）の間にbarrierがDLQにした未送信の配信（監査NF05_OUTBOUND_CLOSED_DLQ）も、
+  開き直しの起動の隔離と同じSTARTUP_REVALIDATION_REQUIREDなので、このfailureClassで選べる。保存期間（90日）を過ぎた行はpurge済みで選べない。
+  bulk replayは開き直した後（OPEN_PENDING_RESTART、再起動、隔離の完了の後）に行う。閉じている間に作った新しいgenerationは同じ処理で再びDLQになる。
+  処理中に閉じた配信のKILL_SWITCHはこの区分の対象外で、開き直した後に個別のreplayで戻す（feature-enablement-console design §9.6）。
 - 最初に条件・候補ID・requestIdのrequired要求監査を短い独立transactionでcommitする。ここで失敗すれば新generationはゼロ。
   以後は一件ずつ既存replayを呼び、現在権限・scope・帰属を再検証し、HTTPSではallow-list/DNSを検証し、同じ絶対期限内で検証済みaddressを順に試すTLS preflightをtransaction外で行う。最初のTLS成功で止め、全addressの成功は要求しない。
   HTTP本文やsecretはprobeに送らない。各成功は既存のrequired replay監査と同じtransactionで確定する。

@@ -62,8 +62,9 @@ final class FeatureSwitchTestSupport {
     }
 
     /**
-     * 本番の目録（段階 A の容易な7件と段階 B〜D で足した開放単位に DB 管理の印。FE-A11・FE-B01）の DB の源で、印のある開放単位のうち
-     * 指定したものだけを閉じ、残りは開いた snapshot、印の無い開放単位は全て ON の設定値（property の源）にした FeatureSwitches。
+     * 本番の目録（DB 管理の印のある開放単位。段階 A の容易な7件・段階 B〜D で足した開放単位。FE-A11・FE-B01・FE-C05・FE-D02）の DB の
+     * 源で、印のある開放単位のうち指定したものだけを閉じ、残りは開いた snapshot、印の無い開放単位は全て ON の設定値（property の源）に
+     * した FeatureSwitches。
      * {@link #disabledOnly} と同じ応答になる。
      */
     static FeatureSwitches standardDatabaseDisabledOnly(Feature... disabled) {

@@ -76,4 +76,49 @@ class IntegrationHubRetentionPurgeConditionTest {
         assertThat(conditional).isNotNull();
         assertThat(conditional.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
     }
+
+    /**
+     * FE-D02（design §9.1 の 5a・review P2-5・P3-N3）: 起動の前の読取りが書いた purge 用の property があればその値で決める（NF05 を閉じた
+     * 後の起動でも purge を作る）。read snapshot の purge も同じ条件。
+     */
+    @Test
+    void purge用のpropertyがあれば両方向が閉でも作り無ければ従来の判定() {
+        runner.withPropertyValues("integration.hub.public-api.enabled=false",
+                        "integration.hub.external-transport.enabled=false", "integration.hub.retention-purge.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(IntegrationHubRetentionPurgeScheduler.class));
+        runner.withPropertyValues("integration.hub.public-api.enabled=true",
+                        "integration.hub.retention-purge.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(IntegrationHubRetentionPurgeScheduler.class));
+        Conditional snapshot = ExternalApiReadSnapshotPurgeScheduler.class.getAnnotation(Conditional.class);
+        assertThat(snapshot.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
+        Conditional metrics = IntegrationHubDeliveryMetrics.class.getAnnotation(Conditional.class);
+        assertThat(metrics.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
+    }
+
+    /**
+     * review rb-fe-d P3-13（spec の review P2-5）: NF05 が {@code AUTO_CLOSED} の後の起動（両方向は閉、purge 用の property は開）で、
+     * retention・nonce の purge、read snapshot の purge、台帳の metric の3つの bean が作られる。
+     */
+    @Test
+    void AUTO_CLOSEDの後の起動でもpurgeの3つのbeanを作る() {
+        ApplicationContextRunner all = runner
+                .withBean(ExternalApiReadSnapshotPurgeService.class, () -> mock(ExternalApiReadSnapshotPurgeService.class))
+                .withBean(com.ses.mapper.ApiDeliveryMapper.class, () -> mock(com.ses.mapper.ApiDeliveryMapper.class))
+                .withBean(com.ses.mapper.InboundEventMapper.class, () -> mock(com.ses.mapper.InboundEventMapper.class))
+                .withUserConfiguration(ExternalApiReadSnapshotPurgeScheduler.class, IntegrationHubDeliveryMetrics.class);
+        all.withPropertyValues("integration.hub.public-api.enabled=false", "integration.hub.external-transport.enabled=false",
+                        "integration.hub.retention-purge.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(IntegrationHubRetentionPurgeScheduler.class);
+                    assertThat(context).hasSingleBean(ExternalApiReadSnapshotPurgeScheduler.class);
+                    assertThat(context).hasSingleBean(IntegrationHubDeliveryMetrics.class);
+                });
+        all.withPropertyValues("integration.hub.public-api.enabled=false", "integration.hub.external-transport.enabled=false",
+                        "integration.hub.retention-purge.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(ExternalApiReadSnapshotPurgeScheduler.class);
+                    assertThat(context).doesNotHaveBean(IntegrationHubDeliveryMetrics.class);
+                });
+    }
 }
