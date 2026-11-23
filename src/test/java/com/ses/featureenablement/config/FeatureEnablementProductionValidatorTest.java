@@ -174,6 +174,23 @@ class FeatureEnablementProductionValidatorTest {
                 .validate()).doesNotThrowAnyException();
     }
 
+    /** FE-B03: NF02 顧客ポータルの公開範囲の旧い変数は、空の値でもどの綴りでも起動を止める（承認で変える設定へ移した）。 */
+    @Test
+    void 段階BのNF02顧客ポータルの公開範囲の旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", SECRET_LIKE_VALUE), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", ""), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("APP_FEATURES_NF02CUSTOMERPORTAL_VISIBLESINCE", SECRET_LIKE_VALUE), new Properties(),
+                "APP_FEATURES_NF02CUSTOMERPORTAL_VISIBLESINCE");
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.features.nf02-customer-portal.visible-since", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.features.nf02-customer-portal.visible-since");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf02-customer-portal\":"
+                        + "{\"visible-since\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf02-customer-portal.visible-since]");
+    }
+
     private static void assertStopsWithStandard(Map<String, String> env, Properties systemProperties, String expectedName) {
         assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
                 FeatureEnablementCatalog.standard(), () -> env, () -> systemProperties).validate())

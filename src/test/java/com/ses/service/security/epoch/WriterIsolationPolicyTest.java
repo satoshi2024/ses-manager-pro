@@ -70,6 +70,8 @@ class WriterIsolationPolicyTest {
                     "reject", "withdraw", "revoke", "requestExtension", "document")),
             Map.entry(com.ses.featureenablement.service.FeatureSignOffBundleServiceImpl.class, List.of("register",
                     "confirm", "reject", "withdraw", "revoke")),
+            // 段階 B（FE-B03）: 設定の変更の申請（承認は FeatureEnablementServiceImpl.approve の transaction の中）
+            Map.entry(com.ses.featureenablement.service.FeatureEnablementSettingChangeService.class, List.of("request")),
             Map.entry(com.ses.featureenablement.evaluation.FeatureEnablementEvaluationWriter.class, List.of("markUnverifiable",
                     "clearUnverifiable", "markExpiredSignOffs", "cancelAllPending", "recordOpenConditionWarning",
                     "recordSubgateChange", "recordMasterClosed")));

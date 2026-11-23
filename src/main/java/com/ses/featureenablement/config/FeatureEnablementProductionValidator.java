@@ -77,6 +77,9 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                 "app.features.nf01-dual-confirmation.privacy-sign-off-ref"));
         // FE-B02: NF06 の admission の承認（IMPORT_ADMISSION_* の6項目。署名 NF06_ADMISSION へ移した）
         names.put(Feature.NF06, List.of("IMPORT_ADMISSION_", "app.import-center.admission."));
+        // FE-B03: NF02 顧客ポータルの公開範囲（承認で変える設定 nf02-customer-portal.visible-since へ移した）
+        names.put(Feature.NF02_CUSTOMER_PORTAL, List.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE",
+                "app.features.nf02-customer-portal.visible-since"));
         LEGACY_SETTING_NAMES = java.util.Collections.unmodifiableMap(names);
     }
 

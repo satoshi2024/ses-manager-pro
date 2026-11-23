@@ -137,11 +137,9 @@ app:
   # FEATURE_NF01_DUAL_CONFIRMATION_ENABLED・FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF を設定すると起動しない）。
   # 段階 B: NF06（FE-B02）も system の中で開閉し、admission の承認は署名 NF06_ADMISSION として画面で登録・確認する
   # （FEATURE_NF06_ENABLED・IMPORT_ADMISSION_* を設定すると起動しない）。
-  features:
-    # NF-02の子（顧客ポータルの問い合わせ）の公開範囲（開閉は system の中。公開範囲の変更は段階 B の FE-B03 で system の中へ移す）
-    nf02-customer-portal:
-      # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）
-      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
+  # 段階 B: NF02 顧客ポータルの公開範囲（FE-B03）は承認で変える設定（画面「設定」tab の申請と別の管理者の承認）で、
+  # FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE を設定すると起動しない。未設定ならportal起票の問い合わせだけを出す。
+  # 段階 B の後、ここに置く app.features.* の placeholder は無い（NF05・NF07 は各自の property の名前空間）。
 
 # ===== freee連携（HFP-01） =====
 # prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。

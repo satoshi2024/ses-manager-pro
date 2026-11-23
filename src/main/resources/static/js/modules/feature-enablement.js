@@ -11,7 +11,7 @@ const FeatureEnablement = (function () {
     'use strict';
 
     const API = '/api/feature-enablement';
-    const state = {catalog: null, units: [], signOffs: [], bundles: [], requestsPage: 1, eventsPage: 1};
+    const state = {catalog: null, units: [], signOffs: [], bundles: [], settings: [], requestsPage: 1, eventsPage: 1};
     const SIGN_OFF_REASONS = ['DOCUMENT_MISMATCH', 'ROLE_MISMATCH', 'DATE_MISMATCH', 'REFERENCE_MISMATCH', 'OTHER'];
     const REVOKE_REASONS = ['DECISION_WITHDRAWN', 'DOCUMENT_ERROR', 'SECURITY_CONCERN', 'OTHER'];
 
@@ -98,8 +98,73 @@ const FeatureEnablement = (function () {
     function loadAll() {
         return request('GET', API + '/catalog').then(function (catalog) {
             state.catalog = catalog;
-            return Promise.all([loadUnits(), loadRequests(state.requestsPage), loadSignOffs(), loadEvents(state.eventsPage)]);
+            return Promise.all([loadUnits(), loadRequests(state.requestsPage), loadSignOffs(), loadEvents(state.eventsPage),
+                loadSettings()]);
         }).catch(function () { /* Toast で通知済み */ });
+    }
+
+    // ---------------------------------------------------------------- 設定（段階 B の FE-B03。承認は「申請」tab）
+
+    function loadSettings() {
+        return request('GET', API + '/settings').then(function (settings) {
+            state.settings = settings || [];
+            renderSettings();
+        });
+    }
+
+    function settingValue(value) {
+        return value ? '<code>' + esc(value) + '</code>' : '<span class="text-muted">' + esc(t('featureEnablement.setting.unset'))
+            + '</span>';
+    }
+
+    function renderSettings() {
+        const body = $('#featureEnablementSettings');
+        if (!state.settings.length) {
+            body.html('<tr><td colspan="6" class="text-center text-muted py-4">' + esc(t('featureEnablement.empty')) + '</td></tr>');
+            return;
+        }
+        body.html(state.settings.map(function (s) {
+            const decision = s.decisionConfirmed ? settingValue(s.decisionValue)
+                : '<span class="badge bg-secondary">' + esc(t('featureEnablement.setting.decisionMissing')) + '</span>';
+            const inventory = '<span class="badge ' + (s.inventoryConfirmed ? 'bg-success' : 'bg-secondary') + '">'
+                + esc(t(s.inventoryConfirmed ? 'featureEnablement.setting.inventoryConfirmed'
+                    : 'featureEnablement.setting.inventoryMissing')) + '</span>';
+            const pending = s.pendingRequestId
+                ? '#' + esc(s.pendingRequestId) + ' ' + settingValue(s.pendingValue)
+                + (s.pendingMine ? ' ' + esc(t('featureEnablement.request.mine')) : '') : '-';
+            const button = !s.pendingRequestId && !masterClosed()
+                ? '<button type="button" class="btn btn-sm btn-primary" data-fe-action="settingChange" data-key="' + esc(s.key)
+                + '">' + esc(t('featureEnablement.btn.requestSettingChange')) + '</button>' : '';
+            return '<tr><td class="ps-3"><div>' + esc(t('featureEnablement.setting.label.' + s.key, s.key))
+                + '</div><div class="small text-muted"><code>' + esc(s.key) + '</code></div></td>'
+                + '<td>' + settingValue(s.value) + (s.approvedAt ? '<div class="small text-muted">' + dateTime(s.approvedAt)
+                    + '</div>' : '') + '</td>'
+                + '<td>' + decision + '</td><td>' + inventory + '</td><td>' + pending + '</td>'
+                + '<td class="text-end pe-3">' + button + '</td></tr>';
+        }).join(''));
+    }
+
+    function requestSettingChange(key) {
+        const setting = state.settings.find(function (s) { return s.key === key; }) || {};
+        Swal.fire({
+            titleText: t('featureEnablement.confirm.setting.title', t('featureEnablement.setting.label.' + key, key)),
+            text: t('featureEnablement.confirm.setting.text'),
+            input: 'text',
+            inputValue: setting.decisionConfirmed && setting.decisionValue ? setting.decisionValue : '',
+            inputPlaceholder: t('featureEnablement.field.settingValue'),
+            inputAttributes: {maxlength: '100'},
+            showCancelButton: true,
+            confirmButtonText: t('featureEnablement.btn.requestSettingChange'),
+            cancelButtonText: t('featureEnablement.btn.cancel')
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            const value = (result.value || '').trim();
+            request('POST', API + '/requests', {type: 'SETTING_CHANGE', target: key, value: value || null, reason: null})
+                .then(function () {
+                    Toast.success(t('featureEnablement.toast.settingRequested'));
+                    return Promise.all([loadSettings(), loadRequests(1)]);
+                }).catch(function () {});
+        });
     }
 
     function loadUnits() {
@@ -464,7 +529,8 @@ const FeatureEnablement = (function () {
     }
 
     function refreshAfterDecision() {
-        return Promise.all([loadUnits(), loadRequests(state.requestsPage), loadSignOffs()]).catch(function () {});
+        return Promise.all([loadUnits(), loadRequests(state.requestsPage), loadSignOffs(), loadSettings()])
+            .catch(function () {});
     }
 
     // ---------------------------------------------------------------- 署名・組
@@ -860,6 +926,7 @@ const FeatureEnablement = (function () {
                 case 'signOffDetail': signOffDetail(id); break;
                 case 'document': SES.download(API + '/sign-offs/' + id + '/document', 'sign-off-' + id + '.pdf'); break;
                 case 'signOffExtend': extend(id); break;
+                case 'settingChange': requestSettingChange(key); break;
                 default: decideSignOff(action, id, version);
             }
         });

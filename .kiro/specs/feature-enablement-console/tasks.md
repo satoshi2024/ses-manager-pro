@@ -178,6 +178,7 @@
   - **Implementation:** `design.md` §5.6・§8.4。設定の行は申請者・承認者を複合 FK で申請と一致させる。DB の値が壊れていれば portal 起票だけ（fail-closed）。
   - **Automated test:** `PortalServiceRequestVisibilityPolicyTest`（property の源の既存の case と、DB の源で値の変更が次の判定から効く case）、`PortalServiceRequestVisibilityIntegrationTest`（DB の源の変種）、`FeatureEnablementSettingChangeH2Test`（申請者本人の承認 403、署名の値と違う値 409、offset なし 400、未設定へ戻す）。
   - **Demo:** dev（DB の源）で公開範囲を設定・承認し、社内で登録した問い合わせが portal に出ることと、未設定へ戻すと消えることを見る。
+    - 手順（段階 B で補った。統括が dev の MySQL と browser で一括して行う）: (1) `APP_FEATURE_ENABLEMENT_SOURCE=database` で起動し、FE-A11 の Demo の手順で NF02 と顧客ポータルを開き、社内で問い合わせを1件登録して portal の一覧に出ないことを見る（設定の行が無い＝portal 起票だけ）。(2) 管理者 A が `NF02_PORTAL_VISIBLE_SINCE_DECISION`（構造化された値 `visibleSince` に今より前の日時。例 `2026-11-01T00:00:00+09:00`）と `NF02_PORTAL_INVENTORY` を合成の PDF で登録し、管理者 B が確認する。(3) A が「設定」tab の「変更を申請」で同じ値を申請する（違う値は 409 `conditionsUnsatisfied`（`decision.valueMismatch`）、`2026-11-01T00:00:00` のような offset の無い値は 400 の toast）。(4) B の「申請」tab にだけ承認の button が出ることを見て承認し、再起動せずに portal の一覧へ社内で登録した問い合わせが出ることを見る。(5) 決定の署名を `visibleSince` が空の新しい決定に差し替えて確認し、A が値を空にして申請、B が承認すると、portal の一覧から社内で登録した問い合わせが消えることを見る。(6) `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` を付けた prod の起動が止まることは `FeatureEnablementProductionValidatorTest` の結果で見る。
 
 ### 段階 C
 

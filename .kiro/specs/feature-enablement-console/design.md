@@ -556,6 +556,13 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 - NF02 の公開範囲だけ（要件 FE-RQ-010）。申請に値（または未設定）を持たせ、承認で `t_feature_enablement_setting` を書き換える。
 - 条件: 確認済みの署名 `NF02_PORTAL_VISIBLE_SINCE_DECISION` の構造化された値 `visibleSince` が申請の値と一致すること。値を設定する場合は `NF02_PORTAL_INVENTORY` も要る。値の形式は `PortalServiceRequestVisibilityPolicy` の解釈と同じ（offset 付き ISO-8601）。
 - 指紋に申請の値を含める（§4.5）。
+- 実装で決めた細部（FE-B03）:
+  - 申請は `FeatureEnablementSettingChangeService.request`（READ COMMITTED。`WriterIsolationPolicyTest` に登録）、承認は申請の種類の拡張点 `FeatureEnablementSettingChangeApprover`（`FeatureEnablementServiceImpl.approve` の transaction の中で呼ばれる）。却下・取下げは共通の処理のまま。`FeatureEnablementServiceImpl` は変えていない（段階 D の閉鎖の hook と衝突しない）。
+  - 値の正規化: 前後の空白を除き、空・null は未設定（`proposed_value`・`setting_value` は NULL）。offset 付き ISO-8601 で 100 文字以内でなければ 400 `settingValueInvalid`。今の値と同じ値は 409 `settingUnchanged`。値の同一は解釈した `OffsetDateTime` の `equals`（同じ日時と offset。秒の `:00` の有無の表記の違いは同じとみなす）。
+  - 条件の code（固定の文字列。値を含めない）: `setting.visibleSince.decision.{valid|missing|signedOn.future|expiresOn.expired|valueMismatch}`・`setting.visibleSince.inventory.{valid|missing|signedOn.future|expiresOn.expired}`。決定の構造化された値 `visibleSince` が空・無しは「未設定の決定」。申請の時に成り立たなければ 409 `conditionsUnsatisfied`、承認の時は `CONDITIONS_UNSATISFIED`（申請は未決のまま）。
+  - 指紋は §4.5 の正規形を `unit=<設定の key>`・`type=SETTING_CHANGE`・`value=<値か空>`・要る署名（決定、値を設定する時は棚卸し）の `id:version` で計算する（親は含めない。NF02 の開閉で陳腐化させない）。
+  - 承認は申請を先に `APPROVED` にしてから設定の行を lock（§5.1 の (5)）し、無ければ挿入・あれば版の CAS で `setting_value`（NULL は `set(col, null)`）・`request_id`・`requested_by`・`approved_by`・`approved_at` を書く。履歴 `SETTING`/`CHANGED`、監査 `FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（設定の値は秘密でないため監査の前後に含める）、通知 `settingChangeRequested`・`settingChanged`。世代を上げ、commit の後に snapshot を読み直す。
+  - 画面: 「設定」tab（今の値・決定の署名の値・棚卸しの有無・未決の申請・「変更を申請」）。承認・却下は「申請」tab の既存の行で行う。読取りは `GET /api/feature-enablement/settings`。
 
 ## 6. 署名の登録と確認
 
@@ -721,6 +728,7 @@ writeAutoClose(f, reason):
 
 - `PortalServiceRequestVisibilityPolicy`: `final` の `visibleSince`（:45-52）をやめ、`FeatureEnablementStateSource.setting("nf02-customer-portal.visible-since")` を毎回解釈する（解釈の結果は値の文字列を key に 1 件だけ cache する）。構築時の解釈の失敗で起動を止めるのは property の源の時だけ（dev・test の現状を保つ）。DB の源では不正な値は申請の時に拒否され、DB の値が壊れていれば portal 起票だけを出す（fail-closed）。
 - `PORTAL_ORIGINATED_ONLY` の既定（:41-43）はそのまま。呼出し元（`ServiceRequestServiceImpl`・`ServiceRequestAttachmentService`・`FileScopeValidationService`・`ServiceRequestDto`）は変えない。
+- 実装で決めた細部（FE-B03）: Spring の構築子は `FeatureEnablementStateSource` を `ObjectProvider` で受け、源が DB（`database()`）なら判定のたびに `setting(...)` を読み（構築時に解釈しない）、それ以外（property の源・源が無い slice）は従来どおり構築時に解釈する。DB の源の `setting` は目録の印（NF02 顧客ポータル。段階 A で付与済み）に従い snapshot を読むため、hot path は memory だけ。源を読めない・値を解釈できない時は portal 起票だけ（WARN は値ごとに1回）。`FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` と property の綴りは prod で拒否し（`LEGACY_SETTING_NAMES`）、`application-prod.yml` の placeholder を削除した（`app.features.*` の prod の placeholder は段階 B の後に無くなった）。
 
 ### 8.5 NF07（保持・保全・DSAR・副入口）
 
@@ -957,7 +965,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 - 読取りは `FeatureEnablementQueryService`（一覧・詳細・再評価・申請と履歴の頁・組の一覧・目録）。閲覧も含め全ての API が `FeatureEnablementActorPolicy.resolve`（session の種別と有効な管理者の読直し）を通る（J-13）。
 - 一覧の「最後の評価」は `FeatureEnablementEvaluationResults`（この instance の memory。起動時・定期・画面の再評価の結果を開放単位ごとに1件）から出す。開いていない開放単位は定期の評価をしないため、再評価を押すまで「未評価」。再評価は開放単位ごとに1分に1回（それより早ければ 429 `error.featureEnablement.evaluateTooSoon`）。
-- `POST /requests` の `type` は段階 A では `OPEN` と `SIGN_OFF_EXTENSION`（`target` は `signoff:<id>`、`value` は新しい失効日）だけ。`SETTING_CHANGE` は FE-B03 まで 400 `requestTypeUnsupported`。延長は `POST /sign-offs/{id}/extend` からも申請できる。表に無い取下げ（`POST /sign-offs/{id}/withdraw`・`/sign-off-bundles/{id}/withdraw`。登録者だけ）も置く。組の一覧は `GET /sign-off-bundles`。
+- `POST /requests` の `type` は段階 A では `OPEN` と `SIGN_OFF_EXTENSION`（`target` は `signoff:<id>`、`value` は新しい失効日）だけ。`SETTING_CHANGE` は FE-B03 で足した（`target` は設定の key、`value` は新しい値で null・空は未設定へ戻す。設定の一覧は `GET /settings`。§5.6）。延長は `POST /sign-offs/{id}/extend` からも申請できる。表に無い取下げ（`POST /sign-offs/{id}/withdraw`・`/sign-off-bundles/{id}/withdraw`。登録者だけ）も置く。組の一覧は `GET /sign-off-bundles`。
 - 承認の結果が承認でない時は、service の transaction の commit の後に controller が 409（`Outcome.messageKey()`、成り立たない条件の code を引数）にする。
 - 署名の詳細は氏名を含むが、保存名・元の file 名を返さず、`structuredValues` のうち名前が `digest` で終わる値と文書の SHA-256 は先頭 16 文字だけにする。一覧（`Summary`）は氏名を含めない。文書の取得の file 名は `<種別>-<id>.pdf`（`Cache-Control: no-store`）。
 - 組の登録は multipart で、part `request` に JSON（`bundleKind`・新しい member・`carriedOver`）、新しい member ごとに文書の part `file.<種別>`。
