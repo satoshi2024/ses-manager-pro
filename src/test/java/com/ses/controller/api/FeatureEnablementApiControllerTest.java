@@ -229,6 +229,22 @@ class FeatureEnablementApiControllerTest {
                 .andExpect(content().bytes(pdf));
     }
 
+    /** A2 の復審 P3-3: file の部を欠いた署名の登録は Spring の既定の 400 ではなく、文書が必要という業務の 400 を JSON で返す。 */
+    @Test
+    void 文書の部を欠いた署名の登録は文書が必要という400で行を作らない() throws Exception {
+        Integer before = jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_sign_off WHERE tenant_id = ?",
+                Integer.class, FeatureEnablementH2Fixture.TENANT);
+        mockMvc.perform(multipart("/api/feature-enablement/sign-offs")
+                        .param("kindCode", "NF04_SRE").param("reference", "SRE-2026-1123").param("signerRole", "SRE")
+                        .param("signerName", SIGNER_NAME).param("signedOn", "2026-11-22").param("expiresOn", "2027-11-22")
+                        .with(as(admin, "管理者")).with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("署名の文書（PDF）を添付してください"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_sign_off WHERE tenant_id = ?", Integer.class,
+                FeatureEnablementH2Fixture.TENANT)).isEqualTo(before);
+    }
+
     /** 管理者の '*' を誤って複製した group（非管理者に付けても SecurityConfig と isAdminOnlyAction が拒否する）。 */
     private long copiedAdminGroup() {
         String key = "fe-copied-admin-" + System.nanoTime();

@@ -219,6 +219,12 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("運用値は配備の設定で上書きしない（D-5）").isEmpty();
         assertThat(Files.readString(Path.of("src/main/resources/application-prod.yml"), StandardCharsets.UTF_8))
                 .contains("allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}").contains("source: database");
+        // 段階の間の暫定の拒否（FE-B01・FE-B03 まで。実装 review rb-fe-a2 P2-1・P2-2）: 雛形は持たず、注記と照合が同じ2件を扱う
+        assertThat(all).doesNotContain("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertThat(taskDefinition().path("_offlineAcceptanceNotes").path("FEATURE_ENABLEMENT").asText())
+                .contains("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED").contains("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertThat(Files.readString(VALIDATOR, StandardCharsets.UTF_8))
+                .contains("'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED'").contains("'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE'");
     }
 
     @Test

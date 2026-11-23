@@ -7,15 +7,24 @@ import com.ses.entity.FeatureEnablementRequest;
 import com.ses.featureenablement.FeatureEnablementH2Fixture;
 import com.ses.featureenablement.FeatureEnablementTestConfiguration;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
+import com.ses.featureenablement.condition.CommonFeatureConditionEvaluator;
+import com.ses.featureenablement.condition.FeatureConditionEvaluator;
+import com.ses.featureenablement.condition.FeatureConditionRegistry;
 import com.ses.featureenablement.condition.FeatureEvaluationContext;
+import com.ses.featureenablement.condition.WorkCalendarConditionEvaluator;
+import com.ses.featureenablement.config.FeatureEnablementProperties;
 import com.ses.featureenablement.service.FeatureEnablementActor;
 import com.ses.featureenablement.service.FeatureEnablementApprovalResult;
 import com.ses.featureenablement.service.FeatureEnablementNotifier;
 import com.ses.featureenablement.service.FeatureEnablementService;
 import com.ses.featureenablement.state.FeatureEnablementOverlay;
 import com.ses.featureenablement.state.FeatureEnablementSnapshotHolder;
+import com.ses.featureenablement.state.FeatureEnablementTenant;
+import com.ses.mapper.WorkCalendarMapper;
+import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -26,9 +35,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * FE-A11（feature-enablement-console design §7.4・§8.1・D-9・J-16）: NF02 の全社共通カレンダーは開放の時だけの条件。暦が無ければ NF02 の
@@ -62,6 +77,14 @@ class FeatureEnablementNf02CalendarH2Test {
     private JdbcTemplate jdbc;
     @Autowired
     private FeatureEnablementTestConfiguration.MutableTestClock clock;
+    @Autowired
+    private FeatureEnablementProperties properties;
+    @Autowired
+    private FeatureEnablementEvaluationWriter writer;
+    @Autowired
+    private FeatureEnablementNotifier notifier;
+    @Autowired
+    private List<FeatureConditionEvaluator> evaluators;
 
     private FeatureEnablementH2Fixture fixture;
     private FeatureEnablementActor requester;
@@ -161,6 +184,46 @@ class FeatureEnablementNf02CalendarH2Test {
 
         assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_EXPIRING")).isZero();
         assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_LOST")).isZero();
+    }
+
+    /**
+     * A2 の復審 P3-2: 暦を照会できない（評価できない）日は「外れた」とは別の監査と通知を出し、NF02 は開いたまま。照会の失敗は本物の
+     * 評価器に失敗する mapper を渡して起こす（共有の評価 service と overlay は使わない）。
+     */
+    @Test
+    void 暦を照会できない日は外れたとは別に評価できないという警告だけを出し開いたままにする() {
+        calendar("2026-04-01", "2027-03-31");
+        open(Feature.NF02);
+        WorkCalendarMapper failing = mock(WorkCalendarMapper.class);
+        when(failing.selectCompanyWideNotEndedBefore(any())).thenThrow(new IllegalStateException("calendar"));
+        FeatureEnablementEvaluationService local = local(new WorkCalendarConditionEvaluator(failing));
+
+        local.evaluateAtBusinessDayStart();
+
+        assertThat(fixture.state(Feature.NF02)).isEqualTo("OPEN");
+        assertThat(holder.get().unit(Feature.NF02).unverifiableSince()).as("開放の時だけの条件は閉鎖の根拠にしない").isNull();
+        assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_UNVERIFIABLE")).isEqualTo(1);
+        assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_LOST")).as("外れたとは数えない").isZero();
+        assertThat(fixture.countAudit("FEATURE_OPEN_CONDITION_EXPIRING")).isZero();
+        FeatureEnablementH2Fixture.runAfterCommit();
+        assertThat(FeatureEnablementH2Fixture.notices()).filteredOn(notice -> notice.recipients().contains(requester.userId())
+                        && "NF02".equals(notice.args()[0])).extracting(FeatureEnablementNotifier.Notice::eventKey)
+                .contains("openConditionUnverifiable").doesNotContain("openConditionLost");
+    }
+
+    /** NF02 の本物の暦の評価器だけを差し替えた評価 service（共通の評価器は残す。overlay は共有しない）。 */
+    @SuppressWarnings("unchecked")
+    private FeatureEnablementEvaluationService local(WorkCalendarConditionEvaluator calendarEvaluator) {
+        List<FeatureConditionEvaluator> all = new ArrayList<>(evaluators);
+        all.removeIf(evaluator -> evaluator instanceof WorkCalendarConditionEvaluator);
+        all.add(calendarEvaluator);
+        assertThat(all).anyMatch(CommonFeatureConditionEvaluator.class::isInstance);
+        ObjectProvider<SystemConfigService> config = mock(ObjectProvider.class);
+        ObjectProvider<FeatureEnablementDayStartHook> hooks = mock(ObjectProvider.class);
+        when(hooks.orderedStream()).thenAnswer(invocation -> Stream.empty());
+        return new FeatureEnablementEvaluationService(properties, holder, new FeatureConditionRegistry(catalog, all),
+                catalog, new FeatureEnablementOverlay(), service, writer, notifier, config, hooks,
+                FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT), clock);
     }
 
     private void open(Feature feature) {

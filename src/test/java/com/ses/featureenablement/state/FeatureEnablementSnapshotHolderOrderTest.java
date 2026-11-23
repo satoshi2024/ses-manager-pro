@@ -73,7 +73,7 @@ class FeatureEnablementSnapshotHolderOrderTest {
 
     /**
      * review rb-fe-a1 1a4fd48d 差分 P3-N2: commit の後の読直し（後に読み始めた）が失敗した時、commit の前に読み始めた poll の読込みが
-     * 後で成功しても差し替えず、変更した開放単位の一時の閉鎖を外さない（失敗した読込みが屏障になる）。その後に読み始めた読込みは
+     * 後で成功しても差し替えず、変更した開放単位の一時の閉鎖を外さない（失敗した読込みが障壁になる）。その後に読み始めた読込みは
      * 差し替え、一時の閉鎖を外す。
      */
     @Test
@@ -106,14 +106,14 @@ class FeatureEnablementSnapshotHolderOrderTest {
 
             releasePoll.countDown();
             assertThat(poll.get(30, TimeUnit.SECONDS)).as("読めたことは返す").isTrue();
-            assertThat(holder.get()).as("屏障より前に読み始めた読込みは差し替えない").isSameAs(initial);
+            assertThat(holder.get()).as("障壁より前に読み始めた読込みは差し替えない").isSameAs(initial);
             assertThat(overlay.has(Feature.NF04, FeatureEnablementOverlay.REFRESH_PENDING))
                     .as("commit を含まないかもしれない読込みで一時の閉鎖を外さない（fail-open の窓を作らない）").isTrue();
 
             assertThat(holder.reload()).isTrue();
             assertThat(holder.get().generation()).isEqualTo(5L);
             assertThat(overlay.has(Feature.NF04, FeatureEnablementOverlay.REFRESH_PENDING))
-                    .as("屏障より後に読み始めた読込みは commit を含むため外す").isFalse();
+                    .as("障壁より後に読み始めた読込みは commit を含むため外す").isFalse();
         } finally {
             releasePoll.countDown();
             pool.shutdownNow();

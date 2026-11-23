@@ -88,7 +88,7 @@ public class FeatureEnablementSnapshotHolder {
     }
 
     /**
-     * DB から読み直して差し替える。読めなければ、この読込みの順番を屏障にし（それより前に読み始めた読込みは後で成功しても捨てる）、
+     * DB から読み直して差し替える。読めなければ、この読込みの順番を障壁にし（それより前に読み始めた読込みは後で成功しても捨てる）、
      * {@code closeOnFailure} の開放単位を一時の閉鎖（{@link FeatureEnablementOverlay#REFRESH_PENDING}）にする。順番の判定と一時の閉鎖の
      * 付け外しは同じ lock の中で行う（review rb-fe-a1 1a4fd48d 差分 P3-N2: commit の後の読直しが失敗した時に、commit の前に読み始めた
      * poll の読込みが後で成功して旧い状態を差し替え、一時の閉鎖を外してしまう二重故障の窓を閉じる）。
@@ -165,8 +165,8 @@ public class FeatureEnablementSnapshotHolder {
     }
 
     /**
-     * 読み始めの順番が最後に差し替えた（または屏障にした失敗の）ものより新しい時だけ差し替え、一時の閉鎖
-     * （{@link FeatureEnablementOverlay#REFRESH_PENDING}）を外して通知する。屏障より後に読み始めた読込みは、屏障を作った commit の後に
+     * 読み始めの順番が最後に差し替えた（または障壁にした失敗の）ものより新しい時だけ差し替え、一時の閉鎖
+     * （{@link FeatureEnablementOverlay#REFRESH_PENDING}）を外して通知する。障壁より後に読み始めた読込みは、障壁を作った commit の後に
      * 照会したため、その commit を含む（commit の後の読直しは順番を commit の後に採る）。
      */
     private boolean replaceIfLatest(FeatureEnablementSnapshot snapshot, long sequence) {
@@ -193,7 +193,7 @@ public class FeatureEnablementSnapshotHolder {
     }
 
     /**
-     * 読めなかった読込みを屏障にする: それより前に読み始めた読込み（commit の前の状態を読み得る）は後で成功しても差し替えない。
+     * 読めなかった読込みを障壁にする: それより前に読み始めた読込み（commit の前の状態を読み得る）は後で成功しても差し替えない。
      * 一時の閉鎖は、それより後に読み始めた読込みがまだ差し替えていない時だけ付ける（差し替えていれば、その読込みは commit を含む）。
      */
     private void failAsBarrier(long sequence, List<Feature> closeOnFailure) {

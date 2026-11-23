@@ -304,8 +304,11 @@ public class FeatureEnablementEvaluationService {
                 if (check.scope() != FeatureConditionCheck.Scope.OPEN_ONLY) {
                     continue;
                 }
+                // 評価できない（照会の失敗）は「外れた」と分ける（条件はまだ成り立っているかもしれない。実装 review rb-fe-a2 P3-2）
                 String event = null;
-                if (!check.passing()) {
+                if (check.status() == FeatureConditionCheck.Status.UNVERIFIABLE) {
+                    event = "UNVERIFIABLE";
+                } else if (!check.passing()) {
                     event = "LOST";
                 } else if (check.validUntil() != null && ChronoUnit.DAYS.between(today, check.validUntil()) <= warningDays) {
                     event = "EXPIRING";
@@ -314,12 +317,17 @@ public class FeatureEnablementEvaluationService {
                     continue;
                 }
                 String auditCode = "FEATURE_OPEN_CONDITION_" + event;
+                String noticeKey = switch (event) {
+                    case "UNVERIFIABLE" -> "openConditionUnverifiable";
+                    case "LOST" -> "openConditionLost";
+                    default -> "openConditionExpiring";
+                };
                 log.warn("[機能の開放] 開放の時だけの条件が{}（開いたまま）: errorCode={} feature={} check={}",
-                        "LOST".equals(event) ? "外れています" : "期限に近づいています", auditCode, feature.name(),
-                        check.code());
+                        "UNVERIFIABLE".equals(event) ? "評価できません" : "LOST".equals(event) ? "外れています"
+                                : "期限に近づいています", auditCode, feature.name(), check.code());
                 runSafely("開放の時だけの条件の警告の監査",
                         () -> writer.recordOpenConditionWarning(feature, check.code(), auditCode));
-                notifier.notifyAdministrators("LOST".equals(event) ? "openConditionLost" : "openConditionExpiring",
+                notifier.notifyAdministrators(noticeKey,
                         new Object[]{feature.name(), feature.displayName(), check.code()},
                         "FEATURE_ENABLEMENT:OPEN_CONDITION_" + event + ":" + feature.name() + ":" + check.code() + ":"
                                 + today, List.of());

@@ -160,7 +160,7 @@ const FeatureEnablement = (function () {
 
     function reasonLabel(code) {
         const prefixes = ['snapshot.stale', 'master.closed', 'signoff.window.closed', 'evaluation.unverifiable',
-            'source.closed', 'runtime.unverifiable'];
+            'property.disabled', 'source.missing', 'runtime.unverifiable'];
         if (prefixes.indexOf(code) >= 0) {
             return t('featureEnablement.reason.' + code, code);
         }

@@ -122,7 +122,7 @@
   - **依存:** FE-A05、FE-A06、FE-A12
   - **対応要求:** FE-RQ-011・012
   - **Objective:** `FeatureEnablementApiController`（`design.md` §15.1。組の API を含む）と page controller、権限の配線を足す。
-  - **対象 file:** `controller/api/FeatureEnablementApiController.java`・`controller/page/FeatureEnablementPageController.java`（新規）、`service/security/ActionPermissionResolver.java`（`RESOURCE_NAMES` :13 と `pageResource` :450）、`service/security/impl/AuthorizationServiceImpl.java`（`isAdminOnlyAction` :204-208 に `feature-enablement.`）、`config/SecurityConfig.java`（両 path を `hasRole("管理者")`）、`service/security/impl/BreakGlassServiceImpl.java`（`validateAndSerializeActions` :316-331 で拒否）、`FeatureSwitchRouteCoverageTest`（`UNGATED_ROUTE_PREFIXES` に理由つき）。
+  - **対象 file:** `controller/api/FeatureEnablementApiController.java`・`controller/page/FeatureEnablementPageController.java`（新規）、`service/security/ActionPermissionResolver.java`（`RESOURCE_NAMES` :13 と `pageResource` :450）、`service/security/impl/AuthorizationServiceImpl.java`（`isAdminOnlyAction` :204-208 に `feature-enablement.`）、`config/SecurityConfig.java`（両 path を `hasRole("管理者")`）、`service/security/impl/BreakGlassServiceImpl.java`（`validateAndSerializeActions` :316-331 で拒否）。`FeatureSwitchRouteCoverageTest` の `UNGATED_ROUTE_PREFIXES` には登録しない（NF の入口として検出されず、対象外の表は NF 配下の入口のための表のため。実装 review rb-fe-a2 P3-4。当初の「理由つきで登録」を改めた）。
   - **Implementation:** 一覧・履歴は `PageUtils.safePage`。`/units` は実効値と閉じている理由を返す。`/units/{key}/evaluate` は開放単位ごとに 1 分に 1 回で、状態を遷移させない（`Purpose.DISPLAY`）。応答は `ApiResult`。段階 A2 の実装の細部（読取りの `FeatureEnablementQueryService`、最後の評価の memory、申請の種類、`UNGATED_ROUTE_PREFIXES` に登録しない理由）は `design.md` §15.1 の「実装で決めた細部」。
   - **Automated test:** `FeatureEnablementApiControllerTest`（管理者 200、営業・HR・マネージャー（group あり・なし）403、未認証 401/302、CSRF、氏名を一覧に返さない、実効値の項目、evaluate で状態が変わらない）、`ActionPermissionMatrixTest`（allow-list を足さずに通る）、`BreakGlassServiceImplTest` に `feature-enablement.view` の拒否、`MenuPermissionFilter` の試験に admin の素通しと resolver の null にならないこと。
   - **Demo:** dev で管理者と営業で `/api/feature-enablement/units` を叩き、200 と 403 を見る。
@@ -156,6 +156,8 @@
   - **Objective:** `LifecycleDualConfirmationReleaseGate` の起動の停止をやめ、同じ判定を評価器から使う。証跡種別の検査と閉鎖の警告を足す。
   - **対象 file:** `service/lifecycle/dual/LifecycleDualConfirmationReleaseGate.java`（:68-80 の例外を削除、`acceptable` は残す）、`service/lifecycle/dual/LifecycleDualConfirmationEnablementConditions.java`（新規）、`mapper/LifecycleTemplateTaskMapper`・`LifecycleTaskMapper`（件数の method）、目録、`FeatureEnablementProductionValidator`（`FEATURE_NF01_DUAL_CONFIRMATION_*`）、`FeatureEnablementQueryService`（有効な DUAL template の件数）、`application-prod.yml`（placeholder の削除）、`messages*.properties`。
   - **Implementation:** `design.md` §8.2。BINARY 比較の H2 での書き方を着手時に確かめる。
+    - **過渡期の拒否を外し正式の扱いに替える**（実装 review rb-fe-a2 P2-1）: 段階 A2 は、二者確認を DB 管理にするまでの暫定として、prod の `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=true`（`app.features.nf01-dual-confirmation.enabled` の全ての綴り）を拒否している（`featureenablement/config/FeatureEnablementTransitionalRejections` の NF01 の規則、`validate-task-definition.ps1` の暫定の block の NF01 の行と self-test の case、雛形の `FEATURE_ENABLEMENT` の注記、RB §1.0「段階の間の暫定の拒否」の (1) と §1.7 の注記、`FeatureEnablementProductionValidatorTest`・`ProductionTaskDefinitionTemplateTest` の暫定の試験）。本 task で二者確認に DB 管理の印を付けて旧い変数として正式に拒否する時に、これらを全て外す（両方が残ると同じ変数を2回拒否する）。
+
   - **Automated test:** `LifecycleDualConfirmationEnablementConditionsTest`（`acceptable` と同じ入力で同じ成否、許可値の外の行で不成立）、`LifecycleDualConfirmationReleaseGateTest`（prod でも起動を止めない）、`LifecycleTemplateDualPolicyTest`・`LifecycleTemplateDualSwitchUnavailableTest`（既存のまま通る）、MySQL で照合順序の揺れ（全角英字・NBSP）を検出する case（shard の登録を同じ commit で）。
   - **Demo:** dev（DB の源）で合成の Privacy の署名を登録・確認し、NF01 → 二者確認の順に開き、二者確認の提出が通ること、閉鎖の dialog に DUAL template の件数が出ることを見る。
 
@@ -174,6 +176,8 @@
   - **Objective:** 設定の変更の申請と承認、`PortalServiceRequestVisibilityPolicy` の毎回の読取りを実装する。
   - **対象 file:** `service/servicedesk/PortalServiceRequestVisibilityPolicy.java`（:45-52）、`FeatureEnablementService`（`SETTING_CHANGE`。A05 の拡張点を使う）、目録（`NF02_PORTAL_VISIBLE_SINCE_DECISION`・`NF02_PORTAL_INVENTORY`）、画面の「設定」tab、`FeatureEnablementProductionValidator`（`FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE`）、`application-prod.yml`（placeholder の削除）。
   - **Implementation:** `design.md` §5.6・§8.4。設定の行は申請者・承認者を複合 FK で申請と一致させる。DB の値が壊れていれば portal 起票だけ（fail-closed）。
+    - **過渡期の拒否を外し正式の扱いに替える**（実装 review rb-fe-a2 P2-2）: 段階 A2 は、公開範囲を二人の承認の設定へ移すまでの暫定として、prod の空でない `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE`（`app.features.nf02-customer-portal.visible-since` の全ての綴り）を拒否している（`FeatureEnablementTransitionalRejections` の NF02 の規則、`validate-task-definition.ps1` の暫定の block の NF02 の行（secret の綴りを含む）と self-test の case、雛形の注記、RB §1.0「段階の間の暫定の拒否」の (2) と §1.7 の注記、暫定の試験）。本 task で公開範囲を DB の設定にし旧い変数として正式に拒否する時に、これらを全て外す（FE-B01 と合わせて全ての規則を外せば `FeatureEnablementTransitionalRejections` と validator の呼出し1行を削除する）。
+
   - **Automated test:** `PortalServiceRequestVisibilityPolicyTest`（property の源の既存の case と、DB の源で値の変更が次の判定から効く case）、`PortalServiceRequestVisibilityIntegrationTest`（DB の源の変種）、`FeatureEnablementSettingChangeH2Test`（申請者本人の承認 403、署名の値と違う値 409、offset なし 400、未設定へ戻す）。
   - **Demo:** dev（DB の源）で公開範囲を設定・承認し、社内で登録した問い合わせが portal に出ることと、未設定へ戻すと消えることを見る。
 

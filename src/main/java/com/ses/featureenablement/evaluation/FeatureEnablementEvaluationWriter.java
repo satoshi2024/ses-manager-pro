@@ -133,7 +133,7 @@ public class FeatureEnablementEvaluationWriter {
     /**
      * 開放の時だけの条件の期限の接近・喪失を監査に残す（閉鎖の根拠にしない。design §7.4）。
      *
-     * @param auditCode {@code FEATURE_OPEN_CONDITION_EXPIRING} か {@code FEATURE_OPEN_CONDITION_LOST}
+     * @param auditCode {@code FEATURE_OPEN_CONDITION_EXPIRING}・{@code FEATURE_OPEN_CONDITION_LOST}・{@code FEATURE_OPEN_CONDITION_UNVERIFIABLE}
      */
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void recordOpenConditionWarning(Feature feature, String checkCode, String auditCode) {

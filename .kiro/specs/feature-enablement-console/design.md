@@ -376,6 +376,8 @@ public interface FeatureEnablementStateSource {
 
 **段階的な合入の間の扱い**: 目録の各開放単位に「DB で管理するか」の印を持ち、`database` の源でも印の無い開放単位は property の値を返す（合成の源）。段階 A は容易な 7 件に印を付け、B〜D が残りに付け、段階 E で印を削除して全てを DB にする。go-live は段階 E の後に限る（D-1: go-live の前に全てを終える）。
 
+- **親が DB の源・子や設定がまだ property の源の時**（実装 review rb-fe-a2 P2-1・P2-2）: 親は運転中に開くため、子や設定の起動時の検査・開放の条件の判定は親の実効値や DB の設定に頼れない（親の閉じた起動では子の検査が働かず、後から親を開くと検査を経ずに子が有効になる。条件の判定が DB の設定（空）を見ても、実際の挙動は property の値で動く）。段階 A では該当する2件（NF01 二者確認の ON、NF02 顧客ポータルの `visible-since`）を、子・設定が DB 管理になるまで prod の起動時検査で拒否する（`FeatureEnablementTransitionalRejections`。照合・RB §1.0 と同じ。FE-B01・FE-B03 で外して旧い変数の正式の拒否に替える）。後の段階で同じ形（親だけを DB 管理にする）が生じたら、子の起動時検査を親の実効値と無関係にするか、同じく暫定で拒否する。
+
 ### 3.2 snapshot
 
 ```java
@@ -413,7 +415,7 @@ return true
 - **他の instance**: `FeatureEnablementSnapshotRefresher` が専用の thread で `app.feature-enablement.refresh-interval`（既定 5 秒）ごとに世代の 1 行を読み、変わっていれば snapshot を読み直す。`@Scheduled` を使わない（`app.scheduling.enabled=false` で scheduler を一括で止めた時に、全ての開放単位が古さで閉じないため。読むだけで書かない）。`SchedulingDisabledDrainTest` の既知の一覧に理由つきで足す（RB-QUIESCE の `BackupQuiesceTicker` と同じ扱い）。
 - **古さ**: 最後に読めた時刻（`verifiedAt`）から `app.feature-enablement.max-staleness`（既定 60 秒、10 秒〜300 秒）を超えたら、全ての開放単位を閉とする。DB の状態は変えず、読めれば戻る。`refresh-interval`（既定 5 秒、1 秒〜30 秒）は `max-staleness` の半分より短いことを bind の時に検査する（`@Validated`。review P3-13）。
 - **差替えの順**: 読込みは読み始めの順番を採り、後に読み始めた snapshot を差し替えた後は、それより前に読み始めた snapshot で上書きしない（poll の読込みが commit の前に始まり、commit の後の読直しより後に終わった時に旧い世代へ戻さない。実装 review rb-fe-a1 P2-3）。世代の値でなく読み始めの順で比べるのは、PITR の後（§13.1）や試験の rollback で DB の世代が小さくなっても読み直せるようにするため（DB の世代は commit の順に増えるため、後に読み始めた snapshot の世代は前のものより小さくならない）。
-- **読めなかった読込みも屏障にする**（実装 review rb-fe-a1 1a4fd48d 差分 P3-N2）: 読込みが失敗したら、その読み始めの順番を「最後に差し替えた順番」として記録し、それより前に読み始めた読込みが後で成功しても差し替えない（commit の後の読直しが失敗した時に、commit の前に読み始めた poll の読込みが旧い状態を差し替えて一時の閉鎖 `REFRESH_PENDING` を外す二重故障の窓を閉じる）。一時の閉鎖は、失敗した読込みより後に読み始めた読込みがまだ差し替えていない時だけ付け、外すのは差し替えた時だけにする（順番の判定と付け外しは同じ lock の中）。失敗より後に読み始めた読込みは commit の後に照会したため、その commit を含む。
+- **読めなかった読込みも障壁にする**（実装 review rb-fe-a1 1a4fd48d 差分 P3-N2）: 読込みが失敗したら、その読み始めの順番を「最後に差し替えた順番」として記録し、それより前に読み始めた読込みが後で成功しても差し替えない（commit の後の読直しが失敗した時に、commit の前に読み始めた poll の読込みが旧い状態を差し替えて一時の閉鎖 `REFRESH_PENDING` を外す二重故障の窓を閉じる）。一時の閉鎖は、失敗した読込みより後に読み始めた読込みがまだ差し替えていない時だけ付け、外すのは差し替えた時だけにする（順番の判定と付け外しは同じ lock の中）。失敗より後に読み始めた読込みは commit の後に照会したため、その commit を含む。
 - 多 instance の版の失効は世代で行う（TTL ではなく版。TTL は古さの上限としてだけ使う）。現在は単一 instance（SRE-5）。
 
 ### 3.4 `FeatureSwitches` の変更
@@ -667,7 +669,7 @@ writeAutoClose(f, reason):
 
 - 評価できない状態の始まりは DB の `unverifiable_since` に持ち、全ての instance が snapshot で同じに閉じる（review P2-2 (c)。J-10 の 3 項目）。
 - 自動閉鎖の書込み待ち（`AUTO_CLOSE_PENDING`）は instance の memory にあり、再起動で失われ、他の instance へも伝わらない（review P3-N1）。そのため書込み待ちの間は毎周期 WARN `errorCode=FEATURE_AUTO_CLOSE_PENDING feature=<key> reason=<code>` を出す。RB に「DB に書けない間は再起動しない。再起動した場合は、起動の後に、この WARN が出ていて `FEATURE_AUTO_CLOSED` が出ていない開放単位を手動で閉じる」を書く。NF05 outbound では書込み待ちを確定の閉鎖として扱う（§9.3）。自動閉鎖までは「3 回」を時間（評価の間隔の 3 倍）で数えるため、再起動や ShedLock の持ち主の移動で数え直しにならない。
-- `OPEN_ONLY` の check（NF02 の全社共通カレンダー）が開いている間に外れても、NF02 と子は開いたままにする。日の始まりの評価で、暦の有効期間の終わりの既定 30 日前（`feature-enablement.expiry-warning-days` と同じ日数）から毎日 1 回、監査 `FEATURE_OPEN_CONDITION_EXPIRING`（`recordDomainEventRequired`）・管理者への通知・WARN `errorCode=FEATURE_OPEN_CONDITION_EXPIRING` を出し、暦が切れた後も同じく毎日警告する（`FEATURE_OPEN_CONDITION_LOST`）。暦が無い間の SLA の計算は現行どおり（`ServiceSlaCalculator.isNonWorkingDay` :314-329 が WARN `missing_calendar` を出し、土日だけを休日として数える）。
+- `OPEN_ONLY` の check（NF02 の全社共通カレンダー）が開いている間に外れても、NF02 と子は開いたままにする。日の始まりの評価で、暦の有効期間の終わりの既定 30 日前（`feature-enablement.expiry-warning-days` と同じ日数）から毎日 1 回、監査 `FEATURE_OPEN_CONDITION_EXPIRING`（`recordDomainEventRequired`）・管理者への通知・WARN `errorCode=FEATURE_OPEN_CONDITION_EXPIRING` を出し、暦が切れた後も同じく毎日警告する（`FEATURE_OPEN_CONDITION_LOST`）。暦を照会できない日（評価できない）は外れたとは分け、同じく毎日 `FEATURE_OPEN_CONDITION_UNVERIFIABLE`（監査・通知 `openConditionUnverifiable`・WARN）を出し、開いたままにする（実装 review rb-fe-a2 P3-2）。暦が無い間の SLA の計算は現行どおり（`ServiceSlaCalculator.isNonWorkingDay` :314-329 が WARN `missing_calendar` を出し、土日だけを休日として数える）。
 - 副入口は DB の状態を持たない。成否が変わったら履歴 `SUBGATE_CLOSED`・`SUBGATE_OPENED` と通知を出す（要求ごとの gate は今のまま 404・409 を返す）。
 
 ### 7.5 通知・metric・log
@@ -857,7 +859,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 - `method`: `FEAT_EN`（7 文字。`t_audit_log.method` は `VARCHAR(10)`。`AuditLogMethodLengthGuardTest`）。
 - `application_code`（`VARCHAR(64)`。A1 の実装の名前に揃えた。実装 review rb-fe-a1 P3-6）:
-  - 開放の申請と開放単位: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`（延長の申請の期限切れも同じ code）・`FEATURE_OPEN_STALE`・`FEATURE_REQUEST_CANCELLED`（閉鎖・総スイッチで未決を取り消した）・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`（総スイッチで開放単位を閉じた回だけ）・`FEATURE_EVALUATION_UNVERIFIABLE`・`FEATURE_EVALUATION_RECOVERED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`・`FEATURE_SUBGATE_OPENED`・`FEATURE_SUBGATE_CLOSED`・`FEATURE_ADMIN_ROLE_GRANTED_NOTICE`（通知の送付の記録）。
+  - 開放の申請と開放単位: `FEATURE_OPEN_REQUESTED`・`FEATURE_OPEN_APPROVED`・`FEATURE_OPEN_REJECTED`・`FEATURE_OPEN_WITHDRAWN`・`FEATURE_OPEN_EXPIRED`（延長の申請の期限切れも同じ code）・`FEATURE_OPEN_STALE`・`FEATURE_REQUEST_CANCELLED`（閉鎖・総スイッチで未決を取り消した）・`FEATURE_CLOSED`・`FEATURE_AUTO_CLOSED`・`FEATURE_MASTER_CLOSED`（総スイッチで開放単位を閉じた回だけ）・`FEATURE_EVALUATION_UNVERIFIABLE`・`FEATURE_EVALUATION_RECOVERED`・`FEATURE_OPEN_CONDITION_EXPIRING`・`FEATURE_OPEN_CONDITION_LOST`・`FEATURE_OPEN_CONDITION_UNVERIFIABLE`（開放の時だけの条件を評価できない）・`FEATURE_SUBGATE_OPENED`・`FEATURE_SUBGATE_CLOSED`・`FEATURE_ADMIN_ROLE_GRANTED_NOTICE`（通知の送付の記録）。
   - 署名: `FEATURE_SIGN_OFF_REGISTERED`・`FEATURE_SIGN_OFF_CONFIRMED`・`FEATURE_SIGN_OFF_REJECTED`・`FEATURE_SIGN_OFF_REVOKED`・`FEATURE_SIGN_OFF_SUPERSEDED`・`FEATURE_SIGN_OFF_EXPIRED`・`FEATURE_SIGN_OFF_PURGED`・`FEATURE_SIGN_OFF_DOCUMENT_READ`（文書の取得）・`FEATURE_SIGN_OFF_EXTENSION_REQUESTED`・`FEATURE_SIGN_OFF_EXTENSION_STALE`・`FEATURE_SIGN_OFF_EXTENDED`。
   - 組: `FEATURE_SIGN_OFF_BUNDLE_REGISTERED`・`FEATURE_SIGN_OFF_BUNDLE_CONFIRMED`・`FEATURE_SIGN_OFF_BUNDLE_REJECTED`・`FEATURE_SIGN_OFF_BUNDLE_SUPERSEDED`・`FEATURE_SIGN_OFF_BUNDLE_REVOKED`。
   - 後の段階で足す: `FEATURE_RESTART_APPLIED`・`FEATURE_BOOT_READ_FAILED`（段階 D の NF05）、`FEATURE_SETTING_REQUESTED`・`FEATURE_SETTING_CHANGED`（設定の変更。A08・A11）。
@@ -948,7 +950,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - 承認の結果が承認でない時は、service の transaction の commit の後に controller が 409（`Outcome.messageKey()`、成り立たない条件の code を引数）にする。
 - 署名の詳細は氏名を含むが、保存名・元の file 名を返さず、`structuredValues` のうち名前が `digest` で終わる値と文書の SHA-256 は先頭 16 文字だけにする。一覧（`Summary`）は氏名を含めない。文書の取得の file 名は `<種別>-<id>.pdf`（`Cache-Control: no-store`）。
 - 組の登録は multipart で、part `request` に JSON（`bundleKind`・新しい member・`carriedOver`）、新しい member ごとに文書の part `file.<種別>`。
-- `FeatureSwitchRouteCoverageTest` の `UNGATED_ROUTE_PREFIXES` には登録しない: controller は NF の service package に依存せず、action の resource も NF に属さないため、NF の入口として検出されない（登録すると同試験の「古い登録」で落ちる）。
+- `FeatureSwitchRouteCoverageTest` の `UNGATED_ROUTE_PREFIXES` には登録しない: controller は NF の service package に依存せず、action の resource も NF に属さないため NF の入口として検出されず、対象外の表は NF 配下の入口を意図して遮断しない時のための表であるため（登録しても同試験の「古い登録」の検査は全ての controller の入口と比べるため落ちないが、意味が違う。実装 review rb-fe-a2 P3-4）。
 
 ### 15.2 画面
 

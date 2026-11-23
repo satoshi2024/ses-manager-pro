@@ -35,7 +35,7 @@ import java.util.function.Supplier;
  *   <li><b>源</b>（prod）: {@code app.feature-enablement.source} が {@code database} でなければ止める。</li>
  *   <li><b>運用値の上書き</b>（prod）: 環境変数・system property の名前を {@code validate-task-definition.ps1} の {@code NameKey}
  *       （大文字にして {@code _}・{@code .}・{@code -} を除く。ここでは英数字以外を全て除く）で正規化し、{@code APPFEATUREENABLEMENT}
- *       で始まる名前と、{@code FEATUREENABLEMENTALLOWED} 以外の {@code FEATUREENABLEMENT} で始まる名前があれば止める
+ *       で始まる名前と、綴りが完全に {@code FEATURE_ENABLEMENT_ALLOWED} である名前以外の {@code FEATUREENABLEMENT} で始まる名前があれば止める
  *       （{@code SPRING_APPLICATION_JSON}・{@code spring.application.json} の {@code app.feature-enablement} と
  *       {@code FEATURE_ENABLEMENT_*} は総スイッチを含めて止める）。D-5: 配備の設定は鍵と総スイッチだけで、{@code max-staleness} を
  *       大きくして fail-closed を外すことも防ぐ。{@code evaluation-initial-delay}・{@code sign-off-purge-cron} も同じ（review rb-fe-a1
@@ -43,6 +43,8 @@ import java.util.function.Supplier;
  *   <li><b>旧い変数</b>（prod）: 目録で DB 管理にした開放単位の旧い開閉の変数（{@link Feature#environmentVariable()}・
  *       {@link Feature#propertyName()} の全ての綴り）が環境変数・system property・{@code SPRING_APPLICATION_JSON} にあれば止める
  *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。</li>
+ *   <li><b>段階の間の暫定の拒否</b>（prod）: 環境変数・system property・{@code SPRING_APPLICATION_JSON} の NF01 二者確認の ON と NF02 顧客ポータルの公開範囲
+ *       （{@link FeatureEnablementTransitionalRejections}。FE-B01・FE-B03 で外す）。</li>
  * </ul>
  *
  * <p>prod の判定は {@code Environment.acceptsProfiles(Profiles.of("prod"))}（CLAUDE.md。{@code @ActiveProfiles("prod")} の試験でも
@@ -126,8 +128,10 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         names.forEach((name, origin) -> {
             String key = nameKey(name);
             boolean json = origin.equals(JSON_VARIABLE);
+            // 総スイッチは環境変数・system property とも綴りが完全に一致する名前だけを受ける（placeholder は他の綴りを読まないため、
+            // feature_enablement_allowed=false 等は効かずに全開で起動する。照合の ps1 と同じ。実装 review rb-fe-a2 P3-1）
             if (key.startsWith(OPERATIONAL_PREFIX)
-                    || (key.startsWith(SHORT_PREFIX) && (json || !key.equals(ALLOWED_KEY)))) {
+                    || (key.startsWith(SHORT_PREFIX) && (json || !name.equals(ALLOWED_VARIABLE)))) {
                 overrides.add(describe(name, origin));
             }
             if (legacyKeys.contains(key)) {
@@ -142,6 +146,8 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             violations.add("system の中で開閉する機能の旧い変数を設定しないでください（画面の申請と二人の承認で開きます）: "
                     + String.join(",", legacy));
         }
+        // 段階 A〜B の間だけの暫定の拒否（NF01 二者確認の ON・NF02 顧客ポータルの公開範囲。FE-B01・FE-B03 で外す）
+        violations.addAll(FeatureEnablementTransitionalRejections.violations(systemEnvironment.get(), systemProperties.get()));
         return violations;
     }
 

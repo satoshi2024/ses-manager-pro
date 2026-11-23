@@ -213,7 +213,8 @@ public class FeatureEnablementApiController {
     }
 
     @PostMapping(value = "/sign-offs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResult<Ref> register(@RequestParam("file") MultipartFile file, @RequestParam String kindCode,
+    public ApiResult<Ref> register(@RequestParam(value = "file", required = false) MultipartFile file,
+                                   @RequestParam String kindCode,
                                    @RequestParam(required = false) String reference, @RequestParam String signerRole,
                                    @RequestParam String signerName,
                                    @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate signedOn,
@@ -221,8 +222,11 @@ public class FeatureEnablementApiController {
                                    @RequestParam(required = false) String structuredValues,
                                    Authentication authentication, HttpSession session) {
         FeatureEnablementActor actor = actor(authentication, session);
+        // file の部を欠いた要求も Spring の既定の 400（MissingServletRequestPartException）にせず、
+        // 文書が必要という業務の 400 にそろえる。bytes が先に止めるので file.getOriginalFilename は null にならない。
+        byte[] document = bytes(file);
         FeatureSignOff registered = signOffs.register(new FeatureSignOffService.Registration(kindCode, reference,
-                        signerRole, signerName, signedOn, expiresOn, structured(structuredValues)), bytes(file),
+                        signerRole, signerName, signedOn, expiresOn, structured(structuredValues)), document,
                 file.getOriginalFilename(), actor);
         return ApiResult.success(ref(registered));
     }

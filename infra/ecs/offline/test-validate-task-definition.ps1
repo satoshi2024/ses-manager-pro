@@ -350,6 +350,19 @@ try {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"feature-enablement":{"max-staleness":"PT300S"}}}'; $td }
   Case 'FEATURE_ENABLEMENT_ALLOWED in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"FEATURE_ENABLEMENT_ALLOWED":"true"}'; $td }
+  # ---- transitional refusals until FE-B01 and FE-B03 (implementation review rb-fe-a2 P2-1, P2-2)
+  Case 'steady, NF01 dual confirmation left false' $SteadyOn 'PASS' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED' 'false'; $td }
+  Case 'steady, NF02 customer portal visible-since left empty' $SteadyOn 'PASS' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE' ''; $td }
+  Case 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=true before FE-B01' $SteadyOn 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED must not be true until FE-B01' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED' 'true'; $td }
+  Case 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED=ON before FE-B01' $SteadyOn 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED must not be true until FE-B01' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED' 'ON'; $td }
+  Case 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE before FE-B03' $SteadyOn 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE must not be set until FE-B03' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE' '2027-04-01T00:00:00+09:00'; $td }
+  Case 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE from the secret store before FE-B03' $SteadyOn 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE must not be set until FE-B03' {
+    $td = New-Steady 'true'; Add-Secret (App $td) 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE'; $td }
 
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
