@@ -36,7 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *       後の {@code OPEN_PENDING_RESTART} を含む）。一度確定の閉鎖を見た方向は、この process の間は閉じたまま（同じ process では開き
  *       直さない。開き直しは {@code OPEN_PENDING_RESTART} → 再起動 → 隔離。他の instance が再起動で {@code OPEN} を書いてもこの instance
  *       は送らない）。現在の kill switch と同じ扱い（producer は積まず、worker は送信せず処理中は DLQ {@code KILL_SWITCH}）で、DB の
- *       状態が確定の閉鎖の間は未送信の配信も barrier が DLQ {@code KILL_SWITCH} にする（保存期間で purge する。review rb-fe-d P2-2）。</li>
+ *       状態が確定の閉鎖の間は未送信の配信を barrier が開き直しの起動の隔離と同じ DLQ {@code STARTUP_REVALIDATION_REQUIRED} にする
+ *       （保存期間で purge し、開き直した後は bulk replay で戻せる。review rb-fe-d P2-2・P2-N2）。</li>
  * </ul>
  * <p>property の源（dev・test。目録の DB 管理の印が無い間を含む）では、閉は全て確定の閉鎖（従来の kill switch）。Spring 管理外で
  * {@code new} した部品は {@link #inboundOpen(IntegrationHubRuntimeSwitch, IntegrationHubExternalApiProperties)} 等の static で
@@ -220,6 +221,18 @@ public class IntegrationHubRuntimeSwitch {
             request.setAttribute(REQUEST_ATTRIBUTE, open);
         }
         return open;
+    }
+
+    /**
+     * 1つの要求の inbound が閉で、起動時の値も閉か（LB が遮断している。review rb-fe-d P2-N1）。この時だけ、外部の要求は DB へ書かない
+     * （監査の境界は永続化せず、backup の静止の filter は読取りとして扱い静止中も平時の 404）。実行時の閉鎖（起動時の値は開・LB は開）の
+     * 要求は監査の行を書くため、静止の filter は外部の書込みとして permit を求め、静止中は 503 {@code BACKUP_QUIESCED} にする（開放した
+     * 公開 API の静止中の扱いと同じ。deploy-runbook §1.7 の NF05 の (g)）。2つの filter が同じ判定式を使う。
+     */
+    public static boolean inboundClosedSinceBoot(jakarta.servlet.http.HttpServletRequest request,
+                                                 IntegrationHubRuntimeSwitch runtimeSwitch,
+                                                 IntegrationHubExternalApiProperties properties) {
+        return !inboundOpen(request, runtimeSwitch, properties) && !inboundBootOpen(properties);
     }
 
     // ---------------------------------------------------------------- Spring 管理外の部品（従来の判定）

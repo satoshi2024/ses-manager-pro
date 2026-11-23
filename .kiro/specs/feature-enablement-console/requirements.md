@@ -231,7 +231,7 @@
 - 閉じる変更（手動・自動・総スイッチ）は即時に反映する: 実行時の NF05 の判定（§1 の NF05 の全ての読取り）を「起動時の値 AND 実効値」に改める。outbound を閉じる transaction は、barrier の行を `v1|OFF|0|<指紋>` に書き直し `NF05_OUTBOUND_OFF` を監査する（次に開く起動で再び隔離するため。現在の kill switch は行を書き直さない）。
 - NF05 outbound の閉鎖を 2 種類に分ける:
   - **(i) 一時の閉鎖**（開放状態は `OPEN` のまま、評価できない状態（`unverifiable_since`・この instance の memory）か snapshot の古さだけで実効値が閉じている）: producer は outbox への書込みを続け（起動時の値・最後に読めた開放状態が `OPEN`・総スイッチだけを見る）、worker は claim を止めるだけで、処理中の配信は DLQ にせず PENDING へ戻す。解ければ同じ process で送信を再開し、閉じていた間の変更も送る（at-least-once を保つ）。barrier の行は `ON` のままで、隔離は要らない（OFF の期間の配信を作らないため）。
-  - **(ii) 確定の閉鎖**（`AUTO_CLOSED`・手動の閉鎖・総スイッチ。DB に書けない間の自動閉鎖の書込み待ちを含む）: 現在の kill switch と同じ（producer は積まない、処理中は DLQ `KILL_SWITCH`）で、barrier の行を OFF に書き直す。未送信（PENDING・RETRYABLE）は、DB の状態が確定の閉鎖の間に barrier の定期の処理が DLQ `KILL_SWITCH` にし、保存期間で purge する（開き直さなくても外部へ送るための写しを残し続けない。開き直しの起動の隔離の前倒し。review rb-fe-d P2-2）。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
+  - **(ii) 確定の閉鎖**（`AUTO_CLOSED`・手動の閉鎖・総スイッチ。DB に書けない間の自動閉鎖の書込み待ちを含む）: 現在の kill switch と同じ（producer は積まない、処理中は DLQ `KILL_SWITCH`）で、barrier の行を OFF に書き直す。未送信（PENDING・RETRYABLE）は、DB の状態が確定の閉鎖の間に barrier の定期の処理が開き直しの起動の隔離と同じ DLQ `STARTUP_REVALIDATION_REQUIRED` にし、保存期間で purge する（開き直さなくても外部へ送るための写しを残し続けない。開き直しの起動の隔離の前倒しで、開き直した後は条件付きの bulk replay で再検証して戻せる。review rb-fe-d P2-2・P2-N2）。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
 - inbound は (i)・(ii) のどちらでも実効値が閉じている間は 404（client が再試行する。SES 側に失われるものは無い）。
 - NF05 の保存期間の purge（retention・nonce の purge、read snapshot の purge）は、NF05 を閉じた後の起動でも動かす。NF05 を一度でも開いたか、対象の表に行があれば、boot resolver が purge 用の property を開にする（個人データを無期限に残さない）。
 - outbound の barrier の条件を 2 つに分ける: (a) 継続の条件: barrier の行の tenant の指紋が `sha256(現在の bound-tenant-id)`（phase は問わない）。(b) 開放の遷移の前提: 行の phase が `OFF` で `NF05_OUTBOUND_OFF` の監査がある（現在 RB §1.7 で DBA が SQL で確かめていること）。(b) は申請・承認と、`OPEN_PENDING_RESTART` を反映する起動でだけ判定する。開いた後に barrier が `QUARANTINING`・`ON` へ進むのは正常で、(b) で閉じない。全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID` を設定する規則は変えない。
@@ -243,7 +243,7 @@
 - **FE-AC-008-01** WHEN NF05 outbound を承認する THEN 状態は `OPEN_PENDING_RESTART` で、再起動の前は worker・scheduler・producer が作られず、画面に「再起動待ち」と出る。
 - **FE-AC-008-02** WHEN 再起動する THEN 条件が成り立てば outbound の bean が作られ、barrier が隔離から READY へ進み、状態が `OPEN`（`RESTART_APPLIED` の監査）になる。続く定期の評価の後も `OPEN` のままで、もう一度再起動しても `OPEN` のままで、隔離は走らない。条件が成り立たなければ app は起動し、outbound の bean は作られず、状態は `AUTO_CLOSED` になる。
 - **FE-AC-008-06** WHEN 開いていた NF05 が `AUTO_CLOSED` になった後に再起動する THEN retention・nonce・read snapshot の purge の scheduler は作られ、保存期間を過ぎた行を消す。
-- **FE-AC-008-03** WHEN 開いている outbound を確定の閉鎖で閉じる THEN 次の worker の tick から送信しない（claim 済みは DLQ `KILL_SWITCH`。未送信は barrier の定期の処理が DLQ `KILL_SWITCH` にし、保存期間の後に purge される。review rb-fe-d P2-2）。barrier の行は `v1|OFF|0|<指紋>` になり、開き直しは再起動と隔離を経る。
+- **FE-AC-008-03** WHEN 開いている outbound を確定の閉鎖で閉じる THEN 次の worker の tick から送信しない（claim 済みは DLQ `KILL_SWITCH`。未送信は barrier の定期の処理が DLQ `STARTUP_REVALIDATION_REQUIRED` にし、保存期間の後に purge される。開き直した後は ops runbook §13.3 の bulk replay で選べる。review rb-fe-d P2-2・P2-N2）。barrier の行は `v1|OFF|0|<指紋>` になり、開き直しは再起動と隔離を経る。
 - **FE-AC-008-07** WHEN outbound が一時の閉鎖（評価できない状態）になり、その間に業務の変更が起き、その後に評価が戻る THEN 閉じていた間の変更の配信が戻った後に送られ、閉じた時に処理中だった配信は DLQ にならず PENDING へ戻って送られる。
 - **FE-AC-008-04** WHEN 開いている inbound を閉じる THEN 次の要求から `/external-api/**` は 404（`DISABLED_DENY`）になる。
 - **FE-AC-008-05** WHEN 起動時に DB を読めない THEN NF05 の property は閉の値で、app は起動する。

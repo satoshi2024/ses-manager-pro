@@ -87,14 +87,14 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
     }
 
     /**
-     * NF05 の公開 API（inbound）が有効か（{@code ExternalApiDisabledFilter} と同じ判定。設定が無ければ無効）。chain の最初の判定で、
-     * 決めた値を request attribute に置き、後の filter と監査の境界が同じ値を読む（静止中の外部の書込みが、ここで閉・後で開と
-     * 判定されて permit を取らずに実行されることを防ぐ。review rb-fe-d P2-1）。
+     * NF05 の公開 API（inbound）が閉で、起動時の値も閉（LB 遮断）か（{@code ExternalApiAuditBoundary} の永続化を抑える条件と同じ判定式。
+     * 設定が無ければ閉）。chain の最初の判定で、決めた要求の開閉を request attribute に置き、後の filter と監査の境界が同じ値を読む
+     * （静止中の外部の書込みが、ここで閉・後で開と判定されて permit を取らずに実行されることを防ぐ。review rb-fe-d P2-1）。実行時の閉鎖
+     * （起動時の値は開）の要求は監査の行を書くため、ここでは閉と扱わず permit を求める（静止中は 503。P2-N1）。
      */
-    private boolean publicApiEnabled(HttpServletRequest request) {
-        IntegrationHubExternalApiProperties properties = externalApiPropertiesProvider.getIfAvailable();
-        return properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request,
-                integrationHubRuntimeSwitch, properties);
+    private boolean publicApiClosedSinceBoot(HttpServletRequest request) {
+        return com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundClosedSinceBoot(request,
+                integrationHubRuntimeSwitch, externalApiPropertiesProvider.getIfAvailable());
     }
 
     @Override
@@ -107,9 +107,10 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         }
         BackupQuiesceRequestClassifier.Classification classification = BackupQuiesceRequestClassifier.classify(request);
         BackupQuiesceRequestClassifier.Kind kind = classification.kind();
-        if (kind == BackupQuiesceRequestClassifier.Kind.EXTERNAL && !publicApiEnabled(request)) {
-            // NF05 の公開 API が OFF の間は、静止中も平時と同じ 404（ExternalApiDisabledFilter。DB へ書かず
-            // audit_suppressed{PUBLIC_API_DISABLED} だけを数える）を返す（§6.4「OFF の機能は静止中も 404」。2b review P3-2）
+        if (kind == BackupQuiesceRequestClassifier.Kind.EXTERNAL && publicApiClosedSinceBoot(request)) {
+            // NF05 の公開 API が起動時から OFF の間は、静止中も平時と同じ 404（ExternalApiDisabledFilter。DB へ書かず
+            // audit_suppressed{PUBLIC_API_DISABLED} だけを数える）を返す（§6.4「OFF の機能は静止中も 404」。2b review P3-2）。
+            // 実行時の閉鎖（起動時の値は開）は監査の行を書くため EXTERNAL のまま permit を求め、静止中は 503（review rb-fe-d P2-N1）
             kind = BackupQuiesceRequestClassifier.Kind.READ;
         }
         BackupWritePermit permit = null;

@@ -58,9 +58,9 @@ class IntegrationHubFlagReadGuardTest {
             // 起動時の値を実行時条件にする（画面の「この起動では閉」）
             "com/ses/featureenablement/nf05/IntegrationHubBootConditions.java", 2,
             // barrier の起動時の経路（bootEnabled）
-            "com/ses/service/integrationhub/IntegrationHubOutboundStartupBarrier.java", 1,
-            // 監査の永続化の要否だけ（起動時から閉（LB 遮断）と実行時の閉鎖を分ける。開閉の判定には使わない）
-            "com/ses/config/integrationhub/ExternalApiAuditBoundary.java", 1);
+            "com/ses/service/integrationhub/IntegrationHubOutboundStartupBarrier.java", 1);
+    // 起動時から閉（LB 遮断）と実行時の閉鎖の区別は IntegrationHubRuntimeSwitch.inboundClosedSinceBoot の1か所にまとめ、
+    // 監査の境界と backup の静止の filter はそれを呼ぶ（review rb-fe-d P2-N1）
 
     /** flag の property 名の文字列を書いてよい file（{@code @Conditional} の条件・起動の前の読取り・目録の名前・property の源）。 */
     private static final java.util.Set<String> ALLOWED_FLAG_LITERALS = java.util.Set.of(

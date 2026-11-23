@@ -159,6 +159,22 @@ class IntegrationHubEnablementConditionsTest {
                 context(FeatureEvaluationContext.Purpose.PERIODIC, true)))).contains("legalEntity.unverifiable:UNVERIFIABLE");
     }
 
+    @Test
+    void 法人の未解決を判定できなかった結果は持たず同じ実例の次の評価で照会し直す() {
+        // review rb-fe-d P3-N3: 同じ実例・同じ時刻（共用の秒数の中）で、判定できなかった結果を共用しない
+        when(readiness.isReady()).thenThrow(new IllegalStateException("synthetic DB failure")).thenReturn(true);
+        IntegrationHubEnablementConditions conditions = conditions();
+
+        assertThat(codes(conditions.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.PERIODIC,
+                true)))).contains("legalEntity.unverifiable:UNVERIFIABLE");
+        assertThat(codes(conditions.evaluate(Feature.NF05_INBOUND, context(FeatureEvaluationContext.Purpose.PERIODIC,
+                true)))).contains("legalEntity.resolved:SATISFIED");
+        verify(readiness, times(2)).isReady();
+
+        conditions.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.PERIODIC, true));
+        verify(readiness, times(2)).isReady();
+    }
+
     private IntegrationHubEnablementConditions conditions() {
         return new IntegrationHubEnablementConditions(properties, environment, configs, audits, provider(settings),
                 provider(readiness));

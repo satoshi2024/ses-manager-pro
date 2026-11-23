@@ -94,16 +94,23 @@ public class IntegrationHubOutboundStartupBarrier implements ApplicationRunner, 
 
     /**
      * DB の開放状態が確定の閉鎖（{@code AUTO_CLOSED}・手動の閉鎖・総スイッチ）の間、未送信（{@code PENDING}・{@code RETRYABLE}）と lease の
-     * 切れた {@code CLAIMED} の配信を1周期に128件まで DLQ {@code KILL_SWITCH} にする（feature-enablement-console design §9.6。review
-     * rb-fe-d P2-2）。開き直しの起動の隔離が同じ行を DLQ にするのを前倒しし、保存期間の purge（D7 の hold の確認を通る）の対象にする
-     * （NF05 を開き直さなければ外部へ送るための写しが無期限に残るため）。一時の閉鎖（DB は {@code OPEN}）・書込み待ち・property の源では
-     * 何もしない（producer は一時の閉鎖の間も積み続ける。P2-N3）。失敗は次の周期で再試行する。
+     * 切れた {@code CLAIMED} の配信を1周期に128件まで、開き直しの起動の隔離と同じ DLQ {@code STARTUP_REVALIDATION_REQUIRED} にする
+     * （{@link ApiDeliveryMapper#quarantineHistorical}。feature-enablement-console design §9.6。review rb-fe-d P2-2・P2-N2）。隔離を前倒しし、
+     * 保存期間の purge（D7 の hold の確認を通る）と ops runbook §13.3 の条件付き bulk replay（開き直した後）の対象にする（NF05 を開き
+     * 直さなければ外部へ送るための写しが無期限に残るため）。一時の閉鎖（DB は {@code OPEN}）・書込み待ち・property の源では何もしない
+     * （producer は一時の閉鎖の間も積み続ける。P2-N3）。失敗は次の周期で再試行する。1件も無かった後は {@value #DRAIN_IDLE_MINUTES} 分
+     * 照会しない（閉じた状態が続く間に5秒ごとに照会し続けない。確定の閉鎖でなくなれば間隔を戻す。review rb-fe-d P3-N1）。
      *
      * @return DLQ にした件数
      */
     public int drainUnsentAfterDefinitiveClosure() {
         if (runtimeSwitch == null
                 || !runtimeSwitch.definitivelyClosedInDatabase(com.ses.config.feature.Feature.NF05_OUTBOUND)) {
+            nextDrainNanos = 0;
+            return 0;
+        }
+        long nowNanos = System.nanoTime();
+        if (nextDrainNanos != 0 && nowNanos - nextDrainNanos < 0) {
             return 0;
         }
         try {
@@ -111,18 +118,26 @@ public class IntegrationHubOutboundStartupBarrier implements ApplicationRunner, 
                 LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
                 int count = 0; Long last = null;
                 for (var delivery : deliveries.selectHistoricalForQuarantine(Long.MAX_VALUE, now, 128)) {
-                    int updated = deliveries.closeUnsent(delivery.getId(), delivery.getVersion(), now, now.plusDays(90));
+                    int updated = deliveries.quarantineHistorical(delivery.getId(), delivery.getVersion(), now,
+                            now.plusDays(90));
                     count += updated; if (updated > 0) last = delivery.getId();
                 }
                 if (count > 0) record("NF05_OUTBOUND_CLOSED_DLQ", last, "OFF");
                 return count;
             });
-            return closed == null ? 0 : closed;
+            int count = closed == null ? 0 : closed;
+            nextDrainNanos = count > 0 ? 0 : nowNanos + java.util.concurrent.TimeUnit.MINUTES.toNanos(DRAIN_IDLE_MINUTES);
+            return count;
         } catch (RuntimeException failure) {
             warn("CLOSED_DLQ_FAILED");
             return 0;
         }
     }
+
+    /** 確定の閉鎖の後の未送信が1件も無かった後に照会しない分数（P3-N1）。 */
+    static final long DRAIN_IDLE_MINUTES = 5;
+    /** 次に照会してよい時刻（{@link System#nanoTime}。0 は直ちに）。 */
+    private volatile long nextDrainNanos;
 
     /**
      * outbound を閉じる transaction（手動・自動・総スイッチ）の中で、行を lock して {@code v1|OFF|0|<指紋>} に書き直し、変われば

@@ -175,11 +175,11 @@ class IntegrationHubEnablementRestartMySqlTest {
         assertThat(barrierRow()).as("確定の閉鎖は行を OFF に書き直す").startsWith("v1|OFF|0|");
         holder.reload();
         assertThat(second.runtime().outboundClosure()).isEqualTo(IntegrationHubRuntimeSwitch.Closure.DEFINITIVE);
-        // review rb-fe-d P2-2: 確定の閉鎖の間、未送信の配信は barrier が DLQ KILL_SWITCH にし、保存期間の purge の対象になる
+        // review rb-fe-d P2-2: 確定の閉鎖の間、未送信の配信は barrier が隔離と同じ DLQ（STARTUP_REVALIDATION_REQUIRED）にし、保存期間の purge と bulk replay の対象になる（P2-N2）
         long unsent = insertPendingDelivery();
         second.barrier().continueRecovery();
         assertThat(jdbc.queryForObject("SELECT CONCAT(status, ':', last_error_code, ':', retention_class) FROM t_api_delivery "
-                + "WHERE id = ?", String.class, unsent)).isEqualTo("DLQ:KILL_SWITCH:FAILED_DLQ_PAYLOAD_90D");
+                + "WHERE id = ?", String.class, unsent)).isEqualTo("DLQ:STARTUP_REVALIDATION_REQUIRED:FAILED_DLQ_PAYLOAD_90D");
 
         Process afterClose = restart();
         assertThat(afterClose.values().get("integration.hub.retention-purge.enabled"))

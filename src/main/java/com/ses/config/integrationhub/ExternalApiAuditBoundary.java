@@ -93,10 +93,12 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                 response.getStatus() >= 200 && response.getStatus() < 400 ? "SUCCESS" : "HTTP_REJECTED");
         int status = response.getStatus();
         ExternalApiMetricsRecorder metrics = metricsProvider.getIfAvailable();
-        if (!publicApiEnabled(request) && !inboundBootOpen()) {
+        if (com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundClosedSinceBoot(request, runtimeSwitch,
+                propertiesProvider.getIfAvailable())) {
             // 起動時の値で無効の間はDBへ書かない。D-1（LB遮断）が効いていればこのcounterは増えない。
             // 要求の開閉は要求の始めに一度だけ決めた値で、途中で実効値が閉じても実行した要求は下で監査する（review rb-fe-d P2-1）。
-            // 実行時の閉鎖（起動時の値は開で LB は開いている）の拒否は、下の未認証の上限の中で永続化する（同 P3-12）。
+            // 実行時の閉鎖（起動時の値は開で LB は開いている）の拒否は、下の未認証の上限の中で永続化する（同 P3-12）。backup の静止の
+            // filter も同じ判定式で、この時だけ読取りとして扱う（それ以外は permit を求める。P2-N1）。
             recordWithoutPersistence(metrics, ExternalApiMetricsRecorder.AuditSuppressionReason.PUBLIC_API_DISABLED,
                     trail, request, status, decision, principal);
             return true;
@@ -170,12 +172,6 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
         return properties != null
                 && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request, runtimeSwitch, properties);
     }
-
-    /** 起動時の値で inbound が開か（実行時の閉鎖と、起動時から閉（LB 遮断）を分ける）。 */
-    private boolean inboundBootOpen() {
-        return com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundBootOpen(propertiesProvider.getIfAvailable());
-    }
-
     /** budget beanが無いslice等では従来どおり永続化する（監査の欠落側へ倒さない）。 */
     private boolean unauthenticatedBudgetAvailable() {
         ExternalApiUnauthenticatedAuditBudget budget = unauthenticatedBudgetProvider.getIfAvailable();
