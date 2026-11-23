@@ -25,8 +25,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * src/main を走査し、守る型ごとに、その型で宣言した変数・field・引数（{@code 型 名前}）の getter と method 参照を呼んでよい file を
  * 固定する。DSAR の期限規則・保存期間の getter は名前で探す（{@code PrivacyFeatureProperties.Dsar} の getter。他の型に同名が無い）。</p>
  *
- * <p>守る型の行は段階ごとに足す（NF06 の {@code ImportAdmissionApprovalProperties} は段階 B、NF05 の approval の
- * {@code decision-id}・{@code approval-digest} は段階 D。各段階の property の源だけを許す）。</p>
+ * <p>守る型の行は段階ごとに足す（各段階の property の源だけを許す）。NF06 の {@code ImportAdmissionApprovalProperties}（段階 B）は
+ * 段階の整合 M5 で足した: getter を呼べるのは property 自身・property の源（{@code ImportAdmissionApprovalSource.Property}）と、
+ * 源が返した値を解釈する純粋な関数 {@code ImportAdmissionApproval} だけで、読む側は {@code ImportAdmissionApprovalSource} を経る。
+ * NF05 の approval の {@code decision-id}・{@code approval-digest}（段階 D）は {@code IntegrationHubFlagReadGuardTest} が守る
+ * （{@code IntegrationHubApprovals} だけが getter を呼ぶ）。</p>
  */
 class ApprovalValueReadGuardTest {
 
@@ -36,7 +39,12 @@ class ApprovalValueReadGuardTest {
     private static final List<GuardedType> GUARDED = List.of(
             new GuardedType("PrivacyApprovalProperties", "get\\w+|reference",
                     Set.of("com/ses/privacy/production/PrivacyApprovalProperties.java",
-                            "com/ses/privacy/production/PropertyPrivacyApprovalSource.java")));
+                            "com/ses/privacy/production/PropertyPrivacyApprovalSource.java")),
+            // 段階 B（FE-B02）の NF06 の admission の承認（決定 ID・tenant・署名日・失効日・source code・approval digest）
+            new GuardedType("ImportAdmissionApprovalProperties", "get\\w+",
+                    Set.of("com/ses/importcenter/metadata/ImportAdmissionApprovalProperties.java",
+                            "com/ses/importcenter/metadata/ImportAdmissionApprovalSource.java",
+                            "com/ses/importcenter/metadata/ImportAdmissionApproval.java")));
 
     /** DSAR の期限規則・保存期間の getter（D-06 の署名の構造化された値に移した。§18 J-15）。 */
     private static final Pattern DSAR_VALUE_GETTER = Pattern.compile("\\.\\s*(getDueDays|getPackageMaxAge)\\s*\\(");
