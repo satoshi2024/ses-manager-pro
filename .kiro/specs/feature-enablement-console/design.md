@@ -780,7 +780,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
   - **確定の閉鎖 `DEFINITIVE`**: `AUTO_CLOSED`・手動の閉鎖・総スイッチ（DB に書けない間の自動閉鎖の書込み待ち `AUTO_CLOSE_PENDING` を含む。条件の不成立が確かめられているため）。現在の kill switch と同じ: producer は積まず、worker は送信しない（未送信は PENDING のまま、処理中は DLQ `KILL_SWITCH`）。barrier の行を OFF に書き直し（上）、memory の `ready` を false にする。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
   - inbound は、どちらの閉鎖でも実効値が閉じている間は 404 `DISABLED_DENY`（client が再試行する。SES 側に失うものは無い）。
   - bean は次の起動まで残る（runtime switch で眠る）。
-- **注記（micro review 88630af1 の P3-M2）**: 一時の閉鎖で処理中の配信を PENDING へ戻す更新は、claim の持ち主（lease の token）と状態を条件にした CAS で行い、`attempt_count` を増やさない（一時の閉鎖が続いても回数の上限で DLQ に落とさない）。`TRANSIENT` と `DEFINITIVE` の境の細部（`AUTO_CLOSE_PENDING` を確定の閉鎖として扱う時点、古さが続いて自動閉鎖に変わる時の処理中の配信の扱い）は段階 D（FE-D03）の着手時に確定する。
+- **注記（micro review 88630af1 の P3-M2）**: 一時の閉鎖で処理中の配信を PENDING へ戻す更新は、claim の持ち主（lease の token）と状態を条件にした CAS で行い、`attempt_count` を増やさない（一時の閉鎖が続いても回数の上限で DLQ に落とさない）。`TRANSIENT` と `DEFINITIVE` の境の細部（`AUTO_CLOSE_PENDING` を確定の閉鎖として扱う時点、古さが続いて自動閉鎖に変わる時の処理中の配信の扱い）は段階 D（FE-D03）の着手時に確定する。→ §9.6 で確定した。
 - 同じ process での再開は一時の閉鎖からだけ（上）。第 2 版の「一時の閉鎖は ON→ON と同じ」の説明は、producer が配信を捨て、処理中の配信が DLQ に入るため成り立たなかった（review P2-N3）。上の 2 種類の区別で置き換えた。
 - `IntegrationHubApprovalDigest.canonicalInbound`・`canonicalOutbound`（:79・:104）は決定 ID を properties から読むため、`IntegrationHubApprovals`（§9.5）から受け取るように改める（DB の源では properties の決定 ID が空になり、digest が必ず合わなくなるため。review P3-15）。
 
@@ -801,6 +801,43 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - truststore の検査（:138-146）は bytes を読むだけの純粋な関数にし、`recordApprovedTruststore`（:140）の副作用は起動時の値が開の時の `validateBoundaries` だけで行う。
 - `validateBoundaries`（:35-125）の flag に依る検査（public-id-key :42-46、DEDICATED_DATABASE と bound-tenant-id :47-50、HTTPS の truststore :92-96）を静的な関数に切り出し、boot resolver と評価器から呼ぶ。DB の源の prod では、起動時の値が開でも違反があれば例外にせず runtime を閉じて `AUTO_CLOSED` にする（boot resolver と同じ関数を使うため、通常は起きない安全網）。
 - flag に依らない検査（`provider.mode` が STUB・LOOPBACK でない :51-54、loopback の port が空 :55-57）は残す。outbound が閉の時の mode の規則（:58-60）は MOCK か HTTPS を許す（承認の前に HTTPS と承認の内容を配備の設定に入れるため）。
+
+### 9.6 実装で決めた細部（段階 D。FE-D01〜D05）
+
+**純粋な関数と違反の code（FE-D01）**
+
+- `IntegrationHubEnablementDecision`（`config/integrationhub`）が §9.1 の 0 の純粋な関数。入力 `BootInputs` は普通の値だけ（開放状態・確認済みの署名・barrier の行・OFF の監査の有無・bind した properties・環境・承認の値・truststore の読取り・総スイッチ・今日）。総スイッチ・署名・鍵は共通の評価器（`MasterSwitchConditionEvaluator`・`SignOffConditionEvaluator`・`SecretPresenceConditionEvaluator`）をそのまま呼び、評価器の経路は registry が同じ共通の評価器を呼ぶため、評価器は固有の部分（`specificChecks`）だけを返す。判定の写しは無い。
+- `IntegrationHubProductionEnablementPolicy` の違反は固定の code（`nf05.inbound.approvalDigest.mismatch` 等。64 文字以内）と従来の文言の組。起動時検査は文言、boot resolver・評価器は code を使い、code が `closed_reason`（`AUTO_CLOSED(<code>)`）に入る。従来の `violations(properties, environment)`（flag と承認の値を properties から作る property の源の呼出し）と文言は変えない。
+- barrier の継続の条件の code は `barrier.tenantFingerprint`（不成立は `.mismatch`・`.missing`・`.invalid`）。§9.4 の「`AUTO_CLOSED(TENANT_STATE_MISMATCH)`」は `AUTO_CLOSED(barrier.tenantFingerprint.mismatch)` になる。開放の遷移の前提は `barrier.offRecorded`（目録の `OPEN_TRANSITION` の code と同じ文字列。理由は detail の `barrier.phase.<phase>`・`barrier.offAudit.missing`）。
+- 承認の値の getter（`InboundApproval`・`OutboundApproval` の決定 ID・digest）を呼ぶのは `IntegrationHubApprovals.fromProperties` だけ（`IntegrationHubFlagReadGuardTest`）。DB の源の決定 ID は確認済みの署名の参照、digest は構造化された値の `approvalDigest`。
+- DB の源の prod の安全網（§9.5）: `validateBoundaries` は起動時の値が開の方向に違反があれば、その方向の flag を false にして違反の code を `bootClosureCode` に残す（例外にしない）。承認の値は boot resolver が写した `app.feature-enablement.nf05-boot.<方向>.decision-id`・`.approval-digest`。起動の後の反映がその code で `AUTO_CLOSED` にする。flag に依らない違反は従来どおり起動を止める。truststore の byte 列の記録は、outbound が開いたままの時だけここで行う。
+
+**起動の前の読取りと起動の後の反映（FE-D02）**
+
+- boot resolver（`featureenablement/nf05/IntegrationHubEnablementBootResolver`、`META-INF/spring.factories`）は `ConfigDataEnvironmentPostProcessor.ORDER + 10`。`spring.datasource.url` が `jdbc:mysql:` で始まる時だけ読み（他は `READ_FAILED`。H2 の DB の源の試験と prod の profile の H2 の試験は常に `READ_FAILED` で、試験の順に依らない）、接続・socket・照会の timeout は5秒、接続は read only。truststore は outbound の行が開いている時だけ読む。書く property は §9.1 の 6 に加え、`.state`・`.version`（読んだ状態と版）と `.decision-id`・`.approval-digest`。
+- 起動の後の反映（`IntegrationHubBootDecisionRecorder`、SmartLifecycle の phase -100: barrier の初期化（`Integer.MIN_VALUE`）の後、起動時の評価（0）の前）は、起動の前に読んだ状態と版が lock の後も同じ時だけ遷移させる（`IntegrationHubBootDecisionWriter`。READ COMMITTED。読んだ後に別の instance が変えた行を上書きしない）。`RESTART_APPLIED` の書込みに失敗した行は `OPEN_PENDING_RESTART` のまま残り、runtime switch が確定の閉鎖にする（この起動では閉。次の起動は再び OFF の記録を要するため、OFF の起動と再承認が要ることがある。RB に書く。段階 E）。
+- 法人の未解決（§9.2）は `FeatureEnablementStartupEvaluator` ではなく起動の後の反映で判定する（同じく port を開く前で、起動時の評価（共通の部品）を変えずに済むため）。起動時の値で開いた方向があれば `LegalEntityReadinessService.isReady()`（例外にしない判定を足した）を呼び、未解決なら `AUTO_CLOSED(LEGAL_ENTITY_UNRESOLVED)`、照会の失敗は `LEGAL_ENTITY_UNVERIFIABLE`。DB の源では `LegalEntityReadinessStartupValidator` は NF05 を判定しない（copilot と property の源の NF05 は従来どおり例外）。評価器も同じ判定を `legalEntity.unresolved` の check にする。
+- 起動時の値は実行時条件（`FeatureRuntimeCondition`。`IntegrationHubBootConditions`）にもした。DB の状態が `OPEN` でもこの起動で閉じた方向は実効値が閉で、画面の閉じている理由に `nf05.boot.readFailed`・`nf05.boot.closed`・`nf05.boot.safetyNet`・`nf05.boot.notRestarted` が出る（§9.2 の「この起動では閉」）。property の源では設定値と同じ値になる。
+- purge の条件（`IntegrationHubRetentionPurgeCondition`）は `integration.hub.retention-purge.enabled` があればその値、無ければ従来の「inbound か outbound」。`ExternalApiReadSnapshotPurgeScheduler` も同じ条件にした（従来は inbound だけ）。
+- `application-prod.yml` に NF05 の開閉の placeholder は無い（`enabled: false` の固定値で、boot resolver の property source が上書きする）。承認の値の placeholder は `application.yml` にあり property の源（dev・test）が使うため残す。
+
+**閉鎖の2種類の境（FE-D03。micro review P3-M2 の確定）**
+
+- 判定は `IntegrationHubRuntimeSwitch.outboundClosure()`。起動時の値が閉 → 確定。property の源（目録の DB 管理の印が無い間を含む）の閉 → 確定（従来の kill switch）。DB の源で実効値が閉の時: 総スイッチが閉・`AUTO_CLOSE_PENDING` → 確定。最後に読めた snapshot の開放状態が `OPEN` → 一時。snapshot を一度も読めていない・起動の後の反映の前の `OPEN_PENDING_RESTART` → 一時（producer は `OPEN` だけを見るため積まない）。それ以外（`AUTO_CLOSED`・`MANUALLY_CLOSED`・反映の後の `OPEN_PENDING_RESTART`）→ 確定。
+- DB の状態が `OPEN` のまま実効値が閉じる原因の分類: 期限が来たが `AUTO_CLOSED` が未書込み（`openUntil` の経過）・要る署名の欠け（`openUntil=MIN`）・afterCommit の読直しの失敗の overlay（`REFRESH_PENDING`）・`unverifiable_since`・memory の評価できない状態・snapshot の古さ・実行時条件の不成立は全て一時の閉鎖（producer の判定式「起動時の値 ∧ 最後に読めた開放状態が OPEN ∧ 総スイッチ ∧ 書込み待ちでない」と一致する）。期限の経過と署名の欠けは、次の書込みの transaction の先行の閉鎖か定期の評価で `AUTO_CLOSED` になった時点で確定の閉鎖に変わり、その間に積まれた PENDING は開き直しの起動の隔離の対象になる（条件の成り立たない送信は無い）。NF05 に親は無いため親の閉鎖は該当しない。
+- 確定の閉鎖を一度見た方向は、その process の間は閉じたまま（latch。複数 instance で他の instance が再起動して `OPEN` を書いても、この instance は送らない）。一時の閉鎖は解ければ同じ process で戻る。
+- worker: 一時の閉鎖では `dispatchDue` が claim を止め（barrier の `isReady` も runtime switch で閉）、`dispatchOne` は claim の前なら何もせず、claim の後・送信の前なら `ApiDeliveryMapper.releaseClaim`（lease の token・版・世代・`CLAIMED` の CAS。`attempt_count` を1戻し、`next_attempt_at` は変えない）で PENDING へ戻す。戻すのは送信の前だけで、HTTP を送った後には戻さない（送った後に process が止まった時は従来どおり lease の回収で再送する。at-least-once で、受信側は event ID と `Idempotency-Key` で重複を除く）。確定の閉鎖は従来どおり（未送信は保留、claim 済みは DLQ `KILL_SWITCH`）。
+- inbound は一時・確定のどちらでも実効値が閉なら 404 `DISABLED_DENY`（`ExternalApiDisabledFilter`・`ExternalApiAuthenticationFilter`・`ExternalApiAuditBoundary`・`BackupWriteGateFilter` が runtime switch を通す）。Spring 管理外で `new` した部品（試験）は従来どおり properties の値を使う。
+
+**barrier（FE-D04）**
+
+- 閉鎖の hook（`IntegrationHubOutboundClosureHook`）が `IntegrationHubOutboundStartupBarrier.recordRuntimeOff` を同じ transaction で呼ぶ。行が変わった時だけ `NF05_OUTBOUND_OFF`（`reference_type='NF05'`・`reference_id=0`）を監査し、commit の後に `ready` を外す。barrier の monitor は取らない（`quarantineBatch` が monitor を持ったまま行の lock を待つため。行の lock だけで直列になる）。
+- `continueRecovery` は、起動時の値が開で実行時に閉じていれば初期化を再試行しない（P3-N2）。起動時の値が閉（OFF の起動）は従来どおり初期化を再試行して OFF を書く。
+
+**評価器と旧い変数（FE-D05）**
+
+- `IntegrationHubEnablementConditions`（NF05 の2件の固有の評価器）。barrier の行・OFF の監査は mapper で読み（読めなければ `state=STATE_IO_ERROR`。監査は `reference_type='NF05'` を付ける。P3-N8）、truststore は外部への検査を許す評価だけ読み、lock を持つ transaction の中は最後に読んだ内容（無ければ `nf05.outbound.truststore.unverifiable`）。承認の値は DB の源では確認済みの署名、property の源では配備の設定。DG-05 の digest が現在の配備の設定と合わなければ `nf05.<方向>.approvalDigest.mismatch` の check になり、画面の最後の評価に出る（署名の登録の応答に一致・不一致を返す FE-A06 の残りは未実装。段階 E で画面と合わせて判断する）。
+- prod の起動時検査は、NF05 を DB 管理にした目録で、開閉の旧い変数に加え `INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)` と `integration.hub.(public-api|external-transport).approval.(decision-id|approval-digest)` の全ての綴りを止める（`SPRING_APPLICATION_JSON` を含む）。許可する送信元・送信先の一覧（`allowed-client-cidrs`・`allowed-destinations`）は digest の内容で配備の設定に残すため止めない（§10 の「`integration.hub.*.approval` があれば拒否」はこの2つの key に限った）。
 
 ## 10. 緊急の総スイッチと旧い変数
 
