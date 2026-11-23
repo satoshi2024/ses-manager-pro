@@ -14,6 +14,8 @@ import com.ses.featureenablement.service.FeatureEnablementActorPolicy;
 import com.ses.featureenablement.service.FeatureEnablementApprovalResult;
 import com.ses.featureenablement.service.FeatureEnablementQueryService;
 import com.ses.featureenablement.service.FeatureEnablementService;
+import com.ses.featureenablement.service.FeatureEnablementSettingChangeApprover;
+import com.ses.featureenablement.service.FeatureEnablementSettingChangeService;
 import com.ses.featureenablement.service.FeatureSignOffBundleService;
 import com.ses.featureenablement.service.FeatureSignOffService;
 import jakarta.servlet.http.HttpSession;
@@ -68,21 +70,28 @@ public class FeatureEnablementApiController {
     private final FeatureSignOffBundleService bundles;
     private final FeatureEnablementQueryService query;
     private final ObjectMapper objectMapper;
+    /** 設定の変更（{@code SETTING_CHANGE}。FE-B03）。 */
+    private final FeatureEnablementSettingChangeService settingChanges;
 
     public FeatureEnablementApiController(FeatureEnablementActorPolicy actorPolicy, FeatureEnablementService service,
                                           FeatureSignOffService signOffs, FeatureSignOffBundleService bundles,
-                                          FeatureEnablementQueryService query, ObjectMapper objectMapper) {
+                                          FeatureEnablementQueryService query, ObjectMapper objectMapper,
+                                          FeatureEnablementSettingChangeService settingChanges) {
         this.actorPolicy = actorPolicy;
         this.service = service;
         this.signOffs = signOffs;
         this.bundles = bundles;
         this.query = query;
         this.objectMapper = objectMapper;
+        this.settingChanges = settingChanges;
     }
 
     // ---------------------------------------------------------------- 要求の形
 
-    /** 申請（{@code type}: {@code OPEN}・{@code SIGN_OFF_EXTENSION}。設定の変更は段階 B）。 */
+    /**
+     * 申請（{@code type}: {@code OPEN}・{@code SIGN_OFF_EXTENSION}・{@code SETTING_CHANGE}。設定の変更は {@code target} が設定の key、
+     * {@code value} が新しい値（null・空は未設定へ戻す）。FE-B03）。
+     */
     public record OpenRequestBody(String type, String target, String value, String reason) {
     }
 
@@ -169,9 +178,18 @@ public class FeatureEnablementApiController {
             case "OPEN" -> service.requestOpen(feature(body.target()), body.reason(), actor);
             case FeatureSignOffService.REQUEST_TYPE_EXTENSION -> signOffs.requestExtension(extensionTarget(body.target()),
                     date(body.value()), body.reason(), actor);
+            case FeatureEnablementSettingChangeApprover.REQUEST_TYPE -> settingChanges.request(body.target(), body.value(),
+                    body.reason(), actor);
             default -> throw BusinessException.of(400, "error.featureEnablement.requestTypeUnsupported");
         };
         return ApiResult.success(query.view(created, actor));
+    }
+
+    /** 承認で変える設定（画面「設定」tab。今の値・決定の署名の値・未決の申請。FE-B03）。 */
+    @GetMapping("/settings")
+    public ApiResult<List<FeatureEnablementSettingChangeService.SettingView>> settings(Authentication authentication,
+                                                                                      HttpSession session) {
+        return ApiResult.success(settingChanges.settings(actor(authentication, session)));
     }
 
     /** 承認する。結果が承認でなければ（申請の終了・監査は commit 済み）409。 */

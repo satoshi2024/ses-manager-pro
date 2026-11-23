@@ -30,6 +30,8 @@ import com.ses.mapper.FeatureEnablementEventMapper;
 import com.ses.mapper.FeatureEnablementRequestMapper;
 import com.ses.mapper.FeatureSignOffBundleMapper;
 import com.ses.mapper.FeatureSignOffBundleMemberMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -52,6 +54,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 条件は最後の評価の結果（memory）を出す。「再評価」は1件だけを {@code Purpose.DISPLAY} で評価し、状態を遷移させない（1分に1回まで。
  * review P3-20）。応答に署名者の氏名・元の file 名・保存名・鍵の値・digest の全体を含めない（FE-AC-011-02）。
  */
+@Slf4j
 @Service
 public class FeatureEnablementQueryService {
 
@@ -73,6 +76,8 @@ public class FeatureEnablementQueryService {
     private final FeatureSignOffBundleMemberMapper memberMapper;
     private final FeatureEnablementTenant tenant;
     private final Clock clock;
+    /** 閉鎖の警告の件数（拡張点。FE-B01 の NF01 二者確認の DUAL template の件数）。 */
+    private final ObjectProvider<FeatureEnablementCloseWarningSource> closeWarningSources;
     private final Map<Feature, Instant> lastDisplayEvaluation = new ConcurrentHashMap<>();
 
     public FeatureEnablementQueryService(FeatureEnablementCatalog catalog, FeatureEnablementSnapshotHolder holder,
@@ -81,7 +86,8 @@ public class FeatureEnablementQueryService {
                                          FeatureEnablementRequestMapper requestMapper,
                                          FeatureEnablementEventMapper eventMapper, FeatureSignOffBundleMapper bundleMapper,
                                          FeatureSignOffBundleMemberMapper memberMapper, FeatureEnablementTenant tenant,
-                                         Clock clock) {
+                                         Clock clock, ObjectProvider<FeatureEnablementCloseWarningSource> closeWarningSources) {
+        this.closeWarningSources = closeWarningSources;
         this.catalog = catalog;
         this.holder = holder;
         this.switches = switches;
@@ -120,9 +126,10 @@ public class FeatureEnablementQueryService {
                             LocalDate validUntil, List<String> detailCodes) {
     }
 
-    /** 開放単位の詳細。 */
+    /** 開放単位の詳細（{@code closeWarnings} は閉鎖の確認の dialog に出す警告の件数。design §5.5）。 */
     public record UnitDetail(UnitSummary unit, List<RequiredSignOff> signOffs, List<KeyView> keys, List<String> children,
-                             List<RequestView> requests, List<String> subgates) {
+                             List<RequestView> requests, List<String> subgates,
+                             List<FeatureEnablementCloseWarningSource.CloseWarning> closeWarnings) {
     }
 
     /** 開放単位が要する署名の種別と現在の確認済みの署名（氏名を含めない）。 */
@@ -227,7 +234,44 @@ public class FeatureEnablementQueryService {
         List<RequestView> requests = recent.stream().map(request -> requestView(request, actor)).toList();
         List<String> subgates = unit.subgates().stream().map(subgate -> subgate.code()).toList();
         return new UnitDetail(summary(unit, snapshot, pendingRequest, actor), signOffs, keys, children, requests,
-                subgates);
+                subgates, closeWarnings(feature, snapshot));
+    }
+
+    /**
+     * 閉鎖の警告（拡張点の件数。読めない拡張点は飛ばす。閉鎖そのものは妨げない）。親を閉じると開いている子も
+     * {@code AUTO_CLOSED(PARENT_CLOSED)} になるため、DB で開いている子の警告も合わせて出す（例: NF01 本体の閉鎖で二者確認の DUAL template
+     * の件数。復審 rb-fe-b-656d71b8 の P3-2）。
+     */
+    private List<FeatureEnablementCloseWarningSource.CloseWarning> closeWarnings(Feature feature,
+                                                                               FeatureEnablementSnapshot snapshot) {
+        List<FeatureEnablementCloseWarningSource.CloseWarning> warnings = new ArrayList<>(closeWarnings(feature));
+        for (Feature child : catalog.children(feature)) {
+            if (snapshot.unit(child).state().openLike()) {
+                warnings.addAll(closeWarnings(child, snapshot));
+            }
+        }
+        return List.copyOf(warnings);
+    }
+
+    /** 1つの開放単位の閉鎖の警告。 */
+    private List<FeatureEnablementCloseWarningSource.CloseWarning> closeWarnings(Feature feature) {
+        if (closeWarningSources == null) {
+            return List.of();
+        }
+        List<FeatureEnablementCloseWarningSource.CloseWarning> warnings = new ArrayList<>();
+        closeWarningSources.orderedStream().filter(source -> source.features().contains(feature)).forEach(source -> {
+            try {
+                for (FeatureEnablementCloseWarningSource.CloseWarning warning : source.closeWarnings(feature)) {
+                    if (warning != null && warning.count() > 0) {
+                        warnings.add(warning);
+                    }
+                }
+            } catch (RuntimeException e) {
+                log.warn("[機能の開放] 閉鎖の警告の件数を読めません（警告を出さずに続けます）: feature={} source={} exceptionClass={}",
+                        feature.name(), source.getClass().getSimpleName(), e.getClass().getSimpleName());
+            }
+        });
+        return List.copyOf(warnings);
     }
 
     /**

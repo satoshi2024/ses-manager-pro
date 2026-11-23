@@ -27,8 +27,11 @@ import java.util.regex.Pattern;
  * 記録の成否にかかわらず拒否する。監査には決定ID・source code・phase・固定の理由コードだけを書き、CSV本文や
  * hash全体は書かない（content phaseはsource SHA-256の先頭12桁だけ）。
  *
- * <p>承認設定は起動時に一度だけbindされる。content phaseでも評価をやり直し、日付の変わり目での失効と、
- * token発行時と異なる決定（決定ID・digest）を拒否する。
+ * <p>承認の値は要求ごとに源（{@link ImportAdmissionApprovalSource}）から読む。prod の源は確認済みの署名 {@code NF06_ADMISSION}
+ * （feature-enablement-console design §8.3。FE-B02）で、署名の差替えは再起動なしに次の要求から効く。property の源（dev・test）は
+ * 起動時に一度だけbindされた値。content phaseでも評価をやり直し、日付の変わり目での失効と、token発行時と異なる決定
+ * （決定ID・digest）を拒否する。期間の外は NF06 の開放の条件も成り立たず、NF06 全体が閉じる（404。D-8）。本 port の拒否は
+ * その閉鎖の書込みの前と、閉鎖と同時の要求の多重防御になる。
  */
 @Component
 public final class ApprovedSourceImportAdmissionPort implements ImportAdmissionPort {
@@ -40,27 +43,32 @@ public final class ApprovedSourceImportAdmissionPort implements ImportAdmissionP
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ApprovedSourceImportAdmissionPort.class);
 
-    private final ImportAdmissionApprovalProperties properties;
+    private final ImportAdmissionApprovalSource source;
     private final ObjectProvider<AuditLogService> auditProvider;
     private final AuditLogService fixedAudit;
     private final Clock clock;
 
     @Autowired
-    public ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalProperties properties,
+    public ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalSource source,
                                              ObjectProvider<AuditLogService> auditProvider) {
-        this(properties, auditProvider, null, Clock.systemUTC());
+        this(source, auditProvider, null, Clock.systemUTC());
     }
 
     /** test用。監査と時刻を差し替える（auditがnullなら許可は記録できないため常に503になる）。 */
     ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalProperties properties, AuditLogService audit,
                                       Clock clock) {
-        this(properties, null, audit, clock);
+        this(new ImportAdmissionApprovalSource.Property(properties), null, audit, clock);
     }
 
-    private ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalProperties properties,
+    /** test用。源・監査・時刻を差し替える。 */
+    ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalSource source, AuditLogService audit, Clock clock) {
+        this(source, null, audit, clock);
+    }
+
+    private ApprovedSourceImportAdmissionPort(ImportAdmissionApprovalSource source,
                                               ObjectProvider<AuditLogService> auditProvider,
                                               AuditLogService fixedAudit, Clock clock) {
-        this.properties = properties == null ? new ImportAdmissionApprovalProperties() : properties;
+        this.source = source == null ? new ImportAdmissionApprovalSource.Property(null) : source;
         this.auditProvider = auditProvider;
         this.fixedAudit = fixedAudit;
         this.clock = clock == null ? Clock.systemUTC() : clock;
@@ -118,7 +126,7 @@ public final class ApprovedSourceImportAdmissionPort implements ImportAdmissionP
     }
 
     private ImportAdmissionApproval.Evaluation evaluate() {
-        return ImportAdmissionApproval.evaluate(properties, ImportAdmissionApproval.businessDate(clock));
+        return ImportAdmissionApproval.evaluate(source.current(), ImportAdmissionApproval.businessDate(clock));
     }
 
     /** tokenを発行時の決定（決定ID・digestの先頭16桁）へ束縛する接頭辞。 */

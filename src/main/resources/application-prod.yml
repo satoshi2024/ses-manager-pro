@@ -114,7 +114,7 @@ app:
   pwa:
     context-secret: ${PWA_CONTEXT_SECRET:}
   # NF-06 preview・error exportの行参照HMAC鍵（開発用の既定値を引き継がない）。
-  # NF-06 ONで未設定・形式不正・開発用鍵なら起動失敗（ImportRowReferenceKeyStartupValidator）。OFFなら起動を止めない。
+  # 未設定・形式不正・開発用鍵なら NF-06 の開放の条件が成り立たず、NF-06 を開けない・開いていれば閉じる（起動は止めない。FE-B02）。
   import-center:
     row-reference:
       hmac-key: ${IMPORT_ROW_REFERENCE_HMAC_KEY:}
@@ -133,19 +133,13 @@ app:
   # ポータル・NF03・NF03 資格番号・NF04・NF10。FE-A11）の placeholder はここに置かない。それらの旧い環境変数（FEATURE_NF01_ENABLED 等）
   # を設定すると prod は起動しない（FeatureEnablementProductionValidator）。残りの機能は段階 B〜D で system の中へ移すまで、ここの値で
   # 開閉する（本番も既定は OFF。再起動で反映）。手順: .kiro/specs/production-launch/feature-switches.md
-  features:
-    # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
-    nf01-dual-confirmation:
-      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
-      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
-    # NF-02の子（顧客ポータルの問い合わせ）の公開範囲（開閉は system の中。公開範囲の変更は段階 B の FE-B03 で system の中へ移す）
-    nf02-customer-portal:
-      # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）
-      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
-    # NF-06（取込センター画面・API）。ONにする場合はapp.import-center.admissionの署名済み承認設定と
-    # 行参照鍵（IMPORT_ROW_REFERENCE_HMAC_KEY）が必須（不備は起動失敗）。手順: feature-switches.md 4.8
-    nf06:
-      enabled: ${FEATURE_NF06_ENABLED:false}
+  # 段階 B: NF01 二者確認（FE-B01）も system の中で開閉し、Privacy 署名は画面で登録・確認する（placeholder を置かない。
+  # FEATURE_NF01_DUAL_CONFIRMATION_ENABLED・FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF を設定すると起動しない）。
+  # 段階 B: NF06（FE-B02）も system の中で開閉し、admission の承認は署名 NF06_ADMISSION として画面で登録・確認する
+  # （FEATURE_NF06_ENABLED・IMPORT_ADMISSION_* を設定すると起動しない）。
+  # 段階 B: NF02 顧客ポータルの公開範囲（FE-B03）は承認で変える設定（画面「設定」tab の申請と別の管理者の承認）で、
+  # FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE を設定すると起動しない。未設定ならportal起票の問い合わせだけを出す。
+  # 段階 B の後、ここに置く app.features.* の placeholder は無い（NF05・NF07 は各自の property の名前空間）。
 
 # ===== freee連携（HFP-01） =====
 # prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。

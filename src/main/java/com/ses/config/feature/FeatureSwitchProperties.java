@@ -133,14 +133,16 @@ public class FeatureSwitchProperties {
      * 二者確認の子スイッチ。ON/OFFに加えて、prodでONにする根拠となるPrivacy署名の記録を持つ。
      *
      * <p>{@code privacySignOffRef} は業務comment（{@code business_comment}・{@code decision_comment}）の保存期間と
-     * 削除・匿名化経路についてPrivacyが署名した決定の参照（例: review文書のID）。値の妥当性は
-     * {@code LifecycleDualConfirmationReleaseGate} が起動時に検査し、本classは保持だけを行う。</p>
+     * 削除・匿名化経路についてPrivacyが署名した決定の参照（例: review文書のID）。dev・test の property の源でだけ使い、値の妥当性は
+     * 機能の開放の条件（{@code LifecycleDualConfirmationEnablementConditions}）が判定する。prod の源は DB で、署名は画面で
+     * 登録・確認し、この property（{@code FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF}）を設定すると起動しない
+     * （{@code FeatureEnablementProductionValidator}。FE-B01）。本classは保持だけを行う。</p>
      */
     @Data
     @EqualsAndHashCode(callSuper = true)
     @ToString(callSuper = true)
     public static class DualConfirmationToggle extends Toggle {
-        /** Privacy署名の参照。未設定・空ならprodではONで起動できない。 */
+        /** Privacy署名の参照（property の源の条件の評価だけに使う。開閉は {@code enabled} のまま）。 */
         private String privacySignOffRef;
     }
 

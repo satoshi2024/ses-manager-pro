@@ -9,42 +9,42 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
-import java.util.List;
 
 /**
- * 本番起動時のNF-06 admission承認設定の検査（Q-5）。
+ * 本番起動時のNF-06 admission承認の値の確認（Q-5）。起動は止めない（feature-enablement-console design §8.3、requirements §7 の
+ * 「機能を閉じる」。FE-B02）。
  *
- * <ul>
- *   <li>NF-06スイッチがOFF：起動を止めない（初回リリースはOFFで配備するため）。部分的な設定があればWARNだけを出す。
- *       OFFの間は取込APIが404になり、admissionにも到達しない。</li>
- *   <li>NF-06スイッチがON：承認設定に構造的な不備（未設定・部分設定・形式不正・placeholder・digest不一致・有効期間の
- *       上限超過等）があれば起動を失敗させる。設定誤りを最初の利用者requestまで潜伏させないためである。</li>
- *   <li>NF-06スイッチがONで、不備が時間の経過だけ（署名日前・失効）：起動は止めず、取込の受付だけを拒否したまま
- *       WARNを出す（{@value #LOG_CODE_STOPPED}）。承認の失効で無関係な機能まで再起動のたびに使えなくなる事態を避ける。
- *       admission portは要求ごとに評価し直すため、受付は自動では再開せず、再承認後に設定を差し替えて再起動する。</li>
- * </ul>
- * メッセージには固定の違反コードだけを出し、設定値は出さない。
+ * <p>以前は NF-06 がONで承認設定に構造的な不備があれば起動を失敗させ、時間要因（署名日前・失効）だけなら起動して取込の受付だけを
+ * 拒否していた。機能の開放では、同じ判定（{@link ImportAdmissionApproval#evaluate}）を profile に依らない評価器
+ * {@code ImportCenterEnablementConditions} が使い、条件が成り立たなければ NF-06 を開けない・開いていれば起動時・定期の評価で
+ * 自動閉鎖する（期間の外も NF-06 全体を閉じる。D-8・J-09）。本classは起動の log に評価の結果を出すだけで、値（決定ID 以外）を出さない。
+ * 承認の値は源（{@link ImportAdmissionApprovalSource}。prod は確認済みの署名 {@code NF06_ADMISSION}）から読む。</p>
  */
 @Component
 @Profile("prod")
 public class ImportAdmissionStartupValidator {
-    /** 時間要因で取込受付を止めたまま起動したことを示す固定コード（監視のlog検索用）。 */
+    /** 起動時に NF-06 が開いているのに承認が成り立たない（起動時の評価で閉じる）ことを示す固定コード（監視のlog検索用）。 */
     public static final String LOG_CODE_STOPPED = "NF06_IMPORT_ADMISSION_STOPPED_AT_STARTUP";
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ImportAdmissionStartupValidator.class);
 
-    private final ImportAdmissionApprovalProperties properties;
+    private final ImportAdmissionApprovalSource source;
     private final ObjectProvider<FeatureSwitches> featureSwitches;
     private final Clock clock;
 
     @Autowired
-    public ImportAdmissionStartupValidator(ImportAdmissionApprovalProperties properties,
+    public ImportAdmissionStartupValidator(ImportAdmissionApprovalSource source,
                                            ObjectProvider<FeatureSwitches> featureSwitches) {
-        this(properties, featureSwitches, Clock.systemUTC());
+        this(source, featureSwitches, Clock.systemUTC());
     }
 
     ImportAdmissionStartupValidator(ImportAdmissionApprovalProperties properties,
                                     ObjectProvider<FeatureSwitches> featureSwitches, Clock clock) {
-        this.properties = properties;
+        this(new ImportAdmissionApprovalSource.Property(properties), featureSwitches, clock);
+    }
+
+    ImportAdmissionStartupValidator(ImportAdmissionApprovalSource source,
+                                    ObjectProvider<FeatureSwitches> featureSwitches, Clock clock) {
+        this.source = source == null ? new ImportAdmissionApprovalSource.Property(null) : source;
         this.featureSwitches = featureSwitches;
         this.clock = clock;
     }
@@ -53,6 +53,7 @@ public class ImportAdmissionStartupValidator {
     void validate() {
         FeatureSwitches switches = featureSwitches == null ? null : featureSwitches.getIfAvailable();
         boolean enabled = switches != null && switches.isEnabled(Feature.NF06);
+        ImportAdmissionApprovalProperties properties = source.current();
         ImportAdmissionApproval.Evaluation evaluation =
                 ImportAdmissionApproval.evaluate(properties, ImportAdmissionApproval.businessDate(clock));
         if (evaluation.complete()) {
@@ -62,17 +63,13 @@ public class ImportAdmissionStartupValidator {
         }
         if (!enabled) {
             if (ImportAdmissionApproval.configured(properties)) {
-                log.warn("[取込] NF-06 admission承認設定が不完全ですが、NF-06がOFFのため起動を継続します（取込は拒否）: "
-                        + "violations={}", String.join(",", evaluation.violations()));
+                log.warn("[取込] NF-06 admission承認設定が不完全です（NF-06は閉じているため取込は拒否のまま）: violations={}",
+                        String.join(",", evaluation.violations()));
             }
             return;
         }
-        List<String> blocking = ImportAdmissionApproval.structuralViolations(evaluation);
-        if (!blocking.isEmpty()) {
-            throw new IllegalStateException("本番のNF-06取込admission承認設定が完全でないため起動できません: "
-                    + String.join(",", evaluation.violations()));
-        }
-        log.warn("{}: NF-06取込admissionの承認が有効期間外のため取込受付を停止して起動します。再承認後に再起動してください: "
-                + "violations={}", LOG_CODE_STOPPED, String.join(",", evaluation.violations()));
+        log.warn("{}: NF-06取込admissionの承認が成り立たないため、取込の受付を拒否し、起動時の評価でNF-06を閉じます"
+                + "（起動は止めません。再承認の後に画面で申請と承認をやり直してください）: violations={}",
+                LOG_CODE_STOPPED, String.join(",", evaluation.violations()));
     }
 }

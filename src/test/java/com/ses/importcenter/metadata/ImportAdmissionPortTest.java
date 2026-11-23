@@ -227,6 +227,53 @@ class ImportAdmissionPortTest {
                         java.util.Set.of("a-source", "b-source"))));
     }
 
+    /**
+     * FE-B02（feature-enablement-console design §8.3）: DB の源では確認済みの署名 {@code NF06_ADMISSION}（golden vector の値）から
+     * 承認の値を読み、要求ごとに読み直すため、署名を差し替える（ここでは失効した署名）と再起動なしに次の要求から拒否する。
+     */
+    @Test
+    void DBの源は確認済みの署名の値で許可し署名の差替えは次の要求から効く() {
+        Clock december = Clock.fixed(Instant.parse("2026-12-10T03:00:00Z"), ZoneOffset.UTC);
+        com.ses.featureenablement.config.FeatureEnablementProperties properties =
+                new com.ses.featureenablement.config.FeatureEnablementProperties();
+        properties.setSource(com.ses.featureenablement.config.FeatureEnablementProperties.Source.DATABASE);
+        com.ses.featureenablement.state.FeatureEnablementSnapshotHolder holder =
+                new com.ses.featureenablement.state.FeatureEnablementSnapshotHolder(null,
+                        com.ses.featureenablement.state.FeatureEnablementTenant.fixed("default"), properties,
+                        new com.ses.featureenablement.state.FeatureEnablementOverlay(), december);
+        holder.replace(admissionSnapshot(LocalDate.of(2026, 12, 1), LocalDate.of(2027, 11, 30)));
+        ImportAdmissionPort admission = new ApprovedSourceImportAdmissionPort(new ImportAdmissionApprovalSource.Database(
+                holder, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(),
+                new ImportAdmissionApprovalSource.Property(null)), audit, december);
+        ImportAuthorizedContext context = new ImportAuthorizedContext("default", 1, 2);
+
+        assertNotNull(admission.admitBeforeBody(context, new ImportUploadSource(3, "CRM", 1), ImportEntity.CUSTOMER,
+                "ses-import-v1", ImportEncoding.UTF8));
+
+        holder.replace(admissionSnapshot(LocalDate.of(2025, 12, 1), LocalDate.of(2026, 12, 1)));
+        assertDenied(() -> admission.admitBeforeBody(context, new ImportUploadSource(3, "CRM", 1), ImportEntity.CUSTOMER,
+                "ses-import-v1", ImportEncoding.UTF8));
+    }
+
+    private static com.ses.featureenablement.state.FeatureEnablementSnapshot admissionSnapshot(LocalDate signedOn,
+                                                                                            LocalDate expiresOn) {
+        ImportAdmissionApprovalProperties values = new ImportAdmissionApprovalProperties();
+        values.setDecisionId("DO-NF06-2026-001");
+        values.setTenantId("default");
+        values.setSignedOn(signedOn.toString());
+        values.setExpiresOn(expiresOn.toString());
+        values.setSourceCodes(List.of("CRM_2", "crm-2", "Crm", "crm2", "crm"));
+        String json = "{\"approvalDigest\":\"" + ImportAdmissionApproval.computeDigest(values)
+                + "\",\"decisionId\":\"DO-NF06-2026-001\",\"sourceCodes\":\"CRM_2,crm-2,Crm,crm2,crm\",\"tenantId\":\"default\"}";
+        com.ses.featureenablement.state.FeatureEnablementSnapshot.ConfirmedSignOff signOff =
+                new com.ses.featureenablement.state.FeatureEnablementSnapshot.ConfirmedSignOff(7L, 0,
+                        ImportAdmissionApprovalSource.KIND, "DO-NF06-2026-001", "DATA_OWNER", signedOn, expiresOn, json,
+                        "DECISION");
+        java.time.Instant now = java.time.Instant.parse("2026-12-10T03:00:00Z");
+        return new com.ses.featureenablement.state.FeatureEnablementSnapshot(1L, now, now, true, java.util.Map.of(),
+                java.util.Map.of(), java.util.Map.of(ImportAdmissionApprovalSource.KIND, signOff), java.util.Map.of());
+    }
+
     private static ImportAdmissionApprovalProperties approved() {
         ImportAdmissionApprovalProperties properties = new ImportAdmissionApprovalProperties();
         properties.setDecisionId("DO-NF06-2026-001");

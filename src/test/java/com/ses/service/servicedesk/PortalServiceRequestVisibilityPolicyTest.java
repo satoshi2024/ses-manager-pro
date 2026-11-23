@@ -139,6 +139,102 @@ class PortalServiceRequestVisibilityPolicyTest {
                 .contains(OffsetDateTime.parse("2027-04-01T00:00:00+09:00"));
     }
 
+    /**
+     * FE-B03（feature-enablement-console design §8.4、FE-AC-010-01）: DB の源では公開範囲を構築時に固定せず、判定のたびに源の設定を
+     * 読む。承認で値が変われば次の判定から新しい範囲になり、未設定へ戻せば portal 起票だけになる。
+     */
+    @Test
+    void DBの源では値の変更が次の判定から効き未設定へ戻すとportal起票だけになる() {
+        MutableSource source = new MutableSource();
+        PortalServiceRequestVisibilityPolicy policy = new PortalServiceRequestVisibilityPolicy(source);
+        ServiceRequest internal = internalRequest("INTERNAL", LocalDateTime.of(2027, 4, 2, 9, 0));
+        assertThat(policy.isVisible(internal, TOKYO)).as("未設定").isFalse();
+        assertThat(policy.describe()).contains("判定のたびに読む");
+
+        source.value = "2027-04-01T00:00:00+09:00";
+        assertThat(policy.isVisible(internal, TOKYO)).isTrue();
+        assertThat(policy.visibleSince()).contains(OffsetDateTime.parse("2027-04-01T00:00:00+09:00"));
+        LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
+        policy.restrict(wrapper, TOKYO);
+        assertThat(wrapper.getSqlSegment().toLowerCase(Locale.ROOT)).contains("created_at");
+
+        source.value = "2027-05-01T00:00:00+09:00";
+        assertThat(policy.isVisible(internal, TOKYO)).as("範囲を狭めた次の判定から出さない").isFalse();
+
+        source.value = null;
+        assertThat(policy.visibleSince()).isEmpty();
+        assertThat(policy.isVisible(portalRequest(LocalDateTime.of(2026, 12, 1, 9, 0)), TOKYO)).isTrue();
+    }
+
+    /** FE-B03: DB の値が壊れていても例外にせず portal 起票だけを出す（fail-closed。起動も判定も止めない）。 */
+    @Test
+    void DBの源の値を解釈できなければportal起票だけを出し源を読めなくても例外にしない() {
+        MutableSource source = new MutableSource();
+        source.value = "2027-04-01T00:00:00";
+        PortalServiceRequestVisibilityPolicy policy = new PortalServiceRequestVisibilityPolicy(source);
+        assertThat(policy.visibleSince()).isEmpty();
+        assertThat(policy.isVisible(internalRequest("INTERNAL", LocalDateTime.of(2030, 1, 1, 0, 0)), TOKYO)).isFalse();
+        assertThat(policy.isVisible(portalRequest(LocalDateTime.of(2026, 12, 1, 9, 0)), TOKYO)).isTrue();
+
+        source.failing = true;
+        assertThat(policy.visibleSince()).isEmpty();
+    }
+
+    /** FE-B03: Spring の構築は、DB の源なら構築時に値を解釈しない（不正な property でも起動を止めない）。property の源は従来どおり。 */
+    @Test
+    void 構築時の解釈の失敗で起動を止めるのはpropertyの源の時だけ() {
+        FeatureSwitchProperties invalid = new FeatureSwitchProperties();
+        invalid.getNf02CustomerPortal().setVisibleSince("2027-04-01");
+        MutableSource database = new MutableSource();
+        assertThat(new PortalServiceRequestVisibilityPolicy(invalid, provider(database)).visibleSince()).isEmpty();
+        MutableSource property = new MutableSource();
+        property.database = false;
+        assertThatThrownBy(() -> new PortalServiceRequestVisibilityPolicy(invalid, provider(property)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new PortalServiceRequestVisibilityPolicy(invalid, provider(null)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static org.springframework.beans.factory.ObjectProvider<com.ses.featureenablement.state.FeatureEnablementStateSource>
+            provider(com.ses.featureenablement.state.FeatureEnablementStateSource source) {
+        org.springframework.beans.factory.ObjectProvider<com.ses.featureenablement.state.FeatureEnablementStateSource> provider =
+                org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(source);
+        return provider;
+    }
+
+    /** 設定の値を差し替えられる試験用の源。 */
+    private static final class MutableSource implements com.ses.featureenablement.state.FeatureEnablementStateSource {
+        private volatile String value;
+        private volatile boolean failing;
+        private volatile boolean database = true;
+
+        @Override
+        public boolean isOpen(com.ses.config.feature.Feature feature) {
+            return true;
+        }
+
+        @Override
+        public java.util.Optional<String> setting(String key) {
+            if (failing) {
+                throw new IllegalStateException("snapshot");
+            }
+            return com.ses.featureenablement.catalog.FeatureEnablementCatalog.SETTING_NF02_VISIBLE_SINCE.equals(key)
+                    ? java.util.Optional.ofNullable(value) : java.util.Optional.empty();
+        }
+
+        @Override
+        public long generation() {
+            return 0L;
+        }
+
+        @Override
+        public boolean database() {
+            return database;
+        }
+    }
+
     private static PortalServiceRequestVisibilityPolicy policy(String visibleSince) {
         return new PortalServiceRequestVisibilityPolicy(OffsetDateTime.parse(visibleSince));
     }

@@ -68,7 +68,8 @@ class FeatureEnablementTemplateRenderingTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
         assertThat(html).contains("id=\"fe-units-tab\"", "id=\"fe-requests-tab\"", "id=\"fe-signoffs-tab\"",
-                "id=\"fe-events-tab\"", "id=\"featureEnablementModal\"", "id=\"featureEnablementBundleModal\"",
+                "id=\"fe-events-tab\"", "id=\"fe-settings-tab\"", "id=\"featureEnablementSettings\"",
+                "id=\"featureEnablementModal\"", "id=\"featureEnablementBundleModal\"",
                 "id=\"featureEnablementDetailModal\"", "/js/modules/feature-enablement.js", "href=\"/feature-enablement\"",
                 "機能の開放");
         assertThat(html).containsPattern(

@@ -207,9 +207,9 @@ public final class FeatureEnablementCatalog {
                 evidence("NF01_STAGING_VERIFICATION", "PRODUCTION_OWNER"),
                 evidence("NF01_RUNNER_EVIDENCE", "TECH_LEAD"));
 
-        // NF01 二者確認（§6.2）。証跡種別の検査と Privacy 署名の参照の検査は FE-B01 の評価器
+        // NF01 二者確認（§6.2）。証跡種別の検査と Privacy 署名の参照の検査は LifecycleDualConfirmationEnablementConditions（FE-B01）
         b.unit(Feature.NF01_DUAL_CONFIRMATION, false, false, true, List.of(),
-                List.of("LifecycleDualConfirmationReleaseGate.validate（起動時検査）", "FS 4.9.2・4.9.5",
+                List.of("LifecycleDualConfirmationReleaseGate.acceptable（旧い起動時検査の判定）", "FS 4.9.2・4.9.5",
                         "署名表の NF01 二者確認の行 (1)〜(7)"),
                 kind("NF01_DUAL_PRIVACY", SignOffKindClass.DECISION, SignOffKind.ReferenceRule.NF01_DUAL_PRIVACY,
                         List.of(), null, false, "PRIVACY_OWNER"),
@@ -217,6 +217,8 @@ public final class FeatureEnablementCatalog {
                 decision("NF01_DUAL_BREAK_GLASS_DECISION", "SECURITY"),
                 evidence("NF01_DUAL_RUNNER_EVIDENCE", "TECH_LEAD"),
                 evidence("NF01_DUAL_REVIEW_PASS", "TECH_LEAD"));
+        // 段階 B の DB 管理の印（FE-B01）
+        b.databaseManaged(Set.of(Feature.NF01_DUAL_CONFIRMATION));
 
         // NF02 本体（§6.3）。全社共通カレンダーは開放の時だけの条件（D-9）。評価器は FE-A11
         b.unit(Feature.NF02, false, false, true, List.of(),
@@ -292,10 +294,10 @@ public final class FeatureEnablementCatalog {
                 sreLoad, stagingWire, digestRule);
         b.openTransition(Feature.NF05_OUTBOUND, CODE_NF05_BARRIER_OFF);
 
-        // NF06（§6.10）。評価器は FE-B02
+        // NF06（§6.10）。評価器は ImportCenterEnablementConditions（FE-B02）
         b.unit(Feature.NF06, false, false, true,
                 List.of(new KeyRequirement("IMPORT_ROW_REFERENCE_HMAC_KEY", "app.import-center.row-reference.hmac-key")),
-                List.of("ImportAdmissionStartupValidator・ImportRowReferenceKeyStartupValidator（起動時検査）",
+                List.of("ImportAdmissionApproval.evaluate・ImportSourceRowReference.state（旧い起動時検査の判定）",
                         "FS 4.8.2 の #1〜#10", "署名表の NF06 の行"),
                 kind("NF06_ADMISSION", SignOffKindClass.DECISION, SignOffKind.ReferenceRule.NF06_ADMISSION,
                         List.of("decisionId", "tenantId", "sourceCodes", "approvalDigest"), null, false, "DATA_OWNER"),
@@ -303,6 +305,8 @@ public final class FeatureEnablementCatalog {
                 evidence("NF06_SRE_LB", "SRE"),
                 evidence("NF06_DBA_ACCOUNT", "DBA"),
                 evidence("NF06_STAGING_CHECK", "PRODUCTION_OWNER"));
+        // 段階 B の DB 管理の印（FE-B02）
+        b.databaseManaged(Set.of(Feature.NF06));
 
         // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は FE-C05
         List<KeyRequirement> journalKeys = List.of(

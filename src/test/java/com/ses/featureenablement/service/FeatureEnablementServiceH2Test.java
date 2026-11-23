@@ -199,9 +199,10 @@ class FeatureEnablementServiceH2Test {
         assertThat(unsatisfied.getCode()).isEqualTo(409);
         assertThat(unsatisfied.getMessageKey()).isEqualTo("error.featureEnablement.conditionsUnsatisfied");
         assertThat(String.valueOf(unsatisfied.getArgs()[0])).contains("signoff.NF10_REPORT_OWNER.missing");
-        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）
-        fixture.confirmedSignOffs(Feature.NF06, SIGNED, EXPIRES);
-        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF06, null, requester),
+        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）。NF06 は FE-B02 で評価器を足したため、
+        // 評価器がまだ無い NF05 inbound で確かめる（段階 D の FE-D05 で評価器を足す時は、この case を別の開放単位へ移す）
+        fixture.confirmedSignOffs(Feature.NF05_INBOUND, SIGNED, EXPIRES);
+        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF05_INBOUND, null, requester),
                 BusinessException.class);
         assertThat(String.valueOf(missing.getArgs()[0])).contains("evaluator.missing");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_request WHERE tenant_id = 'default'",

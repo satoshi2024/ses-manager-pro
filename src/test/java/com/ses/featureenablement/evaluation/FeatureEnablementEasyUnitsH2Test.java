@@ -81,9 +81,10 @@ class FeatureEnablementEasyUnitsH2Test {
         for (Feature feature : STAGE_A) {
             fixture.confirmedSignOffs(feature, SIGNED, EXPIRES);
         }
-        // 本番の目録の段階 A の印で、試験の context の snapshot・一時の閉鎖・時計を読む DB の源
+        // 本番の目録の段階 A の印で、試験の context の snapshot・一時の閉鎖・時計を読む DB の源（段階 B〜D で印を足した開放単位は
+        // それぞれの段階の試験が確かめるため、ここは段階 A の7件だけに印を付けた写しで比べる）
         database = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay,
-                FeatureEnablementCatalog.standard(), propertySource, properties, clock));
+                FeatureEnablementCatalog.standard().withDatabaseManaged(STAGE_A), propertySource, properties, clock));
     }
 
     @AfterTransaction

@@ -37,11 +37,11 @@ public record SignOffKind(String code, SignOffKindClass kindClass, List<String> 
     public enum ReferenceRule {
         /** 英数字で始まる 4〜128 文字（{@code ._:/#-}）で placeholder の語を含まない（共通の規則）。 */
         GENERIC,
-        /** NF01 二者確認の Privacy 署名の参照（{@code LifecycleDualConfirmationReleaseGate.acceptable}）。段階 B で検査を足す。 */
+        /** NF01 二者確認の Privacy 署名の参照（{@code LifecycleDualConfirmationReleaseGate.acceptable}。英字と数字を含む。FE-B01）。 */
         NF01_DUAL_PRIVACY,
         /** NF07 の決定 ID（{@code PrivacyDecisionBinding} の規則）。段階 C で検査を足す。 */
         NF07_DECISION,
-        /** NF06 の admission の決定（{@code ImportAdmissionApproval.evaluate}）。段階 B で検査を足す。 */
+        /** NF06 の admission の決定（参照は共通の規則、構造化された値は {@code ImportAdmissionApproval.evaluate}。FE-B02）。 */
         NF06_ADMISSION,
         /** DG-05-IN の決定 ID（{@code DG-05-IN-[0-9]{8}-[0-9]{2}}）。 */
         NF05_DG05_IN,
