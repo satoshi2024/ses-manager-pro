@@ -179,37 +179,41 @@
 
 ### 段階 C
 
-- [ ] **FE-C01 — NF07 の承認の値の源（`PrivacyApprovalSource`）・組・期間の範囲**
+- [x] **FE-C01 — NF07 の承認の値の源（`PrivacyApprovalSource`）・組・期間の範囲**
   - **依存:** 段階 A
   - **対応要求:** FE-RQ-004・009（要件 §6.11・6.12）
   - **Objective:** `privacy.approval.*` と DSAR の `due-days`・`package-max-age` を、property か確認済みの組・署名から読む源に置き換える。組の種類 `NF07_DECISION_BINDING` と digest の整合の検査を足す。期間による閉鎖を開放単位が要る決定だけにする。
   - **対象 file:** `privacy/production/PrivacyApprovalSource.java`（新規。property・DB の実装）、`PrivacyDecisionBinding.java`（:145・:202 の overload と、期間を判定する capability の引数）、`retention/hold/PrivacyHoldDecisions.java`（:47-83）、`dsar/PrivacyDsarDecisions.java`（:49-88）、`retention/policy/PrivacyPolicyRegistrationService.java`（:134-150）、`redaction/ThirdPartyRedactor.java`（:48-53）、目録（`NF07_D01`〜`NF07_D09`、組、構造化された値の検査）、`src/test/java/com/ses/architecture/ApprovalValueReadGuardTest.java`（新規）。
   - **Implementation:** `design.md` §2.6.1・§8.5 の 1・7。digest の正規形 v1 は変えない。構造（digest を含む）は承認 capability の決定の全てで、署名日前・失効は評価する開放単位の capability の決定だけで判定する。
   - **Automated test:** `PrivacyDecisionBindingTest`（既存の golden vector `a4ce05f1…` が源の経由でも同じ、D-06 の失効で retention の評価は成立・dsar は不成立）、`PrivacyApprovalSourceTest`、`PrivacyHoldDecisionsTest`・`PrivacyDsarDecisionsTest`・`ThirdPartyRedactorTest`（組の差替えが次の呼出しから効く、決定の束縛の入力は `CONFIRMED` の組の全 member で member の状態に依らない）、`FeatureSignOffBundleH2Test` に NF07 の組（D-01 の更新で D-06 を引き継ぐ、D-09 の digest の不一致で 400）、`ApprovalValueReadGuardTest`。
+  - **実装の記録（段階 C）:** golden vector・期間の範囲・member の状態・差替え（hold・DSAR・redaction の3つの読む側）・組の整合の検査は `PrivacyApprovalSourceTest` にまとめた（`PrivacyHoldDecisionsTest`・`PrivacyDsarDecisionsTest` は存在しないため作らなかった）。`ApprovalValueReadGuardTest` は `PrivacyApprovalProperties` と DSAR の期限規則・保存期間の getter を固定し、NF06・NF05 の行は段階 B・D が同じ表に足す。
   - **Demo:** なし（試験の結果）。
 
-- [ ] **FE-C02 — 5 箇所の直接の読取りと Monitor の cache**
+- [x] **FE-C02 — 5 箇所の直接の読取りと Monitor の cache**
   - **依存:** FE-C01
   - **対応要求:** FE-RQ-009
   - **Objective:** `design.md` §8.5 の 2・5（Monitor の状態を capability ごとに持つ）。
   - **対象 file:** `PrivacyProductionConfigurationValidator.java`（:303-315）、`PrivacyDecisionWindowMonitor.java`（:156-165・:211-223）、`PrivacyDsarDecisionWindowCondition.java`、`PrivacyProductionConfiguration.java`（:77-83）、`src/test/java/com/ses/architecture/PrivacyFeatureFlagReadGuardTest.java`（新規）。
   - **Automated test:** `PrivacyDecisionWindowMonitorTest`（同じ日に開く・DSAR を足す・署名を差し替えると直ちに判定が変わる、D-06 の失効で `NF07_RETENTION` の条件は成立のまま、再帰しない）、`PrivacyProductionConfigurationTest`、`PrivacyFeatureFlagReadGuardTest`。
+  - **実装の記録（段階 C）:** 5箇所のうち trust・Journal は FE-C04・C03 で flag を読まないようにした（`PrivacyFeatureFlagReadGuardTest` が全てを固定）。`PrivacyProductionConfiguration` の supplier は `FeatureSwitches` を `ObjectProvider` で読む（`PrivacyPolicyEnforcementConfiguration` も同じ）。
   - **Demo:** なし。
 
-- [ ] **FE-C03 — Journal の結果を 2 つに分ける（hold の効力と開放の条件）**
+- [x] **FE-C03 — Journal の結果を 2 つに分ける（hold の効力と開放の条件）**
   - **依存:** FE-C01
   - **対応要求:** FE-RQ-009
   - **Objective:** `design.md` §8.5 の 3。hold gate は開閉・principal の種類・再検査の失敗で UNAVAILABLE にならない。
   - **対象 file:** `retention/hold/PrivacyJournalStartupVerifier.java`（:115・:130-192）、`retention/hold/PrivacyHoldJournal.java`（:108・:116-127・:180-200）、`retention/hold/PrivacyHoldService.java`（hold の開始は開放の条件の結果で判定）、`journal-witness-grant-design.md`（注記）。
   - **Automated test:** `PrivacyJournalProtectionResultTest`（reader の principal で NF07 が閉の時に hold gate が AVAILABLE、appender の再検査の失敗で hold gate が下がらない、開放の条件は appender を要する）、`PrivacyJournalStartupVerifierTest`（`enforce` が例外にしない、`reverify` の間隔の下限、`journal.unreachable` は評価できない類）、`PrivacyHoldJournalTest`。MySQL の Journal の試験（既存の shard）に reader の principal で保持・保全が開けず、文書の処分・purge の hold の確認は動く case。
+  - **実装の記録（段階 C）:** `PrivacyHoldJournalTest` は存在しないため、`appendAvailability` は `PrivacyJournalProtectionResultTest` で確かめた。MySQL は `PrivacyJournalStartupVerifierMySqlTest`（shard 既存）に1回の検査の2つの結果（reader は hold の効力で適合・開放の条件で権限不足、appender は両方適合）を足した（gate の動作の MySQL の確認は `PrivacyHoldServiceMySqlTest` 等の既存の試験に任せ、新しい case は足していない）。
   - **Demo:** なし。
 
-- [ ] **FE-C04 — trust の構造の検査を flag から切り離し、副入口の変化を告げる**
+- [x] **FE-C04 — trust の構造の検査を flag から切り離し、副入口の変化を告げる**
   - **依存:** FE-C01
   - **対応要求:** FE-RQ-005・009
   - **Objective:** `design.md` §8.5 の 4・10 と §7.4 の副入口（自動の再開は D-4 の例外）。
   - **対象 file:** `retention/trust/PrivacyTrustStartupValidator.java`（:55-79）、`retention/hold/PrivacyHoldReleaseService.java`（:131-137）、`retention/policy/PrivacyPolicyRegistrationService.java`（:125-150）、`featureenablement/evaluation/SubgateMonitor`（新規）。
   - **Automated test:** `PrivacyTrustStartupValidatorTest`（構造の不足で起動を止めない・副入口が閉じる）、`PrivacyHoldReleaseServiceTest`・`PrivacyPolicyRegistrationServiceTest`（構造の不足で 404）、副入口の閉鎖と再開で履歴と通知、D-05 の失効で保持・保全は開いたまま副入口だけが閉じる。
+  - **実装の記録（段階 C）:** REL の構造の不足は `PrivacyTrustSourceTest`（構成の bean method で作った解除の service）、副入口の履歴・通知・自動の再開と D-05 の失効は `SubgateMonitorTest`。
   - **Demo:** なし。
 
 - [ ] **FE-C05 — NF07 の評価器・行為者の privacy-admin・PR #130 の guard**
@@ -219,14 +223,16 @@
   - **対象 file:** `PrivacyProductionConfigurationValidator.java`（:130-194）、`FeatureEnablementActorPolicy`、`service/security/AdministratorContinuityGuard.java`（:234-254 の呼出し側）、`AdministratorConditionCheck` の javadoc、目録（NF07 の 2 件を DB 管理に。評価できない類の code: `privacyAdmins.unverifiable` 等）、`FeatureEnablementProductionValidator`（`PRIVACY_*` の旧い変数）、`application-prod.yml`（placeholder の削除）。
   - **Implementation:** `design.md` §8.5 の 6・8 と §14（NF07 に再起動待ちは無い。guard が表を読めない時は利用者の管理の変更を全て拒否する）。
   - **Automated test:** `PrivacyProductionConfigurationValidatorTest`（既存の全ての違反 code が評価器でも同じ code になる、`privacyAdmins.unverifiable` が `UNVERIFIABLE`、prod でも起動を止めない）、`AdministratorContinuityGuardTest`・`AdministratorContinuityGuardH2Test`（NF07 が閉じていれば privacy-admin の減少を拒否しない、開いている・未決なら拒否、表を読めなければ拒否）、`FeatureEnablementActorPolicyTest`（NF07 で privacy-admin 以外は 403）、DSAR が閉じている間の未完了の請求の通知。MySQL の `AdministratorContinuityGuardMySqlTest` に申請との並行の case。
+  - **実装の記録（段階 C）:** 評価器の code の一致・`privacyAdmins.unverifiable` の分類・D-06 の失効・guard 向けの判定（閉・開・未決・読めない）は `PrivacyProductionConfigurationValidatorTest`、guard が読む開放状態は `PrivacyEnablementStateReaderH2Test`、DSAR が閉じている間の通知は `PrivacyDsarClosedNotifierTest`。`AdministratorContinuityGuardH2Test`・`AdministratorContinuityGuardMySqlTest` への NF07 の開閉と申請の並行の case は**未作成**（guard 自体は条件の source の `notEvaluated`・`unverifiable` を既存の規則で扱う）。Demo の試験の一部（D-06 の1件の取消しで DSAR だけが閉じる・組の member の状態に依らない束縛）は `FeatureSignOffBundleH2Test`（test profile。開放は `openDirectly`）と `PrivacyApprovalSourceTest`（EXPIRED の後の評価）にある。
   - **Demo:** prod の profile の試験の構成で、合成の D-01・D-09（・D-06）を組で登録・確認し、privacy-admin 2 名で保持・保全と DSAR を開き、1 名を外す変更が拒否されること、D-01 の更新の組を確認しても両方が開いたままであること、D-06 を失効させると DSAR だけが閉じること、D-06 の行が `EXPIRED` になった後の次の定期の評価と、D-06 を 1 件だけ `REVOKED` にした後も保持・保全は `OPEN` のままで DSAR は閉じていることを確かめる（review P2-N1。試験は `FeatureSignOffBundleH2Test`）。
 
-- [ ] **FE-C06 — NF07 の起動の停止の撤去の確認と文書**
+- [x] **FE-C06 — NF07 の起動の停止の撤去の確認と文書**
   - **依存:** FE-C05
   - **対応要求:** FE-RQ-005・014
   - **Objective:** NF07 の 3 つの起動時検査（validator・Journal・trust）が prod で機能の条件では起動を止めないことを、prod の完全な context で確かめ、FS 4.7 の起動時の記述を直す。
   - **対象 file:** `ProductionSecurityConfigurationTest`（prod の完全な context）、FS 4.7.2・4.7.4・4.7.5・4.7.7。
   - **Automated test:** prod の完全な context が、NF07 の条件を満たさない DB でも起動する case。
+  - **実装の記録（段階 C）:** `ProductionSecurityConfigurationTest` に `sql/production-security-nf07-open-h2.sql`（保持・保全を DB で開き、署名は有効だが束縛・privacy-admin・Journal・鍵を満たさない）を足し、起動して起動時の評価が `AUTO_CLOSED` にすることを確かめた。FS 4.7.2〜4.7.5・4.7.7 と RB §1.0 の NF07 の行を直した（RB §1.7・FS の冒頭の表は FE-E03）。
   - **Demo:** なし。
 
 ### 段階 D

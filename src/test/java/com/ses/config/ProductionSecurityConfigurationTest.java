@@ -32,7 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "app.features.nf01-dual-confirmation.enabled=false",
     "spring.flyway.enabled=false",
     "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
-    "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",
+    // FE-C06: NF07 保持・保全を DB で開き、その条件を満たさない状態から起動する（sql/production-security-nf07-open-h2.sql）
+    "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql,"
+            + "classpath:sql/production-security-nf07-open-h2.sql",
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
@@ -55,9 +57,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"compliance.gate.fingerprint-keys.default.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
     ,"certification.number-crypto.current-key-version=v1"
     ,"certification.number-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
-    // importしたapplication-test.ymlはNF07をONにするが、本番既定はOFF。prodでONにするとNF07の起動前提検査
-    // （PrivacyProductionConfigurationValidator、W3-14b）が決定ID束縛とprivacy-adminを要求するため、本番既定へ戻す
-    // （本番既定OFFは FeatureSwitchDefaultsTest、前提検査は PrivacyProductionConfigurationValidatorTest が検証する）。
+    // importしたapplication-test.ymlはNF07をONにするが、本番既定はOFF。prod の NF07 は DB の開放状態で開閉する（FE-C05）ため
+    // この値は開閉に効かないが、本番既定へ戻しておく（本番既定OFFは FeatureSwitchDefaultsTest が検証する）。
     ,"privacy.retention.enabled=false"
     ,"privacy.dsar.enabled=false"
     // prod の profile では backup の書込み静止が停止口（DISABLED）で instance を登録し、heartbeat・要求の読取り・保存期間の
@@ -99,6 +100,35 @@ class ProductionSecurityConfigurationTest {
 
     @Autowired
     private com.ses.service.FreeeIntegrationService freeeIntegrationService;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private com.ses.privacy.production.PrivacyProductionConfigurationValidator privacyProductionConfigurationValidator;
+
+    @Autowired
+    private com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier privacyJournalStartupVerifier;
+
+    @Autowired
+    private com.ses.privacy.production.retention.trust.PrivacyTrustStructureState privacyTrustStructureState;
+
+    /**
+     * FE-C06（requirements §7「機能を閉じる」）: NF07 保持・保全が DB で開いていて、その条件（決定ID束縛・privacy-admin・Journal・鍵）を
+     * 満たさなくても、prod の完全な context は起動する（NF07 の3つの起動時検査 validator・Journal・trust は起動を止めない）。
+     * 起動時の評価が保持・保全を {@code AUTO_CLOSED} にする。
+     */
+    @Test
+    void NF07の条件を満たさないDBでもprodの完全なcontextは起動し起動時の評価が保持保全を閉じる() {
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject("SELECT state FROM t_feature_enablement_state "
+                + "WHERE tenant_id = 'default' AND feature_key = 'NF07_RETENTION'", String.class))
+                .isEqualTo("AUTO_CLOSED");
+        org.assertj.core.api.Assertions.assertThatCode(privacyProductionConfigurationValidator::validate)
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThat(privacyJournalStartupVerifier.protectionResult().availability())
+                .isEqualTo(com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier.Availability.NOT_CONFIGURED);
+        org.assertj.core.api.Assertions.assertThat(privacyTrustStructureState.sound()).isTrue();
+    }
 
     @Test
     void freee連携を使わない既定のprodはclient設定が無くても起動しMISCONFIGUREDになる() {
