@@ -85,6 +85,18 @@ class FeatureSignOffBundleH2Test {
     private FeatureEnablementActor registrant;
     private FeatureEnablementActor confirmer;
 
+    /**
+     * 試験の H2 は全ての context で同じ in-memory の DB（jdbc:h2:mem:testdb）を使い、FK の検査の有無は DB の設定である。
+     * engineer-schema-h2.sql・schema-mismatch-h2.sql は SET REFERENTIAL_INTEGRITY FALSE にしたまま戻さず、この class の
+     * context が先に作られて cache されていると、random の実行順でそれらの試験の後に回った時に初期化の replay
+     * （schema-order-acceptance-h2.sql が TRUE に戻す）が走らず、複合 FK が検査されない（CI の run 45147817969）。
+     * H2 の SET は実行中の transaction を commit するため、試験の transaction の外（始まる前）で有効にする。
+     */
+    @org.springframework.test.context.transaction.BeforeTransaction
+    void enableReferentialIntegrity() {
+        jdbc.execute("SET REFERENTIAL_INTEGRITY TRUE");
+    }
+
     @BeforeEach
     void setUp() {
         clock.reset();
