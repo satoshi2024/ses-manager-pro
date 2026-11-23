@@ -53,9 +53,9 @@ class FeatureEnablementProductionValidatorTest {
 
     @Test
     void 段階Aでは印の無い開放単位の旧い変数は止めない() {
-        // NF01 二者確認の ON は段階 A〜B の間の暫定で止める（下の「暫定で…」の試験。FE-B01 で旧い変数の正式の拒否に替わる）
+        // 段階 A の印だけの写しの目録で確かめる（本番の目録では段階 B〜D の印で止まる。下の「段階 B」以降の試験）
         assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF06_ENABLED", "true", "PRIVACY_RETENTION_ENABLED", "true",
-                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "false"), new Properties()).validate())
+                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties()).validate())
                 .as("NF06・NF07・NF01 二者確認は段階 B〜C で DB 管理にするまで property の源").doesNotThrowAnyException();
     }
 
@@ -148,87 +148,70 @@ class FeatureEnablementProductionValidatorTest {
     }
 
     /**
-     * 実装 review rb-fe-a2 P2-1（FE-B01 で外す暫定の拒否）: prod では NF01 二者確認の ON を、配備の設定（環境変数・system property・
-     * {@code SPRING_APPLICATION_JSON}）のどの綴り（yml の placeholder の変数名・relaxed な property 名）で与えても止める（変換できない値も
-     * 止める）。false、jar の中の yml 等の配備の設定でない値、prod 以外は止めない。
+     * 段階の整合 M2（実装 review rb-fe-a2 P2-1 の暫定の拒否を FE-B01 の正式の拒否に替えた）: 本番の目録では NF01 二者確認の開閉の変数を、
+     * 配備の設定（環境変数・system property・{@code SPRING_APPLICATION_JSON}）のどの綴り（yml の placeholder の変数名・relaxed な property
+     * 名）でも、値に依らず（{@code false}・変換できない値も）止める。jar の中の yml 等の配備の設定でない値と prod 以外は止めない。
      */
     @Test
-    void 暫定でprodはNF01二者確認のONをどの綴りでも止めfalseと配備の設定でない値とprod以外は止めない() {
-        String name = FeatureEnablementTransitionalRejections.NF01_DUAL_VARIABLE;
-        assertTransitionalStops(Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties(), name);
-        assertTransitionalStops(Map.of("APP_FEATURES_NF01DUALCONFIRMATION_ENABLED", "on"), new Properties(), name);
-        assertTransitionalStops(Map.of("feature_nf01_dual_confirmation_enabled", "maybe"), new Properties(), name);
-        assertTransitionalStops(Map.of("SPRING_APPLICATION_JSON",
-                "{\"app\":{\"features\":{\"nf01-dual-confirmation\":{\"enabled\":true}}}}"), new Properties(), name);
+    void NF01二者確認の開閉の旧い変数は値と綴りに依らず止め配備の設定でない値とprod以外は止めない() {
+        for (Map.Entry<String, String> entry : List.of(Map.entry("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"),
+                Map.entry("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "false"),
+                Map.entry("APP_FEATURES_NF01DUALCONFIRMATION_ENABLED", "on"),
+                Map.entry("feature_nf01_dual_confirmation_enabled", "maybe"))) {
+            assertStopsWithStandard(Map.of(entry.getKey(), entry.getValue()), new Properties(), entry.getKey());
+        }
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON",
+                        "{\"app\":{\"features\":{\"nf01-dual-confirmation\":{\"enabled\":true}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf01-dual-confirmation.enabled]");
         Properties dotted = new Properties();
         dotted.setProperty("app.features.nf01-dual-confirmation.enabled", "TRUE");
-        assertTransitionalStops(Map.of(), dotted, name);
+        assertStopsWithStandard(Map.of(), dotted, "app.features.nf01-dual-confirmation.enabled");
 
-        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "false"), new Properties())
-                .validate()).doesNotThrowAnyException();
         MockEnvironment yml = prod();
         yml.setProperty("app.features.nf01-dual-confirmation.enabled", "true");
-        assertThatCode(() -> validator(yml, Map.of(), new Properties()).validate())
+        assertThatCode(() -> new FeatureEnablementProductionValidator(yml, databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).validate())
                 .as("配備の設定でない値（試験の application-test.yml 等）では止めない").doesNotThrowAnyException();
         MockEnvironment dev = new MockEnvironment();
         dev.setActiveProfiles("dev");
-        assertThatCode(() -> validator(dev, Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties())
-                .validate()).doesNotThrowAnyException();
+        assertThatCode(() -> new FeatureEnablementProductionValidator(dev, databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"),
+                Properties::new).validate()).doesNotThrowAnyException();
     }
 
     /**
-     * 実装 review rb-fe-a2 P2-2（FE-B03 で外す暫定の拒否）: prod では NF02 顧客ポータルの公開範囲を、配備の設定のどの綴りでも空でない値で
-     * 与えると止める（値は message に出さない）。空白、配備の設定でない値、prod 以外は止めない。
+     * 段階の整合 M2（実装 review rb-fe-a2 P2-2 の暫定の拒否を FE-B03 の正式の拒否に替えた）: 本番の目録では NF02 顧客ポータルの公開範囲の
+     * 変数を、配備の設定のどの綴りでも値に依らず（空白も）止め、値を message に出さない。配備の設定でない値と prod 以外は止めない。
+     * 公開範囲は承認で変える設定で、prod の yml は2件の placeholder を持たない（dev・test の property の源の {@code application.yml} だけ）。
      */
     @Test
-    void 暫定でprodはNF02顧客ポータルの公開範囲の値を止め空と配備の設定でない値とprod以外は止めない() {
-        String name = FeatureEnablementTransitionalRejections.NF02_VISIBLE_SINCE_VARIABLE;
+    void NF02顧客ポータルの公開範囲の旧い変数は値と綴りに依らず止め配備の設定でない値とprod以外は止めない() throws java.io.IOException {
         String visibleSince = "2027-04-01T00:00:00+09:00";
-        assertThatThrownBy(() -> validator(prod(), Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
-                new Properties()).validate())
+        assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
+                Properties::new).validate())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(name)
+                .hasMessageContaining("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE")
                 .hasMessageNotContaining(visibleSince).hasMessageNotContaining("2027");
-        assertTransitionalStops(Map.of("APP_FEATURES_NF02CUSTOMERPORTAL_VISIBLESINCE", visibleSince), new Properties(), name);
-        assertTransitionalStops(Map.of("SPRING_APPLICATION_JSON", "{\"app.features.nf02-customer-portal.visible-since\":\""
-                + visibleSince + "\"}"), new Properties(), name);
-        Properties dotted = new Properties();
-        dotted.setProperty("app.features.nf02-customer-portal.visible-since", visibleSince);
-        assertTransitionalStops(Map.of(), dotted, name);
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", "  "), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app.features.nf02-customer-portal.visible-since\":\""
+                        + visibleSince + "\"}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf02-customer-portal.visible-since]");
 
-        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", "  "), new Properties())
-                .validate()).doesNotThrowAnyException();
         MockEnvironment yml = prod();
         yml.setProperty("app.features.nf02-customer-portal.visible-since", "2000-01-01T00:00:00+09:00");
-        assertThatCode(() -> validator(yml, Map.of(), new Properties()).validate())
+        assertThatCode(() -> new FeatureEnablementProductionValidator(yml, databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).validate())
                 .as("試験の application-test.yml の値では prod の context の試験を止めない").doesNotThrowAnyException();
         MockEnvironment dev = new MockEnvironment();
         dev.setActiveProfiles("dev");
-        assertThatCode(() -> validator(dev, Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
-                new Properties()).validate()).doesNotThrowAnyException();
-    }
-
-    /** 暫定の拒否が jar の中の yml を読まない代わりに、prod が読む yml の既定値（false・空）が変わらないことを確かめる。 */
-    @Test
-    void 暫定の2件はprodが読むymlの中では既定値のfalseと空だけを持つ() throws java.io.IOException {
-        for (String yml : List.of("application.yml", "application-prod.yml")) {
-            String text = new org.springframework.core.io.ClassPathResource(yml)
-                    .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-            assertThat(lines(text, "enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED"))
-                    .as(yml).containsExactly("enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}");
-            assertThat(lines(text, "visible-since:"))
-                    .as(yml).containsExactly("visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}");
-            assertThat(text).as(yml).doesNotContain("nf01-dual-confirmation.enabled", "nf02-customer-portal.visible-since");
-        }
-    }
-
-    private static List<String> lines(String text, String prefix) {
-        return text.lines().map(String::trim).filter(line -> line.startsWith(prefix)).toList();
-    }
-
-    private static void assertTransitionalStops(Map<String, String> env, Properties systemProperties, String expectedName) {
-        assertThatThrownBy(() -> validator(prod(), env, systemProperties).validate())
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining(expectedName);
+        assertThatCode(() -> new FeatureEnablementProductionValidator(dev, databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
+                Properties::new).validate()).doesNotThrowAnyException();
+        String prodYml = new org.springframework.core.io.ClassPathResource("application-prod.yml")
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(prodYml).doesNotContain("${FEATURE_NF01_DUAL_CONFIRMATION_", "${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
     }
 
     /** FE-B01: 本番の目録で DB 管理にした NF01 二者確認の開閉の変数と Privacy 署名の参照の変数は、どの綴りでも起動を止める。 */

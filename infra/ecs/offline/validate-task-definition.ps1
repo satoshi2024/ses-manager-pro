@@ -346,19 +346,6 @@ $enablementOverrides = @($allNames | Where-Object {
 if ($enablementOverrides.Count -gt 0) { Fail ('feature-enablement operational settings must not be set; only FEATURE_ENABLEMENT_ALLOWED (deploy-runbook 1.0 row 42): ' + ($enablementOverrides -join ',')) }
 Ok "FEATURE_ENABLEMENT_ALLOWED=$($enablementAllowed[0]) in environment; no feature-enablement operational override"
 
-# Transitional, until FE-B01 and FE-B03 of feature-enablement-console (implementation review rb-fe-a2 P2-1, P2-2): the parent
-# features NF01 and NF02 customer portal are opened inside the system, while these two settings are still read from the
-# deployment. The app refuses both in prod (FeatureEnablementTransitionalRejections), so this validator does too, in
-# both phases. Remove this block when FE-B01 and FE-B03 refuse them as legacy variables.
-$dualOn = @($c.environment | Where-Object { $_.name -ceq 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED' } |
-    Where-Object { @('true', 'on', 'yes', '1') -contains ([string]$_.value).Trim().ToLowerInvariant() })
-if ($dualOn.Count -gt 0) { Fail 'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED must not be true until FE-B01 moves NF01 dual confirmation into the system: NF01 is opened in the system and the startup gate would not check the Privacy sign-off (deploy-runbook 1.0, feature enablement)' }
-$visibleSince = @($c.environment | Where-Object { $_.name -ceq 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE' } |
-    Where-Object { ([string]$_.value).Trim() -ne '' })
-$visibleSinceSecret = @($secretNames | Where-Object { (NameKey $_) -eq 'FEATURENF02CUSTOMERPORTALVISIBLESINCE' })
-if ($visibleSince.Count -gt 0 -or $visibleSinceSecret.Count -gt 0) { Fail 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE must not be set until FE-B03 moves the portal visibility into a two-person approval: the portal shows portal-created requests only (deploy-runbook 1.0, feature enablement)' }
-Ok 'NF01 dual confirmation not on and NF02 customer portal visible-since not set (transitional, until FE-B01 and FE-B03)'
-
 # deploy-runbook.md section 4: prod alone, and no other profile or configuration source the validator cannot read.
 $profiles = @($c.environment | Where-Object { $_.name -eq 'SPRING_PROFILES_ACTIVE' } | ForEach-Object { ([string]$_.value).Trim() })
 if ($profiles.Count -ne 1 -or $profiles[0] -cne 'prod') { Fail 'SPRING_PROFILES_ACTIVE must be exactly prod (deploy-runbook 4)' }

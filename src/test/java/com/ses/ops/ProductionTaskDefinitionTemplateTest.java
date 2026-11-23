@@ -219,12 +219,19 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("運用値は配備の設定で上書きしない（D-5）").isEmpty();
         assertThat(Files.readString(Path.of("src/main/resources/application-prod.yml"), StandardCharsets.UTF_8))
                 .contains("allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}").contains("source: database");
-        // 段階の間の暫定の拒否（FE-B01・FE-B03 まで。実装 review rb-fe-a2 P2-1・P2-2）: 雛形は持たず、注記と照合が同じ2件を扱う
-        assertThat(all).doesNotContain("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        // 段階 B〜D で DB 管理にした開放単位の旧い変数（開閉と、署名・設定へ移した承認の値）は雛形に置かず、注記に書く。段階 A2 の
+        // 暫定の拒否（NF01 二者確認の ON・NF02 の公開範囲）は FE-B01・FE-B03 の旧い変数の拒否に替えて外した（段階の整合 M2）。
+        // 照合が旧い変数を FAIL にするのは FE-E01（段階 E）で、それまでは app の起動時検査だけが止める
+        assertThat(all).doesNotContain("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE",
+                "FEATURE_NF06_ENABLED", "PRIVACY_RETENTION_ENABLED", "PRIVACY_DSAR_ENABLED", "INTEGRATION_HUB_PUBLIC_API_ENABLED",
+                "INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED");
+        assertThat(all.stream().filter(name -> name.startsWith("IMPORT_ADMISSION_") || name.startsWith("PRIVACY_APPROVAL_")
+                || name.matches("INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)"))).isEmpty();
         assertThat(taskDefinition().path("_offlineAcceptanceNotes").path("FEATURE_ENABLEMENT").asText())
-                .contains("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED").contains("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
-        assertThat(Files.readString(VALIDATOR, StandardCharsets.UTF_8))
-                .contains("'FEATURE_NF01_DUAL_CONFIRMATION_ENABLED'").contains("'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE'");
+                .contains("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF").contains("IMPORT_ADMISSION_*")
+                .contains("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE").contains("PRIVACY_APPROVAL_*")
+                .contains("INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)")
+                .doesNotContain("Transitional");
     }
 
     @Test

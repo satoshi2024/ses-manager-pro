@@ -44,8 +44,6 @@ import java.util.function.Supplier;
  *       {@link Feature#propertyName()} の全ての綴り）が環境変数・system property・{@code SPRING_APPLICATION_JSON} にあれば止める
  *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。
  *       開閉以外の旧い変数（署名・設定へ移した承認の値。{@link #LEGACY_SETTING_RULES}）も、DB 管理の印のある開放単位の分を同じく拒否する。</li>
- *   <li><b>段階の間の暫定の拒否</b>（prod）: 環境変数・system property・{@code SPRING_APPLICATION_JSON} の NF01 二者確認の ON と NF02 顧客ポータルの公開範囲
- *       （{@link FeatureEnablementTransitionalRejections}。FE-B01・FE-B03 で外す）。</li>
  * </ul>
  *
  * <p>prod の判定は {@code Environment.acceptsProfiles(Profiles.of("prod"))}（CLAUDE.md。{@code @ActiveProfiles("prod")} の試験でも
@@ -191,8 +189,6 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             violations.add("system の中で開閉する機能の旧い変数を設定しないでください（画面の申請と二人の承認で開きます）: "
                     + String.join(",", legacy));
         }
-        // 段階 A〜B の間だけの暫定の拒否（NF01 二者確認の ON・NF02 顧客ポータルの公開範囲。FE-B01・FE-B03 で外す）
-        violations.addAll(FeatureEnablementTransitionalRejections.violations(systemEnvironment.get(), systemProperties.get()));
         return violations;
     }
 
