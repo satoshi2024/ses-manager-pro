@@ -32,21 +32,44 @@ public class IntegrationHubExternalApiProperties {
     /** 現行の物理トポロジー。共有DBを暗黙に許可しない。 */
     private Topology topology = new Topology();
 
+    /**
+     * 起動時の値が開で違反があり、DB の源の prod の安全網で閉じた方向の違反の code（inbound・outbound。閉じていなければ null。
+     * feature-enablement-console design §9.5）。boot resolver が同じ関数で判定するため通常は起きない。
+     */
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    @lombok.EqualsAndHashCode.Exclude
+    @lombok.ToString.Exclude
+    private volatile String inboundBootClosure;
+
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    @lombok.EqualsAndHashCode.Exclude
+    @lombok.ToString.Exclude
+    private volatile String outboundBootClosure;
+
+    /** 安全網で閉じた方向の違反の code（閉じていなければ null）。 */
+    public String bootClosureCode(boolean inbound) {
+        return inbound ? inboundBootClosure : outboundBootClosure;
+    }
+
+    /**
+     * 起動の境界の検査。flag に依る検査（public-id-key・DEDICATED_DATABASE と bound-tenant-id・HTTPS の truststore・LOOPBACK の
+     * port）は {@link #boundaryViolations} の静的な関数と同じ規則で、boot resolver と評価器も同じ関数を使う（FE-D01）。DB の源の prod
+     * では、起動時の値が開でも flag に依る違反があれば例外にせず、その方向を閉じて code を残す（{@link #bootClosureCode}。起動の後の
+     * 反映が {@code AUTO_CLOSED} にする）。flag に依らない検査は従来どおり起動を止める。
+     */
     @PostConstruct
     void validateBoundaries() {
         if (publicApi.enabled == null || externalTransport.enabled == null || provider.mode == null) {
             throw new IllegalStateException("integration.hubのpublic-api/external-transport/provider.modeは明示設定が必要です");
         }
-        boolean anyDirection = publicApi.enabled || externalTransport.enabled;
-        // public IDはread APIの応答とoutbound payloadのprimary bindingの両方で使うため、方向を問わず要求する。
-        if (anyDirection && (publicApi.publicIdKey == null
-                || publicApi.publicIdKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
-            throw new IllegalStateException(
-                    "public-api.enabledまたはexternal-transport.enabled=trueには32 byte以上のpublic-id-keyが必要です");
-        }
-        if (anyDirection && (!"DEDICATED_DATABASE".equals(topology.mode)
-                || !StringUtils.hasText(topology.boundTenantId))) {
-            throw new IllegalStateException("公開API/外部transportはDEDICATED_DATABASEとbound-tenant-idの明示設定が必要です");
+        boolean production = environment != null
+                && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"));
+        boolean safetyNet = production && databaseSource(environment);
+        for (IntegrationHubProductionEnablementPolicy.Violation violation
+                : leadingBoundaryViolations(this, publicApi.enabled, externalTransport.enabled)) {
+            rejectOrClose(violation, safetyNet, true, true);
         }
         if (provider.approvedInboundProviders == null
                 || provider.approvedInboundProviders.stream().anyMatch(value -> value == null
@@ -89,14 +112,9 @@ public class IntegrationHubExternalApiProperties {
         if (externalTransport.dnsTimeoutMs < 100 || externalTransport.dnsTimeoutMs > 5_000) {
             throw new IllegalStateException("DNS timeoutは100〜5000msで指定してください");
         }
-        if (externalTransport.enabled && provider.mode == ProviderMode.HTTPS
-                && (!StringUtils.hasText(externalTransport.truststorePath)
-                || !SetHolder.TRUSTSTORE_TYPES.contains(externalTransport.truststoreType))) {
-            throw new IllegalStateException("HTTPS transportにはtruststoreが必要です");
-        }
-        if (externalTransport.enabled && provider.mode == ProviderMode.LOOPBACK
-                && security.allowedLoopbackPorts.isEmpty()) {
-            throw new IllegalStateException("LOOPBACK transportには明示的な許可portが必要です");
+        for (IntegrationHubProductionEnablementPolicy.Violation violation
+                : transportBoundaryViolations(this, externalTransport.enabled)) {
+            rejectOrClose(violation, safetyNet, false, true);
         }
         if (security.trustedProxies == null || security.forwardedHeader == null) {
             throw new IllegalStateException("trusted proxy設定が不正です");
@@ -119,9 +137,128 @@ public class IntegrationHubExternalApiProperties {
                 throw new IllegalStateException("public-api.approval.allowed-client-cidrsはCIDR形式で指定してください");
             }
         }
-        if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))) {
-            IntegrationHubProductionEnablementPolicy.requireProductionBoundary(this, environment);
+        if (production) {
+            productionBoundary(safetyNet);
         }
+    }
+
+    /**
+     * prod の承認の検査。property の源は配備の設定の承認の値で検査し、最初の違反で起動を止める。DB の源は boot resolver が確認済みの
+     * 署名から写した承認の値（{@link IntegrationHubApprovals#fromBootProperties}）で検査し、違反のある方向を閉じる（安全網）。truststore は
+     * 1回だけ読み、outbound が開いたままなら同じ byte 列を HTTPS transport のために記録する（RB-NF05 review P3-6。記録はここだけ）。
+     */
+    private void productionBoundary(boolean safetyNet) {
+        boolean inbound = Boolean.TRUE.equals(publicApi.enabled);
+        boolean outbound = Boolean.TRUE.equals(externalTransport.enabled);
+        byte[] truststore = outbound ? IntegrationHubApprovalDigest.readTruststore(externalTransport.truststorePath) : null;
+        if (!safetyNet) {
+            List<IntegrationHubProductionEnablementPolicy.Violation> violations =
+                    IntegrationHubProductionEnablementPolicy.violationList(this, environment, inbound, outbound,
+                            IntegrationHubApprovals.fromProperties(this), truststore);
+            if (!violations.isEmpty()) {
+                throw new IllegalStateException("production NF-05境界: " + violations.get(0).message());
+            }
+        } else {
+            List<IntegrationHubProductionEnablementPolicy.Violation> common =
+                    IntegrationHubProductionEnablementPolicy.flagIndependentViolations(this, outbound);
+            if (!common.isEmpty()) {
+                throw new IllegalStateException("production NF-05境界: " + common.get(0).message());
+            }
+            IntegrationHubApprovals approvals = IntegrationHubApprovals.fromBootProperties(environment);
+            List<IntegrationHubProductionEnablementPolicy.Violation> credential = inbound || outbound
+                    ? IntegrationHubProductionEnablementPolicy.credentialViolations(environment) : List.of();
+            if (inbound) {
+                List<IntegrationHubProductionEnablementPolicy.Violation> violations = new ArrayList<>(credential);
+                violations.addAll(IntegrationHubProductionEnablementPolicy.inboundViolationList(this, approvals.inbound()));
+                if (!violations.isEmpty()) {
+                    rejectOrClose(violations.get(0), true, true, false);
+                }
+            }
+            if (outbound) {
+                List<IntegrationHubProductionEnablementPolicy.Violation> violations = new ArrayList<>(credential);
+                violations.addAll(IntegrationHubProductionEnablementPolicy.outboundViolationList(this,
+                        approvals.outbound(), truststore));
+                if (!violations.isEmpty()) {
+                    rejectOrClose(violations.get(0), true, false, true);
+                }
+            }
+        }
+        if (Boolean.TRUE.equals(externalTransport.enabled) && truststore != null) {
+            externalTransport.recordApprovedTruststore(externalTransport.truststorePath, truststore);
+        }
+    }
+
+    /** 違反を起動の停止にするか、DB の源の prod の安全網でその方向を閉じる。 */
+    private void rejectOrClose(IntegrationHubProductionEnablementPolicy.Violation violation, boolean safetyNet,
+                               boolean inbound, boolean outbound) {
+        if (!safetyNet) {
+            throw new IllegalStateException(violation.message());
+        }
+        if (inbound && Boolean.TRUE.equals(publicApi.enabled)) {
+            publicApi.enabled = false;
+            inboundBootClosure = violation.code();
+        }
+        if (outbound && Boolean.TRUE.equals(externalTransport.enabled)) {
+            externalTransport.enabled = false;
+            outboundBootClosure = violation.code();
+        }
+    }
+
+    /** 開閉の源が DB か（{@code app.feature-enablement.source=database}）。 */
+    static boolean databaseSource(Environment environment) {
+        String source = environment == null ? null : environment.getProperty("app.feature-enablement.source");
+        return source != null && "database".equalsIgnoreCase(source.trim());
+    }
+
+    /**
+     * flag に依る境界の違反（boot resolver・評価器・起動時検査が共用する純粋な関数。FE-D01）。{@code inbound}・{@code outbound} は
+     * 検査する方向（開いた場合の違反を求める）。
+     */
+    static List<IntegrationHubProductionEnablementPolicy.Violation> boundaryViolations(
+            IntegrationHubExternalApiProperties properties, boolean inbound, boolean outbound) {
+        List<IntegrationHubProductionEnablementPolicy.Violation> violations =
+                new ArrayList<>(leadingBoundaryViolations(properties, inbound, outbound));
+        violations.addAll(transportBoundaryViolations(properties, outbound));
+        return violations;
+    }
+
+    /** public-id-key と DEDICATED_DATABASE・bound-tenant-id（どちらかの方向が開く時）。 */
+    static List<IntegrationHubProductionEnablementPolicy.Violation> leadingBoundaryViolations(
+            IntegrationHubExternalApiProperties properties, boolean inbound, boolean outbound) {
+        List<IntegrationHubProductionEnablementPolicy.Violation> violations = new ArrayList<>();
+        boolean anyDirection = inbound || outbound;
+        String key = properties.getPublicApi().getPublicIdKey();
+        // public IDはread APIの応答とoutbound payloadのprimary bindingの両方で使うため、方向を問わず要求する。
+        if (anyDirection && (key == null || key.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
+            violations.add(new IntegrationHubProductionEnablementPolicy.Violation("nf05.boundary.publicIdKey",
+                    "public-api.enabledまたはexternal-transport.enabled=trueには32 byte以上のpublic-id-keyが必要です"));
+        }
+        Topology topology = properties.getTopology();
+        if (anyDirection && (topology == null || !"DEDICATED_DATABASE".equals(topology.getMode())
+                || !StringUtils.hasText(topology.getBoundTenantId()))) {
+            violations.add(new IntegrationHubProductionEnablementPolicy.Violation("nf05.boundary.topology",
+                    "公開API/外部transportはDEDICATED_DATABASEとbound-tenant-idの明示設定が必要です"));
+        }
+        return violations;
+    }
+
+    /** HTTPS の truststore と LOOPBACK の許可 port（outbound が開く時）。 */
+    static List<IntegrationHubProductionEnablementPolicy.Violation> transportBoundaryViolations(
+            IntegrationHubExternalApiProperties properties, boolean outbound) {
+        List<IntegrationHubProductionEnablementPolicy.Violation> violations = new ArrayList<>();
+        ProviderMode mode = properties.getProvider().getMode();
+        ExternalTransport transport = properties.getExternalTransport();
+        if (outbound && mode == ProviderMode.HTTPS
+                && (!StringUtils.hasText(transport.getTruststorePath())
+                || !SetHolder.TRUSTSTORE_TYPES.contains(transport.getTruststoreType()))) {
+            violations.add(new IntegrationHubProductionEnablementPolicy.Violation("nf05.boundary.truststore",
+                    "HTTPS transportにはtruststoreが必要です"));
+        }
+        if (outbound && mode == ProviderMode.LOOPBACK && properties.getSecurity().getAllowedLoopbackPorts().isEmpty()) {
+            violations.add(new IntegrationHubProductionEnablementPolicy.Violation("nf05.boundary.loopbackPorts",
+                    "LOOPBACK transportには明示的な許可portが必要です"));
+        }
+        return violations;
     }
 
     private static class SetHolder {

@@ -114,7 +114,7 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 
 - 外部 HTTP は DB transaction 外。DB 停止中も in-flight lease は expiry 後に recovery 可能。
 - provider 停止時: MOCK/STUB（無接続）または LOOPBACK（development/test のみ）。production は STUB/LOOPBACK を常に拒否し、
-  outbound無効時はMOCK固定。本番outboundはHTTPSだけを許可し、承認不足・不正な専用truststoreで起動を拒否する。
+  outbound無効時はMOCKかHTTPS（承認の前にHTTPSと承認の内容を配備の設定へ入れるため。transport のbeanはoutboundが閉なら作らない。feature-enablement-console FE-D01）。本番outboundはHTTPSだけを許可し、承認不足・不正な専用truststoreで起動を拒否する。
 - restore 後: `advanceRestoreEpoch` により purge checkpoint を invalid 化し、retention 対象を先頭から再評価する。
 - legal hold 中は purge を停止する。hold 解除後に cursor reset で再 purge する。
 
