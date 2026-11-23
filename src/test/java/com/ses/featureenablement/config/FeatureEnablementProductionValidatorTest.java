@@ -300,10 +300,70 @@ class FeatureEnablementProductionValidatorTest {
                 .hasMessageNotContaining(SECRET_LIKE_VALUE);
     }
 
+    /**
+     * FE-C05・review rb-fe-c P2-3: NF07 を DB 管理にした目録（段階 A と段階 C の印）では、NF07 の開閉の変数と、署名へ移した承認の値の
+     * 旧い変数（{@code PRIVACY_APPROVAL_*}・{@code PRIVACY_DSAR_DUE_DAYS}・{@code PRIVACY_DSAR_PACKAGE_MAX_AGE}）が、環境変数・system
+     * property・JSON のどの綴りでも起動を止め、message に値を出さない。運用値の {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は止めない。
+     */
+    @Test
+    void NF07をDB管理にした目録では開閉と承認の値の旧い変数を全ての綴りで止め運用値は止めない() {
+        FeatureEnablementCatalog nf07 = FeatureEnablementCatalog.standard();
+        assertThat(nf07.databaseManaged(com.ses.config.feature.Feature.NF07_RETENTION)).isTrue();
+        assertStops(nf07, Map.of("PRIVACY_RETENTION_ENABLED", "true"), new Properties(), "PRIVACY_RETENTION_ENABLED");
+        assertStops(nf07, Map.of("PRIVACY_DSAR_ENABLED", "true"), new Properties(), "PRIVACY_DSAR_ENABLED");
+        assertStops(nf07, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_APPROVAL_D01_DECISION_ID");
+        assertStops(nf07, Map.of("PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS", "30"), new Properties(),
+                "PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS");
+        assertStops(nf07, Map.of("PRIVACY_DSAR_PACKAGE_MAX_AGE", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_DSAR_PACKAGE_MAX_AGE");
+        Properties digest = new Properties();
+        digest.setProperty("privacy.approval.approval-digest", SECRET_LIKE_VALUE);
+        assertStops(nf07, Map.of(), digest, "privacy.approval.approval-digest");
+        Properties retention = new Properties();
+        retention.setProperty("privacy.retention.enabled", "true");
+        assertStops(nf07, Map.of(), retention, "privacy.retention.enabled");
+        assertStops(nf07, Map.of("SPRING_APPLICATION_JSON", "{\"privacy\":{\"dsar\":{\"due-days\":\""
+                + SECRET_LIKE_VALUE + "\"}}}"), new Properties(), "SPRING_APPLICATION_JSON[privacy.dsar.due-days]");
+
+        assertThatCode(() -> validator(prod(), Map.of("PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "7",
+                "PRIVACY_JOURNAL_DATASOURCE_URL", "jdbc:mysql://journal/db", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "/app/x.json"),
+                new Properties(), nf07).validate()).as("運用値・基盤の設定は止めない").doesNotThrowAnyException();
+    }
+
+    /** review rb-fe-c P3-8: NF07 の2件のどちらかだけを DB 管理にした目録でも、承認の値の旧い変数を止める。 */
+    @Test
+    void NF07のどちらかだけがDB管理でも承認の値の旧い変数を止める() {
+        FeatureEnablementCatalog dsarOnly = FeatureEnablementCatalog.standard().withDatabaseManaged(
+                java.util.EnumSet.of(com.ses.config.feature.Feature.NF07_DSAR));
+        assertStops(dsarOnly, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_APPROVAL_D01_DECISION_ID");
+        assertThatCode(() -> validator(prod(), Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", "x"), new Properties(),
+                catalog()).validate()).as("段階 A の印だけなら止めない").doesNotThrowAnyException();
+    }
+
+    private static void assertStops(FeatureEnablementCatalog catalog, Map<String, String> env,
+                                    Properties systemProperties, String expectedName) {
+        Map<String, String> environment = new LinkedHashMap<>(env);
+        assertThatThrownBy(() -> validator(prod(), environment, systemProperties, catalog).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedName)
+                .hasMessageNotContaining(SECRET_LIKE_VALUE);
+    }
+
     private static FeatureEnablementProperties databaseProperties() {
         FeatureEnablementProperties properties = new FeatureEnablementProperties();
         properties.setSource(FeatureEnablementProperties.Source.DATABASE);
         return properties;
+    }
+
+    private static FeatureEnablementProductionValidator validator(MockEnvironment environment, Map<String, String> env,
+                                                                  Properties systemProperties,
+                                                                  FeatureEnablementCatalog catalog) {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        return new FeatureEnablementProductionValidator(environment, properties, catalog, () -> env,
+                () -> systemProperties);
     }
 
     private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {

@@ -10,6 +10,7 @@ import com.ses.privacy.foundation.HoldReleaseRejection;
 import com.ses.privacy.foundation.HoldReleaseRules;
 import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.HoldReleaseVerifier;
+import com.ses.privacy.foundation.JournalAccessDeniedException;
 import com.ses.privacy.foundation.JournalConflictException;
 import com.ses.privacy.foundation.PrivacyJournalPort;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalAck;
@@ -51,6 +52,10 @@ import java.util.regex.Pattern;
  *       （{@code OIDC_TENANT_ID}、未設定なら {@code default}）を範囲に含み、失効 provider が ACTIVE と答える
  *       （{@code HoldReleaseVerifier#trustReady(String)}。trust 文書を設定するまでは失効 provider が常に UNKNOWN のため開かない。
  *       REL review P3-9、RB-NF07-REG delta review P3-1）。</li>
+ *   <li>trust 文書の構造に不足が無い（{@code PrivacyTrustStructureState}。KMS の trust を設定した prod の起動時に flag と関係なく
+ *       検査した結果。不足は起動を止めず、この入口だけを閉じる。feature-enablement-console design §8.5 の 4。FE-C04）。</li>
+ *   <li>DB の開放状態で管理する間は、REL の署名（D-03・D-05・{@code NF07_TRUST_KMS}・{@code NF07_TRUST_STAGING}）が確認済みで有効
+ *       （証拠の類の取消し・失効でも閉じる。review rb-fe-c P2-1）。</li>
  * </ul>
  * 開放の後も、要求ごとに verifier が両 anchor の失効状態を確かめる（{@code REVOCATION_UNKNOWN} / {@code REVOKED}）。
  *
@@ -101,6 +106,7 @@ public class PrivacyHoldReleaseService {
     private final Supplier<PrivacyHoldService.Actor> actorSource;
     private final HoldReleaseVerifier verifier;
     private final HoldReleaseTrustRegistry registry;
+    private final java.util.function.BooleanSupplier subgateConditions;
 
     PrivacyHoldReleaseService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                               PrivacyHoldDecisions decisions, PrivacyHoldJournal journal,
@@ -108,6 +114,21 @@ public class PrivacyHoldReleaseService {
                               PrivacyHoldProjector projector, PrivacyHoldAudit audit, TransactionTemplate requiresNew,
                               Clock clock, Supplier<PrivacyHoldService.Actor> actorSource, HoldReleaseVerifier verifier,
                               HoldReleaseTrustRegistry registry) {
+        this(accessGuard, oidcProperties, decisions, journal, store, resolver, projector, audit, requiresNew, clock,
+                actorSource, verifier, registry, () -> true);
+    }
+
+    /**
+     * @param subgateConditions 副入口 REL の追加の条件: trust 文書の構造に不足が無く（FE-C04）、REL の署名（D-03・D-05・{@code NF07_TRUST_KMS}・
+     *                          {@code NF07_TRUST_STAGING}）が有効（DB の開放状態で管理する間。review rb-fe-c P2-1）。判定できなければ false を返すこと
+     */
+    PrivacyHoldReleaseService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
+                              PrivacyHoldDecisions decisions, PrivacyHoldJournal journal,
+                              PrivacyHoldProjectionStore store, HoldSubjectResolver resolver,
+                              PrivacyHoldProjector projector, PrivacyHoldAudit audit, TransactionTemplate requiresNew,
+                              Clock clock, Supplier<PrivacyHoldService.Actor> actorSource, HoldReleaseVerifier verifier,
+                              HoldReleaseTrustRegistry registry, java.util.function.BooleanSupplier subgateConditions) {
+        this.subgateConditions = subgateConditions == null ? () -> false : subgateConditions;
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
         this.decisions = Objects.requireNonNull(decisions, "decisions");
@@ -130,7 +151,8 @@ public class PrivacyHoldReleaseService {
      */
     public boolean isOpen() {
         try {
-            return verifier != null && anchorsConfigured() && decisions.releaseReadiness().ready() && trustReady();
+            return verifier != null && subgateConditionsHold() && anchorsConfigured() && decisions.releaseReadiness().ready()
+                    && trustReady();
         } catch (RuntimeException e) {
             return false;
         }
@@ -148,7 +170,7 @@ public class PrivacyHoldReleaseService {
             throw BusinessException.of(403, "error.accessDenied");
         }
         PrivacyHoldDecisions.ReleaseReadiness readiness = decisions.releaseReadiness();
-        if (!readiness.ready() || verifier == null || !anchorsConfigured() || !trustReady()) {
+        if (!readiness.ready() || verifier == null || !subgateConditionsHold() || !anchorsConfigured() || !trustReady()) {
             // 開放の前（D-03・D-05 の署名前・placeholder・失効、trust anchor 未登録・失効状態を ACTIVE と確認できない、prod 以外）は
             // 入口が無いのと同じ404
             throw new PrivacyAccessGuard.PrivacyEntryNotFoundException();
@@ -243,8 +265,13 @@ public class PrivacyHoldReleaseService {
         } catch (SecurityException e) {
             releasePending(tenantId, holdId, commandId, actor, "JOURNAL_REFUSED", 403);
             throw BusinessException.of(403, "error.privacy.holdReleaseProofRejected");
+        } catch (JournalAccessDeniedException e) {
+            // 最初の試行が権限で拒否された（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）。ACK 不明の後の
+            // 再送の拒否は JournalRetryDeniedAfterUnknown で下の ACK 不明になる（P3-N1）
+            releasePending(tenantId, holdId, commandId, actor, "JOURNAL_ACCESS_DENIED", 503);
+            throw BusinessException.of(503, "error.privacy.journalUnavailable");
         } catch (RuntimeException e) {
-            ackUnknown(holdId, actor);
+            ackUnknown(holdId, actor, e instanceof JournalRetryDeniedAfterUnknown);
             throw BusinessException.of(503, "error.privacy.holdReleaseAckUnknown");
         }
 
@@ -405,13 +432,18 @@ public class PrivacyHoldReleaseService {
                                                  String commandId) {
         try {
             return port.appendHoldRelease(proof);
-        } catch (JournalConflictException | SecurityException e) {
+        } catch (JournalConflictException | SecurityException | JournalAccessDeniedException e) {
             throw e;
         } catch (RuntimeException firstUnknown) {
             if (!refreshPendingSince(tenantId, commandId)) {
                 throw firstUnknown;
             }
-            return port.appendHoldRelease(proof);
+            try {
+                return port.appendHoldRelease(proof);
+            } catch (JournalAccessDeniedException deniedAfterUnknown) {
+                // 先の試行は ACK 不明のまま（commit 済みかもしれない）。確定の拒否にせず ACK 不明として扱う（review rb-fe-c P3-N1）
+                throw new JournalRetryDeniedAfterUnknown(deniedAfterUnknown);
+            }
         }
     }
 
@@ -459,11 +491,17 @@ public class PrivacyHoldReleaseService {
     }
 
     private void ackUnknown(String holdId, PrivacyHoldService.Actor actor) {
-        log.warn("[privacy-hold] hold解除のACKを確認できません。pendingを残してreconcilerに任せます: code={}",
-                LOG_CODE_ACK_UNKNOWN);
+        ackUnknown(holdId, actor, false);
+    }
+
+    /** @param deniedAfterUnknown 再送が権限で拒否された（先の試行の結果は不明。監査の理由で拒否と区別する。review rb-fe-c P3-N1） */
+    private void ackUnknown(String holdId, PrivacyHoldService.Actor actor, boolean deniedAfterUnknown) {
+        String reason = deniedAfterUnknown ? JournalRetryDeniedAfterUnknown.AUDIT_REASON : null;
+        log.warn("[privacy-hold] hold解除のACKを確認できません。pendingを残してreconcilerに任せます: code={} reason={}",
+                LOG_CODE_ACK_UNKNOWN, reason);
         try {
             requiresNew.executeWithoutResult(tx -> audit.record(actor.username(), PrivacyHoldAudit.RELEASE_ACK_UNKNOWN,
-                    PrivacyHoldAudit.fields("hold", holdId), 503, false));
+                    PrivacyHoldAudit.fields("hold", holdId, "reason", reason), 503, false));
         } catch (RuntimeException e) {
             log.warn("[privacy-hold] 解除のACK不明の監査を記録できません: exceptionClass={}", e.getClass().getSimpleName());
         }
@@ -553,6 +591,14 @@ public class PrivacyHoldReleaseService {
 
     private static BusinessException invalid() {
         return BusinessException.of(400, "error.privacy.holdReleaseInvalidRequest");
+    }
+
+    private boolean subgateConditionsHold() {
+        try {
+            return subgateConditions.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private boolean anchorsConfigured() {

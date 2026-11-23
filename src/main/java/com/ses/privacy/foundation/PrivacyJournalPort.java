@@ -10,6 +10,10 @@ import java.util.List;
  * ACKは合成eventの線形化記録であり、VerifiedDispatchFenceや実policy承認ではない。
  */
 public interface PrivacyJournalPort {
+    /**
+     * command を append する。本番 adapter は ACK を確認できない失敗を {@link JournalUnavailableException}、principal の権限の拒否を
+     * {@link JournalAccessDeniedException}（append は起きていない。ACK 不明の後の再送で返った時は先の試行の結果は不明のまま）で返す。
+     */
     JournalAck append(JournalCommand command);
 
     JournalHead head(JournalPartition partition);

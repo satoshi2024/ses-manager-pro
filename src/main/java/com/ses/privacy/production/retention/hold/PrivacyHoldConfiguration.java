@@ -5,10 +5,12 @@ import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.HoldReleaseVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
-import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.PrivacySubgateSignOffs;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
 import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
 import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
+import com.ses.privacy.production.retention.trust.PrivacyTrustStructureState;
 import com.ses.service.AuditLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
@@ -37,11 +39,11 @@ import java.time.Clock;
 public class PrivacyHoldConfiguration {
 
     @Bean
-    public PrivacyHoldDecisions privacyHoldDecisions(PrivacyApprovalProperties approvalProperties,
+    public PrivacyHoldDecisions privacyHoldDecisions(PrivacyApprovalSource approvalSource,
                                                      PrivacyHoldProperties holdProperties,
                                                      PrivacyClockProperties clockProperties,
                                                      ObjectProvider<Clock> clock) {
-        return new PrivacyHoldDecisions(approvalProperties, holdProperties, clockProperties, clockOf(clock));
+        return new PrivacyHoldDecisions(approvalSource, holdProperties, clockProperties, clockOf(clock));
     }
 
     @Bean
@@ -101,7 +103,8 @@ public class PrivacyHoldConfiguration {
                                                  AuditLogService auditLogService,
                                                  PlatformTransactionManager transactionManager,
                                                  ObjectProvider<Clock> clock,
-                                                 ObjectProvider<PrivacyHoldReleaseService> releaseService) {
+                                                 ObjectProvider<PrivacyHoldReleaseService> releaseService,
+                                                 ObjectProvider<PrivacySubgateSignOffs> subgateSignOffs) {
         PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
@@ -112,7 +115,7 @@ public class PrivacyHoldConfiguration {
                 requiresNew, resolvedClock, null, () -> {
                     PrivacyHoldReleaseService service = releaseService.getIfAvailable();
                     return service != null && service.isOpen();
-                });
+                }, () -> subgateSignOffsValid(subgateSignOffs, PrivacySubgateSignOffs.HOLD_START));
     }
 
     /**
@@ -142,7 +145,9 @@ public class PrivacyHoldConfiguration {
                                                                ObjectProvider<Clock> clock,
                                                                HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry,
                                                                Environment environment,
-                                                               PrivacyTrustSource privacyTrustSource) {
+                                                               PrivacyTrustSource privacyTrustSource,
+                                                               ObjectProvider<PrivacyTrustStructureState> trustStructure,
+                                                               ObjectProvider<PrivacySubgateSignOffs> subgateSignOffs) {
         PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
@@ -156,7 +161,13 @@ public class PrivacyHoldConfiguration {
         return new PrivacyHoldReleaseService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
                 privacyHoldJournal, store, holdSubjectResolver,
                 new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock), audit,
-                requiresNew, resolvedClock, null, verifier, privacyHoldReleaseTrustRegistry);
+                requiresNew, resolvedClock, null, verifier, privacyHoldReleaseTrustRegistry, () -> {
+                    // trust 文書の構造の不足（起動時に flag と関係なく検査した結果。FE-C04）と、REL の署名（証拠の類を含む）の
+                    // 取消し・失効（review rb-fe-c P2-1）でも閉じる
+                    PrivacyTrustStructureState state = trustStructure.getIfAvailable();
+                    return (state == null || state.sound())
+                            && subgateSignOffsValid(subgateSignOffs, PrivacySubgateSignOffs.RELEASE);
+                });
     }
 
     @Bean
@@ -176,6 +187,12 @@ public class PrivacyHoldConfiguration {
                 new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock),
                 privacyHoldDecisions, audit, requiresNew, resolvedClock, meterRegistry,
                 new PrivacyHoldStarterLookup(jdbcTemplate));
+    }
+
+    /** 副入口の署名（部品が無い試験の context では判定しない）。 */
+    static boolean subgateSignOffsValid(ObjectProvider<PrivacySubgateSignOffs> subgateSignOffs, String subgateCode) {
+        PrivacySubgateSignOffs signOffs = subgateSignOffs == null ? null : subgateSignOffs.getIfAvailable();
+        return signOffs == null || signOffs.valid(subgateCode);
     }
 
     static TransactionTemplate requiresNew(PlatformTransactionManager transactionManager) {

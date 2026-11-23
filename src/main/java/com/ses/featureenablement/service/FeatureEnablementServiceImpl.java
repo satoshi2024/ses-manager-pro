@@ -47,6 +47,8 @@ import java.util.regex.Pattern;
 @Service
 public class FeatureEnablementServiceImpl implements FeatureEnablementService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(FeatureEnablementServiceImpl.class);
+
     public static final String REQUEST_TYPE_OPEN = "OPEN";
     /** 閉鎖の理由の code の形（{@code closed_reason} は VARCHAR(64)。自由記述は書かない）。 */
     static final Pattern REASON_CODE = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
@@ -86,6 +88,8 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
         actorPolicy.requirePrivacyAdminIfRequired(unit.privacyUnit(), checked);
         requireMasterAllowed();
         String reasonText = optionalText(reason);
+        // 外部への検査は世代の行の lock の前に行い、lock の中では最後の結果を読む（review rb-fe-c P2-6）
+        registry.refreshRemote(feature);
 
         FeatureEnablementWriteSupport.WriteContext context = write.begin(FeatureEnablementWriteSupport.Actor.of(checked));
         write.lockStates(context, lineage(feature));
@@ -95,7 +99,7 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
             throw BusinessException.of(409, "error.featureEnablement.stateNotRequestable");
         }
         FeatureEvaluation evaluation = registry.evaluate(feature,
-                evaluationContext(context, snapshot, FeatureEvaluationContext.Purpose.REQUEST, EnumSet.of(feature), true));
+                evaluationContext(context, snapshot, FeatureEvaluationContext.Purpose.REQUEST, EnumSet.of(feature), false));
         if (!evaluation.openingAllowed()) {
             throw BusinessException.of(409, "error.featureEnablement.conditionsUnsatisfied", codes(evaluation));
         }
@@ -135,6 +139,7 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
         FeatureEnablementActor checked = actorPolicy.requireActiveAdministrator(actor == null ? null : actor.userId());
         requireMasterAllowed();
         String reasonText = optionalText(reason);
+        refreshRemoteBeforeLock(requestId);
         FeatureEnablementWriteSupport.WriteContext context = write.begin(FeatureEnablementWriteSupport.Actor.of(checked));
         FeatureEnablementRequest request = lockPendingRequest(context, requestId, expectedVersion);
         if (checked.userId().equals(request.getRequestedBy())) {
@@ -160,6 +165,24 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
         return result;
     }
 
+    /**
+     * 承認の対象の開放単位の外部への検査を、世代の行の lock の前に新しくする（lock を取らずに申請を読む。lock の後の読直しが正。
+     * review rb-fe-c P2-6）。開放の申請でなければ何もしない。
+     */
+    private void refreshRemoteBeforeLock(long requestId) {
+        try {
+            FeatureEnablementRequest unlocked = requestMapper.selectById(requestId);
+            Feature feature = unlocked == null || !REQUEST_TYPE_OPEN.equals(unlocked.getRequestType()) ? null
+                    : FeatureEnablementWriteSupport.featureOf(unlocked.getTargetKey());
+            if (feature != null) {
+                registry.refreshRemote(feature);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[機能の開放] 承認の前の外部への検査を新しくできません（最後の結果で評価します）: request={} exceptionClass={}",
+                    requestId, e.getClass().getSimpleName());
+        }
+    }
+
     private FeatureEnablementApprovalResult approveOpen(FeatureEnablementWriteSupport.WriteContext context,
                                                         FeatureEnablementRequest request,
                                                         FeatureEnablementActor approver, String reasonText) {
@@ -175,7 +198,7 @@ public class FeatureEnablementServiceImpl implements FeatureEnablementService {
             throw BusinessException.of(409, "error.featureEnablement.stateNotRequestable");
         }
         FeatureEvaluation evaluation = registry.evaluate(feature,
-                evaluationContext(context, snapshot, FeatureEvaluationContext.Purpose.APPROVAL, EnumSet.of(feature), true));
+                evaluationContext(context, snapshot, FeatureEvaluationContext.Purpose.APPROVAL, EnumSet.of(feature), false));
         if (!evaluation.openingAllowed()) {
             // 申請は未決のまま（失効の先行の閉鎖は commit する）
             return new FeatureEnablementApprovalResult(FeatureEnablementApprovalResult.Outcome.CONDITIONS_UNSATISFIED,

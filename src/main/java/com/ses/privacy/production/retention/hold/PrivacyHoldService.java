@@ -3,6 +3,7 @@ package com.ses.privacy.production.retention.hold;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.privacy.foundation.JournalAccessDeniedException;
 import com.ses.privacy.foundation.JournalConflictException;
 import com.ses.privacy.foundation.PrivacyJournalPort;
 import com.ses.privacy.foundation.PrivacyJournalPort.JournalAck;
@@ -99,6 +100,7 @@ public class PrivacyHoldService {
     private final Clock clock;
     private final Supplier<Actor> actorSource;
     private final BooleanSupplier releaseOpen;
+    private final BooleanSupplier startSignOffsValid;
 
     PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                        PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
@@ -116,6 +118,20 @@ public class PrivacyHoldService {
                        HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
                        PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource,
                        BooleanSupplier releaseOpen) {
+        this(accessGuard, oidcProperties, decisions, journal, store, resolver, gate, projector, audit, requiresNew, clock,
+                actorSource, releaseOpen, () -> true);
+    }
+
+    /**
+     * @param startSignOffsValid 副入口「hold 開始」の署名（{@code NF07_D05}・{@code NF07_D05_OWNER_ACCEPTANCE}）が有効か（DB の
+     *                           開放状態で管理する間だけ判定する。判定できなければ false を返すこと。review rb-fe-c P2-1）
+     */
+    PrivacyHoldService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
+                       PrivacyHoldDecisions decisions, PrivacyHoldJournal journal, PrivacyHoldProjectionStore store,
+                       HoldSubjectResolver resolver, PrivacyHoldGate gate, PrivacyHoldProjector projector,
+                       PrivacyHoldAudit audit, TransactionTemplate requiresNew, Clock clock, Supplier<Actor> actorSource,
+                       BooleanSupplier releaseOpen, BooleanSupplier startSignOffsValid) {
+        this.startSignOffsValid = startSignOffsValid == null ? () -> false : startSignOffsValid;
         this.releaseOpen = releaseOpen == null ? () -> false : releaseOpen;
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
@@ -182,7 +198,11 @@ public class PrivacyHoldService {
             unattributable.add(new PrivacyHoldOverview.ElementEntry(elementId, count, heldElements.contains(elementId)));
         }
         List<String> missing = new ArrayList<>(readiness.missing());
-        if (availability != PrivacyHoldJournal.Availability.AVAILABLE) {
+        if (!startSignOffsValidQuietly()) {
+            missing.add("subgateSignOffs");
+        }
+        if (availability != PrivacyHoldJournal.Availability.AVAILABLE
+                || journal.appendAvailability() != PrivacyHoldJournal.Availability.AVAILABLE) {
             missing.add("journal");
         }
         List<PrivacyHoldOverview.RelatedElements> related = RELATED_ELEMENTS.stream()
@@ -198,6 +218,14 @@ public class PrivacyHoldService {
                 related, holdable, releaseOpenQuietly(), tenantId,
                 viewer.userId() == null || viewer.userId() <= 0 ? null
                         : PrivacyHoldReleaseService.REQUESTER_PREFIX + viewer.userId());
+    }
+
+    private boolean startSignOffsValidQuietly() {
+        try {
+            return startSignOffsValid.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private boolean releaseOpenQuietly() {
@@ -220,7 +248,8 @@ public class PrivacyHoldService {
             throw BusinessException.of(403, "error.accessDenied");
         }
         PrivacyHoldDecisions.Readiness readiness = decisions.evaluate();
-        if (!readiness.ready()) {
+        if (!readiness.ready() || !startSignOffsValidQuietly()) {
+            // D-05 と副入口の署名（D-05・D-05 owner の受理）の取消し・失効は副入口だけを閉じる（review rb-fe-c P2-1）
             throw BusinessException.of(409, "error.privacy.decisionUnknown");
         }
         if (request == null) {
@@ -232,7 +261,9 @@ public class PrivacyHoldService {
             throw BusinessException.of(409, "error.privacy.holdTargetTypeNotAllowed");
         }
         Validated validated = validate(request, type);
-        if (journal.availability() != PrivacyHoldJournal.Availability.AVAILABLE) {
+        // hold の開始は Journal への append。開放の条件の結果（appender の権限）で判定する（reader の principal では開始できない。
+        // 既存の hold の gate は hold の効力の結果のまま動く。feature-enablement-console design §8.5 の 3）
+        if (journal.appendAvailability() != PrivacyHoldJournal.Availability.AVAILABLE) {
             throw BusinessException.of(503, "error.privacy.journalUnavailable");
         }
         Map<String, SubjectAttribution> catalog;
@@ -282,12 +313,17 @@ public class PrivacyHoldService {
             ack = appendWithRefreshedReplay(port, command, tenantId, ids.commandId());
         } catch (JournalConflictException e) {
             // Journal の transaction 内で拒否された（append されていない）ので pending を戻してよい
-            releasePending(tenantId, ids, actor);
+            releasePending(tenantId, ids, actor, "JOURNAL_CONFLICT", 409);
             // held なら同じ対象の hold が既にある。それ以外（revision の競合）は再試行を求める（Review P3-7）
             throw BusinessException.of(409, headHeldQuietly(partition)
                     ? "error.privacy.holdAlreadyActive" : "error.privacy.holdStartInProgress");
+        } catch (JournalAccessDeniedException e) {
+            // 最初の試行が権限で拒否された（reader 等）。append は起きていないため pending を戻す（review rb-fe-c P3-1）。ACK 不明の後の
+            // 再送の拒否は JournalRetryDeniedAfterUnknown で下の ACK 不明になる（P3-N1）
+            releasePending(tenantId, ids, actor, "JOURNAL_ACCESS_DENIED", 503);
+            throw BusinessException.of(503, "error.privacy.journalUnavailable");
         } catch (RuntimeException e) {
-            ackUnknown(ids, actor);
+            ackUnknown(ids, actor, e instanceof JournalRetryDeniedAfterUnknown);
             throw BusinessException.of(503, "error.privacy.holdAckUnknown");
         }
 
@@ -394,13 +430,18 @@ public class PrivacyHoldService {
                                                  String commandId) {
         try {
             return port.append(command);
-        } catch (JournalConflictException e) {
+        } catch (JournalConflictException | JournalAccessDeniedException e) {
             throw e;
         } catch (RuntimeException firstUnknown) {
             if (!refreshPendingSince(tenantId, commandId)) {
                 throw firstUnknown;
             }
-            return port.append(command);
+            try {
+                return port.append(command);
+            } catch (JournalAccessDeniedException deniedAfterUnknown) {
+                // 先の試行は ACK 不明のまま（commit 済みかもしれない）。確定の拒否にせず ACK 不明として扱う（review rb-fe-c P3-N1）
+                throw new JournalRetryDeniedAfterUnknown(deniedAfterUnknown);
+            }
         }
     }
 
@@ -439,12 +480,13 @@ public class PrivacyHoldService {
         }
     }
 
-    private void releasePending(String tenantId, PrivacyHoldPartitions.Ids ids, Actor actor) {
+    private void releasePending(String tenantId, PrivacyHoldPartitions.Ids ids, Actor actor, String reason,
+                                int rejectedStatus) {
         try {
             requiresNew.executeWithoutResult(status -> {
                 store.clearPending(tenantId, journal.journalId(), ids.commandId());
                 audit.record(actor.username(), PrivacyHoldAudit.START_REJECTED,
-                        PrivacyHoldAudit.fields("hold", ids.holdId(), "reason", "JOURNAL_CONFLICT"), 409, false);
+                        PrivacyHoldAudit.fields("hold", ids.holdId(), "reason", reason), rejectedStatus, false);
             });
         } catch (RuntimeException e) {
             // pending が残っても reconciler が「Journal に command が無い」ことを確かめてから消す
@@ -453,11 +495,17 @@ public class PrivacyHoldService {
     }
 
     private void ackUnknown(PrivacyHoldPartitions.Ids ids, Actor actor) {
-        log.warn("[privacy-hold] hold開始のACKを確認できません。pendingを残してreconcilerに任せます: code={}",
-                LOG_CODE_ACK_UNKNOWN);
+        ackUnknown(ids, actor, false);
+    }
+
+    /** @param deniedAfterUnknown 再送が権限で拒否された（先の試行の結果は不明。監査の理由で拒否と区別する。review rb-fe-c P3-N1） */
+    private void ackUnknown(PrivacyHoldPartitions.Ids ids, Actor actor, boolean deniedAfterUnknown) {
+        String reason = deniedAfterUnknown ? JournalRetryDeniedAfterUnknown.AUDIT_REASON : null;
+        log.warn("[privacy-hold] hold開始のACKを確認できません。pendingを残してreconcilerに任せます: code={} reason={}",
+                LOG_CODE_ACK_UNKNOWN, reason);
         try {
             requiresNew.executeWithoutResult(status -> audit.record(actor.username(), PrivacyHoldAudit.ACK_UNKNOWN,
-                    PrivacyHoldAudit.fields("hold", ids.holdId()), 503, false));
+                    PrivacyHoldAudit.fields("hold", ids.holdId(), "reason", reason), 503, false));
         } catch (RuntimeException e) {
             log.warn("[privacy-hold] ACK不明の監査を記録できません: exceptionClass={}", e.getClass().getSimpleName());
         }

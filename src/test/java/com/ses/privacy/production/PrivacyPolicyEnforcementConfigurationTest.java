@@ -94,23 +94,22 @@ class PrivacyPolicyEnforcementConfigurationTest {
         org.mockito.Mockito.when(dataElements.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
         org.mockito.Mockito.when(policies.selectList(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(java.util.List.of(signed.row()));
-        PrivacyFeatureProperties flags = new PrivacyFeatureProperties();
-        flags.getRetention().setEnabled(true);
-        PrivacyDecisionWindowMonitor window = mock(PrivacyDecisionWindowMonitor.class);
-        org.mockito.Mockito.when(window.satisfied()).thenReturn(true);
+        // 保持・保全の実効値（開放状態と決定ID束縛の有効期間を含む。FE-C02）が開
+        com.ses.config.feature.FeatureSwitches switches = mock(com.ses.config.feature.FeatureSwitches.class);
+        org.mockito.Mockito.when(switches.isEnabled(com.ses.config.feature.Feature.NF07_RETENTION)).thenReturn(true);
         com.ses.service.ai.AiExternalSendApproval.Snapshot approval = com.ses.service.ai.AiExternalSendApproval.evaluate(
                 com.ses.service.ai.AiExternalSendApprovalFixtures.approvedConfig(today), today).snapshot();
 
         org.springframework.mock.env.MockEnvironment prod = new org.springframework.mock.env.MockEnvironment();
         prod.setActiveProfiles("prod");
         @SuppressWarnings("unchecked")
-        org.springframework.beans.factory.ObjectProvider<PrivacyDecisionWindowMonitor> windowProvider =
+        org.springframework.beans.factory.ObjectProvider<com.ses.config.feature.FeatureSwitches> switchesProvider =
                 mock(org.springframework.beans.factory.ObjectProvider.class);
-        org.mockito.Mockito.when(windowProvider.getIfAvailable()).thenReturn(window);
+        org.mockito.Mockito.when(switchesProvider.getIfAvailable()).thenReturn(switches);
 
         // Spring 登録と同じ bean method で1回だけ作り、以後は作り直さない（再起動しない）
         PolicyEnforcementPort port = new PrivacyPolicyEnforcementConfiguration().productionPolicyEnforcementPort(prod,
-                flags, dataElements, policies, windowProvider, trust, Clock.fixed(now, ZoneOffset.UTC));
+                switchesProvider, dataElements, policies, trust, Clock.fixed(now, ZoneOffset.UTC));
         assertThat(trust.anchorReads.get() + trust.revocationReads.get()).as("構築時に trust source を読まない").isZero();
         com.ses.service.ai.AiExternalSendPrivacyPolicyCheck check =
                 com.ses.service.ai.AiExternalSendApprovalFixtures.privacyPolicyCheck(port, null);

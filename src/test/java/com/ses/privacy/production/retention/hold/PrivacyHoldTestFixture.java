@@ -56,6 +56,10 @@ final class PrivacyHoldTestFixture {
     volatile PrivacyJournalStartupVerifier.Result startupResult =
             new PrivacyJournalStartupVerifier.Result(PrivacyJournalStartupVerifier.Availability.AVAILABLE, List.of());
     volatile Duration pendingTimeout = Duration.ofMinutes(2);
+    /** 開放の条件の結果（appender の権限。null なら hold の効力の結果と同じ）。FE-C03 の試験が reader の principal を模す。 */
+    volatile PrivacyJournalStartupVerifier.Result enablementResult;
+    /** 副入口「hold 開始」の署名が有効か（review rb-fe-c P2-1 の試験が取消しを模す）。 */
+    volatile boolean startSignOffsValid = true;
     volatile PrivacyHoldService.Actor actor = new PrivacyHoldService.Actor(TENANT, 1L, "privacy-admin-a");
     /** application DB の {@code @@server_uuid}（H2 には無いため差し替える。Journal と同じ値なら同じ instance の扱い）。 */
     volatile java.util.function.Supplier<String> applicationServerUuid = () -> "application-server-uuid";
@@ -98,7 +102,8 @@ final class PrivacyHoldTestFixture {
         }).when(auditLog).recordRequired(any(), any(), any(), anyInt(), any(), anyBoolean());
 
         this.store = new PrivacyHoldProjectionStore(jdbc);
-        this.holdJournal = new PrivacyHoldJournal(() -> startupResult, () -> journal, journal, JOURNAL_ID,
+        this.holdJournal = new PrivacyHoldJournal(() -> startupResult,
+                () -> enablementResult == null ? startupResult : enablementResult, () -> journal, journal, JOURNAL_ID,
                 null, Duration.ofSeconds(35), () -> applicationServerUuid.get(), clock) {
             @Override
             Duration pendingTimeout() {
@@ -113,7 +118,7 @@ final class PrivacyHoldTestFixture {
         this.audit = new PrivacyHoldAudit(auditLog);
         this.projector = new PrivacyHoldProjector(store, holdJournal, independent, audit, clock);
         this.service = new PrivacyHoldService(guard, null, decisions, holdJournal, store, resolver, gate, projector, audit,
-                independent, clock, () -> actor);
+                independent, clock, () -> actor, null, () -> startSignOffsValid);
         this.reconciler = new PrivacyHoldProjectionReconciler(holdJournal, store, projector, decisions, audit,
                 independent, clock, noMetrics, new PrivacyHoldStarterLookup(jdbc));
     }

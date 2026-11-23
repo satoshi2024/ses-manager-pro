@@ -45,7 +45,12 @@ class FeatureConditionCodeClassificationTest {
             // 段階 B（FE-B01）: NF01 二者確認の証跡種別を照会できない
             "dualConfirmation.evidenceTypes.unverifiable",
             // 段階 B（FE-B02）: NF06 の権限・単一法人を照会できない
-            "importCenter.permission.unverifiable", "importCenter.legalEntity.unverifiable");
+            "importCenter.permission.unverifiable", "importCenter.legalEntity.unverifiable",
+            // FE-C05: NF07 の評価器（PrivacyProductionConfigurationValidator）の照会の失敗
+            "privacyAdminGroup.unverifiable", "privacyAllow.unverifiable", "journal.verifier.unverifiable",
+            "journal.unverifiable", "journal.privilege.unverifiable", "journal.instance.serverUuid.unverifiable",
+            // review rb-fe-c P2-2: Flyway の履歴の照会の失敗（瞬断・timeout）
+            "journal.flyway.history.unverifiable", "journal.schema.unverifiable", "journal.projection.unverifiable");
 
     /** 条件の不成立を表す code（評価できない類であってはならない）。 */
     private static final List<String> UNSATISFIED = List.of(
@@ -73,7 +78,15 @@ class FeatureConditionCodeClassificationTest {
             "importCenter.permission.otherGroupAllowed[count=2]", "importCenter.legalEntity.single",
             "importCenter.legalEntity.notSingle",
             // 段階 B（復審 rb-fe-b P3-1）: NF02 顧客ポータルの公開範囲の設定が決定の範囲の内か
-            PortalVisibleSinceConditionEvaluator.CODE_WITHIN, PortalVisibleSinceConditionEvaluator.CODE_OUTSIDE);
+            PortalVisibleSinceConditionEvaluator.CODE_WITHIN, PortalVisibleSinceConditionEvaluator.CODE_OUTSIDE,
+            // FE-C05: NF07 の評価器の不成立（成立の code を含む）
+            "decisionBinding.valid", "decisionBinding.approvalDigest.mismatch", "decisionBinding.d06.expiresOn.expired",
+            "privacyAdmins.oidcProviderUnavailable", "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.valid",
+            "privacyAllow.outsidePrivacyAdmin[custom-policy-viewer]", "dsar.prerequisites", "dsar.providersUnregistered",
+            "journal.appender", "journal.notConfigured", "journal.privilege.missing:pj_head.INSERT",
+            "journal.durability.syncBinlog", "journal.contract.datasource.url.autoReconnect",
+            // 版を解釈できない履歴の行と classpath の migration を読めないことは実際の不一致（不成立）
+            "journal.flyway.historyUnreadable", "journal.flyway.artifactUnreadable");
 
     @Test
     void 一覧のcodeは分類と一致する() {

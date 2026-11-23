@@ -130,8 +130,9 @@ app:
     source: database
     allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}
   # 機能スイッチ（段階公開）。段階 A で system の中（画面「機能の開放」の申請と二人の承認）で開閉する7件（NF01・NF02・NF02 顧客
-  # ポータル・NF03・NF03 資格番号・NF04・NF10。FE-A11）の placeholder はここに置かない。それらの旧い環境変数（FEATURE_NF01_ENABLED 等）
-  # を設定すると prod は起動しない（FeatureEnablementProductionValidator）。残りの機能は段階 B〜D で system の中へ移すまで、ここの値で
+  # ポータル・NF03・NF03 資格番号・NF04・NF10。FE-A11）と、段階 C の NF07 保持・保全・DSAR（FE-C05。開閉の PRIVACY_RETENTION_ENABLED・
+  # PRIVACY_DSAR_ENABLED と、署名へ移した PRIVACY_APPROVAL_*・PRIVACY_DSAR_DUE_DAYS・PRIVACY_DSAR_PACKAGE_MAX_AGE）の placeholder は
+  # ここに置かない。それらの旧い環境変数（FEATURE_NF01_ENABLED 等）を設定すると prod は起動しない（FeatureEnablementProductionValidator）。残りの機能は段階 B〜D で system の中へ移すまで、ここの値で
   # 開閉する（本番も既定は OFF。再起動で反映）。手順: .kiro/specs/production-launch/feature-switches.md
   # 段階 B: NF01 二者確認（FE-B01）も system の中で開閉し、Privacy 署名は画面で登録・確認する（placeholder を置かない。
   # FEATURE_NF01_DUAL_CONFIRMATION_ENABLED・FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF を設定すると起動しない）。

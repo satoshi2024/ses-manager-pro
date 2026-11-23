@@ -85,6 +85,24 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         LEGACY_SETTING_NAMES = java.util.Collections.unmodifiableMap(names);
     }
 
+    /**
+     * 開閉以外の旧い変数（DB 管理にした開放単位の、署名へ移した承認の値。正規化した名前の接頭辞）。段階ごとに自分の開放単位の行を足す
+     * （A2 の報告の拡張点）。行の開放単位のどれかが DB 管理なら拒否する（review rb-fe-c P3-8）。
+     * <ul>
+     *   <li>NF07（FE-C05）: {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05 は署名の組と署名へ、失効の警告日数は system 設定
+     *       {@code feature-enablement.expiry-warning-days} へ移した。review rb-fe-c P3-4）と、D-06 の {@code PRIVACY_DSAR_DUE_DAYS}・
+     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。運用値の
+     *       {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は配備の設定に残す（接頭辞に当たらない）。</li>
+     * </ul>
+     */
+    static final List<LegacyRule> ADDITIONAL_LEGACY_RULES = List.of(
+            new LegacyRule(Set.of(Feature.NF07_RETENTION, Feature.NF07_DSAR),
+                    List.of("PRIVACYAPPROVAL", "PRIVACYDSARDUEDAYS", "PRIVACYDSARPACKAGEMAXAGE")));
+
+    /** 開閉以外の旧い変数の規則（開放単位のどれかが DB 管理なら、正規化した名前が接頭辞で始まる変数を拒否する）。 */
+    record LegacyRule(Set<Feature> units, List<String> prefixes) {
+    }
+
     private final Environment environment;
     private final FeatureEnablementProperties properties;
     private final FeatureEnablementCatalog catalog;
@@ -155,7 +173,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                     || (key.startsWith(SHORT_PREFIX) && (json || !name.equals(ALLOWED_VARIABLE)))) {
                 overrides.add(describe(name, origin));
             }
-            if (legacyKeys.contains(key) || legacySettingPrefixes.stream().anyMatch(key::startsWith)) {
+            if (legacyKeys.contains(key) || legacySettingPrefixes.stream().anyMatch(key::startsWith) || additionalLegacy(key)) {
                 legacy.add(describe(name, origin));
             }
         });
@@ -195,6 +213,20 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             }
         }
         return prefixes;
+    }
+
+    /** DB 管理にした開放単位の、開閉以外の旧い変数か（{@link #ADDITIONAL_LEGACY_RULES}）。 */
+    boolean additionalLegacy(String key) {
+        if (key == null) {
+            return false;
+        }
+        for (LegacyRule rule : ADDITIONAL_LEGACY_RULES) {
+            if (rule.units().stream().anyMatch(catalog::databaseManaged)
+                    && rule.prefixes().stream().anyMatch(key::startsWith)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 名前 → 出処（環境変数・system property・JSON の key）。JSON を読めなければその旨を出処の名前で返す。 */

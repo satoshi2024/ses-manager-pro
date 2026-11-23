@@ -15,6 +15,8 @@ public interface HoldReleaseJournalPort {
      * @throws JournalConflictException     同じ command ID の別内容、head・hold revision・hold ID の不一致、hold が無効
      * @throws HoldReleaseRejectedException proof の期限切れ
      * @throws JournalUnavailableException  ACK を確認できない（同じ proof で照会・再送する）
+ * @throws JournalAccessDeniedException principal に append の権限が無い（本番 adapter。文の実行の前の拒否で append は起きていない。
+ *                                      ただし ACK 不明の後の再送で返った時は、先の試行の結果は不明のまま。review rb-fe-c P3-1・P3-N1）
      */
     JournalAck appendHoldRelease(VerifiedHoldRelease release);
 }

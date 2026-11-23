@@ -29,8 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "spring.flyway.enabled=false",
     "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
     // FE-B01・FE-B02: NF01 二者確認と NF06 を DB で開き、その条件を満たさない状態から起動する（sql/production-security-nf01-nf06-open-h2.sql）
+    // FE-C06: NF07 保持・保全を DB で開き、その条件を満たさない状態から起動する（sql/production-security-nf07-open-h2.sql）
     "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql,"
-            + "classpath:sql/production-security-nf01-nf06-open-h2.sql",
+            + "classpath:sql/production-security-nf01-nf06-open-h2.sql,classpath:sql/production-security-nf07-open-h2.sql",
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
@@ -53,9 +54,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"compliance.gate.fingerprint-keys.default.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
     ,"certification.number-crypto.current-key-version=v1"
     ,"certification.number-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
-    // importしたapplication-test.ymlはNF07をONにするが、本番既定はOFF。prodでONにするとNF07の起動前提検査
-    // （PrivacyProductionConfigurationValidator、W3-14b）が決定ID束縛とprivacy-adminを要求するため、本番既定へ戻す
-    // （本番既定OFFは FeatureSwitchDefaultsTest、前提検査は PrivacyProductionConfigurationValidatorTest が検証する）。
+    // importしたapplication-test.ymlはNF07をONにするが、本番既定はOFF。prod の NF07 は DB の開放状態で開閉する（FE-C05）ため
+    // この値は開閉に効かないが、本番既定へ戻しておく（本番既定OFFは FeatureSwitchDefaultsTest が検証する）。
     ,"privacy.retention.enabled=false"
     ,"privacy.dsar.enabled=false"
     // prod の profile では backup の書込み静止が停止口（DISABLED）で instance を登録し、heartbeat・要求の読取り・保存期間の
@@ -101,6 +101,18 @@ class ProductionSecurityConfigurationTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private com.ses.privacy.production.PrivacyProductionConfigurationValidator privacyProductionConfigurationValidator;
+
+    @Autowired
+    private com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier privacyJournalStartupVerifier;
+
+    @Autowired
+    private com.ses.privacy.production.retention.trust.PrivacyTrustStructureState privacyTrustStructureState;
+
+    @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationResults featureEnablementEvaluationResults;
+
     /**
      * FE-B01・FE-B02（requirements §7「機能を閉じる」、復審 rb-fe-b-656d71b8 の P3-4）: NF01 二者確認と NF06 が DB で開いていて
      * （要る署名は有効期間の内で起動の時点の実効値は開）、固有の条件（Privacy 署名の参照・admission の値と行参照の鍵）を満たさなくても、
@@ -121,6 +133,34 @@ class ProductionSecurityConfigurationTest {
         org.assertj.core.api.Assertions.assertThat(String.valueOf(states.get("NF06").get("CLOSED_REASON")))
                 .startsWith("importCenter.");
         org.assertj.core.api.Assertions.assertThat(states.get("NF01")).containsEntry("STATE", "OPEN");
+    }
+
+    /**
+     * FE-C06（requirements §7「機能を閉じる」）: NF07 保持・保全が DB で開いていて、その条件（決定ID束縛・privacy-admin・Journal・鍵）を
+     * 満たさなくても、prod の完全な context は起動する（NF07 の3つの起動時検査 validator・Journal・trust は起動を止めない）。
+     * 起動時の評価が保持・保全を {@code AUTO_CLOSED} にする。
+     */
+    @Test
+    void NF07の条件を満たさないDBでもprodの完全なcontextは起動し起動時の評価が保持保全を閉じる() {
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject("SELECT state FROM t_feature_enablement_state "
+                + "WHERE tenant_id = 'default' AND feature_key = 'NF07_RETENTION'", String.class))
+                .isEqualTo("AUTO_CLOSED");
+        // 閉じた根拠が NF07 の固有の評価器の検査であること（評価器が無い evaluator.missing や、鍵の条件だけで閉じたのではない。
+        // review rb-fe-c P3-6）。起動時の WARN（NF07_PRIVACY_STOPPED_AT_STARTUP）は context の生成の中で出るため、ここでは
+        // 評価の結果の code で確かめる
+        java.util.List<String> codes = featureEnablementEvaluationResults.latest(com.ses.config.feature.Feature.NF07_RETENTION)
+                .orElseThrow().checks().stream()
+                .filter(check -> !check.passing())
+                .map(com.ses.featureenablement.condition.FeatureConditionCheck::code).toList();
+        org.assertj.core.api.Assertions.assertThat(codes)
+                .contains("journal.notConfigured")
+                .anyMatch(code -> code.startsWith("decisionBinding."))
+                .doesNotContain(com.ses.featureenablement.condition.FeatureConditionRegistry.CODE_EVALUATOR_MISSING);
+        org.assertj.core.api.Assertions.assertThatCode(privacyProductionConfigurationValidator::validate)
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThat(privacyJournalStartupVerifier.protectionResult().availability())
+                .isEqualTo(com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier.Availability.NOT_CONFIGURED);
+        org.assertj.core.api.Assertions.assertThat(privacyTrustStructureState.sound()).isTrue();
     }
 
     @Test

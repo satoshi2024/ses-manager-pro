@@ -36,9 +36,10 @@ import java.util.regex.Pattern;
  * （ID・署名日・失効日）である。設定が不完全・形式不正・digest 不一致なら「未承認」（complete=false）とする。
  * 違反は固定コードだけで返し、設定値そのものを含めない。I/O や状態を持たない。
  *
- * <p>署名日前・失効（{@link #isTemporalViolation}）も未承認だが、NF06・NF08 と同じく prod の起動は止めない。
- * 起動時検査は {@link #structuralViolations} だけで止め、時間要因の間は {@code PrivacyDecisionWindowMonitor} が
- * 実行時に NF07 を OFF として扱う（JST業務日ごとに再評価する）。
+ * <p>署名日前・失効（{@link #isTemporalViolation}）も未承認だが、prod の起動は止めない（機能の条件では起動を止めない。
+ * feature-enablement-console design §4.4）。時間要因の間は {@code PrivacyDecisionWindowMonitor} が実行時に NF07 を OFF として扱う
+ * （JST業務日ごとに再評価する）。期間は評価する開放単位の capability が要る決定だけで判定する（review P1-2）。値は承認の値の源
+ * （{@link PrivacyApprovalSource}。property か確認済みの署名）から読む。
  */
 public final class PrivacyDecisionBinding {
 
@@ -135,7 +136,7 @@ public final class PrivacyDecisionBinding {
     }
 
     /**
-     * 束縛を評価する。
+     * 束縛を評価する（property の源。期間は ON の capability が要る決定だけで判定する）。
      *
      * @param properties       {@code privacy.approval.*}
      * @param enabled          ON の capability。全て承認 capability に含まれていなければ拒否する
@@ -144,11 +145,42 @@ public final class PrivacyDecisionBinding {
      */
     public static Evaluation evaluate(PrivacyApprovalProperties properties, Set<Capability> enabled,
                                       String expectedTenantId, LocalDate today) {
-        if (properties == null || enabled == null || today == null) {
+        if (properties == null) {
+            return new Evaluation(false, List.of("approval.unavailable"), null);
+        }
+        return evaluate(PrivacyApprovalSource.properties(properties, null), enabled, expectedTenantId, today, enabled);
+    }
+
+    /** 束縛を評価する（承認の値の源。期間は ON の capability が要る決定だけで判定する）。 */
+    public static Evaluation evaluate(PrivacyApprovalSource source, Set<Capability> enabled, String expectedTenantId,
+                                      LocalDate today) {
+        return evaluate(source, enabled, expectedTenantId, today, enabled);
+    }
+
+    /**
+     * 束縛を評価する（feature-enablement-console design §8.5 の 1。review P1-2）。
+     *
+     * <p>構造（形式・tenant・承認 capability・digest）は D-09 が承認した capability の決定の全てで判定する（digest の内容は変えない）。
+     * 署名日前・失効は {@code periodCapabilities} が要る決定だけで判定する（保持・保全は D-01・D-09、DSAR は D-01・D-06・D-09）。
+     * D-06 が失効しても、保持・保全の評価（{@code periodCapabilities = {retention}}）は成り立つ（D-4）。</p>
+     *
+     * @param source             承認の値の源（評価の初めに {@link PrivacyApprovalSource#resolve()} で値を固定する）
+     * @param enabled            ON の capability。全て承認 capability に含まれていなければ拒否する
+     * @param expectedTenantId   権限評価に使う設定tenant。承認tenantと完全一致しなければ拒否する
+     * @param today              JST業務日（署名日・失効日の判定に使う）
+     * @param periodCapabilities 期間（署名日前・失効）を判定する capability（空なら期間を判定しない）
+     */
+    public static Evaluation evaluate(PrivacyApprovalSource source, Set<Capability> enabled, String expectedTenantId,
+                                      LocalDate today, Set<Capability> periodCapabilities) {
+        if (source == null || enabled == null || today == null) {
+            return new Evaluation(false, List.of("approval.unavailable"), null);
+        }
+        PrivacyApprovalSource values = source.resolve();
+        if (values == null) {
             return new Evaluation(false, List.of("approval.unavailable"), null);
         }
         List<String> violations = new ArrayList<>();
-        Content content = readContent(properties, violations);
+        Content content = readContent(values, violations);
 
         if (content.tenantId() != null && !content.tenantId().equals(trim(expectedTenantId))) {
             violations.add(VIOLATION_TENANT_MISMATCH);
@@ -160,7 +192,11 @@ public final class PrivacyDecisionBinding {
                 }
             }
         }
+        Set<Decision> periodDecisions = decisionsFor(periodCapabilities);
         for (Map.Entry<Decision, DecisionContent> entry : content.decisions().entrySet()) {
+            if (!periodDecisions.contains(entry.getKey())) {
+                continue;
+            }
             DecisionContent decision = entry.getValue();
             String prefix = entry.getKey().key();
             if (decision.signedOn() != null && decision.signedOn().isAfter(today)) {
@@ -172,7 +208,7 @@ public final class PrivacyDecisionBinding {
         }
 
         // 決定書に記載されたdigestと束縛内容を照合する。失効等の時間要因に関係なく内容の食い違いを検出する。
-        String configuredDigest = lower(properties.getApprovalDigest());
+        String configuredDigest = lower(values.approvalDigest());
         if (configuredDigest.isEmpty()) {
             violations.add("approvalDigest.missing");
         } else if (!DIGEST.matcher(configuredDigest).matches()) {
@@ -201,11 +237,21 @@ public final class PrivacyDecisionBinding {
      */
     public static StandaloneEvaluation evaluateStandalone(PrivacyApprovalProperties properties, Decision decision,
                                                           LocalDate today) {
-        if (properties == null || decision == null || today == null) {
+        if (properties == null) {
+            return new StandaloneEvaluation(false, null, List.of("approval.unavailable"));
+        }
+        return evaluateStandalone(PrivacyApprovalSource.properties(properties, null), decision, today);
+    }
+
+    /** {@link #evaluateStandalone(PrivacyApprovalProperties, Decision, LocalDate)} の承認の値の源の版。 */
+    public static StandaloneEvaluation evaluateStandalone(PrivacyApprovalSource source, Decision decision,
+                                                          LocalDate today) {
+        PrivacyApprovalSource values = source == null ? null : source.resolve();
+        if (values == null || decision == null || today == null) {
             return new StandaloneEvaluation(false, null, List.of("approval.unavailable"));
         }
         List<String> violations = new ArrayList<>();
-        DecisionContent content = readDecision(decision, properties.reference(decision), violations);
+        DecisionContent content = readDecision(decision, values.reference(decision), violations);
         String prefix = decision.key();
         if (content.signedOn() != null && content.signedOn().isAfter(today)) {
             violations.add(prefix + TEMPORAL_SIGNED_ON_FUTURE);
@@ -215,9 +261,8 @@ public final class PrivacyDecisionBinding {
         }
         if (content.decisionId() != null) {
             for (Decision other : Decision.values()) {
-                PrivacyApprovalProperties.DecisionReference reference = other == decision ? null
-                        : properties.reference(other);
-                if (reference != null && upper(content.decisionId()).equals(upper(reference.getDecisionId()))) {
+                PrivacyApprovalSource.DecisionValue reference = other == decision ? null : values.reference(other);
+                if (reference != null && upper(content.decisionId()).equals(upper(reference.decisionId()))) {
                     violations.add("decisionIds.notDistinct");
                     break;
                 }
@@ -264,16 +309,37 @@ public final class PrivacyDecisionBinding {
      * {@link WindowState#EXPIRING} とするか（1以上に丸める）。
      */
     public static Window window(PrivacyApprovalProperties properties, LocalDate today, int warningDays) {
-        if (properties == null || today == null) {
+        if (properties == null) {
             return new Window(WindowState.NOT_CONFIGURED, null);
         }
-        Content content = readContent(properties, new ArrayList<>());
-        if (content.decisions().isEmpty()) {
+        return window(PrivacyApprovalSource.properties(properties, null), today, warningDays, null);
+    }
+
+    /**
+     * {@link #window(PrivacyApprovalProperties, LocalDate, int)} の承認の値の源の版。{@code periodCapabilities} が要る決定だけを見る
+     * （null なら承認 capability の決定の全て。design §8.5 の 5: Monitor は capability ごとに状態を持つ）。
+     */
+    public static Window window(PrivacyApprovalSource source, LocalDate today, int warningDays,
+                                Set<Capability> periodCapabilities) {
+        PrivacyApprovalSource values = source == null ? null : source.resolve();
+        if (values == null || today == null) {
+            return new Window(WindowState.NOT_CONFIGURED, null);
+        }
+        Content content = readContent(values, new ArrayList<>());
+        Set<Decision> period = periodCapabilities == null ? content.decisions().keySet()
+                : decisionsFor(periodCapabilities);
+        List<DecisionContent> decisions = new ArrayList<>();
+        content.decisions().forEach((decision, value) -> {
+            if (period.contains(decision)) {
+                decisions.add(value);
+            }
+        });
+        if (decisions.isEmpty()) {
             return new Window(WindowState.NOT_CONFIGURED, null);
         }
         LocalDate earliestExpiry = null;
         boolean notYetValid = false;
-        for (DecisionContent decision : content.decisions().values()) {
+        for (DecisionContent decision : decisions) {
             if (decision.expiresOn() == null) {
                 return new Window(WindowState.NOT_CONFIGURED, null);
             }
@@ -306,8 +372,70 @@ public final class PrivacyDecisionBinding {
         if (properties == null) {
             return null;
         }
-        Content content = readContent(properties, new ArrayList<>());
+        return computeDigest(PrivacyApprovalSource.properties(properties, null));
+    }
+
+    /** {@link #computeDigest(PrivacyApprovalProperties)} の承認の値の源の版（正規形 v1 は同じ）。 */
+    public static String computeDigest(PrivacyApprovalSource source) {
+        PrivacyApprovalSource values = source == null ? null : source.resolve();
+        if (values == null) {
+            return null;
+        }
+        Content content = readContent(values, new ArrayList<>());
         return content.complete() ? digestOf(content) : null;
+    }
+
+    /**
+     * 決定 ID として受け付けるか（形式と placeholder の拒否。{@link #evaluate} と同じ規則）。署名の登録の時の検査
+     * （{@code FeatureSignOffKindValidator}）が使う。
+     */
+    public static boolean isAcceptableDecisionId(String value) {
+        return requireId(value, "id", new ArrayList<>()) != null;
+    }
+
+    /** 承認 tenant の形式として受け付けるか。 */
+    public static boolean isAcceptableTenantId(String value) {
+        String trimmed = trim(value);
+        return !trimmed.isEmpty() && TENANT.matcher(trimmed).matches();
+    }
+
+    /**
+     * capability の原文の一覧を解釈する。形式が違う・未対応の値・空なら null（{@link #evaluate} の
+     * {@code capabilities.*} と同じ規則）。
+     */
+    public static Set<Capability> parseCapabilities(List<String> raw) {
+        if (raw == null) {
+            return null;
+        }
+        Set<Capability> capabilities = EnumSet.noneOf(Capability.class);
+        for (String value : raw) {
+            String trimmed = trim(value);
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (!CAPABILITY.matcher(trimmed).matches()) {
+                return null;
+            }
+            Capability capability = capabilityOf(trimmed.toLowerCase(Locale.ROOT));
+            if (capability == null) {
+                return null;
+            }
+            capabilities.add(capability);
+        }
+        return capabilities.isEmpty() ? null : Collections.unmodifiableSet(capabilities);
+    }
+
+    /** capability の集合が要る決定の和。 */
+    private static Set<Decision> decisionsFor(Set<Capability> capabilities) {
+        Set<Decision> decisions = EnumSet.noneOf(Decision.class);
+        if (capabilities != null) {
+            for (Capability capability : capabilities) {
+                if (capability != null) {
+                    decisions.addAll(requiredDecisions(capability));
+                }
+            }
+        }
+        return decisions;
     }
 
     /**
@@ -333,8 +461,8 @@ public final class PrivacyDecisionBinding {
     }
 
     /** digest以外の束縛内容を読み、正規化値と違反を返す。 */
-    private static Content readContent(PrivacyApprovalProperties properties, List<String> violations) {
-        String tenantId = trim(properties.getTenantId());
+    private static Content readContent(PrivacyApprovalSource values, List<String> violations) {
+        String tenantId = trim(values.tenantId());
         if (tenantId.isEmpty()) {
             violations.add("tenantId.missing");
             tenantId = null;
@@ -346,8 +474,8 @@ public final class PrivacyDecisionBinding {
         Set<Capability> capabilities = EnumSet.noneOf(Capability.class);
         boolean capabilityFormatValid = true;
         boolean capabilityKnown = true;
-        if (properties.getCapabilities() != null) {
-            for (String raw : properties.getCapabilities()) {
+        if (values.capabilities() != null) {
+            for (String raw : values.capabilities()) {
                 String trimmed = trim(raw);
                 if (trimmed.isEmpty()) {
                     continue;
@@ -382,7 +510,7 @@ public final class PrivacyDecisionBinding {
             Set<Decision> required = EnumSet.noneOf(Decision.class);
             capabilities.forEach(capability -> required.addAll(requiredDecisions(capability)));
             for (Decision decision : required) {
-                DecisionContent value = readDecision(decision, properties.reference(decision), violations);
+                DecisionContent value = readDecision(decision, values.reference(decision), violations);
                 decisions.put(decision, value);
                 decisionsValid &= value.valid();
             }
@@ -404,14 +532,14 @@ public final class PrivacyDecisionBinding {
                 Collections.unmodifiableSet(capabilities), Collections.unmodifiableMap(decisions));
     }
 
-    private static DecisionContent readDecision(Decision decision, PrivacyApprovalProperties.DecisionReference reference,
+    private static DecisionContent readDecision(Decision decision, PrivacyApprovalSource.DecisionValue reference,
                                                 List<String> violations) {
         String prefix = decision.key();
-        String decisionId = requireId(reference == null ? null : reference.getDecisionId(),
+        String decisionId = requireId(reference == null ? null : reference.decisionId(),
                 prefix + ".decisionId", violations);
-        LocalDate signedOn = parseDate(reference == null ? null : reference.getSignedOn(),
+        LocalDate signedOn = parseDate(reference == null ? null : reference.signedOn(),
                 prefix + ".signedOn", violations);
-        LocalDate expiresOn = parseDate(reference == null ? null : reference.getExpiresOn(),
+        LocalDate expiresOn = parseDate(reference == null ? null : reference.expiresOn(),
                 prefix + ".expiresOn", violations);
         boolean datesValid = signedOn != null && expiresOn != null;
         if (datesValid) {
