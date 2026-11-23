@@ -152,10 +152,26 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             if (unit.databaseManaged()) {
                 keys.add(nameKey(unit.feature().environmentVariable()));
                 keys.add(nameKey(unit.feature().propertyName()));
+                // FE-D05: 開閉以外の旧い変数（承認の値。DB の源では確認済みの署名から読む）
+                for (String name : NF05_APPROVAL_VARIABLES.getOrDefault(unit.feature(), List.of())) {
+                    keys.add(nameKey(name));
+                }
             }
         }
         return keys;
     }
+
+    /**
+     * NF05 の承認の値の旧い変数（環境変数の短い名前と property の正規名。feature-enablement-console design §10。FE-D05）。許可する
+     * 送信元・送信先の一覧（{@code allowed-client-cidrs}・{@code allowed-destinations}）は digest の内容で配備の設定に残すため含めない。
+     */
+    static final Map<Feature, List<String>> NF05_APPROVAL_VARIABLES = Map.of(
+            Feature.NF05_INBOUND, List.of("INTEGRATION_HUB_INBOUND_DECISION_ID", "INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST",
+                    "integration.hub.public-api.approval.decision-id",
+                    "integration.hub.public-api.approval.approval-digest"),
+            Feature.NF05_OUTBOUND, List.of("INTEGRATION_HUB_OUTBOUND_DECISION_ID", "INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST",
+                    "integration.hub.external-transport.approval.decision-id",
+                    "integration.hub.external-transport.approval.approval-digest"));
 
     /** 名前 → 出処（環境変数・system property・JSON の key）。JSON を読めなければその旨を出処の名前で返す。 */
     private Map<String, String> configuredNames() {
