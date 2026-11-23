@@ -43,7 +43,7 @@ import java.util.function.Supplier;
  *   <li><b>旧い変数</b>（prod）: 目録で DB 管理にした開放単位の旧い開閉の変数（{@link Feature#environmentVariable()}・
  *       {@link Feature#propertyName()} の全ての綴り）が環境変数・system property・{@code SPRING_APPLICATION_JSON} にあれば止める
  *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。
- *       開閉以外の旧い変数（署名の値・設定。{@link #LEGACY_SETTING_NAMES}）も、DB 管理の印のある開放単位の分を同じく拒否する。</li>
+ *       開閉以外の旧い変数（署名・設定へ移した承認の値。{@link #LEGACY_SETTING_RULES}）も、DB 管理の印のある開放単位の分を同じく拒否する。</li>
  *   <li><b>段階の間の暫定の拒否</b>（prod）: 環境変数・system property・{@code SPRING_APPLICATION_JSON} の NF01 二者確認の ON と NF02 顧客ポータルの公開範囲
  *       （{@link FeatureEnablementTransitionalRejections}。FE-B01・FE-B03 で外す）。</li>
  * </ul>
@@ -67,40 +67,46 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
-     * 開閉以外の旧い変数（署名の値・設定。環境変数と property の綴り。正規化した名前の前方一致で、list の添字の付いた綴りも拾う）。
-     * DB 管理の印のある開放単位の分だけ拒否する（値は system の中の署名・設定へ移した。D-5。段階 B〜D が開放単位ごとに足す）。
-     */
-    static final Map<Feature, List<String>> LEGACY_SETTING_NAMES;
-
-    static {
-        Map<Feature, List<String>> names = new java.util.EnumMap<>(Feature.class);
-        // FE-B01: NF01 二者確認の Privacy 署名の参照（署名 NF01_DUAL_PRIVACY へ移した）
-        names.put(Feature.NF01_DUAL_CONFIRMATION, List.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF",
-                "app.features.nf01-dual-confirmation.privacy-sign-off-ref"));
-        // FE-B02: NF06 の admission の承認（IMPORT_ADMISSION_* の6項目。署名 NF06_ADMISSION へ移した）
-        names.put(Feature.NF06, List.of("IMPORT_ADMISSION_", "app.import-center.admission."));
-        // FE-B03: NF02 顧客ポータルの公開範囲（承認で変える設定 nf02-customer-portal.visible-since へ移した）
-        names.put(Feature.NF02_CUSTOMER_PORTAL, List.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE",
-                "app.features.nf02-customer-portal.visible-since"));
-        LEGACY_SETTING_NAMES = java.util.Collections.unmodifiableMap(names);
-    }
-
-    /**
-     * 開閉以外の旧い変数（DB 管理にした開放単位の、署名へ移した承認の値。正規化した名前の接頭辞）。段階ごとに自分の開放単位の行を足す
-     * （A2 の報告の拡張点）。行の開放単位のどれかが DB 管理なら拒否する（review rb-fe-c P3-8）。
+     * 開閉以外の旧い変数の規則（値を system の中の署名・設定へ移した承認の値。D-5）。段階 B・C・D がそれぞれ足した拒否（B の
+     * 開放単位ごとの名前の前方一致・C の開放単位の集合と接頭辞・D の NF05 の名前の完全一致）を、この1つの表にまとめた（段階の整合 M1）。
+     * 各行は開放単位の集合と名前（環境変数と property の綴り）で、集合のどれかが DB 管理なら、正規化した名前がどれかの名前（正規化）で
+     * 始まる変数を拒否する（前方一致のため list の添字の付いた綴りも拾う。review rb-fe-c P3-8）。
+     * 配備の設定に残る運用値（{@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS}・Journal・trust・行参照の鍵・NF05 の許可の一覧等）は、どの行の
+     * 名前でも始まらないように行の名前を選ぶ（運用値に当たると prod はその運用値で起動しなくなる。{@code application*.yml} の
+     * placeholder のうち規則に当たるものが移した値だけであることを {@code FeatureEnablementProductionValidatorTest} が確かめる）。
      * <ul>
-     *   <li>NF07（FE-C05）: {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05 は署名の組と署名へ、失効の警告日数は system 設定
+     *   <li>FE-B01: NF01 二者確認の Privacy 署名の参照（署名 {@code NF01_DUAL_PRIVACY} へ移した）。</li>
+     *   <li>FE-B02: NF06 の admission の承認（{@code IMPORT_ADMISSION_*} の6項目。署名 {@code NF06_ADMISSION} へ移した）。行参照の鍵
+     *       {@code IMPORT_ROW_REFERENCE_HMAC_KEY} は鍵として配備の設定に残る。</li>
+     *   <li>FE-B03: NF02 顧客ポータルの公開範囲（承認で変える設定 {@code nf02-customer-portal.visible-since} へ移した。空の値も拒否する）。</li>
+     *   <li>FE-C05: NF07 の {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05 は署名の組と署名へ、失効の警告の日数は system 設定
      *       {@code feature-enablement.expiry-warning-days} へ移した。review rb-fe-c P3-4）と、D-06 の {@code PRIVACY_DSAR_DUE_DAYS}・
-     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。運用値の
-     *       {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は配備の設定に残す（接頭辞に当たらない）。</li>
+     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。NF07 の2件のどちらかが DB 管理なら拒否する。</li>
+     *   <li>FE-D05: NF05 の決定 ID と approval digest（確認済みの署名から読む）。許可する送信元・送信先の一覧
+     *       （{@code allowed-client-cidrs}・{@code allowed-destinations}）は digest の内容で配備の設定に残すため含めない。</li>
      * </ul>
      */
-    static final List<LegacyRule> ADDITIONAL_LEGACY_RULES = List.of(
-            new LegacyRule(Set.of(Feature.NF07_RETENTION, Feature.NF07_DSAR),
-                    List.of("PRIVACYAPPROVAL", "PRIVACYDSARDUEDAYS", "PRIVACYDSARPACKAGEMAXAGE")));
+    static final List<LegacySettingRule> LEGACY_SETTING_RULES = List.of(
+            new LegacySettingRule(Set.of(Feature.NF01_DUAL_CONFIRMATION), List.of(
+                    "FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF",
+                    "app.features.nf01-dual-confirmation.privacy-sign-off-ref")),
+            new LegacySettingRule(Set.of(Feature.NF06), List.of("IMPORT_ADMISSION_", "app.import-center.admission.")),
+            new LegacySettingRule(Set.of(Feature.NF02_CUSTOMER_PORTAL), List.of(
+                    "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", "app.features.nf02-customer-portal.visible-since")),
+            new LegacySettingRule(Set.of(Feature.NF07_RETENTION, Feature.NF07_DSAR), List.of(
+                    "PRIVACY_APPROVAL_", "PRIVACY_DSAR_DUE_DAYS", "PRIVACY_DSAR_PACKAGE_MAX_AGE",
+                    "privacy.approval.", "privacy.dsar.due-days", "privacy.dsar.package-max-age")),
+            new LegacySettingRule(Set.of(Feature.NF05_INBOUND), List.of(
+                    "INTEGRATION_HUB_INBOUND_DECISION_ID", "INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST",
+                    "integration.hub.public-api.approval.decision-id",
+                    "integration.hub.public-api.approval.approval-digest")),
+            new LegacySettingRule(Set.of(Feature.NF05_OUTBOUND), List.of(
+                    "INTEGRATION_HUB_OUTBOUND_DECISION_ID", "INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST",
+                    "integration.hub.external-transport.approval.decision-id",
+                    "integration.hub.external-transport.approval.approval-digest")));
 
-    /** 開閉以外の旧い変数の規則（開放単位のどれかが DB 管理なら、正規化した名前が接頭辞で始まる変数を拒否する）。 */
-    record LegacyRule(Set<Feature> units, List<String> prefixes) {
+    /** 開閉以外の旧い変数の規則の1行（{@code units} のどれかが DB 管理なら、正規化した {@code names} のどれかで始まる変数を拒否する）。 */
+    record LegacySettingRule(Set<Feature> units, List<String> names) {
     }
 
     private final Environment environment;
@@ -173,7 +179,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                     || (key.startsWith(SHORT_PREFIX) && (json || !name.equals(ALLOWED_VARIABLE)))) {
                 overrides.add(describe(name, origin));
             }
-            if (legacyKeys.contains(key) || legacySettingPrefixes.stream().anyMatch(key::startsWith) || additionalLegacy(key)) {
+            if (legacyKeys.contains(key) || legacySettingPrefixes.stream().anyMatch(key::startsWith)) {
                 legacy.add(describe(name, origin));
             }
         });
@@ -197,53 +203,21 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             if (unit.databaseManaged()) {
                 keys.add(nameKey(unit.feature().environmentVariable()));
                 keys.add(nameKey(unit.feature().propertyName()));
-                // FE-D05: 開閉以外の旧い変数（承認の値。DB の源では確認済みの署名から読む）
-                for (String name : NF05_APPROVAL_VARIABLES.getOrDefault(unit.feature(), List.of())) {
-                    keys.add(nameKey(name));
-                }
             }
         }
         return keys;
     }
 
-    /** DB 管理の印のある開放単位の開閉以外の旧い変数（正規化した名前。前方一致で比べる）。 */
+    /** DB 管理の印のある開放単位の開閉以外の旧い変数（{@link #LEGACY_SETTING_RULES}。正規化した名前。前方一致で比べる）。 */
     Set<String> legacySettingPrefixes() {
         Set<String> prefixes = new LinkedHashSet<>();
-        for (UnitDefinition unit : catalog.units()) {
-            if (unit.databaseManaged()) {
-                for (String name : LEGACY_SETTING_NAMES.getOrDefault(unit.feature(), List.of())) {
-                    prefixes.add(nameKey(name));
-                }
+        for (LegacySettingRule rule : LEGACY_SETTING_RULES) {
+            if (rule.units().stream().anyMatch(catalog::databaseManaged)) {
+                rule.names().forEach(name -> prefixes.add(nameKey(name)));
             }
         }
         return prefixes;
     }
-
-    /** DB 管理にした開放単位の、開閉以外の旧い変数か（{@link #ADDITIONAL_LEGACY_RULES}）。 */
-    boolean additionalLegacy(String key) {
-        if (key == null) {
-            return false;
-        }
-        for (LegacyRule rule : ADDITIONAL_LEGACY_RULES) {
-            if (rule.units().stream().anyMatch(catalog::databaseManaged)
-                    && rule.prefixes().stream().anyMatch(key::startsWith)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * NF05 の承認の値の旧い変数（環境変数の短い名前と property の正規名。feature-enablement-console design §10。FE-D05）。許可する
-     * 送信元・送信先の一覧（{@code allowed-client-cidrs}・{@code allowed-destinations}）は digest の内容で配備の設定に残すため含めない。
-     */
-    static final Map<Feature, List<String>> NF05_APPROVAL_VARIABLES = Map.of(
-            Feature.NF05_INBOUND, List.of("INTEGRATION_HUB_INBOUND_DECISION_ID", "INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST",
-                    "integration.hub.public-api.approval.decision-id",
-                    "integration.hub.public-api.approval.approval-digest"),
-            Feature.NF05_OUTBOUND, List.of("INTEGRATION_HUB_OUTBOUND_DECISION_ID", "INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST",
-                    "integration.hub.external-transport.approval.decision-id",
-                    "integration.hub.external-transport.approval.approval-digest"));
 
     /** 名前 → 出処（環境変数・system property・JSON の key）。JSON を読めなければその旨を出処の名前で返す。 */
     private Map<String, String> configuredNames() {

@@ -378,8 +378,10 @@ class FeatureEnablementProductionValidatorTest {
                 (env, system) -> new FeatureEnablementProductionValidator(prod(), properties,
                         FeatureEnablementCatalog.standard(), () -> env, () -> system);
         assertThat(standard.apply(Map.of(), new Properties()).legacyKeys()).contains("INTEGRATIONHUBPUBLICAPIENABLED",
-                "INTEGRATIONHUBEXTERNALTRANSPORTENABLED", "INTEGRATIONHUBINBOUNDDECISIONID",
-                "INTEGRATIONHUBINBOUNDAPPROVALDIGEST", "INTEGRATIONHUBOUTBOUNDDECISIONID",
+                "INTEGRATIONHUBEXTERNALTRANSPORTENABLED");
+        // 承認の値は開閉以外の旧い変数の規則の表（段階の整合 M1 で LEGACY_SETTING_RULES の1つにまとめた）
+        assertThat(standard.apply(Map.of(), new Properties()).legacySettingPrefixes()).contains(
+                "INTEGRATIONHUBINBOUNDDECISIONID", "INTEGRATIONHUBINBOUNDAPPROVALDIGEST", "INTEGRATIONHUBOUTBOUNDDECISIONID",
                 "INTEGRATIONHUBOUTBOUNDAPPROVALDIGEST", "INTEGRATIONHUBPUBLICAPIAPPROVALDECISIONID",
                 "INTEGRATIONHUBEXTERNALTRANSPORTAPPROVALAPPROVALDIGEST");
         for (Map<String, String> env : List.of(Map.of("INTEGRATION_HUB_PUBLIC_API_ENABLED", "true"),
@@ -397,6 +399,53 @@ class FeatureEnablementProductionValidatorTest {
         assertThatCode(() -> standard.apply(Map.of("SPRING_APPLICATION_JSON", "{\"integration\":{\"hub\":{\"public-api\":"
                 + "{\"approval\":{\"allowed-client-cidrs\":[\"203.0.113.0/24\"]}}}}}"), new Properties()).validate())
                 .doesNotThrowAnyException();
+    }
+
+    /**
+     * 段階の整合 M1: 段階 B・C・D の開閉以外の旧い変数の拒否を1つの表（{@code LEGACY_SETTING_RULES}）にまとめた後も、規則は署名・設定へ
+     * 移した承認の値だけに当たり、配備の設定に残る運用値には当たらない（当たると prod はその運用値で起動しなくなる）。
+     * {@code application.yml}・{@code application-prod.yml} の placeholder の変数名のうち、本番の目録の規則に当たるものは全て移した値の
+     * 形で、運用値（DSAR の期限の警告日数・Journal・trust・行参照の鍵・公開 ID の鍵・NF05 の許可の一覧）は当たらない。
+     */
+    @Test
+    void 開閉以外の旧い変数の規則はymlのplaceholderのうち移した承認の値だけに当たり運用値には当たらない() throws java.io.IOException {
+        java.util.Set<String> prefixes = new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).legacySettingPrefixes();
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([A-Za-z0-9_.\\-]+)");
+        java.util.Set<String> matched = new java.util.TreeSet<>();
+        for (String yml : List.of("application.yml", "application-prod.yml")) {
+            java.util.regex.Matcher found = placeholder.matcher(new org.springframework.core.io.ClassPathResource(yml)
+                    .getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+            while (found.find()) {
+                String key = FeatureEnablementProductionValidator.nameKey(found.group(1));
+                if (prefixes.stream().anyMatch(key::startsWith)) {
+                    matched.add(found.group(1));
+                }
+            }
+        }
+        java.util.regex.Pattern moved = java.util.regex.Pattern.compile(
+                "FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF"
+                        + "|IMPORT_ADMISSION_(DECISION_ID|TENANT_ID|SIGNED_ON|EXPIRES_ON|SOURCE_CODES|APPROVAL_DIGEST)"
+                        + "|FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE"
+                        + "|PRIVACY_APPROVAL_(D0[1-9]_(DECISION_ID|SIGNED_ON|EXPIRES_ON)|TENANT_ID|CAPABILITIES|DIGEST"
+                        + "|EXPIRY_WARNING_DAYS)"
+                        + "|PRIVACY_DSAR_(DUE_DAYS|PACKAGE_MAX_AGE)"
+                        + "|INTEGRATION_HUB_(IN|OUT)BOUND_(DECISION_ID|APPROVAL_DIGEST)");
+        assertThat(matched).as("規則に当たる placeholder").isNotEmpty()
+                .allSatisfy(name -> assertThat(moved.matcher(name).matches()).as(name).isTrue());
+        for (String operational : List.of("PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "privacy.dsar.deadline-warning-days",
+                "PRIVACY_JOURNAL_DATASOURCE_URL", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "IMPORT_ROW_REFERENCE_HMAC_KEY",
+                "INTEGRATION_HUB_PUBLIC_ID_KEY", "integration.hub.public-api.approval.allowed-client-cidrs[0]",
+                "integration.hub.external-transport.approval.allowed-destinations[0]")) {
+            String key = FeatureEnablementProductionValidator.nameKey(operational);
+            assertThat(prefixes).as(operational).noneMatch(key::startsWith);
+        }
+        // 表の全ての行は本番の目録（段階 D の後は全ての開放単位に印）で拒否に効く
+        for (FeatureEnablementProductionValidator.LegacySettingRule rule
+                : FeatureEnablementProductionValidator.LEGACY_SETTING_RULES) {
+            rule.names().forEach(name -> assertThat(prefixes).as(name)
+                    .contains(FeatureEnablementProductionValidator.nameKey(name)));
+        }
     }
 
     private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {
