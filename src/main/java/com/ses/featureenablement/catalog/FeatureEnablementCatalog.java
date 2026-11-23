@@ -294,10 +294,10 @@ public final class FeatureEnablementCatalog {
                 sreLoad, stagingWire, digestRule);
         b.openTransition(Feature.NF05_OUTBOUND, CODE_NF05_BARRIER_OFF);
 
-        // NF06（§6.10）。評価器は FE-B02
+        // NF06（§6.10）。評価器は ImportCenterEnablementConditions（FE-B02）
         b.unit(Feature.NF06, false, false, true,
                 List.of(new KeyRequirement("IMPORT_ROW_REFERENCE_HMAC_KEY", "app.import-center.row-reference.hmac-key")),
-                List.of("ImportAdmissionStartupValidator・ImportRowReferenceKeyStartupValidator（起動時検査）",
+                List.of("ImportAdmissionApproval.evaluate・ImportSourceRowReference.state（旧い起動時検査の判定）",
                         "FS 4.8.2 の #1〜#10", "署名表の NF06 の行"),
                 kind("NF06_ADMISSION", SignOffKindClass.DECISION, SignOffKind.ReferenceRule.NF06_ADMISSION,
                         List.of("decisionId", "tenantId", "sourceCodes", "approvalDigest"), null, false, "DATA_OWNER"),
@@ -305,6 +305,8 @@ public final class FeatureEnablementCatalog {
                 evidence("NF06_SRE_LB", "SRE"),
                 evidence("NF06_DBA_ACCOUNT", "DBA"),
                 evidence("NF06_STAGING_CHECK", "PRODUCTION_OWNER"));
+        // 段階 B の DB 管理の印（FE-B02）
+        b.databaseManaged(Set.of(Feature.NF06));
 
         // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は FE-C05
         List<KeyRequirement> journalKeys = List.of(

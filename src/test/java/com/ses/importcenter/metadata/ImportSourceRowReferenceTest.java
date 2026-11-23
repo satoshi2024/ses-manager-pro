@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * W3-12（W3-05 review P2-1）: preview・error exportへ返す行参照は鍵付きHMACで、鍵が無ければ計算し直せないこと。
- * 鍵の形式検査・prodでの開発用鍵の拒否・NF-06 ONの起動検査（値をmessageへ出さない）を固定する。
+ * 鍵の形式検査・prodでの開発用鍵の拒否・起動の log（prod でも起動を止めない。FE-B02）を固定する。
  */
 class ImportSourceRowReferenceTest {
     private static final String KEY = ImportA1aH2Fixture.ROW_REFERENCE_KEY;
@@ -118,27 +118,28 @@ class ImportSourceRowReferenceTest {
         }
     }
 
+    /**
+     * FE-B02（feature-enablement-console design §8.3、requirements §7）: prod でも鍵の状態で起動を止めない（NF-06 を閉じるのは
+     * {@code ImportCenterEnablementConditions}）。状態の判定は従来どおりで、test用鍵・開発用鍵は prod で使えない。
+     */
     @Test
-    void productionStartupFailsOnlyWhenNf06IsOnAndNeverPrintsTheKey() {
+    void prodでもNF06のONとOFFのどちらでも鍵の状態で起動を止めず状態の判定は変えない() {
         String broken = "broken-key-value-not-base64";
-        IllegalStateException missing = assertThrows(IllegalStateException.class,
-                () -> validator(new ImportSourceRowReference(null, true), true).validate());
-        assertTrue(missing.getMessage().contains("state=MISSING"));
-        IllegalStateException invalid = assertThrows(IllegalStateException.class,
-                () -> validator(new ImportSourceRowReference(broken, true), true).validate());
-        assertTrue(invalid.getMessage().contains("state=INVALID"));
-        assertFalse(invalid.getMessage().contains(broken), "鍵の値をmessageへ出さない");
-        IllegalStateException development = assertThrows(IllegalStateException.class, () -> validator(
-                new ImportSourceRowReference(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, true), true).validate());
-        assertTrue(development.getMessage().contains("state=DEVELOPMENT_KEY_IN_PRODUCTION"));
-        assertFalse(development.getMessage().contains(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY));
-        IllegalStateException testKey = assertThrows(IllegalStateException.class,
-                () -> validator(new ImportSourceRowReference(KEY, true), true).validate());
-        assertTrue(testKey.getMessage().contains("state=DEVELOPMENT_KEY_IN_PRODUCTION"), "test用鍵もprodで拒否する");
-
-        assertDoesNotThrow(() -> validator(new ImportSourceRowReference(PRODUCTION_LIKE_KEY, true), true).validate());
-        assertDoesNotThrow(() -> validator(new ImportSourceRowReference(null, true), false).validate());
-        assertDoesNotThrow(() -> validator(new ImportSourceRowReference(broken, true), false).validate());
+        for (boolean nf06Enabled : new boolean[]{true, false}) {
+            for (String key : new String[]{null, broken, ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, KEY,
+                    PRODUCTION_LIKE_KEY}) {
+                assertDoesNotThrow(() -> validator(new ImportSourceRowReference(key, true), nf06Enabled).validate(),
+                        "nf06=" + nf06Enabled);
+            }
+        }
+        assertEquals(ImportSourceRowReference.KeyState.MISSING, new ImportSourceRowReference(null, true).state());
+        assertEquals(ImportSourceRowReference.KeyState.INVALID, new ImportSourceRowReference(broken, true).state());
+        assertEquals(ImportSourceRowReference.KeyState.DEVELOPMENT_KEY_IN_PRODUCTION,
+                new ImportSourceRowReference(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, true).state());
+        assertEquals(ImportSourceRowReference.KeyState.DEVELOPMENT_KEY_IN_PRODUCTION,
+                new ImportSourceRowReference(KEY, true).state(), "test用鍵もprodで使えない");
+        assertEquals(ImportSourceRowReference.KeyState.AVAILABLE,
+                new ImportSourceRowReference(PRODUCTION_LIKE_KEY, true).state());
     }
 
     private static ImportSourceRowReference scope(String key) {

@@ -79,6 +79,19 @@ public class LegalEntityContextService {
         return timezoneResolver.resolve(tenantId);
     }
 
+    /**
+     * 管理者の法人contextが数える法人IDの種類の数（{@link #requireCurrentLegalEntityId} の管理者の場合と同じ条件: 論理削除されて
+     * いない組織の法人ID。組織の状態と有効期間は見ない）。ちょうど1でなければ管理者の法人contextは決まらない。security contextを
+     * 読まない（機能の開放の NF06 の単一法人の条件。feature-enablement-console design §8.3。FE-B02）。読めなければ例外。
+     */
+    public int administratorLegalEntityCount() {
+        if (attendanceScopeMapper == null) {
+            throw new IllegalStateException("法人の一覧を読めません");
+        }
+        List<Long> ids = attendanceScopeMapper.selectAllLegalEntityIds();
+        return ids == null ? 0 : (int) ids.stream().filter(Objects::nonNull).distinct().count();
+    }
+
     /** 現在ユーザーに一意に束縛された法人を返す。曖昧または不明ならfail-closed。 */
     public Long requireCurrentLegalEntityId() {
         String tenantId = requireTenantId();

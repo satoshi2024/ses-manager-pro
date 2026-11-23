@@ -153,6 +153,27 @@ class FeatureEnablementProductionValidatorTest {
                 .contains("FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF", "APPFEATURESNF01DUALCONFIRMATIONPRIVACYSIGNOFFREF");
     }
 
+    /** FE-B02: NF06 の開閉の変数と admission の承認の6項目（list の添字の綴りを含む）は、どの綴りでも起動を止める。 */
+    @Test
+    void 段階BのNF06の開閉とadmissionの旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF06_ENABLED", "true"), new Properties(), "FEATURE_NF06_ENABLED");
+        for (String name : List.of("IMPORT_ADMISSION_DECISION_ID", "IMPORT_ADMISSION_TENANT_ID", "IMPORT_ADMISSION_SIGNED_ON",
+                "IMPORT_ADMISSION_EXPIRES_ON", "IMPORT_ADMISSION_SOURCE_CODES", "IMPORT_ADMISSION_APPROVAL_DIGEST",
+                "APP_IMPORTCENTER_ADMISSION_SOURCECODES_0_")) {
+            assertStopsWithStandard(Map.of(name, SECRET_LIKE_VALUE), new Properties(), name);
+        }
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.import-center.admission.source-codes[0]", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.import-center.admission.source-codes[0]");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"import-center\":{\"admission\":"
+                        + "{\"approval-digest\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.import-center.admission.approval-digest]");
+        // 行参照の鍵は鍵（secret）で配備の設定に残る（D-5）。拒否しない
+        assertThatCode(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("IMPORT_ROW_REFERENCE_HMAC_KEY", "k"), Properties::new)
+                .validate()).doesNotThrowAnyException();
+    }
+
     private static void assertStopsWithStandard(Map<String, String> env, Properties systemProperties, String expectedName) {
         assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
                 FeatureEnablementCatalog.standard(), () -> env, () -> systemProperties).validate())

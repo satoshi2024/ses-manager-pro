@@ -151,14 +151,14 @@ class FeatureEnablementCatalogCoverageTest {
     }
 
     /**
-     * FE-A11: 段階 A は容易な7件に DB 管理の印を付ける。段階 B は NF01 二者確認（FE-B01）に印を足す。NF05・NF06・NF07 は各段階まで
+     * FE-A11: 段階 A は容易な7件に DB 管理の印を付ける。段階 B は NF01 二者確認（FE-B01）と NF06（FE-B02）に印を足す。NF05・NF07 は各段階まで
      * property の源。
      */
     @Test
     void 段階Aの7件と段階Bで足した開放単位だけにDB管理の印があり写しで印を付け直せる() {
         EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
                 Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
-        EnumSet<Feature> stageB = EnumSet.of(Feature.NF01_DUAL_CONFIRMATION);
+        EnumSet<Feature> stageB = EnumSet.of(Feature.NF01_DUAL_CONFIRMATION, Feature.NF06);
         for (Feature feature : Feature.values()) {
             assertThat(catalog.databaseManaged(feature)).as(feature.name())
                     .isEqualTo(stageA.contains(feature) || stageB.contains(feature));

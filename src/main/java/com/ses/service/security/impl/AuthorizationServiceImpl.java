@@ -177,7 +177,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
      * <p>ドットを含まないkeyではwildcardがactionKey自身と一致するため、
      * {@code Set.of}（重複で例外）ではなく重複を許す集合で組み立てる。
      */
-    private Set<String> candidateKeys(String actionKey) {
+    public static Set<String> candidateKeys(String actionKey) {
         int separator = actionKey.indexOf('.');
         Set<String> candidates = new java.util.LinkedHashSet<>();
         candidates.add(actionKey);
@@ -189,11 +189,32 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     }
 
     /** privacy の許可候補（action本体と resource wildcard だけ。全体baseline '*' は含めない）。 */
-    private Set<String> privacyAllowCandidates(String actionKey) {
+    private static Set<String> privacyAllowCandidates(String actionKey) {
         Set<String> candidates = new java.util.LinkedHashSet<>();
         candidates.add(actionKey);
         candidates.add(PRIVACY_WILDCARD);
         return candidates;
+    }
+
+    /**
+     * 1つの group の有効な行（{@code action_key}・{@code deny_flag}）だけで、group の評価（{@link #evaluate} の group 部分）と同じ
+     * 規則で action を許すか（拒否行の照合が許可行より先。privacy は全体baseline '*' を許可根拠に数えない）。role に依る短絡
+     * （管理者の許可・管理者専用の action）は含めない。group ごとの実効の許可を判定する評価器が使う（feature-enablement-console
+     * design §8.3 の NF06 の (c)。拒否行の有無ではなく、許可・拒否を評価した結果で判定する。review P3-19。FE-B02）。
+     */
+    public static boolean groupAllows(java.util.Collection<PermissionGroupAction> rows, String actionKey) {
+        if (rows == null || !StringUtils.hasText(actionKey)) {
+            return false;
+        }
+        Set<String> candidates = candidateKeys(actionKey);
+        boolean denied = rows.stream().anyMatch(row -> row != null && Integer.valueOf(1).equals(row.getDenyFlag())
+                && candidates.contains(row.getActionKey()));
+        if (denied) {
+            return false;
+        }
+        Set<String> allowCandidates = isPrivacyAction(actionKey) ? privacyAllowCandidates(actionKey) : candidates;
+        return rows.stream().anyMatch(row -> row != null && Integer.valueOf(0).equals(row.getDenyFlag())
+                && allowCandidates.contains(row.getActionKey()));
     }
 
     /** NF07 privacy action（{@code privacy.} 接頭辞。{@code privacy-x} 等の別resourceは含めない）。 */

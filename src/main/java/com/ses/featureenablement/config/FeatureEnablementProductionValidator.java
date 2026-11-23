@@ -75,6 +75,8 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         // FE-B01: NF01 二者確認の Privacy 署名の参照（署名 NF01_DUAL_PRIVACY へ移した）
         names.put(Feature.NF01_DUAL_CONFIRMATION, List.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF",
                 "app.features.nf01-dual-confirmation.privacy-sign-off-ref"));
+        // FE-B02: NF06 の admission の承認（IMPORT_ADMISSION_* の6項目。署名 NF06_ADMISSION へ移した）
+        names.put(Feature.NF06, List.of("IMPORT_ADMISSION_", "app.import-center.admission."));
         LEGACY_SETTING_NAMES = java.util.Collections.unmodifiableMap(names);
     }
 

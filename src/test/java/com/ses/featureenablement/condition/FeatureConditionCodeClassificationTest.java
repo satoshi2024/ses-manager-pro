@@ -43,7 +43,9 @@ class FeatureConditionCodeClassificationTest {
             // FE-A11: NF02 の暦を照会できない（開放の時だけの条件のまま）
             FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE,
             // 段階 B（FE-B01）: NF01 二者確認の証跡種別を照会できない
-            "dualConfirmation.evidenceTypes.unverifiable");
+            "dualConfirmation.evidenceTypes.unverifiable",
+            // 段階 B（FE-B02）: NF06 の権限・単一法人を照会できない
+            "importCenter.permission.unverifiable", "importCenter.legalEntity.unverifiable");
 
     /** 条件の不成立を表す code（評価できない類であってはならない）。 */
     private static final List<String> UNSATISFIED = List.of(
@@ -59,7 +61,17 @@ class FeatureConditionCodeClassificationTest {
             // 段階 B（FE-B01）: NF01 二者確認の Privacy 署名の参照と証跡種別
             "dualConfirmation.privacySignOff.missing", "dualConfirmation.privacySignOff.invalid",
             "dualConfirmation.privacySignOff.valid", "dualConfirmation.evidenceTypes.outsideAllowed",
-            "dualConfirmation.evidenceTypes.allowed");
+            "dualConfirmation.evidenceTypes.allowed",
+            // 段階 B（FE-B02）: NF06 の admission・行参照の鍵・権限・単一法人（admission の違反 code は ImportAdmissionApproval の値）
+            "importCenter.admission.complete", "importCenter.admission.approval.unavailable",
+            "importCenter.admission.decisionId.missing", "importCenter.admission.approvalDigest.mismatch",
+            "importCenter.admission.signedOn.future", "importCenter.admission.expiresOn.expired",
+            "importCenter.admission.tenant.notApproved", "importCenter.rowReferenceKey.available",
+            "importCenter.rowReferenceKey.notUsable", "importCenter.permission.adminOnly",
+            "importCenter.permission.adminGroup.missing[group=role-admin]",
+            "importCenter.permission.adminGroup.notAllowed[group=privacy-admin]",
+            "importCenter.permission.otherGroupAllowed[count=2]", "importCenter.legalEntity.single",
+            "importCenter.legalEntity.notSingle");
 
     @Test
     void 一覧のcodeは分類と一致する() {
