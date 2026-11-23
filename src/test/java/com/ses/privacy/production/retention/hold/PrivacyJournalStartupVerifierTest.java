@@ -1,6 +1,5 @@
 package com.ses.privacy.production.retention.hold;
 
-import com.ses.privacy.production.PrivacyFeatureProperties;
 import com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier.Availability;
 import com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier.GrantRow;
 import com.ses.privacy.production.retention.hold.PrivacyJournalStartupVerifier.HistoryRow;
@@ -462,7 +461,7 @@ class PrivacyJournalStartupVerifierTest {
     void 設定が無ければ接続もapplication_DBの照会もせずNOT_CONFIGURED() {
         AtomicInteger applicationLookups = new AtomicInteger();
         PrivacyJournalStartupVerifier verifier = new PrivacyJournalStartupVerifier(
-                PrivacyJournalConnections.create(new PrivacyJournalProperties()), features(false), () -> {
+                PrivacyJournalConnections.create(new PrivacyJournalProperties()), () -> {
                     applicationLookups.incrementAndGet();
                     return null;
                 }, true);
@@ -473,36 +472,29 @@ class PrivacyJournalStartupVerifierTest {
         assertThat(applicationLookups).hasValue(0);
     }
 
+    /** FE-C03: 契約違反は接続せず両方の結果を UNAVAILABLE にし、prod でも起動を止めない（log は固定 code だけ）。 */
     @Test
-    void 契約違反は接続せずUNAVAILABLEでflag_ONなら起動を止める() {
+    void 契約違反は接続せず両方の結果をUNAVAILABLEにしprodでも起動を止めない() {
         PrivacyJournalProperties properties = valid();
         properties.getDatasource().setUrl(VALID_URL + "&autoReconnect=true");
         AtomicInteger applicationLookups = new AtomicInteger();
 
-        PrivacyJournalStartupVerifier off = new PrivacyJournalStartupVerifier(
-                PrivacyJournalConnections.create(properties), features(false), () -> {
+        PrivacyJournalStartupVerifier production = new PrivacyJournalStartupVerifier(
+                PrivacyJournalConnections.create(properties), () -> {
                     applicationLookups.incrementAndGet();
                     return null;
                 }, true);
-        off.afterSingletonsInstantiated();
-        assertThat(off.startupResult().availability()).isEqualTo(Availability.UNAVAILABLE);
-        assertThat(off.startupResult().violations()).containsExactly("contract.datasource.url.autoReconnect");
+        assertThatCode(production::afterSingletonsInstantiated).as("prod でも起動を止めない")
+                .doesNotThrowAnyException();
+        assertThat(production.startupResult().availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(production.protectionResult().violations()).containsExactly("contract.datasource.url.autoReconnect");
+        assertThat(production.enablementResult().violations()).containsExactly("contract.datasource.url.autoReconnect");
         assertThat(applicationLookups).hasValue(0);
 
         PrivacyJournalStartupVerifier nonProduction = new PrivacyJournalStartupVerifier(
-                PrivacyJournalConnections.create(properties), features(true), () -> null, false);
-        assertThatCode(nonProduction::afterSingletonsInstantiated).as("prod 以外では flag ON でも起動を止めない")
-                .doesNotThrowAnyException();
+                PrivacyJournalConnections.create(properties), () -> null, false);
+        assertThatCode(nonProduction::afterSingletonsInstantiated).doesNotThrowAnyException();
         assertThat(nonProduction.startupResult().availability()).isEqualTo(Availability.UNAVAILABLE);
-
-        PrivacyJournalStartupVerifier on = new PrivacyJournalStartupVerifier(
-                PrivacyJournalConnections.create(properties), features(true), () -> null, true);
-        assertThatThrownBy(on::afterSingletonsInstantiated)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("contract.datasource.url.autoReconnect")
-                .hasMessageNotContaining("journal.internal")
-                .hasMessageNotContaining(USER)
-                .hasMessageNotContaining(SECRET);
     }
 
     @Test
@@ -526,29 +518,34 @@ class PrivacyJournalStartupVerifierTest {
         org.mockito.Mockito.verifyNoInteractions(application);
     }
 
+    /** FE-C03: 起動時の扱いは prod でも log だけ（設定欠落・UNAVAILABLE・appender の欠けのどれでも例外にしない）。 */
     @Test
-    void prodのflag_ONは設定欠落とUNAVAILABLEで起動を止めflag_OFFとprod以外は止めない() {
-        assertThatThrownBy(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.NOT_CONFIGURED, List.of()), true, true))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("journal.notConfigured");
-        assertThatThrownBy(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.UNAVAILABLE, List.of("durability.syncBinlog")), true, true))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("durability.syncBinlog");
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.AVAILABLE, List.of()), true, true)).doesNotThrowAnyException();
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.UNAVAILABLE, List.of("journal.unreachable")), false, true))
-                .doesNotThrowAnyException();
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.NOT_CONFIGURED, List.of()), false, true)).doesNotThrowAnyException();
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.NOT_CONFIGURED, List.of()), true, false))
-                .as("test profile は flag ON（application-test.yml）でも journal 設定を持たない").doesNotThrowAnyException();
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.UNAVAILABLE, List.of("journal.unreachable")), true, false))
-                .doesNotThrowAnyException();
+    void 起動時の結果はprodでも例外にせずlogだけを出す() {
+        Result available = new Result(Availability.AVAILABLE, List.of());
+        Result readerOnly = new Result(Availability.UNAVAILABLE, List.of("privilege.missing:pj_head.INSERT"));
+        for (boolean production : List.of(true, false)) {
+            assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(new Result(Availability.NOT_CONFIGURED, List.of()),
+                    new Result(Availability.NOT_CONFIGURED, List.of()), production)).doesNotThrowAnyException();
+            assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(new Result(Availability.UNAVAILABLE,
+                    List.of("durability.syncBinlog")), new Result(Availability.UNAVAILABLE,
+                    List.of("durability.syncBinlog")), production)).doesNotThrowAnyException();
+            assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(available, readerOnly, production))
+                    .doesNotThrowAnyException();
+            assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(available, available, production))
+                    .doesNotThrowAnyException();
+        }
     }
 
+    /** FE-C03: reader の権限の結果は hold の効力では適合、開放の条件（appender を要する）では不適合になる。 */
+    @Test
+    void readerのprincipalはhold効力の結果では適合し開放の条件の結果では不適合() {
+        List<String> protection = PrivacyJournalStartupVerifier.privilegeViolations("NONE", reader(), SCHEMA, false);
+        List<String> enablement = PrivacyJournalStartupVerifier.privilegeViolations("NONE", reader(), SCHEMA, true);
+        assertThat(protection).isEmpty();
+        assertThat(enablement).isNotEmpty().anyMatch(code -> code.startsWith("privilege.missing:"));
+        assertThat(PrivacyJournalStartupVerifier.privilegeViolations("NONE", appender(), SCHEMA, false)).isEmpty();
+        assertThat(PrivacyJournalStartupVerifier.privilegeViolations("NONE", appender(), SCHEMA, true)).isEmpty();
+    }
     // ---------------------------------------------------------------- helper
 
     private static void assertUrlViolation(String url, String code) {
@@ -570,11 +567,6 @@ class PrivacyJournalStartupVerifierTest {
         return properties;
     }
 
-    private static PrivacyFeatureProperties features(boolean retention) {
-        PrivacyFeatureProperties properties = new PrivacyFeatureProperties();
-        properties.getRetention().setEnabled(retention);
-        return properties;
-    }
 
     private static List<GrantRow> appender() {
         List<GrantRow> rows = new ArrayList<>();

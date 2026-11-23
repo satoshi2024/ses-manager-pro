@@ -539,6 +539,21 @@ class PrivacyPolicyRegistrationServiceTest {
         assertThat(rows()).isZero();
     }
 
+    /** FE-C04（design §8.5 の 4）: trust 文書の構造に不足があれば、決定・verifier・anchor が揃っていても入口は 404 のまま。 */
+    @Test
+    void trust文書の構造に不足があれば登録の入口は404のまま() {
+        assertThat(service.isOpen()).isTrue();
+        java.util.concurrent.atomic.AtomicBoolean sound = new java.util.concurrent.atomic.AtomicBoolean(false);
+        PrivacyPolicyRegistrationService structured = new PrivacyPolicyRegistrationService(guard, oidc,
+                com.ses.privacy.production.PrivacyApprovalSource.properties(approval, null), verifier, policyMapper,
+                dataElementMapper, new PrivacyPolicyAudit(mock(AuditLogService.class)),
+                new TransactionTemplate(transactionManager), clock, actor::get, sound::get);
+
+        assertThat(structured.isOpen()).isFalse();
+        assertThat(structured.readiness().missing()).containsExactly(PrivacyPolicyRegistrationService.REASON_TRUST_STRUCTURE);
+        sound.set(true);
+        assertThat(structured.isOpen()).as("構造が直れば再開する").isTrue();
+    }
     // --- helpers ---
 
     private PolicyRegistrationVerifier verifierWith(ProductionPolicyTrustRegistry registry) {

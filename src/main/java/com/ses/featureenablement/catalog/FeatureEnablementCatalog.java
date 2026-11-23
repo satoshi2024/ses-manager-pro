@@ -43,6 +43,9 @@ public final class FeatureEnablementCatalog {
     public static final Set<Feature> STAGE_A_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
             Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
             Feature.NF04, Feature.NF10));
+    /** 段階 C で DB 管理にする NF07 の2件（requirements §6.11・6.12。FE-C05）。 */
+    public static final Set<Feature> STAGE_C_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF07_RETENTION, Feature.NF07_DSAR));
     /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は FE-D05 で足す。 */
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
 
@@ -304,7 +307,8 @@ public final class FeatureEnablementCatalog {
                 evidence("NF06_DBA_ACCOUNT", "DBA"),
                 evidence("NF06_STAGING_CHECK", "PRODUCTION_OWNER"));
 
-        // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は FE-C05
+        // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は
+        // PrivacyProductionConfigurationValidator（prod だけ。FE-C05）
         List<KeyRequirement> journalKeys = List.of(
                 new KeyRequirement("PRIVACY_JOURNAL_DATASOURCE_URL", "privacy.journal.datasource.url"),
                 new KeyRequirement("PRIVACY_JOURNAL_DATASOURCE_USERNAME", "privacy.journal.datasource.username"),
@@ -352,6 +356,8 @@ public final class FeatureEnablementCatalog {
 
         // 段階 A の DB 管理の印（容易な7件。FE-A11）
         b.databaseManaged(STAGE_A_DATABASE_MANAGED);
+        // 段階 C の DB 管理の印（NF07 の2件。評価器は PrivacyProductionConfigurationValidator。FE-C05）
+        b.databaseManaged(STAGE_C_DATABASE_MANAGED);
 
         return b.build();
     }

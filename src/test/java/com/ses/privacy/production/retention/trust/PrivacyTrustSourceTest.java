@@ -90,7 +90,8 @@ class PrivacyTrustSourceTest {
                         org.mockito.Mockito.mock(com.ses.privacy.production.retention.hold.HoldSubjectResolver.class),
                         org.mockito.Mockito.mock(com.ses.service.AuditLogService.class),
                         org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class),
-                        beans.getBeanProvider(Clock.class), registry, prod, trust);
+                        beans.getBeanProvider(Clock.class), registry, prod, trust,
+                        beans.getBeanProvider(PrivacyTrustStructureState.class));
         assertThat(calls.get()).as("Bean の構築時には trust を読まない").isZero();
 
         assertThat(service.isOpen()).isTrue();
@@ -98,6 +99,15 @@ class PrivacyTrustSourceTest {
         assertThat(service.isOpen()).as("承認者の anchor を消した次の判定で閉じる").isFalse();
 
         current.set(full);
+        assertThat(service.isOpen()).isTrue();
+        // FE-C04: trust 文書の構造に不足があれば（起動時に flag と関係なく検査した結果）、REL は閉じる
+        PrivacyTrustStructureState unsound = new PrivacyTrustStructureState();
+        unsound.record(java.util.List.of("trust.kms.document.notJson"));
+        beans.registerSingleton("privacyTrustStructureState", unsound);
+        assertThat(service.isOpen()).as("構造の不足で REL だけが閉じる").isFalse();
+        unsound.record(java.util.List.of());
+        assertThat(service.isOpen()).as("構造が直れば再開する（副入口は自動で開く。D-4 の例外）").isTrue();
+
         com.ses.privacy.foundation.HoldReleaseVerifier verifier = ProductionPrivacyComponents.holdReleaseVerifier(prod,
                 registry, PrivacyTrustSource.revocationsOf(trust), clock);
         com.ses.privacy.foundation.HoldReleaseBinding binding = new com.ses.privacy.foundation.HoldReleaseBinding(

@@ -3,6 +3,9 @@ package com.ses.featureenablement.signoff;
 import com.ses.common.exception.BusinessException;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.catalog.SignOffKind;
+import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.PrivacyDecisionBinding;
+import com.ses.privacy.production.dsar.PrivacyDsarDecisions;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -17,10 +20,12 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>種別は目録にあるものだけ、署名者の役割は種別が許す値だけ。</li>
  *   <li>参照: 共通の規則（{@link SignOffReferenceRules#generic}）。NF01 二者確認の Privacy 署名は起動時検査と同じ規則
- *       （英字と数字を含む）、DG-05 は決定 ID の形式。NF07 の決定（段階 C）と NF06 の admission（段階 B）の細かな規則は各段階の
- *       評価器が足し、それまでは共通の規則で受ける。</li>
+ *       （英字と数字を含む）、DG-05 は決定 ID の形式、NF07 の決定は {@code PrivacyDecisionBinding} の決定 ID の規則（形式と placeholder の
+ *       拒否。FE-C01）。NF06 の admission（段階 B）の細かな規則は段階 B の評価器が足し、それまでは共通の規則で受ける。</li>
  *   <li>構造化された値: 種別が持つ項目だけ。DG-05 の {@code approvalDigest} は小文字 hex 64 桁（形式だけ。現在の配備の設定との
- *       一致は評価の時に判定する。review P3-18）、{@code visibleSince} は空か offset 付き ISO-8601。</li>
+ *       一致は評価の時に判定する。review P3-18）、{@code visibleSince} は空か offset 付き ISO-8601。NF07 の D-09 は {@code tenantId}・
+ *       {@code capabilities}（{@code retention} / {@code dsar}）・{@code approvalDigest}（小文字 hex 64 桁）、D-06 は {@code dueDays}
+ *       （1〜366）・{@code packageMaxAge}（1時間〜366日）を必須とする（FE-C01。digest と組の中の整合は組の確認の時に確かめる）。</li>
  *   <li>日付: 失効日は署名日より後、期間は類の上限（決定 366 日・証拠 1,095 日。J-08）以内。</li>
  * </ul>
  * 外れれば 400（値そのものは返さない）。
@@ -74,7 +79,8 @@ public final class FeatureSignOffKindValidator {
             case NF01_DUAL_PRIVACY -> SignOffReferenceRules.withLetterAndDigit(reference);
             case NF05_DG05_IN -> DG05_IN.matcher(reference).matches();
             case NF05_DG05_OUT -> DG05_OUT.matcher(reference).matches();
-            case GENERIC, NF07_DECISION, NF06_ADMISSION -> SignOffReferenceRules.generic(reference);
+            case NF07_DECISION -> PrivacyDecisionBinding.isAcceptableDecisionId(reference);
+            case GENERIC, NF06_ADMISSION -> SignOffReferenceRules.generic(reference);
         };
     }
 
@@ -86,6 +92,32 @@ public final class FeatureSignOffKindValidator {
         int max = kind.kindClass().maxValidityDays();
         if (ChronoUnit.DAYS.between(signedOn, expiresOn) > max) {
             throw BusinessException.of(400, "error.featureEnablement.signOffValidityTooLong", max);
+        }
+    }
+
+    /** NF07 の D-09・D-06 の構造化された値（必須。値は返さない）。 */
+    private static void validateNf07(SignOffKind kind, Map<String, String> values) {
+        if (kind.structuredFields().contains("approvalDigest")) {
+            String digest = values.get("approvalDigest");
+            if (digest == null || !DIGEST.matcher(digest).matches()) {
+                throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "approvalDigest");
+            }
+        }
+        if (kind.structuredFields().contains("tenantId")
+                && !PrivacyDecisionBinding.isAcceptableTenantId(values.get("tenantId"))) {
+            throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "tenantId");
+        }
+        if (kind.structuredFields().contains("capabilities") && PrivacyDecisionBinding.parseCapabilities(
+                PrivacyApprovalSource.splitCapabilities(values.get("capabilities"))) == null) {
+            throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "capabilities");
+        }
+        if (kind.structuredFields().contains("dueDays")
+                && !PrivacyDsarDecisions.isValidDueDays(PrivacyApprovalSource.parseDueDays(values.get("dueDays")))) {
+            throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "dueDays");
+        }
+        if (kind.structuredFields().contains("packageMaxAge") && !PrivacyDsarDecisions.isValidPackageMaxAge(
+                PrivacyApprovalSource.parsePackageMaxAge(values.get("packageMaxAge")))) {
+            throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "packageMaxAge");
         }
     }
 
@@ -103,6 +135,9 @@ public final class FeatureSignOffKindValidator {
             if (digest == null || !DIGEST.matcher(digest).matches()) {
                 throw BusinessException.of(400, "error.featureEnablement.signOffStructuredInvalid", "approvalDigest");
             }
+        }
+        if (kind.referenceRule() == SignOffKind.ReferenceRule.NF07_DECISION) {
+            validateNf07(kind, values);
         }
         String visibleSince = values.get("visibleSince");
         if (visibleSince != null && !visibleSince.isEmpty()) {

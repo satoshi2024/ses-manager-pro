@@ -8,7 +8,7 @@ import com.ses.mapper.privacy.PrivacyExportPackageMapper;
 import com.ses.mapper.privacy.PrivacyRequestMapper;
 import com.ses.mapper.privacy.PrivacyRequestSubjectLinkMapper;
 import com.ses.privacy.production.PrivacyAccessGuard;
-import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
 import com.ses.privacy.production.PrivacyFeatureProperties;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
 import com.ses.privacy.production.redaction.ThirdPartyRedactor;
@@ -39,10 +39,10 @@ import java.time.Clock;
 public class PrivacyDsarConfiguration {
 
     @Bean
-    public PrivacyDsarDecisions privacyDsarDecisions(PrivacyApprovalProperties approvalProperties,
+    public PrivacyDsarDecisions privacyDsarDecisions(PrivacyApprovalSource approvalSource,
                                                      PrivacyFeatureProperties featureProperties,
                                                      ObjectProvider<Clock> clock) {
-        return new PrivacyDsarDecisions(approvalProperties, featureProperties, clockOf(clock));
+        return new PrivacyDsarDecisions(approvalSource, featureProperties, clockOf(clock));
     }
 
     @Bean
@@ -126,6 +126,17 @@ public class PrivacyDsarConfiguration {
                                                                      FeatureSwitches featureSwitches) {
         return new PrivacyDsarDeadlineScheduler(requestMapper, recipientResolver, notificationService,
                 privacyDsarDecisions, oidcProperties.getIfAvailable(), clockOf(clock), featureSwitches);
+    }
+
+    /** DSAR が閉じている間の未完了の請求を日の始まりに privacy-admin へ知らせる（feature-enablement-console design §7.5。FE-C05）。 */
+    @Bean
+    public PrivacyDsarClosedNotifier privacyDsarClosedNotifier(PrivacyRequestMapper requestMapper,
+                                                               PrivacyDsarRecipientResolver recipientResolver,
+                                                               NotificationService notificationService,
+                                                               ObjectProvider<OidcSecurityProperties> oidcProperties,
+                                                               FeatureSwitches featureSwitches) {
+        return new PrivacyDsarClosedNotifier(requestMapper, recipientResolver, notificationService,
+                oidcProperties.getIfAvailable(), featureSwitches);
     }
 
     private static Clock clockOf(ObjectProvider<Clock> clock) {

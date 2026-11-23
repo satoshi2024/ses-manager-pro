@@ -63,6 +63,20 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /**
+     * 開閉以外の旧い変数（DB 管理にした開放単位の、署名へ移した承認の値。正規化した名前の接頭辞）。段階ごとに自分の開放単位の行を足す
+     * （A2 の報告の拡張点）。
+     * <ul>
+     *   <li>NF07（FE-C05）: {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05。署名の組と署名へ移した）と、D-06 の
+     *       {@code PRIVACY_DSAR_DUE_DAYS}・{@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。運用値の
+     *       {@code PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS} と {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は配備の設定に残す。</li>
+     * </ul>
+     */
+    static final Map<Feature, List<String>> ADDITIONAL_LEGACY_PREFIXES = Map.of(
+            Feature.NF07_RETENTION, List.of("PRIVACYAPPROVAL", "PRIVACYDSARDUEDAYS", "PRIVACYDSARPACKAGEMAXAGE"));
+    /** 接頭辞に当たっても旧い変数としない運用値（正規化した名前）。 */
+    static final Set<String> ADDITIONAL_LEGACY_EXCEPTIONS = Set.of("PRIVACYAPPROVALEXPIRYWARNINGDAYS");
+
     private final Environment environment;
     private final FeatureEnablementProperties properties;
     private final FeatureEnablementCatalog catalog;
@@ -130,7 +144,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                     || (key.startsWith(SHORT_PREFIX) && (json || !key.equals(ALLOWED_KEY)))) {
                 overrides.add(describe(name, origin));
             }
-            if (legacyKeys.contains(key)) {
+            if (legacyKeys.contains(key) || additionalLegacy(key)) {
                 legacy.add(describe(name, origin));
             }
         });
@@ -155,6 +169,19 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             }
         }
         return keys;
+    }
+
+    /** DB 管理にした開放単位の、開閉以外の旧い変数か（{@link #ADDITIONAL_LEGACY_PREFIXES}）。 */
+    boolean additionalLegacy(String key) {
+        if (key == null || ADDITIONAL_LEGACY_EXCEPTIONS.contains(key)) {
+            return false;
+        }
+        for (Map.Entry<Feature, List<String>> entry : ADDITIONAL_LEGACY_PREFIXES.entrySet()) {
+            if (catalog.databaseManaged(entry.getKey()) && entry.getValue().stream().anyMatch(key::startsWith)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 名前 → 出処（環境変数・system property・JSON の key）。JSON を読めなければその旨を出処の名前で返す。 */

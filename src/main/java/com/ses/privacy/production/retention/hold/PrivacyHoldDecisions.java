@@ -1,6 +1,7 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
 import com.ses.privacy.production.PrivacyDecisionBinding;
 
 import java.time.Clock;
@@ -21,7 +22,10 @@ import java.util.Set;
  *   <li>{@code privacy.clock.max-skew}: 正の値で上限以下。</li>
  * </ul>
  * どれかが欠ければ {@code DECISION_UNKNOWN}（409）。D-01・D-09 は機能スイッチの実行時条件（{@code PrivacyDecisionWindowMonitor}）
- * と prod の起動時検査が束縛を確かめるため、ここでは見ない（OFF なら入口が404）。理由は固定 code だけを返す。
+ * と開放の条件（評価器）が束縛を確かめるため、ここでは見ない（OFF なら入口が404）。理由は固定 code だけを返す。
+ *
+ * <p>決定の値は承認の値の源（{@link PrivacyApprovalSource}。property か確認済みの署名）から呼出しごとに読む（署名の差替えは
+ * 次の呼出しから効く。feature-enablement-console design §8.5 の 1）。</p>
  */
 public class PrivacyHoldDecisions {
 
@@ -30,14 +34,20 @@ public class PrivacyHoldDecisions {
     static final String REASON_TARGET_TYPES = "allowedTargetTypes";
     static final String REASON_MAX_SKEW = "clock.maxSkew";
 
-    private final PrivacyApprovalProperties approvalProperties;
+    private final PrivacyApprovalSource approvalSource;
     private final PrivacyHoldProperties holdProperties;
     private final PrivacyClockProperties clockProperties;
     private final Clock clock;
 
+    /** property の源で包む（既存の試験のため）。 */
     public PrivacyHoldDecisions(PrivacyApprovalProperties approvalProperties, PrivacyHoldProperties holdProperties,
                                 PrivacyClockProperties clockProperties, Clock clock) {
-        this.approvalProperties = approvalProperties;
+        this(PrivacyApprovalSource.properties(approvalProperties, null), holdProperties, clockProperties, clock);
+    }
+
+    public PrivacyHoldDecisions(PrivacyApprovalSource approvalSource, PrivacyHoldProperties holdProperties,
+                                PrivacyClockProperties clockProperties, Clock clock) {
+        this.approvalSource = approvalSource;
         this.holdProperties = holdProperties;
         this.clockProperties = clockProperties;
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -47,7 +57,7 @@ public class PrivacyHoldDecisions {
     public Readiness evaluate() {
         List<String> reasons = new ArrayList<>();
         PrivacyDecisionBinding.StandaloneEvaluation d05 = PrivacyDecisionBinding.evaluateStandalone(
-                approvalProperties, PrivacyDecisionBinding.Decision.D05, PrivacyDecisionBinding.businessDate(clock));
+                approvalSource, PrivacyDecisionBinding.Decision.D05, PrivacyDecisionBinding.businessDate(clock));
         if (!d05.valid()) {
             reasons.add(REASON_D05);
         }
@@ -69,13 +79,14 @@ public class PrivacyHoldDecisions {
     public ReleaseReadiness releaseReadiness() {
         List<String> reasons = new ArrayList<>();
         java.time.LocalDate today = PrivacyDecisionBinding.businessDate(clock);
+        PrivacyApprovalSource values = approvalSource == null ? null : approvalSource.resolve();
         PrivacyDecisionBinding.StandaloneEvaluation d05 = PrivacyDecisionBinding.evaluateStandalone(
-                approvalProperties, PrivacyDecisionBinding.Decision.D05, today);
+                values, PrivacyDecisionBinding.Decision.D05, today);
         if (!d05.valid()) {
             reasons.add(REASON_D05);
         }
         PrivacyDecisionBinding.StandaloneEvaluation d03 = PrivacyDecisionBinding.evaluateStandalone(
-                approvalProperties, PrivacyDecisionBinding.Decision.D03, today);
+                values, PrivacyDecisionBinding.Decision.D03, today);
         if (!d03.valid()) {
             reasons.add(REASON_D03);
         }

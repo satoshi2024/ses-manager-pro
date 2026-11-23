@@ -253,6 +253,165 @@ class PrivacyDecisionWindowMonitorTest {
         assertFalse(notApproved.isEnabled(Feature.NF07_DSAR));
     }
 
+    // ---------------------------------------------------------------- FE-C02: 開放状態の源と capability ごとの状態
+
+    /** 同じ日に開くと直ちに評価し直す（業務日だけの key では翌日まで閉じたままだった。design §8.5 の 5）。 */
+    @Test
+    void 同じ日に開くと直ちに開き同じ日にDSARを足すとD06の検査を通った時だけ開く() {
+        MutableStateSource state = new MutableStateSource();
+        MutableApprovalSource approval = new MutableApprovalSource(PrivacyApprovalSource.properties(approved(), null));
+        PrivacyDecisionWindowMonitor monitor = monitor(state, approval, new MutableClock(NOW));
+        PrivacyDsarDecisionWindowCondition dsar = new PrivacyDsarDecisionWindowCondition(monitor);
+
+        assertFalse(monitor.satisfied(), "閉じている間は監視対象外");
+        state.open(Feature.NF07_RETENTION);
+        assertTrue(monitor.satisfied(), "同じ日に開いた直後から開く");
+
+        state.open(Feature.NF07_DSAR);
+        assertFalse(dsar.satisfied(), "D-09 が dsar を承認していなければ DSAR は開かない");
+        assertEquals("decisionWindow.INCOMPLETE", dsar.unsatisfiedReason().orElseThrow());
+        assertTrue(monitor.satisfied(), "DSAR の不足で保持・保全は閉じない");
+
+        // 署名を差し替える（DB の源では世代が上がる）
+        approval.set(PrivacyApprovalSource.properties(approvedWithDsar(), null));
+        state.bump();
+        assertTrue(dsar.satisfied(), "差し替えた直後から D-06 を含めて判定する");
+        assertTrue(monitor.satisfied());
+    }
+
+    /** review P1-2・D-4: D-06 が失効しても NF07_RETENTION の条件は成立のまま、DSAR だけが閉じる。 */
+    @Test
+    void D06の失効でNF07_RETENTIONの条件は成立のままDSARだけが閉じる() {
+        PrivacyApprovalProperties shortD06 = approvedWithDsar();
+        shortD06.getD06().setExpiresOn("2027-01-31");
+        shortD06.setApprovalDigest(PrivacyDecisionBinding.computeDigest(shortD06));
+        MutableStateSource state = new MutableStateSource();
+        state.open(Feature.NF07_RETENTION);
+        state.open(Feature.NF07_DSAR);
+        MutableClock clock = new MutableClock(NOW);
+        PrivacyDecisionWindowMonitor monitor = monitor(state,
+                new MutableApprovalSource(PrivacyApprovalSource.properties(shortD06, null)), clock);
+        PrivacyDsarDecisionWindowCondition dsar = new PrivacyDsarDecisionWindowCondition(monitor);
+        assertTrue(monitor.satisfied());
+        assertTrue(dsar.satisfied());
+
+        clock.set(Instant.parse("2027-01-31T00:00:00Z")); // 2027-01-31 09:00 JST（D-06 の失効日）
+        assertTrue(monitor.satisfied(), "保持・保全は D-01・D-09 の期間だけで判定する");
+        assertFalse(dsar.satisfied(), "DSAR は D-06 の失効で閉じる");
+        assertEquals(PrivacyDecisionWindowMonitor.State.EXPIRED,
+                monitor.currentStatus(Capability.DSAR).state());
+        assertEquals(PrivacyDecisionWindowMonitor.State.VALID,
+                monitor.currentStatus(Capability.RETENTION).state());
+    }
+
+    /** 開いている capability は開放状態の源を直接読み、FeatureSwitches の実行時条件で再帰しない。 */
+    @Test
+    void 開いているcapabilityは源を直接読みFeatureSwitchesの実行時条件で再帰しない() {
+        MutableStateSource state = new MutableStateSource();
+        state.open(Feature.NF07_RETENTION);
+        PrivacyDecisionWindowMonitor monitor = monitor(state,
+                new MutableApprovalSource(PrivacyApprovalSource.properties(approved(), null)), new MutableClock(NOW));
+        FeatureSwitches switches = new FeatureSwitches(state);
+        switches.setRuntimeConditions(List.of(monitor, new PrivacyDsarDecisionWindowCondition(monitor)));
+
+        assertTrue(switches.isEnabled(Feature.NF07_RETENTION));
+        assertFalse(switches.isEnabled(Feature.NF07_DSAR));
+        state.close(Feature.NF07_RETENTION);
+        assertFalse(switches.isEnabled(Feature.NF07_RETENTION));
+    }
+
+    private static PrivacyDecisionWindowMonitor monitor(MutableStateSource state, PrivacyApprovalSource approval,
+                                                        Clock clock) {
+        OidcSecurityProperties oidc = new OidcSecurityProperties();
+        oidc.setTenantId(TENANT);
+        PrivacyDecisionWindowMonitor monitor = new PrivacyDecisionWindowMonitor(state, approval, oidc, clock,
+                (MeterRegistry) null);
+        monitor.start();
+        return monitor;
+    }
+
+    /** 開閉と世代を変えられる開放状態の源。 */
+    private static final class MutableStateSource implements com.ses.featureenablement.state.FeatureEnablementStateSource {
+        private final java.util.Set<Feature> open = java.util.EnumSet.noneOf(Feature.class);
+        private long generation = 1L;
+
+        void open(Feature feature) {
+            open.add(feature);
+            generation++;
+        }
+
+        void close(Feature feature) {
+            open.remove(feature);
+            generation++;
+        }
+
+        void bump() {
+            generation++;
+        }
+
+        @Override
+        public boolean isOpen(Feature feature) {
+            return open.contains(feature);
+        }
+
+        @Override
+        public java.util.Optional<String> setting(String key) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public long generation() {
+            return generation;
+        }
+    }
+
+    /** 差し替えられる承認の値の源（署名の差替えを模す）。 */
+    private static final class MutableApprovalSource implements PrivacyApprovalSource {
+        private volatile PrivacyApprovalSource current;
+
+        MutableApprovalSource(PrivacyApprovalSource initial) {
+            this.current = initial;
+        }
+
+        void set(PrivacyApprovalSource next) {
+            this.current = next;
+        }
+
+        @Override
+        public PrivacyApprovalSource resolve() {
+            return current.resolve();
+        }
+
+        @Override
+        public String tenantId() {
+            return current.tenantId();
+        }
+
+        @Override
+        public List<String> capabilities() {
+            return current.capabilities();
+        }
+
+        @Override
+        public String approvalDigest() {
+            return current.approvalDigest();
+        }
+
+        @Override
+        public DecisionValue reference(PrivacyDecisionBinding.Decision decision) {
+            return current.reference(decision);
+        }
+
+        @Override
+        public Integer dsarDueDays() {
+            return current.dsarDueDays();
+        }
+
+        @Override
+        public java.time.Duration dsarPackageMaxAge() {
+            return current.dsarPackageMaxAge();
+        }
+    }
     /** retention と dsar を承認した完全な束縛（D-06: 2026-11-05〜2027-11-04。最も早い失効は D-09 の 2027-05-31）。 */
     private static PrivacyApprovalProperties approvedWithDsar() {
         PrivacyApprovalProperties approval = approved();

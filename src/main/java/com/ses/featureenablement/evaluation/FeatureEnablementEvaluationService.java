@@ -2,7 +2,6 @@ package com.ses.featureenablement.evaluation;
 
 import com.ses.config.feature.Feature;
 import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
-import com.ses.featureenablement.catalog.Subgate;
 import com.ses.featureenablement.catalog.UnitDefinition;
 import com.ses.featureenablement.condition.FeatureConditionCheck;
 import com.ses.featureenablement.condition.FeatureConditionRegistry;
@@ -76,14 +75,19 @@ public class FeatureEnablementEvaluationService {
 
     /** DB に書けなかった評価できない状態の始まり（この instance だけ）。 */
     private final Map<Feature, Instant> localUnverifiableSince = new ConcurrentHashMap<>();
-    /** 副入口の前回の成否（変化を履歴に残す）。 */
-    private final Map<String, Boolean> subgateStates = new ConcurrentHashMap<>();
+    /** 副入口の監視（前回の成否と固有の条件。FE-C04）。手で組み立てる試験では固有の条件の無いものを作る。 */
+    private volatile SubgateMonitor subgateMonitor;
     /** 最後の評価の結果（画面の一覧の表示。FE-A09）。手で組み立てる試験では無い。 */
     private volatile FeatureEnablementEvaluationResults results;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setResults(FeatureEnablementEvaluationResults results) {
         this.results = results;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSubgateMonitor(SubgateMonitor subgateMonitor) {
+        this.subgateMonitor = subgateMonitor;
     }
 
     public FeatureEnablementEvaluationService(FeatureEnablementProperties properties, FeatureEnablementSnapshotHolder holder,
@@ -329,29 +333,21 @@ public class FeatureEnablementEvaluationService {
 
     // ---------------------------------------------------------------- 副入口
 
-    /** 副入口の成否の変化を履歴に残し通知する（最初の観測は記録だけ）。 */
+    /**
+     * 副入口の成否の変化を履歴に残し通知する（最初の観測は記録だけ）。判定は {@link SubgateMonitor}（固有の条件を含む。FE-C04）。
+     * 手で組み立てる試験では、固有の条件の無い monitor を使う。
+     */
     private void trackSubgates() {
-        FeatureEnablementSnapshot snapshot = holder.get();
-        LocalDate today = FeatureEvaluationContext.businessDate(clock);
-        for (UnitDefinition unit : catalog.units()) {
-            for (Subgate subgate : unit.subgates()) {
-                boolean open = snapshot.unit(subgate.unit()).state().openLike()
-                        && subgate.signOffKinds().stream().allMatch(kind -> valid(snapshot, kind, today));
-                Boolean previous = subgateStates.put(subgate.code(), open);
-                if (previous != null && previous != open) {
-                    runSafely("副入口の変化の履歴", () -> writer.recordSubgateChange(subgate.code(), open));
-                    notifier.notifyAdministrators(open ? "subgateOpened" : "subgateClosed",
-                            new Object[]{subgate.code(), subgate.unit().displayName()},
-                            "FEATURE_ENABLEMENT:SUBGATE:" + subgate.code() + ":" + open + ":" + today, List.of());
-                }
-            }
+        SubgateMonitor monitor = subgateMonitor;
+        if (monitor == null) {
+            monitor = new SubgateMonitor(catalog, null);
+            subgateMonitor = monitor;
         }
-    }
-
-    private boolean valid(FeatureEnablementSnapshot snapshot, String kind, LocalDate today) {
-        FeatureEnablementSnapshot.ConfirmedSignOff signOff = snapshot.signOffs().get(kind);
-        return signOff != null && !signOff.signedOn().isAfter(today) && today.isBefore(signOff.expiresOn())
-                && SignOffRequirements.inConfirmedBundle(catalog, kind, signOff, snapshot.bundles());
+        try {
+            monitor.track(holder.get(), FeatureEvaluationContext.businessDate(clock), writer, notifier);
+        } catch (RuntimeException e) {
+            log.warn("[機能の開放] 副入口の評価に失敗しました（次の周期で再試行）: exceptionClass={}", e.getClass().getSimpleName());
+        }
     }
 
     // ---------------------------------------------------------------- helper

@@ -182,7 +182,8 @@ public class PrivacyHoldService {
             unattributable.add(new PrivacyHoldOverview.ElementEntry(elementId, count, heldElements.contains(elementId)));
         }
         List<String> missing = new ArrayList<>(readiness.missing());
-        if (availability != PrivacyHoldJournal.Availability.AVAILABLE) {
+        if (availability != PrivacyHoldJournal.Availability.AVAILABLE
+                || journal.appendAvailability() != PrivacyHoldJournal.Availability.AVAILABLE) {
             missing.add("journal");
         }
         List<PrivacyHoldOverview.RelatedElements> related = RELATED_ELEMENTS.stream()
@@ -232,7 +233,9 @@ public class PrivacyHoldService {
             throw BusinessException.of(409, "error.privacy.holdTargetTypeNotAllowed");
         }
         Validated validated = validate(request, type);
-        if (journal.availability() != PrivacyHoldJournal.Availability.AVAILABLE) {
+        // hold の開始は Journal への append。開放の条件の結果（appender の権限）で判定する（reader の principal では開始できない。
+        // 既存の hold の gate は hold の効力の結果のまま動く。feature-enablement-console design §8.5 の 3）
+        if (journal.appendAvailability() != PrivacyHoldJournal.Availability.AVAILABLE) {
             throw BusinessException.of(503, "error.privacy.journalUnavailable");
         }
         Map<String, SubjectAttribution> catalog;

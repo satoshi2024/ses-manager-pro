@@ -77,7 +77,10 @@ final class FeatureSwitchTestSupport {
         for (Feature feature : Feature.values()) {
             toggle(fallback, feature).setEnabled(!off.contains(feature));
         }
-        return databaseSwitches(open, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(), fallback);
+        // 段階 A の印だけ（段階 C の NF07 の印は除く。NF07 の DB の源は FE-C01〜C05 の試験が見る）
+        return databaseSwitches(open, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard()
+                .withDatabaseManaged(com.ses.featureenablement.catalog.FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED),
+                fallback);
     }
 
     private static FeatureSwitches databaseSwitches(Set<Feature> open) {

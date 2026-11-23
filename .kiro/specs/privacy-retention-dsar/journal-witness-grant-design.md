@@ -5,6 +5,8 @@
 R2 の変更: Journal 接続を `DataSource` 型の Bean にしない（P2-7、§2.1）。権限の自己検査を information_schema ベースにし role を禁止（P3-7、§2.3）。Journal 用 Flyway job の profile・設定・設定 test（P3-7、§2.5）。pending の timeout と監視項目（P2-6・P3-6、§2.1・§2.6）。未使用 tenant の判定優先（P3-6、§2.3）。
 R3 の変更（NF07-A1J 独立 Review `9d7d1b4e` の反映、2026-11-16）: 「append の timeout」の定義と `APPEND_TRANSACTION_TIMEOUT`（10秒）・socket timeout（20秒）の明記、`pending-timeout` の下限（P2-1、§2.1・§2.4）。principal は1つとする方式A（§2.1・§3.1）。起動失敗は prod に限ること・生の flag で判定すること（§2.1・§2.3）。URL 契約の追加（§2.1）。Flyway 履歴の checksum 照合（§2.3）。driver の接続失敗の秘匿（§2.6）。
 
+R4 の注記（機能の開放 feature-enablement-console の FE-C03、2026-11-23）: 起動時検査は機能の開閉（生の `privacy.retention.enabled` を含む）を読まず、prod でも起動を止めない（WARN だけ）。結果は2つに分ける: (a) **hold の効力の結果**（`PrivacyJournalStartupVerifier.protectionResult`）は `nf07_journal_reader`・`nf07_journal_appender` のどちらの principal でも適合とし、起動時に検査して、再検査（`reverify`）は成功した時だけ更新する。`PrivacyHoldGate` と破壊的経路はこれを読むため、保持・保全の開閉・principal の種類・再検査の一時の失敗で既存 hold の効力確認が UNAVAILABLE にならない。(b) **開放の条件の結果**（`enablementResult`）は appender の権限を要し、保持・保全の開放の条件と hold の開始（append）がこれを読む（再検査の間隔の下限は `app.feature-enablement.journal-reverify-interval`、既定10分）。以下の本文の「retention flag ON（hold 開始を使う）」は (b)、「flag OFF（既存 hold の効力確認だけ）」は (a) と読み替え、「起動失敗」は「保持・保全を開けない（開いていれば自動閉鎖）」と読み替える。reader 方式（§2.1 方式A、§3.1 の reader 行）はそのまま使える。
+
 インスタンスの配置・region・複製・RPO/RTO・運用者・鍵管理は G-DBA / G-BKP / D-03 の決定事項であり、本書では値を決めない（UNKNOWN）。実 GRANT は DBA が署名・実行する（G-DBA）。本書は、application がどの設定を受け取り、起動時に何を検査し、各 principal がどの権限だけを持つべきかを定める。合成層（`JournalTestConnectionCapability`、`W2bTestConnectionCapability`、`src/test/resources/privacy-journal/*.sql`）の権限分離を本番の形へ写したもので、合成層自体は変更しない。
 
 ---

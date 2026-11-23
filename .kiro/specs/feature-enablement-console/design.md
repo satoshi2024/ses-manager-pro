@@ -731,6 +731,17 @@ writeAutoClose(f, reason):
 9. **副入口の自動の再開**: 副入口は DB の状態を持たず、条件が戻れば自動で開く（D-4 の例外。J-03 の結果。理由は要件 FE-RQ-005）。`NF07_D05` と `NF07_D05_OWNER_ACCEPTANCE` は副入口（hold 開始・REL）の条件で、開放単位の条件ではない（D-05 の失効で保持・保全を閉じない。review P3-16）。
 10. **PR #130 の guard**: §14。
 
+**実装で決めた細部（段階 C。FE-C01〜C06 の実装）**:
+
+- 承認の値の源の選択は `PrivacyApprovalSourceConfiguration`（開放状態の源が `database` で NF07 の2件が DB 管理なら DB の源）。DB の源は1回の評価の値を `resolve()` で snapshot から固定し、評価器は評価に渡された snapshot（書込みの transaction の中では読み直したもの）から `forSnapshot` で読む（§3.2 の P2-3）。組の整合の検査は `PrivacyDecisionBindingConsistencyCheck`（D-09 の `capabilities` が `dsar` を含む時だけ D-06 を member に要し、含まない時は D-06 を拒む）。署名の登録の時の検査（`FeatureSignOffKindValidator`）は NF07 の決定 ID を `PrivacyDecisionBinding` の規則で受け、D-09 の3項目・D-06 の2項目を必須にした。
+- 評価器は開放単位ごとに自分の capability だけを開く束縛として評価し、期間も自分の capability で判定する（`openAfterChange` は使わない。DSAR の不足で保持・保全を閉じない D-4 のため）。Journal の検査は `remoteChecksAllowed` のとき `reverify()`、そうでなければ最後の開放の条件の結果を読む。
+- Monitor の状態は capability ごと（`currentStatus(Capability)`）と、metric・WARN 用の全体（開いている capability の全て）を持つ。
+- 副入口は `SubgateMonitor`（`FeatureEnablementEvaluationService` が定期の評価のたびに呼ぶ）が、親の開放単位・署名・固有の条件（`SubgateMonitor.Condition`。NF07 は `PrivacySubgateConfiguration` の3件）で判定する。trust の構造の不足は `PrivacyTrustStructureState`（prod の起動時に flag と関係なく検査した結果）で REL・REG の gate と副入口の条件に加える。
+- hold 解除（REL）の入口は Journal の開放の条件の結果を見ない（要件 §6.11 の REL の条件に無いため。append の権限が無ければ DB が拒む）。hold の開始だけが `PrivacyHoldJournal.appendAvailability()` を読む。
+- guard の NF07 の開放状態の読取りは `PrivacyEnablementStateReader`（状態の行が `openLike` か、NF07 の2件のどちらかに未決の申請があれば判定）。
+- DSAR が閉じている間の通知は `PrivacyDsarClosedNotifier`（`FeatureEnablementDayStartHook`。件数と最も近い期限日だけ）。
+- NF07 の開閉以外の旧い変数（`PRIVACY_APPROVAL_*`・`PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE`）の拒否は `FeatureEnablementProductionValidator.ADDITIONAL_LEGACY_PREFIXES`（段階ごとに行を足す）。`application-prod.yml` には NF07 の placeholder が無かった（`application.yml` のものは dev・test の property の源が使う）。
+
 ### 8.6 NF05
 
 §9。

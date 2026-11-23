@@ -18,9 +18,12 @@ import java.util.regex.Pattern;
  * hold（開始・gate・reconciler）が使う Journal への入口（NF07-A1H。§3.4.6 の2〜4・8 を1か所で守る）。
  *
  * <ul>
- *   <li>profile に関係なく、起動時検査（{@link PrivacyJournalStartupVerifier#startupResult()}）が {@code AVAILABLE} で
- *       なければ {@link Availability#UNAVAILABLE}（設定が無ければ {@link Availability#NOT_CONFIGURED}）として扱う
- *       （A1J Review §3.3 の条件）。</li>
+ *   <li>profile に関係なく、起動時検査の hold の効力の結果（{@link PrivacyJournalStartupVerifier#protectionResult()}。reader・appender の
+ *       どちらの principal でも可。再検査の失敗では下がらない）が {@code AVAILABLE} でなければ {@link Availability#UNAVAILABLE}
+ *       （設定が無ければ {@link Availability#NOT_CONFIGURED}）として扱う（A1J Review §3.3 の条件）。機能の開閉は読まない（hold は
+ *       保持・保全を閉じた後も保護を続ける。feature-enablement-console design §8.5 の 3）。</li>
+ *   <li>hold の開始（append）は {@link #appendAvailability()}（加えて開放の条件の結果 {@link PrivacyJournalStartupVerifier#enablementResult()}
+ *       が appender の権限で {@code AVAILABLE}）で判定する。</li>
  *   <li>本番 adapter は {@link PrivacyJournalConnections#openJournalPort} だけから作る（prod profile 以外では生成が拒否され、
  *       {@code UNAVAILABLE} になる）。生成は初回の利用時に1回だけ行い、結果（失敗を含む）を保持する。生成時に DB へ触れない。</li>
  *   <li>principal は1つ（方式A）。gate・projection の読み取りも同じ pool を使う。</li>
@@ -69,6 +72,7 @@ public class PrivacyHoldJournal {
     private static final Pattern JOURNAL_ID = Pattern.compile("[A-Za-z0-9._-]{4,64}");
 
     private final Supplier<PrivacyJournalStartupVerifier.Result> startupResult;
+    private final Supplier<PrivacyJournalStartupVerifier.Result> enablementResult;
     private final Supplier<PrivacyJournalPort> portFactory;
     private final PrivacyHoldJournalIndex index;
     private final String journalId;
@@ -83,11 +87,26 @@ public class PrivacyHoldJournal {
     private volatile PrivacyJournalPort port;
     private volatile InstanceCheckResult lastInstanceCheck;
 
+    /** hold の効力の結果を開放の条件の結果にも使う（試験用。appender で検査した結果を渡す）。 */
     PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
                        Supplier<PrivacyJournalPort> portFactory, PrivacyHoldJournalIndex index, String journalId,
                        Duration pendingTimeout, Duration appendInFlightUpperBound,
                        Supplier<String> applicationServerUuid, Clock clock) {
+        this(startupResult, startupResult, portFactory, index, journalId, pendingTimeout, appendInFlightUpperBound,
+                applicationServerUuid, clock);
+    }
+
+    /**
+     * @param startupResult    hold の効力の結果（gate・reconciler・解除が読む）
+     * @param enablementResult 開放の条件の結果（hold の開始が読む）
+     */
+    PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
+                       Supplier<PrivacyJournalStartupVerifier.Result> enablementResult,
+                       Supplier<PrivacyJournalPort> portFactory, PrivacyHoldJournalIndex index, String journalId,
+                       Duration pendingTimeout, Duration appendInFlightUpperBound,
+                       Supplier<String> applicationServerUuid, Clock clock) {
         this.startupResult = Objects.requireNonNull(startupResult, "startupResult");
+        this.enablementResult = Objects.requireNonNull(enablementResult, "enablementResult");
         this.portFactory = Objects.requireNonNull(portFactory, "portFactory");
         this.index = index;
         this.journalId = journalId;
@@ -105,7 +124,8 @@ public class PrivacyHoldJournal {
         Objects.requireNonNull(verifier, "verifier");
         PrivacyHoldJournalIndex index = connections.isPoolCreated()
                 ? new JdbcPrivacyHoldJournalIndex(connections.dataSource()) : null;
-        return new PrivacyHoldJournal(verifier::startupResult, () -> connections.openJournalPort(environment, clock),
+        return new PrivacyHoldJournal(verifier::protectionResult, verifier::enablementResult,
+                () -> connections.openJournalPort(environment, clock),
                 index, connections.journalId(), properties == null ? null : properties.getPendingTimeout(),
                 connections.appendInFlightUpperBound(), applicationServerUuid, clock);
     }
@@ -121,6 +141,26 @@ public class PrivacyHoldJournal {
             last = checkInstanceSingleFlight(last);
         }
         return last.check() == InstanceCheck.DISTINCT ? Availability.AVAILABLE : Availability.UNAVAILABLE;
+    }
+
+    /**
+     * hold の開始（append）に使えるか: {@link #availability()} が {@code AVAILABLE} で、開放の条件の結果（appender の権限）も
+     * {@code AVAILABLE}。reader の principal では {@code UNAVAILABLE}（hold の開始は 503。既存の hold の gate は {@link #availability()}
+     * のまま動く）。
+     */
+    public Availability appendAvailability() {
+        Availability base = availability();
+        if (base != Availability.AVAILABLE) {
+            return base;
+        }
+        PrivacyJournalStartupVerifier.Result result;
+        try {
+            result = enablementResult.get();
+        } catch (RuntimeException e) {
+            return Availability.UNAVAILABLE;
+        }
+        return result != null && result.availability() == PrivacyJournalStartupVerifier.Availability.AVAILABLE
+                ? Availability.AVAILABLE : Availability.UNAVAILABLE;
     }
 
     /**

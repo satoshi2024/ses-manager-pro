@@ -156,9 +156,13 @@ class FeatureEnablementCatalogCoverageTest {
         EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
                 Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
         for (Feature feature : Feature.values()) {
-            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature));
+            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature)
+                    || FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED.contains(feature));
         }
         assertThat(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageA);
+        // 段階 C（FE-C05）: NF07 の2件
+        assertThat(FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED)
+                .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
         FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF06));
         assertThat(managed.databaseManaged(Feature.NF04)).isTrue();
         assertThat(managed.databaseManaged(Feature.NF06)).isTrue();

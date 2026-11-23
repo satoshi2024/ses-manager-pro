@@ -1,6 +1,8 @@
 package com.ses.privacy.production;
 
 import com.ses.config.OidcSecurityProperties;
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.privacy.PiiDataElementMapper;
 import com.ses.mapper.privacy.RetentionPolicyMapper;
@@ -29,8 +31,8 @@ import java.util.function.BooleanSupplier;
  *   <li>prod: foundation の {@link ProductionPrivacyComponents} が生成する production の読み取り専用照会。
  *       catalog・source は application DB の F1 表（{@code m_pii_data_element}・{@code m_retention_policy}）、
  *       trust anchor と失効状態は照会のたびに {@link PrivacyTrustSource} から取る（第1期は anchor 0件・失効状態は常に UNKNOWN。D-03 の方式の
- *       adapter は同じ Bean を差し替える）。公開スイッチ（{@code privacy.retention.enabled}）と決定ID束縛の
- *       有効期間（{@link PrivacyDecisionWindowMonitor}）は照会のたびに読み、OFF・期間外なら source を読まない。
+ *       adapter は同じ Bean を差し替える）。NF07 保持・保全の実効値（{@link FeatureSwitches#isEnabled}。開放状態と決定ID束縛の
+ *       有効期間 {@link PrivacyDecisionWindowMonitor} を含む）は照会のたびに読み、閉・期間外なら source を読まない。
  *       Bean の構築時に DB へ触れない。</li>
  *   <li>prod 以外: 常に {@code POLICY_UNKNOWN} を返す {@link UnavailablePolicyReadonlyQueryPort}（DB を読まない）。</li>
  * </ul>
@@ -43,21 +45,20 @@ public class PrivacyProductionConfiguration {
     @Profile("prod")
     public PolicyReadonlyQueryPort productionPolicyReadonlyQueryPort(
             Environment environment,
-            PrivacyFeatureProperties privacyFeatureProperties,
+            ObjectProvider<FeatureSwitches> featureSwitches,
             LegalEntityContextService legalEntityContextService,
             SysUserMapper sysUserMapper,
             ObjectProvider<AuthorizationService> authorizationServiceProvider,
             OidcSecurityProperties oidcProperties,
             PiiDataElementMapper piiDataElementMapper,
             RetentionPolicyMapper retentionPolicyMapper,
-            ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider,
             PrivacyTrustSource privacyTrustSource,
             Clock clock) {
         String authorizationTenantId = StringUtils.hasText(oidcProperties.getTenantId())
                 ? oidcProperties.getTenantId() : "default";
         return ProductionPrivacyComponents.productionPolicyReadonlyQuery(
                 environment,
-                retentionSourceEnabled(privacyFeatureProperties, decisionWindowProvider),
+                retentionSourceEnabled(featureSwitches),
                 legalEntityContextService,
                 sysUserMapper,
                 authorizationServiceProvider::getIfAvailable,
@@ -70,25 +71,20 @@ public class PrivacyProductionConfiguration {
     }
 
     /**
-     * policy source を読んでよいか（照会のたびに評価する）。公開スイッチが OFF なら決定ID束縛を見ずに false。
-     * ON でも決定ID束縛が有効期間外（署名日前・失効）の間は OFF と同じく source を読まない（W3-14b）。
-     * 判定部品が取れない・例外なら false（fail-closed）。
+     * policy source を読んでよいか（照会のたびに評価する）。NF07 保持・保全の実効値（{@link FeatureSwitches#isEnabled}）で判定する
+     * （feature-enablement-console design §8.5 の 2。以前は生の flag と {@link PrivacyDecisionWindowMonitor} を自前で掛けており、
+     * {@code FeatureSwitches} と同じ判定の写しだった）。開放状態が閉・決定ID束縛が有効期間外（署名日前・失効）の間は source を読まない
+     * （W3-14b）。判定部品が取れない・例外なら false（fail-closed）。
      */
-    static BooleanSupplier retentionSourceEnabled(PrivacyFeatureProperties privacyFeatureProperties,
-                                                  ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider) {
-        return () -> privacyFeatureProperties != null
-                && privacyFeatureProperties.getRetention() != null
-                && privacyFeatureProperties.getRetention().isEnabled()
-                && decisionWindowSatisfied(decisionWindowProvider);
-    }
-
-    private static boolean decisionWindowSatisfied(ObjectProvider<PrivacyDecisionWindowMonitor> provider) {
-        try {
-            PrivacyDecisionWindowMonitor monitor = provider == null ? null : provider.getIfAvailable();
-            return monitor != null && monitor.satisfied();
-        } catch (RuntimeException e) {
-            return false;
-        }
+    static BooleanSupplier retentionSourceEnabled(ObjectProvider<FeatureSwitches> featureSwitches) {
+        return () -> {
+            try {
+                FeatureSwitches switches = featureSwitches == null ? null : featureSwitches.getIfAvailable();
+                return switches != null && switches.isEnabled(Feature.NF07_RETENTION);
+            } catch (RuntimeException e) {
+                return false;
+            }
+        };
     }
 
     @Bean

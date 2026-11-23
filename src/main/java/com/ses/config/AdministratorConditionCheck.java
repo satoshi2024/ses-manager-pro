@@ -9,7 +9,8 @@ package com.ses.config;
  * 変えるとguardの判定も同じに変わる。</p>
  *
  * @param condition  条件の種類
- * @param evaluated  起動時検査がこの条件を判定するか（bootstrap中、OIDCのtenant・issuerが未設定など、起動時検査が
+ * @param evaluated  起動時検査がこの条件を判定するか（bootstrap中、OIDCのtenant・issuerが未設定、NF07 を DB で管理していて保持・保全・
+ *                   DSAR が閉じていて未決の申請も無い（privacy-admin。feature-enablement-console design §14）など、起動時検査が
  *                   判定しない場合は false）
  * @param satisfied  判定する場合に、起動時検査がこの条件では起動を止めないか（判定しない場合は false）
  * @param count      条件を満たす管理者の人数（判定しない・数えられない場合は0）

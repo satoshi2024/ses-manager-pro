@@ -1,6 +1,8 @@
 package com.ses.privacy.production.redaction;
 
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.PrivacyDecisionBinding;
 import com.ses.privacy.production.provider.DsarDeliveryClass;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,7 +22,8 @@ import java.util.function.Supplier;
  * 全 field を要手動確認に回して自動では1件も出さない（§5.2 の A2b「自動出力 0」）。
  * <ul>
  *   <li>{@link Rules} の Bean が無い・一意でない（第1期は Bean を定義しない）</li>
- *   <li>規則の決定IDが空、または {@code privacy.approval.d06.decision-id} と一致しない</li>
+ *   <li>規則の決定IDが空、または D-06 の決定ID（承認の値の源 {@link PrivacyApprovalSource}。property の源は
+ *       {@code privacy.approval.d06.decision-id}、DB の源は確認済みの組の D-06。呼出しごとに読む）と一致しない</li>
  *   <li>規則・決定IDの取得で例外</li>
  * </ul>
  * 規則がある場合も、第三者の field は自動で出さず（{@code withheld}）、帰属が不明な field と規則で自動交付を
@@ -44,13 +47,23 @@ public class ThirdPartyRedactor {
     private final Supplier<Rules> rulesSource;
     private final Supplier<String> boundDecisionId;
 
+    /** 承認の値の源から D-06 の決定ID を呼出しごとに読む（feature-enablement-console design §8.5 の 1。FE-C01）。 */
     @Autowired
+    public ThirdPartyRedactor(ObjectProvider<Rules> rules, PrivacyApprovalSource approvalSource) {
+        this(rules::getIfUnique, () -> d06DecisionId(approvalSource));
+    }
+
+    /** property の源で包む（既存の試験のため）。 */
     public ThirdPartyRedactor(ObjectProvider<PrivacyApprovalProperties> approvalProperties,
                               ObjectProvider<Rules> rules) {
-        this(rules::getIfUnique, () -> {
-            PrivacyApprovalProperties properties = approvalProperties.getIfAvailable();
-            return properties == null || properties.getD06() == null ? null : properties.getD06().getDecisionId();
-        });
+        this(rules::getIfUnique,
+                () -> d06DecisionId(PrivacyApprovalSource.properties(approvalProperties.getIfAvailable(), null)));
+    }
+
+    private static String d06DecisionId(PrivacyApprovalSource source) {
+        PrivacyApprovalSource.DecisionValue d06 = source == null ? null
+                : source.reference(PrivacyDecisionBinding.Decision.D06);
+        return d06 == null ? null : d06.decisionId();
     }
 
     ThirdPartyRedactor(Supplier<Rules> rulesSource, Supplier<String> boundDecisionId) {

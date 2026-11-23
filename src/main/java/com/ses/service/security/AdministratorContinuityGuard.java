@@ -48,7 +48,9 @@ import java.util.stream.Collectors;
  *   <li><b>判定</b>: 起動時検査そのもの（{@link AdministratorStartupConditions}。{@code ProductionSecurityConfigurationValidator}・
  *       {@code PrivacyProductionConfigurationValidator}）を変更の前後に同じtransactionで呼び、条件の写しを持たない。
  *       起動時検査が判定しない条件（bootstrap中のOIDC管理者・break-glass、OIDCのtenant・issuerが未設定のOIDC管理者）は
- *       判定しない。privacy-adminはNF07のflagのON/OFFに関わらず判定する。</li>
+ *       判定しない。privacy-adminは、NF07 を DB の開放状態で管理する間は NF07 保持・保全か DSAR が開いているか未決の申請がある時だけ
+ *       判定する（起動時検査が {@code notEvaluated} を返す。開放状態を読めなければ {@code unverifiable} で全て拒否する。
+ *       feature-enablement-console design §14・J-17）。DB で管理していない間は開閉に関わらず判定する。</li>
  *   <li><b>前から満たさない条件では拒否しない</b>: bootstrapで人数を揃えている途中などの変更を止めない（壊れていない状態を
  *       壊す変更だけを止める）。</li>
  *   <li><b>確認できなければ拒否する（fail-closed）</b>: 変更の前・後のどちらかで照会に失敗した（起動時検査の照会が例外になった、

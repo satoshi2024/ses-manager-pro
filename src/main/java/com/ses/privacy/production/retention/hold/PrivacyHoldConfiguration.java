@@ -5,10 +5,11 @@ import com.ses.privacy.foundation.HoldReleaseTrustRegistry;
 import com.ses.privacy.foundation.HoldReleaseVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
-import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
 import com.ses.privacy.production.ProductionPrivacyProviderRegistry;
 import com.ses.privacy.production.retention.policy.UnknownRevocationStatusProvider;
 import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
+import com.ses.privacy.production.retention.trust.PrivacyTrustStructureState;
 import com.ses.service.AuditLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
@@ -37,11 +38,11 @@ import java.time.Clock;
 public class PrivacyHoldConfiguration {
 
     @Bean
-    public PrivacyHoldDecisions privacyHoldDecisions(PrivacyApprovalProperties approvalProperties,
+    public PrivacyHoldDecisions privacyHoldDecisions(PrivacyApprovalSource approvalSource,
                                                      PrivacyHoldProperties holdProperties,
                                                      PrivacyClockProperties clockProperties,
                                                      ObjectProvider<Clock> clock) {
-        return new PrivacyHoldDecisions(approvalProperties, holdProperties, clockProperties, clockOf(clock));
+        return new PrivacyHoldDecisions(approvalSource, holdProperties, clockProperties, clockOf(clock));
     }
 
     @Bean
@@ -142,7 +143,8 @@ public class PrivacyHoldConfiguration {
                                                                ObjectProvider<Clock> clock,
                                                                HoldReleaseTrustRegistry privacyHoldReleaseTrustRegistry,
                                                                Environment environment,
-                                                               PrivacyTrustSource privacyTrustSource) {
+                                                               PrivacyTrustSource privacyTrustSource,
+                                                               ObjectProvider<PrivacyTrustStructureState> trustStructure) {
         PrivacyHoldProjectionStore store = new PrivacyHoldProjectionStore(jdbcTemplate);
         TransactionTemplate requiresNew = requiresNew(transactionManager);
         PrivacyHoldAudit audit = new PrivacyHoldAudit(auditLogService);
@@ -156,7 +158,11 @@ public class PrivacyHoldConfiguration {
         return new PrivacyHoldReleaseService(accessGuard, oidcProperties.getIfAvailable(), privacyHoldDecisions,
                 privacyHoldJournal, store, holdSubjectResolver,
                 new PrivacyHoldProjector(store, privacyHoldJournal, requiresNew, audit, resolvedClock), audit,
-                requiresNew, resolvedClock, null, verifier, privacyHoldReleaseTrustRegistry);
+                requiresNew, resolvedClock, null, verifier, privacyHoldReleaseTrustRegistry, () -> {
+                    // trust 文書の構造の不足（起動時に flag と関係なく検査した結果）でも閉じる（FE-C04）
+                    PrivacyTrustStructureState state = trustStructure.getIfAvailable();
+                    return state == null || state.sound();
+                });
     }
 
     @Bean

@@ -40,6 +40,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -118,18 +119,17 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void 決定ID束縛が未設定なら起動を止め欠けた項目を固定コードで列挙する() {
+    void 決定ID束縛が未設定なら開放の条件を満たさず欠けた項目を固定コードで列挙する() {
         twoPrivacyAdmins();
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                validator(new PrivacyApprovalProperties())::validate);
+        IllegalStateException error = blocked(validator(new PrivacyApprovalProperties()));
 
         assertContainsAll(error, "privacy.retention.enabled", "decisionBinding.tenantId.missing",
                 "decisionBinding.capabilities.missing", "decisionBinding.approvalDigest.missing");
     }
 
     @Test
-    void 必要な束縛項目が1つでも欠ければそれぞれの欠落コードで起動を止める() {
+    void 必要な束縛項目が1つでも欠ければそれぞれの欠落コードで開放の条件を満たさない() {
         twoPrivacyAdmins();
         List<String> fields = List.of("tenantId", "capabilities", "approvalDigest",
                 "d01.decisionId", "d01.signedOn", "d01.expiresOn", "d09.decisionId", "d09.signedOn", "d09.expiresOn");
@@ -137,8 +137,7 @@ class PrivacyProductionConfigurationValidatorTest {
             PrivacyApprovalProperties approval = approval();
             clear(approval, field);
 
-            IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval)::validate,
-                    field);
+            IllegalStateException error = blocked(validator(approval));
 
             assertContainsAll(error, "decisionBinding." + field + ".missing");
         }
@@ -181,7 +180,7 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void 失効と構造的な不足が同時なら起動を止める() {
+    void 失効と構造的な不足が同時なら開放の条件を満たさない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties expiredAndTampered = approval();
         expiredAndTampered.getD09().setSignedOn("2025-11-15");
@@ -189,8 +188,7 @@ class PrivacyProductionConfigurationValidatorTest {
         expiredAndTampered.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expiredAndTampered));
         expiredAndTampered.getD01().setDecisionId("D01-NF07-2026-7777");
 
-        IllegalStateException tampered = assertThrows(IllegalStateException.class,
-                validator(expiredAndTampered)::validate);
+        IllegalStateException tampered = blocked(validator(expiredAndTampered));
         assertContainsAll(tampered, "decisionBinding." + PrivacyDecisionBinding.VIOLATION_DIGEST_MISMATCH,
                 "decisionBinding.d09.expiresOn.expired");
 
@@ -199,16 +197,15 @@ class PrivacyProductionConfigurationValidatorTest {
         expired.getD09().setExpiresOn("2026-11-14");
         expired.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expired));
         // privacy-admin の条件は時間要因と同時でも起動を止める（mapperは0件・空・providerなしを返す）
-        IllegalStateException noAdmins = assertThrows(IllegalStateException.class, () ->
-                new PrivacyProductionConfigurationValidator(flags(true, false), expired, oidc(Set.of()),
+        IllegalStateException noAdmins = blocked(new PrivacyProductionConfigurationValidator(flags(true, false), expired, oidc(Set.of()),
                         mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class),
-                        mock(IdentityProviderMapper.class), CLOCK).validate());
+                        mock(IdentityProviderMapper.class), CLOCK));
         assertContainsAll(noAdmins, "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.oidcProviderUnavailable",
                 "decisionBinding.d09.expiresOn.expired");
     }
 
     @Test
-    void ONのcapabilityが承認capabilityに無ければ起動を止める() {
+    void ONのcapabilityが承認capabilityに無ければ開放の条件を満たさない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties dsarOnly = approval();
         dsarOnly.setCapabilities(new ArrayList<>(List.of("dsar")));
@@ -217,30 +214,30 @@ class PrivacyProductionConfigurationValidatorTest {
         dsarOnly.getD06().setExpiresOn("2027-11-04");
         dsarOnly.setApprovalDigest(PrivacyDecisionBinding.computeDigest(dsarOnly));
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(dsarOnly)::validate);
+        IllegalStateException error = blocked(validator(dsarOnly));
 
         assertContainsAll(error, "decisionBinding.capabilities.retention.notApproved");
     }
 
     @Test
-    void 承認tenantが設定tenantと異なれば起動を止める() {
+    void 承認tenantが設定tenantと異なれば開放の条件を満たさない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties otherTenant = approval();
         otherTenant.setTenantId("default");
         otherTenant.setApprovalDigest(PrivacyDecisionBinding.computeDigest(otherTenant));
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(otherTenant)::validate);
+        IllegalStateException error = blocked(validator(otherTenant));
 
         assertContainsAll(error, "decisionBinding.tenantId.mismatch");
     }
 
     @Test
-    void digestを改竄した束縛は起動を止め設定値を出さない() {
+    void digestを改竄した束縛は開放の条件を満たさず設定値を出さない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties tampered = approval();
         tampered.getD01().setDecisionId("D01-NF07-2026-7777");
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(tampered)::validate);
+        IllegalStateException error = blocked(validator(tampered));
 
         assertContainsAll(error, "decisionBinding." + PrivacyDecisionBinding.VIOLATION_DIGEST_MISMATCH);
         assertFalse(error.getMessage().contains("D01-NF07-2026-7777"), "決定IDを出さない");
@@ -249,17 +246,17 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void privacy_adminが1名だけなら起動を止める() {
+    void privacy_adminが1名だけなら開放の条件を満たさない() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
 
         assertContainsAll(error, "privacyAdmins.insufficient[current=1;required=2]");
         assertFalse(error.getMessage().contains("nf07b-ops-d"), "usernameを出さない");
     }
 
     @Test
-    void privacy_admin2名のうち1名が無効なら起動を止める() {
+    void privacy_admin2名のうち1名が無効なら開放の条件を満たさない() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         long disabled = admin("nf07b-ops-e");
         jdbcTemplate.update("UPDATE sys_user SET status = 0 WHERE id = ?", disabled);
@@ -307,25 +304,24 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void 設定tenant_issuerの有効なOIDC_providerが無ければ起動を止める() {
+    void 設定tenant_issuerの有効なOIDC_providerが無ければ開放の条件を満たさない() {
         twoPrivacyAdmins();
         jdbcTemplate.update("UPDATE m_identity_provider SET enabled = 0 WHERE id = ?", providerId);
 
-        IllegalStateException disabled = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException disabled = blocked(validator(approval()));
 
         assertContainsAll(disabled, "privacyAdmins.oidcProviderUnavailable");
         assertFalse(disabled.getMessage().contains("privacyAdmins.insufficient"), "人数は数えない");
     }
 
     @Test
-    void issuerが未設定ならOIDC_providerを確認できないとして起動を止める() {
+    void issuerが未設定ならOIDC_providerを確認できないとして開放の条件を満たさない() {
         twoPrivacyAdmins();
         OidcSecurityProperties withoutIssuer = oidc(Set.of());
         withoutIssuer.setIssuerUri(" ");
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), withoutIssuer,
-                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
+        IllegalStateException error = blocked(new PrivacyProductionConfigurationValidator(flags(true, false), approval(), withoutIssuer,
+                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK));
 
         assertContainsAll(error, "privacyAdmins.oidcProviderUnavailable");
     }
@@ -347,8 +343,7 @@ class PrivacyProductionConfigurationValidatorTest {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         member(admin("nf07b-bg-second"), privacyAdminGroupId);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                validator(approval(), Set.of(" NF07B-BG-Second "))::validate);
+        IllegalStateException error = blocked(validator(approval(), Set.of(" NF07B-BG-Second ")));
 
         assertContainsAll(error, "privacyAdmins.insufficient[current=1;required=2]");
     }
@@ -384,52 +379,51 @@ class PrivacyProductionConfigurationValidatorTest {
         member(both, roleAdminGroupId);
         member(admin("nf07b-bg-second"), privacyAdminGroupId);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                validator(approval(), Set.of("admin", "nf07b-bg-second"))::validate);
+        IllegalStateException error = blocked(validator(approval(), Set.of("admin", "nf07b-bg-second")));
 
         assertContainsAll(error, "privacyAdmins.insufficient[current=1;required=2]");
     }
 
     @Test
-    void privacy_admin_groupがprivacyの許可行を持たなければ起動を止める() {
+    void privacy_admin_groupがprivacyの許可行を持たなければ開放の条件を満たさない() {
         twoPrivacyAdmins();
         jdbcTemplate.update("UPDATE t_permission_group_action SET deleted_flag = 1 WHERE group_id = ? AND action_key = ?",
                 privacyAdminGroupId, "privacy.*");
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
 
         assertContainsAll(error, "privacyAdminGroup.notGrantingPrivacy");
     }
 
     @Test
-    void privacy_admin_groupがprivacyの拒否行を持てば起動を止める() {
+    void privacy_admin_groupがprivacyの拒否行を持てば開放の条件を満たさない() {
         twoPrivacyAdmins();
         deny(privacyAdminGroupId, "privacy.policy.view");
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
 
         assertContainsAll(error, "privacyAdminGroup.notGrantingPrivacy");
     }
 
     @Test
-    void privacy_admin_groupが無効なら起動を止める() {
+    void privacy_admin_groupが無効なら開放の条件を満たさない() {
         twoPrivacyAdmins();
         jdbcTemplate.update("UPDATE m_permission_group SET enabled = 0 WHERE id = ?", privacyAdminGroupId);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
 
         assertContainsAll(error, "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.insufficient[current=0;required=2]");
     }
 
     @Test
-    void privacy_admin以外のgroupがprivacy系の許可行を持てば起動を止めgroup_keyだけを出す() {
+    void privacy_admin以外のgroupがprivacy系の許可行を持てば開放の条件を満たさずgroup_keyだけを出す() {
         twoPrivacyAdmins();
         long copied = insertGroup("custom-privacy-copy", 1);
         allow(copied, "privacy.*");
         long narrow = insertGroup("custom-policy-viewer", 1);
         allow(narrow, "privacy.policy.view");
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
 
         assertContainsAll(error, "privacyAllow.outsidePrivacyAdmin[custom-policy-viewer;custom-privacy-copy]");
     }
@@ -463,37 +457,33 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void dsarは期限規則とpackage保存期間とF2_providerのどれかが欠ければそれぞれの固定コードで起動を止める() {
+    void dsarは期限規則とpackage保存期間とF2_providerのどれかが欠ければそれぞれの固定コードで開放の条件を満たさない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties approval = dsarApproval();
 
-        IllegalStateException missingAll = assertThrows(IllegalStateException.class,
-                dsarValidator(dsarFlags(null, null), approval, new ProductionPrivacyProviderRegistry(List.of()))::validate);
+        IllegalStateException missingAll = blocked(dsarValidator(dsarFlags(null, null), approval, new ProductionPrivacyProviderRegistry(List.of())));
         assertContainsAll(missingAll, "privacy.dsar.enabled", "dsar.dueDaysUnset", "dsar.packageMaxAgeUnset",
                 "dsar.providersUnregistered");
         assertFalse(missingAll.getMessage().contains("prerequisitesNotImplemented"));
         assertFalse(missingAll.getMessage().contains("decisionBinding."), "束縛自体は揃っている");
 
-        IllegalStateException outOfRange = assertThrows(IllegalStateException.class,
-                dsarValidator(dsarFlags(367, Duration.ofMinutes(30)), approval, registryWithProvider())::validate);
+        IllegalStateException outOfRange = blocked(dsarValidator(dsarFlags(367, Duration.ofMinutes(30)), approval, registryWithProvider()));
         assertContainsAll(outOfRange, "dsar.dueDaysUnset", "dsar.packageMaxAgeUnset");
         assertFalse(outOfRange.getMessage().contains("dsar.providersUnregistered"));
 
-        IllegalStateException withoutRegistry = assertThrows(IllegalStateException.class,
-                new PrivacyProductionConfigurationValidator(dsarFlags(30, Duration.ofDays(30)), approval, oidc(Set.of()),
-                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
+        IllegalStateException withoutRegistry = blocked(new PrivacyProductionConfigurationValidator(dsarFlags(30, Duration.ofDays(30)), approval, oidc(Set.of()),
+                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK));
         assertContainsAll(withoutRegistry, "dsar.providersUnregistered");
     }
 
     @Test
-    void dsarはD06の決定ID束縛が欠ければ他の前提が揃っても起動を止める() {
+    void dsarはD06の決定ID束縛が欠ければ他の前提が揃っても開放の条件を満たさない() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties withoutD06 = dsarApproval();
         withoutD06.getD06().setDecisionId(" ");
         withoutD06.setApprovalDigest(PrivacyDecisionBinding.computeDigest(withoutD06));
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                dsarValidator(dsarFlags(30, Duration.ofDays(30)), withoutD06, registryWithProvider())::validate);
+        IllegalStateException error = blocked(dsarValidator(dsarFlags(30, Duration.ofDays(30)), withoutD06, registryWithProvider()));
 
         assertContainsAll(error, "privacy.dsar.enabled", "decisionBinding.");
         assertTrue(PrivacyDecisionBinding.requiredDecisions(PrivacyAccessGuard.Capability.DSAR)
@@ -501,7 +491,7 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     @Test
-    void 照会できなければ確認できないとして起動を止め例外の本文を出さない() {
+    void 照会できなければ確認できないとして開放の条件を満たさず例外の本文を出さない() {
         PermissionGroupMapper groups = mock(PermissionGroupMapper.class);
         UserPermissionGroupMapper members = mock(UserPermissionGroupMapper.class);
         IdentityProviderMapper providers = mock(IdentityProviderMapper.class);
@@ -517,7 +507,7 @@ class PrivacyProductionConfigurationValidatorTest {
         PrivacyProductionConfigurationValidator validator = new PrivacyProductionConfigurationValidator(
                 flags(true, false), approval(), oidc(Set.of()), groups, members, providers, CLOCK);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator::validate);
+        IllegalStateException error = blocked(validator);
 
         assertContainsAll(error, "privacyAdminGroup.unverifiable", "privacyAdmins.unverifiable",
                 "privacyAllow.unverifiable");
@@ -526,10 +516,9 @@ class PrivacyProductionConfigurationValidatorTest {
         IdentityProviderMapper brokenProviders = mock(IdentityProviderMapper.class);
         when(brokenProviders.selectEnabledByTenantAndIssuer(any(), any()))
                 .thenThrow(new IllegalStateException("secret-sql-4"));
-        IllegalStateException providerError = assertThrows(IllegalStateException.class,
-                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
+        IllegalStateException providerError = blocked(new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
                         mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class),
-                        brokenProviders, CLOCK)::validate);
+                        brokenProviders, CLOCK));
         assertContainsAll(providerError, "privacyAdmins.unverifiable");
         assertFalse(providerError.getMessage().contains("secret-sql"), "例外の本文を出さない");
     }
@@ -601,8 +590,8 @@ class PrivacyProductionConfigurationValidatorTest {
                 new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
                         permissionGroupMapper, userPermissionGroupMapper, brokenProviders, CLOCK))) {
             org.junit.jupiter.api.Assertions.assertEquals(List.of(unverifiable), broken.checkAdministratorConditions());
-            // 起動時の扱いは従来どおり（privacyAdmins.unverifiable で起動を止める）。
-            assertContainsAll(assertThrows(IllegalStateException.class, broken::validate), "privacyAdmins.unverifiable");
+            // 起動時の検査でも privacyAdmins.unverifiable（評価できない類。起動は止めない。FE-C05）。
+            assertContainsAll(blocked(broken), "privacyAdmins.unverifiable");
         }
 
         // issuer未設定でproviderを解決できないだけ（照会の失敗ではない）なら、validate と同じく満たさない扱いにする。
@@ -616,14 +605,114 @@ class PrivacyProductionConfigurationValidatorTest {
                 withoutIssuer.checkAdministratorConditions());
     }
 
+    // ---------------------------------------------------------------- 評価器（FE-C05）
+
+    /** 評価器は validate と同じ method を呼び、同じ違反 code を返す。照会の失敗は評価できない類（registry が直す）。 */
+    @Test
+    void 評価器の違反codeは起動時検査と同じで照会の失敗は評価できない類になる() {
+        member(admin("nf07b-ops-d"), privacyAdminGroupId);
+        PrivacyApprovalProperties tampered = approval();
+        tampered.getD01().setDecisionId("D01-NF07-2026-7777");
+        PrivacyProductionConfigurationValidator validator = validator(tampered);
+        List<String> startup = validator.report().violations();
+
+        List<com.ses.featureenablement.condition.FeatureConditionCheck> checks =
+                validator.evaluate(com.ses.config.feature.Feature.NF07_RETENTION, context());
+
+        assertTrue(checks.stream().map(com.ses.featureenablement.condition.FeatureConditionCheck::code).toList()
+                .containsAll(startup), () -> "起動時検査の code: " + startup);
+        assertTrue(checks.stream().anyMatch(check -> check.code().equals("journal.verifier.unverifiable")),
+                "Journal の起動時検査が無ければ評価できない");
+        assertEquals(java.util.Set.of(com.ses.config.feature.Feature.NF07_RETENTION,
+                com.ses.config.feature.Feature.NF07_DSAR), validator.features());
+
+        UserPermissionGroupMapper broken = mock(UserPermissionGroupMapper.class);
+        when(broken.selectEffectivePrivacyAdminUsernames(any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("secret-sql-7"));
+        PrivacyProductionConfigurationValidator unverifiable = new PrivacyProductionConfigurationValidator(
+                flags(true, false), approval(), oidc(Set.of()), permissionGroupMapper, broken, identityProviderMapper,
+                CLOCK);
+        com.ses.featureenablement.condition.FeatureEvaluation evaluation =
+                new com.ses.featureenablement.condition.FeatureConditionRegistry(
+                        com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(), List.of(unverifiable))
+                        .evaluate(com.ses.config.feature.Feature.NF07_RETENTION, context());
+        assertTrue(evaluation.checks().stream().anyMatch(check -> check.code().equals("privacyAdmins.unverifiable")
+                        && check.status() == com.ses.featureenablement.condition.FeatureConditionCheck.Status.UNVERIFIABLE),
+                "privacyAdmins.unverifiable は評価できない類");
+    }
+
+    /** review P1-2: D-06 の失効は DSAR の評価だけを不成立（時間要因）にし、保持・保全の束縛は成り立つ。 */
+    @Test
+    void 評価器はD06の失効をDSARだけの時間要因の不成立にする() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties shortD06 = dsarApproval();
+        shortD06.getD06().setSignedOn("2025-11-14");
+        shortD06.getD06().setExpiresOn("2026-11-14");
+        shortD06.setApprovalDigest(PrivacyDecisionBinding.computeDigest(shortD06));
+        PrivacyProductionConfigurationValidator validator = dsarValidator(dsarFlags(30, Duration.ofDays(30)), shortD06,
+                registryWithProvider());
+
+        List<com.ses.featureenablement.condition.FeatureConditionCheck> dsar =
+                validator.evaluate(com.ses.config.feature.Feature.NF07_DSAR, context());
+        List<com.ses.featureenablement.condition.FeatureConditionCheck> retention =
+                validator.evaluate(com.ses.config.feature.Feature.NF07_RETENTION, context());
+
+        assertTrue(dsar.stream().anyMatch(check -> check.code().equals("decisionBinding.d06.expiresOn.expired")
+                && check.temporal()));
+        assertTrue(retention.stream().anyMatch(check -> check.code().equals("decisionBinding.valid") && check.passing()),
+                "保持・保全は D-06 の失効で閉じない");
+        assertTrue(retention.stream().noneMatch(check -> check.code().startsWith("decisionBinding.d06")));
+    }
+
+    /** J-17（design §14）: NF07 を DB で管理する間、閉じていて未決の申請も無ければ privacy-admin の人数を判定しない。 */
+    @Test
+    void 継続性guard向けの判定はNF07が閉じていれば判定せず開いていれば判定し読めなければ確認できない() {
+        twoPrivacyAdmins();
+        PrivacyProductionConfigurationValidator validator = validator(approval());
+        PrivacyEnablementStateReader reader = mock(PrivacyEnablementStateReader.class);
+        validator.setEnablementStateReader(reader);
+        com.ses.config.AdministratorConditionCheck.Condition condition =
+                com.ses.config.AdministratorConditionCheck.Condition.PRIVACY_ADMINISTRATORS;
+
+        when(reader.read()).thenReturn(PrivacyEnablementStateReader.Result.INACTIVE);
+        assertEquals(List.of(com.ses.config.AdministratorConditionCheck.notEvaluated(condition, 2)),
+                validator.checkAdministratorConditions());
+        when(reader.read()).thenReturn(PrivacyEnablementStateReader.Result.ACTIVE);
+        assertEquals(List.of(com.ses.config.AdministratorConditionCheck.evaluated(condition, 2, 2, true)),
+                validator.checkAdministratorConditions());
+        when(reader.read()).thenReturn(PrivacyEnablementStateReader.Result.UNREADABLE);
+        assertEquals(List.of(com.ses.config.AdministratorConditionCheck.unverifiable(condition, 2)),
+                validator.checkAdministratorConditions());
+        when(reader.read()).thenReturn(PrivacyEnablementStateReader.Result.NOT_DATABASE_MANAGED);
+        assertEquals(List.of(com.ses.config.AdministratorConditionCheck.evaluated(condition, 2, 2, true)),
+                validator.checkAdministratorConditions());
+    }
+
+    private static com.ses.featureenablement.condition.FeatureEvaluationContext context() {
+        return new com.ses.featureenablement.condition.FeatureEvaluationContext("default",
+                PrivacyDecisionBinding.businessDate(CLOCK), CLOCK,
+                com.ses.featureenablement.FeatureEnablementTestSnapshots.builder(CLOCK.instant()).build(),
+                com.ses.featureenablement.condition.FeatureEvaluationContext.Purpose.PERIODIC, Set.of(), false);
+    }
     private void twoPrivacyAdmins() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         member(admin("nf07b-ops-e"), privacyAdminGroupId);
     }
 
     private void assertInsufficient(int current) {
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(approval())::validate);
+        IllegalStateException error = blocked(validator(approval()));
         assertContainsAll(error, "privacyAdmins.insufficient[current=" + current + ";required=2]");
+    }
+
+    /**
+     * FE-C05: prod でも機能の条件では起動を止めない（{@code validate} は log だけ）。条件を満たさないことと違反の固定コードを
+     * {@link PrivacyProductionConfigurationValidator#report()} で確かめる（説明の文は起動時の WARN と同じ）。
+     */
+    private static IllegalStateException blocked(PrivacyProductionConfigurationValidator validator) {
+        assertDoesNotThrow(validator::validate, "機能の条件では起動を止めない");
+        PrivacyProductionConfigurationValidator.Report report = validator.report();
+        assertFalse(report.satisfied(), () -> "条件を満たさないはず: " + report.message());
+        return new IllegalStateException(report.message());
     }
 
     private static void assertContainsAll(IllegalStateException error, String... fragments) {

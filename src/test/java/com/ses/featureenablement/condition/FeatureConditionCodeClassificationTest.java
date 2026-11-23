@@ -41,7 +41,10 @@ class FeatureConditionCodeClassificationTest {
             // 段階 C・D の既存の検査が返す照会の失敗（design §4.2 の例）
             "privacyAdmins.unverifiable", "journal.unreachable", "journal.timeout", "state=STATE_IO_ERROR",
             // FE-A11: NF02 の暦を照会できない（開放の時だけの条件のまま）
-            FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE);
+            FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE,
+            // FE-C05: NF07 の評価器（PrivacyProductionConfigurationValidator）の照会の失敗
+            "privacyAdminGroup.unverifiable", "privacyAllow.unverifiable", "journal.verifier.unverifiable",
+            "journal.unverifiable", "journal.privilege.unverifiable", "journal.instance.serverUuid.unverifiable");
 
     /** 条件の不成立を表す code（評価できない類であってはならない）。 */
     private static final List<String> UNSATISFIED = List.of(
@@ -53,7 +56,13 @@ class FeatureConditionCodeClassificationTest {
             "dsar.dueDaysUnset", "state=MISSING", FeatureEnablementCatalog.CODE_NF02_CALENDAR,
             FeatureEnablementCatalog.CODE_NF05_BARRIER_OFF,
             // FE-A11: NF10 の scheduler の状態（警告だけ）
-            SchedulingConditionEvaluator.CODE_DISABLED, SchedulingConditionEvaluator.CODE_ENABLED);
+            SchedulingConditionEvaluator.CODE_DISABLED, SchedulingConditionEvaluator.CODE_ENABLED,
+            // FE-C05: NF07 の評価器の不成立（成立の code を含む）
+            "decisionBinding.valid", "decisionBinding.approvalDigest.mismatch", "decisionBinding.d06.expiresOn.expired",
+            "privacyAdmins.oidcProviderUnavailable", "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.valid",
+            "privacyAllow.outsidePrivacyAdmin[custom-policy-viewer]", "dsar.prerequisites", "dsar.providersUnregistered",
+            "journal.appender", "journal.notConfigured", "journal.privilege.missing:pj_head.INSERT",
+            "journal.durability.syncBinlog", "journal.contract.datasource.url.autoReconnect");
 
     @Test
     void 一覧のcodeは分類と一致する() {
