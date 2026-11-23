@@ -41,7 +41,8 @@ class IntegrationHubEnablementDecisionTest {
         assertThat(outbound("OPEN_PENDING_RESTART", "ON", true)).isEqualTo("CLOSED:barrier.offRecorded");
         assertThat(outbound("OPEN_PENDING_RESTART", "QUARANTINING", true)).isEqualTo("CLOSED:barrier.offRecorded");
         assertThat(outbound("OPEN_PENDING_RESTART", "OFF", false)).isEqualTo("CLOSED:barrier.offRecorded");
-        assertThat(outbound("OPEN_PENDING_RESTART", "OFF", null)).as("監査を読めなければ閉").isEqualTo("CLOSED:barrier.offRecorded");
+        assertThat(outbound("OPEN_PENDING_RESTART", "OFF", null)).as("監査を読めなければこの起動だけ閉（review rb-fe-d P3-3）")
+                .isEqualTo("UNVERIFIABLE:barrier.offRecorded");
     }
 
     @Test
@@ -147,6 +148,31 @@ class IntegrationHubEnablementDecisionTest {
         assertThat(approvals.inbound().approvalDigest()).matches("[0-9a-f]{64}");
         assertThat(approvals.outbound().decisionId()).isEqualTo(Nf05EnablementFixtures.OUTBOUND_DECISION);
         assertThat(IntegrationHubEnablementDecision.decide(base, catalog).inbound().open()).isTrue();
+    }
+
+    /**
+     * review rb-fe-d P3-3: 起動の時に評価できない条件だけ（truststore の file の一時の読取りの失敗等）なら、状態を変えずにこの起動だけ閉
+     * （{@code UNVERIFIABLE:<code>}）。成り立たない条件があれば従来どおり {@code CLOSED:<code>}。
+     */
+    @Test
+    void 起動の時に評価できない条件だけならこの起動だけ閉で成り立たない条件があれば閉() {
+        IntegrationHubEnablementDecision.BootInputs base = Nf05EnablementFixtures.inputs(directory, null, "OPEN", "ON", null);
+        IntegrationHubEnablementDecision.BootInputs unreadable = new IntegrationHubEnablementDecision.BootInputs(
+                base.tenantId(), base.today(), true, base.inbound(), base.outbound(), base.signOffs(), base.barrier(),
+                null, false, base.properties(), base.environment(), null,
+                new IntegrationHubEnablementDecision.TruststoreRead(true, null));
+        IntegrationHubEnablementDecision.Result result = IntegrationHubEnablementDecision.decide(unreadable, catalog).outbound();
+        assertThat(result.open()).isFalse();
+        assertThat(result.unverifiable()).isTrue();
+        assertThat(result.propertyValue()).isEqualTo("UNVERIFIABLE:nf05.outbound.truststore.unverifiable");
+
+        IntegrationHubEnablementDecision.BootInputs mismatch = new IntegrationHubEnablementDecision.BootInputs(
+                base.tenantId(), base.today(), true, base.inbound(), base.outbound(), base.signOffs(),
+                new IntegrationHubEnablementDecision.BarrierRead(true, Nf05EnablementFixtures.barrier("ON", "tenant-b")),
+                null, false, base.properties(), base.environment(), null,
+                new IntegrationHubEnablementDecision.TruststoreRead(true, null));
+        assertThat(IntegrationHubEnablementDecision.decide(mismatch, catalog).outbound().propertyValue())
+                .as("成り立たない条件があれば閉").isEqualTo("CLOSED:barrier.tenantFingerprint.mismatch");
     }
 
     private String outbound(String state, String phase, Boolean offAudit) {

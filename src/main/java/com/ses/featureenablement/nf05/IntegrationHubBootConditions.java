@@ -58,8 +58,8 @@ public class IntegrationHubBootConditions {
 
         /**
          * 閉じている理由: {@code nf05.boot.readFailed}（起動の前に DB を読めなかった）・{@code nf05.boot.closed}（起動の前の判定で閉。
-         * 理由は履歴・log）・{@code nf05.boot.safetyNet}（起動の境界の検査の安全網で閉）・{@code nf05.boot.notRestarted}（property の源、
-         * または起動の後に開いた。次の起動で開く）。
+         * 理由は履歴・log）・{@code nf05.boot.unverifiable}（評価できない条件だけで閉。状態は変えない）・{@code nf05.boot.safetyNet}
+         * （起動の境界の検査の安全網で閉）・{@code nf05.boot.notRestarted}（property の源、または起動の後に開いた。次の起動で開く）。
          */
         @Override
         public Optional<String> unsatisfiedReason() {
@@ -77,6 +77,9 @@ public class IntegrationHubBootConditions {
             }
             if (result != null && result.startsWith(IntegrationHubEnablementDecision.RESULT_CLOSED_PREFIX)) {
                 return Optional.of("nf05.boot.closed");
+            }
+            if (result != null && result.startsWith(IntegrationHubEnablementDecision.RESULT_UNVERIFIABLE_PREFIX)) {
+                return Optional.of("nf05.boot.unverifiable");
             }
             return Optional.of("nf05.boot.notRestarted");
         }

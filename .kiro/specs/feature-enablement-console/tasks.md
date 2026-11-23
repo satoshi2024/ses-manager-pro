@@ -275,7 +275,7 @@
   - **対象 file:** `featureenablement/nf05/IntegrationHubEnablementConditions.java`（新規）、目録（評価できない類の code: `state=STATE_IO_ERROR` 等）、`FeatureEnablementProductionValidator`（`INTEGRATION_HUB_*_ENABLED`・`*_DECISION_ID`・`*_APPROVAL_DIGEST`）。
   - **Automated test:** `IntegrationHubEnablementConditionsTest`（指紋の不一致で継続の条件が不成立、`QUARANTINING`・`ON` の行で継続の条件は成立、申請・承認では OFF の行と監査が要る、行なしで不成立、digest の不一致、鍵の欠落）。
   - **Demo:** prod の profile の試験の構成で、bound-tenant-id を変えた起動の後に outbound を申請すると条件が不成立になることを確かめる。
-  - **実装（段階 D）:** 法人の未解決（`legalEntity.unresolved`）も評価器の check にした。旧い変数は開閉と承認の値（決定 ID・digest）の全ての綴りを止め、許可の一覧（`allowed-client-cidrs`・`allowed-destinations`）は止めない。DG-05 の一致・不一致は check の code（`nf05.<方向>.approvalDigest.mismatch`）で画面の最後の評価に出る（署名の登録の応答で返す FE-A06 の残りは未実装）。Demo は統括が行う（未実施）。
+  - **実装（段階 D）:** 法人の未解決（`legalEntity.unresolved`）も評価器の check にした。旧い変数は開閉と承認の値（決定 ID・digest）の全ての綴りを止め、許可の一覧（`allowed-client-cidrs`・`allowed-destinations`）は止めない。DG-05 の一致・不一致は check の code（`nf05.<方向>.approvalDigest.mismatch`）で画面の最後の評価に出る（署名の登録の応答で返す FE-A06 の残りは未実装）。Demo は統括が行う（未実施）。実装の独立 review（rb-fe-d 8aadee14）の P2-1〜P2-3・P3 の修正は `design.md` §9.6 の末尾（評価器の試験 `IntegrationHubEnablementConditionsTest` は P2-3 で足した）。
 
 ### 段階 E
 

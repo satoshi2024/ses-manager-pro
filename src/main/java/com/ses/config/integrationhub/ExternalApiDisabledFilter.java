@@ -30,7 +30,8 @@ public class ExternalApiDisabledFilter extends OncePerRequestFilter {
             return;
         }
         IntegrationHubExternalApiProperties properties = propertiesProvider.getIfAvailable();
-        if (properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(runtimeSwitch, properties)) {
+        if (properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request, runtimeSwitch,
+                properties)) {
             filterChain.doFilter(request, response);
             return;
         }

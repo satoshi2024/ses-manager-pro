@@ -84,11 +84,44 @@ public class IntegrationHubOutboundStartupBarrier implements ApplicationRunner, 
     @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "integrationHubOutboundState", lockAtMostFor = "PT1M")
     public synchronized void continueRecovery() {
         if (!running) return;
+        drainUnsentAfterDefinitiveClosure();
         if (bootEnabled() && !runtimeOpen()) return;
         if (!initialized) initializeSafely();
         if (!initialized || ready || !runtimeOpen()) return;
         try { quarantineBatch(); }
         catch (RuntimeException failure) { ready = false; confirmationPending = true; warn("STATE_IO_ERROR"); }
+    }
+
+    /**
+     * DB の開放状態が確定の閉鎖（{@code AUTO_CLOSED}・手動の閉鎖・総スイッチ）の間、未送信（{@code PENDING}・{@code RETRYABLE}）と lease の
+     * 切れた {@code CLAIMED} の配信を1周期に128件まで DLQ {@code KILL_SWITCH} にする（feature-enablement-console design §9.6。review
+     * rb-fe-d P2-2）。開き直しの起動の隔離が同じ行を DLQ にするのを前倒しし、保存期間の purge（D7 の hold の確認を通る）の対象にする
+     * （NF05 を開き直さなければ外部へ送るための写しが無期限に残るため）。一時の閉鎖（DB は {@code OPEN}）・書込み待ち・property の源では
+     * 何もしない（producer は一時の閉鎖の間も積み続ける。P2-N3）。失敗は次の周期で再試行する。
+     *
+     * @return DLQ にした件数
+     */
+    public int drainUnsentAfterDefinitiveClosure() {
+        if (runtimeSwitch == null
+                || !runtimeSwitch.definitivelyClosedInDatabase(com.ses.config.feature.Feature.NF05_OUTBOUND)) {
+            return 0;
+        }
+        try {
+            Integer closed = transactions.execute(tx -> {
+                LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
+                int count = 0; Long last = null;
+                for (var delivery : deliveries.selectHistoricalForQuarantine(Long.MAX_VALUE, now, 128)) {
+                    int updated = deliveries.closeUnsent(delivery.getId(), delivery.getVersion(), now, now.plusDays(90));
+                    count += updated; if (updated > 0) last = delivery.getId();
+                }
+                if (count > 0) record("NF05_OUTBOUND_CLOSED_DLQ", last, "OFF");
+                return count;
+            });
+            return closed == null ? 0 : closed;
+        } catch (RuntimeException failure) {
+            warn("CLOSED_DLQ_FAILED");
+            return 0;
+        }
     }
 
     /**

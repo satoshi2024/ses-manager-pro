@@ -86,11 +86,15 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         this.externalApiPropertiesProvider = externalApiPropertiesProvider;
     }
 
-    /** NF05 の公開 API（inbound）が有効か（{@code ExternalApiDisabledFilter} と同じ判定。設定が無ければ無効）。 */
-    private boolean publicApiEnabled() {
+    /**
+     * NF05 の公開 API（inbound）が有効か（{@code ExternalApiDisabledFilter} と同じ判定。設定が無ければ無効）。chain の最初の判定で、
+     * 決めた値を request attribute に置き、後の filter と監査の境界が同じ値を読む（静止中の外部の書込みが、ここで閉・後で開と
+     * 判定されて permit を取らずに実行されることを防ぐ。review rb-fe-d P2-1）。
+     */
+    private boolean publicApiEnabled(HttpServletRequest request) {
         IntegrationHubExternalApiProperties properties = externalApiPropertiesProvider.getIfAvailable();
-        return properties != null
-                && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(integrationHubRuntimeSwitch, properties);
+        return properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request,
+                integrationHubRuntimeSwitch, properties);
     }
 
     @Override
@@ -103,7 +107,7 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
         }
         BackupQuiesceRequestClassifier.Classification classification = BackupQuiesceRequestClassifier.classify(request);
         BackupQuiesceRequestClassifier.Kind kind = classification.kind();
-        if (kind == BackupQuiesceRequestClassifier.Kind.EXTERNAL && !publicApiEnabled()) {
+        if (kind == BackupQuiesceRequestClassifier.Kind.EXTERNAL && !publicApiEnabled(request)) {
             // NF05 の公開 API が OFF の間は、静止中も平時と同じ 404（ExternalApiDisabledFilter。DB へ書かず
             // audit_suppressed{PUBLIC_API_DISABLED} だけを数える）を返す（§6.4「OFF の機能は静止中も 404」。2b review P3-2）
             kind = BackupQuiesceRequestClassifier.Kind.READ;

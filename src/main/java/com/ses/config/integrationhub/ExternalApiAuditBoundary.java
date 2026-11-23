@@ -50,6 +50,8 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
         }
         ExternalApiAuditTrail.start(request);
         ExternalApiAuditTrail trail = ExternalApiAuditTrail.get(request);
+        // 1つの要求の inbound の開閉をここで決める（backup の静止の filter が先に決めていればその値。review rb-fe-d P2-1）
+        publicApiEnabled(request);
         ContentCachingResponseWrapper bufferedResponse = new ContentCachingResponseWrapper(response);
         try {
             filterChain.doFilter(request, bufferedResponse);
@@ -91,8 +93,10 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                 response.getStatus() >= 200 && response.getStatus() < 400 ? "SUCCESS" : "HTTP_REJECTED");
         int status = response.getStatus();
         ExternalApiMetricsRecorder metrics = metricsProvider.getIfAvailable();
-        if (!publicApiEnabled()) {
-            // 無効時はDBへ書かない。D-1（LB遮断）が効いていればこのcounterは増えない。
+        if (!publicApiEnabled(request) && !inboundBootOpen()) {
+            // 起動時の値で無効の間はDBへ書かない。D-1（LB遮断）が効いていればこのcounterは増えない。
+            // 要求の開閉は要求の始めに一度だけ決めた値で、途中で実効値が閉じても実行した要求は下で監査する（review rb-fe-d P2-1）。
+            // 実行時の閉鎖（起動時の値は開で LB は開いている）の拒否は、下の未認証の上限の中で永続化する（同 P3-12）。
             recordWithoutPersistence(metrics, ExternalApiMetricsRecorder.AuditSuppressionReason.PUBLIC_API_DISABLED,
                     trail, request, status, decision, principal);
             return true;
@@ -157,10 +161,19 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                 principal == null ? null : principal.clientTier());
     }
 
-    /** properties未取得は無効扱い。ExternalApiDisabledFilterと同じ判定でdeny-only chainと揃える。 */
-    private boolean publicApiEnabled() {
+    /**
+     * properties未取得は無効扱い。ExternalApiDisabledFilterと同じ判定でdeny-only chainと揃える（1つの要求の中で一度だけ決めた値。
+     * review rb-fe-d P2-1）。
+     */
+    private boolean publicApiEnabled(HttpServletRequest request) {
         IntegrationHubExternalApiProperties properties = propertiesProvider.getIfAvailable();
-        return properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(runtimeSwitch, properties);
+        return properties != null
+                && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request, runtimeSwitch, properties);
+    }
+
+    /** 起動時の値で inbound が開か（実行時の閉鎖と、起動時から閉（LB 遮断）を分ける）。 */
+    private boolean inboundBootOpen() {
+        return com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundBootOpen(propertiesProvider.getIfAvailable());
     }
 
     /** budget beanが無いslice等では従来どおり永続化する（監査の欠落側へ倒さない）。 */

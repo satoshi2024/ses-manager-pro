@@ -429,7 +429,7 @@ return true
 - 一時の閉鎖は 2 層にする（review P2-2）:
   - **共有**: 開放状態の行の `unverifiable_since`（DB）。評価できない状態を全ての instance が snapshot で同じに閉じる。始まりの時刻から自動閉鎖までの時間を数えるため、再起動と ShedLock の持ち主の移動で数え直しにならない。
   - **instance の memory**（`FeatureEnablementOverlay`。`FeatureRuntimeCondition` の実装。開放単位ごとの理由の集合）: `unverifiable_since` を DB に書けない間の評価できない状態と、**自動閉鎖の書込み待ち**（`AUTO_CLOSE_PENDING`。sticky: 条件の成否に関係なく、DB に `AUTO_CLOSED` を書けるまで外さない）。後者は DB に書けない間だけの状態で、同じ DB に書けない他の instance も開く遷移はできない。
-- NF05 の法人の未解決は、port を開く前の `FeatureEnablementStartupEvaluator` で判定し、`AUTO_CLOSED` にする（`ApplicationReadyEvent` を使わない。review P3-5。§9.2）。
+- NF05 の法人の未解決は、port を開く前の `FeatureEnablementStartupEvaluator` で判定し、`AUTO_CLOSED` にする（`ApplicationReadyEvent` を使わない。review P3-5。§9.2。段階 D の実装は同じく port を開く前の `IntegrationHubBootDecisionRecorder`。§9.6）。
 
 ### 3.6 hot path の性能
 
@@ -615,7 +615,7 @@ PR #130 は起動時検査（`ProductionSecurityConfigurationValidator`・`Priva
 
 ### 7.1 起動時
 
-- `FeatureEnablementStartupEvaluator`（`SmartLifecycle`。web server の lifecycle より前の phase）: snapshot を読み、開いている開放単位と再起動待ちを `Purpose.STARTUP` で評価する（`OPEN_TRANSITION` は判定しない。NF05 の `OPEN_PENDING_RESTART` は boot resolver が `BOOT_PENDING` で判定した結果を §9.2 で反映する）。成り立たなければ `AUTO_CLOSED`（理由の code）、総スイッチが閉なら全てを `AUTO_CLOSED`（`MASTER_SWITCH_CLOSED`）。NF05 の法人の未解決もここで判定する（port を開く前。review P3-5）。
+- `FeatureEnablementStartupEvaluator`（`SmartLifecycle`。web server の lifecycle より前の phase）: snapshot を読み、開いている開放単位と再起動待ちを `Purpose.STARTUP` で評価する（`OPEN_TRANSITION` は判定しない。NF05 の `OPEN_PENDING_RESTART` は boot resolver が `BOOT_PENDING` で判定した結果を §9.2 で反映する）。成り立たなければ `AUTO_CLOSED`（理由の code）、総スイッチが閉なら全てを `AUTO_CLOSED`（`MASTER_SWITCH_CLOSED`）。NF05 の法人の未解決もここで判定する（port を開く前。review P3-5。段階 D の実装は同じく port を開く前の `IntegrationHubBootDecisionRecorder`。§9.6）。
 - DB に書けない（backup の静止の最中の起動等）場合は、自動閉鎖の書込み待ち（sticky。§3.5）で閉じ、定期の評価が書込みを再試行する。
 - 起動の log に `[機能の開放] 起動時の評価: NF01=OPEN, NF02=AUTO_CLOSED(sign-off.NF02_DG02.expired), …` を出す（code だけ）。
 
@@ -764,7 +764,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
   - `OPEN_PENDING_RESTART` かつ `OPENED` → `OPEN`（`restart_applied_at`、履歴 `RESTART_APPLIED`、監査）。
   - `OPEN`・`OPEN_PENDING_RESTART` かつ `CLOSED:<code>` → `AUTO_CLOSED(<code>)`。
   - `READ_FAILED` → 状態は変えず、履歴 `BOOT_READ_FAILED` を残し、画面に「この起動では閉」と出す（runtime の判定は起動時の値で閉）。
-- 法人の未解決（`LegalEntityReadinessStartupValidator` の NF05 の部分）: `ApplicationReadyEvent`（:21-27）は port を開いた後のため、NF05 の部分を `FeatureEnablementStartupEvaluator`（port を開く前。§7.1）へ移す。NF05 のどちらかが起動時の値で開なら `readinessService` の非例外の判定を呼び、未解決の行があれば例外にせず両方向を `AUTO_CLOSED(LEGAL_ENTITY_UNRESOLVED)` にする（書けなければ自動閉鎖の書込み待ちで閉じる。review P3-5）。management copilot の部分（`aiConfig.isManagementCopilotEnabled()`）は `ApplicationReadyEvent` のまま従来どおり例外。
+- 法人の未解決（`LegalEntityReadinessStartupValidator` の NF05 の部分）: `ApplicationReadyEvent`（:21-27）は port を開いた後のため、NF05 の部分を `FeatureEnablementStartupEvaluator`（port を開く前。§7.1）へ移す（段階 D の実装は同じく port を開く前の `IntegrationHubBootDecisionRecorder`。§9.6）。NF05 のどちらかが起動時の値で開なら `readinessService` の非例外の判定を呼び、未解決の行があれば例外にせず両方向を `AUTO_CLOSED(LEGAL_ENTITY_UNRESOLVED)` にする（書けなければ自動閉鎖の書込み待ちで閉じる。review P3-5）。management copilot の部分（`aiConfig.isManagementCopilotEnabled()`）は `ApplicationReadyEvent` のまま従来どおり例外。
 
 ### 9.3 閉じる（即時）
 
@@ -777,7 +777,7 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
     - worker（`dispatchDue` :75-100）は claim を止める。`dispatchOne`（:103-208）が処理の途中で閉鎖を見た時は、DLQ にせず PENDING へ戻す（`ApiDeliveryMapper` に、claim を外して `PENDING` に戻し試行の回数を増やさない method を足す。現在の `holdPending`（`ApiDeliveryMapper.java:81-86`）は `DLQ`・`KILL_SWITCH` の終端にする）。
     - 解ければ同じ process で送信を再開する。閉じていた間に積まれた配信も送る（at-least-once を保つ）。barrier の行は `ON` のままで、OFF の期間の配信を作らないため隔離は要らない。
     - 一時の閉鎖が続いて自動閉鎖（確定の閉鎖）になった場合は、その時点で PENDING の配信は下の確定の閉鎖の扱いになる（開き直しの起動の隔離の対象になる）。
-  - **確定の閉鎖 `DEFINITIVE`**: `AUTO_CLOSED`・手動の閉鎖・総スイッチ（DB に書けない間の自動閉鎖の書込み待ち `AUTO_CLOSE_PENDING` を含む。条件の不成立が確かめられているため）。現在の kill switch と同じ: producer は積まず、worker は送信しない（未送信は PENDING のまま、処理中は DLQ `KILL_SWITCH`）。barrier の行を OFF に書き直し（上）、memory の `ready` を false にする。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
+  - **確定の閉鎖 `DEFINITIVE`**: `AUTO_CLOSED`・手動の閉鎖・総スイッチ（DB に書けない間の自動閉鎖の書込み待ち `AUTO_CLOSE_PENDING` を含む。条件の不成立が確かめられているため）。現在の kill switch と同じ: producer は積まず、worker は送信しない（処理中は DLQ `KILL_SWITCH`。未送信は DB の状態が確定の閉鎖の間に barrier が DLQ `KILL_SWITCH` にする。§9.6・review rb-fe-d P2-2）。barrier の行を OFF に書き直し（上）、memory の `ready` を false にする。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
   - inbound は、どちらの閉鎖でも実効値が閉じている間は 404 `DISABLED_DENY`（client が再試行する。SES 側に失うものは無い）。
   - bean は次の起動まで残る（runtime switch で眠る）。
 - **注記（micro review 88630af1 の P3-M2）**: 一時の閉鎖で処理中の配信を PENDING へ戻す更新は、claim の持ち主（lease の token）と状態を条件にした CAS で行い、`attempt_count` を増やさない（一時の閉鎖が続いても回数の上限で DLQ に落とさない）。`TRANSIENT` と `DEFINITIVE` の境の細部（`AUTO_CLOSE_PENDING` を確定の閉鎖として扱う時点、古さが続いて自動閉鎖に変わる時の処理中の配信の扱い）は段階 D（FE-D03）の着手時に確定する。→ §9.6 で確定した。
@@ -838,6 +838,20 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 
 - `IntegrationHubEnablementConditions`（NF05 の2件の固有の評価器）。barrier の行・OFF の監査は mapper で読み（読めなければ `state=STATE_IO_ERROR`。監査は `reference_type='NF05'` を付ける。P3-N8）、truststore は外部への検査を許す評価だけ読み、lock を持つ transaction の中は最後に読んだ内容（無ければ `nf05.outbound.truststore.unverifiable`）。承認の値は DB の源では確認済みの署名、property の源では配備の設定。DG-05 の digest が現在の配備の設定と合わなければ `nf05.<方向>.approvalDigest.mismatch` の check になり、画面の最後の評価に出る（署名の登録の応答に一致・不一致を返す FE-A06 の残りは未実装。段階 E で画面と合わせて判断する）。
 - prod の起動時検査は、NF05 を DB 管理にした目録で、開閉の旧い変数に加え `INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)` と `integration.hub.(public-api|external-transport).approval.(decision-id|approval-digest)` の全ての綴りを止める（`SPRING_APPLICATION_JSON` を含む）。許可する送信元・送信先の一覧（`allowed-client-cidrs`・`allowed-destinations`）は digest の内容で配備の設定に残すため止めない（§10 の「`integration.hub.*.approval` があれば拒否」はこの2つの key に限った）。
+
+**実装の独立 review（rb-fe-d 8aadee14）で直した所**
+
+- **1つの要求の中の inbound の判定（P2-1）**: 実行時の判定は要求の途中で変わり得るため、chain の最初の判定（`BackupWriteGateFilter`、静止が無効なら `ExternalApiAuditBoundary`）が `IntegrationHubRuntimeSwitch.inboundOpen(request, …)` で決めた値を request attribute に置き、`ExternalApiDisabledFilter`・`ExternalApiAuthenticationFilter`・監査の境界は同じ値を読む（switch を読み直さない）。開と決めた後に閉じても実行した要求は監査し（書けなければ 500）、閉と決めた後に開いても 404 のままで、静止の間の外部の書込みが permit を取らずに実行されることは無い。監査の境界が永続化を抑えるのは、その要求が閉で、かつ起動時の値も閉（LB が遮断している）の時だけ。実行時の閉鎖（起動時の値は開で LB は開いている）の拒否は、未認証の上限の中で永続化する（P3-12）。
+- **確定の閉鎖の後の未送信（P2-2）**: DB の開放状態が確定の閉鎖（`AUTO_CLOSED`・手動・総スイッチ。`IntegrationHubRuntimeSwitch.definitivelyClosedInDatabase`。書込み待ちと `OPEN`・`OPEN_PENDING_RESTART` は除く）の間、barrier の `continueRecovery`（5秒ごと）が未送信（`PENDING`・`RETRYABLE`）と lease の切れた `CLAIMED` を1周期128件まで DLQ `KILL_SWITCH`・`FAILED_DLQ_PAYLOAD_90D` にし（`ApiDeliveryMapper.closeUnsent`。監査 `NF05_OUTBOUND_CLOSED_DLQ`）、保存期間の purge（D7 の hold の確認を通る）の対象にする。終わった状態の値は、処理中に閉じた配信（`dispatchOne` の DLQ `KILL_SWITCH`）と同じものにした（閉鎖という同じ原因を同じ code で表し、既存の DLQ の運用を変えない。`IntegrationHubBulkReplayService` は `KILL_SWITCH` を対象の区分に持たない。個別の再送（DLQ の行から新しい世代の PENDING を作る）は閉じている間に作っても同じく DLQ `KILL_SWITCH` になるため、開き直した後に行う（閉じている間は従来も送られなかった））。開き直しの起動の隔離（`STARTUP_REVALIDATION_REQUIRED`）が同じ行を DLQ にするのを前倒しするだけで、閉じた後の未送信を送る経路は元から無い。一時の閉鎖（DB は `OPEN`）では変えない（producer は積み続ける。P2-N3）。property の源（dev・test）では動かない。worker の `dispatchDue`・`dispatchOne` が確定の閉鎖を見た時に due の未送信を DLQ `KILL_SWITCH` にする従来の動きも、これと同じ扱いになる（P3-7。requirements FE-AC-008-03 を同じに直した）。
+- **反映の後の読直し（P3-1）**: 起動の後の反映は、runtime switch に完了を伝える前に開放状態を読み直す（commit の後の読直しの失敗や、他の instance が先に反映して UNCHANGED の時に、古い `OPEN_PENDING_RESTART` の snapshot で確定の閉鎖に倒さない）。
+- **`RESTART_APPLIED` の書込みの失敗（P3-2）**: 自動閉鎖の書込み待ち（`NF05_RESTART_NOT_APPLIED`）にし、定期の評価が理由を付けて `AUTO_CLOSED` を書き、閉鎖の hook が barrier を OFF に書き直す（次の起動は OFF の記録を満たし、再承認の後の再起動で開ける）。
+- **起動の時の一時の失敗（P3-3）**: 起動の判定は、成り立たない条件があれば `CLOSED:<code>`（`AUTO_CLOSED`）、評価できない条件だけなら `UNVERIFIABLE:<code>`（状態を変えず、履歴 `BOOT_UNVERIFIABLE`。画面の理由 `nf05.boot.unverifiable`）。truststore の file を読めないことは評価できない類（`nf05.outbound.truststore.unverifiable`）に揃えた。法人の未解決を判定できない（照会の失敗）時は状態を変えず、この instance の評価できない状態（overlay）で閉じ、定期の評価が判定し直す（続けば評価の間隔の3倍で自動閉鎖）。
+- **法人の未解決の照会の量（P3-4）**: 評価器は結果を60秒だけ両方向で共用する（判定できなかった結果は持たない）。業務の data（法人が NULL・不一致の行）が NF05 を自動閉鎖し得ることは RB §1.0 に書いた（NF05 owner の受理事項）。
+- **静的な守り（P3-5）**: `IntegrationHubFlagReadGuardTest` に、properties の型を使う file の `getEnabled()`（呼出しを分けた書き方を含む）・`IntegrationHubRuntimeSwitch.inboundBootOpen`／`outboundBootOpen` の呼出し・flag の property 名の文字列の許す箇所を足した。
+- **`releaseClaim` の戻し先（P3-6）**: claim の前の状態（`last_error_code` があれば `RETRYABLE`、無ければ `PENDING`）へ戻す。
+- **purge の対象の表（P3-8）**: 起動の前の読取りの表に `t_inbound_event_replay`・`t_external_api_audit` を足した（purge の record kind の6種と nonce・read snapshot）。
+- **起動の前の読取りの診断と期限（P3-9）**: 失敗の log に SQLState と vendor の code を出し（message は URL・account を含み得るため出さない）、接続の後の照会に全体の期限20秒（1つの照会は5秒まで）を付けた。最悪は接続の5秒と照会の20秒。照会の timeout では Connector/J が別の接続で `KILL QUERY` を送ることがある（RB §1.2）。
+- **画面の理由（P3-10）**: `nf05.boot.*` の5つの key を4言語に足し、画面の理由の表示（`reasonLabel`）が訳す。
 
 ## 10. 緊急の総スイッチと旧い変数
 

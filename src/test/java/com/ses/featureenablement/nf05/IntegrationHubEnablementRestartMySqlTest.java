@@ -175,6 +175,11 @@ class IntegrationHubEnablementRestartMySqlTest {
         assertThat(barrierRow()).as("確定の閉鎖は行を OFF に書き直す").startsWith("v1|OFF|0|");
         holder.reload();
         assertThat(second.runtime().outboundClosure()).isEqualTo(IntegrationHubRuntimeSwitch.Closure.DEFINITIVE);
+        // review rb-fe-d P2-2: 確定の閉鎖の間、未送信の配信は barrier が DLQ KILL_SWITCH にし、保存期間の purge の対象になる
+        long unsent = insertPendingDelivery();
+        second.barrier().continueRecovery();
+        assertThat(jdbc.queryForObject("SELECT CONCAT(status, ':', last_error_code, ':', retention_class) FROM t_api_delivery "
+                + "WHERE id = ?", String.class, unsent)).isEqualTo("DLQ:KILL_SWITCH:FAILED_DLQ_PAYLOAD_90D");
 
         Process afterClose = restart();
         assertThat(afterClose.values().get("integration.hub.retention-purge.enabled"))
@@ -249,7 +254,7 @@ class IntegrationHubEnablementRestartMySqlTest {
         ObjectProvider<LegalEntityReadinessService> legalEntity = mock(ObjectProvider.class);
         when(legalEntity.getIfAvailable()).thenReturn(readiness);
         new IntegrationHubBootDecisionRecorder(environment, featureProperties, writer, runtime, properties, legalEntity,
-                overlay).start();
+                overlay, provider(holder)).start();
         holder.reload();
         barrier.run(new DefaultApplicationArguments());
         return new Process(values, properties, runtime, barrier);
@@ -314,6 +319,26 @@ class IntegrationHubEnablementRestartMySqlTest {
         jdbc.update("DELETE FROM m_system_config WHERE config_key = ?", IntegrationHubOutboundStartupBarrier.CONFIG_KEY);
         overlay.open(Feature.NF05_OUTBOUND, FeatureEnablementOverlay.AUTO_CLOSE_PENDING);
         holder.reload();
+    }
+
+    /** 未送信（PENDING）の配信を1行入れる（client と購読も作る。行の ID を返す）。 */
+    private long insertPendingDelivery() {
+        String client = "nf05-restart-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        jdbc.update("INSERT INTO m_api_client(client_id,owner_ref,tenant_id,legal_entity_id,data_scope_json,allowed_cidrs) "
+                + "VALUES(?,'PROJECT_OWNER','default',9,'{}','')", client);
+        jdbc.update("INSERT INTO m_webhook_subscription(client_id,direction,event_type,endpoint_url,key_id,"
+                + "encrypted_signing_secret,crypto_key_version,data_scope_json) VALUES(?,'OUTBOUND','resource.changed',"
+                + "'https://web.example.com:443/hook','key-1','synthetic','v1','{}')", client);
+        Long subscription = jdbc.queryForObject("SELECT id FROM m_webhook_subscription WHERE client_id=?", Long.class,
+                client);
+        String event = java.util.UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO t_api_delivery(event_id,subscription_id,client_id,tenant_id,scope_code,event_type,"
+                        + "schema_version,provider_idempotency_key,external_dto_snapshot,payload_hash,primary_resource_type,"
+                        + "primary_resource_id,scope_digest,created_at) VALUES(?,?,?,'default','integration.project.read',"
+                        + "'resource.changed','v1',?,'{}',?,'project',1,?,CURRENT_TIMESTAMP)", event, subscription, client,
+                com.ses.service.integrationhub.IntegrationHubDigest.sha256Hex(event),
+                com.ses.service.integrationhub.IntegrationHubDigest.sha256Hex("{}"), "a".repeat(64));
+        return jdbc.queryForObject("SELECT id FROM t_api_delivery WHERE event_id=?", Long.class, event);
     }
 
     private long events(String eventType) {

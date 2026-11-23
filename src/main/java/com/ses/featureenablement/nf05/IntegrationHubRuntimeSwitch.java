@@ -35,7 +35,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *       条件の不成立が確かめられているため。review P3-N1）、開放状態が {@code OPEN} 以外（{@code AUTO_CLOSED}・手動の閉鎖。起動の後の反映の
  *       後の {@code OPEN_PENDING_RESTART} を含む）。一度確定の閉鎖を見た方向は、この process の間は閉じたまま（同じ process では開き
  *       直さない。開き直しは {@code OPEN_PENDING_RESTART} → 再起動 → 隔離。他の instance が再起動で {@code OPEN} を書いてもこの instance
- *       は送らない）。現在の kill switch と同じ扱い（producer は積まず、worker は送信せず処理中は DLQ {@code KILL_SWITCH}）。</li>
+ *       は送らない）。現在の kill switch と同じ扱い（producer は積まず、worker は送信せず処理中は DLQ {@code KILL_SWITCH}）で、DB の
+ *       状態が確定の閉鎖の間は未送信の配信も barrier が DLQ {@code KILL_SWITCH} にする（保存期間で purge する。review rb-fe-d P2-2）。</li>
  * </ul>
  * <p>property の源（dev・test。目録の DB 管理の印が無い間を含む）では、閉は全て確定の閉鎖（従来の kill switch）。Spring 管理外で
  * {@code new} した部品は {@link #inboundOpen(IntegrationHubRuntimeSwitch, IntegrationHubExternalApiProperties)} 等の static で
@@ -172,6 +173,53 @@ public class IntegrationHubRuntimeSwitch {
         FeatureEnablementProperties settings = featureProperties.getIfAvailable();
         FeatureEnablementCatalog units = catalog.getIfAvailable();
         return settings != null && settings.databaseSource() && units != null && units.databaseManaged(feature);
+    }
+
+    /**
+     * DB の開放状態が確定の閉鎖か（未送信の配信を終わった状態にしてよいか。review rb-fe-d P2-2）。DB の源で、snapshot を読めていて、
+     * 総スイッチが閉か、開放状態が {@code OPEN}・{@code OPEN_PENDING_RESTART} 以外の時だけ true。自動閉鎖の書込み待ち
+     * （DB はまだ {@code OPEN}）・{@code OPEN}（他の instance が送っているかもしれない）・property の源は false。
+     */
+    public boolean definitivelyClosedInDatabase(Feature feature) {
+        if (!databaseManaged(feature)) {
+            return false;
+        }
+        FeatureEnablementSnapshotHolder snapshots = holder.getIfAvailable();
+        FeatureEnablementProperties settings = featureProperties.getIfAvailable();
+        FeatureEnablementSnapshot snapshot = snapshots == null ? null : snapshots.get();
+        if (snapshot == null || snapshot.generation() < 0) {
+            return false;
+        }
+        if ((settings != null && !settings.isAllowed()) || !snapshot.masterAllowed()) {
+            return true;
+        }
+        return !snapshot.unit(feature).state().openLike();
+    }
+
+    // ---------------------------------------------------------------- 1つの要求の中の判定（review rb-fe-d P2-1）
+
+    /** 要求の中で一度だけ決めた inbound の開閉を置く request attribute。 */
+    public static final String REQUEST_ATTRIBUTE = IntegrationHubRuntimeSwitch.class.getName() + ".inboundOpen";
+
+    /**
+     * 1つの要求の inbound の開閉（最初に呼んだ filter が決め、request attribute に置く。以後の filter と監査の境界は同じ値を読む）。
+     * 要求の途中で実効値が変わっても、backup の静止の permit・404・認証・監査の判定が食い違わない（開→閉で実行済みの要求の監査が
+     * 落ちる、閉→開で静止中の外部の書込みが permit を取らない、を防ぐ）。properties が無ければ決めずに閉を返す。
+     */
+    public static boolean inboundOpen(jakarta.servlet.http.HttpServletRequest request,
+                                      IntegrationHubRuntimeSwitch runtimeSwitch,
+                                      IntegrationHubExternalApiProperties properties) {
+        if (request != null && request.getAttribute(REQUEST_ATTRIBUTE) instanceof Boolean decided) {
+            return decided;
+        }
+        if (properties == null) {
+            return false;
+        }
+        boolean open = inboundOpen(runtimeSwitch, properties);
+        if (request != null) {
+            request.setAttribute(REQUEST_ATTRIBUTE, open);
+        }
+        return open;
     }
 
     // ---------------------------------------------------------------- Spring 管理外の部品（従来の判定）

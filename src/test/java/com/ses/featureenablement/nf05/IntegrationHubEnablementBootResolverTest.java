@@ -158,6 +158,23 @@ class IntegrationHubEnablementBootResolverTest {
                 .as("保存期間の対象の表に行があれば開く").isEqualTo("true");
     }
 
+    /** review rb-fe-d P3-9・P3-13: 失敗の log は SQLState と vendor の code を出し、URL・account・password・例外の本文を出さない。 */
+    @Test
+    void 読取りの失敗のlogはSQLStateとvendorのcodeだけでURLとpasswordを出さない() {
+        IntegrationHubEnablementBootResolver failing = new IntegrationHubEnablementBootResolver(log, (url, user, password) -> {
+            throw new SQLException("Access denied for user 'fixture-user' to jdbc:mysql://secret-host.invalid/ses "
+                    + "password=synthetic-secret", "28000", 1045);
+        });
+        MockEnvironment environment = environment();
+        environment.setProperty("spring.datasource.password", "synthetic-secret");
+        assertReadFailed(failing.resolve(environment));
+        ArgumentCaptor<Object> warned = ArgumentCaptor.forClass(Object.class);
+        verify(log).warn(warned.capture());
+        assertThat(String.valueOf(warned.getValue())).contains("sqlState=28000").contains("vendorCode=1045")
+                .doesNotContain("secret-host").doesNotContain("synthetic-secret").doesNotContain("fixture-user")
+                .doesNotContain("jdbc:mysql");
+    }
+
     private void assertReadFailed(Map<String, Object> values) {
         assertThat(values.get("integration.hub.public-api.enabled")).isEqualTo("false");
         assertThat(values.get("integration.hub.external-transport.enabled")).isEqualTo("false");

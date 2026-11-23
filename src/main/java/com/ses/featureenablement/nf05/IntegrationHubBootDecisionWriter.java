@@ -80,14 +80,27 @@ public class IntegrationHubBootDecisionWriter {
      */
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public Outcome recordReadFailed(Feature feature) {
+        return recordWithoutTransition(feature, "BOOT_READ_FAILED", "NF05_BOOT_READ_FAILED");
+    }
+
+    /**
+     * 起動の時に評価できない条件があった（DB・file の一時の失敗。review rb-fe-d P3-3）。状態は変えず、開いている行に履歴
+     * {@code BOOT_UNVERIFIABLE}（理由は check の code）を残す（この起動では閉。次の起動で判定し直す。不成立は {@link #closeAtBoot}）。
+     */
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
+    public Outcome recordBootUnverifiable(Feature feature, String reasonCode) {
+        return recordWithoutTransition(feature, "BOOT_UNVERIFIABLE", reasonCode);
+    }
+
+    private Outcome recordWithoutTransition(Feature feature, String eventType, String reasonCode) {
         FeatureEnablementWriteSupport.WriteContext context = write.begin(FeatureEnablementWriteSupport.Actor.startupSystem());
         FeatureEnablementState row = write.lockState(context, feature);
         if (row == null || !EnablementState.of(row.getState()).openLike()) {
             write.finish(context);
             return Outcome.UNCHANGED;
         }
-        write.event(context, "FEATURE", feature.name(), row.getId(), "BOOT_READ_FAILED", row.getState(), row.getState(),
-                "NF05_BOOT_READ_FAILED", null);
+        write.event(context, "FEATURE", feature.name(), row.getId(), eventType, row.getState(), row.getState(),
+                reasonCode, null);
         context.markChanged(feature);
         write.finish(context);
         return Outcome.APPLIED;

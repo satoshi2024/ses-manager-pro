@@ -42,6 +42,21 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     int quarantineHistorical(@Param("id") Long id, @Param("version") Integer version,
                              @Param("now") LocalDateTime now, @Param("expiry") LocalDateTime expiry);
 
+    /**
+     * NF05 outbound の確定の閉鎖の後に、未送信（{@code PENDING}・{@code RETRYABLE}）と lease の切れた {@code CLAIMED} の配信を
+     * DLQ {@code KILL_SWITCH}（{@code FAILED_DLQ_PAYLOAD_90D}）にする（feature-enablement-console design §9.6。review rb-fe-d P2-2）。
+     * 処理中に閉じた配信（{@code dispatchOne} の DLQ {@code KILL_SWITCH}）と同じ終わった状態で、保存期間の purge の対象になる。開き直しの
+     * 起動の隔離（{@link #quarantineHistorical}）が同じ行を DLQ にするのを前倒しする（開き直しは再起動と隔離を経るため、閉じた後の未送信を
+     * 送ることは無い）。版の CAS で行い、有効な lease の {@code CLAIMED} は変えない。
+     */
+    @Update("UPDATE t_api_delivery SET status='DLQ', last_error_code='KILL_SWITCH', "
+            + "retention_class='FAILED_DLQ_PAYLOAD_90D', retention_expires_at=#{expiry}, terminal_at=#{now}, "
+            + "lease_token=NULL, lease_expires_at=NULL, version=version+1, updated_at=#{now} "
+            + "WHERE id=#{id} AND version=#{version} AND (status IN ('PENDING','RETRYABLE') "
+            + "OR (status='CLAIMED' AND lease_expires_at <= #{now}))")
+    int closeUnsent(@Param("id") Long id, @Param("version") Integer version,
+                    @Param("now") LocalDateTime now, @Param("expiry") LocalDateTime expiry);
+
     @Select("SELECT * FROM t_api_delivery WHERE event_id = #{eventId} "
             + "AND subscription_id = #{subscriptionId} AND delivery_generation = #{generation} LIMIT 1")
     ApiDelivery selectByEventGeneration(@Param("eventId") String eventId,
@@ -83,9 +98,11 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
      * （lease の token）・版・世代・{@code CLAIMED} の CAS で行い、claim で足した {@code attempt_count} を戻す（一時の閉鎖が繰り返しても
      * {@code max_attempts} を使い切って claim できない PENDING を残さない。micro review P3-M2）。{@code next_attempt_at} は変えない
      * （claim の時に期限が来ていた値のまま）。送信の前に呼ぶ（HTTP を送った後に戻すと再送になる。at-least-once で、受信側は event ID で
-     * 重複を除く）。{@link #holdPending} は確定の閉鎖だけで使う。
+     * 重複を除く）。{@link #holdPending} は確定の閉鎖だけで使う。claim の前の状態へ戻す（{@code RETRYABLE} から claim した行は
+     * {@code last_error_code} を持つため {@code RETRYABLE}、無い行は {@code PENDING}。review rb-fe-d P3-6）。
      */
-    @Update("UPDATE t_api_delivery SET status = 'PENDING', lease_token = NULL, lease_expires_at = NULL, "
+    @Update("UPDATE t_api_delivery SET status = CASE WHEN last_error_code IS NULL THEN 'PENDING' ELSE 'RETRYABLE' END, "
+            + "lease_token = NULL, lease_expires_at = NULL, "
             + "attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, "
             + "version = version + 1, updated_at = #{now} WHERE id = #{id} AND version = #{version} "
             + "AND delivery_generation = #{generation} AND lease_token = #{leaseToken} AND status = 'CLAIMED'")

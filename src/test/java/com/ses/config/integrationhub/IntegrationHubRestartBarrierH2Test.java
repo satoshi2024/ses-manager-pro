@@ -123,6 +123,39 @@ class IntegrationHubRestartBarrierH2Test {
                     assertThat(registry.get("integration_hub_startup_quarantine_pending").gauge().value()).isEqualTo(1); });
         assertThat(state()).isNull(); var off = barrier(false); off.start(); assertThat(state()).startsWith("v1|OFF|");
     }
+    @Autowired com.ses.service.integrationhub.ApiRetentionPurgeService purge;
+
+    /**
+     * review rb-fe-d P2-2: DB の開放状態が確定の閉鎖の間、未送信（PENDING・RETRYABLE）の配信は barrier が DLQ KILL_SWITCH にし、保存期間を
+     * 過ぎると purge される（NF05 を開き直さなくても外部へ送るための写しを残し続けない）。一時の閉鎖（DB は OPEN）では変えない。
+     */
+    @Test void 確定の閉鎖の間は未送信をDLQのKILL_SWITCHにし保存期間の後にpurgeし一時の閉鎖では変えない() {
+        addRows(2); tx.executeWithoutResult(s -> jdbc.update(
+                "UPDATE t_api_delivery SET status='RETRYABLE', last_error_code='HTTP_RETRYABLE' WHERE id=(SELECT MAX(id) FROM t_api_delivery WHERE client_id=?)",
+                client));
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        when(runtime.outboundClosure()).thenReturn(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT);
+        var closed = barrier(true); closed.setRuntimeSwitch(runtime); closed.start();
+        closed.continueRecovery();
+        assertThat(count("PENDING") + count("RETRYABLE")).as("一時の閉鎖では変えない").isEqualTo(2);
+
+        when(runtime.outboundClosure()).thenReturn(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.DEFINITIVE);
+        when(runtime.definitivelyClosedInDatabase(com.ses.config.feature.Feature.NF05_OUTBOUND)).thenReturn(true);
+        closed.continueRecovery();
+        assertThat(count("DLQ")).isEqualTo(2);
+        Integer killed = tx.execute(s -> jdbc.queryForObject("SELECT COUNT(*) FROM t_api_delivery WHERE client_id=? AND "
+                + "last_error_code='KILL_SWITCH' AND retention_class='FAILED_DLQ_PAYLOAD_90D' AND retention_expires_at IS NOT NULL",
+                Integer.class, client));
+        assertThat(killed).isEqualTo(2);
+        Integer audited = tx.execute(s -> jdbc.queryForObject("SELECT COUNT(*) FROM t_audit_log WHERE application_code="
+                + "'NF05_OUTBOUND_CLOSED_DLQ' AND reference_type='NF05'", Integer.class));
+        assertThat(audited).isEqualTo(1);
+
+        LocalDateTime afterRetention = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).plusDays(91);
+        purge.purgeExpired("DELIVERY", "FAILED_DLQ_PAYLOAD_90D", afterRetention, 100);
+        assertThat(count("DLQ")).as("保存期間の後に purge される").isZero();
+    }
+
     private IntegrationHubExternalApiProperties properties(boolean enabled) {
         var props = new IntegrationHubExternalApiProperties(); props.getExternalTransport().setEnabled(enabled);
         props.getTopology().setBoundTenantId("restart-tenant"); return props;

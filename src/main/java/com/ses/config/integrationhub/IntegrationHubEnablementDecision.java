@@ -56,6 +56,8 @@ public final class IntegrationHubEnablementDecision {
     public static final String RESULT_OPENED = "OPENED";
     public static final String RESULT_READ_FAILED = "READ_FAILED";
     public static final String RESULT_CLOSED_PREFIX = "CLOSED:";
+    /** 評価できない条件のため、この起動だけ閉（状態は変えない。review rb-fe-d P3-3）。 */
+    public static final String RESULT_UNVERIFIABLE_PREFIX = "UNVERIFIABLE:";
     /** 総スイッチが閉の時の理由（起動時の評価と同じ code）。 */
     public static final String MASTER_SWITCH_CLOSED = "MASTER_SWITCH_CLOSED";
     /** barrier の行の継続の条件の code。 */
@@ -159,21 +161,26 @@ public final class IntegrationHubEnablementDecision {
     /**
      * 1つの方向の起動の判定。
      *
-     * @param open 開くか
-     * @param code 閉じる理由の code（開くなら null。64 文字以内）
+     * @param open         開くか
+     * @param code         閉じる理由の code（開くなら null。64 文字以内）
+     * @param unverifiable 評価できない（一時の失敗）ための閉か。状態は変えず、この起動だけ閉じる（review rb-fe-d P3-3）
      */
-    public record Result(boolean open, String code) {
+    public record Result(boolean open, String code, boolean unverifiable) {
         static Result opened() {
-            return new Result(true, null);
+            return new Result(true, null, false);
         }
 
         static Result closed(String code) {
-            return new Result(false, truncate(code));
+            return new Result(false, truncate(code), false);
         }
 
-        /** property の値（{@code OPENED} / {@code CLOSED:<code>}）。 */
+        static Result unverifiable(String code) {
+            return new Result(false, truncate(code), true);
+        }
+
+        /** property の値（{@code OPENED} / {@code CLOSED:<code>} / {@code UNVERIFIABLE:<code>}）。 */
         public String propertyValue() {
-            return open ? RESULT_OPENED : RESULT_CLOSED_PREFIX + code;
+            return open ? RESULT_OPENED : (unverifiable ? RESULT_UNVERIFIABLE_PREFIX : RESULT_CLOSED_PREFIX) + code;
         }
     }
 
@@ -197,12 +204,18 @@ public final class IntegrationHubEnablementDecision {
         }
         FeatureEvaluationContext.Purpose purpose = "OPEN_PENDING_RESTART".equals(state.state())
                 ? FeatureEvaluationContext.Purpose.BOOT_PENDING : FeatureEvaluationContext.Purpose.STARTUP;
+        // 成り立たない条件があれば閉（AUTO_CLOSED）。無く、評価できない条件だけなら、この起動だけ閉（状態は変えない。review rb-fe-d
+        // P3-3。定期の評価が評価できない状態を閉鎖の根拠にしないのと揃える）
+        FeatureConditionCheck unverifiable = null;
         for (FeatureConditionCheck check : checks(feature, inputs, purpose, catalog)) {
-            if (!check.passing()) {
+            if (check.status() == FeatureConditionCheck.Status.UNSATISFIED) {
                 return Result.closed(check.code());
             }
+            if (unverifiable == null && check.status() == FeatureConditionCheck.Status.UNVERIFIABLE) {
+                unverifiable = check;
+            }
         }
-        return Result.opened();
+        return unverifiable == null ? Result.opened() : Result.unverifiable(unverifiable.code());
     }
 
     /** purge 用の property（どちらかが一度でも開いたか、保存期間の対象の表に行がある。review P2-5）。 */
@@ -241,7 +254,8 @@ public final class IntegrationHubEnablementDecision {
                 !inbound, inputs.effectiveApprovals(), inbound ? null : truststore.content()));
         String prefix = inbound ? "nf05.inbound" : "nf05.outbound";
         for (IntegrationHubProductionEnablementPolicy.Violation violation : violations) {
-            if (!inbound && !truststore.attempted() && "nf05.outbound.truststore.unreadable".equals(violation.code())) {
+            // truststore を読まなかった・読めなかった（file の一時の失敗を含む）は評価できない類（review rb-fe-d P3-3）
+            if (!inbound && "nf05.outbound.truststore.unreadable".equals(violation.code())) {
                 checks.add(FeatureConditionCheck.unverifiable(CODE_TRUSTSTORE_UNVERIFIABLE,
                         FeatureConditionCheck.Category.AUTO));
                 continue;

@@ -166,9 +166,16 @@ class IntegrationHubDeliveryTransientClosureMySqlTest {
         }
         assertThat(attempts(delivery)).isZero();
         assertThat(status(delivery)).isEqualTo("PENDING");
-        // lease の持ち主でなければ戻さない（CAS）
-        int version = jdbc.queryForObject("SELECT version FROM t_api_delivery WHERE id=?", Integer.class, delivery);
-        assertThat(deliveryMapper.releaseClaim(delivery, version, 1, "not-the-owner", utcNow())).isZero();
+        // claim した行は lease の持ち主でなければ戻さない（token の CAS。review rb-fe-d P3-6）。RETRYABLE から claim した行は RETRYABLE へ戻す
+        jdbc.update("UPDATE t_api_delivery SET status='RETRYABLE', last_error_code='HTTP_RETRYABLE' WHERE id=?", delivery);
+        com.ses.entity.integrationhub.ApiDelivery claimed = deliveryService.claim(delivery, "owner-token", utcNow(),
+                utcNow().plusMinutes(1));
+        assertThat(claimed).isNotNull();
+        assertThat(deliveryMapper.releaseClaim(delivery, claimed.getVersion(), 1, "not-the-owner", utcNow())).isZero();
+        assertThat(status(delivery)).isEqualTo("CLAIMED");
+        assertThat(deliveryMapper.releaseClaim(delivery, claimed.getVersion(), 1, "owner-token", utcNow())).isEqualTo(1);
+        assertThat(status(delivery)).as("claim の前の状態へ戻す").isEqualTo("RETRYABLE");
+        assertThat(attempts(delivery)).isZero();
     }
 
     private long insertDelivery() {

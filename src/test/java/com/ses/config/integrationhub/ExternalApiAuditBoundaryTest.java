@@ -180,6 +180,65 @@ class ExternalApiAuditBoundaryTest {
         verify(service, times(2)).recordRequired(org.mockito.ArgumentMatchers.any());
     }
 
+    /**
+     * review rb-fe-d P2-1: 1つの要求の inbound の開閉は要求の始めに一度だけ決める。開と決めた後に実効値が閉じても、実行した要求は監査を
+     * 書き（書けなければ 500）、閉と決めた後に開いても 404 のまま実行しない。
+     */
+    @Test
+    void 判定の後に実効値が閉じても実行した要求は監査を書き書けなければ500にする() throws Exception {
+        IntegrationHubExternalApiProperties properties = properties(true, 60);
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        org.mockito.Mockito.when(runtime.inboundOpen()).thenReturn(true, false);
+        ExternalApiAuditService service = mock(ExternalApiAuditService.class);
+        ExternalApiAuditBoundary boundary = new ExternalApiAuditBoundary(providerOf(service),
+                providerOf(mock(ExternalApiMetricsRecorder.class)), providerOf(properties), providerOf(budget(properties)),
+                new ObjectMapper());
+        ExternalApiDisabledFilter disabled = new ExternalApiDisabledFilter(providerOf(properties), new ObjectMapper());
+        org.springframework.test.util.ReflectionTestUtils.setField(boundary, "runtimeSwitch", runtime);
+        org.springframework.test.util.ReflectionTestUtils.setField(disabled, "runtimeSwitch", runtime);
+        java.util.concurrent.atomic.AtomicBoolean executed = new java.util.concurrent.atomic.AtomicBoolean();
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        boundary.doFilter(request(), response, (req, res) -> disabled.doFilter(req, res, (a, b) -> {
+            executed.set(true);
+            ((jakarta.servlet.http.HttpServletResponse) b).setStatus(200);
+        }));
+        assertTrue(executed.get());
+        assertEquals(200, response.getStatus());
+        verify(service).recordRequired(org.mockito.ArgumentMatchers.any());
+        verify(runtime, times(1)).inboundOpen();
+
+        org.mockito.Mockito.when(runtime.inboundOpen()).thenReturn(true, false);
+        doThrow(new IllegalStateException("synthetic audit failure")).when(service)
+                .recordRequired(org.mockito.ArgumentMatchers.any());
+        MockHttpServletResponse failed = new MockHttpServletResponse();
+        boundary.doFilter(request(), failed, (req, res) -> disabled.doFilter(req, res, (a, b) ->
+                ((jakarta.servlet.http.HttpServletResponse) b).setStatus(200)));
+        assertEquals(500, failed.getStatus(), "監査を書けなければ fail-closed");
+    }
+
+    @Test
+    void 閉と決めた後に開いても404のままで実行時の閉鎖の拒否は上限の中で監査する() throws Exception {
+        IntegrationHubExternalApiProperties properties = properties(true, 60);
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        org.mockito.Mockito.when(runtime.inboundOpen()).thenReturn(false, true);
+        ExternalApiAuditService service = mock(ExternalApiAuditService.class);
+        ExternalApiAuditBoundary boundary = new ExternalApiAuditBoundary(providerOf(service),
+                providerOf(mock(ExternalApiMetricsRecorder.class)), providerOf(properties), providerOf(budget(properties)),
+                new ObjectMapper());
+        ExternalApiDisabledFilter disabled = new ExternalApiDisabledFilter(providerOf(properties), new ObjectMapper());
+        org.springframework.test.util.ReflectionTestUtils.setField(boundary, "runtimeSwitch", runtime);
+        org.springframework.test.util.ReflectionTestUtils.setField(disabled, "runtimeSwitch", runtime);
+        java.util.concurrent.atomic.AtomicBoolean executed = new java.util.concurrent.atomic.AtomicBoolean();
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        boundary.doFilter(request(), response, (req, res) -> disabled.doFilter(req, res, (a, b) -> executed.set(true)));
+        org.junit.jupiter.api.Assertions.assertFalse(executed.get());
+        assertEquals(404, response.getStatus());
+        // 起動時の値は開（LB は開いている）ため、実行時の閉鎖の拒否は未認証の上限の中で永続化する（review rb-fe-d P3-12）
+        verify(service).recordRequired(org.mockito.ArgumentMatchers.any());
+    }
+
     private ExternalApiAuditBoundary boundary(ExternalApiAuditService service,
                                                ExternalApiMetricsRecorder metrics) {
         IntegrationHubExternalApiProperties properties = properties(true, 60);

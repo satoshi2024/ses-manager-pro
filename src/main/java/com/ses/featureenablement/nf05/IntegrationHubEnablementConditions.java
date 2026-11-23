@@ -88,7 +88,7 @@ public class IntegrationHubEnablementConditions implements FeatureConditionEvalu
                 truststore);
         List<FeatureConditionCheck> checks = new ArrayList<>(
                 IntegrationHubEnablementDecision.specificChecks(feature, inputs, context.purpose()));
-        checks.add(legalEntity());
+        checks.add(legalEntity(context));
         return checks;
     }
 
@@ -132,18 +132,40 @@ public class IntegrationHubEnablementConditions implements FeatureConditionEvalu
         return read;
     }
 
-    private FeatureConditionCheck legalEntity() {
+    /**
+     * 法人の未解決。{@code LegalEntityReadinessService} は約20本の照会のため、結果を {@value #LEGAL_ENTITY_CACHE_SECONDS} 秒だけ両方向で
+     * 共用する（定期の評価の1回の2方向・画面の再評価・申請と承認（世代の lock の中）で照会を繰り返さない。review rb-fe-d P3-4）。
+     * 判定できなかった結果は持たない（次の評価で照会し直す）。開く変更は次の起動で反映し、起動の後の反映が port を開く前に照会し直す
+     * ため、承認で古い結果を使っても未解決のまま開くことは無い。
+     */
+    private FeatureConditionCheck legalEntity(FeatureEvaluationContext context) {
+        java.time.Instant now = context.clock().instant();
+        LegalEntityResult cached = legalEntityCache;
+        if (cached != null && now.isBefore(cached.until())) {
+            return cached.check();
+        }
         LegalEntityReadinessService service = readiness == null ? null : readiness.getIfAvailable();
         if (service == null) {
             return FeatureConditionCheck.unverifiable(CODE_LEGAL_ENTITY_UNVERIFIABLE, FeatureConditionCheck.Category.AUTO);
         }
+        FeatureConditionCheck check;
         try {
-            return service.isReady()
+            check = service.isReady()
                     ? FeatureConditionCheck.satisfied(CODE_LEGAL_ENTITY, FeatureConditionCheck.Category.AUTO, null)
                     : FeatureConditionCheck.unsatisfied(CODE_LEGAL_ENTITY_UNRESOLVED, FeatureConditionCheck.Category.AUTO,
                     false);
         } catch (RuntimeException e) {
             return FeatureConditionCheck.unverifiable(CODE_LEGAL_ENTITY_UNVERIFIABLE, FeatureConditionCheck.Category.AUTO);
         }
+        legalEntityCache = new LegalEntityResult(check, now.plusSeconds(LEGAL_ENTITY_CACHE_SECONDS));
+        return check;
     }
+
+    /** 法人の未解決の結果を共用する秒数。 */
+    static final long LEGAL_ENTITY_CACHE_SECONDS = 60;
+
+    private record LegalEntityResult(FeatureConditionCheck check, java.time.Instant until) {
+    }
+
+    private volatile LegalEntityResult legalEntityCache;
 }

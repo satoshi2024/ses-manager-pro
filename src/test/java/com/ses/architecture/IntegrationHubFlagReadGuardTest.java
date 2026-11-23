@@ -46,6 +46,61 @@ class IntegrationHubFlagReadGuardTest {
             // 起動時の検査（ApplicationReadyEvent の法人の未解決。property の源の NF05 と copilot）
             "com/ses/config/LegalEntityReadinessStartupValidator.java", 2);
 
+    /** 呼出しを分けた {@code getEnabled()}（{@code var t = p.getExternalTransport(); t.getEnabled()}。review rb-fe-d P3-5）。 */
+    private static final Pattern ANY_GET_ENABLED = Pattern.compile("\\.getEnabled\\(\\)");
+    private static final Pattern BOOT_OPEN_CALL = Pattern.compile(
+            "IntegrationHubRuntimeSwitch\\s*\\.\\s*(inbound|outbound)BootOpen\\(");
+    private static final Pattern FLAG_LITERAL = Pattern.compile(
+            "integration\\.hub\\.(public-api|external-transport)\\.enabled");
+
+    /** 起動時の値を直接読んでよい file と件数（理由。review rb-fe-d P3-5）。 */
+    private static final Map<String, Integer> ALLOWED_BOOT_OPEN_CALLS = Map.of(
+            // 起動時の値を実行時条件にする（画面の「この起動では閉」）
+            "com/ses/featureenablement/nf05/IntegrationHubBootConditions.java", 2,
+            // barrier の起動時の経路（bootEnabled）
+            "com/ses/service/integrationhub/IntegrationHubOutboundStartupBarrier.java", 1,
+            // 監査の永続化の要否だけ（起動時から閉（LB 遮断）と実行時の閉鎖を分ける。開閉の判定には使わない）
+            "com/ses/config/integrationhub/ExternalApiAuditBoundary.java", 1);
+
+    /** flag の property 名の文字列を書いてよい file（{@code @Conditional} の条件・起動の前の読取り・目録の名前・property の源）。 */
+    private static final java.util.Set<String> ALLOWED_FLAG_LITERALS = java.util.Set.of(
+            "com/ses/config/feature/Feature.java",
+            "com/ses/config/feature/FeatureSwitchProperties.java",
+            "com/ses/featureenablement/nf05/IntegrationHubEnablementBootResolver.java",
+            "com/ses/featureenablement/nf05/IntegrationHubRuntimeSwitch.java",
+            "com/ses/service/integrationhub/IntegrationHubDeliverySchedulingCondition.java",
+            "com/ses/service/integrationhub/IntegrationHubInboundCondition.java",
+            "com/ses/service/integrationhub/IntegrationHubOutboundCondition.java",
+            "com/ses/service/integrationhub/IntegrationHubRetentionPurgeCondition.java",
+            "com/ses/service/integrationhub/IntegrationHubTransportModeCondition.java");
+
+    @Test
+    void properties型を使うfileのgetEnabledと起動時の値の呼出しとflagのproperty名は許した箇所だけ() throws IOException {
+        Map<String, Integer> getEnabled = new TreeMap<>();
+        Map<String, Integer> bootOpen = new TreeMap<>();
+        List<String> literals = new ArrayList<>();
+        for (Path file : javaFiles()) {
+            String source = read(file);
+            String name = relative(file);
+            if (source.contains("IntegrationHubExternalApiProperties")) {
+                int count = count(ANY_GET_ENABLED, source);
+                if (count > 0) {
+                    getEnabled.put(name, count);
+                }
+            }
+            int calls = count(BOOT_OPEN_CALL, source);
+            if (calls > 0 && !name.equals("com/ses/featureenablement/nf05/IntegrationHubRuntimeSwitch.java")) {
+                bootOpen.put(name, calls);
+            }
+            if (FLAG_LITERAL.matcher(source).find() && !ALLOWED_FLAG_LITERALS.contains(name)) {
+                literals.add(name);
+            }
+        }
+        assertThat(getEnabled).as("分けて書いた getEnabled() も runtime switch を通す").isEqualTo(new TreeMap<>(ALLOWED_FLAG_READS));
+        assertThat(bootOpen).as("起動時の値の直接の読取り").isEqualTo(new TreeMap<>(ALLOWED_BOOT_OPEN_CALLS));
+        assertThat(literals).as("environment.getProperty 等で flag を読まない").isEmpty();
+    }
+
     @Test
     void NF05のflagを直接読むのは起動時の検査とruntime_switchとpropertyの源だけ() throws IOException {
         Map<String, Integer> found = new TreeMap<>();

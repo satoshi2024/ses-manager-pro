@@ -67,9 +67,15 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
     /** {@code ConfigDataEnvironmentPostProcessor} の後。 */
     public static final int ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 10;
     static final int TIMEOUT_SECONDS = 5;
-    /** NF05 の保存期間の対象の表（行があれば purge を作る）。 */
+    /** 接続の後の照会の全体の期限（照会は最大で約12本。review rb-fe-d P3-9）。 */
+    static final int TOTAL_SECONDS = 20;
+    /**
+     * NF05 の保存期間の対象の表（行があれば purge を作る）。purge の record kind（{@code PrivacyHoldPath.INTEGRATION_HUB_KINDS}:
+     * IDEMPOTENCY・DELIVERY・INBOUND・INBOUND_REPLAY・AUDIT・EXTERNAL_AUDIT）の表と、nonce・read snapshot の表（review rb-fe-d P3-8）。
+     */
     static final List<String> RETENTION_TABLES = List.of("t_api_delivery", "t_api_delivery_replay_audit",
-            "t_api_nonce_replay", "t_api_read_snapshot", "t_inbound_event", "t_api_idempotency_record");
+            "t_api_nonce_replay", "t_api_read_snapshot", "t_inbound_event", "t_api_idempotency_record",
+            "t_inbound_event_replay", "t_external_api_audit");
     private static final ZoneId JST = ZoneId.of("Asia/Tokyo");
 
     private final Log log;
@@ -126,8 +132,13 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
             put(values, "outbound", decision.outbound(), inputs.outbound(), approvals.outbound());
             values.put(PURGE_ENABLED, Boolean.toString(decision.purgeEnabled()));
         } catch (Exception failure) {
+            // 原因の切分けに SQLState と vendor の code を出す（接続の失敗・表の欠け・timeout。message は URL・account を含み得るため
+            // 出さない。review rb-fe-d P3-9）
+            String sqlState = failure instanceof SQLException sql ? sql.getSQLState() : null;
+            String vendorCode = failure instanceof SQLException sql ? Integer.toString(sql.getErrorCode()) : null;
             log.warn("[機能の開放] NF05 の起動の前の読取りに失敗したため、この起動では NF05 を閉じます: "
-                    + "errorCode=NF05_BOOT_READ_FAILED exceptionClass=" + failure.getClass().getSimpleName());
+                    + "errorCode=NF05_BOOT_READ_FAILED exceptionClass=" + failure.getClass().getSimpleName()
+                    + " sqlState=" + sqlState + " vendorCode=" + vendorCode);
             values.clear();
             values.put(INBOUND_ENABLED, "false");
             values.put(OUTBOUND_ENABLED, "false");
@@ -166,14 +177,16 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
         String url = environment.getProperty("spring.datasource.url");
         if (url == null || !url.startsWith("jdbc:mysql:")) {
             // 起動の前の読取りは本番の MySQL だけ（H2 等では schema がまだ無い。design §9.1 の 0）
-            throw new SQLException("unsupported datasource");
+            throw new SQLException("unsupported datasource", "NF05US");
         }
+        // 照会の全体の期限（接続の後。1つの照会は5秒まで、全体で TOTAL_SECONDS 秒まで。review rb-fe-d P3-9）
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(TOTAL_SECONDS);
         try (Connection connection = reader.open(url, environment.getProperty("spring.datasource.username"),
                 environment.getProperty("spring.datasource.password"))) {
             connection.setReadOnly(true);
-            Map<Feature, IntegrationHubEnablementDecision.DirectionState> states = readStates(connection, tenantId);
-            Map<String, FeatureEnablementSnapshot.ConfirmedSignOff> signOffs = readSignOffs(connection, tenantId);
-            String barrier = scalarString(connection,
+            Map<Feature, IntegrationHubEnablementDecision.DirectionState> states = readStates(connection, tenantId, deadline);
+            Map<String, FeatureEnablementSnapshot.ConfirmedSignOff> signOffs = readSignOffs(connection, tenantId, deadline);
+            String barrier = scalarString(connection, deadline,
                     "SELECT config_value FROM m_system_config WHERE config_key = ?",
                     IntegrationHubEnablementDecision.BARRIER_CONFIG_KEY);
             IntegrationHubEnablementDecision.DirectionState outbound = states.getOrDefault(Feature.NF05_OUTBOUND,
@@ -181,13 +194,13 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
             Boolean offAudit = null;
             if ("OPEN_PENDING_RESTART".equals(outbound.state())) {
                 // idx_auditlog_reference (reference_type, reference_id) を使う（review P3-N8。付けないと全表を走査する）
-                offAudit = exists(connection, "SELECT 1 FROM t_audit_log WHERE reference_type = ? AND reference_id = 0 "
+                offAudit = exists(connection, deadline, "SELECT 1 FROM t_audit_log WHERE reference_type = ? AND reference_id = 0 "
                         + "AND application_code = ? LIMIT 1", IntegrationHubEnablementDecision.AUDIT_REFERENCE_TYPE,
                         IntegrationHubEnablementDecision.OFF_AUDIT_CODE);
             }
             boolean retentionRows = false;
             for (String table : RETENTION_TABLES) {
-                if (exists(connection, "SELECT 1 FROM " + table + " LIMIT 1")) {
+                if (exists(connection, deadline, "SELECT 1 FROM " + table + " LIMIT 1")) {
                     retentionRows = true;
                     break;
                 }
@@ -206,12 +219,12 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
     }
 
     private static Map<Feature, IntegrationHubEnablementDecision.DirectionState> readStates(Connection connection,
-                                                                                            String tenantId)
+                                                                                            String tenantId, long deadline)
             throws SQLException {
         Map<Feature, IntegrationHubEnablementDecision.DirectionState> states = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement("SELECT feature_key, state, version, opened_at "
                 + "FROM t_feature_enablement_state WHERE tenant_id = ? AND feature_key IN (?, ?)")) {
-            statement.setQueryTimeout(TIMEOUT_SECONDS);
+            statement.setQueryTimeout(remaining(deadline));
             statement.setString(1, tenantId);
             statement.setString(2, Feature.NF05_INBOUND.name());
             statement.setString(3, Feature.NF05_OUTBOUND.name());
@@ -227,7 +240,7 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
     }
 
     private static Map<String, FeatureEnablementSnapshot.ConfirmedSignOff> readSignOffs(Connection connection,
-                                                                                         String tenantId)
+                                                                                         String tenantId, long deadline)
             throws SQLException {
         Set<String> kinds = new LinkedHashSet<>();
         FeatureEnablementCatalog catalog = FeatureEnablementCatalog.standard();
@@ -246,7 +259,7 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
         sql.append(")");
         Map<String, FeatureEnablementSnapshot.ConfirmedSignOff> signOffs = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            statement.setQueryTimeout(TIMEOUT_SECONDS);
+            statement.setQueryTimeout(remaining(deadline));
             statement.setString(1, tenantId);
             for (int i = 0; i < ordered.size(); i++) {
                 statement.setString(i + 2, ordered.get(i));
@@ -264,9 +277,9 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
         return signOffs;
     }
 
-    private static String scalarString(Connection connection, String sql, String parameter) throws SQLException {
+    private static String scalarString(Connection connection, long deadline, String sql, String parameter) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setQueryTimeout(TIMEOUT_SECONDS);
+            statement.setQueryTimeout(remaining(deadline));
             statement.setString(1, parameter);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? rows.getString(1) : null;
@@ -274,9 +287,9 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
         }
     }
 
-    private static boolean exists(Connection connection, String sql, String... parameters) throws SQLException {
+    private static boolean exists(Connection connection, long deadline, String sql, String... parameters) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setQueryTimeout(TIMEOUT_SECONDS);
+            statement.setQueryTimeout(remaining(deadline));
             for (int i = 0; i < parameters.length; i++) {
                 statement.setString(i + 1, parameters[i]);
             }
@@ -286,7 +299,19 @@ public class IntegrationHubEnablementBootResolver implements EnvironmentPostProc
         }
     }
 
-    /** 接続を1本だけ開く（pool を作らない。接続と socket の timeout は5秒）。 */
+    /** 照会の timeout（1つの照会は5秒まで、全体の期限の残りまで。期限を過ぎていれば読まない）。 */
+    static int remaining(long deadline) throws SQLException {
+        long left = deadline - System.nanoTime();
+        if (left <= 0) {
+            throw new java.sql.SQLTimeoutException("NF05 boot read deadline", "HYT00");
+        }
+        return (int) Math.max(1, Math.min(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(left)));
+    }
+
+    /**
+     * 接続を1本だけ開く（pool を作らない。接続と socket の timeout は5秒）。照会の timeout が来ると Connector/J は照会を止めるため別の
+     * 接続で {@code KILL QUERY} を送ることがある（RB §1.2）。
+     */
     static Connection connect(String url, String username, String password) throws SQLException {
         Properties info = new Properties();
         if (username != null) {

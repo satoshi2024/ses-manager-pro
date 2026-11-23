@@ -52,8 +52,62 @@ class IntegrationHubBootDecisionRecorderTest {
         overlay = new FeatureEnablementOverlay();
         when(writer.applyRestart(any(), anyInt())).thenReturn(IntegrationHubBootDecisionWriter.Outcome.APPLIED);
         when(writer.closeAtBoot(any(), any(), anyInt(), anyString())).thenReturn(IntegrationHubBootDecisionWriter.Outcome.CLOSED);
+        holder = mock(com.ses.featureenablement.state.FeatureEnablementSnapshotHolder.class);
+        ObjectProvider<com.ses.featureenablement.state.FeatureEnablementSnapshotHolder> holders = mock(ObjectProvider.class);
+        when(holders.getIfAvailable()).thenReturn(holder);
         recorder = new IntegrationHubBootDecisionRecorder(environment, properties, writer, runtimeSwitch, integrationHub,
-                provider, overlay);
+                provider, overlay, holders);
+    }
+
+    private com.ses.featureenablement.state.FeatureEnablementSnapshotHolder holder;
+
+    /** review rb-fe-d P3-1: 反映の後に開放状態を読み直してから完了を伝える（古い再起動待ちの snapshot で確定の閉鎖に倒さない）。 */
+    @Test
+    void 反映の後に開放状態を読み直してから完了を伝える() {
+        boot("outbound", "OPENED", "OPEN_PENDING_RESTART", 7);
+        when(runtimeSwitch.bootOpen(Feature.NF05_OUTBOUND)).thenReturn(true);
+        when(writer.applyRestart(any(), anyInt())).thenReturn(IntegrationHubBootDecisionWriter.Outcome.UNCHANGED);
+
+        recorder.start();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(writer, holder, runtimeSwitch);
+        order.verify(writer).applyRestart(Feature.NF05_OUTBOUND, 7);
+        order.verify(holder).reload();
+        order.verify(runtimeSwitch).markBootRecorded();
+    }
+
+    /**
+     * review rb-fe-d P3-2・P3-3: RESTART_APPLIED を書けなければ理由の分かる自動閉鎖の書込み待ち。評価できない結果と法人を判定できない
+     * 状態は、状態を変えずこの起動だけ閉じる。
+     */
+    @Test
+    void 再起動の反映を書けなければ書込み待ちで評価できない結果は状態を変えない() {
+        boot("outbound", "OPENED", "OPEN_PENDING_RESTART", 7);
+        boot("inbound", "UNVERIFIABLE:nf05.outbound.truststore.unverifiable", "OPEN", 4);
+        when(runtimeSwitch.bootOpen(Feature.NF05_OUTBOUND)).thenReturn(true);
+        when(writer.applyRestart(any(), anyInt())).thenThrow(new IllegalStateException("synthetic DB failure"));
+
+        recorder.record();
+
+        assertThat(overlay.has(Feature.NF05_OUTBOUND, FeatureEnablementOverlay.AUTO_CLOSE_PENDING)).isTrue();
+        assertThat(overlay.pendingAutoCloseReason(Feature.NF05_OUTBOUND))
+                .contains(IntegrationHubBootDecisionRecorder.RESTART_NOT_APPLIED);
+        verify(writer).recordBootUnverifiable(Feature.NF05_INBOUND, "nf05.outbound.truststore.unverifiable");
+        verify(writer, never()).closeAtBoot(eq(Feature.NF05_INBOUND), any(), anyInt(), anyString());
+    }
+
+    @Test
+    void 法人を判定できなければ状態を変えずこの起動だけ閉じる() {
+        boot("outbound", "OPENED", "OPEN", 5);
+        when(runtimeSwitch.bootOpen(Feature.NF05_OUTBOUND)).thenReturn(true);
+        when(readiness.isReady()).thenThrow(new IllegalStateException("synthetic DB failure"));
+
+        recorder.record();
+
+        verify(writer, never()).closeAtBoot(any(), any(), anyInt(), anyString());
+        verify(writer).recordBootUnverifiable(Feature.NF05_OUTBOUND, IntegrationHubBootDecisionRecorder.LEGAL_ENTITY_UNVERIFIABLE);
+        assertThat(overlay.has(Feature.NF05_OUTBOUND, FeatureEnablementOverlay.EVALUATION_UNVERIFIABLE)).isTrue();
+        assertThat(overlay.has(Feature.NF05_OUTBOUND, FeatureEnablementOverlay.AUTO_CLOSE_PENDING)).isFalse();
     }
 
     @Test
