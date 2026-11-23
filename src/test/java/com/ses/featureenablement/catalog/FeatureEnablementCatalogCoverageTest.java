@@ -150,15 +150,21 @@ class FeatureEnablementCatalogCoverageTest {
                 .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
     }
 
-    /** FE-A11: 段階 A は容易な7件だけに DB 管理の印を付け、NF01 二者確認・NF05・NF06・NF07 は段階 B〜D まで property の源。 */
+    /**
+     * FE-A11・FE-D02: 段階 A は容易な7件、段階 D は NF05 の2件に DB 管理の印を付け、NF01 二者確認・NF06・NF07 は段階 B・C まで
+     * property の源。
+     */
     @Test
     void 段階Aは容易な7件だけにDB管理の印があり写しで印を付け直せる() {
         EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
                 Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
+        EnumSet<Feature> stageD = EnumSet.of(Feature.NF05_INBOUND, Feature.NF05_OUTBOUND);
         for (Feature feature : Feature.values()) {
-            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature));
+            assertThat(catalog.databaseManaged(feature)).as(feature.name())
+                    .isEqualTo(stageA.contains(feature) || stageD.contains(feature));
         }
         assertThat(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageA);
+        assertThat(FeatureEnablementCatalog.STAGE_D_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageD);
         FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF06));
         assertThat(managed.databaseManaged(Feature.NF04)).isTrue();
         assertThat(managed.databaseManaged(Feature.NF06)).isTrue();

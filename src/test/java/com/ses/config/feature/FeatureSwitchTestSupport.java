@@ -62,14 +62,17 @@ final class FeatureSwitchTestSupport {
     }
 
     /**
-     * 本番の目録（段階 A の容易な7件だけに DB 管理の印。FE-A11）の DB の源で、7件のうち指定したものだけを閉じ、残りの7件は開いた
-     * snapshot、印の無い開放単位は全て ON の設定値（property の源）にした FeatureSwitches。{@link #disabledOnly} と同じ応答になる。
+     * 本番の目録（DB 管理の印のある開放単位。段階 A の容易な7件・段階 D の NF05 の2件等）の DB の源で、印のある開放単位のうち指定した
+     * ものだけを閉じ、残りは開いた snapshot、印の無い開放単位は全て ON の設定値（property の源）にした FeatureSwitches。
+     * {@link #disabledOnly} と同じ応答になる。
      */
     static FeatureSwitches standardDatabaseDisabledOnly(Feature... disabled) {
         Set<Feature> off = disabled.length == 0 ? EnumSet.noneOf(Feature.class) : EnumSet.of(disabled[0], disabled);
         Set<Feature> open = EnumSet.noneOf(Feature.class);
-        for (Feature feature : com.ses.featureenablement.catalog.FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED) {
-            if (!off.contains(feature)) {
+        com.ses.featureenablement.catalog.FeatureEnablementCatalog standard =
+                com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard();
+        for (Feature feature : Feature.values()) {
+            if (standard.databaseManaged(feature) && !off.contains(feature)) {
                 open.add(feature);
             }
         }

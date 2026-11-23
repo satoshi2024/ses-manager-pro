@@ -212,7 +212,11 @@ class SchedulingDisabledDrainTest {
             // FE-A07: 起動時の評価（SmartLifecycle。web server より前。DB の源の時だけ動く）
             "com.ses.featureenablement.evaluation.FeatureEnablementStartupEvaluator:Lifecycle",
             "起動時に開いている開放単位を評価し、成り立たなければ自動閉鎖を書く（scheduler でなく起動の1回。"
-                    + "閉じる側の書込みだけで、書けなければ memory の書込み待ちで閉じる）");
+                    + "閉じる側の書込みだけで、書けなければ memory の書込み待ちで閉じる）",
+            // FE-D02: NF05 の起動の後の反映（SmartLifecycle。起動時の評価より前。DB の源の時だけ書く）
+            "com.ses.featureenablement.nf05.IntegrationHubBootDecisionRecorder:Lifecycle",
+            "起動の前の読取りの結果を開放状態に反映する（scheduler でなく起動の1回。再起動待ちの OPEN への遷移と閉じる側の書込み"
+                    + "だけで、書けなければ memory の書込み待ちで閉じる）");
 
     /** {@code @Async} method（taskExecutor上で実行。起点はrequestまたはscheduler）。 */
     private static final Map<String, String> ASYNC_INVENTORY = inventory(

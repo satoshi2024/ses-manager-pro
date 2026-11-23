@@ -43,8 +43,14 @@ public final class FeatureEnablementCatalog {
     public static final Set<Feature> STAGE_A_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
             Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
             Feature.NF04, Feature.NF10));
-    /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は FE-D05 で足す。 */
+    /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は {@code IntegrationHubEnablementConditions}（FE-D05）。 */
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
+    /**
+     * 段階 D で DB 管理にする NF05 の2件（requirements §6.8・6.9。FE-D02）。開ける変更は次の起動で反映し、閉じる変更は即時に反映する
+     * （D-2）。prod の起動時検査はこの2件の旧い変数（開閉と決定 ID・digest）を止める（FE-D05）。
+     */
+    public static final Set<Feature> STAGE_D_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF05_INBOUND, Feature.NF05_OUTBOUND));
 
     /**
      * 手動の閉鎖の理由の区分（{@code closed_reason} に入る。system の理由（{@code SIGN_OFF_REVOKED}・{@code MASTER_SWITCH_CLOSED} 等）と
@@ -256,7 +262,8 @@ public final class FeatureEnablementCatalog {
                 decision("NF04_SECURITY", "SECURITY", "BUSINESS_OWNER"),
                 evidence("NF04_DEVICE_ACCEPTANCE", "ACCEPTANCE_OWNER"));
 
-        // NF05 inbound（§6.8）。開くのは次の起動。評価器は FE-D05
+        // NF05 inbound（§6.8）。開くのは次の起動。評価器は IntegrationHubEnablementConditions（FE-D05。評価できない類の code は
+        // state=STATE_IO_ERROR・nf05.outbound.truststore.unverifiable・legalEntity.unverifiable）
         List<KeyRequirement> nf05Keys = List.of(
                 new KeyRequirement("INTEGRATION_HUB_PUBLIC_ID_KEY", "integration.hub.public-api.public-id-key"),
                 new KeyRequirement("INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION", "integration.hub.crypto.current-key-version"),
@@ -352,6 +359,8 @@ public final class FeatureEnablementCatalog {
 
         // 段階 A の DB 管理の印（容易な7件。FE-A11）
         b.databaseManaged(STAGE_A_DATABASE_MANAGED);
+        // 段階 D の DB 管理の印（NF05 の2件。FE-D02）
+        b.databaseManaged(STAGE_D_DATABASE_MANAGED);
 
         return b.build();
     }

@@ -76,4 +76,22 @@ class IntegrationHubRetentionPurgeConditionTest {
         assertThat(conditional).isNotNull();
         assertThat(conditional.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
     }
+
+    /**
+     * FE-D02（design §9.1 の 5a・review P2-5・P3-N3）: 起動の前の読取りが書いた purge 用の property があればその値で決める（NF05 を閉じた
+     * 後の起動でも purge を作る）。read snapshot の purge も同じ条件。
+     */
+    @Test
+    void purge用のpropertyがあれば両方向が閉でも作り無ければ従来の判定() {
+        runner.withPropertyValues("integration.hub.public-api.enabled=false",
+                        "integration.hub.external-transport.enabled=false", "integration.hub.retention-purge.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(IntegrationHubRetentionPurgeScheduler.class));
+        runner.withPropertyValues("integration.hub.public-api.enabled=true",
+                        "integration.hub.retention-purge.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(IntegrationHubRetentionPurgeScheduler.class));
+        Conditional snapshot = ExternalApiReadSnapshotPurgeScheduler.class.getAnnotation(Conditional.class);
+        assertThat(snapshot.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
+        Conditional metrics = IntegrationHubDeliveryMetrics.class.getAnnotation(Conditional.class);
+        assertThat(metrics.value()).containsExactly(IntegrationHubRetentionPurgeCondition.class);
+    }
 }
