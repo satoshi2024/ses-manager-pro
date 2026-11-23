@@ -18,6 +18,9 @@ import java.io.IOException;
 public class ExternalApiDisabledFilter extends OncePerRequestFilter {
     private final ObjectProvider<IntegrationHubExternalApiProperties> propertiesProvider;
     private final ObjectMapper objectMapper;
+    /** NF05 の実行時の判定（起動時の値 AND 実効値。feature-enablement-console design §9.3）。slice の試験では無く、properties の値を使う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -27,7 +30,7 @@ public class ExternalApiDisabledFilter extends OncePerRequestFilter {
             return;
         }
         IntegrationHubExternalApiProperties properties = propertiesProvider.getIfAvailable();
-        if (properties != null && properties.getPublicApi().getEnabled()) {
+        if (properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(runtimeSwitch, properties)) {
             filterChain.doFilter(request, response);
             return;
         }

@@ -64,6 +64,9 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
     private final ObjectProvider<ObjectMapper> objectMapperProvider;
     private final ObjectProvider<BackupQuiesceRejectionRecorder> rejectionRecorderProvider;
     private final ObjectProvider<IntegrationHubExternalApiProperties> externalApiPropertiesProvider;
+    /** NF05 の実行時の判定（起動時の値 AND 実効値。feature-enablement-console design §9.3）。slice の試験では無く、properties の値を使う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch integrationHubRuntimeSwitch;
 
     public BackupWriteGateFilter(ObjectProvider<BackupWriteGate> gateProvider,
                                  ObjectProvider<BackupQuiesceMetrics> metricsProvider,
@@ -86,8 +89,8 @@ public class BackupWriteGateFilter extends OncePerRequestFilter {
     /** NF05 の公開 API（inbound）が有効か（{@code ExternalApiDisabledFilter} と同じ判定。設定が無ければ無効）。 */
     private boolean publicApiEnabled() {
         IntegrationHubExternalApiProperties properties = externalApiPropertiesProvider.getIfAvailable();
-        return properties != null && properties.getPublicApi() != null
-                && Boolean.TRUE.equals(properties.getPublicApi().getEnabled());
+        return properties != null
+                && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(integrationHubRuntimeSwitch, properties);
     }
 
     @Override

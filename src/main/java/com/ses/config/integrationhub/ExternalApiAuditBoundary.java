@@ -37,6 +37,9 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
     private final ObjectProvider<IntegrationHubExternalApiProperties> propertiesProvider;
     private final ObjectProvider<ExternalApiUnauthenticatedAuditBudget> unauthenticatedBudgetProvider;
     private final ObjectMapper objectMapper;
+    /** NF05 の実行時の判定（起動時の値 AND 実効値。feature-enablement-console design §9.3）。slice の試験では無く、properties の値を使う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -157,8 +160,7 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
     /** properties未取得は無効扱い。ExternalApiDisabledFilterと同じ判定でdeny-only chainと揃える。 */
     private boolean publicApiEnabled() {
         IntegrationHubExternalApiProperties properties = propertiesProvider.getIfAvailable();
-        return properties != null && properties.getPublicApi() != null
-                && Boolean.TRUE.equals(properties.getPublicApi().getEnabled());
+        return properties != null && com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(runtimeSwitch, properties);
     }
 
     /** budget beanが無いslice等では従来どおり永続化する（監査の欠落側へ倒さない）。 */
