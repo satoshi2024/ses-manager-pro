@@ -40,6 +40,11 @@ public class FileApiController {
             // NF07 DSAR の開示 package 等、server が生成する種別は利用者の upload で作らせない
             throw BusinessException.of(403, "error.forbidden");
         }
+        if (kind != null && kind.isDedicatedPathOnly()) {
+            // 機能の開放の署名の文書は署名の登録の専用の経路だけが保存する（汎用の upload では種別ごと受け付けない。
+            // feature-enablement-console design §6.1）
+            throw BusinessException.of(400, "error.file.kindNotAllowed");
+        }
         return ApiResult.success(fileStorageService.store(file, kind));
     }
 

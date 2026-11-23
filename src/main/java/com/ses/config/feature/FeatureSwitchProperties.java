@@ -73,6 +73,31 @@ public class FeatureSwitchProperties {
     }
 
     /**
+     * NF-05 の設定値（{@code integration.hub.public-api.enabled}・{@code integration.hub.external-transport.enabled}。
+     * feature-enablement-console design §3.4）。{@code app.features.*} としてはbindしない。Spring contextでは
+     * {@link com.ses.config.integrationhub.IntegrationHubExternalApiProperties} beanを {@link #useIntegrationHubProperties}
+     * で受け取り、その値をそのまま読み書きする。Spring管理外で {@code new} した場合は既定OFFの値を持つ。
+     */
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    private com.ses.config.integrationhub.IntegrationHubExternalApiProperties integrationHub;
+
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    private final Toggle nf05InboundFallback = new Toggle();
+
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    private final Toggle nf05OutboundFallback = new Toggle();
+
+    /** NF-05 の設定値の正本（{@code integration.hub.*} のbind結果）を受け取る。null は既定OFFとして扱う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void useIntegrationHubProperties(
+            com.ses.config.integrationhub.IntegrationHubExternalApiProperties integrationHubProperties) {
+        this.integrationHub = integrationHubProperties;
+    }
+
+    /**
      * 機能に対応する設定値（親子の論理積を取る前の値）。機能を追加したらここへcaseを追加する
      * （switch式が網羅的でないとcompileできないため、登録漏れはbuildで検出される）。
      */
@@ -85,6 +110,12 @@ public class FeatureSwitchProperties {
             case NF03 -> nf03;
             case NF03_CERTIFICATION_PII -> nf03CertificationPii;
             case NF04 -> nf04;
+            case NF05_INBOUND -> integrationHub == null ? nf05InboundFallback
+                    : new IntegrationHubToggle(() -> integrationHub.getPublicApi().getEnabled(),
+                    value -> integrationHub.getPublicApi().setEnabled(value));
+            case NF05_OUTBOUND -> integrationHub == null ? nf05OutboundFallback
+                    : new IntegrationHubToggle(() -> integrationHub.getExternalTransport().getEnabled(),
+                    value -> integrationHub.getExternalTransport().setEnabled(value));
             case NF06 -> nf06;
             case NF07_RETENTION -> privacy.getRetention();
             case NF07_DSAR -> privacy.getDsar();
@@ -126,5 +157,44 @@ public class FeatureSwitchProperties {
     public static class CustomerPortalToggle extends Toggle {
         /** 公開開始時刻。この時刻以降に作成された問い合わせは、起票経路にかかわらずportalへ出す。 */
         private String visibleSince;
+    }
+
+    /**
+     * NF-05 の設定値（{@code integration.hub.*.enabled}）を読み書きする Toggle。値の正本は
+     * {@link com.ses.config.integrationhub.IntegrationHubExternalApiProperties} で、本 class は値を持たない（未設定の null は OFF）。
+     */
+    static final class IntegrationHubToggle extends Toggle {
+        private final java.util.function.Supplier<Boolean> reader;
+        private final java.util.function.Consumer<Boolean> writer;
+
+        IntegrationHubToggle(java.util.function.Supplier<Boolean> reader, java.util.function.Consumer<Boolean> writer) {
+            this.reader = reader;
+            this.writer = writer;
+        }
+
+        @Override
+        public boolean isEnabled() {
+            return Boolean.TRUE.equals(reader.get());
+        }
+
+        @Override
+        public void setEnabled(boolean enabled) {
+            writer.accept(enabled);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return this == other;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(this);
+        }
+
+        @Override
+        public String toString() {
+            return "IntegrationHubToggle(enabled=" + isEnabled() + ")";
+        }
     }
 }

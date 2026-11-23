@@ -112,6 +112,29 @@ public enum Feature {
             List.of()),
 
     /**
+     * NF-05 公開API の inbound（read API・inbound webhook）。機能の開放の開放単位（feature-enablement-console design §3.4）。
+     *
+     * <p>prefix・menu を持たない（{@link FeatureSwitchFilter} は何も遮断しない）。inbound の 404 は既存の
+     * {@code ExternalApiDisabledFilter} が行う。開ける変更は次の起動で反映し、閉じる変更は即時に反映する（D-2。段階 D）。
+     * 設定値は {@code integration.hub.public-api.enabled}（{@link FeatureSwitchProperties#toggle} が返す）。
+     */
+    NF05_INBOUND("公開APIのinbound（read API・inbound webhook）",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of()),
+
+    /**
+     * NF-05 公開API の outbound（outbound webhook の送信）。prefix・menu を持たない。設定値は
+     * {@code integration.hub.external-transport.enabled}。inbound と親子にしない（独立に開く）。
+     */
+    NF05_OUTBOUND("公開APIのoutbound（outbound webhookの送信）",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of()),
+
+    /**
      * NF-06 データ移行・取込センター（初回はupload・検証・preview・error export・source/mapping管理だけ）。
      *
      * <p>入口は取込センター画面 {@code /import-center}（W3-12）とAPI {@code /api/import-center}、menu key は
@@ -224,6 +247,12 @@ public enum Feature {
      * {@code privacy.dsar.enabled}）。
      */
     public String propertyName() {
+        if (this == NF05_INBOUND) {
+            return "integration.hub.public-api.enabled";
+        }
+        if (this == NF05_OUTBOUND) {
+            return "integration.hub.external-transport.enabled";
+        }
         if (this == NF07_RETENTION) {
             return "privacy.retention.enabled";
         }
@@ -238,6 +267,12 @@ public enum Feature {
      * {@code PRIVACY_DSAR_ENABLED}）。
      */
     public String environmentVariable() {
+        if (this == NF05_INBOUND) {
+            return "INTEGRATION_HUB_PUBLIC_API_ENABLED";
+        }
+        if (this == NF05_OUTBOUND) {
+            return "INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED";
+        }
         if (this == NF07_RETENTION) {
             return "PRIVACY_RETENTION_ENABLED";
         }

@@ -41,7 +41,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 class SchedulerLockProxyInvocationTest {
 
     private static final String[] LOCK_NAMES = {
-            "privacyDsarDeadlineDaily", "certificationExpiryNotificationDaily", "serviceRequestAttachmentCompensation"};
+            "privacyDsarDeadlineDaily", "certificationExpiryNotificationDaily", "serviceRequestAttachmentCompensation",
+            "featureEnablementEvaluation", "featureEnablementDayStart", "featureSignOffPurge"};
 
     @Autowired
     private ApplicationContext context;
@@ -52,7 +53,13 @@ class SchedulerLockProxyInvocationTest {
         return Stream.of(
                 Arguments.of(PrivacyDsarDeadlineScheduler.class, "notifyDaily", LOCK_NAMES[0]),
                 Arguments.of(CertificationExpiryNotificationScheduler.class, "dispatchToday", LOCK_NAMES[1]),
-                Arguments.of(ServiceRequestAttachmentCompensationScheduler.class, "retryDue", LOCK_NAMES[2]));
+                Arguments.of(ServiceRequestAttachmentCompensationScheduler.class, "retryDue", LOCK_NAMES[2]),
+                // FE-A06・A07: 機能の開放の定期の評価・日の始まり・署名の消去（test profile の源は properties のため何も書かない）
+                Arguments.of(com.ses.featureenablement.evaluation.FeatureEnablementConditionScheduler.class, "evaluateAll",
+                        LOCK_NAMES[3]),
+                Arguments.of(com.ses.featureenablement.evaluation.FeatureEnablementConditionScheduler.class,
+                        "evaluateAtBusinessDayStart", LOCK_NAMES[4]),
+                Arguments.of(com.ses.featureenablement.signoff.FeatureSignOffPurgeScheduler.class, "purge", LOCK_NAMES[5]));
     }
 
     @ParameterizedTest
@@ -81,7 +88,8 @@ class SchedulerLockProxyInvocationTest {
     @BeforeTransaction
     @AfterTransaction
     void removeLockRows() {
-        jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (?, ?, ?)", (Object[]) LOCK_NAMES);
+        jdbcTemplate.update("DELETE FROM shedlock WHERE name IN (" + String.join(", ", java.util.Collections.nCopies(
+                LOCK_NAMES.length, "?")) + ")", (Object[]) LOCK_NAMES);
     }
 
     // ---------------------------------------------------------------- backup の書込み静止（RB-QUIESCE BWQ-006）

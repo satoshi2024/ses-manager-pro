@@ -157,6 +157,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         // freee=承認後にfreeeへ自動送信（会計・支払連携のEXPENSE_DEAL_SYNCを使う）、manual=自動送信しない、
         // mock=開発用（freeeへは送らない。prodではsenderが無いため何もしない）。
         SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("freee", "manual", "mock"));
+        // FE-A07（feature-enablement-console design §6.5）: 機能の開放の署名の失効の接近を通知し始める日数（既定 30）
+        SCHEMAS.put("feature-enablement.expiry-warning-days", ConfigSchema.integer(1, 366));
     }
 
     private void ensureLoaded() {

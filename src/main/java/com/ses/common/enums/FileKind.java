@@ -59,7 +59,14 @@ public enum FileKind {
      */
     PRIVACY_EXPORT(
             Set.of("json"),
-            32L * 1024 * 1024);
+            32L * 1024 * 1024),
+    /**
+     * 機能の開放の署名の文書（pdf、最大10MB。feature-enablement-console design §6.1）。multipart の上限（{@code max-file-size: 10MB}）の
+     * 中に収める。汎用の upload・取得・再 scan は受け付けず（{@link #isDedicatedPathOnly()}）、署名の専用の経路だけが保存・取得する。
+     */
+    FEATURE_SIGN_OFF(
+            Set.of("pdf"),
+            10L * 1024 * 1024);
 
     private final Set<String> allowedExtensions;
     private final long maxBytes;
@@ -80,6 +87,15 @@ public enum FileKind {
     /** server が生成する file だけの種別か（汎用 upload の入口では受け付けない）。 */
     public boolean isServerGeneratedOnly() {
         return this == PRIVACY_EXPORT;
+    }
+
+    /**
+     * 専用の経路だけが保存・取得する種別か（server 生成の種別と、機能の開放の署名の文書）。汎用の upload（{@code FileApiController}）は
+     * 400 で拒否し、汎用の {@code load}・{@code rescan} は metadata の種別で 403 にし、scan が CLEAN でなければ実体を残さない。
+     * 読むのは種別の一致を要する {@code FileStorageService#loadDedicated} だけ。
+     */
+    public boolean isDedicatedPathOnly() {
+        return isServerGeneratedOnly() || this == FEATURE_SIGN_OFF;
     }
 
     /** Content-Typeは明示必須。拡張子と完全一致する組だけを許可する。 */

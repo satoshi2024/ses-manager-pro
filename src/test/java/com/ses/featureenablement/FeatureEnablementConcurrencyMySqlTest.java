@@ -1,0 +1,439 @@
+package com.ses.featureenablement;
+
+import com.ses.common.exception.BusinessException;
+import com.ses.config.feature.Feature;
+import com.ses.entity.FeatureEnablementRequest;
+import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
+import com.ses.featureenablement.service.FeatureEnablementActor;
+import com.ses.featureenablement.service.FeatureEnablementApprovalResult;
+import com.ses.featureenablement.service.FeatureEnablementService;
+import com.ses.test.MySQLContainer;
+import com.ses.test.MySqlTestImages;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * FE-A05（design §5.1・§11.4）: 実 MySQL 8.4 の READ COMMITTED と行 lock で、機能の開放の書込みの並行を確かめる。
+ *
+ * <ul>
+ *   <li>同じ申請の並行の承認は1件だけ成功し、もう1件は 409（世代の行の lock で直列になり、後の側は決まった申請を読む）。</li>
+ *   <li>子の承認と親の閉鎖の並行は、どちらの順でも「親は手動で閉じ、子は開いていない」に落ち着く。</li>
+ *   <li>申請・承認・閉鎖を混ぜた並行で deadlock も lock 待ちの timeout も起きない（世代の行を最初に lock する順のため）。</li>
+ * </ul>
+ * <p>各 test は別の開放単位を使い、commit した行は class 専用の container DB に残る（他の test の行は数えない）。</p>
+ */
+@SpringBootTest(properties = "app.feature-enablement.source=database")
+@ActiveProfiles("test")
+@Import(FeatureEnablementTestConfiguration.class)
+@Tag("mysql")
+@Testcontainers
+class FeatureEnablementConcurrencyMySqlTest {
+
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MySqlTestImages.image())
+            .withDatabaseName("ses_feature_enablement_concurrency")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
+
+    private static final LocalDate SIGNED = LocalDate.of(2026, 11, 1);
+    private static final LocalDate EXPIRES = LocalDate.of(2027, 11, 1);
+
+    @Autowired
+    private FeatureEnablementService service;
+    @Autowired
+    private com.ses.featureenablement.service.FeatureSignOffService signOffs;
+    @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationService evaluation;
+    @Autowired
+    private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationWriter evaluationWriter;
+    @Autowired
+    private com.ses.featureenablement.state.FeatureEnablementSnapshotLoader loader;
+    @Autowired
+    private com.ses.featureenablement.state.FeatureEnablementSnapshotHolder holder;
+    @Autowired
+    private com.ses.config.feature.FeatureSwitches switches;
+    @Autowired
+    private com.ses.mapper.FeatureEnablementGenerationMapper generationMapper;
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired
+    private JdbcTemplate jdbc;
+    @Autowired
+    private FeatureEnablementCatalog catalog;
+    @Autowired
+    private FeatureEnablementTestConfiguration.MutableTestClock clock;
+
+    private FeatureEnablementH2Fixture fixture;
+
+    @BeforeEach
+    void setUp() {
+        clock.reset();
+        fixture = new FeatureEnablementH2Fixture(jdbc, catalog);
+    }
+
+    @Test
+    void 同じ申請の並行の承認は1件だけ成功しもう1件は409() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF03, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor first = fixture.admin();
+        FeatureEnablementActor second = fixture.admin();
+        FeatureEnablementRequest request = service.requestOpen(Feature.NF03, null, requester);
+
+        List<Object> outcomes = race(
+                () -> service.approve(request.getId(), 0, null, first),
+                () -> service.approve(request.getId(), 0, null, second));
+
+        assertThat(outcomes.stream().filter(outcome -> outcome instanceof FeatureEnablementApprovalResult result
+                && result.approved()).count()).as("承認は1件だけ").isEqualTo(1);
+        assertThat(outcomes.stream().filter(outcome -> outcome instanceof BusinessException failure
+                && failure.getCode() == 409).count()).as("もう1件は 409").isEqualTo(1);
+        assertNoLockFailure(outcomes);
+        assertThat(fixture.requestStatus(request.getId())).isEqualTo("APPROVED");
+        assertThat(fixture.state(Feature.NF03)).isEqualTo("OPEN");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_event WHERE tenant_id = 'default' "
+                + "AND subject_type = 'FEATURE' AND event_type = 'APPROVED' AND subject_id = ?", Long.class,
+                request.getId())).as("開いた履歴は1行").isEqualTo(1);
+    }
+
+    @Test
+    void 子の承認と親の閉鎖の並行はどちらの順でも親が閉じ子は開いていない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF03, SIGNED, EXPIRES);
+        fixture.confirmedSignOffs(Feature.NF03_CERTIFICATION_PII, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor closer = fixture.admin();
+        ensureOpen(Feature.NF03, requester, approver);
+        FeatureEnablementRequest child = service.requestOpen(Feature.NF03_CERTIFICATION_PII, null, requester);
+
+        List<Object> outcomes = race(
+                () -> service.approve(child.getId(), 0, null, approver),
+                () -> {
+                    service.close(Feature.NF03, "MANUAL_OWNER_DECISION", closer);
+                    return "closed";
+                });
+
+        assertNoLockFailure(outcomes);
+        assertThat(outcomes.get(1)).as("親の閉鎖は必ず成功する").isEqualTo("closed");
+        assertThat(fixture.state(Feature.NF03)).isEqualTo("MANUALLY_CLOSED");
+        assertThat(fixture.state(Feature.NF03_CERTIFICATION_PII)).as("子は開いていない")
+                .isIn("CLOSED", "AUTO_CLOSED");
+        assertThat(fixture.requestStatus(child.getId())).as("承認が先なら APPROVED、閉鎖が先なら CANCELLED")
+                .isIn("APPROVED", "CANCELLED");
+        if ("APPROVED".equals(fixture.requestStatus(child.getId()))) {
+            assertThat(fixture.closedReason(Feature.NF03_CERTIFICATION_PII)).isEqualTo("PARENT_CLOSED");
+        } else {
+            assertThat(outcomes.get(0)).isInstanceOf(BusinessException.class);
+        }
+    }
+
+    @Test
+    void 申請と承認と閉鎖を混ぜた並行でdeadlockもlock待ちのtimeoutも起きない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF10, SIGNED, EXPIRES);
+        fixture.confirmedSignOffs(Feature.NF01, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor closer = fixture.admin();
+        ensureOpen(Feature.NF10, requester, approver);
+        FeatureEnablementRequest nf01 = service.requestOpen(Feature.NF01, null, requester);
+
+        List<Object> outcomes = race(
+                () -> service.approve(nf01.getId(), 0, null, approver),
+                () -> {
+                    service.close(Feature.NF10, "MANUAL_OWNER_DECISION", closer);
+                    return "closed";
+                },
+                () -> service.expirePendingRequests(),
+                () -> service.autoClose(Feature.NF10, "TEST_RACE", false));
+
+        assertNoLockFailure(outcomes);
+        assertThat(fixture.state(Feature.NF01)).isEqualTo("OPEN");
+        assertThat(fixture.state(Feature.NF10)).isIn("MANUALLY_CLOSED", "AUTO_CLOSED");
+    }
+
+    /** FE-A06: 署名の取消し × 承認。どちらの順でも、取り消した署名を要する開放単位は開いていない。 */
+    @Test
+    void 署名の取消しと承認の並行はどちらの順でも開放単位は開いていない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor revoker = fixture.admin();
+        ensureClosed(Feature.NF04, revoker);
+        FeatureEnablementRequest request = service.requestOpen(Feature.NF04, null, requester);
+        long privacy = fixture.confirmedId("NF04_PRIVACY");
+        int version = signOffVersion(privacy);
+
+        List<Object> outcomes = race(
+                () -> service.approve(request.getId(), 0, null, approver),
+                () -> {
+                    signOffs.revoke(privacy, version, "SIGNER_WITHDREW", revoker);
+                    return "revoked";
+                });
+
+        assertNoLockFailure(outcomes);
+        assertThat(outcomes.get(1)).as("取消しは必ず成功する").isEqualTo("revoked");
+        assertThat(fixture.state(Feature.NF04)).isNotIn("OPEN", "OPEN_PENDING_RESTART");
+        FeatureEnablementApprovalResult result = (FeatureEnablementApprovalResult) outcomes.get(0);
+        if (result.approved()) {
+            assertThat(fixture.closedReason(Feature.NF04)).as("承認が先なら取消しが自動閉鎖する")
+                    .isEqualTo("SIGN_OFF_REVOKED");
+        } else {
+            assertThat(result.outcome()).as("取消しが先なら承認は条件の不成立")
+                    .isEqualTo(FeatureEnablementApprovalResult.Outcome.CONDITIONS_UNSATISFIED);
+            assertThat(fixture.requestStatus(request.getId())).isEqualTo("PENDING");
+            // 後の test の申請と衝突しないよう取り下げる
+            service.withdraw(request.getId(), fixture.requestVersion(request.getId()), requester);
+        }
+    }
+
+    /** FE-A06: 署名の差替え × 承認。差替えが先なら承認は STALE、承認が先なら成り立つ差替えで開いたまま。 */
+    @Test
+    void 署名の差替えと承認の並行は差替えが先ならSTALEで承認が先なら開いたまま() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor confirmer = fixture.admin();
+        ensureClosed(Feature.NF04, confirmer);
+        FeatureEnablementRequest request = service.requestOpen(Feature.NF04, null, requester);
+        long replacement = fixture.signOff("NF04_SRE", "REGISTERED", SIGNED, EXPIRES);
+
+        List<Object> outcomes = race(
+                () -> service.approve(request.getId(), 0, null, approver),
+                () -> signOffs.confirm(replacement, 0, confirmer));
+
+        assertNoLockFailure(outcomes);
+        assertThat(jdbc.queryForObject("SELECT status FROM t_feature_sign_off WHERE id = ?", String.class, replacement))
+                .isEqualTo("CONFIRMED");
+        FeatureEnablementApprovalResult result = (FeatureEnablementApprovalResult) outcomes.get(0);
+        if (result.approved()) {
+            assertThat(fixture.state(Feature.NF04)).isEqualTo("OPEN");
+        } else {
+            assertThat(result.outcome()).isEqualTo(FeatureEnablementApprovalResult.Outcome.STALE);
+            assertThat(fixture.requestStatus(request.getId())).as("STALE は commit される").isEqualTo("STALE");
+        }
+    }
+
+    /** FE-A07: 定期の自動閉鎖 × 子の承認。どちらの順でも親は自動閉鎖し、子は開いていない。 */
+    @Test
+    void 定期の自動閉鎖と子の承認の並行はどちらの順でも親が閉じ子は開いていない() throws Exception {
+        fixture.confirmedSignOffs(Feature.NF03, SIGNED, EXPIRES);
+        fixture.confirmedSignOffs(Feature.NF03_CERTIFICATION_PII, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        FeatureEnablementActor closer = fixture.admin();
+        ensureClosed(Feature.NF03_CERTIFICATION_PII, closer);
+        ensureOpen(Feature.NF03, requester, approver);
+        FeatureEnablementRequest child = service.requestOpen(Feature.NF03_CERTIFICATION_PII, null, requester);
+        jdbc.update("UPDATE t_feature_sign_off SET status = 'REVOKED', ended_by = ?, ended_at = TIMESTAMP "
+                + "'2026-11-23 09:00:00', end_reason = 'TEST' WHERE tenant_id = 'default' AND kind_code = "
+                + "'NF03_BUSINESS_OWNER' AND status = 'CONFIRMED'", closer.userId());
+
+        List<Object> outcomes = race(
+                () -> service.approve(child.getId(), 0, null, approver),
+                () -> {
+                    evaluation.evaluateOpenUnits(
+                            com.ses.featureenablement.condition.FeatureEvaluationContext.Purpose.PERIODIC, false);
+                    return "evaluated";
+                });
+
+        assertNoLockFailure(outcomes);
+        assertThat(fixture.state(Feature.NF03)).isEqualTo("AUTO_CLOSED");
+        assertThat(fixture.state(Feature.NF03_CERTIFICATION_PII)).isIn("CLOSED", "AUTO_CLOSED", "MANUALLY_CLOSED");
+        if ("PENDING".equals(fixture.requestStatus(child.getId()))) {
+            service.withdraw(child.getId(), fixture.requestVersion(child.getId()), requester);
+        }
+    }
+
+    /** FE-A07: 評価できない状態の始まりは DB にあり、2つの instance 相当の snapshot が同じに閉じる（review P2-2 (c)）。 */
+    @Test
+    void 評価できない状態の始まりは2つのinstance相当のsnapshotで同じに閉じる() {
+        fixture.confirmedSignOffs(Feature.NF10, SIGNED, EXPIRES);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        ensureOpen(Feature.NF10, requester, approver);
+
+        evaluationWriter.markUnverifiable(Feature.NF10, "journal.unreachable", false, null);
+        com.ses.featureenablement.state.FeatureEnablementSnapshot first = loader.load("default");
+        com.ses.featureenablement.state.FeatureEnablementSnapshot second = loader.load("default");
+
+        assertThat(first.unit(Feature.NF10).unverifiableSince()).isNotNull()
+                .isEqualTo(second.unit(Feature.NF10).unverifiableSince());
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF10)).as("評価できない間は閉じる").isFalse();
+
+        evaluationWriter.clearUnverifiable(Feature.NF10, false);
+        holder.reload();
+        assertThat(switches.isEnabled(Feature.NF10)).as("回復で開く").isTrue();
+    }
+
+    /**
+     * review rb-fe-a1 P1-1: 世代の行は no-op の upsert で最初から排他 lock を取る。二つ目の書き手は一つ目の commit まで排他 lock を
+     * 待ち（performance_schema の待ちの辺で確かめる。sleep で順序を作らない）、共有 lock からの昇格が無いため deadlock しない。
+     */
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void 世代の行のupsertは二つ目の書き手を排他lockで待たせdeadlockしない() throws Exception {
+        String lockTenant = "fe-lock-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 11, 23, 10, 0);
+        generationMapper.lockRow(lockTenant, now);
+        org.springframework.transaction.support.TransactionTemplate tx =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        CountDownLatch firstLocked = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong firstConnection = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicLong secondConnection = new java.util.concurrent.atomic.AtomicLong();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Long> first = pool.submit(() -> tx.execute(status -> {
+                firstConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                generationMapper.lockRow(lockTenant, now);
+                firstLocked.countDown();
+                awaitQuietly(releaseFirst);
+                long generation = generationMapper.selectForUpdate(lockTenant).getGeneration();
+                generationMapper.increment(lockTenant, now);
+                return generation;
+            }));
+            assertThat(firstLocked.await(30, TimeUnit.SECONDS)).isTrue();
+            Future<Long> second = pool.submit(() -> tx.execute(status -> {
+                secondConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                generationMapper.lockRow(lockTenant, now);
+                long generation = generationMapper.selectForUpdate(lockTenant).getGeneration();
+                generationMapper.increment(lockTenant, now);
+                return generation;
+            }));
+
+            List<com.ses.test.InnoDbRecordLockWaits.WaitEdge> edges = List.of();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (edges.isEmpty() && System.nanoTime() < deadline) {
+                assertThat(second.isDone()).as("二つ目の書き手は一つ目の commit の前に終わらない").isFalse();
+                edges = com.ses.test.InnoDbRecordLockWaits.waitEdgesOwnedBy(jdbc, firstConnection.get(),
+                        "t_feature_enablement_generation", null);
+                if (edges.isEmpty()) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(20));
+                }
+            }
+            assertThat(edges).as("二つ目の書き手が一つ目の世代の行の lock を待つ").isNotEmpty();
+            assertThat(edges).allSatisfy(edge -> {
+                assertThat(edge.requesterConnectionId()).as("待つのは二つ目（接続 ID を引けない時は 0）")
+                        .isIn(secondConnection.get(), 0L);
+                assertThat(edge.requesterMode()).as("共有 lock ではなく排他 lock を待つ: %s", edge.describe())
+                        .startsWith("X");
+            });
+
+            releaseFirst.countDown();
+            assertThat(first.get(60, TimeUnit.SECONDS)).isZero();
+            assertThat(second.get(60, TimeUnit.SECONDS)).as("二つ目は一つ目の commit の後の世代を読む").isEqualTo(1L);
+        } finally {
+            releaseFirst.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(generationMapper.selectGeneration(lockTenant)).isEqualTo(2L);
+    }
+
+    // ---------------------------------------------------------------- helper
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            if (!latch.await(60, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("待ちの解除が来ません");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 開いていれば閉じる（前の test の状態を持ち越さない）。 */
+    private void ensureClosed(Feature feature, FeatureEnablementActor closer) {
+        if ("OPEN".equals(fixture.state(feature))) {
+            service.close(feature, "MANUAL_VERIFICATION", closer);
+        }
+    }
+
+    private int signOffVersion(long id) {
+        return jdbc.queryForObject("SELECT version FROM t_feature_sign_off WHERE id = ?", Integer.class, id);
+    }
+
+    /** 開放単位を開く（前の test で開いていればそのまま）。 */
+    private void ensureOpen(Feature feature, FeatureEnablementActor requester, FeatureEnablementActor approver) {
+        if ("OPEN".equals(fixture.state(feature))) {
+            return;
+        }
+        FeatureEnablementRequest request = service.requestOpen(feature, null, requester);
+        assertThat(service.approve(request.getId(), 0, null, approver).approved()).isTrue();
+    }
+
+    /** 全ての処理を同時に始め、結果か例外を順に返す。 */
+    @SafeVarargs
+    private static List<Object> race(Callable<Object>... calls) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(calls.length);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Object>> futures = new ArrayList<>();
+            for (Callable<Object> call : calls) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    try {
+                        return call.call();
+                    } catch (Exception failure) {
+                        return failure;
+                    }
+                }));
+            }
+            start.countDown();
+            List<Object> outcomes = new ArrayList<>();
+            for (Future<Object> future : futures) {
+                outcomes.add(future.get(60, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static void assertNoLockFailure(List<Object> outcomes) {
+        for (Object outcome : outcomes) {
+            assertThat(outcome).isNotInstanceOf(DeadlockLoserDataAccessException.class)
+                    .isNotInstanceOf(CannotAcquireLockException.class);
+            if (outcome instanceof Exception failure) {
+                assertThat(failure).as("想定する失敗は業務の 409 だけ").isInstanceOf(BusinessException.class);
+                assertThat(((BusinessException) failure).getCode()).isEqualTo(409);
+            }
+        }
+    }
+}

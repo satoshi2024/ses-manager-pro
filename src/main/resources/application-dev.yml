@@ -13,6 +13,9 @@ app:
     tenants:
       # 空だと AccountingTenantInventoryStartupValidator がtest以外の全profileで起動を止める。
       ids: ${ACCOUNTING_TENANT_IDS:default}
+  # 機能の開放の Demo（feature-enablement-console design §13）: APP_FEATURE_ENABLEMENT_SOURCE=database で DB の源を使う（既定は properties）
+  feature-enablement:
+    source: ${APP_FEATURE_ENABLEMENT_SOURCE:properties}
   security:
     oidc:
       # local loginのprincipalはこの値をtenantにする（sys_user.tenant_id は使わない）。空だとlogin後の全画面・APIが

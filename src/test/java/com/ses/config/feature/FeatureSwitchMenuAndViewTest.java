@@ -68,6 +68,17 @@ class FeatureSwitchMenuAndViewTest {
         assertThat(visible).containsExactlyElementsOf(expected);
     }
 
+    /** FE-A04（FE-AC-006-04）: DB の源で閉じた機能のメニュー・OFF一覧は property の源の OFF と同じ。 */
+    @ParameterizedTest
+    @EnumSource(Feature.class)
+    void DBの源で閉じた機能のメニューとOFF一覧はpropertyの源のOFFと同じ(Feature disabled) {
+        GlobalControllerAdvice property = adminAdvice(disabledOnly(disabled));
+        GlobalControllerAdvice database = adminAdvice(FeatureSwitchTestSupport.databaseDisabledOnly(disabled));
+
+        assertThat(database.allowedMenus(admin())).containsExactlyElementsOf(property.allowedMenus(admin()));
+        assertThat(database.disabledFeatures()).containsExactlyElementsOf(property.disabledFeatures());
+    }
+
     @Test
     void 全機能OFFでもNF以外のメニューは変わらず全機能ONでは何も隠さない() {
         assertThat(adminAdvice(allOff()).allowedMenus(admin()))

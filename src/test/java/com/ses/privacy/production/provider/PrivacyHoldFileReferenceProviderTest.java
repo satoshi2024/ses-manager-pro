@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.ses.privacy.production.provider.PrivacyProviderH2Fixture.BASE_ID;
+import static com.ses.privacy.production.provider.PrivacyProviderH2Fixture.OTHER_TENANT;
 import static com.ses.privacy.production.provider.PrivacyProviderH2Fixture.TENANT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -154,6 +155,54 @@ class PrivacyHoldFileReferenceProviderTest {
         assertThatThrownBy(() -> provider(unavailable).referencedFileNames())
                 .isInstanceOf(PrivacyHoldFileReferenceProvider.PrivacyHoldCleanupAbortedException.class);
         assertThat(unavailable.counter(PrivacyHoldFileReferenceProvider.ABORT_METRIC, "stage", "gate")).isEqualTo(1.0);
+    }
+
+    /**
+     * review rb-fe-a1 P2-1: 機能の開放の署名の文書（{@code FEATURE_SIGN_OFF_DOCUMENT}、{@code t_feature_sign_off.stored_name}）の
+     * DATA_ELEMENT hold は、状態に依らず保存名の残る全ての署名の文書を守り、清掃を中止しない（他 tenant の行は含めない）。
+     */
+    @Test
+    void 署名の文書のDATA_ELEMENT_holdは保存名の残る全ての署名の文書を守り清掃を中止しない() {
+        catalog("FEATURE_SIGN_OFF_DOCUMENT", "FILE_OBJECT", "t_feature_sign_off.stored_name");
+        signOff(TENANT, "REVOKED", "fe-hold-revoked-751.pdf");
+        signOff(TENANT, "CONFIRMED", "fe-hold-confirmed-752.pdf");
+        signOff(OTHER_TENANT, "REVOKED", "fe-hold-other-753.pdf");
+        PrivacyHoldTestGuards.Stub stub = PrivacyHoldTestGuards.stub().tenant(TENANT, PrivacyHoldTestGuards.verified(
+                Set.of(), Set.of("FEATURE_SIGN_OFF_DOCUMENT"), Map.of()));
+
+        Set<String> claims = provider(stub).referencedFileNames();
+
+        assertThat(claims).contains("fe-hold-revoked-751.pdf", "fe-hold-confirmed-752.pdf")
+                .doesNotContain("fe-hold-other-753.pdf");
+        assertThat(stub.counter(PrivacyHoldFileReferenceProvider.ABORT_METRIC, "stage", "resolve")).isZero();
+    }
+
+    /**
+     * review rb-fe-a1 P2-1: SUBJECT hold だけの tenant では、帰属できない署名の文書（NOT_ATTRIBUTABLE）があっても清掃を中止せず、
+     * held な本人の保存名は守る（署名の文書は SUBJECT hold では守られない。残余は D-05 の受理事項。RB §4.5）。
+     */
+    @Test
+    void SUBJECT_holdは署名の文書があっても清掃を中止せずheldな本人の保存名を守る() {
+        catalog("FEATURE_SIGN_OFF_DOCUMENT", "FILE_OBJECT", "t_feature_sign_off.stored_name");
+        signOff(TENANT, "REVOKED", "fe-hold-subject-761.pdf");
+        long held = fx.document(BASE_ID + 762, TENANT, "CONTRACT", false);
+        fx.link(BASE_ID + 762, TENANT, held, "ENGINEER", ENGINEER_ID, false);
+        fx.version(BASE_ID + 762, TENANT, held, 1, "nf07/a1h2/held-762.pdf", false);
+        PrivacyHoldTestGuards.Stub stub = PrivacyHoldTestGuards.stub().tenant(TENANT, PrivacyHoldTestGuards.verified(
+                Set.of("ENGINEER:" + ENGINEER_ID), Set.of(), Map.of()));
+
+        Set<String> claims = provider(stub).referencedFileNames();
+
+        assertThat(claims).contains("nf07/a1h2/held-762.pdf").doesNotContain("fe-hold-subject-761.pdf");
+        assertThat(stub.counter(PrivacyHoldFileReferenceProvider.ABORT_METRIC, "stage", "resolve")).isZero();
+    }
+
+    private void signOff(String tenantId, String status, String storedName) {
+        jdbc.update("INSERT INTO t_feature_sign_off (tenant_id, kind_code, reference, signer_role, signed_on, expires_on, "
+                        + "kind_class, content_sha256, size_bytes, stored_name, status, registered_by, registered_at, "
+                        + "confirmed_by, confirmed_at) VALUES (?, 'NF04_SRE', 'SRE-2026-11', 'SRE', DATE '2026-11-01', "
+                        + "DATE '2027-11-01', 'EVIDENCE', ?, 10, ?, ?, 990001, TIMESTAMP '2026-11-01 10:00:00', 990002, "
+                        + "TIMESTAMP '2026-11-01 11:00:00')", tenantId, "c".repeat(64), storedName, status);
     }
 
     private PrivacyHoldFileReferenceProvider provider(com.ses.privacy.production.retention.hold.PrivacyHoldGate.Decision decision) {

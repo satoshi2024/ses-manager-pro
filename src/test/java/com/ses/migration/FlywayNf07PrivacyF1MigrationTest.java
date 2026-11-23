@@ -376,6 +376,9 @@ class FlywayNf07PrivacyF1MigrationTest {
                                     new org.springframework.core.io.ClassPathResource(script),
                                     java.nio.charset.StandardCharsets.UTF_8));
                 }
+                // V203 は表の作成を含み全体を再実行できないため、catalog の行を入れる文（V198 と同じ形）だけを取り出して
+                // 再実行する。これで V203 の2件も「tenant ごとに1回だけ」入ることを確かめる。
+                st.executeUpdate(v203CatalogSeedStatement());
                 assertEquals(defaultRows, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
                         "再実行で既存 tenant の行は増えない");
                 assertEquals(defaultRows, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='nf07-seed'"),
@@ -388,10 +391,25 @@ class FlywayNf07PrivacyF1MigrationTest {
     }
 
     /**
-     * tenant ごとに入る文書以外の固定の data element の件数（V196 の27件と、V198 の NF01 二者確認（B0）の9件。
+     * tenant ごとに入る文書以外の固定の data element の件数（V196 の27件と、V198 の NF01 二者確認（B0）の9件と、V203 の機能の開放の2件。
      * DOCUMENT:<code> は文書種別ごとに数える）。
      */
-    private static final long CATALOG_FIXED_ELEMENTS = 36L;
+    private static final long CATALOG_FIXED_ELEMENTS = 38L;
+
+    /** V203 の中の、m_pii_data_element へ catalog の行を入れる1文（他の DDL を含まない。末尾の ; は除く）。 */
+    private static String v203CatalogSeedStatement() throws java.io.IOException {
+        String sql;
+        try (java.io.InputStream in = new org.springframework.core.io.ClassPathResource(
+                "db/migration/V203__feature_enablement_console.sql").getInputStream()) {
+            sql = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        int start = sql.indexOf("INSERT INTO m_pii_data_element");
+        assertTrue(start >= 0, "V203 に catalog の行を入れる文がある");
+        assertEquals(-1, sql.indexOf("INSERT INTO m_pii_data_element", start + 1), "V203 の catalog の文は1つだけ");
+        int end = sql.indexOf(';', start);
+        assertTrue(end > start, "V203 の catalog の文が ; で終わる");
+        return sql.substring(start, end);
+    }
 
     // ---------------------------------------------------------------- helper
 

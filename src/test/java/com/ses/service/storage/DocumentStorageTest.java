@@ -73,6 +73,9 @@ class DocumentStorageTest {
         // NF07-A2b: DSAR の開示 package の照合（無ければ全て拒否する fail-closed。mock は package でない＝0件を返す）
         org.springframework.test.util.ReflectionTestUtils.setField(fileScopeValidationService,
                 "privacyExportPackageMapper", mock(com.ses.mapper.privacy.PrivacyExportPackageMapper.class));
+        // FE-A02: 機能の開放の署名の文書の照合（無ければ全て拒否する fail-closed。mock は署名でない＝0件を返す）
+        org.springframework.test.util.ReflectionTestUtils.setField(fileScopeValidationService,
+                "featureSignOffMapper", mock(com.ses.mapper.FeatureSignOffMapper.class));
     }
 
     @Test

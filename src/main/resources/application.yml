@@ -394,6 +394,18 @@ app:
     # 真偽値として解釈できない値は起動失敗になる。手順: .kiro/specs/production-launch/deploy-runbook.md §4.3
     ledger-copy-alignment:
       enabled: ${RESUME_LEDGER_COPY_ALIGNMENT_ENABLED:true}
+  # 機能の開放（feature-enablement-console design §3・§10）。開閉の源・反映の間隔・古さの上限・評価の間隔。
+  # source は dev・test の既定 properties（app.features.* 等を源にする）、prod は database（application-prod.yml）。
+  # allowed は緊急の総スイッチ FEATURE_ENABLEMENT_ALLOWED（true/false だけ。閉なら全ての開放単位を閉じる）。
+  # 運用値（refresh-interval 等）は範囲を bind の時に検査する（FeatureEnablementProperties）。prod の配備の設定では上書きしない（D-5）。
+  feature-enablement:
+    source: properties
+    allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}
+    refresh-interval: PT5S
+    max-staleness: PT60S
+    evaluation-interval: PT5M
+    journal-reverify-interval: PT10M
+    refresh-thread-enabled: true
   # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
   # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
   # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。

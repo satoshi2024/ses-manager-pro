@@ -16,7 +16,8 @@ package com.ses.migration;
 final class LatestMigrationVersion {
 
     /**
-     * 現在の最新versioned migration（V202: backup の書込み静止の信号表（要求・instance・ack）。V201 は NF07 F1 の状態・区分の列の
+     * 現在の最新versioned migration（V203: 機能の開放を system 内で行う9表と追記専用3表の trigger 6件・menu・data element 2件。
+     * V202 は backup の書込み静止の信号表（要求・instance・ack）、V201 は NF07 F1 の状態・区分の列の
      * CHECK、V200 は NF-06 取込 stage 照合の
      * t_document_version.storage_key 索引、V199 は欠番（RB-NF07-REG の予約番号を使わなかった）、V198 は NF01 二者確認（B0）の
      * 7表と自由記述2列の NF07 data element catalog 登録、V197 は履歴・スキルシート取込と取込センターCSVの文書種別、V196 は NF07 F2
@@ -24,7 +25,7 @@ final class LatestMigrationVersion {
      * V193 は NF-06 取込センター画面の menuと import.metadata.manage の seed、V192 は外部API監査の保存期限、
      * V189 は NF01 細粒度認可epoch、V190/V191 は NF07 F1表と権限seed）。
      */
-    static final String LATEST = "202";
+    static final String LATEST = "203";
 
     private LatestMigrationVersion() {
     }

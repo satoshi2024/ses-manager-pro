@@ -78,6 +78,7 @@ class FileScopeValidationServiceTest {
     @Mock private DocumentLinkMapper documentLinkMapper;
     @Mock private Clock clock;
     @Mock private com.ses.mapper.privacy.PrivacyExportPackageMapper privacyExportPackageMapper;
+    @Mock private com.ses.mapper.FeatureSignOffMapper featureSignOffMapper;
 
     private FileScopeValidationService service;
 
@@ -107,6 +108,9 @@ class FileScopeValidationServiceTest {
         lenient().when(privacyExportPackageMapper.countByStoredNames(any(), any(), any())).thenReturn(0L);
         org.springframework.test.util.ReflectionTestUtils.setField(service, "privacyExportPackageMapper",
                 privacyExportPackageMapper);
+        // FE-A02: 機能の開放の署名の文書の照合（無ければ全て拒否する fail-closed。mock は署名でない＝0件を返す）
+        lenient().when(featureSignOffMapper.countByStoredNames(any(), any())).thenReturn(0L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "featureSignOffMapper", featureSignOffMapper);
     }
 
     // ---------------------------------------------------------------- NF07-A2b: 汎用 file 経路の遮断（§3.5.2 P2-5）
@@ -128,6 +132,33 @@ class FileScopeValidationServiceTest {
         verify(resumeIngestionMapper, never()).selectByStoredFileNameForTenant(any(), any());
         verify(documentVersionMapper, never()).selectList(any());
         verify(engineerMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void 機能の開放の署名の文書は全roleで汎用の取得と再scanを拒否し業務表を見ない() {
+        when(featureSignOffMapper.countByStoredNames("signoff.pdf", "signoff.pdf")).thenReturn(1L);
+        when(featureSignOffMapper.countByStoredNames("SIGNOFF.PDF. ", "signoff.pdf")).thenReturn(1L);
+        for (String role : List.of("営業", "要員", "HR", "マネージャー", "管理者")) {
+            loginAs(role);
+            BusinessException download = assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("signoff.pdf"), role);
+            assertEquals(403, download.getCode(), role);
+            assertEquals("error.forbidden", download.getMessageKey(), role);
+            BusinessException rescan = assertThrows(BusinessException.class,
+                    () -> service.assertRescanAllowed("signoff.pdf"), role);
+            assertEquals(403, rescan.getCode(), role);
+            // 大文字・末尾の . と空白の違いも正規化した名前で照合する
+            assertEquals(403, assertThrows(BusinessException.class,
+                    () -> service.assertDownloadAllowed("SIGNOFF.PDF. "), role).getCode(), role);
+        }
+        verify(resumeIngestionMapper, never()).selectByStoredFileNameForTenant(any(), any());
+        verify(engineerMapper, never()).selectOne(any());
+
+        // 照会に失敗した・mapper が無い場合も拒否する（fail-closed）
+        when(featureSignOffMapper.countByStoredNames(any(), any())).thenThrow(new IllegalStateException("db"));
+        assertEquals(403, assertThrows(BusinessException.class, () -> service.assertRescanAllowed("other.pdf")).getCode());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "featureSignOffMapper", null);
+        assertEquals(403, assertThrows(BusinessException.class, () -> service.assertRescanAllowed("other.pdf")).getCode());
     }
 
     @Test

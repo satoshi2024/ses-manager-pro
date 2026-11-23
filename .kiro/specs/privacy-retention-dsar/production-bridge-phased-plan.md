@@ -1140,6 +1140,7 @@ NF07 の policy 値が確定した後の手順:
 | R-15 | 帰属できない行（未変換の取込、integration hub の payload、snapshot、参照元が物理削除された実体）にある held subject のデータは SUBJECT hold で守られない | hold 開始画面で該当 element と件数を示し、必要なら DATA_ELEMENT hold を足す。残余は D-05 owner が受理する（§7）。F2 の inventory で帰属を増やす |
 | R-16 | Journal の不達が続くと、hold を使った tenant の帰属可能な削除が止まり続け、期限超過の保持になる | 経路ごとの skip 件数と `UNAVAILABLE` の継続時間を監視し、閾値（SRE が決める）を超えたら通報する。reconciler が pending と projection 欠落を自動で解消する |
 | R-17 | batch の途中で開始された hold がその回に反映されない | 窓は最大1回分の実行時間（既知の残余として受け入れ、hold 開始画面に表示）。手動の文書処分は同一 tx で照会するので窓が無い |
+| R-18 | 機能の開放の署名者の氏名と署名の文書（`FEATURE_SIGN_OFF_SIGNER_NAME`・`FEATURE_SIGN_OFF_DOCUMENT`。V203、`NOT_ATTRIBUTABLE`）は、署名者が SUBJECT hold の本人でも SUBJECT hold で守られない（`signer_name` は自由記述で `sys_user`・要員と結ばず、F2 provider で本人を導出できない）。守るには DATA_ELEMENT hold を掛け、その間は署名の消去（RB §4.4 の D17）が止まり、孤児の清掃は D10 で署名の文書の保存名を守る（feature-enablement 実装 review rb-fe-a1 P2-1・P3-12） | SUBJECT hold の開始のたびにこの2件の element を選ぶ（DATA_ELEMENT_HOLD か ACCEPT_RISK）。**残余の受理は D-05 owner の署名項目、分類（`NOT_ATTRIBUTABLE`）は Plan Review で Privacy が確認する項目として扱う（未取得）**。`SubjectAttribution` の分類の変更は migration と Plan Review でだけ行う |
 
 ---
 

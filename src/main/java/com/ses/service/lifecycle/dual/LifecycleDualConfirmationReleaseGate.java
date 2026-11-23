@@ -3,14 +3,13 @@ package com.ses.service.lifecycle.dual;
 import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitchProperties;
 import com.ses.config.feature.FeatureSwitches;
+import com.ses.featureenablement.signoff.SignOffReferenceRules;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.util.Locale;
-import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -39,22 +38,11 @@ public class LifecycleDualConfirmationReleaseGate {
     /** 起動を止めた理由を示す固定コード（監視のlog検索用）。 */
     public static final String VIOLATION_CODE = "NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_MISSING";
 
-    /** 署名の参照の形式（英数字で始まる4〜128文字。review文書のID・ticket番号等）。 */
-    static final Pattern SIGN_OFF_REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/#-]{3,127}");
-
     /**
-     * 一部にでも含めば署名の参照とみなさない語（小文字で比較。W3-21a review P3-6: 完全一致だけでは {@code TODO-1}・
-     * {@code TBD2026}・{@code xxxxx} が通った）。
+     * 署名の参照の形式（英数字で始まる4〜128文字。review文書のID・ticket番号等）。placeholder の語の規則とともに、機能の開放の
+     * 署名の参照と共通の部品（{@link SignOffReferenceRules}）にある。
      */
-    private static final List<String> PLACEHOLDER_FRAGMENTS = List.of("todo", "tbd", "xxx", "placeholder", "changeme",
-            "change-me", "change_me", "dummy", "fixme", "sample", "example", "unsigned", "replace", "your-");
-
-    /** この語で始まる値は署名の参照とみなさない（小文字で比較）。 */
-    private static final List<String> PLACEHOLDER_PREFIXES = List.of("test", "pending", "tmp", "temp", "none", "null",
-            "n/a", "dev", "local");
-
-    private static final Pattern HAS_LETTER = Pattern.compile(".*[A-Za-z].*");
-    private static final Pattern HAS_DIGIT = Pattern.compile(".*[0-9].*");
+    static final Pattern SIGN_OFF_REF = SignOffReferenceRules.REFERENCE;
 
     private final ObjectProvider<FeatureSwitches> featureSwitches;
     private final FeatureSwitchProperties properties;
@@ -84,17 +72,7 @@ public class LifecycleDualConfirmationReleaseGate {
      * placeholderの語を一部に含む値・placeholderの語で始まる値は不可。
      */
     static boolean acceptable(String reference) {
-        if (reference == null) {
-            return false;
-        }
-        String trimmed = reference.trim();
-        if (!trimmed.equals(reference) || !SIGN_OFF_REF.matcher(trimmed).matches()
-                || !HAS_LETTER.matcher(trimmed).matches() || !HAS_DIGIT.matcher(trimmed).matches()) {
-            return false;
-        }
-        String lower = trimmed.toLowerCase(Locale.ROOT);
-        return PLACEHOLDER_FRAGMENTS.stream().noneMatch(lower::contains)
-                && PLACEHOLDER_PREFIXES.stream().noneMatch(lower::startsWith);
+        return SignOffReferenceRules.withLetterAndDigit(reference);
     }
 
     private String signOffReference() {

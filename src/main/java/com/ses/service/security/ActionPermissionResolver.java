@@ -37,6 +37,10 @@ public final class ActionPermissionResolver {
             Map.entry("compliance-gate", "compliance-gate"),
             Map.entry("contract-documents", "contract-document"),
             Map.entry("digital-invoices", "digital-invoice"),
+            // 機能の開放（feature-enablement-console FE-RQ-012）。V203 の m_menu seed と対にする（未登録だと /api/feature-enablement/**
+            // が管理者を含む全roleで403になる。CRM-R2-P1-01と同じ罠）。管理者専用で、非管理者のgroupへ feature-enablement.* を seed
+            // しない（role-admin の '*' で通る）。group の無い利用者は AuthorizationServiceImpl.isAdminOnlyAction の接頭辞で拒否する。
+            Map.entry("feature-enablement", "feature-enablement"),
             Map.entry("inbound-invoices", "inbound-invoice"),
             Map.entry("contracts", "contract"),
             Map.entry("copilot", "copilot"),

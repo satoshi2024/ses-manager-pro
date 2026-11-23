@@ -49,6 +49,11 @@ class PrivacyDataElementCatalogSeedTest {
     private static final String SEED = "db/migration/V196__nf07_privacy_data_element_catalog_seed.sql";
     /** V198: NF01 二者確認（B0）の7表と自由記述2列の catalog 行。 */
     private static final String B0_SEED = "db/migration/V198__nf01_dual_confirmation_privacy_catalog.sql";
+    /**
+     * V203: 機能の開放の署名者の氏名・署名の文書の catalog 行。V203 の DDL（ENGINE・STORED・trigger）は H2 で流せないため、
+     * 末尾の {@code INSERT INTO m_pii_data_element} の文だけを再実行する（application-test.yml は H2 変種で同じ文を流す）。
+     */
+    private static final String FE_SEED = "db/migration/V203__feature_enablement_console.sql";
     private static final String TENANT = "default";
 
     /** V198 が入れる B0 の data element と保存先（V195 の7表と、別の data element にした自由記述2列）。 */
@@ -112,13 +117,20 @@ class PrivacyDataElementCatalogSeedTest {
     }
 
     @Test
-    void seedは構造行だけでownerとデータ分類とinventory状態はUNKNOWNのまま() {
+    void seedは構造行だけでownerとデータ分類とinventory状態はUNKNOWNのまま() throws Exception {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? AND "
                 + "(owner_state <> 'UNKNOWN' OR data_class <> 'UNKNOWN' OR inventory_status <> 'UNKNOWN' "
                 + "OR owner_ref IS NOT NULL)", Long.class, TENANT)).isZero();
-        // V196 の27件と V198（NF01 二者確認 B0）の9件
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
-                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT)).isEqualTo(36L);
+        // V196 の27件と V198（NF01 二者確認 B0）の9件と V203（機能の開放の署名者の氏名・署名の文書）の2件
+        long fixed = jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
+                + "AND data_element_id NOT LIKE 'DOCUMENT:%'", Long.class, TENANT);
+        assertThat(fixed).isEqualTo(38L);
+        // 配備の手順（RB §3.4 の DBA 立会いの照合 SQL）の件数も seed と同じ（review rb-fe-a1 P2-4。migration を足した時の書き漏れを防ぐ）
+        java.util.regex.Matcher runbook = java.util.regex.Pattern.compile(
+                "data_element_id NOT LIKE 'DOCUMENT:%';\\s*--\\s*(\\d+)").matcher(java.nio.file.Files.readString(
+                java.nio.file.Path.of(".kiro/specs/production-launch/deploy-runbook.md")));
+        assertThat(runbook.find()).as("RB §3.4 の catalog の件数の照会").isTrue();
+        assertThat(Long.parseLong(runbook.group(1))).as("RB §3.4 の catalog の件数").isEqualTo(fixed);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id = ? "
                 + "AND inventory_ref IS NULL", Long.class, TENANT)).isZero();
     }
@@ -303,11 +315,15 @@ class PrivacyDataElementCatalogSeedTest {
         return mapper.selectList(new LambdaQueryWrapper<PiiDataElement>().eq(PiiDataElement::getTenantId, tenant));
     }
 
-    /** catalog の seed（V196 と V198）を再実行する。 */
-    private static void runSeed(Connection connection) {
+    /** catalog の seed（V196・V198 と V203 の catalog 行）を再実行する。 */
+    private static void runSeed(Connection connection) throws java.io.IOException {
         for (String script : List.of(SEED, B0_SEED)) {
             ScriptUtils.executeSqlScript(connection, new EncodedResource(new ClassPathResource(script),
                     StandardCharsets.UTF_8));
         }
+        String v203 = new ClassPathResource(FE_SEED).getContentAsString(StandardCharsets.UTF_8);
+        String catalogInsert = v203.substring(v203.lastIndexOf("INSERT INTO m_pii_data_element"));
+        ScriptUtils.executeSqlScript(connection, new EncodedResource(new org.springframework.core.io.ByteArrayResource(
+                catalogInsert.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8));
     }
 }
