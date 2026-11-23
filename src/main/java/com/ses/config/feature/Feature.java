@@ -41,8 +41,8 @@ public enum Feature {
      * （{@code /api/lifecycle/tasks/{id}/dual-confirmation/**}、{@code /api/my/lifecycle/tasks/{id}/dual-confirmation/**}）は
      * 親のNF-01の遮断表に属し、本スイッチがOFFの間はservice層（{@code LifecycleDualConfirmationCoordinator}）が
      * 400 {@code error.lifecycle.dualConfirmationDisabled} で拒否する。業務commentを書き込む経路であるため、
-     * prodではPrivacyの署名（計画 §10・§12 O-8）の記録が無い限りONで起動できない
-     * （{@code LifecycleDualConfirmationReleaseGate}）。</p>
+     * Privacyの署名（計画 §10・§12 O-8）が確認されていなければ開けない（機能の開放の条件
+     * {@code LifecycleDualConfirmationEnablementConditions}。起動は止めず、この開放単位だけを閉じる。FE-B01）。</p>
      */
     NF01_DUAL_CONFIRMATION(NF01, "二者確認（DUAL_CONFIRMATION）の提出・確認",
             List.of(),

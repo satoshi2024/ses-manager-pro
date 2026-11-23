@@ -127,6 +127,28 @@ class FeatureEnablementApiControllerTest {
                 .andExpect(jsonPath("$.data.size").value(200));
     }
 
+    /** FE-B01: NF01 二者確認の詳細は閉鎖の dialog の警告に二者確認を含む有効なテンプレートの件数を返す（FS 4.9.5 の (3)）。 */
+    @Test
+    void NF01二者確認の詳細は閉鎖の警告に二者確認を含む有効なテンプレートの件数を返す() throws Exception {
+        Long before = jdbc.queryForObject("SELECT COUNT(*) FROM m_lifecycle_template t WHERE t.deleted_flag = 0 "
+                + "AND t.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM m_lifecycle_template_task tt WHERE tt.template_id = t.id "
+                + "AND tt.deleted_flag = 0 AND tt.evidence_type = 'DUAL_CONFIRMATION')", Long.class);
+        jdbc.update("INSERT INTO m_lifecycle_template (template_type, name, version_no, status, valid_from) "
+                + "VALUES ('FEB01-API', 'FE-B01', 1, 'ACTIVE', ?)", SIGNED);
+        Long template = jdbc.queryForObject("SELECT id FROM m_lifecycle_template WHERE template_type = 'FEB01-API'",
+                Long.class);
+        jdbc.update("INSERT INTO m_lifecycle_template_task (template_id, task_code, task_name, assignee_rule, evidence_type) "
+                + "VALUES (?, 'DUAL1', '二者確認', 'ROLE', 'DUAL_CONFIRMATION')", template);
+
+        mockMvc.perform(get("/api/feature-enablement/units/NF01_DUAL_CONFIRMATION").with(as(admin, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closeWarnings[0].code").value("dualConfirmation.activeDualTemplates"))
+                .andExpect(jsonPath("$.data.closeWarnings[0].count").value(before + 1));
+        mockMvc.perform(get("/api/feature-enablement/units/NF04").with(as(admin, "管理者")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closeWarnings").isEmpty());
+    }
+
     @Test
     void 営業とHRとマネージャーはgroupの有無に関わらず画面もAPIも403() throws Exception {
         long copiedAdminGroup = copiedAdminGroup();

@@ -133,11 +133,9 @@ app:
   # ポータル・NF03・NF03 資格番号・NF04・NF10。FE-A11）の placeholder はここに置かない。それらの旧い環境変数（FEATURE_NF01_ENABLED 等）
   # を設定すると prod は起動しない（FeatureEnablementProductionValidator）。残りの機能は段階 B〜D で system の中へ移すまで、ここの値で
   # 開閉する（本番も既定は OFF。再起動で反映）。手順: .kiro/specs/production-launch/feature-switches.md
+  # 段階 B: NF01 二者確認（FE-B01）も system の中で開閉し、Privacy 署名は画面で登録・確認する（placeholder を置かない。
+  # FEATURE_NF01_DUAL_CONFIRMATION_ENABLED・FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF を設定すると起動しない）。
   features:
-    # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
-    nf01-dual-confirmation:
-      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
-      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
     # NF-02の子（顧客ポータルの問い合わせ）の公開範囲（開閉は system の中。公開範囲の変更は段階 B の FE-B03 で system の中へ移す）
     nf02-customer-portal:
       # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）

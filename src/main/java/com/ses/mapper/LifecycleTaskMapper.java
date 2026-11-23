@@ -50,4 +50,12 @@ public interface LifecycleTaskMapper extends BaseMapper<LifecycleTask> {
 
     @Select("SELECT * FROM t_lifecycle_task WHERE case_id = #{caseId} AND is_engineer_visible = 1 AND deleted_flag = 0 ORDER BY id ASC")
     List<LifecycleTask> selectEngineerVisibleByCaseId(@Param("caseId") Long caseId);
+
+    /**
+     * 案件のタスク（テンプレートから複写された値）で、証跡種別が許可値一覧の外にある行の件数（FS 4.9.5 の (2)。論理削除を除く。
+     * 比較は {@link LifecycleTemplateTaskMapper#EVIDENCE_TYPE_OUTSIDE_ALLOWED} と同じバイト列の比較。FE-B01）。
+     */
+    @Select("SELECT COUNT(*) FROM t_lifecycle_task tt WHERE tt.deleted_flag = 0 AND "
+            + LifecycleTemplateTaskMapper.EVIDENCE_TYPE_OUTSIDE_ALLOWED)
+    long countEvidenceTypesOutsideAllowed();
 }

@@ -41,7 +41,9 @@ class FeatureConditionCodeClassificationTest {
             // 段階 C・D の既存の検査が返す照会の失敗（design §4.2 の例）
             "privacyAdmins.unverifiable", "journal.unreachable", "journal.timeout", "state=STATE_IO_ERROR",
             // FE-A11: NF02 の暦を照会できない（開放の時だけの条件のまま）
-            FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE);
+            FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE,
+            // 段階 B（FE-B01）: NF01 二者確認の証跡種別を照会できない
+            "dualConfirmation.evidenceTypes.unverifiable");
 
     /** 条件の不成立を表す code（評価できない類であってはならない）。 */
     private static final List<String> UNSATISFIED = List.of(
@@ -53,7 +55,11 @@ class FeatureConditionCodeClassificationTest {
             "dsar.dueDaysUnset", "state=MISSING", FeatureEnablementCatalog.CODE_NF02_CALENDAR,
             FeatureEnablementCatalog.CODE_NF05_BARRIER_OFF,
             // FE-A11: NF10 の scheduler の状態（警告だけ）
-            SchedulingConditionEvaluator.CODE_DISABLED, SchedulingConditionEvaluator.CODE_ENABLED);
+            SchedulingConditionEvaluator.CODE_DISABLED, SchedulingConditionEvaluator.CODE_ENABLED,
+            // 段階 B（FE-B01）: NF01 二者確認の Privacy 署名の参照と証跡種別
+            "dualConfirmation.privacySignOff.missing", "dualConfirmation.privacySignOff.invalid",
+            "dualConfirmation.privacySignOff.valid", "dualConfirmation.evidenceTypes.outsideAllowed",
+            "dualConfirmation.evidenceTypes.allowed");
 
     @Test
     void 一覧のcodeは分類と一致する() {

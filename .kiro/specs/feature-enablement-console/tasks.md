@@ -158,6 +158,7 @@
   - **Implementation:** `design.md` §8.2。BINARY 比較の H2 での書き方を着手時に確かめる。
   - **Automated test:** `LifecycleDualConfirmationEnablementConditionsTest`（`acceptable` と同じ入力で同じ成否、許可値の外の行で不成立）、`LifecycleDualConfirmationReleaseGateTest`（prod でも起動を止めない）、`LifecycleTemplateDualPolicyTest`・`LifecycleTemplateDualSwitchUnavailableTest`（既存のまま通る）、MySQL で照合順序の揺れ（全角英字・NBSP）を検出する case（shard の登録を同じ commit で）。
   - **Demo:** dev（DB の源）で合成の Privacy の署名を登録・確認し、NF01 → 二者確認の順に開き、二者確認の提出が通ること、閉鎖の dialog に DUAL template の件数が出ることを見る。
+    - 手順（段階 B で補った。統括が dev の MySQL と browser で一括して行う）: (1) `APP_FEATURE_ENABLEMENT_SOURCE=database` で起動し、FE-A10 の Demo の手順で NF01 を開く。(2) 管理者 A が「署名・受理」tab で `NF01_DUAL_PRIVACY`（参照は英字と数字を含む合成の値。例 `PRIV-DEMO-2026-01`）・`NF01_DUAL_MANUAL_CHECK`・`NF01_DUAL_BREAK_GLASS_DECISION`・`NF01_DUAL_RUNNER_EVIDENCE`・`NF01_DUAL_REVIEW_PASS` を合成の PDF で登録し、管理者 B が確認する（参照を `TODO-1` にした `NF01_DUAL_PRIVACY` は登録の時に 400 になる）。(3) 「開放単位」tab の NF01_DUAL_CONFIRMATION の「再評価」で `dualConfirmation.privacySignOff.valid` と `dualConfirmation.evidenceTypes.allowed` が ✓ であることを見て、A が申請・B が承認する。(4) `/lifecycle/templates` で二者確認を含むテンプレートを作って有効にし、案件を起票して DUAL タスクの提出が通ることを見る。(5) A が NF01_DUAL_CONFIRMATION の「閉鎖」を押すと、dialog に「二者確認を含む有効なテンプレートが 1 件あります。…」が出ることを見る。(6) 起動の log に `[二者確認] Privacy署名の参照を確認して公開します` が出ない（起動時検査を撤去した）ことを見る。揺れた証跡種別の検出は `LifecycleDualConfirmationEnablementConditionsTest`（H2）と `LifecycleDualConfirmationEvidenceTypeMySqlTest`（MySQL shard 2）の結果で見る（DB を手作業で書き換えない。FS 4.9.5）。
 
 - [ ] **FE-B02 — NF06**
   - **依存:** 段階 A

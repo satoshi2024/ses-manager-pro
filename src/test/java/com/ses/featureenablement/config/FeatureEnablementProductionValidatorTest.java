@@ -130,6 +130,43 @@ class FeatureEnablementProductionValidatorTest {
                 .isEqualTo("APPFEATURESNF01ENABLED");
     }
 
+    /** FE-B01: 本番の目録で DB 管理にした NF01 二者確認の開閉の変数と Privacy 署名の参照の変数は、どの綴りでも起動を止める。 */
+    @Test
+    void 段階BのNF01二者確認の開閉と署名の参照の旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties(),
+                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED");
+        assertStopsWithStandard(Map.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF", SECRET_LIKE_VALUE),
+                new Properties(), "FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF");
+        assertStopsWithStandard(Map.of("APP_FEATURES_NF01DUALCONFIRMATION_PRIVACYSIGNOFFREF", SECRET_LIKE_VALUE),
+                new Properties(), "APP_FEATURES_NF01DUALCONFIRMATION_PRIVACYSIGNOFFREF");
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.features.nf01-dual-confirmation.privacy-sign-off-ref", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.features.nf01-dual-confirmation.privacy-sign-off-ref");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf01-dual-confirmation\":"
+                        + "{\"privacy-sign-off-ref\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf01-dual-confirmation.privacy-sign-off-ref]");
+        // 段階 A の写しの目録（印なし）では止めない（印に従う）
+        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF", "x"),
+                new Properties()).validate()).doesNotThrowAnyException();
+        assertThat(new FeatureEnablementProductionValidator(prod(), databaseProperties(), FeatureEnablementCatalog.standard(),
+                Map::of, Properties::new).legacySettingPrefixes())
+                .contains("FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF", "APPFEATURESNF01DUALCONFIRMATIONPRIVACYSIGNOFFREF");
+    }
+
+    private static void assertStopsWithStandard(Map<String, String> env, Properties systemProperties, String expectedName) {
+        assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> env, () -> systemProperties).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedName)
+                .hasMessageNotContaining(SECRET_LIKE_VALUE);
+    }
+
+    private static FeatureEnablementProperties databaseProperties() {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        return properties;
+    }
+
     private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {
         Map<String, String> environment = new LinkedHashMap<>(env);
         assertThatThrownBy(() -> validator(prod(), environment, systemProperties).validate())

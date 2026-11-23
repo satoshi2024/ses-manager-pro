@@ -337,13 +337,25 @@ const FeatureEnablement = (function () {
     }
 
     function closeUnit(key) {
+        // 閉鎖の警告（例: NF01 二者確認は二者確認を含む有効な template の件数。FE-B01）は詳細の API から読む。読めなくても閉鎖はできる
+        request('GET', API + '/units/' + encodeURIComponent(key)).then(function (detail) {
+            confirmClose(key, (detail && detail.closeWarnings) || []);
+        }).catch(function () {
+            confirmClose(key, []);
+        });
+    }
+
+    function confirmClose(key, warnings) {
         const options = {};
         (state.catalog ? state.catalog.manualCloseReasons : []).forEach(function (code) {
             options[code] = label('featureEnablement.closeReason.', code);
         });
+        const warningText = warnings.map(function (warning) {
+            return t('featureEnablement.closeWarning.' + warning.code, warning.count);
+        }).join(' ');
         Swal.fire({
             titleText: t('featureEnablement.confirm.close.title', unitName(key)),
-            text: t('featureEnablement.confirm.close.text'),
+            text: t('featureEnablement.confirm.close.text') + (warningText ? ' ' + warningText : ''),
             icon: 'warning',
             input: 'select',
             inputOptions: options,

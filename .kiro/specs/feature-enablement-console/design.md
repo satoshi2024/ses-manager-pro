@@ -696,6 +696,11 @@ writeAutoClose(f, reason):
 - 評価器: (a) 署名 `NF01_DUAL_PRIVACY` の参照が `acceptable`。(b) 証跡種別の許可値の外の行が 0 件（FS 4.9.5 の (1)(2)）。`m_lifecycle_template_task`・`t_lifecycle_task` の mapper に件数の method を足す。照合順序で揺れを同一視しないよう、MySQL では `CAST(... AS BINARY)` と同じ比較を行う。H2 で同じ SQL が動かない場合は、`HEX` の値の一覧を Java で許可値と照合する（実装の着手時に両方で確かめる）。
 - 閉鎖の dialog の警告（§5.5）のため、有効な DUAL template の件数（FS 4.9.5 の (3)）を詳細の API で返す。
 - 実行時の gate（`LifecycleDualConfirmationCoordinator:660`、`LifecycleTemplateServiceImpl:316`）は変えない。
+- 実装で決めた細部（FE-B01）:
+  - バイト列の比較は `CAST(CONCAT(evidence_type, '|') AS BINARY(128)) NOT IN (CAST('NONE|' AS BINARY(128)), …)` で、MySQL と H2 の同じ SQL で動く（H2 に `HEX` は無く、長さの無い `CAST(... AS BINARY)` は H2 で `BINARY(1)` になるため長さを付ける。`BINARY(N)` は短い値を 0x00 で埋めるため、末尾に区切りの `'|'` を付けて末尾の NUL も検出する。`VARCHAR(30)` の utf8mb4 は最大 120 byte）。条件の文は `LifecycleTemplateTaskMapper.EVIDENCE_TYPE_OUTSIDE_ALLOWED` の1箇所で、`LifecycleTaskMapper` も同じ文を使う。許可値は `LifecycleTemplateServiceImpl.EVIDENCE_TYPES`（public にした）と同じで、`LifecycleDualConfirmationEnablementConditionsTest` が全ての許可値で0件を確かめる。照会の失敗は `dualConfirmation.evidenceTypes.unverifiable`（評価できない類）。
+  - `LifecycleDualConfirmationReleaseGate` は bean でなくなり（`@Component`・`@Profile("prod")`・`@PostConstruct` を外した）、`acceptable` だけを持つ。起動時の判定は `FeatureEnablementStartupEvaluator` が評価器で行う。参照の検査は、DB の源で DB 管理の時は評価に使う snapshot の確認済みの `NF01_DUAL_PRIVACY` の参照、それ以外（property の源）は `privacy-sign-off-ref` を見る。
+  - 閉鎖の警告は拡張点 `FeatureEnablementCloseWarningSource`（開放単位ごとの code と件数）で、`FeatureEnablementQueryService.UnitDetail.closeWarnings` が返し、画面の閉鎖の dialog が `featureEnablement.closeWarning.<code>` の文言で出す。読めない時は警告なしで閉鎖を続ける。
+  - 開閉以外の旧い変数（署名の値・設定）は `FeatureEnablementProductionValidator.LEGACY_SETTING_NAMES`（開放単位ごと。正規化した名前の前方一致）に置き、DB 管理の印のある開放単位の分を拒否する。FE-B01 は `FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF` と property の綴り（開閉の `FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` は印から自動で拒否する）。`application-prod.yml` の NF01 二者確認の placeholder を削除した。
 
 ### 8.3 NF06
 

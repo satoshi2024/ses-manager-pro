@@ -42,7 +42,8 @@ import java.util.function.Supplier;
  *       P3-5）。</li>
  *   <li><b>旧い変数</b>（prod）: 目録で DB 管理にした開放単位の旧い開閉の変数（{@link Feature#environmentVariable()}・
  *       {@link Feature#propertyName()} の全ての綴り）が環境変数・system property・{@code SPRING_APPLICATION_JSON} にあれば止める
- *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。</li>
+ *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。
+ *       開閉以外の旧い変数（署名の値・設定。{@link #LEGACY_SETTING_NAMES}）も、DB 管理の印のある開放単位の分を同じく拒否する。</li>
  * </ul>
  *
  * <p>prod の判定は {@code Environment.acceptsProfiles(Profiles.of("prod"))}（CLAUDE.md。{@code @ActiveProfiles("prod")} の試験でも
@@ -62,6 +63,20 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     static final String JSON_PROPERTY = "spring.application.json";
 
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * 開閉以外の旧い変数（署名の値・設定。環境変数と property の綴り。正規化した名前の前方一致で、list の添字の付いた綴りも拾う）。
+     * DB 管理の印のある開放単位の分だけ拒否する（値は system の中の署名・設定へ移した。D-5。段階 B〜D が開放単位ごとに足す）。
+     */
+    static final Map<Feature, List<String>> LEGACY_SETTING_NAMES;
+
+    static {
+        Map<Feature, List<String>> names = new java.util.EnumMap<>(Feature.class);
+        // FE-B01: NF01 二者確認の Privacy 署名の参照（署名 NF01_DUAL_PRIVACY へ移した）
+        names.put(Feature.NF01_DUAL_CONFIRMATION, List.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF",
+                "app.features.nf01-dual-confirmation.privacy-sign-off-ref"));
+        LEGACY_SETTING_NAMES = java.util.Collections.unmodifiableMap(names);
+    }
 
     private final Environment environment;
     private final FeatureEnablementProperties properties;
@@ -123,6 +138,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         Set<String> overrides = new TreeSet<>();
         Set<String> legacy = new TreeSet<>();
         Set<String> legacyKeys = legacyKeys();
+        Set<String> legacySettingPrefixes = legacySettingPrefixes();
         names.forEach((name, origin) -> {
             String key = nameKey(name);
             boolean json = origin.equals(JSON_VARIABLE);
@@ -130,7 +146,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                     || (key.startsWith(SHORT_PREFIX) && (json || !key.equals(ALLOWED_KEY)))) {
                 overrides.add(describe(name, origin));
             }
-            if (legacyKeys.contains(key)) {
+            if (legacyKeys.contains(key) || legacySettingPrefixes.stream().anyMatch(key::startsWith)) {
                 legacy.add(describe(name, origin));
             }
         });
@@ -155,6 +171,19 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
             }
         }
         return keys;
+    }
+
+    /** DB 管理の印のある開放単位の開閉以外の旧い変数（正規化した名前。前方一致で比べる）。 */
+    Set<String> legacySettingPrefixes() {
+        Set<String> prefixes = new LinkedHashSet<>();
+        for (UnitDefinition unit : catalog.units()) {
+            if (unit.databaseManaged()) {
+                for (String name : LEGACY_SETTING_NAMES.getOrDefault(unit.feature(), List.of())) {
+                    prefixes.add(nameKey(name));
+                }
+            }
+        }
+        return prefixes;
     }
 
     /** 名前 → 出処（環境変数・system property・JSON の key）。JSON を読めなければその旨を出処の名前で返す。 */
