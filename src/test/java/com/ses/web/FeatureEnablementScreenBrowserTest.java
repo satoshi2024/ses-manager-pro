@@ -358,7 +358,10 @@ class FeatureEnablementScreenBrowserTest {
     }
 
     private static int getStatus(HttpClient http, String url) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+        return http.send(HttpRequest.newBuilder(URI.create(url))
+                        .header("Accept", "text/html")
+                        .GET()
+                        .build(),
                 HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
