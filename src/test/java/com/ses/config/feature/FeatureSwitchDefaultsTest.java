@@ -9,9 +9,10 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -391,13 +392,14 @@ class FeatureSwitchDefaultsTest {
 
     private static Binder binder(Map<String, Object> environment, String... yamlResources) throws IOException {
         MutablePropertySources sources = new MutablePropertySources();
-        sources.addFirst(new MapPropertySource("testEnvironment", environment));
+        String envSourceName = StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
+        sources.addFirst(new SystemEnvironmentPropertySource(envSourceName, environment));
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         for (String name : yamlResources) {
             List<PropertySource<?>> loaded = loader.load(name, new ClassPathResource(name));
             for (PropertySource<?> source : loaded) {
-                // 後から読んだファイルほど優先する（testEnvironmentの直後へ差し込む）。
-                sources.addAfter("testEnvironment", source);
+                // 後から読んだファイルほど優先する（systemEnvironmentの直後へ差し込む）。
+                sources.addAfter(envSourceName, source);
             }
         }
         return new Binder(ConfigurationPropertySources.from(sources), new PropertySourcesPlaceholdersResolver(sources));
