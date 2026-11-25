@@ -46,6 +46,13 @@ public class IntegrationHubWebhookDeliveryWorker {
     private IntegrationHubWebhookReplayAuthorizationService currentScope;
     @org.springframework.beans.factory.annotation.Autowired
     private IntegrationHubOutboundStartupBarrier startupBarrier;
+    /**
+     * NF05 の実行時の判定（feature-enablement-console design §9.3。FE-D03）。一時の閉鎖では claim を止め、処理中の配信を DLQ にせず
+     * PENDING へ戻す。確定の閉鎖は従来の kill switch（未送信は保留、処理中は DLQ {@code KILL_SWITCH}）。Spring 管理外で {@code new} した
+     * 試験では無く、properties の値（閉は確定の閉鎖）を使う。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     public IntegrationHubWebhookDeliveryWorker(com.ses.mapper.ApiDeliveryMapper deliveryMapper,
                                                ApiDeliveryService deliveryService,
@@ -76,7 +83,12 @@ public class IntegrationHubWebhookDeliveryWorker {
         if (startupBarrier == null) return 0;
         startupBarrier.continueRecovery();
         if (!startupBarrier.isReady()) return 0;
-        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+        com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure closure = closure();
+        if (closure == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT) {
+            // 一時の閉鎖は claim を止めるだけ（未送信は PENDING のまま、解ければ同じ process で再開する）
+            return 0;
+        }
+        if (closure == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.DEFINITIVE) {
             int held = 0;
             for (ApiDelivery row : deliveryMapper.selectDue(utcNow(), properties.getExternalTransport().getBatchSize())) {
                 held += deliveryMapper.holdPending(row.getId(), row.getVersion(), utcNow());
@@ -108,7 +120,11 @@ public class IntegrationHubWebhookDeliveryWorker {
                 || TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("webhook送信はtransaction外から呼び出してください");
         }
-        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+        com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure beforeClaim = closure();
+        if (beforeClaim == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT) {
+            return false;
+        }
+        if (beforeClaim == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.DEFINITIVE) {
             ApiDelivery due = deliveryMapper.selectById(deliveryId);
             return due != null && deliveryMapper.holdPending(deliveryId, due.getVersion(), utcNow()) == 1;
         }
@@ -190,7 +206,14 @@ public class IntegrationHubWebhookDeliveryWorker {
                     return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "CURRENT_SCOPE_REJECTED", utcNow());
                 }
             }
-            if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+            com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure beforeSend = closure();
+            if (beforeSend == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.TRANSIENT) {
+                // 一時の閉鎖は DLQ にせず、lease の持ち主の CAS で PENDING へ戻し、claim で足した試行の回数を戻す
+                // （繰り返す一時の閉鎖で max_attempts を使い切らない。micro review P3-M2）。送信の前に戻すため再送にはならない
+                return deliveryMapper.releaseClaim(claimed.getId(), claimed.getVersion(), claimed.getDeliveryGeneration(),
+                        leaseToken, utcNow()) == 1;
+            }
+            if (beforeSend == com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure.DEFINITIVE) {
                 return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "KILL_SWITCH", utcNow());
             }
             long requiredMillis = properties.getExternalTransport().getDnsTimeoutMs()
@@ -228,6 +251,10 @@ public class IntegrationHubWebhookDeliveryWorker {
             // 書き込むと、provider成功直後のcrashを別経路の再送へ誤変換し得る。
             return false;
         }
+    }
+
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.Closure closure() {
+        return com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.outboundClosure(runtimeSwitch, properties);
     }
 
     private static boolean environmentFailure(String code) {

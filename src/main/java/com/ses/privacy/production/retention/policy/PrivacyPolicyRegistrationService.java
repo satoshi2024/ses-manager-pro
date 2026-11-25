@@ -14,6 +14,7 @@ import com.ses.privacy.foundation.PolicyRegistrationVerifier;
 import com.ses.privacy.foundation.VerifiedPolicyRegistration;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
 import com.ses.privacy.production.PrivacyDecisionBinding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -46,7 +48,10 @@ import java.util.regex.Pattern;
  *       （{@code OIDC_TENANT_ID}、未設定なら {@code default}）を範囲に含み、失効 provider がその失効状態を ACTIVE と答える
  *       （{@link PolicyRegistrationVerifier#trustReady(String)}。trust 文書（D-03 = AWS KMS の adapter）を設定するまでは
  *       registry が空・失効 provider が常に UNKNOWN のため開かない）。</li>
+ *   <li>trust 文書の構造に不足が無い（{@code PrivacyTrustStructureState}。KMS の trust を設定した prod の起動時に flag と関係なく
+ *       検査した結果。不足は起動を止めず、この入口だけを閉じる。feature-enablement-console design §8.5 の 4。FE-C04）。</li>
  * </ul>
+ * 決定は承認の値の源（{@link PrivacyApprovalSource}）から呼出しごとに読む（署名の差替えは次の呼出しから効く）。
  *
  * <p>状態の遷移（{@code m_retention_policy.status}）:
  * <ol>
@@ -84,6 +89,8 @@ public class PrivacyPolicyRegistrationService {
     /** 開放の前提の固定 code。 */
     static final String REASON_VERIFIER = "verifier";
     static final String REASON_TRUST = "trust";
+    static final String REASON_TRUST_STRUCTURE = "trustStructure";
+    static final String REASON_SIGN_OFFS = "subgateSignOffs";
     /** canonical bytes の上限（64KB）の base64 の長さ。 */
     static final int MAX_ENVELOPE_BASE64 = 87_384;
     /** 署名の上限（1024 byte）の base64 の長さ。 */
@@ -95,7 +102,9 @@ public class PrivacyPolicyRegistrationService {
 
     private final PrivacyAccessGuard accessGuard;
     private final OidcSecurityProperties oidcProperties;
-    private final PrivacyApprovalProperties approvalProperties;
+    private final PrivacyApprovalSource approvalSource;
+    private final BooleanSupplier trustStructureSound;
+    private final BooleanSupplier subgateSignOffsValid;
     private final PolicyRegistrationVerifier verifier;
     private final RetentionPolicyMapper policyMapper;
     private final PiiDataElementMapper dataElementMapper;
@@ -104,14 +113,32 @@ public class PrivacyPolicyRegistrationService {
     private final Clock clock;
     private final Supplier<Actor> actorSource;
 
+    /** property の源で包み、trust 文書の構造は不足なしとして扱う（既存の試験のため）。 */
     PrivacyPolicyRegistrationService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
                                      PrivacyApprovalProperties approvalProperties, PolicyRegistrationVerifier verifier,
                                      RetentionPolicyMapper policyMapper, PiiDataElementMapper dataElementMapper,
                                      PrivacyPolicyAudit audit, TransactionTemplate transaction, Clock clock,
                                      Supplier<Actor> actorSource) {
+        this(accessGuard, oidcProperties, PrivacyApprovalSource.properties(approvalProperties, null), verifier,
+                policyMapper, dataElementMapper, audit, transaction, clock, actorSource, () -> true, () -> true);
+    }
+
+    /**
+     * @param trustStructureSound  trust 文書の構造に不足が無いか（判定できなければ false を返すこと）
+     * @param subgateSignOffsValid 副入口 REG の署名（D-01・D-02・D-03）が確認済みで有効か（DB の開放状態で管理する間。判定できなければ
+     *                             false を返すこと。review rb-fe-c P2-1）
+     */
+    PrivacyPolicyRegistrationService(PrivacyAccessGuard accessGuard, OidcSecurityProperties oidcProperties,
+                                     PrivacyApprovalSource approvalSource, PolicyRegistrationVerifier verifier,
+                                     RetentionPolicyMapper policyMapper, PiiDataElementMapper dataElementMapper,
+                                     PrivacyPolicyAudit audit, TransactionTemplate transaction, Clock clock,
+                                     Supplier<Actor> actorSource, BooleanSupplier trustStructureSound,
+                                     BooleanSupplier subgateSignOffsValid) {
         this.accessGuard = Objects.requireNonNull(accessGuard, "accessGuard");
         this.oidcProperties = oidcProperties;
-        this.approvalProperties = approvalProperties;
+        this.approvalSource = approvalSource;
+        this.trustStructureSound = trustStructureSound == null ? () -> false : trustStructureSound;
+        this.subgateSignOffsValid = subgateSignOffsValid == null ? () -> false : subgateSignOffsValid;
         this.verifier = verifier;
         this.policyMapper = Objects.requireNonNull(policyMapper, "policyMapper");
         this.dataElementMapper = Objects.requireNonNull(dataElementMapper, "dataElementMapper");
@@ -134,11 +161,18 @@ public class PrivacyPolicyRegistrationService {
     public Readiness readiness() {
         List<String> missing = new ArrayList<>();
         LocalDate today = PrivacyDecisionBinding.businessDate(clock);
+        PrivacyApprovalSource values = approvalSource == null ? null : approvalSource.resolve();
         for (PrivacyDecisionBinding.Decision decision : List.of(PrivacyDecisionBinding.Decision.D01,
                 PrivacyDecisionBinding.Decision.D02, PrivacyDecisionBinding.Decision.D03)) {
-            if (!PrivacyDecisionBinding.evaluateStandalone(approvalProperties, decision, today).valid()) {
+            if (!PrivacyDecisionBinding.evaluateStandalone(values, decision, today).valid()) {
                 missing.add(decision.key());
             }
+        }
+        if (!structureSound()) {
+            missing.add(REASON_TRUST_STRUCTURE);
+        }
+        if (!signOffsValid()) {
+            missing.add(REASON_SIGN_OFFS);
         }
         if (verifier == null) {
             missing.add(REASON_VERIFIER);
@@ -147,6 +181,22 @@ public class PrivacyPolicyRegistrationService {
             missing.add(REASON_TRUST);
         }
         return new Readiness(missing.isEmpty(), List.copyOf(missing));
+    }
+
+    private boolean signOffsValid() {
+        try {
+            return subgateSignOffsValid.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private boolean structureSound() {
+        try {
+            return trustStructureSound.getAsBoolean();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** 署名済み envelope を検証して CANDIDATE として登録する。 */

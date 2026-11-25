@@ -34,6 +34,11 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     LocalDateTime selectReplayWindowStart(@Param("eventId") String eventId, @Param("generation") int generation,
                                           @Param("subscriptionId") Long subscriptionId, @Param("clientId") String clientId);
 
+    /**
+     * 開き直しの起動の隔離と、NF05 outbound の確定の閉鎖の後の未送信の隔離（feature-enablement-console design §9.6。review rb-fe-d
+     * P2-2・P2-N2）が共用する。DLQ {@code STARTUP_REVALIDATION_REQUIRED}・{@code FAILED_DLQ_PAYLOAD_90D} にし、保存期間の purge の対象にする
+     * （ops runbook §13.3 の条件付き bulk replay の区分で選べる）。版の CAS で行い、有効な lease の {@code CLAIMED} は変えない。
+     */
     @Update("UPDATE t_api_delivery SET status='DLQ', last_error_code='STARTUP_REVALIDATION_REQUIRED', "
             + "retention_class='FAILED_DLQ_PAYLOAD_90D', retention_expires_at=#{expiry}, terminal_at=#{now}, "
             + "lease_token=NULL, lease_expires_at=NULL, version=version+1, updated_at=#{now} "
@@ -77,6 +82,22 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     default int recoverExpiredLeases(LocalDateTime now) {
         return recoverExpiredLeases(now, now.plusDays(90));
     }
+
+    /**
+     * NF05 outbound の一時の閉鎖（feature-enablement-console design §9.3。FE-D03）で、claim した配信を PENDING へ戻す。claim の持ち主
+     * （lease の token）・版・世代・{@code CLAIMED} の CAS で行い、claim で足した {@code attempt_count} を戻す（一時の閉鎖が繰り返しても
+     * {@code max_attempts} を使い切って claim できない PENDING を残さない。micro review P3-M2）。{@code next_attempt_at} は変えない
+     * （claim の時に期限が来ていた値のまま）。送信の前に呼ぶ（HTTP を送った後に戻すと再送になる。at-least-once で、受信側は event ID で
+     * 重複を除く）。{@link #holdPending} は確定の閉鎖だけで使う。claim の前の状態へ戻す（{@code RETRYABLE} から claim した行は
+     * {@code last_error_code} を持つため {@code RETRYABLE}、無い行は {@code PENDING}。review rb-fe-d P3-6）。
+     */
+    @Update("UPDATE t_api_delivery SET status = CASE WHEN last_error_code IS NULL THEN 'PENDING' ELSE 'RETRYABLE' END, "
+            + "lease_token = NULL, lease_expires_at = NULL, "
+            + "attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, "
+            + "version = version + 1, updated_at = #{now} WHERE id = #{id} AND version = #{version} "
+            + "AND delivery_generation = #{generation} AND lease_token = #{leaseToken} AND status = 'CLAIMED'")
+    int releaseClaim(@Param("id") Long id, @Param("version") Integer version, @Param("generation") Integer generation,
+                     @Param("leaseToken") String leaseToken, @Param("now") LocalDateTime now);
 
     @Update("UPDATE t_api_delivery SET status = 'DLQ', last_error_code = 'KILL_SWITCH', "
             + "retention_class = 'FAILED_DLQ_PAYLOAD_90D', retention_expires_at = #{expiry}, "

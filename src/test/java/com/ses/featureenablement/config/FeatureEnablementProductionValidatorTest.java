@@ -1,0 +1,459 @@
+package com.ses.featureenablement.config;
+
+import com.ses.config.feature.Feature;
+import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
+
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * FE-A08（feature-enablement-console design §10、FE-RQ-007・016）: prod（{@code Environment.acceptsProfiles}。
+ * {@code @ActiveProfiles("prod")} 相当の有効な profile）で、DB 管理にした開放単位の旧い変数（環境変数・system property・
+ * {@code SPRING_APPLICATION_JSON} の各綴り）・運用値の上書き・{@code database} 以外の源で起動を止める。総スイッチは全 profile で原文の
+ * {@code true}/{@code false} だけを受ける。message は変数名だけで値を出さない。
+ */
+class FeatureEnablementProductionValidatorTest {
+
+    /** 段階 A の DB 管理の7件（FE-A11 の目録の印と同じ）。 */
+    private static final EnumSet<Feature> STAGE_A = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL,
+            Feature.NF03, Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
+    private static final String SECRET_LIKE_VALUE = "PT299S-do-not-print";
+
+    @Test
+    void prodで旧い変数も運用値の上書きも無ければ起動する() {
+        assertThatCode(() -> validator(prod(), Map.of("FEATURE_ENABLEMENT_ALLOWED", "false", "TZ", "Asia/Tokyo"),
+                new Properties()).validate()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void prodでDB管理の開放単位の旧い変数は環境変数とsystem_propertyとJSONのどの綴りでも起動を止める() {
+        assertStops(Map.of("FEATURE_NF01_ENABLED", "true"), new Properties(), "FEATURE_NF01_ENABLED");
+        assertStops(Map.of("APP_FEATURES_NF02CUSTOMERPORTAL_ENABLED", "true"), new Properties(),
+                "APP_FEATURES_NF02CUSTOMERPORTAL_ENABLED");
+        assertStops(Map.of("app.features.nf03-certification-pii.enabled", "true"), new Properties(),
+                "app.features.nf03-certification-pii.enabled");
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.features.nf04.enabled", "true");
+        assertStops(Map.of(), systemProperties, "app.features.nf04.enabled");
+        assertStops(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf10\":{\"enabled\":true}}}}"),
+                new Properties(), "SPRING_APPLICATION_JSON[app.features.nf10.enabled]");
+        Properties json = new Properties();
+        json.setProperty("spring.application.json", "{\"FEATURE_NF02_ENABLED\":\"true\"}");
+        assertStops(Map.of(), json, "SPRING_APPLICATION_JSON[FEATURE_NF02_ENABLED]");
+    }
+
+    @Test
+    void 段階Aでは印の無い開放単位の旧い変数は止めない() {
+        // 段階 A の印だけの写しの目録で確かめる（本番の目録では段階 B〜D の印で止まる。下の「段階 B」以降の試験）
+        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF06_ENABLED", "true", "PRIVACY_RETENTION_ENABLED", "true",
+                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties()).validate())
+                .as("NF06・NF07・NF01 二者確認は段階 B〜C で DB 管理にするまで property の源").doesNotThrowAnyException();
+    }
+
+    @Test
+    void prodで運用値の上書きは環境変数とsystem_propertyとJSONで起動を止め値をmessageに出さない() {
+        assertStops(Map.of("APP_FEATURE_ENABLEMENT_MAX_STALENESS", SECRET_LIKE_VALUE), new Properties(),
+                "APP_FEATURE_ENABLEMENT_MAX_STALENESS");
+        assertStops(Map.of("FEATURE_ENABLEMENT_EVALUATION_INTERVAL", SECRET_LIKE_VALUE), new Properties(),
+                "FEATURE_ENABLEMENT_EVALUATION_INTERVAL");
+        assertStops(Map.of("APP_FEATURE_ENABLEMENT_ALLOWED", "true"), new Properties(), "APP_FEATURE_ENABLEMENT_ALLOWED");
+        Properties delay = new Properties();
+        delay.setProperty("app.feature-enablement.evaluation-initial-delay", SECRET_LIKE_VALUE);
+        assertStops(Map.of(), delay, "app.feature-enablement.evaluation-initial-delay");
+        Properties cron = new Properties();
+        cron.setProperty("app.feature-enablement.sign-off-purge-cron", "0 0 * * * *");
+        assertStops(Map.of(), cron, "app.feature-enablement.sign-off-purge-cron");
+        assertStops(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"feature-enablement\":{\"max-staleness\":\""
+                        + SECRET_LIKE_VALUE + "\"}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.feature-enablement.max-staleness]");
+        assertStops(Map.of("SPRING_APPLICATION_JSON", "{\"FEATURE_ENABLEMENT_ALLOWED\":\"true\"}"), new Properties(),
+                "SPRING_APPLICATION_JSON[FEATURE_ENABLEMENT_ALLOWED]");
+    }
+
+    @Test
+    void prodの源がdatabaseでなければ起動を止める() {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.PROPERTIES);
+
+        assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), properties, catalog(), Map::of,
+                Properties::new).validate()).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.feature-enablement.source");
+    }
+
+    @Test
+    void 総スイッチは全profileで原文のtrueかfalseだけを受ける() {
+        for (String value : List.of("yes", "1", "on", "TRUE", " true", "False")) {
+            MockEnvironment prod = prod();
+            prod.setProperty(FeatureEnablementProductionValidator.ALLOWED_PROPERTY, value);
+            assertThatThrownBy(() -> validator(prod, Map.of(), new Properties()).validate()).as(value)
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("FEATURE_ENABLEMENT_ALLOWED");
+            MockEnvironment dev = new MockEnvironment();
+            dev.setActiveProfiles("dev");
+            dev.setProperty(FeatureEnablementProductionValidator.ALLOWED_PROPERTY, value);
+            assertThatThrownBy(() -> validator(dev, Map.of(), new Properties()).validate()).as(value)
+                    .isInstanceOf(IllegalStateException.class);
+        }
+        for (String value : List.of("true", "false")) {
+            MockEnvironment prod = prod();
+            prod.setProperty(FeatureEnablementProductionValidator.ALLOWED_PROPERTY, value);
+            assertThatCode(() -> validator(prod, Map.of(), new Properties()).validate()).doesNotThrowAnyException();
+        }
+    }
+
+    @Test
+    void prod以外では旧い変数と運用値の上書きを止めない() {
+        MockEnvironment dev = new MockEnvironment();
+        dev.setActiveProfiles("dev");
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+
+        assertThatCode(() -> new FeatureEnablementProductionValidator(dev, properties, catalog(),
+                () -> Map.of("FEATURE_NF01_ENABLED", "true", "APP_FEATURE_ENABLEMENT_SOURCE", "database"),
+                Properties::new).validate()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void 旧い変数の一覧は目録のDB管理の印に従う() {
+        FeatureEnablementProductionValidator validator = validator(prod(), Map.of(), new Properties());
+
+        assertThat(validator.legacyKeys()).contains("FEATURENF01ENABLED", "APPFEATURESNF01ENABLED",
+                "FEATURENF02CUSTOMERPORTALENABLED", "APPFEATURESNF10ENABLED")
+                .doesNotContain("FEATURENF06ENABLED", "PRIVACYRETENTIONENABLED", "INTEGRATIONHUBPUBLICAPIENABLED");
+        assertThat(FeatureEnablementProductionValidator.nameKey("app.features[nf01].enabled"))
+                .isEqualTo("APPFEATURESNF01ENABLED");
+    }
+
+    /**
+     * 実装 review rb-fe-a2 P3-1: 総スイッチは綴りが完全に一致する {@code FEATURE_ENABLEMENT_ALLOWED} だけを受ける（placeholder は他の綴りを
+     * 読まないため、{@code feature_enablement_allowed=false} 等は効かずに全開で起動する）。
+     */
+    @Test
+    void 総スイッチの綴りが完全に一致しない環境変数とsystem_propertyは上書きとして止める() {
+        assertStops(Map.of("feature_enablement_allowed", "false"), new Properties(), "feature_enablement_allowed");
+        Properties dotted = new Properties();
+        dotted.setProperty("feature.enablement.allowed", "false");
+        assertStops(Map.of(), dotted, "feature.enablement.allowed");
+        Properties exact = new Properties();
+        exact.setProperty("FEATURE_ENABLEMENT_ALLOWED", "false");
+        assertThatCode(() -> validator(prod(), Map.of("FEATURE_ENABLEMENT_ALLOWED", "false"), exact).validate())
+                .doesNotThrowAnyException();
+    }
+
+    /**
+     * 段階の整合 M2（実装 review rb-fe-a2 P2-1 の暫定の拒否を FE-B01 の正式の拒否に替えた）: 本番の目録では NF01 二者確認の開閉の変数を、
+     * 配備の設定（環境変数・system property・{@code SPRING_APPLICATION_JSON}）のどの綴り（yml の placeholder の変数名・relaxed な property
+     * 名）でも、値に依らず（{@code false}・変換できない値も）止める。jar の中の yml 等の配備の設定でない値と prod 以外は止めない。
+     */
+    @Test
+    void NF01二者確認の開閉の旧い変数は値と綴りに依らず止め配備の設定でない値とprod以外は止めない() {
+        for (Map.Entry<String, String> entry : List.of(Map.entry("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"),
+                Map.entry("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "false"),
+                Map.entry("APP_FEATURES_NF01DUALCONFIRMATION_ENABLED", "on"),
+                Map.entry("feature_nf01_dual_confirmation_enabled", "maybe"))) {
+            assertStopsWithStandard(Map.of(entry.getKey(), entry.getValue()), new Properties(), entry.getKey());
+        }
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON",
+                        "{\"app\":{\"features\":{\"nf01-dual-confirmation\":{\"enabled\":true}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf01-dual-confirmation.enabled]");
+        Properties dotted = new Properties();
+        dotted.setProperty("app.features.nf01-dual-confirmation.enabled", "TRUE");
+        assertStopsWithStandard(Map.of(), dotted, "app.features.nf01-dual-confirmation.enabled");
+
+        MockEnvironment yml = prod();
+        yml.setProperty("app.features.nf01-dual-confirmation.enabled", "true");
+        assertThatCode(() -> new FeatureEnablementProductionValidator(yml, databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).validate())
+                .as("配備の設定でない値（試験の application-test.yml 等）では止めない").doesNotThrowAnyException();
+        MockEnvironment dev = new MockEnvironment();
+        dev.setActiveProfiles("dev");
+        assertThatCode(() -> new FeatureEnablementProductionValidator(dev, databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"),
+                Properties::new).validate()).doesNotThrowAnyException();
+    }
+
+    /**
+     * 段階の整合 M2（実装 review rb-fe-a2 P2-2 の暫定の拒否を FE-B03 の正式の拒否に替えた）: 本番の目録では NF02 顧客ポータルの公開範囲の
+     * 変数を、配備の設定のどの綴りでも値に依らず（空白も）止め、値を message に出さない。配備の設定でない値と prod 以外は止めない。
+     * 公開範囲は承認で変える設定で、prod の yml は2件の placeholder を持たない（dev・test の property の源の {@code application.yml} だけ）。
+     */
+    @Test
+    void NF02顧客ポータルの公開範囲の旧い変数は値と綴りに依らず止め配備の設定でない値とprod以外は止めない() throws java.io.IOException {
+        String visibleSince = "2027-04-01T00:00:00+09:00";
+        assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
+                Properties::new).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE")
+                .hasMessageNotContaining(visibleSince).hasMessageNotContaining("2027");
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", "  "), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app.features.nf02-customer-portal.visible-since\":\""
+                        + visibleSince + "\"}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf02-customer-portal.visible-since]");
+
+        MockEnvironment yml = prod();
+        yml.setProperty("app.features.nf02-customer-portal.visible-since", "2000-01-01T00:00:00+09:00");
+        assertThatCode(() -> new FeatureEnablementProductionValidator(yml, databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).validate())
+                .as("試験の application-test.yml の値では prod の context の試験を止めない").doesNotThrowAnyException();
+        MockEnvironment dev = new MockEnvironment();
+        dev.setActiveProfiles("dev");
+        assertThatCode(() -> new FeatureEnablementProductionValidator(dev, databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", visibleSince),
+                Properties::new).validate()).doesNotThrowAnyException();
+        String prodYml = new org.springframework.core.io.ClassPathResource("application-prod.yml")
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(prodYml).doesNotContain("${FEATURE_NF01_DUAL_CONFIRMATION_", "${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+    }
+
+    /** FE-B01: 本番の目録で DB 管理にした NF01 二者確認の開閉の変数と Privacy 署名の参照の変数は、どの綴りでも起動を止める。 */
+    @Test
+    void 段階BのNF01二者確認の開閉と署名の参照の旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties(),
+                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED");
+        assertStopsWithStandard(Map.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF", SECRET_LIKE_VALUE),
+                new Properties(), "FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF");
+        assertStopsWithStandard(Map.of("APP_FEATURES_NF01DUALCONFIRMATION_PRIVACYSIGNOFFREF", SECRET_LIKE_VALUE),
+                new Properties(), "APP_FEATURES_NF01DUALCONFIRMATION_PRIVACYSIGNOFFREF");
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.features.nf01-dual-confirmation.privacy-sign-off-ref", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.features.nf01-dual-confirmation.privacy-sign-off-ref");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf01-dual-confirmation\":"
+                        + "{\"privacy-sign-off-ref\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf01-dual-confirmation.privacy-sign-off-ref]");
+        // 段階 A の写しの目録（印なし）では止めない（印に従う）
+        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF", "x"),
+                new Properties()).validate()).doesNotThrowAnyException();
+        assertThat(new FeatureEnablementProductionValidator(prod(), databaseProperties(), FeatureEnablementCatalog.standard(),
+                Map::of, Properties::new).legacySettingPrefixes())
+                .contains("FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF", "APPFEATURESNF01DUALCONFIRMATIONPRIVACYSIGNOFFREF");
+    }
+
+    /** FE-B02: NF06 の開閉の変数と admission の承認の6項目（list の添字の綴りを含む）は、どの綴りでも起動を止める。 */
+    @Test
+    void 段階BのNF06の開閉とadmissionの旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF06_ENABLED", "true"), new Properties(), "FEATURE_NF06_ENABLED");
+        for (String name : List.of("IMPORT_ADMISSION_DECISION_ID", "IMPORT_ADMISSION_TENANT_ID", "IMPORT_ADMISSION_SIGNED_ON",
+                "IMPORT_ADMISSION_EXPIRES_ON", "IMPORT_ADMISSION_SOURCE_CODES", "IMPORT_ADMISSION_APPROVAL_DIGEST",
+                "APP_IMPORTCENTER_ADMISSION_SOURCECODES_0_")) {
+            assertStopsWithStandard(Map.of(name, SECRET_LIKE_VALUE), new Properties(), name);
+        }
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.import-center.admission.source-codes[0]", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.import-center.admission.source-codes[0]");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"import-center\":{\"admission\":"
+                        + "{\"approval-digest\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.import-center.admission.approval-digest]");
+        // 行参照の鍵は鍵（secret）で配備の設定に残る（D-5）。拒否しない
+        assertThatCode(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> Map.of("IMPORT_ROW_REFERENCE_HMAC_KEY", "k"), Properties::new)
+                .validate()).doesNotThrowAnyException();
+    }
+
+    /** FE-B03: NF02 顧客ポータルの公開範囲の旧い変数は、空の値でもどの綴りでも起動を止める（承認で変える設定へ移した）。 */
+    @Test
+    void 段階BのNF02顧客ポータルの公開範囲の旧い変数はどの綴りでも起動を止める() {
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", SECRET_LIKE_VALUE), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE", ""), new Properties(),
+                "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE");
+        assertStopsWithStandard(Map.of("APP_FEATURES_NF02CUSTOMERPORTAL_VISIBLESINCE", SECRET_LIKE_VALUE), new Properties(),
+                "APP_FEATURES_NF02CUSTOMERPORTAL_VISIBLESINCE");
+        Properties systemProperties = new Properties();
+        systemProperties.setProperty("app.features.nf02-customer-portal.visible-since", SECRET_LIKE_VALUE);
+        assertStopsWithStandard(Map.of(), systemProperties, "app.features.nf02-customer-portal.visible-since");
+        assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf02-customer-portal\":"
+                        + "{\"visible-since\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
+                "SPRING_APPLICATION_JSON[app.features.nf02-customer-portal.visible-since]");
+    }
+
+    private static void assertStopsWithStandard(Map<String, String> env, Properties systemProperties, String expectedName) {
+        assertThatThrownBy(() -> new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), () -> env, () -> systemProperties).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedName)
+                .hasMessageNotContaining(SECRET_LIKE_VALUE);
+    }
+
+    /**
+     * FE-C05・review rb-fe-c P2-3: NF07 を DB 管理にした目録（段階 A と段階 C の印）では、NF07 の開閉の変数と、署名へ移した承認の値の
+     * 旧い変数（{@code PRIVACY_APPROVAL_*}・{@code PRIVACY_DSAR_DUE_DAYS}・{@code PRIVACY_DSAR_PACKAGE_MAX_AGE}）が、環境変数・system
+     * property・JSON のどの綴りでも起動を止め、message に値を出さない。運用値の {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は止めない。
+     */
+    @Test
+    void NF07をDB管理にした目録では開閉と承認の値の旧い変数を全ての綴りで止め運用値は止めない() {
+        FeatureEnablementCatalog nf07 = FeatureEnablementCatalog.standard();
+        assertThat(nf07.databaseManaged(com.ses.config.feature.Feature.NF07_RETENTION)).isTrue();
+        assertStops(nf07, Map.of("PRIVACY_RETENTION_ENABLED", "true"), new Properties(), "PRIVACY_RETENTION_ENABLED");
+        assertStops(nf07, Map.of("PRIVACY_DSAR_ENABLED", "true"), new Properties(), "PRIVACY_DSAR_ENABLED");
+        assertStops(nf07, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_APPROVAL_D01_DECISION_ID");
+        assertStops(nf07, Map.of("PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS", "30"), new Properties(),
+                "PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS");
+        assertStops(nf07, Map.of("PRIVACY_DSAR_PACKAGE_MAX_AGE", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_DSAR_PACKAGE_MAX_AGE");
+        Properties digest = new Properties();
+        digest.setProperty("privacy.approval.approval-digest", SECRET_LIKE_VALUE);
+        assertStops(nf07, Map.of(), digest, "privacy.approval.approval-digest");
+        Properties retention = new Properties();
+        retention.setProperty("privacy.retention.enabled", "true");
+        assertStops(nf07, Map.of(), retention, "privacy.retention.enabled");
+        assertStops(nf07, Map.of("SPRING_APPLICATION_JSON", "{\"privacy\":{\"dsar\":{\"due-days\":\""
+                + SECRET_LIKE_VALUE + "\"}}}"), new Properties(), "SPRING_APPLICATION_JSON[privacy.dsar.due-days]");
+
+        assertThatCode(() -> validator(prod(), Map.of("PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "7",
+                "PRIVACY_JOURNAL_DATASOURCE_URL", "jdbc:mysql://journal/db", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "/app/x.json"),
+                new Properties(), nf07).validate()).as("運用値・基盤の設定は止めない").doesNotThrowAnyException();
+    }
+
+    /** review rb-fe-c P3-8: NF07 の2件のどちらかだけを DB 管理にした目録でも、承認の値の旧い変数を止める。 */
+    @Test
+    void NF07のどちらかだけがDB管理でも承認の値の旧い変数を止める() {
+        FeatureEnablementCatalog dsarOnly = FeatureEnablementCatalog.standard().withDatabaseManaged(
+                java.util.EnumSet.of(com.ses.config.feature.Feature.NF07_DSAR));
+        assertStops(dsarOnly, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
+                "PRIVACY_APPROVAL_D01_DECISION_ID");
+        assertThatCode(() -> validator(prod(), Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", "x"), new Properties(),
+                catalog()).validate()).as("段階 A の印だけなら止めない").doesNotThrowAnyException();
+    }
+
+    private static void assertStops(FeatureEnablementCatalog catalog, Map<String, String> env,
+                                    Properties systemProperties, String expectedName) {
+        Map<String, String> environment = new LinkedHashMap<>(env);
+        assertThatThrownBy(() -> validator(prod(), environment, systemProperties, catalog).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedName)
+                .hasMessageNotContaining(SECRET_LIKE_VALUE);
+    }
+
+    private static FeatureEnablementProperties databaseProperties() {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        return properties;
+    }
+
+    private static FeatureEnablementProductionValidator validator(MockEnvironment environment, Map<String, String> env,
+                                                                  Properties systemProperties,
+                                                                  FeatureEnablementCatalog catalog) {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        return new FeatureEnablementProductionValidator(environment, properties, catalog, () -> env,
+                () -> systemProperties);
+    }
+
+    /**
+     * FE-D05（design §10）: NF05 を DB 管理にした目録では、開閉と承認の値（決定 ID・digest）の旧い変数を全ての綴りで止める。許可する
+     * 送信元・送信先の一覧は digest の内容で配備の設定に残すため止めない。
+     */
+    @Test
+    void NF05の開閉と承認の値の旧い変数を止め許可の一覧は止めない() {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        java.util.function.BiFunction<Map<String, String>, Properties, FeatureEnablementProductionValidator> standard =
+                (env, system) -> new FeatureEnablementProductionValidator(prod(), properties,
+                        FeatureEnablementCatalog.standard(), () -> env, () -> system);
+        assertThat(standard.apply(Map.of(), new Properties()).legacyKeys()).contains("INTEGRATIONHUBPUBLICAPIENABLED",
+                "INTEGRATIONHUBEXTERNALTRANSPORTENABLED");
+        // 承認の値は開閉以外の旧い変数の規則の表（段階の整合 M1 で LEGACY_SETTING_RULES の1つにまとめた）
+        assertThat(standard.apply(Map.of(), new Properties()).legacySettingPrefixes()).contains(
+                "INTEGRATIONHUBINBOUNDDECISIONID", "INTEGRATIONHUBINBOUNDAPPROVALDIGEST", "INTEGRATIONHUBOUTBOUNDDECISIONID",
+                "INTEGRATIONHUBOUTBOUNDAPPROVALDIGEST", "INTEGRATIONHUBPUBLICAPIAPPROVALDECISIONID",
+                "INTEGRATIONHUBEXTERNALTRANSPORTAPPROVALAPPROVALDIGEST");
+        for (Map<String, String> env : List.of(Map.of("INTEGRATION_HUB_PUBLIC_API_ENABLED", "true"),
+                Map.of("INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST", SECRET_LIKE_VALUE),
+                Map.of("INTEGRATIONHUB_INBOUND_DECISIONID", "DG-05-IN-20261201-01"),
+                Map.of("SPRING_APPLICATION_JSON", "{\"integration\":{\"hub\":{\"external-transport\":{\"approval\":"
+                        + "{\"decision-id\":\"DG-05-OUT-20261201-01\"}}}}}"))) {
+            assertThatThrownBy(() -> standard.apply(env, new Properties()).validate()).as(env.keySet().toString())
+                    .isInstanceOf(IllegalStateException.class).hasMessageNotContaining(SECRET_LIKE_VALUE);
+        }
+        Properties system = new Properties();
+        system.setProperty("integration.hub.public-api.approval.approval-digest", SECRET_LIKE_VALUE);
+        assertThatThrownBy(() -> standard.apply(Map.of(), system).validate()).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("integration.hub.public-api.approval.approval-digest");
+        assertThatCode(() -> standard.apply(Map.of("SPRING_APPLICATION_JSON", "{\"integration\":{\"hub\":{\"public-api\":"
+                + "{\"approval\":{\"allowed-client-cidrs\":[\"203.0.113.0/24\"]}}}}}"), new Properties()).validate())
+                .doesNotThrowAnyException();
+    }
+
+    /**
+     * 段階の整合 M1: 段階 B・C・D の開閉以外の旧い変数の拒否を1つの表（{@code LEGACY_SETTING_RULES}）にまとめた後も、規則は署名・設定へ
+     * 移した承認の値だけに当たり、配備の設定に残る運用値には当たらない（当たると prod はその運用値で起動しなくなる）。
+     * {@code application.yml}・{@code application-prod.yml} の placeholder の変数名のうち、本番の目録の規則に当たるものは全て移した値の
+     * 形で、運用値（DSAR の期限の警告日数・Journal・trust・行参照の鍵・公開 ID の鍵・NF05 の許可の一覧）は当たらない。
+     */
+    @Test
+    void 開閉以外の旧い変数の規則はymlのplaceholderのうち移した承認の値だけに当たり運用値には当たらない() throws java.io.IOException {
+        java.util.Set<String> prefixes = new FeatureEnablementProductionValidator(prod(), databaseProperties(),
+                FeatureEnablementCatalog.standard(), Map::of, Properties::new).legacySettingPrefixes();
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([A-Za-z0-9_.\\-]+)");
+        java.util.Set<String> matched = new java.util.TreeSet<>();
+        for (String yml : List.of("application.yml", "application-prod.yml")) {
+            java.util.regex.Matcher found = placeholder.matcher(new org.springframework.core.io.ClassPathResource(yml)
+                    .getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+            while (found.find()) {
+                String key = FeatureEnablementProductionValidator.nameKey(found.group(1));
+                if (prefixes.stream().anyMatch(key::startsWith)) {
+                    matched.add(found.group(1));
+                }
+            }
+        }
+        java.util.regex.Pattern moved = java.util.regex.Pattern.compile(
+                "FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF"
+                        + "|IMPORT_ADMISSION_(DECISION_ID|TENANT_ID|SIGNED_ON|EXPIRES_ON|SOURCE_CODES|APPROVAL_DIGEST)"
+                        + "|FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE"
+                        + "|PRIVACY_APPROVAL_(D0[1-9]_(DECISION_ID|SIGNED_ON|EXPIRES_ON)|TENANT_ID|CAPABILITIES|DIGEST"
+                        + "|EXPIRY_WARNING_DAYS)"
+                        + "|PRIVACY_DSAR_(DUE_DAYS|PACKAGE_MAX_AGE)"
+                        + "|INTEGRATION_HUB_(IN|OUT)BOUND_(DECISION_ID|APPROVAL_DIGEST)");
+        assertThat(matched).as("規則に当たる placeholder").isNotEmpty()
+                .allSatisfy(name -> assertThat(moved.matcher(name).matches()).as(name).isTrue());
+        for (String operational : List.of("PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "privacy.dsar.deadline-warning-days",
+                "PRIVACY_JOURNAL_DATASOURCE_URL", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "IMPORT_ROW_REFERENCE_HMAC_KEY",
+                "INTEGRATION_HUB_PUBLIC_ID_KEY", "integration.hub.public-api.approval.allowed-client-cidrs[0]",
+                "integration.hub.external-transport.approval.allowed-destinations[0]")) {
+            String key = FeatureEnablementProductionValidator.nameKey(operational);
+            assertThat(prefixes).as(operational).noneMatch(key::startsWith);
+        }
+        // 表の全ての行は本番の目録（段階 D の後は全ての開放単位に印）で拒否に効く
+        for (FeatureEnablementProductionValidator.LegacySettingRule rule
+                : FeatureEnablementProductionValidator.LEGACY_SETTING_RULES) {
+            rule.names().forEach(name -> assertThat(prefixes).as(name)
+                    .contains(FeatureEnablementProductionValidator.nameKey(name)));
+        }
+    }
+
+    private static void assertStops(Map<String, String> env, Properties systemProperties, String expectedName) {
+        Map<String, String> environment = new LinkedHashMap<>(env);
+        assertThatThrownBy(() -> validator(prod(), environment, systemProperties).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedName)
+                .hasMessageNotContaining(SECRET_LIKE_VALUE);
+    }
+
+    private static FeatureEnablementProductionValidator validator(MockEnvironment environment, Map<String, String> env,
+                                                                  Properties systemProperties) {
+        FeatureEnablementProperties properties = new FeatureEnablementProperties();
+        properties.setSource(FeatureEnablementProperties.Source.DATABASE);
+        return new FeatureEnablementProductionValidator(environment, properties, catalog(), () -> env,
+                () -> systemProperties);
+    }
+
+    private static MockEnvironment prod() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("prod");
+        return environment;
+    }
+
+    private static FeatureEnablementCatalog catalog() {
+        return FeatureEnablementCatalog.standard().withDatabaseManaged(STAGE_A);
+    }
+}

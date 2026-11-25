@@ -278,7 +278,13 @@ public class SecurityConfig {
                     // NF-06取込センター（upload・検証・preview・error export・source/mapping管理）は管理者のみ。
                     // serviceも管理者role＋明示action（import.metadata.manage）を毎回再確認する。画面（/import-center）はW3-12。
                     "/import-center/**",
-                    "/api/import-center/**"
+                    "/api/import-center/**",
+                    // 機能の開放（feature-enablement-console FE-RQ-012）は画面・API とも管理者だけ。行為者の細かな規則
+                    // （OIDC＋MFA・break-glass・bootstrap の session の拒否）は service 層の FeatureEnablementActorPolicy が判定する。
+                    "/feature-enablement",
+                    "/feature-enablement/**",
+                    "/api/feature-enablement",
+                    "/api/feature-enablement/**"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",
                         "/api/management-reports/schedules/*/disable")

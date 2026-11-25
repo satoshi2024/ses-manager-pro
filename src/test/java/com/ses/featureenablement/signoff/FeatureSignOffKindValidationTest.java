@@ -102,6 +102,38 @@ class FeatureSignOffKindValidationTest {
                 Map.of("approvalDigest", DIGEST)), "error.featureEnablement.signOffStructuredInvalid");
     }
 
+    /**
+     * FE-B02（FE-AC-004-06）: NF06 の admission は構造化された値を起動時検査と同じ {@code ImportAdmissionApproval.evaluate} で検査し、
+     * system が正規形から計算した digest と入力した digest の不一致・構造的な不足は 400（違反の code だけを返す）。golden vector
+     * （{@code c5dc5f03…}）の値は通る。署名日が未来でも登録はできる（時間要因は確認の時の検査）。
+     */
+    @Test
+    void NF06のadmissionは正規形から計算したdigestと一致し構造的な不足が無い時だけ通る() {
+        LocalDate signed = LocalDate.of(2026, 12, 1);
+        LocalDate expires = LocalDate.of(2027, 11, 30);
+        Map<String, String> golden = Map.of("decisionId", "DO-NF06-2026-001", "tenantId", "default",
+                "sourceCodes", "CRM_2,crm-2,Crm,crm2,crm",
+                "approvalDigest", "c5dc5f03efdb4fd22c23cdf86c7d248f22af96d187880a87f07664a97b173550");
+        assertThat(validate("NF06_ADMISSION", "DO-NF06-2026-001", "DATA_OWNER", signed, expires, golden).code())
+                .isEqualTo("NF06_ADMISSION");
+
+        Map<String, String> tampered = new java.util.HashMap<>(golden);
+        tampered.put("sourceCodes", "CRM_2,crm-2,Crm,crm2,crm,secret-extra");
+        BusinessException mismatch = catchThrowableOfType(() -> validate("NF06_ADMISSION", "DO-NF06-2026-001",
+                "DATA_OWNER", signed, expires, tampered), BusinessException.class);
+        assertThat(mismatch.getCode()).isEqualTo(400);
+        assertThat(mismatch.getMessageKey()).isEqualTo("error.featureEnablement.admissionInvalid");
+        assertThat(String.valueOf(mismatch.getArgs()[0])).isEqualTo("approvalDigest.mismatch")
+                .doesNotContain("secret-extra");
+
+        Map<String, String> placeholder = new java.util.HashMap<>(golden);
+        placeholder.put("decisionId", "DO-TBD-0001");
+        assertRejected(() -> validate("NF06_ADMISSION", "DO-NF06-2026-001", "DATA_OWNER", signed, expires, placeholder),
+                "error.featureEnablement.admissionInvalid");
+        assertRejected(() -> validate("NF06_ADMISSION", "DO-NF06-2026-001", "DATA_OWNER", signed, expires, Map.of()),
+                "error.featureEnablement.admissionInvalid");
+    }
+
     private SignOffKind validate(String kind, String reference, String role, LocalDate signedOn, LocalDate expiresOn,
                                  Map<String, String> values) {
         return FeatureSignOffKindValidator.validate(catalog,

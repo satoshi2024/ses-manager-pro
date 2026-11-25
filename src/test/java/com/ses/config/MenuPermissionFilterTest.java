@@ -249,6 +249,49 @@ class MenuPermissionFilterTest {
     }
 
     /**
+     * 機能の開放（FE-RQ-012）: 画面と API は feature-enablement の action へ解決され（null で管理者まで 403 にならない。CRM-R2-P1-01 の
+     * 罠）、管理者は通る。
+     */
+    @ParameterizedTest
+    @CsvSource({
+            "GET,/feature-enablement,feature-enablement.view",
+            "GET,/api/feature-enablement/units,feature-enablement.view",
+            "POST,/api/feature-enablement/units/NF04/evaluate,feature-enablement.create",
+            "POST,/api/feature-enablement/requests/3/approve,feature-enablement.create",
+            "GET,/api/feature-enablement/sign-offs/5/document,feature-enablement.view"
+    })
+    void 機能の開放の画面とAPIは管理者には通りactionはnullにならない(String method, String uri, String action)
+            throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        MenuCacheService menuCache = mock(MenuCacheService.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(menuProvider.getIfAvailable()).thenReturn(menuCache);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        Menu menu = new Menu();
+        menu.setMenuKey("feature-enablement");
+        menu.setPathPrefix("/feature-enablement");
+        menu.setApiPrefix("/api/feature-enablement");
+        when(menuCache.getAllMenus()).thenReturn(java.util.List.of(menu));
+        when(menuCache.getMenuKeysByRole("管理者")).thenReturn(java.util.List.of("feature-enablement"));
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq(action))).thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(action, com.ses.service.security.ActionPermissionResolver.resolve(method, uri));
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq(action));
+        verify(chain).doFilter(any(), any());
+    }
+
+    /**
      * R-NF05 P1-001 の回帰。
      *
      * <p>integration-hub が {@code ActionPermissionResolver.RESOURCE_NAMES} に無いと

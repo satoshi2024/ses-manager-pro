@@ -6,8 +6,10 @@ import com.ses.mapper.privacy.RetentionPolicyMapper;
 import com.ses.privacy.foundation.PolicyRegistrationVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.production.PrivacyAccessGuard;
-import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.PrivacySubgateSignOffs;
 import com.ses.privacy.production.retention.trust.PrivacyTrustSource;
+import com.ses.privacy.production.retention.trust.PrivacyTrustStructureState;
 import com.ses.service.AuditLogService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
@@ -28,7 +30,8 @@ import java.util.Arrays;
  * 説明照会（{@code PrivacyProductionConfiguration}）と同じ値を使う。prod 以外・D-01・D-02・D-03 の署名前・trust anchor の
  * 未登録・失効状態を確認できない間は、登録・有効化の入口は存在しない URL と同じ404になる
  * （{@link PrivacyPolicyRegistrationService#isOpen()}）。登録は profile と機能スイッチに依存しない（入口は
- * {@link PrivacyAccessGuard} が flag と action で閉じる）。
+ * {@link PrivacyAccessGuard} が flag と action で閉じる）。決定は承認の値の源（{@link PrivacyApprovalSource}）から読み、trust 文書の
+ * 構造の不足（{@link PrivacyTrustStructureState}）でも閉じる（FE-C01・FE-C04）。
  */
 @Configuration
 public class PrivacyPolicyRegistrationConfiguration {
@@ -37,14 +40,16 @@ public class PrivacyPolicyRegistrationConfiguration {
     public PrivacyPolicyRegistrationService privacyPolicyRegistrationService(
             PrivacyAccessGuard accessGuard,
             ObjectProvider<OidcSecurityProperties> oidcProperties,
-            PrivacyApprovalProperties approvalProperties,
+            PrivacyApprovalSource approvalSource,
             RetentionPolicyMapper retentionPolicyMapper,
             PiiDataElementMapper piiDataElementMapper,
             AuditLogService auditLogService,
             PlatformTransactionManager transactionManager,
             ObjectProvider<Clock> clock,
             Environment environment,
-            PrivacyTrustSource privacyTrustSource) {
+            PrivacyTrustSource privacyTrustSource,
+            ObjectProvider<PrivacyTrustStructureState> trustStructure,
+            ObjectProvider<PrivacySubgateSignOffs> subgateSignOffs) {
         Clock resolvedClock = clock.getIfAvailable(Clock::systemDefaultZone);
         // foundation の guard と同じく active profile だけで判定する（default profile の prod では生成しない）
         boolean activeProd = Arrays.asList(environment.getActiveProfiles()).contains("prod");
@@ -55,8 +60,15 @@ public class PrivacyPolicyRegistrationConfiguration {
                 : null;
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-        return new PrivacyPolicyRegistrationService(accessGuard, oidcProperties.getIfAvailable(), approvalProperties,
+        return new PrivacyPolicyRegistrationService(accessGuard, oidcProperties.getIfAvailable(), approvalSource,
                 verifier, retentionPolicyMapper, piiDataElementMapper, new PrivacyPolicyAudit(auditLogService),
-                transaction, resolvedClock, null);
+                transaction, resolvedClock, null, () -> {
+                    PrivacyTrustStructureState state = trustStructure.getIfAvailable();
+                    return state == null || state.sound();
+                }, () -> {
+                    // REG の署名（D-01・D-02・D-03）の取消し・失効でも閉じる（review rb-fe-c P2-1）
+                    PrivacySubgateSignOffs signOffs = subgateSignOffs.getIfAvailable();
+                    return signOffs == null || signOffs.valid(PrivacySubgateSignOffs.REGISTRATION);
+                });
     }
 }

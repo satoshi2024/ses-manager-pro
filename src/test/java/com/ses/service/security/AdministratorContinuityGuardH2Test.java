@@ -93,6 +93,15 @@ class AdministratorContinuityGuardH2Test {
     private long providerId;
     private SysUser operator;
 
+    /** guard 経由の起動時検査が読む NF07 の開放状態の部品（J-17。試験ごとに戻す）。 */
+    private static final java.util.concurrent.atomic.AtomicReference<com.ses.privacy.production.PrivacyEnablementStateReader>
+            STATE_READER = new java.util.concurrent.atomic.AtomicReference<>();
+
+    @Autowired
+    private com.ses.mapper.FeatureEnablementStateMapper featureStateMapper;
+    @Autowired
+    private com.ses.mapper.FeatureEnablementRequestMapper featureRequestMapper;
+
     @TestConfiguration
     static class StartupConditionsConfiguration {
 
@@ -115,7 +124,11 @@ class AdministratorContinuityGuardH2Test {
                                                                 IdentityProviderMapper identityProviderMapper) {
             PrivacyProductionConfigurationValidator validator = new PrivacyProductionConfigurationValidator(null, null,
                     conditionProperties(), permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, null);
-            return validator::checkAdministratorConditions;
+            // J-17 の試験が NF07 の開放状態を読む部品を差し替える（既定は無し = NF07 を DB で管理しない従来の判定）
+            return () -> {
+                validator.setEnablementStateReader(STATE_READER.get());
+                return validator.checkAdministratorConditions();
+            };
         }
 
         private static OidcSecurityProperties conditionProperties() {
@@ -141,6 +154,7 @@ class AdministratorContinuityGuardH2Test {
 
     @AfterEach
     void tearDown() {
+        STATE_READER.set(null);
         SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
     }
@@ -236,6 +250,89 @@ class AdministratorContinuityGuardH2Test {
                         authentication()));
 
         assertRejected(rejected, "error.user.adminContinuity.privacyAdministrators", 1, 2);
+    }
+
+    /**
+     * J-17（design §14。review rb-fe-c P2-4）: NF07 を DB の開放状態で管理する間、保持・保全と DSAR が閉じていて未決の申請も無ければ、
+     * privacy-admin を2名未満にする解除を拒否しない。開いている・未決の申請がある時は拒否し、開放状態を読めなければ確認できない
+     * として拒否する（実際の guard の READ_COMMITTED の transaction と実 SQL で確かめる）。
+     */
+    @Test
+    void 本番でNF07が閉じていればprivacy_adminの解除を拒否せず開いていれば拒否する() {
+        STATE_READER.set(databaseReader(featureStateMapper));
+        long first = linkedAdmin("privacy-c", PRIVACY_ADMIN_GROUP);
+        long second = linkedAdmin("privacy-d", PRIVACY_ADMIN_GROUP);
+
+        assertDoesNotThrow(() -> permissionGroupManagementService.replaceAssignments(first, Set.of(ROLE_ADMIN_GROUP),
+                authentication()), "NF07 が閉じていて未決の申請も無ければ判定しない");
+
+        linkedAdmin("privacy-e", PRIVACY_ADMIN_GROUP);
+        openNf07("NF07_RETENTION");
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> permissionGroupManagementService.replaceAssignments(second, Set.of(ROLE_ADMIN_GROUP),
+                        authentication()));
+        assertRejected(rejected, "error.user.adminContinuity.privacyAdministrators", 1, 2);
+    }
+
+    @Test
+    void 本番でNF07に未決の申請があればprivacy_adminの解除を拒否する() {
+        STATE_READER.set(databaseReader(featureStateMapper));
+        long first = linkedAdmin("privacy-f", PRIVACY_ADMIN_GROUP);
+        linkedAdmin("privacy-g", PRIVACY_ADMIN_GROUP);
+        jdbc.update("INSERT INTO t_feature_enablement_request (tenant_id, request_type, target_key, status, "
+                        + "condition_fingerprint, condition_summary, requested_by, requested_at, expires_at, version) VALUES "
+                        + "(?, 'OPEN', 'NF07_DSAR', 'PENDING', ?, 'fixture', ?, TIMESTAMP '2026-11-23 09:00:00', "
+                        + "TIMESTAMP '2026-11-30 09:00:00', 0)", TENANT, "e".repeat(64), operator.getId());
+
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> permissionGroupManagementService.replaceAssignments(first, Set.of(ROLE_ADMIN_GROUP),
+                        authentication()));
+        assertRejected(rejected, "error.user.adminContinuity.privacyAdministrators", 1, 2);
+    }
+
+    @Test
+    void 本番でNF07の開放状態を読めなければ利用者の管理の変更を確認できないとして拒否する() {
+        com.ses.mapper.FeatureEnablementStateMapper broken = org.mockito.Mockito.mock(
+                com.ses.mapper.FeatureEnablementStateMapper.class);
+        org.mockito.Mockito.when(broken.selectByTenant(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("io"));
+        STATE_READER.set(databaseReader(broken));
+        long first = linkedAdmin("ops-u");
+        linkedAdmin("ops-v");
+        linkedAdmin("ops-w");
+        linkedAdmin("ops-x");
+
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> sysUserService.updateUserStatus(first, 0, authentication()));
+        assertEquals(409, rejected.getCode());
+        assertEquals(AdministratorContinuityGuard.UNVERIFIABLE_MESSAGE_KEY, rejected.getMessageKey());
+    }
+
+    /** NF07 を DB の開放状態で管理する目録（段階 C の印）と DB の源で読む部品。 */
+    private com.ses.privacy.production.PrivacyEnablementStateReader databaseReader(
+            com.ses.mapper.FeatureEnablementStateMapper stateMapper) {
+        com.ses.featureenablement.config.FeatureEnablementProperties properties =
+                new com.ses.featureenablement.config.FeatureEnablementProperties();
+        properties.setSource(com.ses.featureenablement.config.FeatureEnablementProperties.Source.DATABASE);
+        return new com.ses.privacy.production.PrivacyEnablementStateReader(properties,
+                com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(), stateMapper, featureRequestMapper,
+                com.ses.featureenablement.state.FeatureEnablementTenant.fixed(TENANT));
+    }
+
+    /** NF07 の開放単位を DB で開く（承認した申請と開放状態の行）。 */
+    private void openNf07(String featureKey) {
+        long approver = user("rb-guard-h2-approver-" + featureKey, "管理者");
+        jdbc.update("INSERT INTO t_feature_enablement_request (tenant_id, request_type, target_key, status, "
+                        + "condition_fingerprint, condition_summary, requested_by, requested_at, expires_at, decided_by, "
+                        + "decided_at, version) VALUES (?, 'OPEN', ?, 'APPROVED', ?, 'fixture', ?, TIMESTAMP '2026-11-20 09:00:00', "
+                        + "TIMESTAMP '2026-11-27 09:00:00', ?, TIMESTAMP '2026-11-20 10:00:00', 1)", TENANT, featureKey,
+                "f".repeat(64), operator.getId(), approver);
+        Long requestId = jdbc.queryForObject("SELECT MAX(id) FROM t_feature_enablement_request WHERE tenant_id = ? "
+                + "AND target_key = ? AND status = 'APPROVED'", Long.class, TENANT, featureKey);
+        jdbc.update("INSERT INTO t_feature_enablement_state (tenant_id, feature_key, state, version, open_request_id, "
+                        + "opened_by, approved_by, opened_at, updated_at) VALUES (?, ?, 'OPEN', 1, ?, ?, ?, "
+                        + "TIMESTAMP '2026-11-20 10:00:00', TIMESTAMP '2026-11-20 10:00:00')", TENANT, featureKey, requestId,
+                operator.getId(), approver);
     }
 
     @Test

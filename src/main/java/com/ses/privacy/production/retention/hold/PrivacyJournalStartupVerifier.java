@@ -1,7 +1,6 @@
 package com.ses.privacy.production.retention.hold;
 
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
-import com.ses.privacy.production.PrivacyFeatureProperties;
 import org.flywaydb.core.api.MigrationVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +11,9 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,34 +40,48 @@ import java.util.function.Supplier;
  *       {@code CURRENT_USER()} の grantee で読み、§3.1 の許可集合（appender または reader）と表×操作の単位で突き合わせる。
  *       超過（global 権限、他 schema、列単位、GRANT OPTION、許可集合外の操作）も不足も不適合。role は使わない前提とし、
  *       {@code CURRENT_ROLE()} が {@code NONE} でなければ不適合（role 経由の権限は上の表に現れないため）。
- *       principal は1つ（総括決定の方式A）で、retention flag ON（hold 開始を使う）では appender が必須、flag OFF
- *       （既存 hold の効力確認だけ）では reader または appender。</li>
+ *       principal は1つ（総括決定の方式A）。hold の効力の結果では reader または appender、開放の条件の結果（hold 開始を使う）では
+ *       appender が必須（下の2つの結果）。</li>
  *   <li>Journal 用 Flyway 履歴表（{@value PrivacyJournalMigrations#HISTORY_TABLE}）が artifact の migration と版・script 名・
  *       checksum で一致する（未適用・失敗行・artifact に無い版・適用後に変わった script は不適合）。application は
  *       migration を実行しない。</li>
  *   <li>application DB の {@code t_privacy_projection_state.journal_id} が設定と一致する（別 journal への誤接続の検出。
  *       行が無い＝hold 機構を一度も使っていない場合は一致とみなす）。</li>
  * </ol>
- * 照会できない項目も不適合として扱う（fail-closed）。結果は {@link #startupResult()} で参照できる（A1H の
- * {@code PrivacyHoldGate} が {@code UNAVAILABLE} の判断に使う）。
+ * 照会できない項目も不適合として扱う（fail-closed）。
  *
- * <p>prod で retention flag ON なのに {@code AVAILABLE} でなければ（設定欠落を含む）起動を失敗させる（OFF へ倒さない）。
- * flag OFF では起動を止めず WARN（{@value #LOG_CODE_UNAVAILABLE}）を出す。prod 以外では flag ON でも起動を止めない
- * （本番 adapter は prod 以外で生成できず Journal を使う経路が無いため。test profile は既存 test の意味を保つため flag ON。
- * {@code PrivacyProductionConfigurationValidator} が prod だけで動くのと同じ）。理由は固定の code だけで出し、接続文字列・
- * user 名・password・例外 message は出さない。{@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector
- * 開始前に実行する。application DB へは読むだけで書かない。各照会には {@link #QUERY_TIMEOUT_SECONDS} 秒の query timeout を
- * 置き、Journal が TCP を受けて応答しない場合も pool の socket timeout で打ち切る（起動が止まり続けない）。
+ * <p>結果は2つに分ける（feature-enablement-console design §8.5 の 3。review P2-4。FE-C03）。どちらも機能の開閉（flag・開放状態）を
+ * 読まない。</p>
+ * <ul>
+ *   <li><b>hold の効力の結果</b>（{@link #protectionResult()}。{@link #startupResult()} も同じ値）: reader（{@code nf07_journal_reader}）と
+ *       appender のどちらの principal でも {@code AVAILABLE}（appender を要求しない判定）。起動時に検査し、{@link #reverify()} は成功した
+ *       時だけ更新して失敗では下げない。hold gate（{@code PrivacyHoldJournal#availability}）はこれを読む。したがって開閉・principal の
+ *       種類・再検査の一時の失敗で hold gate が {@code UNAVAILABLE} になり、既存の hold を守るために文書の処分・retention の purge・
+ *       孤児 file の掃除が止まることは無い（保持・保全を閉じた後も hold は保護を続ける）。</li>
+ *   <li><b>開放の条件の結果</b>（{@link #enablementResult()}）: appender の権限を要求する。{@link #reverify()}（承認の時と定期の評価。
+ *       間隔の下限 {@code app.feature-enablement.journal-reverify-interval}）は成否のどちらでも更新する。保持・保全の開放の条件
+ *       （要件 §6.11 の (e)）と hold の開始（append）の判定がこれを読む。{@code journal.unreachable} は評価できない類。</li>
+ * </ul>
  *
- * <p>flag は決定ID束縛の有効期間を見ない生の {@code privacy.retention.enabled} で判定する（意図的。署名日前・失効で NF07 が
- * OFF として扱われている間も、実行中に有効期間へ入れば hold 開始が使われ得るため、起動時に Journal を要求する保守側に倒す）。
+ * <p>起動は止めない（prod でも WARN。{@value #LOG_CODE_UNAVAILABLE}・{@value #LOG_CODE_ENABLEMENT_UNAVAILABLE}。以前は prod で
+ * retention flag ON なら不適合で起動を止めた）。Journal の接続の設定は起動時に要る（{@link PrivacyJournalConnections}）ため、設定の
+ * 追加は配備の設定の変更と再起動を要する。理由は固定の code だけで出し、接続文字列・user 名・password・例外 message は出さない。
+ * {@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する。application DB へは読むだけで
+ * 書かない。各照会には {@link #QUERY_TIMEOUT_SECONDS} 秒の query timeout を置き、Journal が TCP を受けて応答しない場合も pool の
+ * socket timeout で打ち切る（起動が止まり続けない）。</p>
  */
 public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton {
 
     private static final Logger log = LoggerFactory.getLogger(PrivacyJournalStartupVerifier.class);
 
-    /** flag OFF のまま Journal を UNAVAILABLE として起動したことを示す固定コード（監視の log 検索用）。 */
+    /** hold の効力の結果が UNAVAILABLE のまま起動したことを示す固定コード（監視の log 検索用）。 */
     public static final String LOG_CODE_UNAVAILABLE = "NF07_PRIVACY_JOURNAL_UNAVAILABLE";
+
+    /** 開放の条件の結果（appender）が UNAVAILABLE のまま起動したことを示す固定コード（保持・保全は開けない・開いていれば閉じる）。 */
+    public static final String LOG_CODE_ENABLEMENT_UNAVAILABLE = "NF07_PRIVACY_JOURNAL_APPENDER_UNAVAILABLE";
+
+    /** 再検査の間隔の下限の既定（{@code app.feature-enablement.journal-reverify-interval}）。 */
+    static final Duration DEFAULT_REVERIFY_INTERVAL = Duration.ofMinutes(10);
 
     /** 起動時検査の各照会（Journal・application DB とも）の query timeout。 */
     static final int QUERY_TIMEOUT_SECONDS = 10;
@@ -78,6 +94,14 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         AVAILABLE,
         /** 不適合または照会不能。gate は hold を使った tenant について UNAVAILABLE を返す（A1H）。 */
         UNAVAILABLE
+    }
+
+    /** 1回の検査の2つの結果（hold の効力・開放の条件）。 */
+    record Inspection(List<String> protection, List<String> enablement) {
+        Inspection {
+            protection = List.copyOf(protection);
+            enablement = List.copyOf(enablement);
+        }
     }
 
     /** 検査結果。{@code violations} は固定 code の昇順。 */
@@ -109,49 +133,119 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
     static final Set<String> READER_SCHEMA_PRIVILEGES = Set.of("SELECT");
 
     private final PrivacyJournalConnections connections;
-    private final PrivacyFeatureProperties featureProperties;
     private final Supplier<JdbcTemplate> applicationJdbc;
     private final boolean productionProfile;
-    private volatile Result startupResult = new Result(Availability.NOT_CONFIGURED, List.of());
+    private final Duration reverifyInterval;
+    private final Clock clock;
+    private volatile Result protectionResult = new Result(Availability.NOT_CONFIGURED, List.of());
+    private volatile Result enablementResult = new Result(Availability.NOT_CONFIGURED, List.of());
+    private volatile Instant lastVerifiedAt;
+    private final Object reverifyLock = new Object();
+    private final Supplier<Inspection> inspector;
 
     /**
-     * @param productionProfile prod profile が有効か（true のときだけ flag ON の不適合で起動を止める）
+     * @param productionProfile prod profile が有効か（log の文言だけに使う。起動は止めない）
      */
-    public PrivacyJournalStartupVerifier(PrivacyJournalConnections connections,
-                                         PrivacyFeatureProperties featureProperties,
-                                         Supplier<JdbcTemplate> applicationJdbc,
+    public PrivacyJournalStartupVerifier(PrivacyJournalConnections connections, Supplier<JdbcTemplate> applicationJdbc,
                                          boolean productionProfile) {
+        this(connections, applicationJdbc, productionProfile, DEFAULT_REVERIFY_INTERVAL, Clock.systemUTC());
+    }
+
+    /**
+     * @param reverifyInterval {@link #reverify()} の間隔の下限（前回の検査からこの時間が経つまでは前回の結果を返す）
+     */
+    public PrivacyJournalStartupVerifier(PrivacyJournalConnections connections, Supplier<JdbcTemplate> applicationJdbc,
+                                         boolean productionProfile, Duration reverifyInterval, Clock clock) {
+        this(connections, applicationJdbc, productionProfile, reverifyInterval, clock, null);
+    }
+
+    /** 試験用: 検査を差し替える（{@code inspector} が null なら Journal へ接続して検査する）。 */
+    PrivacyJournalStartupVerifier(PrivacyJournalConnections connections, Supplier<JdbcTemplate> applicationJdbc,
+                                  boolean productionProfile, Duration reverifyInterval, Clock clock,
+                                  Supplier<Inspection> inspector) {
         this.connections = Objects.requireNonNull(connections, "connections");
-        this.featureProperties = featureProperties;
         this.applicationJdbc = applicationJdbc == null ? () -> null : applicationJdbc;
         this.productionProfile = productionProfile;
+        this.reverifyInterval = reverifyInterval == null || reverifyInterval.isNegative()
+                ? DEFAULT_REVERIFY_INTERVAL : reverifyInterval;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.inspector = inspector;
     }
 
     @Override
     public void afterSingletonsInstantiated() {
-        Result result = verify();
-        startupResult = result;
-        enforce(result, holdStartRequired(), productionProfile);
+        Inspection inspection = inspectNow();
+        Result protection = result(inspection.protection());
+        Result enablement = result(inspection.enablement());
+        protectionResult = protection;
+        enablementResult = enablement;
+        lastVerifiedAt = clock.instant();
+        enforce(protection, enablement, productionProfile);
     }
 
-    /** 起動時検査の結果（起動前は {@code NOT_CONFIGURED}）。 */
+    /** hold の効力の結果（{@link #protectionResult()} と同じ。起動前は {@code NOT_CONFIGURED}）。 */
     public Result startupResult() {
-        return startupResult;
+        return protectionResult;
     }
 
-    /** hold 開始を使う（{@code privacy.retention.enabled=true}）か。 */
-    boolean holdStartRequired() {
-        return featureProperties != null && featureProperties.getRetention() != null
-                && featureProperties.getRetention().isEnabled();
+    /** hold の効力の結果（reader・appender のどちらでも可。再検査は成功した時だけ更新する）。 */
+    public Result protectionResult() {
+        return protectionResult;
     }
 
+    /** 開放の条件の結果（appender を要する。再検査のたびに更新する）。 */
+    public Result enablementResult() {
+        return enablementResult;
+    }
+
+    /**
+     * 再検査する（承認の時と定期の評価で呼ぶ）。前回の検査から間隔の下限が経っていなければ照会せずに前回の開放の条件の結果を返す。
+     * 開放の条件の結果は成否のどちらでも更新し、hold の効力の結果は {@code AVAILABLE} になった時だけ更新する（一時の失敗で
+     * hold gate を下げない。起動時に使えなかった場合も成功すれば回復する）。
+     */
+    public Result reverify() {
+        synchronized (reverifyLock) {
+            Instant now = clock.instant();
+            Instant last = lastVerifiedAt;
+            if (last != null && now.isBefore(last.plus(reverifyInterval))) {
+                return enablementResult;
+            }
+            Inspection inspection = inspectNow();
+            Result protection = result(inspection.protection());
+            Result enablement = result(inspection.enablement());
+            enablementResult = enablement;
+            if (protection.availability() == Availability.AVAILABLE) {
+                protectionResult = protection;
+            }
+            lastVerifiedAt = now;
+            return enablement;
+        }
+    }
+
+    /** 開放の条件の結果を検査する（{@code appenderRequired=true}。互換のため残す）。 */
     Result verify() {
+        return result(verifyBoth().enablement());
+    }
+
+    private Result result(List<String> violations) {
         if (!connections.isConfigured()) {
             return new Result(Availability.NOT_CONFIGURED, List.of());
         }
+        return new Result(violations.isEmpty() ? Availability.AVAILABLE : Availability.UNAVAILABLE, violations);
+    }
+
+    private Inspection inspectNow() {
+        return inspector == null ? verifyBoth() : inspector.get();
+    }
+
+    Inspection verifyBoth() {
+        if (!connections.isConfigured()) {
+            return new Inspection(List.of(), List.of());
+        }
         if (!connections.contractViolations().isEmpty()) {
-            return new Result(Availability.UNAVAILABLE,
-                    connections.contractViolations().stream().map(code -> "contract." + code).sorted().toList());
+            List<String> contract = connections.contractViolations().stream().map(code -> "contract." + code).sorted()
+                    .toList();
+            return new Inspection(contract, contract);
         }
         JdbcTemplate application;
         try {
@@ -159,59 +253,73 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         } catch (RuntimeException e) {
             application = null;
         }
-        List<String> violations = inspect(connections.dataSource(), application, connections.expectedSchema(),
-                connections.journalId(), holdStartRequired(), PrivacyJournalMigrations::fromClasspath);
-        return new Result(violations.isEmpty() ? Availability.AVAILABLE : Availability.UNAVAILABLE, violations);
+        return inspectBoth(connections.dataSource(), application, connections.expectedSchema(), connections.journalId(),
+                PrivacyJournalMigrations::fromClasspath);
     }
 
     /**
-     * prod で flag ON なのに {@code AVAILABLE} でなければ起動を止める。それ以外は log だけ出す。
-     * 例外・log には固定 code だけを入れる。
+     * 起動を止めず、結果を log に出す（固定 code だけ）。hold の効力の結果が使えなければ WARN（hold を使った tenant の破壊的経路は
+     * gate が止める）、開放の条件の結果だけが使えなければ WARN（保持・保全は開けない・開いていれば閉じる）。
      */
-    static void enforce(Result result, boolean holdStartRequired, boolean productionProfile) {
-        String codes = String.join(",", result.violations());
-        boolean failClosed = holdStartRequired && productionProfile;
-        switch (result.availability()) {
-            case NOT_CONFIGURED -> {
-                if (failClosed) {
-                    throw new IllegalStateException("[privacy-journal] privacy.retention.enabled=true ですが"
-                            + " Journal 設定（privacy.journal.*）が無いため起動を中止します: journal.notConfigured");
+    static void enforce(Result protection, Result enablement, boolean productionProfile) {
+        switch (protection.availability()) {
+            case NOT_CONFIGURED -> log.info("[privacy-journal] Journal 設定が無いため接続せず、起動時検査を行いません"
+                    + "（保持・保全は開放の条件を満たしません）");
+            case AVAILABLE -> {
+                if (enablement.availability() == Availability.AVAILABLE) {
+                    log.info("[privacy-journal] Journal の起動時検査に適合しました（hold の効力・開放の条件とも）");
+                } else {
+                    log.warn("[privacy-journal] {} Journal は hold の効力の確認に使えますが、appender の権限が無いため保持・保全の"
+                                    + "開放の条件を満たしません（prod={}。起動は続けます）: {}", LOG_CODE_ENABLEMENT_UNAVAILABLE,
+                            productionProfile, String.join(",", enablement.violations()));
                 }
-                log.info("[privacy-journal] Journal 設定が無いため接続せず、起動時検査を行いません");
             }
-            case AVAILABLE -> log.info("[privacy-journal] Journal の起動時検査に適合しました");
-            case UNAVAILABLE -> {
-                if (failClosed) {
-                    throw new IllegalStateException("[privacy-journal] privacy.retention.enabled=true ですが"
-                            + " Journal の起動時検査に適合しないため起動を中止します: " + codes);
-                }
-                log.warn("[privacy-journal] {} Journal の起動時検査に適合しないため、hold の効力確認を UNAVAILABLE として"
-                        + "扱います（app は起動を続けます）: {}", LOG_CODE_UNAVAILABLE, codes);
-            }
+            case UNAVAILABLE -> log.warn("[privacy-journal] {} Journal の起動時検査に適合しないため、hold の効力確認を UNAVAILABLE"
+                    + "として扱います（prod={}。app は起動を続けます）: {}", LOG_CODE_UNAVAILABLE, productionProfile,
+                    String.join(",", protection.violations()));
         }
     }
 
     /**
-     * Journal へ1接続だけ借りて §2.3 の 1〜5 を、application DB で 6 を検査する。
+     * Journal へ1接続だけ借りて §2.3 の 1〜5 を、application DB で 6 を検査する（{@code appenderRequired} で選んだ側の結果）。
      * 接続できなければ {@code journal.unreachable} だけを返す（以降の照会をしない）。
      */
     static List<String> inspect(DataSource journalDataSource, JdbcTemplate application, String expectedSchema,
                                 String journalId, boolean appenderRequired,
                                 Supplier<List<PrivacyJournalMigrations.Migration>> artifactMigrations) {
-        Set<String> violations = new TreeSet<>();
+        Inspection inspection = inspectBoth(journalDataSource, application, expectedSchema, journalId,
+                artifactMigrations);
+        return appenderRequired ? inspection.enablement() : inspection.protection();
+    }
+
+    /**
+     * 1回の接続で2つの結果を作る。権限は同じ照会の結果を、appender を要求しない判定（hold の効力）と要求する判定（開放の条件）の
+     * 2通りで突き合わせる。権限以外の項目は両方に入る。
+     */
+    static Inspection inspectBoth(DataSource journalDataSource, JdbcTemplate application, String expectedSchema,
+                                  String journalId, Supplier<List<PrivacyJournalMigrations.Migration>> artifactMigrations) {
+        Set<String> common = new TreeSet<>();
+        Set<String> protection = new TreeSet<>();
+        Set<String> enablement = new TreeSet<>();
         Connection connection;
         try {
             connection = Objects.requireNonNull(journalDataSource, "journalDataSource").getConnection();
         } catch (SQLException | RuntimeException e) {
-            return List.of("journal.unreachable");
+            return new Inspection(List.of("journal.unreachable"), List.of("journal.unreachable"));
         }
         JdbcTemplate checkedApplication = applicationTemplate(application);
         try {
             JdbcTemplate journal = journalTemplate(connection);
-            checkInstance(journal, checkedApplication, violations);
-            checkSchema(journal, expectedSchema, violations);
-            checkPrivileges(journal, expectedSchema, appenderRequired, violations);
-            checkFlywayHistory(journal, artifactMigrations, violations);
+            checkInstance(journal, checkedApplication, common);
+            checkSchema(journal, expectedSchema, common);
+            Privileges privileges = readPrivileges(journal, common);
+            if (privileges != null) {
+                protection.addAll(privilegeViolations(privileges.currentRole(), privileges.grants(), expectedSchema,
+                        false));
+                enablement.addAll(privilegeViolations(privileges.currentRole(), privileges.grants(), expectedSchema,
+                        true));
+            }
+            checkFlywayHistory(journal, artifactMigrations, common);
         } finally {
             try {
                 connection.close();
@@ -219,8 +327,10 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                 // 検査結果は確定している。close の失敗は結果を変えない
             }
         }
-        checkProjectionState(checkedApplication, journalId, violations);
-        return List.copyOf(violations);
+        checkProjectionState(checkedApplication, journalId, common);
+        protection.addAll(common);
+        enablement.addAll(common);
+        return new Inspection(List.copyOf(protection), List.copyOf(enablement));
     }
 
     /** 借りた1接続の上で、query timeout 付きで照会する JdbcTemplate。 */
@@ -327,15 +437,19 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         }
     }
 
-    private static void checkPrivileges(JdbcTemplate journal, String expectedSchema, boolean appenderRequired,
-                                        Set<String> violations) {
+    /** 自身の権限の照会の結果。 */
+    record Privileges(String currentRole, List<GrantRow> grants) {
+    }
+
+    /** 自身の権限を照会する（照会できなければ {@code privilege.unverifiable} を足して null）。 */
+    private static Privileges readPrivileges(JdbcTemplate journal, Set<String> violations) {
         try {
             String currentUser = journal.queryForObject("SELECT CURRENT_USER()", String.class);
             String currentRole = journal.queryForObject("SELECT CURRENT_ROLE()", String.class);
             String grantee = grantee(currentUser);
             if (grantee == null) {
                 violations.add("privilege.unverifiable");
-                return;
+                return null;
             }
             List<GrantRow> grants = new ArrayList<>();
             grants.addAll(journal.query("SELECT PRIVILEGE_TYPE, IS_GRANTABLE FROM information_schema.USER_PRIVILEGES "
@@ -344,7 +458,7 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
             if (grants.isEmpty()) {
                 // 自身の global 行（権限が無ければ USAGE）が見えない＝判定できない
                 violations.add("privilege.unverifiable");
-                return;
+                return null;
             }
             grants.addAll(journal.query("SELECT TABLE_SCHEMA, PRIVILEGE_TYPE, IS_GRANTABLE "
                             + "FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE = ?",
@@ -358,9 +472,10 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                             + "FROM information_schema.COLUMN_PRIVILEGES WHERE GRANTEE = ?",
                     (rs, row) -> new GrantRow(Scope.COLUMN, rs.getString(1), rs.getString(2), rs.getString(3),
                             yes(rs.getString(4))), grantee));
-            violations.addAll(privilegeViolations(currentRole, grants, expectedSchema, appenderRequired));
+            return new Privileges(currentRole, List.copyOf(grants));
         } catch (RuntimeException e) {
             violations.add("privilege.unverifiable");
+            return null;
         }
     }
 
@@ -439,7 +554,7 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         return List.copyOf(violations);
     }
 
-    private static void checkFlywayHistory(JdbcTemplate journal,
+    static void checkFlywayHistory(JdbcTemplate journal,
                                            Supplier<List<PrivacyJournalMigrations.Migration>> artifactMigrations,
                                            Set<String> violations) {
         List<PrivacyJournalMigrations.Migration> artifact;
@@ -459,7 +574,9 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                                 rs.getBoolean(4));
                     });
         } catch (RuntimeException e) {
-            violations.add("flyway.historyUnreadable");
+            // 照会の失敗（接続の切断・timeout）は評価できない類（一度の瞬断で保持・保全を閉じない。review rb-fe-c P2-2）。版を解釈できない
+            // 行（下の historyUnreadable）は実際の不一致で不成立のまま
+            violations.add("flyway.history.unverifiable");
             return;
         }
         violations.addAll(historyViolations(artifact, history));

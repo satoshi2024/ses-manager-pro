@@ -92,6 +92,30 @@ class FeatureSwitchChildTemplateRenderingTest {
         assertThat(on).contains("id=\"my-cert-number\"");
     }
 
+    /**
+     * FE-A11（feature-enablement-console design §8.1）: 本番の目録（段階 A の7件に DB 管理の印）の DB の源で子・親を閉じても、property の
+     * 源で同じ機能を OFF にした時と同じ表示制御の識別子になり、同じく導線を描画しない。
+     */
+    @Test
+    void DBの源で顧客ポータルと資格番号と親を閉じてもpropertyの源と同じく導線を描画しない() {
+        for (Feature closed : java.util.List.of(Feature.NF02_CUSTOMER_PORTAL, Feature.NF02, Feature.NF03_CERTIFICATION_PII,
+                Feature.NF03)) {
+            assertThat(FeatureSwitchTestSupport.standardDatabaseDisabledOnly(closed).disabledKeys()).as(closed.name())
+                    .isEqualTo(disabledOnly(closed).disabledKeys());
+        }
+        assertThat(FeatureSwitchTestSupport.standardDatabaseDisabledOnly().disabledKeys())
+                .isEqualTo(allOn().disabledKeys());
+
+        String portal = render("portal/customer/index",
+                FeatureSwitchTestSupport.standardDatabaseDisabledOnly(Feature.NF02).disabledKeys());
+        assertThat(portal).doesNotContain("id=\"tabBtnServiceDesk\"", "/portal/js/portal-service-desk.js");
+        String certification = render("my/certification-learning-skill-gap",
+                FeatureSwitchTestSupport.standardDatabaseDisabledOnly(Feature.NF03_CERTIFICATION_PII).disabledKeys());
+        assertThat(certification).doesNotContain("id=\"my-cert-number\"").contains("id=\"my-certification-id\"");
+        assertThat(render("my/certification-learning-skill-gap",
+                FeatureSwitchTestSupport.standardDatabaseDisabledOnly().disabledKeys())).contains("id=\"my-cert-number\"");
+    }
+
     @Test
     void 二者確認の子スイッチOFFなら案件詳細と本人詳細のモーダルとscriptとテンプレートの選択肢を描画しない() {
         Set<String> off = disabledOnly(Feature.NF01_DUAL_CONFIRMATION).disabledKeys();

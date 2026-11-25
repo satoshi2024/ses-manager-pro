@@ -1,9 +1,15 @@
 package com.ses.web;
 
+import com.ses.config.feature.Feature;
+import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
+import com.ses.featureenablement.catalog.SignOffKindClass;
+import com.ses.featureenablement.condition.FeatureConditionCheck;
+import com.ses.featureenablement.condition.FeatureEvaluationContext;
 import com.ses.privacy.production.retention.hold.PrivacyHoldDecisions;
 import com.ses.privacy.production.retention.hold.PrivacyHoldGate;
 import com.ses.privacy.production.retention.hold.PrivacyHoldJournal;
 import com.ses.privacy.production.retention.hold.PrivacyHoldTargetType;
+import com.ses.service.lifecycle.dual.LifecycleDualConfirmationEnablementConditions;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +24,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -115,6 +122,14 @@ class ComposedMessageKeyCoverageTest {
         /** 値以外（値から作る表示・入力欄の文言等）へ fallback する箇所。その式を書く。 */
         static Entry fallbackTo(String reason, String expression) {
             return new Entry(null, reason, expression);
+        }
+
+        /**
+         * 値域を持ち、第2引数が値そのものでない箇所（値以外への fallback か、文言の位置引数の件数等）。値域の key は4言語に要り、
+         * 第2引数はその式に限る。
+         */
+        static Entry domainWith(Set<String> values, String source, String secondArgument) {
+            return new Entry(values, source, secondArgument);
         }
     }
 
@@ -252,6 +267,49 @@ class ComposedMessageKeyCoverageTest {
         registry.put("lifecycle.js|lifecycle.evidenceType.", Entry.domain(lifecycleEvidenceTypes(),
                 "LifecycleTemplateServiceImpl.EVIDENCE_TYPES（テンプレートの保存で許す証跡種別。タスクはテンプレートから写す。"
                         + "RB-POSTLAUNCH B-1）"));
+        // 機能の開放の画面（feature-enablement-console FE-A10。段階 A〜D の整合で台帳に足した）
+        String fe = "feature-enablement.js|featureEnablement.";
+        Set<String> decisionActions = new TreeSet<>();
+        jsObjectKeys("feature-enablement.js", "DECISION_DIALOG_KEYS")
+                .forEach(kind -> decisionActions.add(kind.replaceFirst("^(signOff|bundle)", "").toLowerCase(Locale.ROOT)));
+        registry.put(fe + "btn.", Entry.domain(decisionActions,
+                "feature-enablement.js の DECISION_DIALOG_KEYS の操作（kind から signOff・bundle を除いて小文字にした値）"));
+        registry.put(fe + "toast.", Entry.domain(decisionActions, "同上（署名・組の確認・却下・取下げ・取消しの toast）"));
+        registry.put(fe + "closeWarning.", Entry.domainWith(
+                Set.of(LifecycleDualConfirmationEnablementConditions.WARNING_ACTIVE_DUAL_TEMPLATES),
+                "FeatureEnablementCloseWarningSource の実装が返す code（今は NF01 二者確認の有効な template の件数だけ）。"
+                        + "第2引数は fallback ではなく文言の {0} の件数（数値のため SES.i18n.t は fallback にしない）",
+                "warning.count"));
+        registry.put(fe + "unitName.", Entry.domainWith(enumNames(Feature.values()),
+                "Feature（開放単位の key）。key が欠けた時は画面が渡す表示名か key へ fallback する", "fallback || key"));
+        registry.put(fe + "setting.label.", Entry.domain(checkValues("ck_fe_setting_key"),
+                "t_feature_enablement_setting.setting_key の CHECK（V203）"));
+        registry.put(fe + "state.", Entry.domain(checkValues("ck_fe_state_value"),
+                "t_feature_enablement_state.state の CHECK（V203）"));
+        registry.put(fe + "requestStatus.", Entry.domain(checkValues("ck_fe_request_status"),
+                "t_feature_enablement_request.status の CHECK（V203）"));
+        registry.put(fe + "requestType.", Entry.domain(checkValues("ck_fe_request_type"),
+                "t_feature_enablement_request.request_type の CHECK（V203）"));
+        registry.put(fe + "signOffStatus.", Entry.domain(checkValues("ck_fe_sign_off_status"),
+                "t_feature_sign_off.status の CHECK（V203。組の status はこの部分集合）"));
+        registry.put(fe + "kindClass.", Entry.domain(enumNames(SignOffKindClass.values()), "SignOffKindClass"));
+        registry.put(fe + "category.", Entry.domain(enumNames(FeatureConditionCheck.Category.values()),
+                "FeatureConditionCheck.Category"));
+        registry.put(fe + "checkStatus.", Entry.domain(enumNames(FeatureConditionCheck.Status.values()),
+                "FeatureConditionCheck.Status"));
+        registry.put(fe + "scope.", Entry.domain(enumNames(FeatureConditionCheck.Scope.values()),
+                "FeatureConditionCheck.Scope"));
+        registry.put(fe + "purpose.", Entry.domain(enumNames(FeatureEvaluationContext.Purpose.values()),
+                "FeatureEvaluationContext.Purpose"));
+        registry.put(fe + "closeReason.", Entry.domain(new TreeSet<>(FeatureEnablementCatalog.MANUAL_CLOSE_REASONS),
+                "FeatureEnablementCatalog.MANUAL_CLOSE_REASONS（catalog の manualCloseReasons）"));
+        Set<String> signerRoles = new TreeSet<>();
+        FeatureEnablementCatalog.standard().kinds().forEach(kind -> signerRoles.addAll(kind.signerRoles()));
+        registry.put(fe + "role.", Entry.domain(signerRoles, "本番の目録の署名の種別の signerRoles の和"));
+        Set<String> signOffReasons = new TreeSet<>(jsArray("feature-enablement.js", "SIGN_OFF_REASONS"));
+        signOffReasons.addAll(jsArray("feature-enablement.js", "REVOKE_REASONS"));
+        registry.put(fe + "signOffReason.", Entry.domain(signOffReasons,
+                "feature-enablement.js の SIGN_OFF_REASONS・REVOKE_REASONS（却下・取消しの理由の選択肢）"));
 
         // ---- 値域を台帳で持たない箇所（第2引数で値そのものへfallbackする。keyが欠けると訳されない値が出るが、key名は出ない）
         String statusFallback = "DBの状態名（日本語の値）へfallbackする。状態名の訳の網羅は本testの範囲外";
@@ -280,6 +338,13 @@ class ComposedMessageKeyCoverageTest {
             registry.put("privacy-dsar.js|privacyDsar." + prefix,
                     Entry.fallback("DSARの列挙値のcodeへfallbackする（label() 経由）"));
         }
+        // 機能の開放の画面: 閉鎖の理由は system の理由・手動の理由・条件の code が混ざり、値域を1つの正本から読めない
+        registry.put("feature-enablement.js|featureEnablement.reason.", Entry.fallback(
+                "closed_reason の code（system の理由・MANUAL_*・条件の code）へfallbackする"));
+        registry.put("feature-enablement.js|featureEnablement.requiredStatus.", Entry.fallback(
+                "要る署名の状態（FeatureEnablementQueryService が文字列で作る）のcodeへfallbackする（label() 経由）"));
+        registry.put("feature-enablement.js|featureEnablement.subject.", Entry.fallback(
+                "履歴の subject_type（V203 は CHECK を持たない）のcodeへfallbackする（label() 経由）"));
         return registry;
     }
 
@@ -654,6 +719,21 @@ class ComposedMessageKeyCoverageTest {
         Matcher matcher = Pattern.compile("(?:const|let|var)\\s+" + name + "\\s*=\\s*\\[([^\\]]*)\\]").matcher(code);
         assertThat(matcher.find()).as(file + " の " + name).isTrue();
         return quoted(matcher.group(1), '\'');
+    }
+
+    /** JS の {@code const NAME = { key: {…}, … };} の第1階層の key（値が object の行）。 */
+    private static Set<String> jsObjectKeys(String file, String name) throws IOException {
+        String code = Files.readString(MODULES.resolve(file), StandardCharsets.UTF_8);
+        Matcher block = Pattern.compile("(?:const|let|var)\\s+" + name + "\\s*=\\s*\\{(.*?)\\n\\s*\\};", Pattern.DOTALL)
+                .matcher(code);
+        assertThat(block.find()).as(file + " の " + name).isTrue();
+        Set<String> keys = new TreeSet<>();
+        Matcher key = Pattern.compile("(?m)^\\s*([A-Za-z_$][\\w$]*)\\s*:\\s*\\{").matcher(block.group(1));
+        while (key.find()) {
+            keys.add(key.group(1));
+        }
+        assertThat(keys).as(file + " の " + name + " の key").isNotEmpty();
+        return keys;
     }
 
     /** JS の {@code var NAME = 'VALUE';} の値。 */

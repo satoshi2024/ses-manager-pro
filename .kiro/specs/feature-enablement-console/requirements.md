@@ -2,7 +2,7 @@
 
 - 状態: **草案（第 1 段階: spec のみ。第 3 版: 独立 review `rb-feature-enablement-spec-96be3af4-review.md`（P1 2・P2 7・P3 21）と、`85840936` の delta review（P2 3・P3 10）と統括の決定を反映）**。delta review の後に、統括の指示で実装する。本書の段階では code・migration・runbook を変えない。
 - branch: `codex/snf-feature-enablement-20261122`（起点 `88b31d45`＝PR #130 の head。RB-ADMIN-GUARD の `AdministratorConditionCheck` を含む）。
-- 設計は `design.md`、実装の手順は `tasks.md`。利用者・統括の判断が要る点は `design.md` §18 に一覧する。J-01・J-09・J-16 は利用者が決めた（2026-11-22。§2 の D-7〜D-9）。
+- 設計は `design.md`、実装の手順は `tasks.md`。利用者・統括の判断が要る点は `design.md` §18 に一覧する。J-01・J-09・J-16 は利用者が決めた（2026-11-22。§2 の D-7〜D-9）。副入口 REL・REG の自動の再開（D-4 の例外。J-03 の結果）は利用者が確認した（2026-11-23。§2 の D-10）。hold 開始の自動の再開は J-03 の推奨（独立 review で同意）で、利用者の確認の範囲外。
 - 本書の file の行番号は `88b31d45` の行番号である。実装の着手時に再確認する。
 - 関連する正本: `.kiro/specs/production-launch/feature-switches.md`（以下「FS」）、`.kiro/specs/production-launch/deploy-runbook.md`（以下「RB」）、`.kiro/specs/privacy-retention-dsar/production-bridge-phased-plan.md`、`.kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md`、`.kiro/specs/data-migration-import-center/a1a-ingress-operations.md`。
 
@@ -35,12 +35,17 @@
 - **D-8（J-09）**: 時間要因は新しい規則に置き換える。署名の失効でその機能を自動閉鎖して警告し、NF06 の期間外は NF06 全体を閉じる（404）。署名日前の署名では開かず、管理者の申請と承認で開く。これは 2026-11-14 の時間要因の規則（失効・署名日前は起動を止めず OFF 扱い、署名日に自動で開く）を置き換える。
 - **D-9（J-16）**: NF02 の全社共通カレンダーは開放の時だけの条件とする。申請・承認の時に当年度の暦を必須にし、その後は継続の条件にせず NF02 を自動閉鎖しない。暦の期限の 30 日前から警告（監査と管理者への通知）し、暦が無い間は現行の WARN `missing_calendar` と土日だけを休日とする計算を続ける。
 
+2026-11-23 の利用者の確認（段階 C の review rb-fe-c の判断点 7）:
+
+- **D-10（D-4 の例外の確認）**: NF07 保持・保全の副入口 **REL・REG** は D-4 の対象外とし、技術の条件（trust 文書の鮮度・anchor・verifier）が戻れば自動で開く。署名に依る回復（D-03・D-02 等の更新、証拠の類の再登録）は新しい署名の二人の確認を要する（一人で副入口を開き直す経路は無い）。開放単位（保持・保全）の再開は D-4 のとおり二人の承認を要する。FE-RQ-005 の例外と §3 の副入口は REL・REG についてこの確認に従う。
+- **hold 開始の自動の再開は D-10 に含まない**: hold 開始も同じく DB の状態を持たず、技術の条件（Journal の appender）と署名（D-05・D-05 の受理）が戻れば自動で開くが、これは J-03 の推奨（独立 review で同意、2026-11-22）であり、**利用者の確認の範囲外**（2026-11-23 の利用者の確認は REL・REG だけ）。
+
 ## 3. 用語
 
 | 用語 | 定義 |
 |---|---|
 | 開放単位 | 申請・承認・閉鎖の単位になる機能。§6 の 13 件（現在の `Feature` の 11 件と NF05 の 2 件）。 |
-| 副入口 | 開放単位の下で、別の条件で要求ごとに開閉する入口。NF07 保持・保全の hold 開始・hold 解除（REL）・policy の登録と有効化（REG）。独立の申請・承認の単位にはしない（§6.11。`design.md` §18 の判断点 J-03）。副入口の条件が戻れば副入口は自動で開く（D-4 の例外。FE-RQ-005）。 |
+| 副入口 | 開放単位の下で、別の条件で要求ごとに開閉する入口。NF07 保持・保全の hold 開始・hold 解除（REL）・policy の登録と有効化（REG）。独立の申請・承認の単位にはしない（§6.11。`design.md` §18 の判断点 J-03）。副入口の条件が戻れば副入口は自動で開く（D-4 の例外。FE-RQ-005。REL・REG は 2026-11-23 に利用者が確認した D-10、hold 開始は J-03 の推奨（独立 review で同意）で利用者の確認の範囲外）。副入口の目録の署名（決定の類と証拠の類）の取消し・失効は副入口だけを閉じ、各入口の gate も要求ごとに判定する。 |
 | 開放状態 | 開放単位の DB 上の状態（FE-RQ-002）。 |
 | 実効値 | 要求の時点で機能を公開してよいか。開放状態・総スイッチ・親・有効期限・一時の閉鎖（overlay）から決まる。既存の `FeatureSwitches#isEnabled` の値。 |
 | 条件 | 開放単位を開くために満たす事項。自動検査（system が判定する）・署名（登録と確認が要る）・鍵（配備の設定にあること）・親（親の開放単位が開いていること）・総スイッチの 5 種。既定は継続の条件（開いている間も評価し、外れたら自動閉鎖）。 |
@@ -175,7 +180,7 @@
 - 評価できない（`UNVERIFIABLE`。評価器の例外と、目録が「評価できない類」とする code。FE-RQ-001）時は、直ちに一時の閉鎖で実効値を閉じる。一時の閉鎖は開放状態の行の `unverifiable_since` に書き、snapshot で全ての instance が同じに閉じる（DB に書けない時はその instance の memory でだけ閉じる）。評価できない状態が既定 3 回の定期の評価の間（`unverifiable_since` から評価の間隔の 3 倍）続けば `AUTO_CLOSED`（`EVALUATION_UNVERIFIABLE`）にする。評価が成り立てば `unverifiable_since` を消す（判断点 J-10。統括の決定で (a) に 3 項を加えた）。
 - 自動閉鎖を決めたが DB に書けない（backup の静止・監査の失敗等）時は、その開放単位を「自動閉鎖の書込み待ち」の一時の閉鎖にし、次の周期では条件の成否に関係なく書込みを再試行し、書けるまで閉じたままにする（条件が戻っても承認なしに開かない）。書込み待ちは instance の memory にあり、再起動で失われる。そのため書込み待ちの間は WARN `errorCode=FEATURE_AUTO_CLOSE_PENDING` を毎周期出し、RB に「DB に書けない間は再起動しない。再起動した場合は、起動の後に WARN が出ていて `AUTO_CLOSED` が書かれていない開放単位を手動で閉じる」を書く。
 - **機能の条件では app の起動を止めない**。§7 の「機能を閉じる」に挙げた起動時検査は、prod でも例外にせず、該当の開放単位を閉じる。機能の開放と関係しない検査と鍵の fail-fast は残す（§7 の「残す」）。
-- 自動閉鎖の後に条件が戻っても自動では開かない（D-4）。**例外**: 副入口（hold 開始・REL・REG）は DB の開放状態を持たず、条件が戻れば自動で開く（J-03 の結果）。理由: 副入口の条件の署名は既に二人の確認を経ており、外れる原因の多くは trust 文書の鮮度のような一時の状態である。副入口の閉鎖と再開は履歴に残し、管理者へ通知する。
+- 自動閉鎖の後に条件が戻っても自動では開かない（D-4）。**例外**: 副入口（hold 開始・REL・REG）は DB の開放状態を持たず、条件が戻れば自動で開く（J-03 の結果。REL・REG は 2026-11-23 に利用者が確認した（§2 の D-10）。hold 開始は J-03 の推奨（独立 review で同意）で、利用者の確認の範囲外）。理由: 副入口の条件の署名は既に二人の確認を経ており、外れる原因の多くは trust 文書の鮮度のような一時の状態である。自動で戻るのは技術の条件だけで、署名に依る回復は新しい署名の二人の確認を要する。副入口の閉鎖と再開は履歴に残し、管理者へ通知する。
 - 起動時・定期の評価は、開放の遷移の前提（NF05 outbound の barrier の OFF の記録）を判定しない。
 - 開放の時だけの条件（NF02 の全社共通カレンダー。D-9）は、起動時・定期・変更時の評価で外れていても自動閉鎖も一時の閉鎖もしない。暦の有効期間の終わりの既定 30 日前から毎日 1 回、監査（`recordDomainEventRequired`）・管理者への通知・WARN で警告し、暦が切れた後も毎日警告する。暦が無い間の SLA の計算は現行どおり（WARN `missing_calendar`、土日だけを休日とする。`ServiceSlaCalculator.isNonWorkingDay` :314-329）。
 
@@ -231,19 +236,19 @@
 - 閉じる変更（手動・自動・総スイッチ）は即時に反映する: 実行時の NF05 の判定（§1 の NF05 の全ての読取り）を「起動時の値 AND 実効値」に改める。outbound を閉じる transaction は、barrier の行を `v1|OFF|0|<指紋>` に書き直し `NF05_OUTBOUND_OFF` を監査する（次に開く起動で再び隔離するため。現在の kill switch は行を書き直さない）。
 - NF05 outbound の閉鎖を 2 種類に分ける:
   - **(i) 一時の閉鎖**（開放状態は `OPEN` のまま、評価できない状態（`unverifiable_since`・この instance の memory）か snapshot の古さだけで実効値が閉じている）: producer は outbox への書込みを続け（起動時の値・最後に読めた開放状態が `OPEN`・総スイッチだけを見る）、worker は claim を止めるだけで、処理中の配信は DLQ にせず PENDING へ戻す。解ければ同じ process で送信を再開し、閉じていた間の変更も送る（at-least-once を保つ）。barrier の行は `ON` のままで、隔離は要らない（OFF の期間の配信を作らないため）。
-  - **(ii) 確定の閉鎖**（`AUTO_CLOSED`・手動の閉鎖・総スイッチ。DB に書けない間の自動閉鎖の書込み待ちを含む）: 現在の kill switch と同じ（producer は積まない、未送信は PENDING のまま、処理中は DLQ `KILL_SWITCH`）で、barrier の行を OFF に書き直す。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
+  - **(ii) 確定の閉鎖**（`AUTO_CLOSED`・手動の閉鎖・総スイッチ。DB に書けない間の自動閉鎖の書込み待ちを含む）: 現在の kill switch と同じ（producer は積まない、処理中は DLQ `KILL_SWITCH`）で、barrier の行を OFF に書き直す。未送信（PENDING・RETRYABLE）は、DB の状態が確定の閉鎖の間に barrier の定期の処理が開き直しの起動の隔離と同じ DLQ `STARTUP_REVALIDATION_REQUIRED` にし、保存期間で purge する（開き直さなくても外部へ送るための写しを残し続けない。開き直しの起動の隔離の前倒しで、開き直した後は条件付きの bulk replay で再検証して戻せる。review rb-fe-d P2-2・P2-N2）。同じ process では開き直さず、開き直しは `OPEN_PENDING_RESTART` → 再起動 → 隔離を経る。
 - inbound は (i)・(ii) のどちらでも実効値が閉じている間は 404（client が再試行する。SES 側に失われるものは無い）。
 - NF05 の保存期間の purge（retention・nonce の purge、read snapshot の purge）は、NF05 を閉じた後の起動でも動かす。NF05 を一度でも開いたか、対象の表に行があれば、boot resolver が purge 用の property を開にする（個人データを無期限に残さない）。
 - outbound の barrier の条件を 2 つに分ける: (a) 継続の条件: barrier の行の tenant の指紋が `sha256(現在の bound-tenant-id)`（phase は問わない）。(b) 開放の遷移の前提: 行の phase が `OFF` で `NF05_OUTBOUND_OFF` の監査がある（現在 RB §1.7 で DBA が SQL で確かめていること）。(b) は申請・承認と、`OPEN_PENDING_RESTART` を反映する起動でだけ判定する。開いた後に barrier が `QUARANTINING`・`ON` へ進むのは正常で、(b) で閉じない。全ての起動で同じ `INTEGRATION_HUB_BOUND_TENANT_ID` を設定する規則は変えない。
 - outbound が閉じている間の prod の `provider.mode` の規則（現在は MOCK だけ。`IntegrationHubProductionEnablementPolicy:58-60`）を、MOCK か HTTPS に改める（承認の前に HTTPS と承認の内容を設定できるようにするため。transport の bean は outbound が閉じていれば作られない）。
-- `LegalEntityReadinessStartupValidator` の NF05 の部分は、起動を止めず NF05 の両方向を自動閉鎖する。判定は port を開く前（`FeatureEnablementStartupEvaluator`）に行う（`ApplicationReadyEvent` では port を開いた後になるため）。management copilot の部分は変えない。
+- `LegalEntityReadinessStartupValidator` の NF05 の部分は、起動を止めず NF05 の両方向を自動閉鎖する。判定は port を開く前（`FeatureEnablementStartupEvaluator`。段階 D の実装は同じく port を開く前の起動の後の反映 `IntegrationHubBootDecisionRecorder`。design §9.6）に行う（`ApplicationReadyEvent` では port を開いた後になるため）。management copilot の部分は変えない。
 
 受入基準:
 
 - **FE-AC-008-01** WHEN NF05 outbound を承認する THEN 状態は `OPEN_PENDING_RESTART` で、再起動の前は worker・scheduler・producer が作られず、画面に「再起動待ち」と出る。
 - **FE-AC-008-02** WHEN 再起動する THEN 条件が成り立てば outbound の bean が作られ、barrier が隔離から READY へ進み、状態が `OPEN`（`RESTART_APPLIED` の監査）になる。続く定期の評価の後も `OPEN` のままで、もう一度再起動しても `OPEN` のままで、隔離は走らない。条件が成り立たなければ app は起動し、outbound の bean は作られず、状態は `AUTO_CLOSED` になる。
 - **FE-AC-008-06** WHEN 開いていた NF05 が `AUTO_CLOSED` になった後に再起動する THEN retention・nonce・read snapshot の purge の scheduler は作られ、保存期間を過ぎた行を消す。
-- **FE-AC-008-03** WHEN 開いている outbound を確定の閉鎖で閉じる THEN 次の worker の tick から送信しない（未送信は保留、claim 済みは DLQ `KILL_SWITCH`）。barrier の行は `v1|OFF|0|<指紋>` になり、開き直しは再起動と隔離を経る。
+- **FE-AC-008-03** WHEN 開いている outbound を確定の閉鎖で閉じる THEN 次の worker の tick から送信しない（claim 済みは DLQ `KILL_SWITCH`。未送信は barrier の定期の処理が DLQ `STARTUP_REVALIDATION_REQUIRED` にし、保存期間の後に purge される。開き直した後は ops runbook §13.3 の bulk replay で選べる。review rb-fe-d P2-2・P2-N2）。barrier の行は `v1|OFF|0|<指紋>` になり、開き直しは再起動と隔離を経る。
 - **FE-AC-008-07** WHEN outbound が一時の閉鎖（評価できない状態）になり、その間に業務の変更が起き、その後に評価が戻る THEN 閉じていた間の変更の配信が戻った後に送られ、閉じた時に処理中だった配信は DLQ にならず PENDING へ戻って送られる。
 - **FE-AC-008-04** WHEN 開いている inbound を閉じる THEN 次の要求から `/external-api/**` は 404（`DISABLED_DENY`）になる。
 - **FE-AC-008-05** WHEN 起動時に DB を読めない THEN NF05 の property は閉の値で、app は起動する。
@@ -271,11 +276,13 @@
 - 値の形式は現在と同じ（offset 付き ISO-8601。`PortalServiceRequestVisibilityPolicy`）。不正な値は申請の時に 400 で拒否する（起動は止めない）。
 - 申請する値は、確認済みの署名「公開範囲の決定」（CS Owner）の構造化された値と一致することを条件にする。値を設定する（未設定でない）場合は、署名「棚卸し」（CS Owner）も要る。
 - `PortalServiceRequestVisibilityPolicy` は値を構築時に固定せず（現在は `final`。:45-52）、snapshot から毎回読む。反映は即時。
+- 今の公開範囲の設定は、確認済みの「公開範囲の決定」の範囲の内でなければならない（NF02 顧客ポータルの問い合わせの**継続の条件**。段階 B の復審 rb-fe-b-656d71b8 の P3-1、統括の決定。D-4）。範囲の内は、設定が未設定（portal 起票だけ）か、決定に値があり設定の日時が決定の日時と同じか後であること。決定がより狭い値（未設定・より後の日時）へ差し替わる・決定が失効する等で範囲の外になれば、顧客ポータルの問い合わせだけを自動閉鎖して警告し（監査と管理者への通知）、顧客へ見せる範囲が決定を超えないようにする。開き直す申請・承認でも同じに判定する（範囲の外のままでは 409）。
 
 受入基準:
 
 - **FE-AC-010-01** WHEN 公開範囲を承認する THEN 次の portal の一覧・詳細・返信・CSAT・添付から新しい範囲で判定される。
 - **FE-AC-010-02** WHEN 申請者本人が承認する THEN 403、署名の値と違う値の申請は 409、offset の無い値は 400 になる。
+- **FE-AC-010-03** WHEN 公開範囲 V1 で顧客ポータルが開いている時に、公開範囲の決定を V1 より狭い決定へ差し替えて確認する THEN 顧客ポータルの問い合わせだけが同じ transaction で `AUTO_CLOSED` になり（親の NF02 は開いたまま）、監査と管理者への通知が残る。開き直しの申請は設定を新しい決定の値へ変える（二人の承認）までは 409 で、その間に公開範囲は広がらない。
 
 ### FE-RQ-011: 画面「機能の開放」
 
@@ -403,7 +410,7 @@
 
 | 種類 | 内容 | 出処 |
 |---|---|---|
-| 自動検査 | なし（親だけ） | ― |
+| 自動検査 | 今の公開範囲の設定が確認済みの公開範囲の決定（`NF02_PORTAL_VISIBLE_SINCE_DECISION`）の範囲の内（継続の条件。FE-RQ-010。段階 B の復審 P3-1 で足した）。他は親だけ | FE-RQ-010 |
 | 署名 | `NF02_PORTAL_PUBLICATION`【決】（公開の Owner 承認）、`NF02_PORTAL_DG02_AC`【決】（CS Owner。DG-02-A/C）、`NF02_PORTAL_VISIBLE_SINCE_DECISION`【決】（CS Owner。公開範囲を設定するか・その値。構造化された値 `visibleSince`、未設定も値）、`NF02_PORTAL_INVENTORY`【証】（CS Owner。公開範囲を設定する場合の棚卸し。設定しない場合は不要）、`NF02_PORTAL_BROWSER_CHECK`【証】（production owner。起票・CSAT・詳細・返信の modal の実ブラウザの確認） | FS 3.4・4.3.1、署名表の NF02 の行 |
 | 設定 | 公開範囲 `visible-since`（FE-RQ-010） | FS 1・4.3.1 |
 | 鍵 | なし | ― |

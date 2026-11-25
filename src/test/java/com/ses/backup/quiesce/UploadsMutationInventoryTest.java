@@ -65,7 +65,9 @@ class UploadsMutationInventoryTest {
                     "再 scan が CLEAN なら published へ移す（metadata を書けなければ戻す）"),
             mutates("service.impl.FileStorageServiceImpl#deleteQuietly:Files.deleteIfExists",
                     "service.impl.FileStorageServiceImpl#storeBytes",
-                    "保存に失敗した実体の後始末。storeBytes の assert の後（discardServerGenerated を含む）だけ呼ばれる"),
+                    "保存に失敗した実体の後始末。storeBytes の assert の後（discardServerGenerated を含む）と、登録されなかった"
+                            + "署名の文書の削除（discardUnregistered。自身も assert を呼んでから消す。review rb-fe-a1 1a4fd48d 差分"
+                            + " P3-N1）だけで呼ばれる"),
             // LocalDocumentStorage（upload root/documents の quarantine・published）
             dir("service.storage.impl.LocalDocumentStorage#<init>:Files.createDirectories",
                     "bean の初期化の時の quarantine・published の directory（prod の UNARMED でも動く。D-P2-7）"),

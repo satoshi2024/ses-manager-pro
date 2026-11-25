@@ -222,7 +222,7 @@ public final class KmsPrivacyTrustSource implements PrivacyTrustSource {
     /**
      * 起動時の検査の結果。
      *
-     * @param structural         構造的な違反（設定・文書。空でなければ NF07 の flag が ON の起動を止める）
+     * @param structural         構造的な違反（設定・文書。空でなければ ERROR を出し、副入口 REL・REG を閉じる。起動は止めない。FE-C04）
      * @param fresh              文書が鮮度の上限の内にある
      * @param usablePolicyAnchors 有効期間内で ACTIVE の policy の anchor の数
      * @param usableHoldReleaseAnchors 有効期間内で ACTIVE の解除の anchor の数

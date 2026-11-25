@@ -99,4 +99,27 @@ public interface UserPermissionGroupMapper extends BaseMapper<UserPermissionGrou
                                                       @Param("adminRole") String adminRole,
                                                       @Param("identityTenantId") String identityTenantId,
                                                       @Param("providerId") Long providerId);
+
+    /**
+     * 利用者が {@code '*'}・{@code privacy.} 接頭辞の拒否行を持つ有効な group に所属する数（0 でなければ privacy の管理者として扱わない）。
+     * 条件は {@link #selectEffectivePrivacyAdminUsernames} の {@code NOT EXISTS} と同じ（機能の開放の行為者の判定が、開放の条件の
+     * 数え方と揃える。review rb-fe-c P3-3）。
+     */
+    @Select("""
+        SELECT COUNT(*)
+        FROM t_user_permission_group o
+        JOIN m_permission_group og ON og.id = o.group_id
+        JOIN t_permission_group_action d ON d.group_id = og.id
+        WHERE o.tenant_id = #{tenantId}
+          AND o.user_id = #{userId}
+          AND o.deleted_flag = 0
+          AND og.tenant_id = #{tenantId}
+          AND og.enabled = 1
+          AND og.deleted_flag = 0
+          AND d.tenant_id = #{tenantId}
+          AND (d.action_key = '*' OR d.action_key LIKE 'privacy.%')
+          AND d.deny_flag = 1
+          AND d.deleted_flag = 0
+        """)
+    int countPrivacyDenyMemberships(@Param("tenantId") String tenantId, @Param("userId") Long userId);
 }

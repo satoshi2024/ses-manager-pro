@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
  * 項目・属する組を持つ。値（決定 ID・digest・鍵）は持たない。</p>
  *
  * <p>DB 管理の印（{@link UnitDefinition#databaseManaged()}）は段階の間の印で、印の無い開放単位は {@code database} の源でも
- * property の値を返す（design §3.1）。段階 A の本書では全て印なし（FE-A11 が容易な7件に、段階 B〜D が残りに付け、段階 E で印を
- * 削除する）。試験は {@link #withDatabaseManaged} で印を付けた写しを使う。</p>
+ * property の値を返す（design §3.1）。段階 A は容易な7件（{@link #STAGE_A_DATABASE_MANAGED}。FE-A11）に印を付け、段階 B〜D が
+ * 残りに付け、段階 E で印を削除する。試験は {@link #withDatabaseManaged} で印を付け直した写しを使う。</p>
  */
 public final class FeatureEnablementCatalog {
 
@@ -32,10 +32,28 @@ public final class FeatureEnablementCatalog {
     public static final String SETTING_NF02_VISIBLE_SINCE = "nf02-customer-portal.visible-since";
     /** NF07 の決定の束縛の組の種類（D-01・D-09 と、D-09 が dsar を承認する時の D-06。design §2.6.1）。 */
     public static final String BUNDLE_NF07_DECISION_BINDING = "NF07_DECISION_BINDING";
-    /** NF02 の全社共通カレンダー（開放の時だけの条件。D-9）。評価器は FE-A11 で足す。 */
+    /** NF02 の全社共通カレンダー（開放の時だけの条件。D-9）。評価器は {@code WorkCalendarConditionEvaluator}（FE-A11）。 */
     public static final String CODE_NF02_CALENDAR = "calendar.companyWide";
-    /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は FE-D05 で足す。 */
+    /**
+     * NF02 の暦を照会できない時の code（評価できない類。開放の時だけの条件のまま扱い、照会の失敗で NF02 を自動閉鎖しない。D-9。
+     * 申請・承認では評価できない条件として 409）。
+     */
+    public static final String CODE_NF02_CALENDAR_UNVERIFIABLE = "calendar.companyWide.unverifiable";
+    /** 段階 A で DB 管理にする容易な7件（requirements §6.1・6.3〜6.7・6.13。FE-A11）。 */
+    public static final Set<Feature> STAGE_A_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
+            Feature.NF04, Feature.NF10));
+    /** 段階 C で DB 管理にする NF07 の2件（requirements §6.11・6.12。FE-C05）。 */
+    public static final Set<Feature> STAGE_C_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF07_RETENTION, Feature.NF07_DSAR));
+    /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は {@code IntegrationHubEnablementConditions}（FE-D05）。 */
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
+    /**
+     * 段階 D で DB 管理にする NF05 の2件（requirements §6.8・6.9。FE-D02）。開ける変更は次の起動で反映し、閉じる変更は即時に反映する
+     * （D-2）。prod の起動時検査はこの2件の旧い変数（開閉と決定 ID・digest）を止める（FE-D05）。
+     */
+    public static final Set<Feature> STAGE_D_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
+            Feature.NF05_INBOUND, Feature.NF05_OUTBOUND));
 
     /**
      * 手動の閉鎖の理由の区分（{@code closed_reason} に入る。system の理由（{@code SIGN_OFF_REVOKED}・{@code MASTER_SWITCH_CLOSED} 等）と
@@ -198,9 +216,9 @@ public final class FeatureEnablementCatalog {
                 evidence("NF01_STAGING_VERIFICATION", "PRODUCTION_OWNER"),
                 evidence("NF01_RUNNER_EVIDENCE", "TECH_LEAD"));
 
-        // NF01 二者確認（§6.2）。証跡種別の検査と Privacy 署名の参照の検査は FE-B01 の評価器
+        // NF01 二者確認（§6.2）。証跡種別の検査と Privacy 署名の参照の検査は LifecycleDualConfirmationEnablementConditions（FE-B01）
         b.unit(Feature.NF01_DUAL_CONFIRMATION, false, false, true, List.of(),
-                List.of("LifecycleDualConfirmationReleaseGate.validate（起動時検査）", "FS 4.9.2・4.9.5",
+                List.of("LifecycleDualConfirmationReleaseGate.acceptable（旧い起動時検査の判定）", "FS 4.9.2・4.9.5",
                         "署名表の NF01 二者確認の行 (1)〜(7)"),
                 kind("NF01_DUAL_PRIVACY", SignOffKindClass.DECISION, SignOffKind.ReferenceRule.NF01_DUAL_PRIVACY,
                         List.of(), null, false, "PRIVACY_OWNER"),
@@ -208,12 +226,15 @@ public final class FeatureEnablementCatalog {
                 decision("NF01_DUAL_BREAK_GLASS_DECISION", "SECURITY"),
                 evidence("NF01_DUAL_RUNNER_EVIDENCE", "TECH_LEAD"),
                 evidence("NF01_DUAL_REVIEW_PASS", "TECH_LEAD"));
+        // 段階 B の DB 管理の印（FE-B01）
+        b.databaseManaged(Set.of(Feature.NF01_DUAL_CONFIRMATION));
 
         // NF02 本体（§6.3）。全社共通カレンダーは開放の時だけの条件（D-9）。評価器は FE-A11
         b.unit(Feature.NF02, false, false, true, List.of(),
                 List.of("ServiceSlaCalculator.findCalendarForScope の4段目", "FS 4.3", "署名表の NF02 の行"),
                 decision("NF02_DG02", "CS_OWNER"));
         b.openOnly(Feature.NF02, CODE_NF02_CALENDAR);
+        b.openOnly(Feature.NF02, CODE_NF02_CALENDAR_UNVERIFIABLE);
 
         // NF02 顧客ポータルの問い合わせ（§6.4）
         b.unit(Feature.NF02_CUSTOMER_PORTAL, false, false, false, List.of(),
@@ -246,7 +267,8 @@ public final class FeatureEnablementCatalog {
                 decision("NF04_SECURITY", "SECURITY", "BUSINESS_OWNER"),
                 evidence("NF04_DEVICE_ACCEPTANCE", "ACCEPTANCE_OWNER"));
 
-        // NF05 inbound（§6.8）。開くのは次の起動。評価器は FE-D05
+        // NF05 inbound（§6.8）。開くのは次の起動。評価器は IntegrationHubEnablementConditions（FE-D05。評価できない類の code は
+        // state=STATE_IO_ERROR・nf05.outbound.truststore.unverifiable・legalEntity.unverifiable）
         List<KeyRequirement> nf05Keys = List.of(
                 new KeyRequirement("INTEGRATION_HUB_PUBLIC_ID_KEY", "integration.hub.public-api.public-id-key"),
                 new KeyRequirement("INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION", "integration.hub.crypto.current-key-version"),
@@ -282,10 +304,10 @@ public final class FeatureEnablementCatalog {
                 sreLoad, stagingWire, digestRule);
         b.openTransition(Feature.NF05_OUTBOUND, CODE_NF05_BARRIER_OFF);
 
-        // NF06（§6.10）。評価器は FE-B02
+        // NF06（§6.10）。評価器は ImportCenterEnablementConditions（FE-B02）
         b.unit(Feature.NF06, false, false, true,
                 List.of(new KeyRequirement("IMPORT_ROW_REFERENCE_HMAC_KEY", "app.import-center.row-reference.hmac-key")),
-                List.of("ImportAdmissionStartupValidator・ImportRowReferenceKeyStartupValidator（起動時検査）",
+                List.of("ImportAdmissionApproval.evaluate・ImportSourceRowReference.state（旧い起動時検査の判定）",
                         "FS 4.8.2 の #1〜#10", "署名表の NF06 の行"),
                 kind("NF06_ADMISSION", SignOffKindClass.DECISION, SignOffKind.ReferenceRule.NF06_ADMISSION,
                         List.of("decisionId", "tenantId", "sourceCodes", "approvalDigest"), null, false, "DATA_OWNER"),
@@ -293,8 +315,11 @@ public final class FeatureEnablementCatalog {
                 evidence("NF06_SRE_LB", "SRE"),
                 evidence("NF06_DBA_ACCOUNT", "DBA"),
                 evidence("NF06_STAGING_CHECK", "PRODUCTION_OWNER"));
+        // 段階 B の DB 管理の印（FE-B02）
+        b.databaseManaged(Set.of(Feature.NF06));
 
-        // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は FE-C05
+        // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は
+        // PrivacyProductionConfigurationValidator（prod だけ。FE-C05）
         List<KeyRequirement> journalKeys = List.of(
                 new KeyRequirement("PRIVACY_JOURNAL_DATASOURCE_URL", "privacy.journal.datasource.url"),
                 new KeyRequirement("PRIVACY_JOURNAL_DATASOURCE_USERNAME", "privacy.journal.datasource.username"),
@@ -332,13 +357,20 @@ public final class FeatureEnablementCatalog {
         b.bundle(new BundleKind(BUNDLE_NF07_DECISION_BINDING, List.of("NF07_D01", "NF07_D09"), List.of("NF07_D06"), true,
                 true));
 
-        // NF10（§6.13）。scheduler 無効は警告だけ（ADVISORY。評価器は FE-A11）
+        // NF10（§6.13）。scheduler 無効は警告だけ（ADVISORY。評価器は SchedulingConditionEvaluator。FE-A11）
         b.unit(Feature.NF10, false, false, false, List.of(),
                 List.of("RB §1.7 の NF10 の行", "FS 4.5.1 の #1〜#8", "署名表の NF10 の行"),
                 decision("NF10_REPORT_OWNER", "REPORT_OWNER"),
                 decision("NF10_SRE", "SRE"),
                 decision("NF10_TZ_POLICY", "REPORT_OWNER", "SRE"),
                 decision("NF10_DRAIN_APPROVAL", "SRE", "DBA"));
+
+        // 段階 A の DB 管理の印（容易な7件。FE-A11）
+        b.databaseManaged(STAGE_A_DATABASE_MANAGED);
+        // 段階 C の DB 管理の印（NF07 の2件。評価器は PrivacyProductionConfigurationValidator。FE-C05）
+        b.databaseManaged(STAGE_C_DATABASE_MANAGED);
+        // 段階 D の DB 管理の印（NF05 の2件。FE-D02）
+        b.databaseManaged(STAGE_D_DATABASE_MANAGED);
 
         return b.build();
     }
@@ -416,6 +448,12 @@ public final class FeatureEnablementCatalog {
 
         void bundle(BundleKind bundle) {
             bundles.put(bundle.code(), bundle);
+        }
+
+        void databaseManaged(Set<Feature> managed) {
+            for (Feature feature : managed) {
+                units.put(feature, units.get(feature).withDatabaseManaged(true));
+            }
         }
 
         private void replace(UnitDefinition unit, List<SignOffRequirement> requirements, Set<String> openOnly,

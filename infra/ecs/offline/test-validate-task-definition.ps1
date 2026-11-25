@@ -327,6 +327,30 @@ try {
   Case 'SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE replaces SHUTDOWN_TIMEOUT' $Initial 'guarded property trees must use the short names' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE' '100s'; $td }
 
+  # ---- feature enablement (FE-A08, feature-enablement-console design section 10, deploy-runbook 1.0 row 42)
+  Case 'feature enablement master switch false (emergency stop, first start after a restore)' $SteadyOn 'PASS' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_ENABLEMENT_ALLOWED' 'false'; $td }
+  Case 'FEATURE_ENABLEMENT_ALLOWED from the secret store' $Initial 'settings checked by value must be in environment' {
+    $td = New-Initial; Remove-Env (App $td) 'FEATURE_ENABLEMENT_ALLOWED'; Add-Secret (App $td) 'FEATURE_ENABLEMENT_ALLOWED'; $td }
+  Case 'FEATURE_ENABLEMENT_ALLOWED missing' $Initial 'FEATURE_ENABLEMENT_ALLOWED missing' {
+    $td = New-Initial; Remove-Env (App $td) 'FEATURE_ENABLEMENT_ALLOWED'; $td }
+  Case 'FEATURE_ENABLEMENT_ALLOWED=yes' $Initial 'FEATURE_ENABLEMENT_ALLOWED must be exactly true or false' {
+    $td = New-Initial; Set-Env (App $td) 'FEATURE_ENABLEMENT_ALLOWED' 'yes'; $td }
+  Case 'FEATURE_ENABLEMENT_ALLOWED=TRUE (upper case)' $SteadyOn 'FEATURE_ENABLEMENT_ALLOWED must be exactly true or false' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_ENABLEMENT_ALLOWED' 'TRUE'; $td }
+  Case 'APP_FEATURE_ENABLEMENT_MAX_STALENESS override' $SteadyOn 'feature-enablement operational settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'APP_FEATURE_ENABLEMENT_MAX_STALENESS' 'PT300S'; $td }
+  Case 'app.feature-enablement.source override' $Initial 'feature-enablement operational settings must not be set' {
+    $td = New-Initial; Set-Env (App $td) 'app.feature-enablement.source' 'properties'; $td }
+  Case 'FEATURE_ENABLEMENT_EVALUATION_INTERVAL override' $SteadyOn 'feature-enablement operational settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_ENABLEMENT_EVALUATION_INTERVAL' 'PT60M'; $td }
+  Case 'APP_FEATURE_ENABLEMENT_ALLOWED (canonical name of the switch)' $Initial 'feature-enablement operational settings must not be set' {
+    $td = New-Initial; Set-Env (App $td) 'APP_FEATURE_ENABLEMENT_ALLOWED' 'true'; $td }
+  Case 'app.feature-enablement in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"feature-enablement":{"max-staleness":"PT300S"}}}'; $td }
+  Case 'FEATURE_ENABLEMENT_ALLOWED in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"FEATURE_ENABLEMENT_ALLOWED":"true"}'; $td }
+
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_PROFILES_ACTIVE' 'prod,dev'; $td }

@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,11 +91,11 @@ class PrivacyJournalConnectionsContextTest {
     }
 
     @Test
-    void prod以外ではJournalに届かなくても起動を止めず理由は固定codeだけ() {
-        // test profile は既存 test の意味を保つため privacy.retention.enabled=true（application-test.yml）
+    void Journalに届かなくても起動を止めず理由は固定codeだけ() {
+        // 起動時検査は機能の開閉を読まない（FE-C03）。hold の効力と開放の条件の両方が届かない
         PrivacyJournalStartupVerifier.Result result = verifier.startupResult();
 
-        assertThat(verifier.holdStartRequired()).isTrue();
+        assertThat(verifier.enablementResult().violations()).containsExactly("journal.unreachable");
         assertThat(result.availability()).isEqualTo(Availability.UNAVAILABLE);
         assertThat(result.violations()).containsExactly("journal.unreachable");
         assertThat(String.join(",", result.violations()))
@@ -134,17 +133,18 @@ class PrivacyJournalConnectionsContextTest {
         assertThat(attempts).as("application DB への接続も試みない").hasValue(0);
     }
 
+    /** FE-C03: 起動時検査は機能の開閉を読まず、prod でも journal 設定が無いことで起動を止めない（保持・保全は開けない）。 */
     @Test
-    void prodでflag_ONなのにjournal設定が無ければ起動しない() {
+    void prodでflag_ONでもjournal設定が無ければ起動しNOT_CONFIGUREDになる() {
         new ApplicationContextRunner()
                 .withInitializer(runner -> runner.getEnvironment().setActiveProfiles("prod"))
                 .withUserConfiguration(PrivacyJournalConfiguration.class)
                 .withBean(PrivacyFeatureProperties.class, () -> features(true))
                 .run(runner -> {
-                    assertThat(runner).hasFailed();
-                    assertThat(NestedExceptionUtils.getMostSpecificCause(runner.getStartupFailure()))
-                            .isInstanceOf(IllegalStateException.class)
-                            .hasMessageContaining("journal.notConfigured");
+                    assertThat(runner).hasNotFailed();
+                    PrivacyJournalStartupVerifier verifier = runner.getBean(PrivacyJournalStartupVerifier.class);
+                    assertThat(verifier.protectionResult().availability()).isEqualTo(Availability.NOT_CONFIGURED);
+                    assertThat(verifier.enablementResult().availability()).isEqualTo(Availability.NOT_CONFIGURED);
                 });
     }
 
@@ -176,21 +176,21 @@ class PrivacyJournalConnectionsContextTest {
                 });
     }
 
+    /** FE-C03: prod でも Journal に届かないことで起動を止めず、両方の結果が届かない（固定 code だけ）。 */
     @Test
-    void prodでflag_ONなのにJournalに届かなければ起動しない() {
+    void prodでflag_ONでもJournalに届かなければ起動し両方の結果がUNAVAILABLEになる() {
         new ApplicationContextRunner()
                 .withInitializer(runner -> runner.getEnvironment().setActiveProfiles("prod"))
                 .withUserConfiguration(PrivacyJournalConfiguration.class)
                 .withPropertyValues(unreachableJournal("journal-context-02"))
                 .withBean(PrivacyFeatureProperties.class, () -> features(true))
                 .run(runner -> {
-                    assertThat(runner).hasFailed();
-                    assertThat(NestedExceptionUtils.getMostSpecificCause(runner.getStartupFailure()))
-                            .isInstanceOf(IllegalStateException.class)
-                            .hasMessageContaining("journal.unreachable")
-                            .hasMessageNotContaining("127.0.0.1")
-                            .hasMessageNotContaining(JOURNAL_USER)
-                            .hasMessageNotContaining(JOURNAL_SECRET);
+                    assertThat(runner).hasNotFailed();
+                    PrivacyJournalStartupVerifier verifier = runner.getBean(PrivacyJournalStartupVerifier.class);
+                    assertThat(verifier.protectionResult().violations()).containsExactly("journal.unreachable");
+                    assertThat(verifier.enablementResult().violations()).containsExactly("journal.unreachable");
+                    assertThat(String.join(",", verifier.enablementResult().violations()))
+                            .doesNotContain("127.0.0.1", JOURNAL_USER, JOURNAL_SECRET);
                 });
     }
 

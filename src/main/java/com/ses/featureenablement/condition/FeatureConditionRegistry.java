@@ -64,6 +64,24 @@ public class FeatureConditionRegistry {
         return specific.stream().anyMatch(evaluator -> evaluator.features().contains(feature));
     }
 
+    /**
+     * 開放単位の固有の評価器の外部への検査の結果を新しくする（申請・承認の lock の前。{@link FeatureConditionEvaluator#refreshRemote}。
+     * review rb-fe-c P2-6）。例外は log に出して続ける（評価は最後の結果で判定する）。
+     */
+    public void refreshRemote(Feature feature) {
+        for (FeatureConditionEvaluator evaluator : specific) {
+            if (!evaluator.features().contains(feature)) {
+                continue;
+            }
+            try {
+                evaluator.refreshRemote(feature);
+            } catch (RuntimeException e) {
+                log.warn("[機能の開放] 外部への検査を新しくできません（最後の結果で評価します）: feature={} evaluator={} "
+                        + "exceptionClass={}", feature.name(), evaluator.evaluatorName(), e.getClass().getSimpleName());
+            }
+        }
+    }
+
     /** 1つの開放単位を評価する。DB へは書かない。 */
     public FeatureEvaluation evaluate(Feature feature, FeatureEvaluationContext context) {
         UnitDefinition unit = catalog.unit(feature);

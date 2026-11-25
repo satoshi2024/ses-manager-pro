@@ -1,0 +1,3 @@
+# 機能の開放（feature-enablement-console design §9.1）: NF05 の起動の前の読取り。context の refresh の前に DB を読み、NF05 の property を決める
+org.springframework.boot.env.EnvironmentPostProcessor=\
+  com.ses.featureenablement.nf05.IntegrationHubEnablementBootResolver

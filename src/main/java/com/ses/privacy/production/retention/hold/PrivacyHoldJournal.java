@@ -18,9 +18,12 @@ import java.util.regex.Pattern;
  * hold（開始・gate・reconciler）が使う Journal への入口（NF07-A1H。§3.4.6 の2〜4・8 を1か所で守る）。
  *
  * <ul>
- *   <li>profile に関係なく、起動時検査（{@link PrivacyJournalStartupVerifier#startupResult()}）が {@code AVAILABLE} で
- *       なければ {@link Availability#UNAVAILABLE}（設定が無ければ {@link Availability#NOT_CONFIGURED}）として扱う
- *       （A1J Review §3.3 の条件）。</li>
+ *   <li>profile に関係なく、起動時検査の hold の効力の結果（{@link PrivacyJournalStartupVerifier#protectionResult()}。reader・appender の
+ *       どちらの principal でも可。再検査の失敗では下がらない）が {@code AVAILABLE} でなければ {@link Availability#UNAVAILABLE}
+ *       （設定が無ければ {@link Availability#NOT_CONFIGURED}）として扱う（A1J Review §3.3 の条件）。機能の開閉は読まない（hold は
+ *       保持・保全を閉じた後も保護を続ける。feature-enablement-console design §8.5 の 3）。</li>
+ *   <li>hold の開始（append）は {@link #appendAvailability()}（加えて開放の条件の結果 {@link PrivacyJournalStartupVerifier#enablementResult()}
+ *       が appender の権限で {@code AVAILABLE}）で判定する。</li>
  *   <li>本番 adapter は {@link PrivacyJournalConnections#openJournalPort} だけから作る（prod profile 以外では生成が拒否され、
  *       {@code UNAVAILABLE} になる）。生成は初回の利用時に1回だけ行い、結果（失敗を含む）を保持する。生成時に DB へ触れない。</li>
  *   <li>principal は1つ（方式A）。gate・projection の読み取りも同じ pool を使う。</li>
@@ -69,6 +72,7 @@ public class PrivacyHoldJournal {
     private static final Pattern JOURNAL_ID = Pattern.compile("[A-Za-z0-9._-]{4,64}");
 
     private final Supplier<PrivacyJournalStartupVerifier.Result> startupResult;
+    private final Supplier<PrivacyJournalStartupVerifier.Result> enablementResult;
     private final Supplier<PrivacyJournalPort> portFactory;
     private final PrivacyHoldJournalIndex index;
     private final String journalId;
@@ -82,12 +86,32 @@ public class PrivacyHoldJournal {
     private volatile boolean portResolved;
     private volatile PrivacyJournalPort port;
     private volatile InstanceCheckResult lastInstanceCheck;
+    /**
+     * 起動時検査の結果の再検査（reconciler の実行ごと。保持・保全の開閉に関係なく呼ぶ。再検査は Journal を読むだけで、hold の効力の
+     * 結果は成功の時だけ上がる。間隔の下限は再検査の側が守る。review rb-fe-c P3-2）。試験の手組みでは無い。
+     */
+    volatile Runnable resultRefresher;
 
+    /** hold の効力の結果を開放の条件の結果にも使う（試験用。appender で検査した結果を渡す）。 */
     PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
                        Supplier<PrivacyJournalPort> portFactory, PrivacyHoldJournalIndex index, String journalId,
                        Duration pendingTimeout, Duration appendInFlightUpperBound,
                        Supplier<String> applicationServerUuid, Clock clock) {
+        this(startupResult, startupResult, portFactory, index, journalId, pendingTimeout, appendInFlightUpperBound,
+                applicationServerUuid, clock);
+    }
+
+    /**
+     * @param startupResult    hold の効力の結果（gate・reconciler・解除が読む）
+     * @param enablementResult 開放の条件の結果（hold の開始が読む）
+     */
+    PrivacyHoldJournal(Supplier<PrivacyJournalStartupVerifier.Result> startupResult,
+                       Supplier<PrivacyJournalStartupVerifier.Result> enablementResult,
+                       Supplier<PrivacyJournalPort> portFactory, PrivacyHoldJournalIndex index, String journalId,
+                       Duration pendingTimeout, Duration appendInFlightUpperBound,
+                       Supplier<String> applicationServerUuid, Clock clock) {
         this.startupResult = Objects.requireNonNull(startupResult, "startupResult");
+        this.enablementResult = Objects.requireNonNull(enablementResult, "enablementResult");
         this.portFactory = Objects.requireNonNull(portFactory, "portFactory");
         this.index = index;
         this.journalId = journalId;
@@ -105,9 +129,12 @@ public class PrivacyHoldJournal {
         Objects.requireNonNull(verifier, "verifier");
         PrivacyHoldJournalIndex index = connections.isPoolCreated()
                 ? new JdbcPrivacyHoldJournalIndex(connections.dataSource()) : null;
-        return new PrivacyHoldJournal(verifier::startupResult, () -> connections.openJournalPort(environment, clock),
+        PrivacyHoldJournal journal = new PrivacyHoldJournal(verifier::protectionResult, verifier::enablementResult,
+                () -> connections.openJournalPort(environment, clock),
                 index, connections.journalId(), properties == null ? null : properties.getPendingTimeout(),
                 connections.appendInFlightUpperBound(), applicationServerUuid, clock);
+        journal.resultRefresher = verifier::reverify;
+        return journal;
     }
 
     /** 現在の可用性（起動時検査の結果・adapter の生成可否・索引の有無・journal ID の形式・instance の別）。 */
@@ -124,10 +151,41 @@ public class PrivacyHoldJournal {
     }
 
     /**
-     * reconciler の実行ごとに {@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。比較中の thread が
+     * hold の開始（append）に使えるか: {@link #availability()} が {@code AVAILABLE} で、開放の条件の結果（appender の権限）も
+     * {@code AVAILABLE}。reader の principal では {@code UNAVAILABLE}（hold の開始は 503。既存の hold の gate は {@link #availability()}
+     * のまま動く）。
+     */
+    public Availability appendAvailability() {
+        Availability base = availability();
+        if (base != Availability.AVAILABLE) {
+            return base;
+        }
+        PrivacyJournalStartupVerifier.Result result;
+        try {
+            result = enablementResult.get();
+        } catch (RuntimeException e) {
+            return Availability.UNAVAILABLE;
+        }
+        return result != null && result.availability() == PrivacyJournalStartupVerifier.Availability.AVAILABLE
+                ? Availability.AVAILABLE : Availability.UNAVAILABLE;
+    }
+
+    /**
+     * reconciler の実行ごとに起動時検査の結果を再検査し（{@link #resultRefresher}。起動時に Journal を使えず保持・保全が閉じたままでも、
+     * Journal が直れば hold の効力の結果が回復する。review rb-fe-c P3-2）、{@code @@server_uuid} を比べ直す（Journal が使える前提が揃わなければ何もしない）。比較中の thread が
      * あればその終了を待ってから比べ直す（同時に2つ比べない。A1H-1 delta review P3-N1）。
      */
     void refreshInstanceCheck() {
+        Runnable refresher = resultRefresher;
+        if (refresher != null) {
+            try {
+                refresher.run();
+            } catch (RuntimeException e) {
+                // 再検査の失敗は hold の効力の結果を下げない（起動時の結果か直前の成功の結果のまま）
+                log.warn("[privacy-journal] Journal の再検査に失敗しました（結果は変えません）: exceptionClass={}",
+                        e.getClass().getSimpleName());
+            }
+        }
         if (baseAvailability() != Availability.AVAILABLE) {
             return;
         }

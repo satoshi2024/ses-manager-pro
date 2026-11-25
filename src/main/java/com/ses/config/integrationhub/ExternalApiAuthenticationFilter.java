@@ -50,6 +50,9 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
     private final ObjectProvider<IntegrationHubSecretCryptoService> cryptoServiceProvider;
     private final ObjectProvider<Clock> clockProvider;
     private final ObjectMapper objectMapper;
+    /** NF05 の実行時の判定（起動時の値 AND 実効値。feature-enablement-console design §9.3）。slice の試験では無く、properties の値を使う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch runtimeSwitch;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -59,7 +62,7 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         IntegrationHubExternalApiProperties properties = configuredProperties();
-        if (!properties.getPublicApi().getEnabled()) {
+        if (!com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.inboundOpen(request, runtimeSwitch, properties)) {
             filterChain.doFilter(request, response);
             return;
         }

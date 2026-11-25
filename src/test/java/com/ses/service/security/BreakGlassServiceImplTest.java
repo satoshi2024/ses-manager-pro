@@ -174,6 +174,18 @@ class BreakGlassServiceImplTest {
                         Set.of("dashboard.view")));
     }
 
+    /** 機能の開放（FE-AC-012-02）: incident の許可 action に feature-enablement.* を入れた申請は 400 で、incident を作らない。 */
+    @Test
+    void 機能の開放のactionを許可するincidentは起票できない() {
+        for (String action : java.util.List.of("feature-enablement.view", "feature-enablement.create")) {
+            BusinessException rejected = assertThrows(BusinessException.class,
+                    () -> service.create(1L, "IdP outage", true, 30, "INC-2026-002", Set.of("dashboard.view", action)));
+            org.junit.jupiter.api.Assertions.assertEquals(400, rejected.getCode(), action);
+            org.junit.jupiter.api.Assertions.assertEquals("error.breakGlass.invalidRequest", rejected.getMessageKey(), action);
+        }
+        org.mockito.Mockito.verify(incidentMapper, org.mockito.Mockito.never()).insert(any(BreakGlassIncident.class));
+    }
+
     @Test
     void incident期限切れは既存sessionを即時失効する() {
         BreakGlassIncident incident = active();

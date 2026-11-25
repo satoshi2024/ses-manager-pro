@@ -1,6 +1,7 @@
 package com.ses.privacy.production.dsar;
 
 import com.ses.privacy.production.PrivacyApprovalProperties;
+import com.ses.privacy.production.PrivacyApprovalSource;
 import com.ses.privacy.production.PrivacyDecisionBinding;
 import com.ses.privacy.production.PrivacyFeatureProperties;
 
@@ -22,7 +23,10 @@ import java.util.Objects;
  * </ul>
  * D-06 の開示 package の最長保存期間 {@code privacy.dsar.package-max-age}（NF07-A2b）は {@link #packageMaxAge()} が返し、
  * 未設定・範囲外なら草案 package を作らない。
- * D-09 と承認 digest は機能スイッチの実行時条件と prod の起動時検査が確かめるため、ここでは見ない（OFF なら入口が404）。
+ * D-09 と承認 digest は機能スイッチの実行時条件と開放の条件（評価器）が確かめるため、ここでは見ない（OFF なら入口が404）。
+ *
+ * <p>決定・期限規則・保存期間は承認の値の源（{@link PrivacyApprovalSource}）から呼出しごとに読む。DB の源では D-06 の署名の構造化された値
+ * （{@code dueDays}・{@code packageMaxAge}）で、組の差替えは次の呼出しから効く（feature-enablement-console design §8.5 の 1・7）。</p>
  */
 public class PrivacyDsarDecisions {
 
@@ -34,13 +38,23 @@ public class PrivacyDsarDecisions {
     /** package の最長保存期間の上限（366日）。 */
     public static final Duration MAX_PACKAGE_MAX_AGE = Duration.ofDays(366);
 
-    private final PrivacyApprovalProperties approvalProperties;
+    private final PrivacyApprovalSource approvalSource;
     private final PrivacyFeatureProperties featureProperties;
     private final Clock clock;
 
+    /** property の源で包む（既存の試験のため）。 */
     public PrivacyDsarDecisions(PrivacyApprovalProperties approvalProperties, PrivacyFeatureProperties featureProperties,
                                 Clock clock) {
-        this.approvalProperties = approvalProperties;
+        this(PrivacyApprovalSource.properties(approvalProperties, featureProperties), featureProperties, clock);
+    }
+
+    /**
+     * @param approvalSource    承認の値の源（決定・期限規則・保存期間）
+     * @param featureProperties 期限の通知の日数（運用値。{@code privacy.dsar.deadline-warning-days}）
+     */
+    public PrivacyDsarDecisions(PrivacyApprovalSource approvalSource, PrivacyFeatureProperties featureProperties,
+                                Clock clock) {
+        this.approvalSource = approvalSource;
         this.featureProperties = featureProperties;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -49,19 +63,20 @@ public class PrivacyDsarDecisions {
     public Readiness evaluate() {
         var today = PrivacyDecisionBinding.businessDate(clock);
         List<String> missing = new ArrayList<>();
+        PrivacyApprovalSource values = approvalSource == null ? null : approvalSource.resolve();
         PrivacyDecisionBinding.StandaloneEvaluation d01 = PrivacyDecisionBinding.evaluateStandalone(
-                approvalProperties, PrivacyDecisionBinding.Decision.D01, today);
+                values, PrivacyDecisionBinding.Decision.D01, today);
         if (!d01.valid()) {
             missing.add(REASON_D01);
         }
         PrivacyDecisionBinding.StandaloneEvaluation d06 = PrivacyDecisionBinding.evaluateStandalone(
-                approvalProperties, PrivacyDecisionBinding.Decision.D06, today);
+                values, PrivacyDecisionBinding.Decision.D06, today);
         if (!d06.valid()) {
             missing.add(REASON_D06);
         }
         boolean ready = missing.isEmpty();
         return new Readiness(ready, List.copyOf(missing), ready ? d06.decisionId() : null,
-                ready ? configuredDueDays() : null);
+                ready ? validDueDays(values == null ? null : values.dsarDueDays()) : null);
     }
 
     /** 期限の通知を出し始める日数（1〜90 に丸める）。 */
@@ -74,8 +89,10 @@ public class PrivacyDsarDecisions {
 
     /** 設定された期限規則の日数（範囲外・未設定は null）。 */
     Integer configuredDueDays() {
-        Integer dueDays = featureProperties == null || featureProperties.getDsar() == null
-                ? null : featureProperties.getDsar().getDueDays();
+        return validDueDays(approvalSource == null ? null : approvalSource.dsarDueDays());
+    }
+
+    private static Integer validDueDays(Integer dueDays) {
         return isValidDueDays(dueDays) ? dueDays : null;
     }
 
@@ -84,8 +101,7 @@ public class PrivacyDsarDecisions {
      * その間は草案 package を作らない（§5.2 の「DSAR 草案 package」）。
      */
     public Duration packageMaxAge() {
-        Duration configured = featureProperties == null || featureProperties.getDsar() == null
-                ? null : featureProperties.getDsar().getPackageMaxAge();
+        Duration configured = approvalSource == null ? null : approvalSource.dsarPackageMaxAge();
         return isValidPackageMaxAge(configured) ? configured : null;
     }
 

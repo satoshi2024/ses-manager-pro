@@ -38,6 +38,9 @@ import java.util.Objects;
  * 呼出しは拒否する。transaction には {@link #APPEND_TRANSACTION_TIMEOUT} の上限を置き、各 statement の timeout は
  * その残り時間から設定される（journal-witness-grant-design.md §2.4）。ACK を確認できない失敗は成功・失敗のどちらとも
  * 推定せず {@link JournalUnavailableException} を返し、呼出し側は同じ command ID で照会・再送する（再送は元の ACK を返す）。
+ * principal の権限の拒否（MySQL 1142・1143・1044・1227・1370）は文の実行の前に返り transaction は rollback されるため、ACK 不明に
+ * せず {@link JournalAccessDeniedException} を返す（呼出し側は最初の試行の拒否なら pending を戻す。ACK 不明の後の再送の拒否は、
+ * {@code pj_head} の更新が command の再生の照合より先のため先の試行の結果が分からず、ACK 不明として扱う。review rb-fe-c P3-1・P3-N1）。
  * hold 解除（{@code HOLD_RELEASED}）は {@link #append} では常に拒否し、検証済みの proof（{@link VerifiedHoldRelease}）を
  * 受け取る {@link #appendHoldRelease} だけが append する（NF07-REL）。解除の append は同じ transaction の中で head を lock し、
  * command の再送（元の ACK）→ revision CAS → proof の判定（{@link VerifiedHoldRelease#requireAppendable}: journal head・
@@ -108,6 +111,11 @@ final class ProductionPrivacyJournalAdapter implements PrivacyJournalPort, HoldR
         } catch (JournalConflictException | SecurityException e) {
             throw e;
         } catch (RuntimeException e) {
+            if (JournalAccessDeniedException.isAccessDenied(e)) {
+                // 権限の拒否は文の実行の前に返り transaction は rollback される（append は起きていない）。ACK 不明にせず確定の拒否にする
+                // （呼出し側は pending を戻す。review rb-fe-c P3-1）
+                throw new JournalAccessDeniedException("journal principalにappendの権限がありません", null);
+            }
             throw new JournalUnavailableException("journal durable appendに失敗しました", e);
         }
     }

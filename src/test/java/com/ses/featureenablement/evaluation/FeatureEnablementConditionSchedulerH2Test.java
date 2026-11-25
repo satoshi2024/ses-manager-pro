@@ -347,9 +347,16 @@ class FeatureEnablementConditionSchedulerH2Test {
                 + "'CONFIRMED'", approver.userId(), kind);
     }
 
+    /**
+     * 試験の評価器を足した registry。試験の評価器が受け持つ開放単位の本物の固有の評価器（FE-A11 の NF02 の暦・NF10 の scheduler）は
+     * 外し、試験の評価器で置き換える（共通の評価器は残す）。本物の評価器の振舞いは各評価器の試験と
+     * {@code FeatureEnablementNf02CalendarH2Test} が確かめる。
+     */
     private FeatureConditionRegistry registry(FeatureConditionEvaluator extra) {
         List<FeatureConditionEvaluator> all = new ArrayList<>(evaluators);
         if (extra != null) {
+            all.removeIf(evaluator -> !(evaluator instanceof com.ses.featureenablement.condition.CommonFeatureConditionEvaluator)
+                    && evaluator.features().stream().anyMatch(extra.features()::contains));
             all.add(extra);
         }
         return new FeatureConditionRegistry(catalog, all);

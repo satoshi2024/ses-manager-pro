@@ -12,6 +12,20 @@ public class LegalEntityReadinessService {
     private final JdbcTemplate jdbcTemplate;
 
     public void assertReady() {
+        if (unresolvedCount() > 0) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_BACKFILL_INCOMPLETE");
+        }
+    }
+
+    /**
+     * 例外にしない判定（NF05 の起動の後の反映と評価器が使う。feature-enablement-console design §9.2）。照会の失敗は例外のまま
+     * （呼出元が評価できない状態として扱う）。
+     */
+    public boolean isReady() {
+        return unresolvedCount() == 0;
+    }
+
+    private long unresolvedCount() {
         long unresolved = 0L;
         unresolved += count("SELECT COUNT(*) FROM m_customer WHERE deleted_flag = 0 AND legal_entity_id IS NULL");
         unresolved += count("SELECT COUNT(*) FROM t_engineer WHERE deleted_flag = 0 AND legal_entity_id IS NULL");
@@ -81,9 +95,7 @@ public class LegalEntityReadinessService {
                   AND (i.legal_entity_id IS NULL OR c.legal_entity_id IS NULL
                        OR i.legal_entity_id <> c.legal_entity_id)
                 """);
-        if (unresolved > 0) {
-            throw BusinessException.of(503, "LEGAL_ENTITY_BACKFILL_INCOMPLETE");
-        }
+        return unresolved;
     }
 
     private long count(String sql) {

@@ -3,7 +3,6 @@ package com.ses.privacy.production.retention.trust;
 import com.ses.privacy.foundation.PolicyRegistrationVerifier;
 import com.ses.privacy.foundation.ProductionPrivacyComponents;
 import com.ses.privacy.foundation.RevocationStatus;
-import com.ses.privacy.production.PrivacyFeatureProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,6 @@ import static com.ses.privacy.production.retention.trust.KmsTrustTestDocuments.d
 import static com.ses.privacy.production.retention.trust.KmsTrustTestDocuments.ed25519;
 import static com.ses.privacy.production.retention.trust.KmsTrustTestDocuments.policyAnchor;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * trust 文書の file の I/O が止まったとき（EFS・NFS の hard mount で file system に届かない）に、trust の判定が要求を止めないこと
@@ -199,7 +197,7 @@ class KmsPrivacyTrustSourceStallTest {
     }
 
     @Test
-    void 起動時の検査はI_Oが止まれば上限で打ち切りflagがONなら起動を止める() {
+    void 起動時の検査はI_Oが止まれば上限で打ち切り構造の不足として起動を続ける() {
         KmsPrivacyTrustSource source = source(Duration.ofMillis(200));
         files.block();
 
@@ -209,10 +207,11 @@ class KmsPrivacyTrustSourceStallTest {
         assertThat(report.fresh()).isFalse();
         assertThat(elapsedMillis(started)).isLessThan(BOUND_MILLIS);
 
-        PrivacyFeatureProperties features = new PrivacyFeatureProperties();
-        features.getRetention().setEnabled(true);
-        assertThatThrownBy(() -> new PrivacyTrustStartupValidator(features, source).validate())
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("trust.kms.document.");
+        // 構造の不足として状態に置き、起動は止めない（副入口 REL・REG だけが閉じる。FE-C04）
+        PrivacyTrustStructureState state = new PrivacyTrustStructureState();
+        new PrivacyTrustStartupValidator(source, state).validate();
+        assertThat(state.sound()).isFalse();
+        assertThat(String.join(",", state.structuralViolations())).contains("trust.kms.document.");
 
         // I/O が戻れば検査は通る
         files.release();

@@ -268,7 +268,8 @@ class ProductionPrivacyJournalAdapterMySqlTest {
 
         assertEquals(production.head(partition), readerPort.head(partition));
         assertEquals(production.events(partition), readerPort.events(partition));
-        assertThrows(JournalUnavailableException.class, () -> readerPort.append(leaseClaim("lease-by-reader")));
+        // 権限の拒否は ACK 不明ではなく確定の拒否（append は起きていない。呼出し側は pending を戻す。review rb-fe-c P3-1）
+        assertThrows(JournalAccessDeniedException.class, () -> readerPort.append(leaseClaim("lease-by-reader")));
         assertEquals(1, production.head(partition).revision());
     }
 

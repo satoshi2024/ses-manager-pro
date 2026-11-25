@@ -31,7 +31,8 @@ external-account:
 integration:
   hub:
     # 既定は両方向OFF・provider.mode=MOCK（現行DG-05は本番開放を禁止）。開放はinbound/outboundを別々に、
-    # 署名済みDG-05決定（DG-05-IN-*/DG-05-OUT-*）と承認値を環境から注入し、方向別validatorを通過した場合だけ。
+    # 署名済みDG-05決定（DG-05-IN-*/DG-05-OUT-*）を画面の署名 NF05_DG05_IN・NF05_DG05_OUT として登録・確認し、二人の承認と再起動で
+    # 開く（enabled は起動の前に DB から決める。決定 ID・digest を環境から注入すると prod は起動しない。FE-D02・D05）。
     # outboundはHTTPS・方向別承認・truststore・再開時隔離の全条件が必要。STUB/LOOPBACKは本番で常に拒否する。
     public-api:
       enabled: false
@@ -114,7 +115,7 @@ app:
   pwa:
     context-secret: ${PWA_CONTEXT_SECRET:}
   # NF-06 preview・error exportの行参照HMAC鍵（開発用の既定値を引き継がない）。
-  # NF-06 ONで未設定・形式不正・開発用鍵なら起動失敗（ImportRowReferenceKeyStartupValidator）。OFFなら起動を止めない。
+  # 未設定・形式不正・開発用鍵なら NF-06 の開放の条件が成り立たず、NF-06 を開けない・開いていれば閉じる（起動は止めない。FE-B02）。
   import-center:
     row-reference:
       hmac-key: ${IMPORT_ROW_REFERENCE_HMAC_KEY:}
@@ -129,35 +130,19 @@ app:
   feature-enablement:
     source: database
     allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}
-  # 機能スイッチ（段階公開）。本番も既定は全てOFF。デプロイ後に1機能ずつ環境変数でONにする（再起動で反映）。
-  # 手順: .kiro/specs/production-launch/feature-switches.md
-  features:
-    nf01:
-      enabled: ${FEATURE_NF01_ENABLED:false}
-    # NF-01の子（二者確認）。Privacy署名（計画 §10・§12 O-8）の参照が無いとONで起動しない。手順: feature-switches.md 4.9
-    nf01-dual-confirmation:
-      enabled: ${FEATURE_NF01_DUAL_CONFIRMATION_ENABLED:false}
-      privacy-sign-off-ref: ${FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF:}
-    nf02:
-      enabled: ${FEATURE_NF02_ENABLED:false}
-    # NF-02の子（顧客ポータルの問い合わせ）。既定はOFFで、初回リリースでは実値の task definition でONにする（2026-11-22 利用者決定）
-    nf02-customer-portal:
-      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
-      # 未設定ならportal起票の問い合わせだけをportalへ出す（社内で登録した問い合わせは出さない）
-      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
-    nf03:
-      enabled: ${FEATURE_NF03_ENABLED:false}
-    # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）
-    nf03-certification-pii:
-      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
-    nf04:
-      enabled: ${FEATURE_NF04_ENABLED:false}
-    # NF-06（取込センター画面・API）。ONにする場合はapp.import-center.admissionの署名済み承認設定と
-    # 行参照鍵（IMPORT_ROW_REFERENCE_HMAC_KEY）が必須（不備は起動失敗）。手順: feature-switches.md 4.8
-    nf06:
-      enabled: ${FEATURE_NF06_ENABLED:false}
-    nf10:
-      enabled: ${FEATURE_NF10_ENABLED:false}
+  # 機能スイッチ（段階公開）。prod では全ての開放単位を system の中（画面「機能の開放」の申請と二人の承認）で開閉するため、
+  # 開閉と、署名・設定へ移した承認の値の placeholder をここに置かない。それらの旧い変数を設定すると prod は起動しない
+  # （FeatureEnablementProductionValidator。値に依らない）。手順: .kiro/specs/production-launch/feature-switches.md
+  #   段階 A（FE-A11）: NF01・NF02・NF02 顧客ポータル・NF03・NF03 資格番号・NF04・NF10（FEATURE_NF01_ENABLED 等）。
+  #   段階 B: NF01 二者確認（FE-B01。FEATURE_NF01_DUAL_CONFIRMATION_ENABLED と Privacy 署名の参照
+  #   FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF。署名は画面で登録・確認する）、NF06（FE-B02。FEATURE_NF06_ENABLED と
+  #   IMPORT_ADMISSION_*。admission の承認は署名 NF06_ADMISSION）、NF02 顧客ポータルの公開範囲（FE-B03。
+  #   FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE は空でも拒否。画面「設定」tab で変え、未設定なら portal 起票の問い合わせだけを出す）。
+  #   段階 C（FE-C05）: NF07 保持・保全・DSAR（PRIVACY_RETENTION_ENABLED・PRIVACY_DSAR_ENABLED と、署名の組・署名へ移した
+  #   PRIVACY_APPROVAL_*・PRIVACY_DSAR_DUE_DAYS・PRIVACY_DSAR_PACKAGE_MAX_AGE）。
+  #   段階 D（FE-D02・D05）: NF05 inbound・outbound（INTEGRATION_HUB_PUBLIC_API_ENABLED・INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED と
+  #   INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)。上の integration.hub の enabled は起動の前の DB の読取り
+  #   IntegrationHubEnablementBootResolver が上書きし、DG-05 の決定 ID と digest は確認済みの署名 NF05_DG05_IN・NF05_DG05_OUT から読む）。
 
 # ===== freee連携（HFP-01） =====
 # prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。

@@ -70,9 +70,14 @@ class WriterIsolationPolicyTest {
                     "reject", "withdraw", "revoke", "requestExtension", "document")),
             Map.entry(com.ses.featureenablement.service.FeatureSignOffBundleServiceImpl.class, List.of("register",
                     "confirm", "reject", "withdraw", "revoke")),
+            // 段階 B（FE-B03）: 設定の変更の申請（承認は FeatureEnablementServiceImpl.approve の transaction の中）
+            Map.entry(com.ses.featureenablement.service.FeatureEnablementSettingChangeService.class, List.of("request")),
             Map.entry(com.ses.featureenablement.evaluation.FeatureEnablementEvaluationWriter.class, List.of("markUnverifiable",
                     "clearUnverifiable", "markExpiredSignOffs", "cancelAllPending", "recordOpenConditionWarning",
-                    "recordSubgateChange", "recordMasterClosed")));
+                    "recordSubgateChange", "recordMasterClosed")),
+            // FE-D02: NF05 の起動の後の反映（起動の前に読んだ状態と版を lock の後に読み直して比べる writer）
+            Map.entry(com.ses.featureenablement.nf05.IntegrationHubBootDecisionWriter.class, List.of("applyRestart",
+                    "closeAtBoot", "recordReadFailed", "recordBootUnverifiable")));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {

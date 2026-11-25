@@ -324,7 +324,10 @@ public class BreakGlassServiceImpl implements BreakGlassService {
                         || "permission.manage".equals(action)
                         || action.startsWith("user.")
                         // NF07: privacy は既知resource（isKnownAction=true）だが、緊急accessの対象にしない（W-5 §6.8）。
-                        || action.startsWith(PRIVACY_ACTION_PREFIX))) {
+                        || action.startsWith(PRIVACY_ACTION_PREFIX)
+                        // 機能の開放は緊急の操作ではなく、IdP 障害の間に監視の少ない口座で公開範囲を広げさせない
+                        // （feature-enablement-console design §11.2・FE-RQ-012。session の判定でも拒否する二重）。
+                        || action.startsWith("feature-enablement."))) {
             throw BusinessException.of(400, "error.breakGlass.invalidRequest");
         }
         return String.join(",", normalized);

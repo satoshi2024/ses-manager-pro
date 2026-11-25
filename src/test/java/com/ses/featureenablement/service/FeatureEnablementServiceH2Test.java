@@ -199,10 +199,14 @@ class FeatureEnablementServiceH2Test {
         assertThat(unsatisfied.getCode()).isEqualTo(409);
         assertThat(unsatisfied.getMessageKey()).isEqualTo("error.featureEnablement.conditionsUnsatisfied");
         assertThat(String.valueOf(unsatisfied.getArgs()[0])).contains("signoff.NF10_REPORT_OWNER.missing");
-        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）
-        fixture.confirmedSignOffs(Feature.NF06, SIGNED, EXPIRES);
-        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF06, null, requester),
-                BusinessException.class);
+        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）。段階 B で NF06、段階 D で NF05 に評価器を
+        // 足したため（段階の整合 M4）、評価器が prod だけにある NF07 保持・保全（PrivacyProductionConfigurationValidator は
+        // @Profile("prod")）で、test の profile の context で確かめる。NF07 の申請者は privacy-admin に限るため、所属させた管理者で申請する
+        fixture.confirmedSignOffs(Feature.NF07_RETENTION, SIGNED, EXPIRES);
+        FeatureEnablementActor privacyAdmin = privacyAdmin();
+        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF07_RETENTION, null,
+                privacyAdmin), BusinessException.class);
+        assertThat(missing.getCode()).isEqualTo(409);
         assertThat(String.valueOf(missing.getArgs()[0])).contains("evaluator.missing");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_request WHERE tenant_id = 'default'",
                 Long.class)).isZero();
@@ -306,6 +310,23 @@ class FeatureEnablementServiceH2Test {
         assertThat(forbidden).as(messageKey).isNotNull();
         assertThat(forbidden.getCode()).isEqualTo(403);
         assertThat(forbidden.getMessageKey()).isEqualTo(messageKey);
+    }
+
+    /** privacy-admin group に所属させた有効な管理者（NF07 の行為者。{@code FeatureSignOffBundleH2Test} と同じ形）。 */
+    private FeatureEnablementActor privacyAdmin() {
+        FeatureEnablementActor actor = fixture.admin();
+        Long group = jdbc.queryForList("SELECT id FROM m_permission_group WHERE tenant_id = ? AND group_key = "
+                + "'privacy-admin' AND enabled = 1 AND deleted_flag = 0", Long.class, FeatureEnablementH2Fixture.TENANT)
+                .stream().findFirst().orElse(null);
+        if (group == null) {
+            jdbc.update("INSERT INTO m_permission_group (tenant_id, group_key, group_name, enabled, deleted_flag) "
+                    + "VALUES (?, 'privacy-admin', 'privacy-admin', 1, 0)", FeatureEnablementH2Fixture.TENANT);
+            group = jdbc.queryForObject("SELECT id FROM m_permission_group WHERE tenant_id = ? AND group_key = "
+                    + "'privacy-admin'", Long.class, FeatureEnablementH2Fixture.TENANT);
+        }
+        jdbc.update("INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_by, deleted_flag) "
+                + "VALUES (?, ?, ?, 1, 0)", FeatureEnablementH2Fixture.TENANT, actor.userId(), group);
+        return actor;
     }
 
     @SuppressWarnings("unused")

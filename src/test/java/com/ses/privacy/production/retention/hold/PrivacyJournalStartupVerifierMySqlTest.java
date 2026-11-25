@@ -19,7 +19,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * NF07-A1J: Journal の起動時検査（{@link PrivacyJournalStartupVerifier}、journal-witness-grant-design.md §2.3）を実 MySQL で
@@ -87,37 +86,33 @@ class PrivacyJournalStartupVerifierMySqlTest {
     }
 
     @Test
-    void 適合するappenderはflag_ONでも適合し起動を止めない() {
+    void 適合するappenderは開放の条件でも適合し起動を止めない() {
         List<String> violations = inspect(JOURNAL, appender, appenderPassword, true);
 
         assertThat(violations).isEmpty();
-        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                new Result(Availability.AVAILABLE, violations), true, true)).doesNotThrowAnyException();
+        assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(new Result(Availability.AVAILABLE, violations),
+                new Result(Availability.AVAILABLE, violations), true)).doesNotThrowAnyException();
     }
 
     @Test
-    void readerはflag_OFFでだけ適合しflag_ONでは権限不足になる() {
+    void readerはhold効力の結果でだけ適合し開放の条件の結果では権限不足になる() {
         assertThat(inspect(JOURNAL, reader, readerPassword, false)).isEmpty();
         assertThat(inspect(JOURNAL, reader, readerPassword, true))
                 .contains("privilege.missing:pj_head.INSERT", "privilege.missing:pj_event.INSERT");
     }
 
     @Test
-    void innodb_flush_log_at_trx_commitが1でなければflag_ONの起動を拒否する() {
+    void innodb_flush_log_at_trx_commitが1でなければ不適合になる() {
         journalRoot.execute("SET GLOBAL innodb_flush_log_at_trx_commit = 2");
         try {
             List<String> violations = inspect(JOURNAL, appender, appenderPassword, true);
 
             assertThat(violations).contains("durability.innodbFlushLogAtTrxCommit");
-            assertThatThrownBy(() -> PrivacyJournalStartupVerifier.enforce(
-                    new Result(Availability.UNAVAILABLE, violations), true, true))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("durability.innodbFlushLogAtTrxCommit")
-                    .hasMessageNotContaining(appender)
-                    .hasMessageNotContaining(appenderPassword);
+            // 起動は止めない（prod でも WARN だけ。保持・保全は開けない。FE-C03）
             assertThatCode(() -> PrivacyJournalStartupVerifier.enforce(
-                    new Result(Availability.UNAVAILABLE, violations), false, true))
-                    .as("flag OFF では起動を止めない").doesNotThrowAnyException();
+                    new Result(Availability.UNAVAILABLE, violations), new Result(Availability.UNAVAILABLE, violations),
+                    true)).doesNotThrowAnyException();
+            assertThat(String.join(",", violations)).doesNotContain(appender).doesNotContain(appenderPassword);
         } finally {
             journalRoot.execute("SET GLOBAL innodb_flush_log_at_trx_commit = 1");
         }
@@ -295,6 +290,30 @@ class PrivacyJournalStartupVerifierMySqlTest {
             assertThat(inspect(JOURNAL, appender, appenderPassword, true)).contains("projection.journalIdMismatch");
         } finally {
             applicationRoot.update("DELETE FROM t_privacy_projection_state WHERE journal_id = ?", "journal-other-01");
+        }
+    }
+
+    /**
+     * FE-C03（design §8.5 の 3。review P2-4）: reader の principal は1回の検査で、hold の効力の結果（gate が読む）では適合し、開放の
+     * 条件の結果（保持・保全の開放と hold の開始が読む）では appender の権限の不足になる。保持・保全は開けないが、既存の hold を守る
+     * 文書の処分・purge・孤児 file の掃除の gate は動く。
+     */
+    @Test
+    void readerは1回の検査でhold効力の結果は適合し開放の条件の結果は権限不足になる() {
+        try (HikariDataSource pool = PrivacyJournalTestPools.pool(JOURNAL.getJdbcUrl(), reader, readerPassword)) {
+            PrivacyJournalStartupVerifier.Inspection inspection = PrivacyJournalStartupVerifier.inspectBoth(pool,
+                    applicationRoot, SCHEMA, JOURNAL_ID, PrivacyJournalMigrations::fromClasspath);
+
+            assertThat(inspection.protection()).isEmpty();
+            assertThat(inspection.enablement()).contains("privilege.missing:pj_head.INSERT",
+                    "privilege.missing:pj_event.INSERT");
+        }
+        try (HikariDataSource pool = PrivacyJournalTestPools.pool(JOURNAL.getJdbcUrl(), appender, appenderPassword)) {
+            PrivacyJournalStartupVerifier.Inspection inspection = PrivacyJournalStartupVerifier.inspectBoth(pool,
+                    applicationRoot, SCHEMA, JOURNAL_ID, PrivacyJournalMigrations::fromClasspath);
+
+            assertThat(inspection.protection()).isEmpty();
+            assertThat(inspection.enablement()).isEmpty();
         }
     }
 

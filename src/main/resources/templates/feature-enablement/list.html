@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{featureEnablement.pageTitle}">機能の開放 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4" id="featureEnablementPage">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h2 class="h3 mb-1 text-light"><i class="bi bi-toggles me-2 text-info"></i><th:block th:text="#{featureEnablement.title}">機能の開放</th:block></h2>
+            <p class="text-muted small mb-0" th:text="#{featureEnablement.subtitle}">機能は条件を満たした後、申請と別の管理者の承認で開きます。閉じるのは管理者1名でできます。</p>
+        </div>
+        <button type="button" class="btn btn-outline-light btn-sm" id="featureEnablementReload">
+            <i class="bi bi-arrow-clockwise me-1"></i><th:block th:text="#{featureEnablement.btn.reload}">再読込</th:block>
+        </button>
+    </div>
+
+    <div class="alert alert-danger d-none" id="featureEnablementMasterAlert" role="alert">
+        <i class="bi bi-exclamation-octagon me-2"></i><th:block th:text="#{featureEnablement.masterClosed}">緊急の総スイッチが閉じています。</th:block>
+    </div>
+    <div class="alert alert-secondary d-none" id="featureEnablementPropertyAlert" role="status">
+        <i class="bi bi-info-circle me-2"></i><th:block th:text="#{featureEnablement.propertySource}">この環境は配備の設定の源で動いています。</th:block>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="featureEnablementTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="fe-units-tab" data-bs-toggle="tab" data-bs-target="#fe-units-pane" type="button" role="tab" th:text="#{featureEnablement.tab.units}">開放単位</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="fe-requests-tab" data-bs-toggle="tab" data-bs-target="#fe-requests-pane" type="button" role="tab" th:text="#{featureEnablement.tab.requests}">申請</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="fe-signoffs-tab" data-bs-toggle="tab" data-bs-target="#fe-signoffs-pane" type="button" role="tab" th:text="#{featureEnablement.tab.signOffs}">署名・受理</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="fe-events-tab" data-bs-toggle="tab" data-bs-target="#fe-events-pane" type="button" role="tab" th:text="#{featureEnablement.tab.events}">履歴</button>
+        </li>
+        <!-- 段階 B（FE-B03）: 承認で変える設定（NF02 の公開範囲） -->
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="fe-settings-tab" data-bs-toggle="tab" data-bs-target="#fe-settings-pane" type="button" role="tab" th:text="#{featureEnablement.tab.settings}">設定</button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- 開放単位 -->
+        <div class="tab-pane fade show active" id="fe-units-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.unit.name}">開放単位</th>
+                                <th th:text="#{featureEnablement.unit.state}">DB の状態</th>
+                                <th th:text="#{featureEnablement.unit.effective}">実効値</th>
+                                <th th:text="#{featureEnablement.unit.pending}">申請中</th>
+                                <th th:text="#{featureEnablement.unit.openUntil}">有効期限</th>
+                                <th th:text="#{featureEnablement.unit.lastEvaluation}">最後の評価</th>
+                                <th class="text-end pe-3" th:text="#{featureEnablement.unit.actions}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementUnits">
+                            <tr><td colspan="7" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 申請 -->
+        <div class="tab-pane fade" id="fe-requests-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.request.id}">ID</th>
+                                <th th:text="#{featureEnablement.request.type}">種類</th>
+                                <th th:text="#{featureEnablement.request.target}">対象</th>
+                                <th th:text="#{featureEnablement.request.status}">状態</th>
+                                <th th:text="#{featureEnablement.request.requestedBy}">申請者</th>
+                                <th th:text="#{featureEnablement.request.requestedAt}">申請時刻</th>
+                                <th th:text="#{featureEnablement.request.expiresAt}">期限</th>
+                                <th th:text="#{featureEnablement.request.summary}">条件の要約</th>
+                                <th class="text-end pe-3" th:text="#{featureEnablement.unit.actions}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementRequests">
+                            <tr><td colspan="9" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-dark py-2" id="featureEnablementRequestsPager"></div>
+            </div>
+        </div>
+
+        <!-- 署名・受理 -->
+        <div class="tab-pane fade" id="fe-signoffs-pane" role="tabpanel">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" class="btn btn-primary btn-sm" id="featureEnablementRegisterSignOff">
+                    <i class="bi bi-file-earmark-plus me-1"></i><th:block th:text="#{featureEnablement.btn.registerSignOff}">署名を登録</th:block>
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="featureEnablementRegisterBundle">
+                    <i class="bi bi-collection me-1"></i><th:block th:text="#{featureEnablement.btn.registerBundle}">署名の組を登録</th:block>
+                </button>
+            </div>
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.request.id}">ID</th>
+                                <th th:text="#{featureEnablement.signOff.kind}">種別</th>
+                                <th th:text="#{featureEnablement.signOff.class}">類</th>
+                                <th th:text="#{featureEnablement.signOff.reference}">参照</th>
+                                <th th:text="#{featureEnablement.signOff.role}">役割</th>
+                                <th th:text="#{featureEnablement.signOff.period}">期間</th>
+                                <th th:text="#{featureEnablement.signOff.status}">状態</th>
+                                <th th:text="#{featureEnablement.signOff.people}">登録者・確認者</th>
+                                <th th:text="#{featureEnablement.signOff.digest}">文書の SHA-256</th>
+                                <th class="text-end pe-3" th:text="#{featureEnablement.unit.actions}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementSignOffs">
+                            <tr><td colspan="10" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <h3 class="h6 text-light mb-2" th:text="#{featureEnablement.bundle.title}">署名の組</h3>
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.request.id}">ID</th>
+                                <th th:text="#{featureEnablement.bundle.kind}">組の種類</th>
+                                <th th:text="#{featureEnablement.bundle.members}">member</th>
+                                <th th:text="#{featureEnablement.signOff.status}">状態</th>
+                                <th th:text="#{featureEnablement.signOff.people}">登録者・確認者</th>
+                                <th class="text-end pe-3" th:text="#{featureEnablement.unit.actions}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementBundles">
+                            <tr><td colspan="6" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 履歴 -->
+        <div class="tab-pane fade" id="fe-events-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-body">
+                    <form id="searchForm" class="row g-3 align-items-end" onsubmit="event.preventDefault(); FeatureEnablement.loadEvents(1);">
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small" for="feEventSubjectType" th:text="#{featureEnablement.event.subjectType}">対象の種類</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="feEventSubjectType">
+                                <option value="" th:text="#{common.label.all}">すべて</option>
+                                <option value="FEATURE" th:text="#{featureEnablement.subject.FEATURE}">開放単位</option>
+                                <option value="REQUEST" th:text="#{featureEnablement.subject.REQUEST}">申請</option>
+                                <option value="SIGN_OFF" th:text="#{featureEnablement.subject.SIGN_OFF}">署名</option>
+                                <option value="BUNDLE" th:text="#{featureEnablement.subject.BUNDLE}">署名の組</option>
+                                <option value="SUBGATE" th:text="#{featureEnablement.subject.SUBGATE}">副入口</option>
+                                <option value="MASTER" th:text="#{featureEnablement.subject.MASTER}">総スイッチ</option>
+                                <option value="SETTING" th:text="#{featureEnablement.subject.SETTING}">設定</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small" for="feEventSubjectKey" th:text="#{featureEnablement.event.subjectKey}">対象</label>
+                            <input type="text" class="form-control bg-dark border-secondary text-light" id="feEventSubjectKey" maxlength="64" placeholder="NF04">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small" for="feEventFrom" th:text="#{featureEnablement.event.from}">開始日</label>
+                            <input type="date" class="form-control bg-dark border-secondary text-light" id="feEventFrom">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small" for="feEventTo" th:text="#{featureEnablement.event.to}">終了日</label>
+                            <input type="date" class="form-control bg-dark border-secondary text-light" id="feEventTo">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="bi bi-search me-1"></i><th:block th:text="#{common.btn.search}">検索</th:block>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.event.occurredAt}">日時</th>
+                                <th th:text="#{featureEnablement.event.subjectType}">対象の種類</th>
+                                <th th:text="#{featureEnablement.event.subjectKey}">対象</th>
+                                <th th:text="#{featureEnablement.event.type}">事象</th>
+                                <th th:text="#{featureEnablement.event.transition}">遷移</th>
+                                <th th:text="#{featureEnablement.event.reason}">理由</th>
+                                <th th:text="#{featureEnablement.event.actor}">行為者</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementEvents">
+                            <tr><td colspan="7" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-dark py-2" id="featureEnablementEventsPager"></div>
+            </div>
+        </div>
+
+        <!-- 設定（段階 B の FE-B03。申請と別の管理者の承認で変える。承認は「申請」tab） -->
+        <div class="tab-pane fade" id="fe-settings-pane" role="tabpanel">
+            <div class="alert alert-secondary small" th:text="#{featureEnablement.setting.help}">
+                顧客へ見せる範囲を変える設定です。決定の署名の値と同じ値だけを申請でき、別の管理者が承認すると次の判定から効きます。
+            </div>
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                            <tr class="text-muted small">
+                                <th class="ps-3" th:text="#{featureEnablement.setting.name}">設定</th>
+                                <th th:text="#{featureEnablement.setting.value}">今の値</th>
+                                <th th:text="#{featureEnablement.setting.decisionValue}">決定の署名の値</th>
+                                <th th:text="#{featureEnablement.setting.inventory}">棚卸し</th>
+                                <th th:text="#{featureEnablement.setting.pending}">申請中</th>
+                                <th class="text-end pe-3" th:text="#{featureEnablement.unit.actions}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="featureEnablementSettings">
+                            <tr><td colspan="6" class="text-center text-muted py-4" th:text="#{common.msg.loading}">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 開放単位の詳細 -->
+    <div class="modal fade" id="featureEnablementDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="featureEnablementDetailTitle" th:text="#{featureEnablement.detail.title}">開放単位の詳細</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:attr="aria-label=#{featureEnablement.btn.closeDialog}"></button>
+                </div>
+                <div class="modal-body" id="featureEnablementDetailBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 署名の登録 -->
+    <div class="modal fade" id="featureEnablementModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <form id="featureEnablementSignOffForm" novalidate>
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title" th:text="#{featureEnablement.signOffModal.title}">署名を登録</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:attr="aria-label=#{featureEnablement.btn.closeDialog}"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted" th:text="#{featureEnablement.signOffModal.hint}">登録した署名は、登録者以外の管理者が確認して初めて有効になります。</p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffKind" th:text="#{featureEnablement.field.kind}">種別</label>
+                                <select class="form-select bg-dark border-secondary text-light" id="feSignOffKind" required></select>
+                                <div class="form-text text-muted" id="feSignOffKindHint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffRole" th:text="#{featureEnablement.field.role}">署名者の役割</label>
+                                <select class="form-select bg-dark border-secondary text-light" id="feSignOffRole" required></select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffName" th:text="#{featureEnablement.field.name}">署名者の氏名</label>
+                                <input type="text" class="form-control bg-dark border-secondary text-light" id="feSignOffName" maxlength="100" required autocomplete="off">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffReference" th:text="#{featureEnablement.field.reference}">参照</label>
+                                <input type="text" class="form-control bg-dark border-secondary text-light" id="feSignOffReference" maxlength="200" autocomplete="off">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffSignedOn" th:text="#{featureEnablement.field.signedOn}">署名日</label>
+                                <input type="date" class="form-control bg-dark border-secondary text-light" id="feSignOffSignedOn" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="feSignOffExpiresOn" th:text="#{featureEnablement.field.expiresOn}">失効日</label>
+                                <input type="date" class="form-control bg-dark border-secondary text-light" id="feSignOffExpiresOn" required>
+                            </div>
+                            <div class="col-12" id="feSignOffStructured"></div>
+                            <div class="col-12">
+                                <label class="form-label small" for="feSignOffFile" th:text="#{featureEnablement.field.document}">署名の文書（PDF）</label>
+                                <input type="file" class="form-control bg-dark border-secondary text-light" id="feSignOffFile" accept="application/pdf,.pdf" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                        <button type="submit" class="btn btn-primary" th:text="#{featureEnablement.btn.register}">登録</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 署名の組の登録 -->
+    <div class="modal fade" id="featureEnablementBundleModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <form id="featureEnablementBundleForm" novalidate>
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title" th:text="#{featureEnablement.bundleModal.title}">署名の組を登録</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:attr="aria-label=#{featureEnablement.btn.closeDialog}"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted" th:text="#{featureEnablement.bundleModal.hint}">変わらない署名は「引き継ぐ」を選びます。</p>
+                        <div class="mb-3">
+                            <label class="form-label small" for="feBundleKind" th:text="#{featureEnablement.field.bundleKind}">組の種類</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="feBundleKind" required></select>
+                        </div>
+                        <div id="feBundleMembers"></div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                        <button type="submit" class="btn btn-primary" th:text="#{featureEnablement.btn.register}">登録</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/feature-enablement.js}"></script>
+</th:block>
+</body>
+</html>

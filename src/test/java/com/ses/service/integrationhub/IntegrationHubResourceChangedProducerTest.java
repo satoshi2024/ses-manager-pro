@@ -94,6 +94,23 @@ class IntegrationHubResourceChangedProducerTest {
         producer.changed(type, 17L);
         assertThat(registry.get("integration_hub_producer_skipped_total").tag("reason", "SUBSCRIPTION_LIMIT").counter().count()).isEqualTo(1);
         verifyNoInteractions(clients, resources, permissions, deliveries, ownership);
+
+        // FE-D03（design §9.3）: 一時の閉鎖の間も outbox へ積み（runtime switch の producer の判定が開）、確定の閉鎖では積まない
+        when(subscriptions.selectOutboundForTenant("tenant-a")).thenReturn(List.of(WebhookSubscription.builder()
+                .id(5L).clientId("client-a").dataScopeJson(scope).build()));
+        when(permissions.selectActive(3L, scopeCode, "integration.webhook.deliver"))
+                .thenReturn(ApiClientScope.builder().dataScopeJson(scope).build());
+        var runtime = mock(com.ses.featureenablement.nf05.IntegrationHubRuntimeSwitch.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(producer, "runtimeSwitch", runtime);
+        when(runtime.outboundProducerOpen()).thenReturn(true);
+        clearInvocations(deliveries);
+        producer.changed(type, 17L);
+        verify(deliveries).enqueue(anyString(), eq(5L), eq(1), eq("client-a"), eq(scopeCode), eq("tenant-a"),
+                eq(type), eq(17L), eq("resource.changed"), eq("v1"), anyString(), any(), any());
+        when(runtime.outboundProducerOpen()).thenReturn(false);
+        clearInvocations(subscriptions, deliveries);
+        producer.changed(type, 17L);
+        verifyNoInteractions(subscriptions, deliveries);
     }
 
     /**

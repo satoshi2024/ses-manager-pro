@@ -14,7 +14,8 @@ import com.ses.privacy.foundation.RevocationStatus;
 import com.ses.privacy.foundation.RevocationStatusProvider;
 import com.ses.privacy.production.PrivacyAccessGuard;
 import com.ses.privacy.production.PrivacyApprovalProperties;
-import com.ses.privacy.production.PrivacyDecisionWindowMonitor;
+import com.ses.privacy.production.PrivacyApprovalSource;
+import com.ses.privacy.production.retention.trust.PrivacyTrustStructureState;
 import com.ses.privacy.production.PrivacyFeatureProperties;
 import com.ses.privacy.production.PrivacyProductionConfiguration;
 import com.ses.privacy.production.retention.hold.ConfiguredHoldReleaseTrustRegistry;
@@ -69,18 +70,20 @@ class PrivacyPolicyRegistrationConfigurationTest {
         oidc.setTenantId(TENANT);
         PrivacyPolicyRegistrationService service = new PrivacyPolicyRegistrationConfiguration()
                 .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
-                                oidc), approval(), mock(RetentionPolicyMapper.class), mock(PiiDataElementMapper.class),
-                        mock(AuditLogService.class), mock(PlatformTransactionManager.class), provider(Clock.class, clock),
-                        prod, trust);
+                                oidc), PrivacyApprovalSource.properties(approval(), null), mock(RetentionPolicyMapper.class),
+                        mock(PiiDataElementMapper.class), mock(AuditLogService.class), mock(PlatformTransactionManager.class),
+                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null),
+                        provider(com.ses.privacy.production.PrivacySubgateSignOffs.class, null));
         assertThat(trust.calls.get()).as("Bean の構築時には trust を読まない").isZero();
 
         assertThat(service.isOpen()).isTrue();
         // 授権 tenant（OIDC_TENANT_ID 未設定なら default）が anchor の範囲の外なら開かない（RB-NF07-REG delta review P3-1）
         PrivacyPolicyRegistrationService otherTenant = new PrivacyPolicyRegistrationConfiguration()
                 .privacyPolicyRegistrationService(mock(PrivacyAccessGuard.class), provider(OidcSecurityProperties.class,
-                                null), approval(), mock(RetentionPolicyMapper.class), mock(PiiDataElementMapper.class),
-                        mock(AuditLogService.class), mock(PlatformTransactionManager.class), provider(Clock.class, clock),
-                        prod, trust);
+                                null), PrivacyApprovalSource.properties(approval(), null), mock(RetentionPolicyMapper.class),
+                        mock(PiiDataElementMapper.class), mock(AuditLogService.class), mock(PlatformTransactionManager.class),
+                        provider(Clock.class, clock), prod, trust, provider(PrivacyTrustStructureState.class, null),
+                        provider(com.ses.privacy.production.PrivacySubgateSignOffs.class, null));
         assertThat(otherTenant.isOpen()).isFalse();
         assertThat(otherTenant.readiness().missing()).containsExactly("trust");
         assertThat(trust.calls.get()).isPositive();
@@ -122,10 +125,11 @@ class PrivacyPolicyRegistrationConfigurationTest {
         OidcSecurityProperties oidc = new OidcSecurityProperties();
         oidc.setTenantId(TENANT);
 
-        new PrivacyProductionConfiguration().productionPolicyReadonlyQueryPort(prod, features,
+        new PrivacyProductionConfiguration().productionPolicyReadonlyQueryPort(prod,
+                provider(com.ses.config.feature.FeatureSwitches.class, null),
                 mock(LegalEntityContextService.class), mock(SysUserMapper.class),
                 provider(AuthorizationService.class, null), oidc, mock(PiiDataElementMapper.class),
-                mock(RetentionPolicyMapper.class), provider(PrivacyDecisionWindowMonitor.class, null), trust, clock);
+                mock(RetentionPolicyMapper.class), trust, clock);
 
         assertThat(trust.calls.get()).isZero();
     }

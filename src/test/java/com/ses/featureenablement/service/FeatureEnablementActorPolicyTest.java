@@ -120,11 +120,47 @@ class FeatureEnablementActorPolicyTest {
         assertDenied(() -> policy().resolve(null, new MockHttpSession()));
     }
 
+    /** FE-C05（J-05・design §11.3）: NF07 の行為者は有効な privacy-admin の所属者だけ。NF07 以外は所属を問わない。 */
     @Test
-    void NF07のprivacy_adminの規則は段階Cまで無効で通知の宛先は有効な管理者だけ() {
-        assertThat(FeatureEnablementActorPolicy.PRIVACY_ADMIN_RULE_ENABLED).isFalse();
-        policy().requirePrivacyAdminIfRequired(true, new FeatureEnablementActor(1L, "admin"));
+    void NF07ではprivacy_admin以外は403で所属を読めなければ403() {
+        assertThat(FeatureEnablementActorPolicy.PRIVACY_ADMIN_RULE_ENABLED).isTrue();
+        com.ses.mapper.UserPermissionGroupMapper members = mock(com.ses.mapper.UserPermissionGroupMapper.class);
+        when(members.selectActiveUserIdsByGroupKey(TENANT, FeatureEnablementActorPolicy.PRIVACY_ADMIN_GROUP_KEY))
+                .thenReturn(List.of(1L));
+        FeatureEnablementActor privacyAdmin = new FeatureEnablementActor(1L, "admin");
+        FeatureEnablementActor otherAdmin = new FeatureEnablementActor(2L, "admin2");
 
+        policy(members).requirePrivacyAdminIfRequired(true, privacyAdmin);
+        assertDenied(() -> policy(members).requirePrivacyAdminIfRequired(true, otherAdmin));
+        policy(members).requirePrivacyAdminIfRequired(false, otherAdmin);
+        assertDenied(() -> policy(members).requirePrivacyAdminIfRequired(true, null));
+        // 所属を読む部品が無い・照会の失敗は拒否（fail-closed）
+        assertDenied(() -> policy().requirePrivacyAdminIfRequired(true, privacyAdmin));
+        com.ses.mapper.UserPermissionGroupMapper broken = mock(com.ses.mapper.UserPermissionGroupMapper.class);
+        when(broken.selectActiveUserIdsByGroupKey(TENANT, FeatureEnablementActorPolicy.PRIVACY_ADMIN_GROUP_KEY))
+                .thenThrow(new IllegalStateException("io"));
+        assertDenied(() -> policy(broken).requirePrivacyAdminIfRequired(true, privacyAdmin));
+    }
+
+    /**
+     * review rb-fe-c P3-3: privacy-admin の所属者でも、{@code '*'}・{@code privacy.} の拒否行を持つ有効な group にも所属する者は NF07 の
+     * 行為者にしない（開放の条件の privacy-admin の数え方と揃える）。
+     */
+    @Test
+    void NF07ではprivacyの拒否groupにも所属するprivacy_adminは403() {
+        com.ses.mapper.UserPermissionGroupMapper members = mock(com.ses.mapper.UserPermissionGroupMapper.class);
+        when(members.selectActiveUserIdsByGroupKey(TENANT, FeatureEnablementActorPolicy.PRIVACY_ADMIN_GROUP_KEY))
+                .thenReturn(List.of(1L, 3L));
+        when(members.countPrivacyDenyMemberships(TENANT, 3L)).thenReturn(1);
+        when(members.countPrivacyDenyMemberships(TENANT, 1L)).thenReturn(0);
+
+        policy(members).requirePrivacyAdminIfRequired(true, new FeatureEnablementActor(1L, "admin"));
+        assertDenied(() -> policy(members).requirePrivacyAdminIfRequired(true, new FeatureEnablementActor(3L, "admin3")));
+        policy(members).requirePrivacyAdminIfRequired(false, new FeatureEnablementActor(3L, "admin3"));
+    }
+
+    @Test
+    void 通知の宛先は有効な管理者だけ() {
         SysUser active = user(1L, "管理者");
         SysUser locked = user(2L, "管理者");
         locked.setLockedUntil(LocalDateTime.ofInstant(NOW, ZoneId.systemDefault()).plusHours(1));
@@ -140,6 +176,16 @@ class FeatureEnablementActorPolicyTest {
         when(provider.getIfAvailable()).thenReturn(oidc);
         return new FeatureEnablementActorPolicy(mapper, environment, provider, FeatureEnablementTenant.fixed(TENANT),
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @SuppressWarnings("unchecked")
+    private FeatureEnablementActorPolicy policy(com.ses.mapper.UserPermissionGroupMapper members) {
+        ObjectProvider<OidcSecurityProperties> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(oidc);
+        ObjectProvider<com.ses.mapper.UserPermissionGroupMapper> membersProvider = mock(ObjectProvider.class);
+        when(membersProvider.getIfAvailable()).thenReturn(members);
+        return new FeatureEnablementActorPolicy(mapper, environment, provider, FeatureEnablementTenant.fixed(TENANT),
+                Clock.fixed(NOW, ZoneOffset.UTC), membersProvider);
     }
 
     private static SysUser user(Long id, String role) {

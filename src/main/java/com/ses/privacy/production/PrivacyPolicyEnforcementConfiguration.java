@@ -1,5 +1,6 @@
 package com.ses.privacy.production;
 
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.mapper.privacy.PiiDataElementMapper;
 import com.ses.mapper.privacy.RetentionPolicyMapper;
 import com.ses.privacy.foundation.PolicyEnforcementPort;
@@ -36,15 +37,14 @@ public class PrivacyPolicyEnforcementConfiguration {
     @Profile("prod")
     public PolicyEnforcementPort productionPolicyEnforcementPort(
             Environment environment,
-            PrivacyFeatureProperties privacyFeatureProperties,
+            ObjectProvider<FeatureSwitches> featureSwitches,
             PiiDataElementMapper piiDataElementMapper,
             RetentionPolicyMapper retentionPolicyMapper,
-            ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider,
             PrivacyTrustSource privacyTrustSource,
             Clock clock) {
         return ProductionPrivacyComponents.productionPolicyEnforcement(
                 environment,
-                PrivacyProductionConfiguration.retentionSourceEnabled(privacyFeatureProperties, decisionWindowProvider),
+                PrivacyProductionConfiguration.retentionSourceEnabled(featureSwitches),
                 new DbProductionPolicyCatalog(piiDataElementMapper, retentionPolicyMapper),
                 new DbCurrentPolicySource(retentionPolicyMapper),
                 // anchor と失効状態は構築時に1回ではなく、送信の判定のたびに PrivacyTrustSource から取る（RB-NF07-REG

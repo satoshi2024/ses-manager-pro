@@ -104,6 +104,73 @@ class PrivacyHoldServiceTest {
         assertThat(fixture.count("SELECT COUNT(*) FROM t_privacy_projection_state")).isZero();
     }
 
+    /** review rb-fe-c P2-1: 副入口「hold 開始」の署名（D-05 の受理 {@code NF07_D05_OWNER_ACCEPTANCE} 等）が取消し・失効なら開始しない。 */
+    @Test
+    void hold開始の署名が有効でなければDECISION_UNKNOWNで拒否しJournalにも状態表にも触れない() {
+        fixture.startSignOffsValid = false;
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:10")), 409, "error.privacy.decisionUnknown");
+        assertThat(fixture.journal.appendCalls.get()).isZero();
+        assertThat(fixture.state()).isNull();
+        assertThat(fixture.service.overview().missingPrerequisites()).contains("subgateSignOffs");
+
+        fixture.startSignOffsValid = true;
+        assertThat(fixture.service.start(subject("ENGINEER:10"))).as("新しい署名の確認の後は自動で再開する").isNotNull();
+    }
+
+    /** review rb-fe-c P3-10: reader の principal（開放の条件の結果が権限不足）では、hold の効力が読めても開始は 503 で拒否する。 */
+    @Test
+    void readerのprincipalでは開始を503で拒否しJournalに触れない() {
+        fixture.enablementResult = new PrivacyJournalStartupVerifier.Result(
+                PrivacyJournalStartupVerifier.Availability.UNAVAILABLE, List.of("grants.appendMissing"));
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:10")), 503, "error.privacy.journalUnavailable");
+        assertThat(fixture.journal.appendCalls.get()).isZero();
+        assertThat(fixture.state()).isNull();
+    }
+
+    /**
+     * review rb-fe-c P3-1: Journal が append の権限の拒否を返せば（確定の拒否。append は起きていない）、ACK 不明にせず 503 で返し、
+     * pending を戻して gate を UNAVAILABLE にしない。
+     */
+    @Test
+    void appendが権限の拒否なら503でpendingを戻しholdを作らない() {
+        fixture.journal.beforeAppend = () -> {
+            throw new com.ses.privacy.foundation.JournalAccessDeniedException("test: append denied", null);
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:10")), 503, "error.privacy.journalUnavailable");
+        assertThat(fixture.journal.appendCalls.get()).as("再送しない").isEqualTo(1);
+        assertThat(fixture.count("SELECT COUNT(*) FROM t_legal_hold")).isZero();
+        assertThat(fixture.state() == null ? null : fixture.state().pendingCommandId()).as("pending を残さない").isNull();
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.START_REJECTED)
+                && uri.contains("JOURNAL_ACCESS_DENIED"));
+    }
+
+    /**
+     * review rb-fe-c P3-N1: 先の append が ACK 不明（commit 済み・ACK 喪失）の後、再送が権限で拒否されても確定の拒否にしない。ACK 不明と
+     * して pending を残し（gate は UNAVAILABLE のまま）、監査は拒否ではなく ACK 不明に理由を添えて区別する。
+     */
+    @Test
+    void ACK不明の後の再送が権限で拒否されても拒否とせずACK不明としてpendingを残す() {
+        AtomicInteger calls = new AtomicInteger();
+        fixture.journal.commitThenFail.set(1);
+        fixture.journal.beforeAppend = () -> {
+            if (calls.incrementAndGet() == 2) {
+                throw new com.ses.privacy.foundation.JournalAccessDeniedException("test: denied on retry", null);
+            }
+        };
+
+        assertRejected(() -> fixture.service.start(subject("ENGINEER:10")), 503, "error.privacy.holdAckUnknown");
+        assertThat(calls).hasValue(2);
+        assertThat(fixture.state().pendingCommandId()).as("pending を残す").isNotNull();
+        assertThat(fixture.gate.evaluate(PrivacyHoldTestFixture.TENANT).state())
+                .isEqualTo(PrivacyHoldGate.State.UNAVAILABLE);
+        assertThat(fixture.auditUris).anyMatch(uri -> uri.contains(PrivacyHoldAudit.ACK_UNKNOWN)
+                && uri.contains("reason=" + JournalRetryDeniedAfterUnknown.AUDIT_REASON));
+        assertThat(fixture.auditUris).noneMatch(uri -> uri.contains(PrivacyHoldAudit.START_REJECTED));
+    }
+
     @Test
     void Journalに届かなければ503でpendingもprojectionも残さない() {
         fixture.journal.unavailable = true;

@@ -247,7 +247,10 @@ class IntegrationHubProductionEnablementPolicyTest {
         properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
         approveOutbound(properties);
         assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
+        // FE-D01: 検査そのものは副作用を持たない（記録は起動時の値が開の時の validateBoundaries だけ）。
+        assertNull(properties.getExternalTransport().approvedTruststoreContent(), "検査は truststore を記録しない");
         // review P3-6: 照合でdigestを計算したbyte列を記録し、transportはそれを読む（fileを読み直さない）。
+        assertDoesNotThrow(properties::validateBoundaries);
         Path approvedFile = Path.of(properties.getExternalTransport().getTruststorePath());
         assertArrayEquals(Files.readAllBytes(approvedFile), properties.getExternalTransport().approvedTruststoreContent());
 
@@ -341,6 +344,102 @@ class IntegrationHubProductionEnablementPolicyTest {
         assertMessage("/24", properties);
         properties.getSecurity().setTrustedProxies(new java.util.ArrayList<>(List.of("203.0.113.0/24")));
         assertMessage("重複", properties);
+    }
+
+    /** FE-D01: 検査する方向は引数で受け、閉じている process でも開いた場合の違反を求める（flag を読まない）。 */
+    @Test
+    void 検査する方向を引数で受けflagを読まない() {
+        IntegrationHubExternalApiProperties properties = base(false, false);
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)),
+                "property の源の呼出しは flag を見る（両方向とも閉なら承認を要求しない）");
+        List<String> inboundOnly = codes(IntegrationHubProductionEnablementPolicy.violationList(properties,
+                prodEnvironment(true), true, false, IntegrationHubApprovals.none(), null));
+        assertTrue(inboundOnly.contains("nf05.inbound.decisionId"), inboundOnly.toString());
+        assertTrue(inboundOnly.stream().noneMatch(code -> code.startsWith("nf05.outbound")), inboundOnly.toString());
+        List<String> outboundOnly = codes(IntegrationHubProductionEnablementPolicy.violationList(properties,
+                prodEnvironment(true), false, true, IntegrationHubApprovals.none(), null));
+        assertTrue(outboundOnly.contains("nf05.outbound.decisionId"), outboundOnly.toString());
+        assertTrue(outboundOnly.stream().noneMatch(code -> code.startsWith("nf05.inbound")), outboundOnly.toString());
+        assertFalse(properties.getPublicApi().getEnabled());
+        assertFalse(properties.getExternalTransport().getEnabled());
+    }
+
+    /** FE-D01・review P3-15: 承認の値（決定 ID・digest）は引数で受け、配備の設定の決定 ID が空でも照合できる。 */
+    @Test
+    void 承認の値を引数で受け配備の設定の決定IDが空でも照合する() {
+        var properties = base(true, true);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        approveInbound(properties);
+        approveOutbound(properties);
+        IntegrationHubApprovals approvals = IntegrationHubApprovals.fromProperties(properties);
+        properties.getPublicApi().getApproval().setDecisionId(null);
+        properties.getPublicApi().getApproval().setApprovalDigest(null);
+        properties.getExternalTransport().getApproval().setDecisionId(null);
+        properties.getExternalTransport().getApproval().setApprovalDigest(null);
+        byte[] truststore = IntegrationHubApprovalDigest.readTruststore(properties.getExternalTransport().getTruststorePath());
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violationList(properties, prodEnvironment(true),
+                true, true, approvals, truststore));
+        assertTrue(codes(IntegrationHubProductionEnablementPolicy.violationList(properties, prodEnvironment(true), true,
+                true, IntegrationHubApprovals.fromProperties(properties), truststore)).contains("nf05.inbound.decisionId"));
+        assertNull(properties.getExternalTransport().approvedTruststoreContent(), "検査は truststore を記録しない");
+    }
+
+    /** FE-D01（requirements FE-RQ-008）: outbound が閉じている間の mode は MOCK か HTTPS（承認の前に HTTPS と承認の内容を入れる）。 */
+    @Test
+    void outboundが閉じている間はHTTPSを許しSTUBとLOOPBACKは拒否のまま() {
+        IntegrationHubExternalApiProperties properties = base(false, false);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(false)));
+        assertDoesNotThrow(properties::validateBoundaries);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.STUB);
+        assertMessage("STUB/LOOPBACK", properties);
+    }
+
+    /**
+     * FE-D01（design §9.5）: DB の源の prod では、起動時の値が開でも違反のある方向は例外にせず閉じて code を残す（安全網）。承認の値は
+     * 起動の前の読取りが写した値。flag に依らない違反は従来どおり起動を止める。
+     */
+    @Test
+    void DBの源のprodでは違反のある方向を閉じて起動を止めない() {
+        var properties = base(true, false);
+        approveInbound(properties);
+        IntegrationHubApprovals approvals = IntegrationHubApprovals.fromProperties(properties);
+        properties.getPublicApi().getApproval().setDecisionId(null);
+        properties.getPublicApi().getApproval().setApprovalDigest(null);
+        MockEnvironment environment = prodEnvironment(true);
+        environment.setProperty("app.feature-enablement.source", "database");
+        properties.setEnvironment(environment);
+        assertDoesNotThrow(properties::validateBoundaries);
+        assertFalse(properties.getPublicApi().getEnabled(), "承認の値が無ければ inbound を閉じる");
+        assertEquals("nf05.inbound.decisionId", properties.bootClosureCode(true));
+
+        var approved = base(true, false);
+        approveInbound(approved);
+        approved.getPublicApi().getApproval().setDecisionId(null);
+        approved.getPublicApi().getApproval().setApprovalDigest(null);
+        MockEnvironment boot = prodEnvironment(true);
+        boot.setProperty("app.feature-enablement.source", "database");
+        boot.setProperty(IntegrationHubApprovals.BOOT_PREFIX + "inbound.decision-id", approvals.inbound().decisionId());
+        boot.setProperty(IntegrationHubApprovals.BOOT_PREFIX + "inbound.approval-digest", approvals.inbound().approvalDigest());
+        approved.setEnvironment(boot);
+        assertDoesNotThrow(approved::validateBoundaries);
+        assertTrue(approved.getPublicApi().getEnabled(), "確認済みの署名の承認の値なら開いたまま");
+        assertNull(approved.bootClosureCode(true));
+
+        var shortKey = base(true, false);
+        shortKey.getPublicApi().setPublicIdKey("short");
+        shortKey.setEnvironment(boot);
+        assertDoesNotThrow(shortKey::validateBoundaries);
+        assertEquals("nf05.boundary.publicIdKey", shortKey.bootClosureCode(true));
+
+        var stub = base(false, false);
+        stub.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.STUB);
+        stub.setEnvironment(boot);
+        assertThrows(IllegalStateException.class, stub::validateBoundaries, "flag に依らない違反は止める");
+    }
+
+    private static List<String> codes(List<IntegrationHubProductionEnablementPolicy.Violation> violations) {
+        return violations.stream().map(IntegrationHubProductionEnablementPolicy.Violation::code).toList();
     }
 
     @Test

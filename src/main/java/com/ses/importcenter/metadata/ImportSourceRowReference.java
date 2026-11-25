@@ -34,7 +34,8 @@ import java.util.List;
  * 復号後 {@value #MIN_KEY_BYTES} byte以上。prodでは開発用の既定鍵とtest用の鍵を（表記によらず復号後のbyte列で比べて）
  * 使えない。鍵が使えない間は、preview・
  * error exportを監査・原本読込より前に503（{@code error.import.rowReferenceUnavailable}）で拒否する（fail-closed）。
- * NF-06をONにしたprodの起動検査は {@link ImportRowReferenceKeyStartupValidator}。鍵の値はlog・例外messageへ出さない。
+ * 鍵が使えるかは NF-06 の開放の条件（{@code ImportCenterEnablementConditions}。使えなければ NF-06 を閉じる。FE-B02）と、prod の
+ * 起動の log（{@link ImportRowReferenceKeyStartupValidator}。起動は止めない）が見る。鍵の値はlog・例外messageへ出さない。
  */
 @Component
 public class ImportSourceRowReference {

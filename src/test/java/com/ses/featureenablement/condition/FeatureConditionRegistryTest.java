@@ -165,6 +165,38 @@ class FeatureConditionRegistryTest {
                 .signOff("NF02_DG02", 1, 0, TODAY.minusDays(1), TODAY.plusDays(30)).build();
     }
 
+    /**
+     * review rb-fe-c P2-6: 申請・承認は世代の lock の前に、対象の開放単位の固有の評価器だけの外部への検査を新しくする。例外は続ける
+     * （lock の中の評価が最後の結果で判定する）。
+     */
+    @Test
+    void 外部への検査は対象の開放単位の評価器だけを呼び例外でも続ける() {
+        List<Feature> refreshed = new ArrayList<>();
+        FeatureConditionEvaluator nf07 = new FeatureConditionEvaluator() {
+            @Override
+            public Set<Feature> features() {
+                return EnumSet.of(Feature.NF07_RETENTION, Feature.NF07_DSAR);
+            }
+
+            @Override
+            public List<FeatureConditionCheck> evaluate(Feature target, FeatureEvaluationContext context) {
+                return List.of();
+            }
+
+            @Override
+            public void refreshRemote(Feature feature) {
+                refreshed.add(feature);
+                throw new IllegalStateException("journal unreachable");
+            }
+        };
+        FeatureConditionRegistry registry = registry(nf07, stub(Feature.NF02));
+
+        registry.refreshRemote(Feature.NF07_RETENTION);
+        registry.refreshRemote(Feature.NF02);
+
+        assertThat(refreshed).containsExactly(Feature.NF07_RETENTION);
+    }
+
     private FeatureConditionRegistry registry(FeatureConditionEvaluator... specific) {
         List<FeatureConditionEvaluator> evaluators = new ArrayList<>(commonEvaluators(new MockEnvironment()));
         evaluators.addAll(List.of(specific));

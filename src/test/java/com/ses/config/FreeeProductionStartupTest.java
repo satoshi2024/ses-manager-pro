@@ -72,8 +72,6 @@ class FreeeProductionStartupTest {
                 "--spring.config.import=optional:classpath:application-test.yml",
                 "--spring.datasource.url=" + databaseUrl,
                 "--server.port=0",
-                "--app.features.nf06.enabled=false",
-                "--app.features.nf01-dual-confirmation.enabled=false",
                 "--spring.flyway.enabled=false",
                 "--spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
                 "--spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",

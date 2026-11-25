@@ -44,9 +44,10 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     /**
      * 証跡種別の許可値一覧（W3-21b review P2-1）。DDLの列注釈（NONE, SELF_DECLARATION, DUAL_CONFIRMATION,
      * DOCUMENT_LINK, SYSTEM_CHECK）、開発seed（NONE・SYSTEM_CHECK）、テンプレート画面の選択肢（NONE・COMMENT・
-     * DOCUMENT_LINK、ONならDUAL_CONFIRMATION）で実際に使っている値の和集合。
+     * DOCUMENT_LINK、ONならDUAL_CONFIRMATION）で実際に使っている値の和集合。機能の開放の NF01 二者確認の条件
+     * （{@code LifecycleTemplateTaskMapper.EVIDENCE_TYPE_OUTSIDE_ALLOWED}。FE-B01）も同じ一覧で検査する。
      */
-    static final Set<String> EVIDENCE_TYPES = Set.of("NONE", "COMMENT", "SELF_DECLARATION", "DOCUMENT_LINK",
+    public static final Set<String> EVIDENCE_TYPES = Set.of("NONE", "COMMENT", "SELF_DECLARATION", "DOCUMENT_LINK",
             "SYSTEM_CHECK", DUAL_CONFIRMATION);
 
     private final LifecycleTemplateMapper templateMapper;

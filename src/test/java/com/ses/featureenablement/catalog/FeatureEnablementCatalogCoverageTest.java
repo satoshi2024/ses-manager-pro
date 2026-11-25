@@ -98,7 +98,11 @@ class FeatureEnablementCatalogCoverageTest {
                 .filter(unit -> !unit.openTransitionCodes().isEmpty())
                 .collect(Collectors.toMap(UnitDefinition::feature, UnitDefinition::openTransitionCodes));
 
-        assertThat(openOnly).containsExactly(Map.entry(Feature.NF02, Set.of(FeatureEnablementCatalog.CODE_NF02_CALENDAR)));
+        // 暦を照会できない時の code も開放の時だけの条件（照会の失敗で NF02 を自動閉鎖しない。D-9。FE-A11）
+        assertThat(openOnly).containsExactly(Map.entry(Feature.NF02, Set.of(FeatureEnablementCatalog.CODE_NF02_CALENDAR,
+                FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE)));
+        assertThat(FeatureEnablementCatalog.isUnverifiableCode(FeatureEnablementCatalog.CODE_NF02_CALENDAR_UNVERIFIABLE))
+                .isTrue();
         assertThat(openTransition).containsExactly(
                 Map.entry(Feature.NF05_OUTBOUND, Set.of(FeatureEnablementCatalog.CODE_NF05_BARRIER_OFF)));
     }
@@ -146,16 +150,31 @@ class FeatureEnablementCatalogCoverageTest {
                 .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
     }
 
+    /**
+     * FE-A11: 段階 A は容易な7件に DB 管理の印を付ける。段階 B は NF01 二者確認（FE-B01）と NF06（FE-B02）に、段階 C は NF07 の2件（FE-C05）に、
+     * 段階 D は NF05 の2件（FE-D02）に印を足す（段階 D の後は全ての開放単位に印がある）。
+     */
     @Test
-    void 段階AではどのFeatureにもDB管理の印が無く写しで印を付けられる() {
+    void 段階Aの7件と段階BからDで足した開放単位にDB管理の印があり写しで印を付け直せる() {
+        EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
+                Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
+        EnumSet<Feature> stageB = EnumSet.of(Feature.NF01_DUAL_CONFIRMATION, Feature.NF06);
+        EnumSet<Feature> stageD = EnumSet.of(Feature.NF05_INBOUND, Feature.NF05_OUTBOUND);
         for (Feature feature : Feature.values()) {
-            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isFalse();
+            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature)
+                    || stageB.contains(feature) || FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED.contains(feature)
+                    || stageD.contains(feature));
         }
-        FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF10));
+        assertThat(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageA);
+        // 段階 C（FE-C05）: NF07 の2件
+        assertThat(FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED)
+                .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
+        assertThat(FeatureEnablementCatalog.STAGE_D_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageD);
+        FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF07_DSAR));
         assertThat(managed.databaseManaged(Feature.NF04)).isTrue();
-        assertThat(managed.databaseManaged(Feature.NF10)).isTrue();
+        assertThat(managed.databaseManaged(Feature.NF07_DSAR)).isTrue();
         assertThat(managed.databaseManaged(Feature.NF01)).isFalse();
-        assertThat(catalog.databaseManaged(Feature.NF04)).as("元の目録は変えない").isFalse();
+        assertThat(catalog.databaseManaged(Feature.NF01)).as("元の目録は変えない").isTrue();
     }
 
     @Test
