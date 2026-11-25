@@ -124,25 +124,19 @@ app:
     # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
     provider: ${DIGITAL_INVOICE_PROVIDER:none}
     webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:}
-  # 機能の開放（feature-enablement-console design §3.1）。prod の開閉の源は DB（画面の申請と二人の承認で開く）。prod では database 以外を
-  # 起動時に拒否する（FE-A08）。総スイッチ FEATURE_ENABLEMENT_ALLOWED は緊急の閉鎖だけに使う（true/false。既定 true）。
-  # 段階 A〜D の間は、目録の DB 管理の印が無い開放単位は下の app.features.* 等の値を返す（go-live は段階 E の後。D-1）。
+  # 機能の開放（feature-enablement-console design §3.1・FE-E02）。prod の開閉の源は DB（全 13 件の開放単位を画面「機能の開放」の申請と
+  # 二人の承認で開閉する）。prod では database 以外を起動時に拒否する（FE-A08）。総スイッチ FEATURE_ENABLEMENT_ALLOWED は緊急の閉鎖と
+  # PITR の後の最初の起動だけに使う（原文の true/false。既定 true）。
   feature-enablement:
     source: database
     allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}
-  # 機能スイッチ（段階公開）。prod では全ての開放単位を system の中（画面「機能の開放」の申請と二人の承認）で開閉するため、
-  # 開閉と、署名・設定へ移した承認の値の placeholder をここに置かない。それらの旧い変数を設定すると prod は起動しない
-  # （FeatureEnablementProductionValidator。値に依らない）。手順: .kiro/specs/production-launch/feature-switches.md
-  #   段階 A（FE-A11）: NF01・NF02・NF02 顧客ポータル・NF03・NF03 資格番号・NF04・NF10（FEATURE_NF01_ENABLED 等）。
-  #   段階 B: NF01 二者確認（FE-B01。FEATURE_NF01_DUAL_CONFIRMATION_ENABLED と Privacy 署名の参照
-  #   FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF。署名は画面で登録・確認する）、NF06（FE-B02。FEATURE_NF06_ENABLED と
-  #   IMPORT_ADMISSION_*。admission の承認は署名 NF06_ADMISSION）、NF02 顧客ポータルの公開範囲（FE-B03。
-  #   FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE は空でも拒否。画面「設定」tab で変え、未設定なら portal 起票の問い合わせだけを出す）。
-  #   段階 C（FE-C05）: NF07 保持・保全・DSAR（PRIVACY_RETENTION_ENABLED・PRIVACY_DSAR_ENABLED と、署名の組・署名へ移した
-  #   PRIVACY_APPROVAL_*・PRIVACY_DSAR_DUE_DAYS・PRIVACY_DSAR_PACKAGE_MAX_AGE）。
-  #   段階 D（FE-D02・D05）: NF05 inbound・outbound（INTEGRATION_HUB_PUBLIC_API_ENABLED・INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED と
-  #   INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)。上の integration.hub の enabled は起動の前の DB の読取り
-  #   IntegrationHubEnablementBootResolver が上書きし、DG-05 の決定 ID と digest は確認済みの署名 NF05_DG05_IN・NF05_DG05_OUT から読む）。
+  # 旧い機能スイッチと署名・設定へ移した承認値の拒否（FE-E01・FE-E02）。prod では全 13 件の開放単位のスイッチ（FEATURE_NF*_ENABLED・
+  # PRIVACY_RETENTION_ENABLED・PRIVACY_DSAR_ENABLED・INTEGRATION_HUB_PUBLIC_API_ENABLED・INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED）と、
+  # 画面の署名・組・設定へ移した承認の値（FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF・IMPORT_ADMISSION_*・
+  # FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE・PRIVACY_APPROVAL_*・PRIVACY_DSAR_DUE_DAYS・PRIVACY_DSAR_PACKAGE_MAX_AGE・
+  # INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)）の placeholder を置かず、それらの旧い変数を設定すると値に依らず
+  # 起動しない（FeatureEnablementProductionValidator）。NF05 の上の integration.hub.*.enabled は起動の前の DB 読取り
+  # （IntegrationHubEnablementBootResolver）が上書きする。手順: .kiro/specs/production-launch/feature-switches.md
 
 # ===== freee連携（HFP-01） =====
 # prodの既定はOFF（FREEE_ENABLED=false）。OFFの間は認可の開始・code交換を行わず、client設定が無くても起動する。

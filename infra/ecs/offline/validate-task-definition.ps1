@@ -285,7 +285,10 @@ $trustMount = @($c.mountPoints | Where-Object { $_.sourceVolume -eq $TrustVolume
 if (-not $uploadsMount -or $uploadsMount.containerPath -ne '/app/uploads' -or $uploadsMount.readOnly -eq $true) { Fail 'ses-manager must mount uploads read-write at /app/uploads' }
 if (-not $trustMount -or $trustMount.readOnly -ne $true -or [string]$trustMount.containerPath -notmatch '^/[^.]') { Fail 'ses-manager must mount privacy-trust read-only at an absolute path (deploy-runbook 1.6 item 11)' }
 $trustPath = ([string]$trustMount.containerPath).TrimEnd('/')
-Ok 'uploads (read-write) and privacy-trust (read-only, own access point) on EFS with transit encryption and IAM authorization'
+if ($trustPath -eq '' -or $trustPath -eq '/app' -or $trustPath -eq '/app/config' -or $trustPath.StartsWith('/app/config/') -or $trustPath -eq '/app/uploads' -or $trustPath.StartsWith('/app/uploads/')) {
+  Fail 'privacy-trust must not mount at /, /app, /app/config (Spring working-directory config location) or /app/uploads (deploy-runbook 1.6 item 11)'
+}
+Ok 'uploads (read-write) and privacy-trust (read-only, own access point, outside /app/config) on EFS with transit encryption and IAM authorization'
 if ($Mode -eq 'Template') { Ok 'EFS-ACTUAL=DEFERRED (template static only)' }
 
 $envNames = @($c.environment | ForEach-Object { [string]$_.name })
@@ -312,13 +315,42 @@ $duplicates = @($byKey.Values | Where-Object { $_.Count -gt 1 } | ForEach-Object
 if ($duplicates.Count -gt 0) { Fail ('settings given more than once: ' + ($duplicates -join ', ')) }
 Ok 'each setting given once'
 
-# Feature switches (feature-switches.md section 1, and the NF05 switches of deploy-runbook 1.7) are recognised by their
-# key, whatever the spelling, and must use the documented names: the first-start and secrets checks read those names.
-$switchKeyPattern = '^(FEATURENF[0-9A-Z]*ENABLED|APPFEATURES[0-9A-Z]*ENABLED|PRIVACYRETENTIONENABLED|PRIVACYDSARENABLED|INTEGRATIONHUB(PUBLICAPI|EXTERNALTRANSPORT)ENABLED)$'
-$switchNamePattern = '^(FEATURE_NF[0-9A-Z_]*_ENABLED|PRIVACY_RETENTION_ENABLED|PRIVACY_DSAR_ENABLED|INTEGRATION_HUB_(PUBLICAPI|PUBLIC_API|EXTERNALTRANSPORT|EXTERNAL_TRANSPORT)_ENABLED)$'
-$switchNames = @($allNames | Where-Object { (NameKey $_) -match $switchKeyPattern })
-$misspelt = @($switchNames | Where-Object { $_ -cnotmatch $switchNamePattern })
-if ($misspelt.Count -gt 0) { Fail ('feature switches must use the documented names (FEATURE_NF*_ENABLED, PRIVACY_*_ENABLED, INTEGRATION_HUB_*_ENABLED; feature-switches.md 1): ' + ($misspelt -join ',')) }
+# Legacy feature switches and approval values moved into in-system sign-offs and settings (feature-enablement-console
+# design section 10, deploy-runbook 1.0 row 42; FE-E01). All 13 units are opened inside /feature-enablement, so these
+# names are refused in both phases, whether in environment, secrets or SPRING_APPLICATION_JSON, in any spelling. The
+# two arrays match FeatureEnablementProductionValidator (checked by FeatureEnablementLegacySettingTest).
+$legacySwitchKeys = @(
+  'FEATURENF01ENABLED', 'APPFEATURESNF01ENABLED',
+  'FEATURENF01DUALCONFIRMATIONENABLED', 'APPFEATURESNF01DUALCONFIRMATIONENABLED',
+  'FEATURENF02ENABLED', 'APPFEATURESNF02ENABLED',
+  'FEATURENF02CUSTOMERPORTALENABLED', 'APPFEATURESNF02CUSTOMERPORTALENABLED',
+  'FEATURENF03ENABLED', 'APPFEATURESNF03ENABLED',
+  'FEATURENF03CERTIFICATIONPIIENABLED', 'APPFEATURESNF03CERTIFICATIONPIIENABLED',
+  'FEATURENF04ENABLED', 'APPFEATURESNF04ENABLED',
+  'INTEGRATIONHUBPUBLICAPIENABLED',
+  'INTEGRATIONHUBEXTERNALTRANSPORTENABLED',
+  'FEATURENF06ENABLED', 'APPFEATURESNF06ENABLED',
+  'PRIVACYRETENTIONENABLED',
+  'PRIVACYDSARENABLED',
+  'FEATURENF10ENABLED', 'APPFEATURESNF10ENABLED'
+)
+$legacySettingPrefixes = @(
+  'FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF', 'APPFEATURESNF01DUALCONFIRMATIONPRIVACYSIGNOFFREF',
+  'IMPORTADMISSION', 'APPIMPORTCENTERADMISSION',
+  'FEATURENF02CUSTOMERPORTALVISIBLESINCE', 'APPFEATURESNF02CUSTOMERPORTALVISIBLESINCE',
+  'PRIVACYAPPROVAL', 'PRIVACYDSARDUEDAYS', 'PRIVACYDSARPACKAGEMAXAGE',
+  'INTEGRATIONHUBINBOUNDDECISIONID', 'INTEGRATIONHUBINBOUNDAPPROVALDIGEST',
+  'INTEGRATIONHUBPUBLICAPIAPPROVALDECISIONID', 'INTEGRATIONHUBPUBLICAPIAPPROVALAPPROVALDIGEST',
+  'INTEGRATIONHUBOUTBOUNDDECISIONID', 'INTEGRATIONHUBOUTBOUNDAPPROVALDIGEST',
+  'INTEGRATIONHUBEXTERNALTRANSPORTAPPROVALDECISIONID', 'INTEGRATIONHUBEXTERNALTRANSPORTAPPROVALAPPROVALDIGEST'
+)
+function Test-LegacyKey([string]$k) {
+  ($legacySwitchKeys -contains $k) -or ($k -match '^(FEATURENF[0-9A-Z]*ENABLED|APPFEATURES[0-9A-Z]*ENABLED)$') -or (@($legacySettingPrefixes | Where-Object { $k.StartsWith($_) }).Count -gt 0)
+}
+$legacyFound = @($allNames | Where-Object { Test-LegacyKey (NameKey $_) })
+if ($legacyFound.Count -gt 0) {
+  Fail ('legacy feature switches and moved approval settings must not be set in any phase; open features inside the system (/feature-enablement; deploy-runbook 1.0 row 42): ' + ($legacyFound -join ','))
+}
 
 # Settings judged by their value must be visible, so they belong in environment, not in the secret store.
 $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY_BOOTSTRAP_ENABLED', 'SECURITY_BOOTSTRAP_EXPIRES_AT',
@@ -329,7 +361,7 @@ $mustBeVisible = @('SPRING_PROFILES_ACTIVE', 'APP_SCHEDULING_ENABLED', 'SECURITY
   'FEATURE_ENABLEMENT_ALLOWED')
 $visibleKeys = @($mustBeVisible | ForEach-Object { NameKey $_ })
 # BACKUP_QUIESCE_* (deploy-runbook 1.0 rows 31-41) are all judged by value.
-$hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k -match $switchKeyPattern -or $k -match '^FEATURE[0-9A-Z]*ENABLED$' -or $k.StartsWith('BACKUPQUIESCE') })
+$hidden = @($secretNames | Where-Object { $k = NameKey $_; $visibleKeys -contains $k -or $k.StartsWith('BACKUPQUIESCE') })
 if ($hidden.Count -gt 0) { Fail ('settings checked by value must be in environment, not secrets: ' + ($hidden -join ',')) }
 
 # Feature enablement (feature-enablement-console design section 10, deploy-runbook 1.0 row 42): features are opened inside
@@ -565,9 +597,10 @@ if ($jsonOther.Count -gt 0) { Fail ('SPRING_APPLICATION_JSON must be spelt exact
 if ($secretNames -contains 'SPRING_APPLICATION_JSON') {
   Fail 'SPRING_APPLICATION_JSON must not come from the secret store: its contents could not be checked; pass the fingerprint keys by their environment variable names (deploy-runbook 1.0 rows 23-25)'
 }
-$guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'privacy', 'ai',
-  'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee', 'management', 'spring.config', 'spring.main',
-  'compliance', 'app.upload', 'app.backupquiesce', 'spring.lifecycle', 'app.featureenablement')
+$guarded = @('app.scheduling', 'app.security', 'spring.flyway', 'spring.profiles', 'feature', 'app.features',
+  'app.importcenter', 'privacy', 'ai', 'server.forwardheadersstrategy', 'integration.hub', 'cloudsign', 'freee',
+  'management', 'spring.config', 'spring.main', 'compliance', 'app.upload', 'app.backupquiesce', 'spring.lifecycle',
+  'app.featureenablement')
 # The feature-enablement settings, the master switch included, never come through SPRING_APPLICATION_JSON (deploy-runbook
 # 1.0 row 42): app.feature-enablement.* and the FEATURE_ENABLEMENT_ALLOWED placeholder name in any spelling.
 function Test-EnablementJsonKey([string]$k) {
@@ -586,7 +619,12 @@ function Get-JsonKeys([object]$node, [string]$prefix) {
 }
 foreach ($json in @(EnvValues 'SPRING_APPLICATION_JSON')) {
   try { $parsed = $json | ConvertFrom-Json } catch { Fail 'SPRING_APPLICATION_JSON is not valid JSON' }
-  $keys = @(Get-JsonKeys $parsed '' | ForEach-Object { ($_.ToLowerInvariant() -replace '[_-]', '') })
+  $rawKeys = @(Get-JsonKeys $parsed '')
+  $legacyJson = @($rawKeys | Where-Object { Test-LegacyKey ($_.ToUpperInvariant() -replace '[^A-Z0-9]', '') })
+  if ($legacyJson.Count -gt 0) {
+    Fail ('legacy feature switches and moved approval settings must not be set in SPRING_APPLICATION_JSON; open features inside the system (/feature-enablement; deploy-runbook 1.0 row 42): ' + ($legacyJson -join ','))
+  }
+  $keys = @($rawKeys | ForEach-Object { ($_.ToLowerInvariant() -replace '[_-]', '') })
   $hit = @($keys | Where-Object { $k = $_; (Test-EnablementJsonKey $k) -or @($guarded | Where-Object { $k -eq $_ -or $k.StartsWith("$_.") }).Count -gt 0 })
   if ($hit.Count -gt 0) { Fail ('SPRING_APPLICATION_JSON sets guarded properties: ' + ($hit -join ',') + ' (use environment variables)') }
 }
@@ -594,7 +632,6 @@ Ok 'no system property or SPRING_APPLICATION_JSON override of the checked settin
 
 $breakGlass = @(EnvValues 'BREAK_GLASS_USERNAMES')
 $anchorFile = @(EnvValues 'PRIVACY_TRUST_KMS_ANCHOR_FILE')
-$featureSwitches = $switchNames
 $schedulerValues = @(EnvValues 'APP_SCHEDULING_ENABLED' | ForEach-Object { $_.ToLowerInvariant() })
 if ($ExpectedScheduler -eq 'Disabled') {
   if ($schedulerValues.Count -ne 1 -or $schedulerValues[0] -ne 'false') {
@@ -608,8 +645,8 @@ if ($ExpectedScheduler -eq 'Disabled') {
 Ok "scheduler as expected ($ExpectedScheduler)"
 
 if ($Phase -eq 'Initial') {
-  # deploy-runbook.md sections 4 and 4.2: one task in bootstrap mode, all feature switches unset, NF07 trust file empty.
-  # The switches of the first release go on from a steady start after section 5.5 (deploy-runbook 1.7, feature-switches 3.1).
+  # deploy-runbook.md sections 4 and 4.2: one task in bootstrap mode, NF07 trust file empty. Features are opened inside
+  # /feature-enablement after bootstrap ends (legacy switch variables are refused in both phases above).
   if (-not ((EnvValues 'SECURITY_BOOTSTRAP_ENABLED') -contains 'true')) { Fail 'SECURITY_BOOTSTRAP_ENABLED=true missing for the first start (deploy-runbook 4.2)' }
   $expires = @(EnvValues 'SECURITY_BOOTSTRAP_EXPIRES_AT')
   if ($expires.Count -ne 1 -or -not $expires[0]) { Fail 'SECURITY_BOOTSTRAP_EXPIRES_AT missing for the first start (deploy-runbook 4.2)' }
@@ -626,9 +663,8 @@ if ($Phase -eq 'Initial') {
   }
   if ($breakGlass.Count -ne 1 -or $breakGlass[0] -ne '') { Fail 'BREAK_GLASS_USERNAMES must be present and empty during bootstrap (deploy-runbook 4.2)' }
   if ($allNames -contains 'SECURITY_BOOTSTRAP_REOPEN_TICKET') { Fail 'SECURITY_BOOTSTRAP_REOPEN_TICKET must not be set for the first bootstrap (deploy-runbook 4.2; 5.7 only)' }
-  if ($featureSwitches.Count -gt 0) { Fail ('feature switches must stay unset for the initial bootstrap start; set them from a steady start after deploy-runbook 5.5 (feature-switches 3.1): ' + ($featureSwitches -join ',')) }
   if ($anchorFile.Count -ne 1 -or $anchorFile[0] -ne '') { Fail 'PRIVACY_TRUST_KMS_ANCHOR_FILE must be empty for the initial bootstrap start; set it from a steady start (deploy-runbook 1.6 item 11)' }
-  Ok 'first start: bootstrap mode on, BREAK_GLASS_USERNAMES empty, no feature switch, NF07 trust empty'
+  Ok 'first start: bootstrap mode on, BREAK_GLASS_USERNAMES empty, NF07 trust empty'
 } else {
   # deploy-runbook.md section 5.5: bootstrap off and exactly two break-glass names.
   if ((EnvValues 'SECURITY_BOOTSTRAP_ENABLED' | ForEach-Object { $_.ToLowerInvariant() }) | Where-Object { $_ -ne 'false' }) {

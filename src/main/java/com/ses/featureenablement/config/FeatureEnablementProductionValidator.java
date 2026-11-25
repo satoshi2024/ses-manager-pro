@@ -192,25 +192,21 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         return violations;
     }
 
-    /** DB 管理の印のある開放単位の旧い開閉の変数（正規化した名前）。 */
+    /** 全開放単位の旧い開閉の変数（正規化した名前。FE-E02）。 */
     Set<String> legacyKeys() {
         Set<String> keys = new LinkedHashSet<>();
         for (UnitDefinition unit : catalog.units()) {
-            if (unit.databaseManaged()) {
-                keys.add(nameKey(unit.feature().environmentVariable()));
-                keys.add(nameKey(unit.feature().propertyName()));
-            }
+            keys.add(nameKey(unit.feature().environmentVariable()));
+            keys.add(nameKey(unit.feature().propertyName()));
         }
         return keys;
     }
 
-    /** DB 管理の印のある開放単位の開閉以外の旧い変数（{@link #LEGACY_SETTING_RULES}。正規化した名前。前方一致で比べる）。 */
+    /** 開閉以外の旧い変数（{@link #LEGACY_SETTING_RULES}。正規化した名前。前方一致で比べる。FE-E02）。 */
     Set<String> legacySettingPrefixes() {
         Set<String> prefixes = new LinkedHashSet<>();
         for (LegacySettingRule rule : LEGACY_SETTING_RULES) {
-            if (rule.units().stream().anyMatch(catalog::databaseManaged)) {
-                rule.names().forEach(name -> prefixes.add(nameKey(name)));
-            }
+            rule.names().forEach(name -> prefixes.add(nameKey(name)));
         }
         return prefixes;
     }

@@ -87,7 +87,7 @@ class PrivacySubgateSignOffsTest {
                 .as("property の源（dev・test）では従来どおり").isTrue();
 
         DefaultListableBeanFactory none = new DefaultListableBeanFactory();
-        PrivacySubgateSignOffs missing = new PrivacySubgateSignOffs(databaseSource(), catalog,
+        PrivacySubgateSignOffs missing = new PrivacySubgateSignOffs(databaseSource(),
                 none.getBeanProvider(FeatureEnablementSnapshotHolder.class), none.getBeanProvider(SubgateMonitor.class),
                 none.getBeanProvider(Clock.class));
         assertThat(missing.valid(PrivacySubgateSignOffs.RELEASE)).isFalse();
@@ -103,7 +103,7 @@ class PrivacySubgateSignOffsTest {
         beans.registerSingleton("holder", holder);
         beans.registerSingleton("monitor", new SubgateMonitor(catalog, emptyConditions()));
         beans.registerSingleton("clock", CLOCK);
-        return new PrivacySubgateSignOffs(properties, catalog, beans.getBeanProvider(FeatureEnablementSnapshotHolder.class),
+        return new PrivacySubgateSignOffs(properties, beans.getBeanProvider(FeatureEnablementSnapshotHolder.class),
                 beans.getBeanProvider(SubgateMonitor.class), beans.getBeanProvider(Clock.class));
     }
 

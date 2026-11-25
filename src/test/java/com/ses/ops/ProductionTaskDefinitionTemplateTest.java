@@ -47,8 +47,7 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("初回 bootstrap では再開 ticket と local login を設定しない（§4.2）")
                 .doesNotContain("SECURITY_BOOTSTRAP_REOPEN_TICKET", "LOCAL_LOGIN_ENABLED");
         assertThat(names(app.path("environment")).stream().filter(name -> FEATURE_SWITCH.matcher(name).matches()))
-                .as("初回の起動（bootstrap）は機能スイッチの環境変数を設定しない。初回リリースで ON にするスイッチは §5.5 の後の起動で実値の"
-                        + " task definition に設定する（feature-switches 3.1）").isEmpty();
+                .as("機能の開閉は画面 /feature-enablement で行うため、旧い機能スイッチの環境変数は置かない（deploy-runbook §1.0 の42）").isEmpty();
     }
 
     @Test
@@ -219,19 +218,20 @@ class ProductionTaskDefinitionTemplateTest {
                 .as("運用値は配備の設定で上書きしない（D-5）").isEmpty();
         assertThat(Files.readString(Path.of("src/main/resources/application-prod.yml"), StandardCharsets.UTF_8))
                 .contains("allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}").contains("source: database");
-        // 段階 B〜D で DB 管理にした開放単位の旧い変数（開閉と、署名・設定へ移した承認の値）は雛形に置かず、注記に書く。段階 A2 の
-        // 暫定の拒否（NF01 二者確認の ON・NF02 の公開範囲）は FE-B01・FE-B03 の旧い変数の拒否に替えて外した（段階の整合 M2）。
-        // 照合が旧い変数を FAIL にするのは FE-E01（段階 E）で、それまでは app の起動時検査だけが止める
-        assertThat(all).doesNotContain("FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE",
-                "FEATURE_NF06_ENABLED", "PRIVACY_RETENTION_ENABLED", "PRIVACY_DSAR_ENABLED", "INTEGRATION_HUB_PUBLIC_API_ENABLED",
-                "INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED");
+        // FE-E01: 全13件の旧い機能スイッチと、署名・設定へ移した承認の値は雛形に置かず、注記に書く。app の起動時検査と ps1 の両方が両 phase で拒否する
+        assertThat(all).doesNotContain("FEATURE_NF01_ENABLED", "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED",
+                "FEATURE_NF02_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_ENABLED", "FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE",
+                "FEATURE_NF03_ENABLED", "FEATURE_NF03_CERTIFICATION_PII_ENABLED", "FEATURE_NF04_ENABLED",
+                "FEATURE_NF06_ENABLED", "FEATURE_NF10_ENABLED", "PRIVACY_RETENTION_ENABLED", "PRIVACY_DSAR_ENABLED",
+                "INTEGRATION_HUB_PUBLIC_API_ENABLED", "INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED");
         assertThat(all.stream().filter(name -> name.startsWith("IMPORT_ADMISSION_") || name.startsWith("PRIVACY_APPROVAL_")
+                || name.matches("PRIVACY_DSAR_(DUE_DAYS|PACKAGE_MAX_AGE)")
                 || name.matches("INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)"))).isEmpty();
         assertThat(taskDefinition().path("_offlineAcceptanceNotes").path("FEATURE_ENABLEMENT").asText())
                 .contains("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF").contains("IMPORT_ADMISSION_*")
                 .contains("FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE").contains("PRIVACY_APPROVAL_*")
                 .contains("INTEGRATION_HUB_(INBOUND|OUTBOUND)_(DECISION_ID|APPROVAL_DIGEST)")
-                .doesNotContain("Transitional");
+                .doesNotContain("Transitional").doesNotContain("During stages A to D");
     }
 
     @Test
@@ -250,13 +250,15 @@ class ProductionTaskDefinitionTemplateTest {
         for (String name : List.of("APP_SCHEDULING_ENABLED", "SECURITY_BOOTSTRAP_ENABLED", "SECURITY_BOOTSTRAP_EXPIRES_AT",
                 "SECURITY_BOOTSTRAP_REOPEN_TICKET", "FILE_SCANNER_HOST", "FILE_SCANNER_PORT", "METRICS_SCRAPER_ENABLED",
                 "METRICS_SCRAPER_USERNAME", "METRICS_SCRAPER_PASSWORD", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "clamav",
-                "privacy-trust", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE", "entryPoint",
-                "management", "UPLOAD_BASE_PATH", "/app/uploads/current", "BACKUP_QUIESCE_ENABLED",
+                "privacy-trust", "/app/config", "JAVA_TOOL_OPTIONS", "SPRING_APPLICATION_JSON", "SPRING_PROFILES_ACTIVE",
+                "entryPoint", "management", "UPLOAD_BASE_PATH", "/app/uploads/current", "BACKUP_QUIESCE_ENABLED",
                 "BACKUP_QUIESCE_DISABLED_TICKET", "BACKUP_QUIESCE_STARTUP_WAIT_MAX", "SHUTDOWN_TIMEOUT", "APPBACKUPQUIESCE",
                 "app.backupquiesce", "FEATURE_ENABLEMENT_ALLOWED", "APPFEATUREENABLEMENT", "FEATUREENABLEMENT",
-                "app.featureenablement")) {
+                "app.featureenablement", "app.features", "app.importcenter")) {
             assertThat(validator).as("validate-task-definition.ps1 が %s を検査する", name).contains("'" + name + "'");
         }
+        assertThat(validator).contains("$legacySwitchKeys").contains("$legacySettingPrefixes")
+                .doesNotContain("feature switches must stay unset for the initial bootstrap start");
         // RB-QUIESCE BWQ-007: 停止口の ticket の形式、startPeriod と stopTimeout の下限（design.md §12.3）
         assertThat(validator).contains("^[A-Z][A-Z0-9]+-[0-9]+$").contains("$c.stopTimeout")
                 .contains("$c.healthCheck.startPeriod");

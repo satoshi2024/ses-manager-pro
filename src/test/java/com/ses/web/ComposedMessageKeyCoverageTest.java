@@ -338,9 +338,10 @@ class ComposedMessageKeyCoverageTest {
             registry.put("privacy-dsar.js|privacyDsar." + prefix,
                     Entry.fallback("DSARの列挙値のcodeへfallbackする（label() 経由）"));
         }
-        // 機能の開放の画面: 閉鎖の理由は system の理由・手動の理由・条件の code が混ざり、値域を1つの正本から読めない
-        registry.put("feature-enablement.js|featureEnablement.reason.", Entry.fallback(
-                "closed_reason の code（system の理由・MANUAL_*・条件の code）へfallbackする"));
+        // 機能の開放の画面: reasonLabel が連結するのは JS の prefixes の 7 件と IntegrationHubBootConditions の nf05.boot.* の 5 件だけ
+        // （micro review 1ff10083 P3-β）
+        registry.put("feature-enablement.js|featureEnablement.reason.", Entry.domain(featureEnablementReasonCodes(),
+                "feature-enablement.js の reasonLabel の prefixes と IntegrationHubBootConditions の nf05.boot.*"));
         registry.put("feature-enablement.js|featureEnablement.requiredStatus.", Entry.fallback(
                 "要る署名の状態（FeatureEnablementQueryService が文字列で作る）のcodeへfallbackする（label() 経由）"));
         registry.put("feature-enablement.js|featureEnablement.subject.", Entry.fallback(
@@ -746,6 +747,21 @@ class ComposedMessageKeyCoverageTest {
             values.add(matcher.group(1));
         }
         return values;
+    }
+
+    /** 機能の開放の実効値の理由（{@code reasonLabel} が {@code featureEnablement.reason.} に連結する 12 件）。 */
+    private static Set<String> featureEnablementReasonCodes() throws IOException {
+        Set<String> codes = new TreeSet<>(jsArray("feature-enablement.js", "prefixes"));
+        String boot = Files.readString(MAIN_JAVA.resolve(
+                "com/ses/featureenablement/nf05/IntegrationHubBootConditions.java"), StandardCharsets.UTF_8);
+        Matcher matcher = Pattern.compile("\"(nf05\\.boot\\.[A-Za-z0-9_.]+)\"").matcher(boot);
+        Set<String> bootCodes = new TreeSet<>();
+        while (matcher.find()) {
+            bootCodes.add(matcher.group(1));
+        }
+        assertThat(bootCodes).as("IntegrationHubBootConditions の nf05.boot.*").isNotEmpty();
+        codes.addAll(bootCodes);
+        return codes;
     }
 
     /** 保全hold画面の前提code（画面は最初の '.' を '_' へ置換して key にする）。 */

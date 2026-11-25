@@ -23,9 +23,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class FeatureEnablementProductionValidatorTest {
 
-    /** 段階 A の DB 管理の7件（FE-A11 の目録の印と同じ）。 */
-    private static final EnumSet<Feature> STAGE_A = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL,
-            Feature.NF03, Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
     private static final String SECRET_LIKE_VALUE = "PT299S-do-not-print";
 
     @Test
@@ -49,14 +46,6 @@ class FeatureEnablementProductionValidatorTest {
         Properties json = new Properties();
         json.setProperty("spring.application.json", "{\"FEATURE_NF02_ENABLED\":\"true\"}");
         assertStops(Map.of(), json, "SPRING_APPLICATION_JSON[FEATURE_NF02_ENABLED]");
-    }
-
-    @Test
-    void 段階Aでは印の無い開放単位の旧い変数は止めない() {
-        // 段階 A の印だけの写しの目録で確かめる（本番の目録では段階 B〜D の印で止まる。下の「段階 B」以降の試験）
-        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF06_ENABLED", "true", "PRIVACY_RETENTION_ENABLED", "true",
-                "FEATURE_NF01_DUAL_CONFIRMATION_ENABLED", "true"), new Properties()).validate())
-                .as("NF06・NF07・NF01 二者確認は段階 B〜C で DB 管理にするまで property の源").doesNotThrowAnyException();
     }
 
     @Test
@@ -121,12 +110,14 @@ class FeatureEnablementProductionValidatorTest {
     }
 
     @Test
-    void 旧い変数の一覧は目録のDB管理の印に従う() {
+    void 旧い変数の一覧は全13開放単位の開閉変数を網羅する() {
         FeatureEnablementProductionValidator validator = validator(prod(), Map.of(), new Properties());
 
-        assertThat(validator.legacyKeys()).contains("FEATURENF01ENABLED", "APPFEATURESNF01ENABLED",
-                "FEATURENF02CUSTOMERPORTALENABLED", "APPFEATURESNF10ENABLED")
-                .doesNotContain("FEATURENF06ENABLED", "PRIVACYRETENTIONENABLED", "INTEGRATIONHUBPUBLICAPIENABLED");
+        for (Feature feature : Feature.values()) {
+            assertThat(validator.legacyKeys()).contains(
+                    FeatureEnablementProductionValidator.nameKey(feature.environmentVariable()),
+                    FeatureEnablementProductionValidator.nameKey(feature.propertyName()));
+        }
         assertThat(FeatureEnablementProductionValidator.nameKey("app.features[nf01].enabled"))
                 .isEqualTo("APPFEATURESNF01ENABLED");
     }
@@ -229,9 +220,6 @@ class FeatureEnablementProductionValidatorTest {
         assertStopsWithStandard(Map.of("SPRING_APPLICATION_JSON", "{\"app\":{\"features\":{\"nf01-dual-confirmation\":"
                         + "{\"privacy-sign-off-ref\":\"" + SECRET_LIKE_VALUE + "\"}}}}"), new Properties(),
                 "SPRING_APPLICATION_JSON[app.features.nf01-dual-confirmation.privacy-sign-off-ref]");
-        // 段階 A の写しの目録（印なし）では止めない（印に従う）
-        assertThatCode(() -> validator(prod(), Map.of("FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF", "x"),
-                new Properties()).validate()).doesNotThrowAnyException();
         assertThat(new FeatureEnablementProductionValidator(prod(), databaseProperties(), FeatureEnablementCatalog.standard(),
                 Map::of, Properties::new).legacySettingPrefixes())
                 .contains("FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF", "APPFEATURESNF01DUALCONFIRMATIONPRIVACYSIGNOFFREF");
@@ -289,9 +277,8 @@ class FeatureEnablementProductionValidatorTest {
      * property・JSON のどの綴りでも起動を止め、message に値を出さない。運用値の {@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS} は止めない。
      */
     @Test
-    void NF07をDB管理にした目録では開閉と承認の値の旧い変数を全ての綴りで止め運用値は止めない() {
+    void NF07の開閉と承認の値の旧い変数を全ての綴りで止め運用値は止めない() {
         FeatureEnablementCatalog nf07 = FeatureEnablementCatalog.standard();
-        assertThat(nf07.databaseManaged(com.ses.config.feature.Feature.NF07_RETENTION)).isTrue();
         assertStops(nf07, Map.of("PRIVACY_RETENTION_ENABLED", "true"), new Properties(), "PRIVACY_RETENTION_ENABLED");
         assertStops(nf07, Map.of("PRIVACY_DSAR_ENABLED", "true"), new Properties(), "PRIVACY_DSAR_ENABLED");
         assertStops(nf07, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
@@ -312,17 +299,6 @@ class FeatureEnablementProductionValidatorTest {
         assertThatCode(() -> validator(prod(), Map.of("PRIVACY_DSAR_DEADLINE_WARNING_DAYS", "7",
                 "PRIVACY_JOURNAL_DATASOURCE_URL", "jdbc:mysql://journal/db", "PRIVACY_TRUST_KMS_ANCHOR_FILE", "/app/x.json"),
                 new Properties(), nf07).validate()).as("運用値・基盤の設定は止めない").doesNotThrowAnyException();
-    }
-
-    /** review rb-fe-c P3-8: NF07 の2件のどちらかだけを DB 管理にした目録でも、承認の値の旧い変数を止める。 */
-    @Test
-    void NF07のどちらかだけがDB管理でも承認の値の旧い変数を止める() {
-        FeatureEnablementCatalog dsarOnly = FeatureEnablementCatalog.standard().withDatabaseManaged(
-                java.util.EnumSet.of(com.ses.config.feature.Feature.NF07_DSAR));
-        assertStops(dsarOnly, Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", SECRET_LIKE_VALUE), new Properties(),
-                "PRIVACY_APPROVAL_D01_DECISION_ID");
-        assertThatCode(() -> validator(prod(), Map.of("PRIVACY_APPROVAL_D01_DECISION_ID", "x"), new Properties(),
-                catalog()).validate()).as("段階 A の印だけなら止めない").doesNotThrowAnyException();
     }
 
     private static void assertStops(FeatureEnablementCatalog catalog, Map<String, String> env,
@@ -454,6 +430,6 @@ class FeatureEnablementProductionValidatorTest {
     }
 
     private static FeatureEnablementCatalog catalog() {
-        return FeatureEnablementCatalog.standard().withDatabaseManaged(STAGE_A);
+        return FeatureEnablementCatalog.standard();
     }
 }

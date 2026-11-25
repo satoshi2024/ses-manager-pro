@@ -1,7 +1,5 @@
 package com.ses.importcenter.metadata;
 
-import com.ses.config.feature.Feature;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.service.FeatureSignOffRegistrar;
 import com.ses.featureenablement.state.FeatureEnablementSnapshot;
 import com.ses.featureenablement.state.FeatureEnablementSnapshotHolder;
@@ -56,18 +54,13 @@ public interface ImportAdmissionApprovalSource {
         }
     }
 
-    /** 確認済みの署名から作る源（目録の DB 管理の印が無ければ property の源へ委ねる）。 */
+    /** 確認済みの署名から作る源。 */
     final class Database implements ImportAdmissionApprovalSource {
 
         private final FeatureEnablementSnapshotHolder holder;
-        private final FeatureEnablementCatalog catalog;
-        private final ImportAdmissionApprovalSource fallback;
 
-        public Database(FeatureEnablementSnapshotHolder holder, FeatureEnablementCatalog catalog,
-                        ImportAdmissionApprovalSource fallback) {
+        public Database(FeatureEnablementSnapshotHolder holder) {
             this.holder = Objects.requireNonNull(holder, "holder");
-            this.catalog = Objects.requireNonNull(catalog, "catalog");
-            this.fallback = Objects.requireNonNull(fallback, "fallback");
         }
 
         @Override
@@ -77,9 +70,6 @@ public interface ImportAdmissionApprovalSource {
 
         @Override
         public ImportAdmissionApprovalProperties fromSnapshot(FeatureEnablementSnapshot snapshot) {
-            if (!catalog.databaseManaged(Feature.NF06)) {
-                return fallback.fromSnapshot(snapshot);
-            }
             return fromSignOff(snapshot == null ? null : snapshot.signOffs().get(KIND));
         }
     }

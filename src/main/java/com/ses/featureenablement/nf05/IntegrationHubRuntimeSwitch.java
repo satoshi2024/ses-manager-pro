@@ -3,7 +3,6 @@ package com.ses.featureenablement.nf05;
 import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitches;
 import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
 import com.ses.featureenablement.state.EnablementState;
 import com.ses.featureenablement.state.FeatureEnablementOverlay;
@@ -54,7 +53,6 @@ public class IntegrationHubRuntimeSwitch {
     private final ObjectProvider<FeatureSwitches> switches;
     private final ObjectProvider<FeatureEnablementSnapshotHolder> holder;
     private final ObjectProvider<FeatureEnablementOverlay> overlay;
-    private final ObjectProvider<FeatureEnablementCatalog> catalog;
     private final ObjectProvider<FeatureEnablementProperties> featureProperties;
     /** 確定の閉鎖を見た方向（この process の間は閉じたまま）。 */
     private final Set<Feature> latched = ConcurrentHashMap.newKeySet();
@@ -65,13 +63,11 @@ public class IntegrationHubRuntimeSwitch {
                                        ObjectProvider<FeatureSwitches> switches,
                                        ObjectProvider<FeatureEnablementSnapshotHolder> holder,
                                        ObjectProvider<FeatureEnablementOverlay> overlay,
-                                       ObjectProvider<FeatureEnablementCatalog> catalog,
                                        ObjectProvider<FeatureEnablementProperties> featureProperties) {
         this.properties = properties;
         this.switches = switches;
         this.holder = holder;
         this.overlay = overlay;
-        this.catalog = catalog;
         this.featureProperties = featureProperties;
     }
 
@@ -132,7 +128,7 @@ public class IntegrationHubRuntimeSwitch {
         if (current == null) {
             return Closure.NONE;
         }
-        if (!databaseManaged(feature)) {
+        if (!databaseSource()) {
             return current.isEnabled(feature) ? Closure.NONE : Closure.DEFINITIVE;
         }
         if (latched.contains(feature)) {
@@ -170,10 +166,9 @@ public class IntegrationHubRuntimeSwitch {
         return Closure.DEFINITIVE;
     }
 
-    private boolean databaseManaged(Feature feature) {
+    private boolean databaseSource() {
         FeatureEnablementProperties settings = featureProperties.getIfAvailable();
-        FeatureEnablementCatalog units = catalog.getIfAvailable();
-        return settings != null && settings.databaseSource() && units != null && units.databaseManaged(feature);
+        return settings != null && settings.databaseSource();
     }
 
     /**
@@ -182,7 +177,7 @@ public class IntegrationHubRuntimeSwitch {
      * （DB はまだ {@code OPEN}）・{@code OPEN}（他の instance が送っているかもしれない）・property の源は false。
      */
     public boolean definitivelyClosedInDatabase(Feature feature) {
-        if (!databaseManaged(feature)) {
+        if (!databaseSource()) {
             return false;
         }
         FeatureEnablementSnapshotHolder snapshots = holder.getIfAvailable();

@@ -199,15 +199,15 @@ class FeatureEnablementServiceH2Test {
         assertThat(unsatisfied.getCode()).isEqualTo(409);
         assertThat(unsatisfied.getMessageKey()).isEqualTo("error.featureEnablement.conditionsUnsatisfied");
         assertThat(String.valueOf(unsatisfied.getArgs()[0])).contains("signoff.NF10_REPORT_OWNER.missing");
-        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）。段階 B で NF06、段階 D で NF05 に評価器を
-        // 足したため（段階の整合 M4）、評価器が prod だけにある NF07 保持・保全（PrivacyProductionConfigurationValidator は
-        // @Profile("prod")）で、test の profile の context で確かめる。NF07 の申請者は privacy-admin に限るため、所属させた管理者で申請する
-        fixture.confirmedSignOffs(Feature.NF07_RETENTION, SIGNED, EXPIRES);
+        // 固有の評価器を要する開放単位は評価器が無ければ申請できない（FE-AC-001-02）。評価器が prod だけにある NF07 本人請求
+        // （PrivacyProductionConfigurationValidator は @Profile("prod")。鍵の条件が無く、署名を満たせば evaluator.missing だけが不成立になる。
+        // review rb-fe-int P3-1）で、test の profile の context で確かめる。NF07 の申請者は privacy-admin に限るため、所属させた管理者で申請する
+        fixture.confirmedSignOffs(Feature.NF07_DSAR, SIGNED, EXPIRES);
         FeatureEnablementActor privacyAdmin = privacyAdmin();
-        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF07_RETENTION, null,
+        BusinessException missing = catchThrowableOfType(() -> service.requestOpen(Feature.NF07_DSAR, null,
                 privacyAdmin), BusinessException.class);
         assertThat(missing.getCode()).isEqualTo(409);
-        assertThat(String.valueOf(missing.getArgs()[0])).contains("evaluator.missing");
+        assertThat(String.valueOf(missing.getArgs()[0])).isEqualTo("evaluator.missing");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_feature_enablement_request WHERE tenant_id = 'default'",
                 Long.class)).isZero();
     }

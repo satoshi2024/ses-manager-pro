@@ -135,7 +135,7 @@ class LifecycleDualConfirmationEnablementConditionsTest {
         when(templates.countEvidenceTypesOutsideAllowed()).thenReturn(0L);
         when(tasks.countEvidenceTypesOutsideAllowed()).thenReturn(0L);
         LifecycleDualConfirmationEnablementConditions ok = new LifecycleDualConfirmationEnablementConditions(templates,
-                tasks, FeatureEnablementCatalog.standard(), provider(databaseSource()), new FeatureSwitchProperties());
+                tasks, provider(databaseSource()), new FeatureSwitchProperties());
         assertThat(ok.evidenceTypes().code()).isEqualTo("dualConfirmation.evidenceTypes.allowed");
         assertThat(ok.evidenceTypes().passing()).isTrue();
 
@@ -182,7 +182,7 @@ class LifecycleDualConfirmationEnablementConditionsTest {
         properties.getNf01DualConfirmation().setPrivacySignOffRef(propertyReference);
         FeatureEnablementStateSource source = database ? databaseSource() : propertySource();
         return new LifecycleDualConfirmationEnablementConditions(templateTaskMapper, taskMapper,
-                FeatureEnablementCatalog.standard(), provider(source), properties);
+                provider(source), properties);
     }
 
     private static FeatureEnablementSnapshot snapshot(String reference) {

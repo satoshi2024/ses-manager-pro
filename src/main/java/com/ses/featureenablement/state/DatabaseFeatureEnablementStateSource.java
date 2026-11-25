@@ -15,7 +15,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * DB の源（prod の既定。design §3.1・§3.2）。snapshot（memory）だけを読み、DB に往復しない（照会 0 回。FE-AC-006-02）。
+ * DB の源（prod の既定。design §3.1・§3.2、FE-E02）。全 13 件の開放単位と設定を snapshot（memory）だけから読み、DB に往復しない
+ * （照会 0 回。FE-AC-006-02）。
  *
  * <pre>
  * s = holder.get()
@@ -27,9 +28,6 @@ import java.util.Optional;
  * if overlay.contains(f): 閉                                  // この instance の一時の閉鎖
  * 開
  * </pre>
- *
- * <p>段階的な合入の間は合成の源として動く: 目録の DB 管理の印が無い開放単位は property の値を返す（design §3.1）。go-live は段階 E
- * の後に限る（D-1）。</p>
  */
 public class DatabaseFeatureEnablementStateSource implements FeatureEnablementStateSource {
 
@@ -37,18 +35,13 @@ public class DatabaseFeatureEnablementStateSource implements FeatureEnablementSt
 
     private final FeatureEnablementSnapshotHolder holder;
     private final FeatureEnablementOverlay overlay;
-    private final FeatureEnablementCatalog catalog;
-    private final FeatureEnablementStateSource fallback;
     private final FeatureEnablementProperties properties;
     private final Clock clock;
 
     public DatabaseFeatureEnablementStateSource(FeatureEnablementSnapshotHolder holder, FeatureEnablementOverlay overlay,
-                                                FeatureEnablementCatalog catalog, FeatureEnablementStateSource fallback,
                                                 FeatureEnablementProperties properties, Clock clock) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.overlay = Objects.requireNonNull(overlay, "overlay");
-        this.catalog = Objects.requireNonNull(catalog, "catalog");
-        this.fallback = Objects.requireNonNull(fallback, "fallback");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -57,9 +50,6 @@ public class DatabaseFeatureEnablementStateSource implements FeatureEnablementSt
     public boolean isOpen(Feature feature) {
         if (feature == null) {
             return false;
-        }
-        if (!catalog.databaseManaged(feature)) {
-            return fallback.isOpen(feature);
         }
         FeatureEnablementSnapshot snapshot = holder.get();
         if (stale(snapshot) || !snapshot.masterAllowed()) {
@@ -80,11 +70,10 @@ public class DatabaseFeatureEnablementStateSource implements FeatureEnablementSt
 
     @Override
     public Optional<String> setting(String key) {
-        if (FeatureEnablementCatalog.SETTING_NF02_VISIBLE_SINCE.equals(key)
-                && catalog.databaseManaged(Feature.NF02_CUSTOMER_PORTAL)) {
+        if (FeatureEnablementCatalog.SETTING_NF02_VISIBLE_SINCE.equals(key)) {
             return holder.get().setting(key);
         }
-        return fallback.setting(key);
+        return Optional.empty();
     }
 
     @Override
@@ -111,8 +100,8 @@ public class DatabaseFeatureEnablementStateSource implements FeatureEnablementSt
      */
     @Override
     public List<String> closedReasons(Feature feature) {
-        if (!catalog.databaseManaged(feature)) {
-            return fallback.closedReasons(feature);
+        if (feature == null) {
+            return List.of();
         }
         List<String> reasons = new ArrayList<>();
         FeatureEnablementSnapshot snapshot = holder.get();

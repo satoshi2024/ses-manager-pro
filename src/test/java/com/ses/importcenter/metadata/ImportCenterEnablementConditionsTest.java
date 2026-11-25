@@ -190,12 +190,12 @@ class ImportCenterEnablementConditionsTest {
     }
 
     @Test
-    void DBの源は署名の差替えが次の読取りから効き目録の印が無ければpropertyの値を返す() {
+    void DBの源は署名の差替えが次の読取りから効きpropertyの源は設定値をそのまま返す() {
         ImportAdmissionApprovalProperties configured = new ImportAdmissionApprovalProperties();
         configured.setDecisionId("DO-PROPERTY-0001");
         ImportAdmissionApprovalSource.Property property = new ImportAdmissionApprovalSource.Property(configured);
         FeatureEnablementSnapshotHolder holder = holder(snapshot(GOLDEN_JSON, SIGNED, EXPIRES));
-        ImportAdmissionApprovalSource database = new ImportAdmissionApprovalSource.Database(holder, catalog, property);
+        ImportAdmissionApprovalSource database = new ImportAdmissionApprovalSource.Database(holder);
 
         ImportAdmissionApprovalProperties first = database.current();
         assertThat(first.getDecisionId()).isEqualTo("DO-NF06-2026-001");
@@ -206,9 +206,7 @@ class ImportCenterEnablementConditionsTest {
         holder.replace(snapshot(GOLDEN_JSON.replace("DO-NF06-2026-001", "DO-NF06-2026-002"), SIGNED, EXPIRES));
         assertThat(database.current().getDecisionId()).as("再起動なしに次の読取りから効く").isEqualTo("DO-NF06-2026-002");
 
-        ImportAdmissionApprovalSource unmanaged = new ImportAdmissionApprovalSource.Database(holder,
-                catalog.withDatabaseManaged(EnumSet.noneOf(Feature.class)), property);
-        assertThat(unmanaged.current().getDecisionId()).isEqualTo("DO-PROPERTY-0001");
+        assertThat(property.current().getDecisionId()).isEqualTo("DO-PROPERTY-0001");
         assertThat(property.fromSnapshot(snapshot(GOLDEN_JSON, SIGNED, EXPIRES)).getDecisionId())
                 .isEqualTo("DO-PROPERTY-0001");
     }
@@ -217,7 +215,7 @@ class ImportCenterEnablementConditionsTest {
 
     private ImportCenterEnablementConditions conditions(String key) {
         return new ImportCenterEnablementConditions(new ImportAdmissionApprovalSource.Database(
-                holder(snapshot(GOLDEN_JSON, SIGNED, EXPIRES)), catalog, new ImportAdmissionApprovalSource.Property(null)),
+                holder(snapshot(GOLDEN_JSON, SIGNED, EXPIRES))),
                 new ImportSourceRowReference(key, true), groupMapper, actionMapper, legalEntities);
     }
 

@@ -1,6 +1,5 @@
 package com.ses.privacy.production;
 
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.catalog.Subgate;
 import com.ses.featureenablement.condition.FeatureEvaluationContext;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
@@ -20,8 +19,8 @@ import java.util.Optional;
  * （memory）から {@link SubgateMonitor#signOffsValid} で判定する。署名の取消し・失効は副入口だけを閉じ、保持・保全の開放単位は閉じない
  * （D-05 の失効と同じ。review P3-16）。監視の通知（{@code SUBGATE_CLOSED}）と入口の挙動が一致する。</p>
  *
- * <p>NF07 を DB の開放状態で管理していない間（property の源。dev・test）は判定しない（常に true。決定は従来どおり
- * {@code privacy.approval.*} から各入口が読む）。部品が揃わなければ false（閉）。</p>
+ * <p>property の源（dev・test）では判定しない（常に true。決定は従来どおり {@code privacy.approval.*} から各入口が読む）。部品が揃わなければ
+ * false（閉）。</p>
  */
 @Component
 public class PrivacySubgateSignOffs {
@@ -31,24 +30,22 @@ public class PrivacySubgateSignOffs {
     public static final String REGISTRATION = "REG";
 
     private final FeatureEnablementProperties properties;
-    private final FeatureEnablementCatalog catalog;
     private final ObjectProvider<FeatureEnablementSnapshotHolder> holder;
     private final ObjectProvider<SubgateMonitor> monitor;
     private final ObjectProvider<Clock> clock;
 
-    public PrivacySubgateSignOffs(FeatureEnablementProperties properties, FeatureEnablementCatalog catalog,
+    public PrivacySubgateSignOffs(FeatureEnablementProperties properties,
                                   ObjectProvider<FeatureEnablementSnapshotHolder> holder,
                                   ObjectProvider<SubgateMonitor> monitor, ObjectProvider<Clock> clock) {
         this.properties = properties;
-        this.catalog = catalog;
         this.holder = holder;
         this.monitor = monitor;
         this.clock = clock;
     }
 
-    /** 副入口の署名が有効か（DB 管理でなければ true。判定できなければ false）。 */
+    /** 副入口の署名が有効か（DB の源でなければ true。判定できなければ false）。 */
     public boolean valid(String subgateCode) {
-        if (!PrivacyApprovalSourceConfiguration.databaseManaged(properties, catalog)) {
+        if (!PrivacyApprovalSourceConfiguration.databaseManaged(properties)) {
             return true;
         }
         try {

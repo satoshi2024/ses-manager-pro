@@ -18,13 +18,10 @@ import java.util.regex.Pattern;
 /**
  * 機能の開放の目録（feature-enablement-console design §4.1。code の正本で、文書は requirements §6）。
  *
- * <p>開放単位ごとに、親・再起動の要否・NF07 の印・要る署名の種別と類・条件になる鍵・固有の評価器の要否・DB 管理の印・開放の時だけの
- * 条件と開放の遷移の前提の code・副入口・出処を持つ。署名の種別ごとに、類（決定・証拠）・署名者の役割・参照の規則・構造化された値の
- * 項目・属する組を持つ。値（決定 ID・digest・鍵）は持たない。</p>
- *
- * <p>DB 管理の印（{@link UnitDefinition#databaseManaged()}）は段階の間の印で、印の無い開放単位は {@code database} の源でも
- * property の値を返す（design §3.1）。段階 A は容易な7件（{@link #STAGE_A_DATABASE_MANAGED}。FE-A11）に印を付け、段階 B〜D が
- * 残りに付け、段階 E で印を削除する。試験は {@link #withDatabaseManaged} で印を付け直した写しを使う。</p>
+ * <p>開放単位ごとに、親・再起動の要否・NF07 の印・要る署名の種別と類・条件になる鍵・固有の評価器の要否・開放の時だけの条件と開放の
+ * 遷移の前提の code・副入口・出処を持つ。署名の種別ごとに、類（決定・証拠）・署名者の役割・参照の規則・構造化された値の項目・属する
+ * 組を持つ。値（決定 ID・digest・鍵）は持たない。{@code database} の源（prod の既定）では全 13 件の開放単位を DB の開放状態で開閉する
+ * （FE-E02）。</p>
  */
 public final class FeatureEnablementCatalog {
 
@@ -39,21 +36,8 @@ public final class FeatureEnablementCatalog {
      * 申請・承認では評価できない条件として 409）。
      */
     public static final String CODE_NF02_CALENDAR_UNVERIFIABLE = "calendar.companyWide.unverifiable";
-    /** 段階 A で DB 管理にする容易な7件（requirements §6.1・6.3〜6.7・6.13。FE-A11）。 */
-    public static final Set<Feature> STAGE_A_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
-            Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
-            Feature.NF04, Feature.NF10));
-    /** 段階 C で DB 管理にする NF07 の2件（requirements §6.11・6.12。FE-C05）。 */
-    public static final Set<Feature> STAGE_C_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
-            Feature.NF07_RETENTION, Feature.NF07_DSAR));
     /** NF05 outbound の barrier の OFF の記録（開放の遷移の前提）。評価器は {@code IntegrationHubEnablementConditions}（FE-D05）。 */
     public static final String CODE_NF05_BARRIER_OFF = "barrier.offRecorded";
-    /**
-     * 段階 D で DB 管理にする NF05 の2件（requirements §6.8・6.9。FE-D02）。開ける変更は次の起動で反映し、閉じる変更は即時に反映する
-     * （D-2）。prod の起動時検査はこの2件の旧い変数（開閉と決定 ID・digest）を止める（FE-D05）。
-     */
-    public static final Set<Feature> STAGE_D_DATABASE_MANAGED = Collections.unmodifiableSet(java.util.EnumSet.of(
-            Feature.NF05_INBOUND, Feature.NF05_OUTBOUND));
 
     /**
      * 手動の閉鎖の理由の区分（{@code closed_reason} に入る。system の理由（{@code SIGN_OFF_REVOKED}・{@code MASTER_SWITCH_CLOSED} 等）と
@@ -118,12 +102,6 @@ public final class FeatureEnablementCatalog {
         return Optional.ofNullable(code == null ? null : bundles.get(code));
     }
 
-    /** DB の開放状態で開閉する開放単位か（段階の間の印）。 */
-    public boolean databaseManaged(Feature feature) {
-        UnitDefinition unit = units.get(feature);
-        return unit != null && unit.databaseManaged();
-    }
-
     /** 開放単位の子（親の閉鎖で自動閉鎖する。design §5.5）。 */
     public List<Feature> children(Feature parent) {
         List<Feature> children = new ArrayList<>();
@@ -170,13 +148,6 @@ public final class FeatureEnablementCatalog {
         return false;
     }
 
-    /** DB 管理の印を指定の開放単位だけに付けた写し（段階の印を変える試験と、後の段階の印の付与に使う）。 */
-    public FeatureEnablementCatalog withDatabaseManaged(Set<Feature> managed) {
-        Map<Feature, UnitDefinition> copy = new EnumMap<>(Feature.class);
-        units.forEach((feature, unit) -> copy.put(feature, unit.withDatabaseManaged(managed.contains(feature))));
-        return new FeatureEnablementCatalog(copy, kinds, bundles);
-    }
-
     /** 組の種類と、その member の種別を足した写し（組の流れの試験の組の種類。FE-A12）。 */
     public FeatureEnablementCatalog withBundle(BundleKind bundle, List<SignOffKind> memberKinds, Feature requiringUnit) {
         Map<String, SignOffKind> kindCopy = new LinkedHashMap<>(kinds);
@@ -193,7 +164,7 @@ public final class FeatureEnablementCatalog {
                 requirements.add(SignOffRequirement.always(kind.code()));
             }
             unitCopy.put(requiringUnit, new UnitDefinition(unit.feature(), unit.restartRequired(), unit.privacyUnit(),
-                    requirements, unit.keys(), unit.specificEvaluatorRequired(), unit.databaseManaged(),
+                    requirements, unit.keys(), unit.specificEvaluatorRequired(),
                     unit.openOnlyCodes(), unit.openTransitionCodes(), unit.subgates(), unit.sources()));
         }
         return new FeatureEnablementCatalog(unitCopy, kindCopy, bundleCopy);
@@ -201,7 +172,7 @@ public final class FeatureEnablementCatalog {
 
     // ---------------------------------------------------------------- 正本
 
-    /** 段階 A の目録（13件。NF08 は含めない。D-6）。 */
+    /** 本番の目録（全 13 件。NF08 は含めない。D-6）。 */
     public static FeatureEnablementCatalog standard() {
         Builder b = new Builder();
 
@@ -226,8 +197,6 @@ public final class FeatureEnablementCatalog {
                 decision("NF01_DUAL_BREAK_GLASS_DECISION", "SECURITY"),
                 evidence("NF01_DUAL_RUNNER_EVIDENCE", "TECH_LEAD"),
                 evidence("NF01_DUAL_REVIEW_PASS", "TECH_LEAD"));
-        // 段階 B の DB 管理の印（FE-B01）
-        b.databaseManaged(Set.of(Feature.NF01_DUAL_CONFIRMATION));
 
         // NF02 本体（§6.3）。全社共通カレンダーは開放の時だけの条件（D-9）。評価器は FE-A11
         b.unit(Feature.NF02, false, false, true, List.of(),
@@ -315,8 +284,6 @@ public final class FeatureEnablementCatalog {
                 evidence("NF06_SRE_LB", "SRE"),
                 evidence("NF06_DBA_ACCOUNT", "DBA"),
                 evidence("NF06_STAGING_CHECK", "PRODUCTION_OWNER"));
-        // 段階 B の DB 管理の印（FE-B02）
-        b.databaseManaged(Set.of(Feature.NF06));
 
         // NF07 保持・保全（§6.11）。D-01・D-09 は組「NF07 の決定の束縛」。副入口の条件の署名は開放単位の条件ではない。評価器は
         // PrivacyProductionConfigurationValidator（prod だけ。FE-C05）
@@ -365,13 +332,6 @@ public final class FeatureEnablementCatalog {
                 decision("NF10_TZ_POLICY", "REPORT_OWNER", "SRE"),
                 decision("NF10_DRAIN_APPROVAL", "SRE", "DBA"));
 
-        // 段階 A の DB 管理の印（容易な7件。FE-A11）
-        b.databaseManaged(STAGE_A_DATABASE_MANAGED);
-        // 段階 C の DB 管理の印（NF07 の2件。評価器は PrivacyProductionConfigurationValidator。FE-C05）
-        b.databaseManaged(STAGE_C_DATABASE_MANAGED);
-        // 段階 D の DB 管理の印（NF05 の2件。FE-D02）
-        b.databaseManaged(STAGE_D_DATABASE_MANAGED);
-
         return b.build();
     }
 
@@ -411,7 +371,7 @@ public final class FeatureEnablementCatalog {
                 requirements.add(SignOffRequirement.always(kind.code()));
             }
             units.put(feature, new UnitDefinition(feature, restartRequired, privacyUnit, requirements, keys,
-                    specificEvaluatorRequired, false, Set.of(), Set.of(), List.of(), sources));
+                    specificEvaluatorRequired, Set.of(), Set.of(), List.of(), sources));
         }
 
         void conditional(Feature feature, SignOffKind kind, String settingKey) {
@@ -450,16 +410,10 @@ public final class FeatureEnablementCatalog {
             bundles.put(bundle.code(), bundle);
         }
 
-        void databaseManaged(Set<Feature> managed) {
-            for (Feature feature : managed) {
-                units.put(feature, units.get(feature).withDatabaseManaged(true));
-            }
-        }
-
         private void replace(UnitDefinition unit, List<SignOffRequirement> requirements, Set<String> openOnly,
                              Set<String> openTransition, List<Subgate> subgates) {
             units.put(unit.feature(), new UnitDefinition(unit.feature(), unit.restartRequired(), unit.privacyUnit(),
-                    requirements, unit.keys(), unit.specificEvaluatorRequired(), unit.databaseManaged(), openOnly,
+                    requirements, unit.keys(), unit.specificEvaluatorRequired(), openOnly,
                     openTransition, subgates, unit.sources()));
         }
 

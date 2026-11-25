@@ -3,7 +3,6 @@ package com.ses.privacy.production;
 import com.ses.config.feature.Feature;
 import com.ses.entity.FeatureEnablementRequest;
 import com.ses.entity.FeatureEnablementState;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
 import com.ses.featureenablement.state.EnablementState;
 import com.ses.featureenablement.state.FeatureEnablementTenant;
@@ -37,16 +36,14 @@ public class PrivacyEnablementStateReader {
     }
 
     private final FeatureEnablementProperties properties;
-    private final FeatureEnablementCatalog catalog;
     private final FeatureEnablementStateMapper stateMapper;
     private final FeatureEnablementRequestMapper requestMapper;
     private final FeatureEnablementTenant tenant;
 
-    public PrivacyEnablementStateReader(FeatureEnablementProperties properties, FeatureEnablementCatalog catalog,
+    public PrivacyEnablementStateReader(FeatureEnablementProperties properties,
                                         FeatureEnablementStateMapper stateMapper,
                                         FeatureEnablementRequestMapper requestMapper, FeatureEnablementTenant tenant) {
         this.properties = properties;
-        this.catalog = catalog;
         this.stateMapper = Objects.requireNonNull(stateMapper, "stateMapper");
         this.requestMapper = Objects.requireNonNull(requestMapper, "requestMapper");
         this.tenant = Objects.requireNonNull(tenant, "tenant");
@@ -54,7 +51,7 @@ public class PrivacyEnablementStateReader {
 
     /** NF07 の開放状態と未決の申請を読む。 */
     public Result read() {
-        if (!PrivacyApprovalSourceConfiguration.databaseManaged(properties, catalog)) {
+        if (!PrivacyApprovalSourceConfiguration.databaseManaged(properties)) {
             return Result.NOT_DATABASE_MANAGED;
         }
         String tenantId = tenant.tenantId();

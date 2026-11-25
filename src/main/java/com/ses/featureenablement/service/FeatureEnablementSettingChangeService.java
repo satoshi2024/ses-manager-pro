@@ -7,7 +7,6 @@ import com.ses.featureenablement.condition.FeatureConditionCheck;
 import com.ses.featureenablement.condition.FeatureEvaluationContext;
 import com.ses.featureenablement.config.FeatureEnablementProperties;
 import com.ses.featureenablement.state.FeatureEnablementSnapshot;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.state.FeatureEnablementSnapshotHolder;
 import com.ses.featureenablement.state.FeatureEnablementStateSource;
 import com.ses.featureenablement.state.FeatureEnablementTenant;
@@ -51,7 +50,6 @@ public class FeatureEnablementSettingChangeService {
     private final FeatureEnablementProperties properties;
     private final Clock clock;
     private final FeatureEnablementStateSource stateSource;
-    private final FeatureEnablementCatalog catalog;
 
     public FeatureEnablementSettingChangeService(FeatureEnablementWriteSupport write,
                                                  FeatureEnablementActorPolicy actorPolicy,
@@ -59,8 +57,7 @@ public class FeatureEnablementSettingChangeService {
                                                  FeatureEnablementSettingMapper settingMapper,
                                                  FeatureEnablementSnapshotHolder holder, FeatureEnablementTenant tenant,
                                                  FeatureEnablementProperties properties, Clock clock,
-                                                 FeatureEnablementStateSource stateSource,
-                                                 FeatureEnablementCatalog catalog) {
+                                                 FeatureEnablementStateSource stateSource) {
         this.write = write;
         this.actorPolicy = actorPolicy;
         this.requestMapper = requestMapper;
@@ -70,7 +67,6 @@ public class FeatureEnablementSettingChangeService {
         this.properties = properties;
         this.clock = clock;
         this.stateSource = stateSource;
-        this.catalog = catalog;
     }
 
     /**
@@ -182,10 +178,9 @@ public class FeatureEnablementSettingChangeService {
         return List.copyOf(views);
     }
 
-    /** 承認した設定が portal の判定に効く源か（DB の源で NF02 顧客ポータルが DB 管理）。 */
+    /** 承認した設定が portal の判定に効く源か（DB の源）。 */
     private boolean effective() {
-        return stateSource != null && stateSource.database()
-                && catalog != null && catalog.databaseManaged(com.ses.config.feature.Feature.NF02_CUSTOMER_PORTAL);
+        return stateSource != null && stateSource.database();
     }
 
     private static boolean valid(FeatureEnablementSnapshot.ConfirmedSignOff signOff, LocalDate today) {

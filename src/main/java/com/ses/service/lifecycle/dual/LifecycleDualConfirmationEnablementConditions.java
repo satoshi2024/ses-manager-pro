@@ -2,7 +2,6 @@ package com.ses.service.lifecycle.dual;
 
 import com.ses.config.feature.Feature;
 import com.ses.config.feature.FeatureSwitchProperties;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.condition.FeatureConditionCheck;
 import com.ses.featureenablement.condition.FeatureConditionEvaluator;
 import com.ses.featureenablement.condition.FeatureEvaluationContext;
@@ -51,17 +50,15 @@ public class LifecycleDualConfirmationEnablementConditions implements FeatureCon
 
     private final LifecycleTemplateTaskMapper templateTaskMapper;
     private final LifecycleTaskMapper taskMapper;
-    private final FeatureEnablementCatalog catalog;
     private final ObjectProvider<FeatureEnablementStateSource> stateSource;
     private final FeatureSwitchProperties properties;
 
     public LifecycleDualConfirmationEnablementConditions(LifecycleTemplateTaskMapper templateTaskMapper,
-                                                         LifecycleTaskMapper taskMapper, FeatureEnablementCatalog catalog,
+                                                         LifecycleTaskMapper taskMapper,
                                                          ObjectProvider<FeatureEnablementStateSource> stateSource,
                                                          FeatureSwitchProperties properties) {
         this.templateTaskMapper = Objects.requireNonNull(templateTaskMapper, "templateTaskMapper");
         this.taskMapper = Objects.requireNonNull(taskMapper, "taskMapper");
-        this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.stateSource = stateSource;
         this.properties = properties;
     }
@@ -120,7 +117,7 @@ public class LifecycleDualConfirmationEnablementConditions implements FeatureCon
 
     private boolean databaseManaged() {
         FeatureEnablementStateSource source = stateSource == null ? null : stateSource.getIfAvailable();
-        return source != null && source.database() && catalog.databaseManaged(Feature.NF01_DUAL_CONFIRMATION);
+        return source != null && source.database();
     }
 
     private static String signedReference(FeatureEnablementSnapshot snapshot) {
