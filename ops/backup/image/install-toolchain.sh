@@ -118,7 +118,7 @@ fi
 # 受け付ける（任意の 8.4.x・8.0・8.5 以降・innovation 系・空は受け付けない）。patch を上げるときは、repo.mysql.com の
 # mysql-8.4-lts の Packages で mysql-community-client と mysql-community-server-core の版を確かめ、Dockerfile の
 # ARG と同じ変更でここへ足す（tool-image-test の静的な契約が Dockerfile の値がここにあることを確かめる）。
-ALLOWED_MYSQL_CLIENT_VERSIONS=(8.4.13)
+ALLOWED_MYSQL_CLIENT_VERSIONS=(8.4.13.1)
 ALLOWED_MYSQL_APT_COMPONENTS=(mysql-8.4-lts)
 is_listed() { # <value> <許可する値...>
   local value=$1 allowed

@@ -60,11 +60,11 @@ EXIT_QUIESCE=19
 # 対応する MySQL の系列（major.minor）
 SUPPORTED_MYSQL_SERIES=8.4
 
-# --version の出力から x.y.z を取り出す（「Ver 8.4.13」または旧形式の「Distrib 5.7.44」）。取れなければ空
+# --version の出力から x.y.z（または 4 桁の x.y.z.w）を取り出す（「Ver 8.4.13」・「Ver 8.4.13.1」または旧形式の「Distrib 5.7.44」）。取れなければ空
 mysql_tool_version() { # <--version の出力>
-  if [[ "$1" =~ Ver[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+  if [[ "$1" =~ Ver[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}"
-  elif [[ "$1" =~ Distrib[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+  elif [[ "$1" =~ Distrib[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}"
   fi
   return 0

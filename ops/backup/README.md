@@ -24,10 +24,10 @@ production 環境への接続・復元は行わないこと。初回本番配備
 
 ## 前提
 
-- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.4 LTS（8.4.13）client + mysqlbinlog + mysqldump + restic 0.17.3。
+- ツールイメージ（`ops/backup/Dockerfile`）: Oracle MySQL 8.4 LTS（8.4.13.1）client + mysqlbinlog + mysqldump + restic 0.17.3。
   production の MySQL server は 8.4 LTS だけで（2026-11-13 決定）、`preflight.sh` は client・mysqlbinlog・mysqldump と
   server がすべて 8.4 系列であることを求める（RB-W 8.4 対応）。`image/install-toolchain.sh` は client の版と repo の
-  component を列挙した値（`8.4.13`・`mysql-8.4-lts`）だけ受け付け、8.0・列挙していない patch・innovation 系では何も
+  component を列挙した値（`8.4.13.1`・`mysql-8.4-lts`）だけ受け付け、8.0・列挙していない patch・innovation 系では何も
   ダウンロードせずに失敗する。patch を上げるときは repo の `Packages` で client と server-core の版を確かめ、Dockerfile の
   ARG と同じ変更で列挙に足す。
   private registry は使わず、検証済み build の content ID（image store に依存しない識別子）を記録して
