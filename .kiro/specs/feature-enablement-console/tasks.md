@@ -291,28 +291,31 @@
 
 ### 段階 E
 
-- [ ] **FE-E01 — 照合 script と雛形の総仕上げ**
+- [x] **FE-E01 — 照合 script と雛形の総仕上げ**
   - **依存:** 段階 A〜D
   - **対応要求:** FE-RQ-007・014
   - **Objective:** 全ての旧い変数を両 phase で FAIL にし、Initial phase の機能スイッチの検査を削除する。
   - **対象 file:** `infra/ecs/offline/validate-task-definition.ps1`（:316-321・:576・:589 以降）、`test-validate-task-definition.ps1`、`infra/ecs/task-definition.prod.json`（注記）、`infra/ecs/README.md`（:27）、`ProductionTaskDefinitionTemplateTest`、`FeatureEnablementLegacySettingTest`（Java の一覧と ps1 の一覧の一致）。
   - **Demo:** `validate-task-definition.ps1 -Mode Template` が PASS し、旧い変数を 1 つ足すと両 phase で FAIL することを見る。
+  - **実装（段階 E）:** `validate-task-definition.ps1` の Initial 限定 `$featureSwitches` 検査を撤去し、全 13 開放単位の開閉変数 `$legacySwitchKeys`（22 件）と移した承認値 `$legacySettingPrefixes`（17 件）を `Initial`・`Steady` の両 phase（`environment`・`secrets`・`SPRING_APPLICATION_JSON`）で FAIL にした。あわせて `privacy-trust` の `containerPath`（`/`・`/app`・`/app/config*`・`/app/uploads*` の拒否、A2 N1）と `SPRING_APPLICATION_JSON` の `app.features`・`app.import-center`（A2 N2）を加え、Java 側との完全一致を `FeatureEnablementLegacySettingTest` で固定した（`test-validate-task-definition.ps1` 138 cases は pwsh 7・Windows PowerShell 5.1 とも PASS、`-Mode Template` PASS・`FEATURE_NF01_ENABLED` 追加時の Initial / Steady 両 phase FAIL の Demo 確認済み）。
 
-- [ ] **FE-E02 — 段階の印の撤去と既定値の試験**
+- [x] **FE-E02 — 段階の印の撤去と既定値の試験**
   - **依存:** 段階 A〜D
   - **対応要求:** FE-RQ-006・016
   - **Objective:** 目録の DB 管理の印と合成の源を削除し（全て DB）、`FeatureSwitchDefaultsTest` の prod の case を旧い変数の拒否に書き直す。`application-prod.yml:130-152` の機能スイッチの placeholder が残っていないことを確かめる。
   - **対象 file:** `FeatureEnablementCatalog`、`FeatureEnablementStateSource` の合成の実装、`FeatureSwitchDefaultsTest`（:136-176 の prod の case）、`application-prod.yml`。
   - **Automated test:** `FeatureSwitchDefaultsTest`、`FeatureEnablementCatalogCoverageTest`（全て DB 管理）、既存の機能スイッチの全試験。
   - **Demo:** なし。
+  - **実装（段階 E）:** `UnitDefinition.databaseManaged`・`FeatureEnablementCatalog` の `STAGE_*_DATABASE_MANAGED` / `withDatabaseManaged`・`CompositeFeatureEnablementStateSource` 相当の分岐と property fallback（NF01 二者確認・NF05・NF06・NF07・設定変更）を撤去し、`source=database` では全 13 開放単位を DB の開放状態だけで判定するようにした（画面用の `UnitSummary.databaseManaged` は `stateSource.database()` として残し、dev の `source=properties` 表示を保った）。`FeatureSwitchDefaultsTest` の prod case を `application-prod.yml` の `source: database`・旧 placeholder 不在・全 13 開放単位の旧変数拒否の検証へ書き直した。
 
-- [ ] **FE-E03 — FS と RB と関連の文書の書直し**
+- [x] **FE-E03 — FS と RB と関連の文書の書直し**
   - **依存:** 段階 A〜D
   - **対応要求:** FE-RQ-014
   - **Objective:** `design.md` §17 の文書の更新を行う。RB §1.7 は「go-live の前提は基盤と中核だけ。各機能の署名は system の中で開く前提」に書き直し、署名表の各行の署名を目録の種別 code と類（決定・証拠）と対応させる。NF05 の truststore 等の差替えの流れ（再起動 2 回）、総スイッチを誤って `false` にした代償、DSAR が閉じている間の法定の期限の扱い、二人の承認の残る穴（§11.1）と RB §5.6 の運用の規則「承認の前に、直近に管理者の role を得た利用者が承認者でないことを確かめる」、付与の記録の DDL を go-live の後の backlog に記録すること（review P3-N10）、自動閉鎖の書込み待ちの間は再起動しないことと再起動した後の確認（review P3-N1）、guard が表を読めない時の挙動を書く。
   - **対象 file:** `feature-switches.md`、`deploy-runbook.md`（冒頭・§1.0・§1.2・§1.7・§1.7.1・§3.4・§4.2・§4.4・§5.5 の後・§5.6、件数が出る全ての箇所）、`engineer-lifecycle-workflow/runbook.md`、`privacy-retention-dsar/production-bridge-phased-plan.md`、`integration-hub-public-api/dg-05-enablement-decision-draft.md`、`ops/security/runbooks/integration-hub-public-api.md`、`data-migration-import-center/a1a-ingress-operations.md`、`certification-learning-skill-gap/first-release-scope-confirmation.md`、`mobile-pwa-self-service/first-release-user-and-operations-notes.md`。
   - **Automated test:** `DeployRunbookMigrationCountTest`、runbook を読む既存の試験。
   - **Demo:** なし（文書の review）。CLAUDE.md の更新は統括へ依頼する。
+  - **実装（段階 E）:** `feature-switches.md`・`deploy-runbook.md` および関連 spec / ops runbook（NF01・NF02・NF03・NF04・NF05・NF06・NF07）・`CLAUDE.md`（利用者承認 A2 済み）を system 内の開放（`/feature-enablement`）に合わせて書き直した。RB §1.7 は go-live の前提（基盤・中核・常時有効部分）と画面で各機能を開く前提（目録の `SignOffKind` code・`[決]`/`[証]` と対応）に分け、§5.5.1（画面の運用・NF05 の 2 回再起動・`FEATURE_AUTO_CLOSE_PENDING` 中の再起動抑止・PITR 後の参照）と §5.6（`AdministratorContinuityGuard` の開放中/申請中判定と読取失敗時の 409、二人の承認の残余リスクと運用規則、付与記録 DDL の backlog）を追記した。人手の署名・受入・staging 実測は全て「未取得」のまま維持した。
 
 - [ ] **FE-E04 — PITR の後の手順と `CONTENT_HASH_TABLES`**
   - **依存:** 段階 A〜D
@@ -321,9 +324,11 @@
   - **対象 file:** `ops/backup/runbooks/restore-cutover.md`（必須の checklist に「次の起動の task definition は `FEATURE_ENABLEMENT_ALLOWED=false`」、復旧の後の最初の起動は総スイッチを閉、復旧の時点より後に手動・自動で閉じた開放単位と理由の一覧と確認、CloudWatch Logs の log group の保存期間を PITR で戻れる期間以上にする SRE の設定（review P3-N4）、`FEATURE_ENABLEMENT_EVENT` との照合と Logs Insights の query の例、総スイッチを戻して二人で開き直す）、`.kiro/specs/production-launch/dba-prelaunch-draft.md` §1（候補 B に `t_feature_enablement_state`・`t_feature_sign_off`・`t_feature_sign_off_extension`・`t_feature_sign_off_bundle`・`t_feature_sign_off_bundle_member`）、`deploy-runbook.md`（restore の後の手順への参照）。
   - **Automated test:** backup tool の既存の shell の試験（`CONTENT_HASH_TABLES` の候補の書式を検査するものがあれば）、文書の review。
   - **Demo:** 復旧の演習（DBA・SRE。staging。人が行う。未取得）で、復旧の後の最初の起動が全ての開放単位を `AUTO_CLOSED(MASTER_SWITCH_CLOSED)` にし、barrier が OFF になることを確かめる。
+  - **実装（段階 E）:** `restore-cutover.md` §1 と §4.7、`dba-prelaunch-draft.md` §1（候補 B を 9 表→14 表、`t_feature_sign_off_bundle_member` の複合主キー `bundle_id,kind_code` を明記）、`deploy-runbook.md`（SRE の CloudWatch Logs 保持期間・§5.5.1・§6 の参照）を更新した。staging での復旧演習 Demo は人が行う項目（未取得）のため `[ ]` のまま維持する。
 
 - [ ] **FE-E05 — 全 gate と browser の確認（統括の Runner）**
   - **依存:** FE-E01〜FE-E04
   - **対応要求:** FE-RQ-015・016
   - **Objective:** 既定の高速 suite・`-Pmysql-tests`・`-Pperformance-tests`・backup integration・`-Pbrowser-tests`（`FeatureEnablementScreenBrowserTest`）を skip 0 で通す。staging で prod の profile の起動と、1 件の開放単位の申請・承認・閉鎖を人が確かめる（未取得）。
   - **Demo:** staging（人が行う。未取得）。
+  - **実装（段階 E）:** `FeatureEnablementScreenBrowserTest`（`@Tag("browser")`）を追加し、実 Chrome 2 セッション＋375px 幅で一覧・署名 PDF 登録・別管理者確認・開放申請・自己承認抑止・別管理者承認・手動閉鎖・履歴・検索フォーム折りたたみ・console error 0 件を自動検証した。staging での人手確認は未取得のため `[ ]` のまま維持する。

@@ -1,10 +1,10 @@
 # Integration Hub Public API 運用 runbook（NF-05 / M）
 
-本 runbook は `integration.hub.public-api.enabled=false` / `integration.hub.external-transport.enabled=false` /
-`integration.hub.provider.mode=MOCK` を production 正本とする公開 API の障害対応手順である。
+本 runbook は公開 API（NF-05 inbound `NF05_INBOUND` / outbound `NF05_OUTBOUND`）の運用・障害対応手順である。
+prod では両方向とも既定 `CLOSED`（`integration.hub.provider.mode=MOCK`）で出荷し、画面「機能の開放」（`/feature-enablement`）で署名（`NF05_DG05_IN`・`NF05_DG05_OUT` ほか）の二人確認と開放申請・承認を行った後の**次の再起動**で開く（閉じる操作は再起動なしで即時に反映する。旧い `INTEGRATION_HUB_PUBLIC_API_ENABLED`・`INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED`・`*_DECISION_ID`・`*_APPROVAL_DIGEST` を prod の配備設定に置くと起動しない。dev・test は property の源を使う）。
 production enablement、実顧客 credential、実 provider 送信は DG-05 Owner 承認と Review PASS 後のみ実施する。
-開放は inbound（`DG-05-IN-*`）と outbound（`DG-05-OUT-*`）を別々に行う。承認項目と手順は
-`.kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md`（草案・未署名）を正本とする。
+開放は inbound（`DG-05-IN-*`）と outbound（`DG-05-OUT-*`）を別々に行う。承認項目と digest 正規形は
+`.kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md`（草案・未署名）、画面での開放・差替え手順は `.kiro/specs/production-launch/feature-switches.md` §4.10 と `deploy-runbook.md` §5.5.1 を正本とする。
 
 ## 0. 配備前提 D-1（LB/WAF での `/external-api/**` 遮断）
 
@@ -47,7 +47,7 @@ delivery / inbound gaugeはいずれか一方向ON時だけ登録し、各6状�
 
 ## 2. 一般 API 障害（timeout / 5xx）
 
-1. `integration.hub.public-api.enabled` が意図どおりか確認する。production では default-off。
+1. 画面 `/feature-enablement` で `NF05_INBOUND` の DB の状態・実効値（および最後の評価の理由 code）が意図どおりか確認する（dev・test では `integration.hub.public-api.enabled`）。prod の既定は `CLOSED`。
 2. 専用 security chain（`ExternalApiSecurityConfig` @Order(0)）が deny-only か enabled かを profile で確認する。
 3. `t_external_api_audit` で直近 reject の status/result code を確認する。secret/PII/raw body は保存されない。
    public-api OFF 時は監査行を書かない（metric のみ）。ON 時も未認証 reject（principal 無し・5xx 以外）は
@@ -107,8 +107,7 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 6. replay 失敗時は DLQ を維持し、operator reference は server-side 導出値のみを audit へ記録する。
 7. retention / nonce purge scheduler は inbound・outbound のどちらかが有効なら生成される（outbound だけの開放でも
    delivery payload 30/90 日と replay 監査 1 年を purge する）。両方向 OFF では生成されない（§7.3）。
-8. outbound だけを開ける場合も `public-api.public-id-key`、`topology.bound-tenant-id`、法人 readiness が起動時に必須。
-   `public-api.enabled` は false のままにする（true にすると DG-05-IN の承認項目が要求され起動しない）。
+8. outbound だけを開ける場合も `public-api.public-id-key`、`crypto.credential-hash-pepper`、`topology.bound-tenant-id`、法人 readiness が必須。`NF05_INBOUND` は `CLOSED` のままにする（prod では `public-api.enabled` を配備設定に置かない）。法人の未解決がある場合は起動は止まらず NF05 が `AUTO_CLOSED(LEGAL_ENTITY_UNRESOLVED)` になる。
 
 ## 6. DB / worker / provider 停止
 
@@ -134,20 +133,13 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 
 ### 7.3 emergency stop（production）
 
-1. `integration.hub.public-api.enabled=false`
-2. `integration.hub.external-transport.enabled=false`
-3. `integration.hub.provider.mode=MOCK`
-4. 再起動後、deny-only chain が `/external-api/v1/**` を stable 404 JSON で返し、`t_external_api_audit` に行が増えないことを確認する。
-5. external controller / worker / 送信scheduler / transportの停止を確認する。内部管理APIは管理者専用のまま。
-   prodの停止操作はOFFへ変更して全停止・再起動する。実行中propertiesの変更とON/OFFの混在nodeは運用しない。
-   OFF/ONの状態管理componentはOFFでも残り、既存m_system_configへ明示OFFを保存する。正常終了stopだけではOFFを書かない。
-   必ず§13のOFF永続化成功を確認してからONへ戻す。OFFのDB書込が失敗した直後にONへ再起動すると、旧ON値からOFF経由を識別できない。
-   初回の未登録状態でONを指定しても送信は未準備のまま。最初に同じbound-tenant-idを設定してOFFで配備・確認する。
-   OFF→ONだけが高水位以前の旧PENDING/RETRYABLEと期限切れCLAIMEDを隔離する。ON→ONの通常配備/crash再起動はキューを維持する。
-   未完了/DB/監査障害はアプリ全体の起動を妨げず、outboundだけ未準備とする。128件ずつ周期復旧し、4096件の起動拒否上限は廃止した。
-6. inbound を止めた場合は LB/WAF の `/external-api/**` 遮断（§0 D-1）を戻す。片方向だけ止める場合は該当方向の
-   `enabled=false` だけを変え、他方向の承認値は触らない。
-7. 両方向 OFF では retention purge scheduler が生成されない。停止が長引く場合の payload・監査の扱いは DBA が判断する。
+1. **通常（画面・DB が使えるとき。再起動不要・即時反映）**: 管理者 1 名が画面 `/feature-enablement` で対象の開放単位（`NF05_INBOUND`・`NF05_OUTBOUND` の片方または両方）を「閉じる」（理由 `MANUAL_SECURITY_INCIDENT` 等）。
+   - inbound は `ExternalApiSecurityConfig` の runtime switch により次の要求から 404 JSON になり（backup 静止中を除く）、`t_external_api_audit` に行が増えない。あわせて LB/WAF の `/external-api/**` 遮断（§0 D-1）を戻す。
+   - outbound は新規 dispatch と in-flight の送信が止まり（処理中は `KILL_SWITCH`）、確定の閉鎖の後に barrier が未送信の配信を DLQ `STARTUP_REVALIDATION_REQUIRED` に移す（§13.3）。
+2. **画面・DB が使えない緊急時（総スイッチ）**: task definition の `FEATURE_ENABLEMENT_ALLOWED=false`（`deploy-runbook.md` §1.0 の 42。必要なら `integration.hub.provider.mode=MOCK` も）で全停止・再起動する（prod では `integration.hub.*.enabled` を置くと起動しないため使わない）。全ての開放単位（13 件）が `AUTO_CLOSED(MASTER_SWITCH_CLOSED)` になり、開き直しには各開放単位の二人承認（NF05 はさらに再起動）が要る。
+3. 停止後、`/external-api/v1/**` が 404 JSON を返し、worker・送信 scheduler が動いていないことを確認する。内部管理 API は管理者専用のまま。
+4. 再開手順: 原因解消後、outbound は §13.1 の OFF 永続化または閉鎖後の状態と `bound-tenant-id` の一致を確かめ、画面 `/feature-enablement` で申請＋別の管理者の承認（`OPEN_PENDING_RESTART`）→ 全停止で再起動（`OPEN`、OFF→ON は高水位以前の旧行を隔離）→ inbound なら LB/WAF の送信元 rule を戻す。
+5. 両方向が起動時から閉のプロセスでは retention purge scheduler が生成されない（起動時に開で実行中に閉じた場合は、次の再起動まで purge bean は残る）。停止が長引く場合の payload・監査の扱いは DBA が判断する。
 
 ## 8. backup / restore 連携
 
@@ -255,18 +247,22 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
 
 ## 14. RB-NF05：決定IDの承認内容 digest、credential pepper、lease 回収の間引き
 
-### 14.1 承認内容 digest（FINAL review b-13）
+### 14.1 承認内容 digest（FINAL review b-13・FE-D02/D05）
 
-- 開ける方向ごとに `INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST` / `INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST` が必須。正規形・二人による再計算・golden vector の正本は DG-05 草案 §1.1。
-- 起動しない場合の文言と初動:
-  - `…approval-digest（決定書の承認内容のSHA-256、小文字hex 64桁）が必要です`: 未転記か形式外。決定書の値を転記する（大文字・前後空白は直して照合される）。
-  - `…approval-digestが現行の…承認内容と一致しません`: 決定書と設定のどちらかが違う。二人で正規形を作り直して照合する。**設定に合わせて digest を作り直して転記しない**（承認値を変えたなら新しい決定IDと署名が要る）。
-  - `outbound承認digestの照合にはexternal-transport.truststore-pathのfileを読める必要があります`: truststore を読めない・空・1 MiB 超。
-  - `…bound-tenant-idを英数字と._:-の100文字以内に…`: tenant の形式。
-- truststore を入れ替えたら（同じ証明書でも file の byte が変われば）outbound digest が変わり、起動しない。証明書の入替えは OUT-4 の変更として新しい決定を取る。
+- 開ける方向ごとに承認内容の SHA-256（`approvalDigest`）が必須。prod では配備の環境変数ではなく画面 `/feature-enablement` の署名 `NF05_DG05_IN`・`NF05_DG05_OUT`（参照＝決定 ID、構造化された値 `approvalDigest`）として登録・二人確認する（`INTEGRATION_HUB_*_DECISION_ID`・`*_APPROVAL_DIGEST` を prod に置くと起動しない。dev・test は property から読む）。正規形・二人による再計算・golden vector の正本は DG-05 草案 §1.1。
+- 条件が不成立の場合の初動（prod では app 全体の起動は止めず、起動前の読取りまたは評価器が該当方向の NF05 を閉鎖し、画面の最後の評価に check code を出す）:
+  - `nf05.<方向>.approvalDigest.missing` / `invalid`: 未登録か形式外。決定書の値を署名の `approvalDigest` に登録・確認する。
+  - `nf05.<方向>.approvalDigest.mismatch`: 決定書（署名の `approvalDigest`）と配備の承認値（CIDR・送信先・truststore 等）のどちらかが違う。二人で正規形を作り直して照合する。**配備の値に合わせて digest を作り直して登録しない**（承認値を変えたなら新しい決定IDと署名が要る）。
+  - `nf05.outbound.truststore.unreadable` / `unverifiable`: truststore を読めない・空・1 MiB 超。
+  - `bound-tenant-id` の形式不正・不一致: 設定と barrier の行を確認する。
+- **truststore や digest 対象の配備設定（CIDR・送信先・`batch-size`・`fixed-delay-ms`・`unauthenticated-audit-max-per-minute`）を差し替える手順（再起動 2 回。`deploy-runbook.md` §5.5.1）**:
+  1. 新しい DG-05 決定書（新しい決定 ID と新しい設定・truststore に対する `approvalDigest`）を取得する。
+  2. 画面 `/feature-enablement` で対象方向を閉じ（または次の起動で自動閉鎖になることを受容し）、新しい配備設定・truststore を入れた task definition で **1 回目の再起動**を行う（この起動では旧署名と新設定の digest が合わないため NF05 は閉で立ち上がり、新しい設定・truststore が process に読まれる）。
+  3. 画面 `/feature-enablement` で新しい署名（`NF05_DG05_IN` / `NF05_DG05_OUT`）を登録・二人確認し（旧署名は `SUPERSEDED`）、開放を申請・二人承認する（`OPEN_PENDING_RESTART`。現在の process の新設定と新署名の digest が一致するため承認が通る）。
+  4. 同じ task definition で **2 回目の再起動**を行い、`OPEN` に遷移したことを確認する。
 - 調整値（timeout・lease・purge 間隔、`inbound-lease-seconds` 等）は digest に含めない。`batch-size`・`fixed-delay-ms`（OUT-7）と `unauthenticated-audit-max-per-minute`（IN-7）は含めるため、変えるには新しい決定が要る（この運用負担は Owner/SRE の受理事項。未取得）。
-- **旧決定の再投入は検出できない**（RB-NF05 review P3-4）: digest には鍵も有効期間も無いため、撤回・置換された旧決定ID・旧 digest・旧い承認値の組を設定し直しても起動する。配備のたびに、設定する決定IDが現に有効な決定であることを配備記録と変更管理で確かめる。署名日・失効日を正規形へ入れるか（v2）は Security/Owner の判断（未取得。DG-05 草案 §1.1）。
-- truststore は起動時の照合で1回だけ読み、digest を計算した byte 列を transport が読み込む。照合の後に file を差し替えても反映されない（RB-NF05 review P3-6）。替えるときは新しい決定の後に全停止で再起動する。
+- **旧決定の再投入**（RB-NF05 review P3-4）: digest 自体には鍵も有効期間も無いが、prod では署名 `NF05_DG05_IN`・`NF05_DG05_OUT` の行に署名日・失効日（最長 366 日）と取消し（`REVOKED`）があり、失効・取消し後は自動で閉じる。旧決定書を新しい署名行として再登録しないよう変更管理で確かめる。署名日・失効日を digest 正規形そのものへ入れるか（v2）は Security/Owner の判断（未取得。DG-05 草案 §1.1）。
+- truststore は起動時の照合で1回だけ読み、digest を計算した byte 列を transport が読み込む。照合の後に file を差し替えても反映されない（RB-NF05 review P3-6）。替えるときは上の 2 回再起動の手順で行う。
 
 ### 14.2 credential hash の pepper（N5-P3-2）
 

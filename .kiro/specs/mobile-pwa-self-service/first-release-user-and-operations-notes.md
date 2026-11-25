@@ -96,9 +96,9 @@
 - 端末の保存期間30日は利用者の決定（B-NF04-2）で受け入れたものであり、Privacy の署名は別途必要である（4章）。
 - Privacy上の注意（W3-09 P3-13）: OIDC sessionでは、復元できないロック中の下書き（勤怠・経費等の入力内容を含む）が、logoutまたは30日経過まで端末のIndexedDBに残る。個別の破棄操作は無く、すぐに消す手段はlogout（端末内の下書きを全件削除）である。ロック中の下書きの個別破棄UIは、他タブで入力中のrecordと区別する仕組み（tab単位の所有印）が無いと他タブの未送信を消し得るため、本batchでは設けない。保持期間の短縮または破棄UIの要否は、Privacy の30日署名と合わせて判断する。
 
-### 2.3 機能スイッチとの関係
+### 2.3 機能の開放（スイッチ）との関係
 
-- `FEATURE_NF04_ENABLED` で止まるのは PWA shell（Service Worker とインストール用manifest）だけである。日次入力の一時保存・送信、ロック中の下書きの復元（ローカルパスワードsessionだけ。2.4）、server側台帳の削除は、スイッチに関係なく常に有効である（`feature-switches.md` 4.4）。
+- prod では画面「機能の開放」（`/feature-enablement`）の開放単位 `NF04`（既定 `CLOSED`。dev・test の配備設定の源では `FEATURE_NF04_ENABLED` で、prod では旧い変数として起動を拒否する）で止まるのは PWA shell（Service Worker とインストール用manifest）だけである。日次入力の一時保存・送信、ロック中の下書きの復元（ローカルパスワードsessionだけ。2.4）、server側台帳の削除は、`NF04` の開閉に関係なく初回配備から常に有効である（`feature-switches.md` §4.4、`deploy-runbook.md` §1.7「初回配備から有効になる部分」）。
 - NF-04 をOFFにしても、1.2〜1.7 の説明は変わらない（オフライン中に画面を開き直せなくなることだけが異なる）。
 - Service Worker のshell cacheは版（`ses-pwa-shell-v4`）で入れ替える。`pwa-queue.js`・`offline.html` 等のshell資産を変えたときは `service-worker.js` の `CACHE_NAME` も上げる（cache優先で配るため、上げないとSW登録済みの端末へ新しい資産が届かない）。新しいSWが有効になるまでは旧版の画面が動く（server側の拒否は旧画面にも効く）。SW更新の確認は「下書きは維持される」とは表示しない（読み込み直すと未送信の下書きはロック中になるため）。
 

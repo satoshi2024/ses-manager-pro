@@ -5,15 +5,15 @@
 - 本資料は実装側が現行コードを読んで整理したものであり、Finance・HR・Privacy/Legal・Securityの判断や署名を代行しない。確認欄・署名欄は空欄のまま残す。
 - 対象コードの基準: branch `codex/snf-w2-first-release-scope-gating-20261113`（base `1836eb73`）
 
-## 0. 前提の変更（決定済み（2026-11-22、利用者））
+## 0. 前提の変更（2026-11-22 利用者決定、および 2026-11-23〜25 機能の開放への移行）
 
-- 2026-11-22 の利用者決定で、NF-03 本体と子の資格番号（`FEATURE_NF03_CERTIFICATION_PII_ENABLED`）の両方を**初回リリースで ON** にする。冒頭の B-NF03-1（資格番号は DG-07 確定まで本番で入力しない）は変更された。
-- そのため DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認と、証憑文書についての Privacy の確認は初回配備（go-live）の前提である（`production-launch/deploy-runbook.md` §1.7 の NF03 の行、`production-launch/feature-switches.md` 3.4・4.6.1。**未取得**）。
-- 本資料の本文と署名欄は旧前提のまま残す（署名欄は変えない）。次は意味が変わるため、各担当が署名・確認の前に**再確認する（要再確認）**。
-  - 1章の表の「資格番号の入力」の行の「公開しない」は、初回リリースで公開する（入力欄が出て、暗号化して保存する）に変わる。
-  - 2.1 の表の「初回リリースの処置」の欄は、子が OFF のとき（問題時に子だけを OFF にした場合）の処置として読む。
-  - 2.3 の「初回リリースでは鍵は機能上使われない」は成り立たず、鍵（`production-launch/deploy-runbook.md` §1.0 の19・20）は初回から暗号化に使われる。2.4 の設計案（鍵なしで起動する案）は、子を初回から ON にするため初回リリースでは使い道が無い。署名欄の「2.4 鍵なし起動の設計案」の採否は Security/SRE が要再確認とする。
-  - 署名欄の「2.1 資格番号の入力停止範囲・証憑の扱い」（Privacy/Legal）は、入力を開ける判断（DG-07）と証憑の扱いの確認として署名する。
+- 2026-11-23〜25 の `feature-enablement-console`（FE-A〜E）により、prod では NF-03 本体（`NF03`）と子の資格番号（`NF03_CERTIFICATION_PII`）は既定 `CLOSED` で配備され、go-live 後に画面「機能の開放」（`/feature-enablement`）で署名（本体は `NF03_BUSINESS_OWNER`、資格番号は `NF03_DG07`・`NF03_EVIDENCE_PRIVACY`）の二人確認と開放申請・承認を経て再起動なしで開く（旧い環境変数 `FEATURE_NF03_ENABLED`・`FEATURE_NF03_CERTIFICATION_PII_ENABLED` を prod に置くと起動しない。dev・test は従来どおり property を使う）。したがって **NF-03 と資格番号の署名は go-live（初回配備）自体の前提ではなく、画面で各開放単位を開く前の前提**である（`production-launch/deploy-runbook.md` §1.7、`production-launch/feature-switches.md` §3・§4.6。署名はどれも**未取得**）。
+- 一方、資格番号の暗号鍵（`CERTIFICATION_NUMBER_CRYPTO_*`、`deploy-runbook.md` §1.0 の 19・20）は開放状態に関わらず prod の起動時に必須のままである（2.3）。
+- 本資料の本文と署名欄は旧前提のまま残す（署名欄は変えない）。次は意味が変わるため、各担当が画面で開放する前の署名・確認の時に**再確認する（要再確認）**。
+  - 1章の表の「資格番号の入力」は、`NF03` と `NF03_CERTIFICATION_PII` の両方を開いた時点から公開される（入力欄が出て、暗号化して保存する）。
+  - 2.1 の表の「初回リリースの処置」の欄は、`NF03_CERTIFICATION_PII` が閉のときの処置として読む。
+  - 署名欄の「2.4 鍵なし起動の設計案」の採否は Security/SRE が要再確認とする（現状は常に起動時必須）。
+  - 署名欄の「2.1 資格番号の入力停止範囲・証憑の扱い」（Privacy/Legal）は、`NF03_CERTIFICATION_PII` を開く判断（`NF03_DG07`）と証憑の扱いの確認（`NF03_EVIDENCE_PRIVACY`）として署名する。
 - 3章の Finance/HR の事後確認（B-NF03-2）は変わらない。
 
 ## 1. 初回リリースで公開する範囲

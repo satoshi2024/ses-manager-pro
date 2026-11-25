@@ -19,17 +19,17 @@
 
 1. 主キーがある（1.1）。
 2. 静止区間の中で書く者がいない。app の書込みは静止の間 503 と読取り専用の接続で止まる（`backup-write-quiesce/design.md` §6）。app 以外の writer は baseline の PROD-002 で確かめる（`deploy-runbook.md` §1.7「Backup 開始の前提」）。
-3. 復元の誤りが致命的な表を選ぶ: schema の版、認証・認可、NF07 の hold（初回リリースで ON。2026-11-22 利用者決定）、金額。
-4. 行が少なく、伸びが遅い表を選ぶ。行が多く伸び続ける表（監査 `t_audit_log`・通知 `t_notification`・session `t_user_session`・作業記録 `t_work_record` 等）は静止区間を延ばすため選ばない。scheduler の lock の表 `shedlock` は業務の値を持たないため選ばない。
+3. 復元の誤りが致命的な表を選ぶ: schema の版、認証・認可、機能の開放の状態と署名（V203。誤ると閉じているはずの機能が復元後に開く・取消し済みの署名が有効に戻る）、NF07 の hold（掛けた hold は機能の開閉に関わらず守る）、金額。
+4. 行が少なく、伸びが遅い表を選ぶ。行が多く伸び続ける表（監査 `t_audit_log`・通知 `t_notification`・session `t_user_session`・作業記録 `t_work_record`・機能の開放の履歴 `t_feature_enablement_event` 等）は静止区間を延ばすため選ばない。scheduler の lock の表 `shedlock` は業務の値を持たないため選ばない。
 
 ### 1.3 候補
 
 | 候補 | 値（`.env.backup` にそのまま書く形） | 表ごとの理由 | 利点 | 欠点 |
 |---|---|---|---|---|
-| A（最小） | `CONTENT_HASH_TABLES=flyway_schema_history,sys_user,m_system_config` | `flyway_schema_history`（主キー `installed_rank`。README の推奨。schema の版と各 migration の checksum の行。復元検証の `flyway_max_success` の照合は最大の版だけを見るため、途中の行の違いはここで分かる）。`sys_user`（主キー `id`。認証の起点で、break-glass・OIDC 管理者・privacy-admin の判定の元。RR-13 の anchor 表の1つ）。`m_system_config`（主キー `config_key`。初回 bootstrap の完了 marker `security.bootstrap.completed-at`（失うと承認 ticket 無しで bootstrap を再開できる。`deploy-runbook.md` §5.5）、NF05 outbound の状態 `integration.hub.outbound.runtime.v1`、手数料の既定等） | 静止区間がほとんど延びない。3表とも小さい | 認可（権限 group と deny 行）・hold・金額の表の内容の違いは件数（`CRITICAL_TABLES`）と schema fingerprint でしか分からない |
-| B（推奨） | `CONTENT_HASH_TABLES=flyway_schema_history,sys_user,m_system_config,m_permission_group,t_permission_group_action,t_user_permission_group,t_legal_hold,t_contract,t_invoice` | A の3表に加えて、`m_permission_group`・`t_permission_group_action`・`t_user_permission_group`（主キー `id`。baseline＋deny の権限（V66・V66_1）と privacy-admin の割当。deny 行が1つ欠けた復元は権限を黙って広げる。group と action の数に比例して小さい）、`t_legal_hold`（主キー `id`。NF07 の hold。初回リリースで ON。行が欠けた復元は hold の対象を守らない。Journal は別 instance で restore の対象外（`deploy-runbook.md` §3.6））、`t_contract`・`t_invoice`（主キー `id`。契約と請求の金額。行は契約数と月次の請求に比例する） | 認可・hold・金額の復元の誤りを cutover の前に止められる | 9表になり、`t_contract`・`t_invoice` の行数に比例して静止区間が延びる（staging で測る）。表が増えるほど、表の構成を変える release ごとに値の見直しが要る |
+| A（最小） | `CONTENT_HASH_TABLES=flyway_schema_history,sys_user,m_system_config` | `flyway_schema_history`（主キー `installed_rank`。README の推奨。schema の版と各 migration の checksum の行。復元検証の `flyway_max_success` の照合は最大の版だけを見るため、途中の行の違いはここで分かる）。`sys_user`（主キー `id`。認証の起点で、break-glass・OIDC 管理者・privacy-admin の判定の元。RR-13 の anchor 表の1つ）。`m_system_config`（主キー `config_key`。初回 bootstrap の完了 marker `security.bootstrap.completed-at`（失うと承認 ticket 無しで bootstrap を再開できる。`deploy-runbook.md` §5.5）、NF05 outbound の状態 `integration.hub.outbound.runtime.v1`、手数料の既定等） | 静止区間がほとんど延びない。3表とも小さい | 認可（権限 group と deny 行）・機能の開放の状態と署名・hold・金額の表の内容の違いは件数（`CRITICAL_TABLES`）と schema fingerprint でしか分からない |
+| B（推奨） | `CONTENT_HASH_TABLES=flyway_schema_history,sys_user,m_system_config,m_permission_group,t_permission_group_action,t_user_permission_group,t_legal_hold,t_contract,t_invoice,t_feature_enablement_state,t_feature_sign_off,t_feature_sign_off_extension,t_feature_sign_off_bundle,t_feature_sign_off_bundle_member` | A の3表に加えて、`m_permission_group`・`t_permission_group_action`・`t_user_permission_group`（主キー `id`。baseline＋deny の権限（V66・V66_1）と privacy-admin の割当。deny 行が1つ欠けた復元は権限を黙って広げる。group と action の数に比例して小さい）、`t_legal_hold`（主キー `id`。NF07 の hold。行が欠けた復元は hold の対象を守らない。Journal は別 instance で restore の対象外（`deploy-runbook.md` §3.6））、`t_contract`・`t_invoice`（主キー `id`。契約と請求の金額。行は契約数と月次の請求に比例する）、`t_feature_enablement_state`・`t_feature_sign_off`・`t_feature_sign_off_extension`・`t_feature_sign_off_bundle`（主キー `id`）・`t_feature_sign_off_bundle_member`（複合主キー `bundle_id,kind_code`。`lib/content-hash.sh` は複合主キーも列の順で計算する）（機能の開放（V203）の開放状態・署名・延長・組と member。開放単位13件と署名・組の数に比例して小さい。申請 `t_feature_enablement_request` と履歴 `t_feature_enablement_event` は運用とともに伸びるため含めず、設定 `t_feature_enablement_setting`・世代 `t_feature_enablement_generation` は必要に応じて DBA が判断する。`.kiro/specs/feature-enablement-console/design.md` §13.1） | 認可・機能の開放と署名・hold・金額の復元の誤りを cutover の前に止められる | 14表になり、`t_contract`・`t_invoice` の行数に比例して静止区間が延びる（機能の開放の5表は小さい。staging で測る）。表が増えるほど、表の構成を変える release ごとに値の見直しが要る |
 
-- 追加の候補（DBA が判断する）: `m_identity_provider`・`t_user_external_identity`（OIDC の provider と外部 identity の link。起動時検査の「OIDCでログインできる管理者」の判定に使う）。
+- 追加の候補（DBA が判断する）: `m_identity_provider`・`t_user_external_identity`（OIDC の provider と外部 identity の link。起動時検査の「OIDCでログインできる管理者」の判定に使う）、`t_feature_enablement_setting`・`t_feature_enablement_generation`（承認で変える設定と世代。行数はごく小さい）。
 - どちらの候補でも、表を足す・消す migration を入れた release では値を見直す（`FLYWAY_VERSION` と同じく、release ごとに §3 の後で確かめる）。
 
 ### 1.4 DBA の確認 SQL（§3.4 の後、本番の DB で。PROCESS は要らない）
@@ -48,10 +48,13 @@ SELECT t.table_name, t.engine, t.table_rows AS approx_rows,
  WHERE t.table_schema = 'ses_manager_db'
    AND t.table_name IN ('flyway_schema_history', 'sys_user', 'm_system_config',
                         'm_permission_group', 't_permission_group_action', 't_user_permission_group',
-                        't_legal_hold', 't_contract', 't_invoice')
+                        't_legal_hold', 't_contract', 't_invoice',
+                        't_feature_enablement_state', 't_feature_sign_off', 't_feature_sign_off_extension',
+                        't_feature_sign_off_bundle', 't_feature_sign_off_bundle_member')
  ORDER BY t.table_name;
--- 期待: 候補の表の数だけ行がある（B は9行、A は3行）。engine は全て InnoDB。
---       pk_columns は flyway_schema_history が installed_rank、m_system_config が config_key、他は id。
+-- 期待: 候補の表の数だけ行がある（B は14行、A は3行）。engine は全て InnoDB。
+--       pk_columns は flyway_schema_history が installed_rank、m_system_config が config_key、
+--       t_feature_sign_off_bundle_member が bundle_id,kind_code、他は id。
 
 -- (2) 正確な行数（table_rows は統計の推定値のため）
 SELECT 'flyway_schema_history' AS table_name, COUNT(*) AS row_count FROM flyway_schema_history
@@ -62,7 +65,12 @@ UNION ALL SELECT 't_permission_group_action', COUNT(*) FROM t_permission_group_a
 UNION ALL SELECT 't_user_permission_group', COUNT(*) FROM t_user_permission_group
 UNION ALL SELECT 't_legal_hold', COUNT(*) FROM t_legal_hold
 UNION ALL SELECT 't_contract', COUNT(*) FROM t_contract
-UNION ALL SELECT 't_invoice', COUNT(*) FROM t_invoice;
+UNION ALL SELECT 't_invoice', COUNT(*) FROM t_invoice
+UNION ALL SELECT 't_feature_enablement_state', COUNT(*) FROM t_feature_enablement_state
+UNION ALL SELECT 't_feature_sign_off', COUNT(*) FROM t_feature_sign_off
+UNION ALL SELECT 't_feature_sign_off_extension', COUNT(*) FROM t_feature_sign_off_extension
+UNION ALL SELECT 't_feature_sign_off_bundle', COUNT(*) FROM t_feature_sign_off_bundle
+UNION ALL SELECT 't_feature_sign_off_bundle_member', COUNT(*) FROM t_feature_sign_off_bundle_member;
 -- 期待: 新規導入の直後は flyway_schema_history が §3.4 の適用件数と Repeatable の行の合計、業務の表は seed の件数だけ。
 --       数値は配備記録に残し、運用後の見込み（契約数・月次の請求数）と合わせて DBA が規模を判断する。
 
@@ -71,7 +79,9 @@ SELECT table_name, column_name FROM information_schema.columns
  WHERE table_schema = 'ses_manager_db'
    AND table_name IN ('flyway_schema_history', 'sys_user', 'm_system_config',
                       'm_permission_group', 't_permission_group_action', 't_user_permission_group',
-                      't_legal_hold', 't_contract', 't_invoice')
+                      't_legal_hold', 't_contract', 't_invoice',
+                      't_feature_enablement_state', 't_feature_sign_off', 't_feature_sign_off_extension',
+                      't_feature_sign_off_bundle', 't_feature_sign_off_bundle_member')
    AND column_name NOT REGEXP '^[A-Za-z0-9_]{1,64}$';
 -- 期待: 0行
 ```

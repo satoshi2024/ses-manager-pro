@@ -3,12 +3,12 @@
 2026-11-14。実装方針の記録であり、CS Ownerの署名や本番公開の承認を代行しない。
 自動browserは統括Runnerだけが実行する。`ServiceDeskBrowserMTest`はdesktopと390pxで起票・詳細・公開返信・内部メモを実送信し、console/API失敗0件を検証する。
 
-## 前提の変更（決定済み（2026-11-22、利用者））
+## 前提の変更（2026-11-22 利用者決定、および 2026-11-23〜25 機能の開放への移行）
 
-- NF-02 の子の顧客ポータルの問い合わせ（`FEATURE_NF02_CUSTOMER_PORTAL_ENABLED`）も**初回リリースで ON** にする（B-NF02-2 の「第二段階」を変更した）。
-- そのため下の「第二段階」の節の確認は、初回配備（go-live）の前の確認になる（第一段階と同じく go-live の前提。**未取得**）。節の名前と項目は変えずに残す。
-- 第二段階の1つ目の「第一段階の内部desk公開条件には含めない」は、初回から CSAT の回答も公開の対象になるため、go-live の前に確かめる項目として読む。
-- 索引: `production-launch/deploy-runbook.md` §1.7 の NF02 の行、`production-launch/feature-switches.md` 4.3.1。
+- `feature-enablement-console`（FE-A〜E）により、prod では `NF02`（内部 desk）と `NF02_CUSTOMER_PORTAL`（顧客ポータルの問い合わせ）は既定 `CLOSED` で配備され、画面「機能の開放」（`/feature-enablement`）で署名の確認と二人承認を経て開く（旧い `FEATURE_NF02*_ENABLED` は prod では使わない）。
+- そのため下の「第一段階」は `NF02` を開く前、「第二段階」は `NF02_CUSTOMER_PORTAL` を開く前の確認（署名 `NF02_PORTAL_BROWSER_CHECK` の証跡）になる（どちらも**未取得**。なお顧客ポータル全体の Bootstrap 参照修正の確認は初回配備から効くため go-live 自体の前提。`production-launch/deploy-runbook.md` §1.7）。節の名前と項目は変えずに残す。
+- 第二段階の1つ目の「第一段階の内部desk公開条件には含めない」は、`NF02_CUSTOMER_PORTAL` を開くと CSAT の回答も公開の対象になるため、子を開く前に確かめる項目として読む。
+- 索引: `production-launch/deploy-runbook.md` §1.7 の NF02 の行、`production-launch/feature-switches.md` §4.3・§4.3.1。
 
 | 記録 | 値 |
 |---|---|

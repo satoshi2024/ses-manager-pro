@@ -22,6 +22,7 @@
   超過した場合も cutover の判断は incident commander が行い、超過時間を記録する
 - plan（`PLANS_DIR/<plan-id>.json` + `.sha256`）が存在し、`plan::verify` を通ること
 - 二者承認（同一 plan SHA / 同一 target UUID に bind された 2 名の claim）が揃うこと
+- 復元後の最初の app の起動に使う task definition は、緊急の総スイッチ `FEATURE_ENABLEMENT_ALLOWED=false`（`deploy-runbook.md` §1.0 の 42）を設定した revision を用意しておくこと（§4.7 の 1。`true` のまま起動すると、復旧点より後に取り消された署名や閉鎖された開放単位が復元した DB の値のまま開き得る）
 - read-only smoke スクリプト（`APP_SMOKE_SCRIPT`）と write-enable provider
   （`WRITE_ENABLE_COMMAND`、version 管理された executable）が準備済みであること
 - 旧環境の read-only smoke（`OLD_ENV_SMOKE_SCRIPT`）が PASS できること（rollback 用）
@@ -181,6 +182,32 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
    新しい source の最初の backup は full にする（source が変わると lineage が変わり、旧 source の full は新しい source の PITR の基点に
    ならない）。app の起動の前なら `--app-stopped` を付け、起動の後なら付けない。その後に定期起動を再開し、最初の ONLINE の checkpoint が
    VALID になることを確かめる（deploy-runbook §4.7 の4 と同じ確認）。
+
+## 4.7 復元後の機能の開放（総スイッチによる全閉と外部ログとの照合。FE-E04）
+
+復元した DB の開放状態（`t_feature_enablement_state`）・署名と組（`t_feature_sign_off`・`t_feature_sign_off_bundle`）・設定（`t_feature_enablement_setting`）・履歴（`t_feature_enablement_event`）は復旧点の時点に戻る。復旧点より後・障害の前に取り消された署名や、手動・自動で閉鎖された開放単位は、そのまま起動すると「開」に戻るため、次の 1〜3 の順で全閉・外部ログとの照合・再開放を行う（設計は `.kiro/specs/feature-enablement-console/design.md` §13.1）。
+
+1. **最初の app の起動は `FEATURE_ENABLEMENT_ALLOWED=false` で行い、全ての開放単位を閉じる**。
+   - cutover と DB・uploads pointer の対の確認（§4.5.1 の 7）を終えた後の最初の app の起動は、task definition に `FEATURE_ENABLEMENT_ALLOWED=false` を設定して行う（`validate-task-definition.ps1 -Mode Actual -Phase Steady` も `false` を受け付ける）。
+   - 起動時の評価（`FeatureEnablementStartupEvaluator`）が全 13 件の開放単位を `AUTO_CLOSED`（理由 `MASTER_SWITCH_CLOSED`）にし、未決の申請（`PENDING`）を全て `CANCELLED` にする。起動 log に ERROR `errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED` が出、gauge `ses_feature_enablement_master_allowed` が `0` になる。
+   - NF05 も起動の前の読取り（`IntegrationHubEnablementEnvironmentPostProcessor`）が総スイッチの `false` で両方向を閉じ（`MASTER_SWITCH_CLOSED`）、outbound の起動 barrier（`IntegrationHubOutboundStartupBarrier`）が `m_system_config` の `integration.hub.outbound.runtime.v1` を `v1|OFF|0|<指紋>` に書き直すため、次に開き直す起動では未送信の配信が隔離（`STARTUP_REVALIDATION_REQUIRED`）される。
+   - 総スイッチが `false` の間、画面「機能の開放」（`/feature-enablement`）での開放・設定変更の申請と承認は 409 で拒否されるが、一覧・履歴の閲覧と、署名・組の登録・確認・取消し（`REVOKED`）は使える。
+2. **復旧点より後の外部ログ（CloudWatch Logs）と照合し、取消しと閉鎖の理由を反映する**。
+   - app は機能の開放の全ての遷移で構造化ログ `FEATURE_ENABLEMENT_EVENT`（単一行 JSON。`eventType`・`subjectType`・`subjectKey`・`reasonCode`・`actorUserId` 等）を標準出力へ出しており、DB とは独立に CloudWatch Logs（例: `/ecs/ses-manager-prod`。log group の保持期間は PITR で戻り得る binlog の保持期間以上にする。`deploy-runbook.md` §1.0・§1.7）に残る。
+   - 復旧点（plan の `effective_checkpoint.consistency_time_utc` または PITR の target 時刻）より後・旧環境の停止までの期間の `FEATURE_ENABLEMENT_EVENT` を CloudWatch Logs Insights 等で抽出し、復元した DB の `t_feature_enablement_event`（復旧点までの行しか無い）と突き合わせる。
+     ```text
+     fields @timestamp, @message
+     | filter @message like /FEATURE_ENABLEMENT_EVENT/
+     | sort @timestamp asc
+     ```
+   - 突き合わせて次を行う。
+     - **(a) 復旧点より後に取り消された署名・組（`subjectType` が `SIGN_OFF` または `BUNDLE` で `eventType=REVOKED`）**: 復元した DB では `CONFIRMED` に戻っているため、`FEATURE_ENABLEMENT_ALLOWED=false` のまま画面「機能の開放」の「署名」タブから、該当する署名・組を改めて取り消す（`REVOKED`。NF07 の署名・組は privacy-admin が行う）。復旧点より後に登録・確認されていた新しい署名・組が要る場合は、元の決定書・証跡から登録・確認し直す。
+     - **(b) 復旧点より後に閉鎖された開放単位（`subjectType=UNIT` で `eventType` が `MANUALLY_CLOSED` または `AUTO_CLOSED`）とその `reasonCode`**: 1 により全開放単位は既に `AUTO_CLOSED(MASTER_SWITCH_CLOSED)` になっているが、復旧点より後に閉鎖されていた開放単位と理由（障害・インシデント・条件の不成立・署名の失効等）を一覧にし、その原因が解消していることを確かめるまで 3 で開き直さない。
+     - **(c) 復旧点より後に承認・反映された設定変更（`subjectType=SETTING` で `eventType=SETTING_APPLIED`、例: NF02 顧客ポータルの公開範囲 `visible-since`）**: 復旧点の値に戻っているため、3 の後に必要なら「設定」タブで改めて申請・承認する。
+   - 照合した時刻範囲、抽出した事象の一覧、再取消しした署名・組の ID、確認者を change ticket と配備記録に残す。
+3. **`FEATURE_ENABLEMENT_ALLOWED=true` に戻して再起動し、必要な開放単位を二人で開き直す**。
+   - 2 の照合と再取消しが済んだら、task definition の `FEATURE_ENABLEMENT_ALLOWED` を `true` に戻して再起動する（`true` に戻しても自動では 1 件も開かない）。
+   - 原因の解消と条件の成立を確かめた開放単位だけを、画面「機能の開放」で申請者と別の承認者の二人で 1 件ずつ開き直す（NF05 を開く場合は承認の後に再起動し、起動の後に LB/WAF の `/external-api/**` の rule を合わせる。`deploy-runbook.md` §1.7 SRE-2）。
 
 ## 5. 判定早見表
 

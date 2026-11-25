@@ -53,6 +53,8 @@
 - **外部で実施**: W-6 の Journal/Witness インスタンス（DBA/SRE）、W-12 の実 GRANT（DBA）。本計画は設定契約と GRANT 設計案だけを書く。
 - **権限（W-5）**: `privacy.*` を `privacy-admin`（管理者専用 group）以外の全 group で deny、`privacy-admin` だけが許可。管理者 role の短絡許可を `privacy.*` に適用しない。group 未割当の legacy fallback は `privacy.*` を常に拒否する。多重防御として、privacy の判定では `*` を許可の候補に数えない。
 
+> **機能の開放（`.kiro/specs/feature-enablement-console/`、2026-11-23〜25）による prod の変更（FE-C01〜FE-E03）**: prod では NF07 の開閉と決定 ID・DSAR 期限値の設定を環境変数から system 内（画面「機能の開放」`/feature-enablement`、行為者は `privacy-admin` のみ）へ移した。`PRIVACY_RETENTION_ENABLED`・`PRIVACY_DSAR_ENABLED`・`PRIVACY_APPROVAL_*`（`PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS` を含む）・`PRIVACY_DSAR_DUE_DAYS`・`PRIVACY_DSAR_PACKAGE_MAX_AGE` を prod の配備の設定に置くと起動しない（`FeatureEnablementProductionValidator`・`validate-task-definition.ps1`）。D-01・(D-06)・D-09 は署名の組 `NF07_DECISION_BINDING`、D-02・D-03・D-05 は副入口（`HOLD_START`・`REL`・`REG`）の署名として登録・二人確認する。`PrivacyProductionConfigurationValidator`・`PrivacyJournalStartupVerifier`・`PrivacyTrustStartupValidator` は prod の起動を止めず、開放単位（`NF07_RETENTION`・`NF07_DSAR`）や副入口だけを閉じる。配備の設定に残るのは Journal 接続（`PRIVACY_JOURNAL_*`）・trust 文書（`PRIVACY_TRUST_KMS_*`）・通知の運用値（`PRIVACY_DSAR_DEADLINE_WARNING_DAYS`）だけである。運用手順の正本は `.kiro/specs/production-launch/feature-switches.md` §4.7 と `deploy-runbook.md` §1.0・§1.7・§4.4〜§4.6（本計画の §5・§7 の環境変数名は dev・test の property の源と当時の設計記録として残す）。
+
 ---
 
 ## 1. 前提と不変条件
@@ -1055,7 +1057,7 @@ deny は所属 group 全体で優先されるため、`role-admin`（`privacy.*`
 
 ## 7. 署名項目ごとの開放手順
 
-署名が届いた後に人（運用者）が行う。AI・実装者は値を設定しない。各手順の後に再起動し、起動 log の機能スイッチ状態と `PrivacyProductionConfigurationValidator` の結果を記録する。
+署名が届いた後に人（運用者）が行う。AI・実装者は値を設定しない。**prod では `feature-enablement-console`（FE-C01〜FE-E03）により、下表の `PRIVACY_APPROVAL_*`・`PRIVACY_RETENTION_ENABLED`・`PRIVACY_DSAR_ENABLED`・`privacy.dsar.due-days`・`package-max-age` は配備の環境変数ではなく画面 `/feature-enablement` の署名の組 `NF07_DECISION_BINDING`・個別の署名・開放申請と別の `privacy-admin` の承認で反映する（再起動は Journal 接続や trust 文書の path を配備設定に初めて足す時だけ。正本は `.kiro/specs/production-launch/feature-switches.md` §4.7）。下表の環境変数名は dev・test の property の源と W3-14 当時の対応を示す。**
 
 | 署名項目 | 署名後に変える値 | 開く flag・capability | 前提 batch |
 |---|---|---|---|

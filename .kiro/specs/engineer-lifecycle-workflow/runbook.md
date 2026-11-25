@@ -67,7 +67,7 @@
 
 ## 5. NF01 公開前の検査と運用（N1-12）
 
-NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成後に公開する（決定 B-NF01-1）。本章は公開前の読取検査（read-only preflight）の読み方と、V187（L7 重複退社の一意制約）・証跡の版指定（N1-3）・二者確認テンプレートの拒否（N1-2）の運用手順を定める。
+NF01（prod では画面「機能の開放」`/feature-enablement` の開放単位 `NF01`・子 `NF01_DUAL_CONFIRMATION`、既定 `CLOSED`。dev・test の配備設定の源では `FEATURE_NF01_ENABLED`・`FEATURE_NF01_DUAL_CONFIRMATION_ENABLED` で、prod では旧い変数として起動を拒否する。`.kiro/specs/production-launch/feature-switches.md`）は CONFIRM 完成と必要な署名・実測の確認後に開放する（決定 B-NF01-1）。本章は公開前の読取検査（read-only preflight）の読み方と、V187（L7 重複退社の一意制約）・証跡の版指定（N1-3）・二者確認テンプレートの拒否（N1-2）の運用手順を定める。
 
 ### 5.1 read-only preflight の実行と判定
 

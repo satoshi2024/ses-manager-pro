@@ -3,6 +3,8 @@
 > **状態: DRAFT（未署名・効力なし）**。本書はW3-06aで起草した決定書の雛形であり、署名欄がすべて埋まるまで
 > production開放の根拠にならない。AIによる起草は、Owner・Privacy・Legal・Security・SRE・DBA・Financeの
 > 判断と署名を代替しない。
+>
+> **機能の開放（`.kiro/specs/feature-enablement-console/`、FE-D01〜FE-E03）による prod の注入元の変更**: prod では方向ごとの開閉と決定 ID・承認内容 digest を配備の環境変数から画面「機能の開放」（`/feature-enablement`）へ移した。`INTEGRATION_HUB_PUBLIC_API_ENABLED`・`INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED`・`INTEGRATION_HUB_INBOUND_DECISION_ID`・`INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST`・`INTEGRATION_HUB_OUTBOUND_DECISION_ID`・`INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST`（および対応する property の全ての綴り）を prod の配備設定に置くと起動しない（`FeatureEnablementProductionValidator`・`validate-task-definition.ps1`）。決定 ID と `approvalDigest` は画面で署名 `NF05_DG05_IN`・`NF05_DG05_OUT`（参照＝決定 ID、構造化された値 `approvalDigest`）として登録・二人確認し、開放単位 `NF05_INBOUND`・`NF05_OUTBOUND` を二人で承認した後の**次の再起動**で開く（閉じる操作は再起動なしで即時に効く。条件の不成立や法人未解決でも app 全体の起動は止めず NF05 だけを閉じる）。一方、承認内容そのもの（送信元 CIDR・送信先 allow-list・truststore・鍵・pepper・`bound-tenant-id` 等）は従来どおり配備の設定に置き、§1・§1.1 の決定 ID 形式・digest 正規形・golden vector はそのまま正本である（手順は `.kiro/specs/production-launch/feature-switches.md` §4.10・`deploy-runbook.md` §1.0・§1.7・§5.5.1）。
 
 ## 0. 位置付けと現行決定との関係
 
