@@ -139,10 +139,16 @@ class FeatureEnablementScreenBrowserTest {
                     "document.getElementById('fe-signoffs-pane').classList.contains('active')",
                     Duration.ofSeconds(15)), "[adminA] 署名タブへ切り替わる");
             browserA.evaluateStrict("document.getElementById('featureEnablementRegisterSignOff').click(); true");
-            assertTrue(browserA.waitForStrict(
-                    "document.getElementById('featureEnablementModal').classList.contains('show')"
-                            + " && document.querySelector('#feSignOffKind option[value=\"NF03_BUSINESS_OWNER\"]') !== null",
-                    Duration.ofSeconds(15)), "[adminA] 署名登録モーダルが開く");
+            assertTrue(browserA.waitForStrict("(function(){"
+                            + "var m=document.getElementById('featureEnablementModal');"
+                            + "var inst=window.bootstrap&&bootstrap.Modal.getInstance(m);"
+                            + "var dlg=m&&m.querySelector('.modal-dialog');"
+                            + "return m!==null && m.classList.contains('show')"
+                            + " && (!inst || !inst._isTransitioning)"
+                            + " && (!dlg || dlg.getAnimations().length===0)"
+                            + " && m.querySelector('#feSignOffKind option[value=\"NF03_BUSINESS_OWNER\"]')!==null;"
+                            + "})()",
+                    Duration.ofSeconds(15)), "[adminA] 署名登録モーダルが開き遷移が完了する");
 
             String registeredPrep = browserA.evaluateStrict("(function(){"
                     + "var kind=document.getElementById('feSignOffKind');"
