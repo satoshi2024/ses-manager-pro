@@ -121,9 +121,10 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     }
 
     /** 試験用（環境変数と system property を差し替える）。 */
-    FeatureEnablementProductionValidator(Environment environment, FeatureEnablementProperties properties,
-                                         FeatureEnablementCatalog catalog, Supplier<Map<String, String>> systemEnvironment,
-                                         Supplier<Properties> systemProperties) {
+    public FeatureEnablementProductionValidator(Environment environment, FeatureEnablementProperties properties,
+                                                FeatureEnablementCatalog catalog,
+                                                Supplier<Map<String, String>> systemEnvironment,
+                                                Supplier<Properties> systemProperties) {
         this.environment = Objects.requireNonNull(environment, "environment");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.catalog = Objects.requireNonNull(catalog, "catalog");
