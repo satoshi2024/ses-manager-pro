@@ -71,8 +71,8 @@ public class FeatureEnablementSettingChangeService {
 
     /**
      * 画面「設定」tab の1行（値は秘密ではない。署名者の氏名を含めない）。{@code effective} は承認した設定が portal の判定に効く源か
-     * （DB の源で NF02 顧客ポータルが DB 管理。property の源（dev の既定）では承認しても portal は property の値のまま。復審
-     * rb-fe-b-656d71b8 の P3-5）。
+     * （{@code source=database} のとき {@code true}。{@code source=properties}（dev の既定）では承認しても portal は property の値のまま。
+     * review rb-fe-b-656d71b8 の P3-5・FE-E02）。
      */
     public record SettingView(String key, String value, Integer version, Long requestId, Long requestedBy, Long approvedBy,
                               LocalDateTime approvedAt, boolean decisionConfirmed, String decisionValue,

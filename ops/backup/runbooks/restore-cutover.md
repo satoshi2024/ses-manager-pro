@@ -189,11 +189,11 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
 
 1. **最初の app の起動は `FEATURE_ENABLEMENT_ALLOWED=false` で行い、全ての開放単位を閉じる**。
    - cutover と DB・uploads pointer の対の確認（§4.5.1 の 7）を終えた後の最初の app の起動は、task definition に `FEATURE_ENABLEMENT_ALLOWED=false` を設定して行う（`validate-task-definition.ps1 -Mode Actual -Phase Steady` も `false` を受け付ける）。
-   - 起動時の評価（`FeatureEnablementStartupEvaluator`）が全 13 件の開放単位を `AUTO_CLOSED`（理由 `MASTER_SWITCH_CLOSED`）にし、未決の申請（`PENDING`）を全て `CANCELLED` にする。起動 log に ERROR `errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED` が出、gauge `ses_feature_enablement_master_allowed` が `0` になる。
+   - 起動時の評価（`FeatureEnablementStartupEvaluator`）が開いていた（`OPEN` / `OPEN_PENDING_RESTART`）開放単位を全て `AUTO_CLOSED`（理由 `MASTER_SWITCH_CLOSED`）にし（元から閉じていた単位は閉のまま保つ）、未決の申請（`PENDING`）を全て `CANCELLED` にする。起動 log に ERROR `errorCode=FEATURE_ENABLEMENT_MASTER_CLOSED` が出、gauge `ses_feature_enablement_master_allowed` が `0` になる。
    - NF05 も起動の前の読取り（`IntegrationHubEnablementEnvironmentPostProcessor`）が総スイッチの `false` で両方向を閉じ（`MASTER_SWITCH_CLOSED`）、outbound の起動 barrier（`IntegrationHubOutboundStartupBarrier`）が `m_system_config` の `integration.hub.outbound.runtime.v1` を `v1|OFF|0|<指紋>` に書き直すため、次に開き直す起動では未送信の配信が隔離（`STARTUP_REVALIDATION_REQUIRED`）される。
    - 総スイッチが `false` の間、画面「機能の開放」（`/feature-enablement`）での開放・設定変更の申請と承認は 409 で拒否されるが、一覧・履歴の閲覧と、署名・組の登録・確認・取消し（`REVOKED`）は使える。
 2. **復旧点より後の外部ログ（CloudWatch Logs）と照合し、取消しと閉鎖の理由を反映する**。
-   - app は機能の開放の全ての遷移で構造化ログ `FEATURE_ENABLEMENT_EVENT`（単一行 JSON。`eventType`・`subjectType`・`subjectKey`・`reasonCode`・`actorUserId` 等）を標準出力へ出しており、DB とは独立に CloudWatch Logs（例: `/ecs/ses-manager-prod`。log group の保持期間は PITR で戻り得る binlog の保持期間以上にする。`deploy-runbook.md` §1.0・§1.7）に残る。
+   - app は機能の開放の全ての遷移で構造化ログ `FEATURE_ENABLEMENT_EVENT`（単一行の `key=value` 形式: `tenant=<...> subjectType=<...> subjectKey=<...> subjectId=<...> eventType=<...> from=<...> to=<...> reason=<...> generation=<...> actorType=<...> actorUserId=<...> correlationId=<...>`）を標準出力へ出しており、DB とは独立に CloudWatch Logs（例: `/ecs/ses-manager-prod`。log group の保持期間は PITR で戻り得る binlog の保持期間以上にする。`deploy-runbook.md` §1.0・§1.7）に残る。
    - 復旧点（plan の `effective_checkpoint.consistency_time_utc` または PITR の target 時刻）より後・旧環境の停止までの期間の `FEATURE_ENABLEMENT_EVENT` を CloudWatch Logs Insights 等で抽出し、復元した DB の `t_feature_enablement_event`（復旧点までの行しか無い）と突き合わせる。
      ```text
      fields @timestamp, @message
@@ -201,9 +201,9 @@ DB を復旧点の DB に替えたのに pointer が旧版のまま、または 
      | sort @timestamp asc
      ```
    - 突き合わせて次を行う。
-     - **(a) 復旧点より後に取り消された署名・組（`subjectType` が `SIGN_OFF` または `BUNDLE` で `eventType=REVOKED`）**: 復元した DB では `CONFIRMED` に戻っているため、`FEATURE_ENABLEMENT_ALLOWED=false` のまま画面「機能の開放」の「署名」タブから、該当する署名・組を改めて取り消す（`REVOKED`。NF07 の署名・組は privacy-admin が行う）。復旧点より後に登録・確認されていた新しい署名・組が要る場合は、元の決定書・証跡から登録・確認し直す。
-     - **(b) 復旧点より後に閉鎖された開放単位（`subjectType=UNIT` で `eventType` が `MANUALLY_CLOSED` または `AUTO_CLOSED`）とその `reasonCode`**: 1 により全開放単位は既に `AUTO_CLOSED(MASTER_SWITCH_CLOSED)` になっているが、復旧点より後に閉鎖されていた開放単位と理由（障害・インシデント・条件の不成立・署名の失効等）を一覧にし、その原因が解消していることを確かめるまで 3 で開き直さない。
-     - **(c) 復旧点より後に承認・反映された設定変更（`subjectType=SETTING` で `eventType=SETTING_APPLIED`、例: NF02 顧客ポータルの公開範囲 `visible-since`）**: 復旧点の値に戻っているため、3 の後に必要なら「設定」タブで改めて申請・承認する。
+     - **(a) 復旧点より後に取り消された署名・組（`subjectType=SIGN_OFF` または `subjectType=BUNDLE` で `eventType=REVOKED`）**: 復元した DB では `CONFIRMED` に戻っているため、`FEATURE_ENABLEMENT_ALLOWED=false` のまま画面「機能の開放」の「署名・受理」タブから、該当する署名・組を改めて取り消す（`REVOKED`。NF07 の署名・組は privacy-admin が行う）。復旧点より後に登録・確認されていた新しい署名・組が要る場合は、元の決定書・証跡から登録・確認し直す。
+     - **(b) 復旧点より後に閉鎖された開放単位（`subjectType=FEATURE` で `eventType=CLOSED`（`to=MANUALLY_CLOSED`）または `eventType=AUTO_CLOSED`（`to=AUTO_CLOSED`））とその `reason=`（DB の `t_feature_enablement_event` 側では `reason_code` 列）**: 1 により開いていた開放単位は既に `AUTO_CLOSED(MASTER_SWITCH_CLOSED)`（元から閉じていた単位は閉のまま）になっているが、復旧点より後に閉鎖されていた開放単位と理由（`MANUAL_SECURITY_INCIDENT` 等の手動閉鎖理由、条件の不成立、署名の失効等）を一覧にし、その原因が解消していることを確かめるまで 3 で開き直さない。
+     - **(c) 復旧点より後に承認・反映された設定変更（`subjectType=SETTING` で `eventType=CHANGED`、例: `subjectKey=nf02-customer-portal.visible-since`）**: 復旧点の値に戻っているため、3 の後に必要なら「設定」タブで改めて申請・承認する。
    - 照合した時刻範囲、抽出した事象の一覧、再取消しした署名・組の ID、確認者を change ticket と配備記録に残す。
 3. **`FEATURE_ENABLEMENT_ALLOWED=true` に戻して再起動し、必要な開放単位を二人で開き直す**。
    - 2 の照合と再取消しが済んだら、task definition の `FEATURE_ENABLEMENT_ALLOWED` を `true` に戻して再起動する（`true` に戻しても自動では 1 件も開かない）。

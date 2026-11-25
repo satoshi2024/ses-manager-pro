@@ -91,7 +91,7 @@
    - 常時必須の鍵（`PWA_CONTEXT_SECRET`・`CERTIFICATION_NUMBER_CRYPTO_*` 等）は初回配備から入っている。
    - 機能固有の配備設定・DB 状態が要る開放単位（NF-02 の全社共通カレンダー、NF-05 の鍵・pepper・truststore・許可一覧と outbound の `NF05_OUTBOUND_OFF` 記録、NF-06 の `IMPORT_ROW_REFERENCE_HMAC_KEY` と法人を持つ組織 1 件、NF-07 の `privacy-admin` 2 名以上・Journal 接続 `PRIVACY_JOURNAL_*`、副入口 REL/REG を使うなら `PRIVACY_TRUST_KMS_*`）を先に整える。task definition を変えた場合は全停止で再起動しておく。
 2. **署名・受理（決定 `[決]` と証拠 `[証]`）の登録と二人確認**:
-   - 管理者 A（NF-07 は `privacy-admin` A）が `/feature-enablement` の「署名・受理」タブから、対象開放単位が要する署名種別（4章の各節）ごとに署名文書（PDF、ClamAV 検査を通過するもの）・署名者役割・署名者氏名・参照（決定 ID 等）・署名日・失効日（署名日より後、最長 366 日。未来の署名日はその日まで確認不可）・構造化された値を入力して登録する（`REGISTERED`）。NF-07 の D-01・(D-06)・D-09 は「署名の組を登録」から組 `NF07_DECISION_BINDING` として 1 回で登録する。
+   - 管理者 A（NF-07 は `privacy-admin` A）が `/feature-enablement` の「署名・受理」タブから、対象開放単位が要する署名種別（4章の各節）ごとに署名文書（PDF、ClamAV 検査を通過するもの）・署名者役割・署名者氏名・参照（決定 ID 等）・署名日・失効日（署名日より後、`[決]` は最長 366 日、`[証]` は最長 1,095 日（3 年）。未来の署名日はその日まで確認不可）・構造化された値を入力して登録する（`REGISTERED`）。NF-07 の D-01・(D-06)・D-09 は「署名の組を登録」から組 `NF07_DECISION_BINDING` として 1 回で登録する。
    - 登録者 A とは**別の**管理者 B（NF-07 は `privacy-admin` B）が、元の決定書・受入記録と PDF の SHA-256・参照・期間・構造化された値（digest を含む種別は正規形から自分で再計算した値）を照合し、「確認」を押す（`CONFIRMED`）。A 本人には確認ボタンが出ず、API も 403 で拒否する。
 3. **条件の評価と開放申請（管理者 A）**:
    - 「開放単位」タブで対象行の「詳細」または「再評価」（開放単位ごとに 1 分に 1 回まで）を押し、不足している条件（`UNSATISFIED` / `UNVERIFIABLE`）が 0 件であることを確かめる（子単位を開く場合は先に親単位を開いておく）。
@@ -112,12 +112,12 @@
 ### 3.4 緊急の総スイッチ（`FEATURE_ENABLEMENT_ALLOWED=false`）と誤設定の代償
 
 - 画面 `/feature-enablement` や DB の書込み経路自体に問題があって画面から閉じられない緊急時、および **PITR（backup からの復元）の後の最初の起動**（`ops/backup/runbooks/restore-cutover.md` §4.7）にだけ、task definition の `FEATURE_ENABLEMENT_ALLOWED=false`（`deploy-runbook.md` §1.0 の 42）で全停止・再起動する。
-- 起動時に**全 13 件の開放単位が一括で `AUTO_CLOSED(MASTER_SWITCH_CLOSED)`** になり、未決の申請は全て `CANCELLED`、NF-05 outbound の barrier も `OFF` に書き直される。`false` の間は開放・設定変更の申請と承認が全て 409 で拒否される（閲覧と署名・組の登録・確認・取消しは可能）。
+- 起動時に**開いていた（`OPEN` / `OPEN_PENDING_RESTART`）全ての開放単位が一括で `AUTO_CLOSED(MASTER_SWITCH_CLOSED)`** になり（元から閉じていた単位は閉のまま）、未決の申請は全て `CANCELLED`、NF-05 outbound の barrier も `OFF` に書き直される。`false` の間は開放・設定変更の申請と承認が全て 409 で拒否される（閲覧と署名・組の登録・確認・取消しは可能）。
 - **誤って `false` にして起動したときの代償**: `FEATURE_ENABLEMENT_ALLOWED=true` に戻して再起動しても、**閉じた開放単位は 1 件も自動では開かない**。開いていた全ての開放単位について二人承認（申請＋承認）をやり直す必要があり、NF-05 は承認の後にもう 1 回の再起動と outbound の隔離確認も要る。平時の task definition 更新では `FEATURE_ENABLEMENT_ALLOWED=true` を変えないこと。
 
 ## 4. 注意事項と開放単位ごとの条件・署名種別
 
-署名種別の `[決]` は決定（`SignOffKindClass.DECISION`）、`[証]` は証拠（`SignOffKindClass.EVIDENCE`。期間延長 `extend` の申請・二人承認が可能）を表す。有効期間はいずれも署名日より後・最長 366 日で、失効日（JST 0:00）を迎えると snapshot の `openUntil` により即時に実効閉になり、日の始まりの評価で `AUTO_CLOSED(SIGN_OFF_EXPIRED)` に遷移する。
+署名種別の `[決]` は決定（`SignOffKindClass.DECISION`、有効期間は署名日より後・最長 366 日）、`[証]` は証拠（`SignOffKindClass.EVIDENCE`、有効期間は署名日より後・最長 1,095 日（3 年）。期間延長 `extend` の申請・二人承認が可能で、延長後の失効日は承認日より後・最長 1,095 日。design §18 J-08）を表す。失効日（JST 0:00）を迎えると snapshot の `openUntil` により即時に実効閉になり、日の始まりの評価で `AUTO_CLOSED(SIGN_OFF_EXPIRED)` に遷移する。
 
 ### 4.1 共通
 

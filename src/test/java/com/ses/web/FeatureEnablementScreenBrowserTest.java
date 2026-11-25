@@ -3,6 +3,7 @@ package com.ses.web;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -86,6 +87,11 @@ class FeatureEnablementScreenBrowserTest {
     @AfterEach
     void cleanUp() {
         cleanFeatureEnablementTables();
+    }
+
+    @AfterAll
+    static void removeTempUploadDir() {
+        deleteRecursively(UPLOAD_DIR);
     }
 
     @Test
@@ -411,3 +417,4 @@ class FeatureEnablementScreenBrowserTest {
         }
     }
 }
+
