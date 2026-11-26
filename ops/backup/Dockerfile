@@ -25,10 +25,10 @@ ARG BASE_IMAGE=debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048
 FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE
-# MySQL 8.4 LTS（production の server と同じ系列。RB-W 8.4 対応）。版は 2026-11-18 に repo.mysql.com の
+# MySQL 8.4 LTS（production の server と同じ系列。RB-W 8.4 対応）。版は 2026-11-25 に repo.mysql.com の
 # apt/debian/dists/bookworm/mysql-8.4-lts/binary-amd64/Packages で mysql-community-client と
-# mysql-community-server-core がともに 8.4.13-1debian12 であることを確認した値
-ARG MYSQL_CLIENT_VERSION=8.4.13
+# mysql-community-server-core がともに 8.4.13.1-1debian12 であることを確認した値（上流で 8.4.13-1debian12 から更新）
+ARG MYSQL_CLIENT_VERSION=8.4.13.1
 ARG MYSQL_DEB_REVISION=1debian12
 ARG MYSQL_APT_SUITE=bookworm
 ARG MYSQL_APT_COMPONENT=mysql-8.4-lts

@@ -286,12 +286,20 @@ case_preflight_server_80() {
   assert_no_secret "$out"
 }
 
-# 同じ 8.4 系列なら patch の違う server（8.4.1）は受け付ける（client と同じ major.minor）
+# 同じ 8.4 系列なら patch の違う server（8.4.1）や 4 桁版の client（8.4.13.1）も受け付ける（同じ major.minor）
 case_preflight_server_same_series_other_patch() {
   setup_env
   export FAKE_MYSQL_STATUS_ROW=$'8.4.1\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   run_preflight
   assert_zero "$code" "server 8.4.1 と client 8.4.13 は同じ系列で exit 0"
+
+  setup_env
+  export FAKE_CLIENT_VERSION_LINE='mysql  Ver 8.4.13.1 for Linux on x86_64 (MySQL Community Server - GPL)'
+  export FAKE_MYSQLBINLOG_VERSION_LINE='mysqlbinlog  Ver 8.4.13.1 for Linux on x86_64 (MySQL Community Server - GPL)'
+  export FAKE_MYSQLDUMP_VERSION_LINE='mysqldump  Ver 8.4.13.1 for Linux on x86_64 (MySQL Community Server - GPL)'
+  run_preflight
+  assert_zero "$code" "4 桁版 client 8.4.13.1 と server 8.4.13 は同じ 8.4 系列で exit 0"
+  assert_contains "$out" '"mysql_client_version": "8.4.13.1"' "4 桁版 client version をそのまま記録"
 }
 
 # mysql・mysqlbinlog・mysqldump はどれも server と同じ 8.4 系列であること（server が 8.4 でも、どれか 1 つが 8.0 なら exit 10）
