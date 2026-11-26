@@ -242,9 +242,8 @@ class ImportAdmissionPortTest {
                         com.ses.featureenablement.state.FeatureEnablementTenant.fixed("default"), properties,
                         new com.ses.featureenablement.state.FeatureEnablementOverlay(), december);
         holder.replace(admissionSnapshot(LocalDate.of(2026, 12, 1), LocalDate.of(2027, 11, 30)));
-        ImportAdmissionPort admission = new ApprovedSourceImportAdmissionPort(new ImportAdmissionApprovalSource.Database(
-                holder, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(),
-                new ImportAdmissionApprovalSource.Property(null)), audit, december);
+        ImportAdmissionPort admission = new ApprovedSourceImportAdmissionPort(
+                new ImportAdmissionApprovalSource.Database(holder), audit, december);
         ImportAuthorizedContext context = new ImportAuthorizedContext("default", 1, 2);
 
         assertNotNull(admission.admitBeforeBody(context, new ImportUploadSource(3, "CRM", 1), ImportEntity.CUSTOMER,

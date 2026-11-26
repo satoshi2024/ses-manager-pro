@@ -390,7 +390,7 @@ public class FeatureEnablementQueryService {
     private UnitSummary summary(UnitDefinition unit, FeatureEnablementSnapshot snapshot, FeatureEnablementRequest pending,
                                 FeatureEnablementActor actor) {
         Feature feature = unit.feature();
-        boolean managed = stateSource.database() && catalog.databaseManaged(feature);
+        boolean managed = stateSource.database();
         FeatureEnablementSnapshot.UnitView view = snapshot.unit(feature);
         boolean effective = switches.isEnabled(feature);
         LocalDate openUntil = managed && !LocalDate.MIN.equals(view.openUntil()) && !LocalDate.MAX.equals(view.openUntil())

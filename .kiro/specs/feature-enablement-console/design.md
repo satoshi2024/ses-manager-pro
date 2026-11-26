@@ -907,16 +907,16 @@ NF05 の bean の有無は `@Conditional`（要件 §1）が bean の定義の�
 - `System.getenv()` の名前と `System.getProperties()` の key を、`validate-task-definition.ps1` の `NameKey`（`_`・`.`・`-` を除き大文字）と同じ正規化で照合する: `FEATURENF*ENABLED`、`APPFEATURES*`、`PRIVACYRETENTIONENABLED`、`PRIVACYDSARENABLED`、`PRIVACYDSARDUEDAYS`、`PRIVACYDSARPACKAGEMAXAGE`、`PRIVACYAPPROVAL*`、`IMPORTADMISSION*`・`APPIMPORTCENTERADMISSION*`、`INTEGRATIONHUB(PUBLICAPI|EXTERNALTRANSPORT)ENABLED`、`INTEGRATIONHUB(INBOUND|OUTBOUND)(DECISIONID|APPROVALDIGEST)`、`INTEGRATIONHUBPUBLICAPIAPPROVAL(DECISIONID|APPROVALDIGEST)` 等の正規名、`FEATURENF01DUALCONFIRMATIONPRIVACYSIGNOFFREF`、`FEATURENF02CUSTOMERPORTALVISIBLESINCE`。`SPRING_APPLICATION_JSON` に `app.features`・`privacy.retention`・`privacy.dsar.enabled`・`privacy.approval`・`app.import-center.admission`・`integration.hub.*.enabled`・`integration.hub.*.approval` があれば同じく拒否する。
 - 1 つでもあれば `IllegalStateException`（変数名の一覧だけ。値を出さない）で起動を止める（§18 J-12）。
 - 同じ validator が、prod の `app.feature-enablement.source` が `database` でなければ起動を止める。
-- 段階 A〜D の間は、移行済みの開放単位の変数だけを拒否する（§3.1 の印）。段階 E で全てを拒否する。
+- 段階 A〜D の間は移行済みの開放単位の変数だけを拒否し、段階 E（FE-E02）で段階の印を撤去して全 13 件の開放単位の変数を無条件に拒否する。
 - RB §1.0 に行を足し、`infra/ecs/task-definition.prod.json` の雛形に `FEATURE_ENABLEMENT_ALLOWED=true` を置く（CLAUDE.md: prod の fail-fast を足す change で同時に行う）。
 
-**実装で決めた細部（FE-A08）**:
+**実装で決めた細部（FE-A08・FE-E01・FE-E02）**:
 
 - 検査は `SmartInitializingSingleton`（port を開く前、`FeatureEnablementStartupEvaluator` の起動時の評価より前）で1回だけ行う。総スイッチの原文の検査は全 profile、源・運用値・旧い変数は prod だけ（`Environment.acceptsProfiles`）。
 - 名前の正規化は ps1 の `NameKey` を広げた形（大文字にして英数字以外を全て除く。`app.features[nf01].enabled` のような綴りも同じ key になる）。
-- 旧い変数は2種類で判定する（段階の整合 M1）: 開閉の変数は目録の DB 管理の印から自動で作る一覧と完全一致で比べ（`legacyKeys`）、開閉以外の旧い変数（署名・設定へ移した承認の値）は `LEGACY_SETTING_RULES` の1つの表（行 = 開放単位の集合と名前。集合のどれかが DB 管理なら正規化した名前の前方一致で拒否）で比べる。段階 B・C・D が別々に足した3つの仕組み（開放単位ごとの名前・開放単位の集合と接頭辞・NF05 の完全一致）をこの表にまとめた。配備の設定に残る運用値（`PRIVACY_DSAR_DEADLINE_WARNING_DAYS`・Journal・trust・行参照の鍵・NF05 の許可の一覧等）は、どの行の名前でも始まらないように行の名前を選ぶ。`application.yml`・`application-prod.yml` の placeholder のうち規則に当たるものが移した値だけであることを `FeatureEnablementProductionValidatorTest` が確かめる（運用値を規則で拒否すると、prod はその運用値で起動しなくなる）。
+- 旧い変数は2種類で判定する（段階の整合 M1・FE-E02）: 開閉の変数は目録の全 13 開放単位から自動で作る一覧と完全一致で比べ（`legacyKeys`）、開閉以外の旧い変数（署名・設定へ移した承認の値）は `LEGACY_SETTING_RULES` の1つの表（正規化した名前の前方一致で拒否）で比べる。段階 B・C・D が別々に足した3つの仕組み（開放単位ごとの名前・開放単位の集合と接頭辞・NF05 の完全一致）をこの表にまとめ、FE-E02 で段階の印を外した。配備の設定に残る運用値（`PRIVACY_DSAR_DEADLINE_WARNING_DAYS`・Journal・trust・行参照の鍵・NF05 の許可の一覧等）は、どの行の名前でも始まらないように行の名前を選ぶ。`application.yml`・`application-prod.yml` の placeholder のうち規則に当たるものが移した値だけであることを `FeatureEnablementProductionValidatorTest` が確かめる（運用値を規則で拒否すると、prod はその運用値で起動しなくなる）。
 - 運用値の上書き: 環境変数と system property は `APPFEATUREENABLEMENT` で始まる名前（総スイッチの正規名 `APP_FEATURE_ENABLEMENT_ALLOWED` を含む）と、`FEATUREENABLEMENTALLOWED` 以外の `FEATUREENABLEMENT` で始まる名前を拒否する。`SPRING_APPLICATION_JSON`（環境変数）と `spring.application.json`（system property）の key は総スイッチを含めて全て拒否する（総スイッチは task definition の environment に置く）。
-- 照合（`validate-task-definition.ps1`）は、`FEATURE_ENABLEMENT_ALLOWED` が environment に1つあり原文で `true`/`false`（雛形・実値の両 mode、両 phase）、運用値の名前が無く、`SPRING_APPLICATION_JSON` に `app.feature-enablement`・`FEATURE_ENABLEMENT_*` が無いことを見る。旧い変数の FAIL は FE-E01（段階 E）で全てに広げる。それまでは段階 A の7件の旧い変数を照合は通し、起動時検査だけが止める（RB §1.0 の「機能の開放」に書いた）。
+- 照合（`validate-task-definition.ps1`）は、`FEATURE_ENABLEMENT_ALLOWED` が environment に1つあり原文で `true`/`false`（雛形・実値の両 mode、両 phase）、運用値の名前が無く、`SPRING_APPLICATION_JSON` に `app.feature-enablement`・`FEATURE_ENABLEMENT_*`・`app.features`・`app.import-center` 等が無いことを見る。段階 A〜D の間は旧い変数を照合は通し起動時検査だけが止めていたが（実装統合 review rb-fe-int P3-2）、段階 E（FE-E01）で全 13 開放単位の開閉の変数（`$legacySwitchKeys`）と移した承認の値（`$legacySettingPrefixes`）を `Initial`・`Steady` の両 phase（`environment`・`secrets`・`SPRING_APPLICATION_JSON`）で FAIL にし、Java の一覧との完全一致を `FeatureEnablementLegacySettingTest` で固定した。あわせて `privacy-trust` の `containerPath` が `/`・`/app`・`/app/config*`・`/app/uploads*` を覆わないことも検査する（A2 N1・N2）。
 
 ## 11. 安全
 

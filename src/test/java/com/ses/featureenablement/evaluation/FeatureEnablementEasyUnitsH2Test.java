@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -46,7 +47,9 @@ class FeatureEnablementEasyUnitsH2Test {
 
     private static final LocalDate SIGNED = LocalDate.of(2026, 11, 1);
     private static final LocalDate EXPIRES = LocalDate.of(2027, 10, 1);
-    private static final Set<Feature> STAGE_A = FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED;
+    private static final Set<Feature> EASY_UNITS = Collections.unmodifiableSet(EnumSet.of(
+            Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03, Feature.NF03_CERTIFICATION_PII,
+            Feature.NF04, Feature.NF10));
 
     @Autowired
     private FeatureEnablementService service;
@@ -56,10 +59,6 @@ class FeatureEnablementEasyUnitsH2Test {
     private FeatureEnablementOverlay overlay;
     @Autowired
     private FeatureEnablementProperties properties;
-    @Autowired
-    private PropertyFeatureEnablementStateSource propertySource;
-    @Autowired
-    private FeatureSwitchProperties switchProperties;
     @Autowired
     private FeatureEnablementCatalog catalog;
     @Autowired
@@ -78,13 +77,10 @@ class FeatureEnablementEasyUnitsH2Test {
         fixture = new FeatureEnablementH2Fixture(jdbc, catalog);
         requester = fixture.admin();
         approver = fixture.admin();
-        for (Feature feature : STAGE_A) {
+        for (Feature feature : EASY_UNITS) {
             fixture.confirmedSignOffs(feature, SIGNED, EXPIRES);
         }
-        // 本番の目録の段階 A の印で、試験の context の snapshot・一時の閉鎖・時計を読む DB の源（段階 B〜D で印を足した開放単位は
-        // それぞれの段階の試験が確かめるため、ここは段階 A の7件だけに印を付けた写しで比べる）
-        database = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay,
-                FeatureEnablementCatalog.standard().withDatabaseManaged(STAGE_A), propertySource, properties, clock));
+        database = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay, properties, clock));
     }
 
     @AfterTransaction
@@ -96,17 +92,12 @@ class FeatureEnablementEasyUnitsH2Test {
     }
 
     @Test
-    void 何も開いていなければ7件は閉じ印の無い開放単位はpropertyの値のまま() {
+    void 何も開いていなければ全13件が閉じpropertyの源の全閉と同じ応答になる() {
         holder.reload();
 
         assertSameAsProperty(EnumSet.noneOf(Feature.class));
-        for (Feature feature : STAGE_A) {
+        for (Feature feature : Feature.values()) {
             assertThat(database.isEnabled(feature)).as(feature.name()).isFalse();
-        }
-        for (Feature feature : EnumSet.complementOf(EnumSet.copyOf(STAGE_A))) {
-            assertThat(database.isEnabled(feature)).as("印の無い %s は property の値", feature.name())
-                    .isEqualTo(switchProperties.toggle(feature).isEnabled()
-                            && feature.parent().map(parent -> database.isEnabled(parent)).orElse(true));
         }
     }
 
@@ -128,8 +119,8 @@ class FeatureEnablementEasyUnitsH2Test {
         fixture.openDirectly(Feature.NF03_CERTIFICATION_PII, requester, approver);
         holder.reload();
 
-        assertSameAsProperty(EnumSet.copyOf(STAGE_A));
-        for (Feature feature : STAGE_A) {
+        assertSameAsProperty(EnumSet.copyOf(EASY_UNITS));
+        for (Feature feature : EASY_UNITS) {
             assertThat(database.isEnabled(feature)).as(feature.name()).isTrue();
         }
     }
@@ -155,14 +146,13 @@ class FeatureEnablementEasyUnitsH2Test {
     }
 
     /**
-     * DB の源（本番の目録の印）の応答が、段階 A の7件を {@code opened} だけ開いた設定値（他の開放単位は試験の context の設定値）の
-     * property の源と同じであることを、実効値・遮断する入口・menu・scheduler の入口判定・表示制御の識別子で比べる。
+     * DB の源の応答が、{@code opened} だけを開いた設定値の property の源と同じであることを、実効値・遮断する入口・menu・scheduler の
+     * 入口判定・表示制御の識別子で比べる。
      */
     private void assertSameAsProperty(Set<Feature> opened) {
         FeatureSwitchProperties expectedProperties = new FeatureSwitchProperties();
         for (Feature feature : Feature.values()) {
-            expectedProperties.toggle(feature).setEnabled(STAGE_A.contains(feature) ? opened.contains(feature)
-                    : switchProperties.toggle(feature).isEnabled());
+            expectedProperties.toggle(feature).setEnabled(opened.contains(feature));
         }
         FeatureSwitches expected = new FeatureSwitches(expectedProperties);
         List<String> menuKeys = new ArrayList<>();

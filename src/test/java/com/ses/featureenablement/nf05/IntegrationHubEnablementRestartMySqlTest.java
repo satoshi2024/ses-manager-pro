@@ -264,10 +264,10 @@ class IntegrationHubEnablementRestartMySqlTest {
     }
 
     private IntegrationHubRuntimeSwitch runtime(IntegrationHubExternalApiProperties properties) {
-        FeatureSwitches switches = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay, catalog,
-                propertySource, featureProperties, Clock.systemUTC()));
+        FeatureSwitches switches = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay,
+                featureProperties, Clock.systemUTC()));
         return new IntegrationHubRuntimeSwitch(properties, provider(switches), provider(holder), provider(overlay),
-                provider(catalog), provider(featureProperties));
+                provider(featureProperties));
     }
 
     private IntegrationHubOutboundStartupBarrier barrier(IntegrationHubExternalApiProperties properties,

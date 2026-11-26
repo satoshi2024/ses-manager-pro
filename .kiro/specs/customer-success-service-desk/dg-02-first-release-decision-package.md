@@ -10,11 +10,11 @@
 - 署名者: **CS Owner（Customer Success 業務Owner。現時点で未指名 `<OWNER>`）**。実装側・AIは署名を代行しない。
 - 値の出典: traceability の DG-02 本文（以下「台帳」）、`inventory.md` 5章の DG-02 提案（以下「提案」）、および現行実装（以下「実装」）。三者が食い違う箇所は「差分」として明記し、どちらを初回値にするかを署名時に選ぶ。
 
-## 0. 前提の変更（決定済み（2026-11-22、利用者））
+## 0. 前提の変更（2026-11-22 利用者決定、および 2026-11-23〜25 機能の開放への移行）
 
-- 2026-11-22 の利用者決定で、NF-02 本体と子の顧客ポータルの問い合わせ（`FEATURE_NF02_CUSTOMER_PORTAL_ENABLED`）の両方を**初回リリースで ON** にする。冒頭の B-NF02-2（初回は内部サービスデスクだけ、portal は第二段階）は変更された。第二段階は設けない。
-- DG-02 の署名は初回配備（go-live）の前提である（`production-launch/deploy-runbook.md` §1.7 の NF02 の行。**未取得**）。
-- 本資料の本文と署名欄は旧前提（portal は第二段階）のまま残す（署名欄は変えない）。次の項目は、portal を初回から開くことで意味が変わるため、**CS Owner が署名の前に再確認する（要再確認）**。どう読み替えるか・値を変えるかの判断は CS Owner が行い、ここでは決めない。
+- 2026-11-23〜25 の `feature-enablement-console`（FE-A〜E）により、prod では NF-02 本体（`NF02`）と子の顧客ポータルの問い合わせ（`NF02_CUSTOMER_PORTAL`）は既定 `CLOSED` で配備され、画面「機能の開放」（`/feature-enablement`）で署名（本体は `NF02_DG02` と全社共通カレンダー、子は `NF02_PORTAL_PUBLICATION`・`NF02_PORTAL_DG02_AC`・`NF02_PORTAL_VISIBLE_SINCE_DECISION`・`NF02_PORTAL_BROWSER_CHECK`、公開開始時刻を設定するなら `NF02_PORTAL_INVENTORY`）の二人確認と開放申請・承認を経て再起動なしで開く。公開開始時刻も環境変数ではなく同画面の「設定」タブ（`nf02-customer-portal.visible-since`）の申請・二人承認で変更する（旧い `FEATURE_NF02*_ENABLED`・`FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` を prod に置くと起動しない）。
+- したがって DG-02 と子の署名は **go-live（初回配備）自体の前提ではなく、画面 `/feature-enablement` で `NF02`・`NF02_CUSTOMER_PORTAL` を開く前の前提**である（一方、顧客ポータル全体の Bootstrap 参照修正の実ブラウザ確認は初回配備から効くため go-live の前提のまま。`production-launch/deploy-runbook.md` §1.7。どれも**未取得**）。
+- 本資料の本文と署名欄は旧前提（portal は第二段階）のまま残す（署名欄は変えない）。`NF02_CUSTOMER_PORTAL` を開く時は次の項目で意味が変わるため、**CS Owner が署名の前に再確認する（要再確認）**。どう読み替えるか・値を変えるかの判断は CS Owner が行い、ここでは決めない。
   - DG-02-A: 署名欄の「第二段階の値として記録」は、初回リリースの値になる。
   - DG-02-B4: 「portal からの返信による自動再開は第二段階」は、初回リリースから効く。
   - DG-02-C1: 「顧客への表示は第二段階」は、初回リリースから（追加決定の範囲の問い合わせについて）顧客に表示される。

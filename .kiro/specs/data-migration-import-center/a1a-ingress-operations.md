@@ -24,7 +24,7 @@
   - `/api/import-center/**` の上表以外の method・path は `ActionPermissionResolver` が action key を返さず、`MenuPermissionFilter` が管理者を含め 403 にする（fail-closed）。route 単位の閉鎖であり、role 別の action allow-list ではない（action 層は baseline＋deny のまま。新しい API root は追加していない）。
   - 本番 classpath の `ImportAdmissionPort` 実装は `ApprovedSourceImportAdmissionPort` だけ。署名済み Data Owner 決定 ID と承認 source 一覧（§10）が揃うまで、upload は body 読取前に 403 になる（Q-5）。
   - 本番 classpath に apply 実装 package は無い。
-- 公開可否は機能スイッチ NF06（`app.features.nf06.enabled`、環境変数 `FEATURE_NF06_ENABLED`、既定 OFF）で別に制御する。OFF の間は `/api/import-center/**` が管理者を含め 404 になる。照合台帳の回収 batch（§6）は OFF でも止めない。
+- 公開可否は機能スイッチ NF06（prod では画面「機能の開放」`/feature-enablement` の開放単位 `NF06`、既定 `CLOSED`。dev・test の配備設定の源では `app.features.nf06.enabled` / `FEATURE_NF06_ENABLED` で、prod では旧い変数として起動を拒否する）で別に制御する。閉の間は `/import-center/**`・`/api/import-center/**` が管理者を含め 404 になる。照合台帳の回収 batch（§6）は閉でも止めない。
 - 上記は `ImportCenterApplyEntryClosedTest` で固定している。apply を開放するバッチ（W3-B6）は、DG-06 と admission port の承認条件に合わせて同 test を更新すること。
 
 ## 2. 120秒総期限の意味（B-NF06-1）
@@ -198,7 +198,9 @@
 ## 10. 本番 admission の承認設定（Q-5）
 
 - 本番の `ImportAdmissionPort` は `ApprovedSourceImportAdmissionPort`。既定は deny で、承認設定が全て有効な場合だけ upload を受け付ける。評価は `ImportAdmissionApproval`（I/O なし）が行う。考え方は NF08 外部送信承認（`AiExternalSendApproval`）と同じ（ID 形式・placeholder 検出・有効期間・承認 digest・fail-closed）。
-- 設定（値は署名済み Data Owner 決定書の転記。秘密値は置かない。既定は全て未設定）:
+- **値の注入元（FE-B02・FE-E02）**:
+  - **prod（`source=database`）**: 画面 `/feature-enablement` の署名 `NF06_ADMISSION`（参照＝決定 ID、署名日・失効日、構造化された値 `decisionId`・`tenantId`・`sourceCodes`・`approvalDigest`）として登録し、別の管理者が確認する（`ImportAdmissionApprovalSource` が確認済みの署名から読むため差替えに再起動は不要）。下表の `IMPORT_ADMISSION_*`（および `app.import-center.admission.*`）を prod の配備設定に置くと起動しない（`FeatureEnablementProductionValidator`・`validate-task-definition.ps1`）。
+  - **dev・test（`source=properties`）**: 下表の設定キーを読む（値は署名済み Data Owner 決定書の転記。秘密値は置かない。既定は全て未設定）:
 
 | 設定キー | 環境変数 | 形式・検査 |
 |---|---|---|
@@ -236,10 +238,9 @@ printf 'crm\ncrm-2\ncrm2\ncrm_2\n' | LC_ALL=C sort
 
 - 判定: 承認が有効でも、現在の tenant が承認 tenant と一致し、source code が承認一覧に含まれ、entity が `CUSTOMER`・schema が `ses-import-v1` の場合だけ許可する。body 読取前（`admitBeforeBody`）と内容 hash 確定後（`admitContent`）の両方で評価し直し、日付の変わり目の失効と、token 発行時と異なる決定（決定 ID・digest）を拒否する。
 - 監査: 判定結果を `t_audit_log` へ残す（method `ADMISSION`、uri `/api/import-center/uploads;phase=…;result=…;decision=…;source=…`）。許可は `recordRequired`（`IMPORT_ADMISSION_ALLOWED`）で、記録できなければ許可しない（503 `error.import.auditUnavailable`）。拒否（`IMPORT_ADMISSION_DENIED`、`reason=` に固定の違反コード）は best-effort で、記録の成否にかかわらず拒否する。CSV 本文・hash 全体は書かない（content phase は SHA-256 の先頭 12 桁だけ）。
-- 起動時（`ImportAdmissionStartupValidator`、prod profile のみ）:
-  - NF06 OFF: 起動を止めない（初回の起動（bootstrap）は OFF。初回リリース（go-live）では ON にする（2026-11-22 利用者決定。`production-launch/feature-switches.md` 3.1））。部分的な設定があれば WARN だけを出す。
-  - NF06 ON: 構造的な不備（未設定・部分設定・形式不正・placeholder・digest 不一致・有効期間上限超過等）があれば起動失敗。メッセージには固定の違反コードだけを出す。
-  - NF06 ON で不備が時間要因だけ（署名日前・失効）: 起動は継続し、upload だけを拒否したまま WARN `NF06_IMPORT_ADMISSION_STOPPED_AT_STARTUP` を出す。再承認後に設定を差し替えて再起動する。
+- 開放の条件と起動時の扱い（FE-B02 の後）:
+  - prod では `ImportCenterEnablementConditions` が開放単位 `NF06` の評価器として admission 承認・行参照鍵・`import.metadata.manage` の付与・単一法人を検査し、不成立なら開けない・開いていれば自動閉鎖する（**prod の起動は止めない**。起動時の `ImportAdmissionStartupValidator` は開いている `NF06` の不備を WARN `NF06_IMPORT_ADMISSION_STOPPED_AT_STARTUP` で出すだけ。`source=properties` のみ構造的不備を例外にする）。
+  - 署名 `NF06_ADMISSION` の失効日（JST 0:00）以降は snapshot の `openUntil` と admission port の両方で即時に閉じ、日の始まりの評価で `AUTO_CLOSED` になる。再承認した新しい署名を確認したうえで二人で開き直す（再起動は不要）。
 
 ## 11. 検証・preview・error export（W3-05）
 
@@ -302,7 +303,7 @@ printf 'crm\ncrm-2\ncrm2\ncrm_2\n' | LC_ALL=C sort
   - 既存データへの影響: 表示値だけが変わる。本番では NF06 を一度も ON にしていないため、以前に出力した CSV は存在しない（dev/test で以前に出力した CSV の値とは一致しない）。鍵を差し替えた場合も同様に全ての表示値が変わる。
 - 鍵: `app.import-center.row-reference.hmac-key`（環境変数 `IMPORT_ROW_REFERENCE_HMAC_KEY`）。Base64（標準・URL-safe）で復号後32 byte以上。`application.yml` の既定値は開発用で、prod では使えない（`application-prod.yml` は既定を空にし、開発用鍵と test 用鍵は実行時にも拒否する。表記を変えても復号後の byte 列で比べるため、`=` の省略や URL-safe 表記では通らない）。
   - 鍵が使えない間は、preview・error export を認可確認の直後・監査と原本読込の前に 503 `error.import.rowReferenceUnavailable` で拒否する（fail-closed）。
-  - prod の起動検査 `ImportRowReferenceKeyStartupValidator`（`ImportAdmissionStartupValidator` と同じ考え方）: NF06 OFF は起動を止めない（設定済みで使えない鍵だけ WARN）。NF06 ON で未設定・形式不正・開発用鍵なら起動失敗。message は `state=` の固定値だけで、鍵の値を log・例外へ出さない。
+  - prod の評価と起動時の確認（`ImportCenterEnablementConditions`・`ImportRowReferenceKeyStartupValidator`）: 行参照の鍵は secret store から配備設定（`IMPORT_ROW_REFERENCE_HMAC_KEY`）へ注入する。未設定・形式不正・開発用鍵でも prod の起動自体は止めず、WARN を出して開放単位 `NF06` を開けない（開いていれば自動閉鎖する。preview・error export も 503 で拒否）。message は `state=` の固定値だけで、鍵の値を log・例外へ出さない。
 - 試験: `ImportSourceRowReferenceTest`、`ImportValidationResultServiceTest`（preview と CSV が同じ行参照で保存 hash を出さない・鍵の差替えで値が変わる・鍵が無ければ監査と原本読込の前に503）。
 
 ### 14.2 `import.metadata.manage` の明示許可（P2-3(a)）

@@ -13,7 +13,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -21,8 +20,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 機能の開放の H2 試験の共通の構成（同じ構成の試験 class は1つの context を共有する）。
  *
  * <ul>
- *   <li>目録: 全ての開放単位に DB 管理の印を付け（段階 A の本番の目録は印なし）、組の流れの試験用の組の種類
- *       {@link #TEST_BUNDLE}（member {@code NF04_BUNDLE_A}・{@code NF04_BUNDLE_B}、NF04 が要する）を足した写し。</li>
+ *   <li>目録: 本番の目録に、組の流れの試験用の組の種類 {@link #TEST_BUNDLE}（member {@code NF04_BUNDLE_A}・{@code NF04_BUNDLE_B}、
+ *       NF04 が要する）を足した写し。</li>
  *   <li>時計: 進められる時計（{@link MutableTestClock}。試験の前に {@link MutableTestClock#reset} する）。</li>
  *   <li>監査: {@code AuditLogService} の spy（監査の失敗の試験が stub する）。</li>
  * </ul>
@@ -67,8 +66,7 @@ public class FeatureEnablementTestConfiguration {
                                         SignOffKind.ReferenceRule.GENERIC, List.of(), TEST_BUNDLE, false),
                                 new SignOffKind(TEST_BUNDLE_B, SignOffKindClass.EVIDENCE, List.of("SRE"),
                                         SignOffKind.ReferenceRule.GENERIC, List.of(), TEST_BUNDLE, false)),
-                        Feature.NF04)
-                .withDatabaseManaged(EnumSet.allOf(Feature.class));
+                        Feature.NF04);
     }
 
     /** 進められる時計（context の全ての bean が同じ時計を見る）。 */

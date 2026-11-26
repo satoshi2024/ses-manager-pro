@@ -51,7 +51,7 @@ class PrivacyEnablementStateReaderH2Test {
     @BeforeEach
     void setUp() {
         fixture = new FeatureEnablementH2Fixture(jdbc, catalog);
-        reader = new PrivacyEnablementStateReader(properties, catalog, stateMapper, requestMapper,
+        reader = new PrivacyEnablementStateReader(properties, stateMapper, requestMapper,
                 FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT));
     }
 
@@ -79,16 +79,15 @@ class PrivacyEnablementStateReaderH2Test {
     }
 
     @Test
-    void 表を読めなければUNREADABLEでDB管理でなければNOT_DATABASE_MANAGED() {
+    void 表を読めなければUNREADABLEでpropertyの源ならNOT_DATABASE_MANAGED() {
         FeatureEnablementStateMapper broken = mock(FeatureEnablementStateMapper.class);
         when(broken.selectByTenant(any())).thenThrow(new IllegalStateException("io"));
-        assertThat(new PrivacyEnablementStateReader(properties, catalog, broken, requestMapper,
+        assertThat(new PrivacyEnablementStateReader(properties, broken, requestMapper,
                 FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT)).read())
                 .isEqualTo(PrivacyEnablementStateReader.Result.UNREADABLE);
 
-        FeatureEnablementCatalog propertyManaged = FeatureEnablementCatalog.standard()
-                .withDatabaseManaged(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED);
-        assertThat(new PrivacyEnablementStateReader(properties, propertyManaged, stateMapper, requestMapper,
+        FeatureEnablementProperties propertyManaged = new FeatureEnablementProperties();
+        assertThat(new PrivacyEnablementStateReader(propertyManaged, stateMapper, requestMapper,
                 FeatureEnablementTenant.fixed(FeatureEnablementH2Fixture.TENANT)).read())
                 .isEqualTo(PrivacyEnablementStateReader.Result.NOT_DATABASE_MANAGED);
     }

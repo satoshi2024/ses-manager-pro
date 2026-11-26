@@ -142,15 +142,16 @@ try {
   Case 'steady, scheduler enabled' $SteadyOn 'PASS' { New-Steady 'true' }
   Case 'steady, scheduler enabled and unset' $SteadyOn 'PASS' { $td = New-Steady 'true'; Remove-Env (App $td) 'APP_SCHEDULING_ENABLED'; $td }
   Case 'steady, scheduler disabled (drain revision)' $SteadyOff 'PASS' { New-Steady 'false' }
-  Case 'steady, feature switches by their documented names' $SteadyOn 'PASS' {
-    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_ENABLED' 'true'; Set-Env (App $td) 'PRIVACY_RETENTION_ENABLED' 'true'; $td }
-  Case 'steady, NF05 opened with settings that have no short name (DG-05 draft 4.1)' $SteadyOn 'PASS' {
+  Case 'steady, NF05 infrastructure settings that stay in deployment (DG-05 draft 4.1)' $SteadyOn 'PASS' {
     $td = New-Steady 'true'; $app = App $td
-    Set-Env $app 'INTEGRATION_HUB_PUBLIC_API_ENABLED' 'true'
     Set-Env $app 'INTEGRATION_HUB_PUBLIC_API_APPROVAL_ALLOWED_CLIENT_CIDRS' '10.1.0.0/24'
+    Set-Env $app 'INTEGRATION_HUB_EXTERNAL_TRANSPORT_APPROVAL_ALLOWED_DESTINATIONS' 'hooks.partner.example:443'
     Set-Env $app 'INTEGRATION_HUB_SECURITY_TRUSTED_PROXIES' '10.0.0.0/16'
+    Set-Env $app 'PRIVACY_DSAR_DEADLINE_WARNING_DAYS' '7'
+    Set-Env $app 'PRIVACY_JOURNAL_EXPECTED_SCHEMA' 'privacy_journal'
     Add-Secret $app 'INTEGRATION_HUB_PUBLIC_ID_KEY'
     Add-Secret $app 'INTEGRATION_HUB_CRYPTO_KEYS_V1'
+    Add-Secret $app 'PRIVACY_JOURNAL_DATASOURCE_PASSWORD'
     $td }
   Case 'actual, SPRING_APPLICATION_JSON in environment without checked settings' $Initial 'PASS' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"logging":{"level":{"root":"INFO"}}}'; $td }
@@ -163,25 +164,53 @@ try {
   Case 'actual, JAVA_TOOL_OPTIONS with the time zone and a heap option' $Initial 'PASS' {
     $td = New-Initial; Set-Env (App $td) 'JAVA_TOOL_OPTIONS' '-Duser.timezone=Asia/Tokyo -XX:MaxRAMPercentage=75'; $td }
 
-  # ---- negative cases added for the e8dcf83c review (P3-2 to P3-6) and the EFS IAM rule
+  # ---- negative cases added for the e8dcf83c review (P3-2 to P3-6), EFS IAM rule, and FE-E01 legacy settings
   Case 'profile PROD (upper case)' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_PROFILES_ACTIVE' 'PROD'; $td }
   Case 'profile Prod (mixed case)' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_PROFILES_ACTIVE' 'Prod'; $td }
-  Case 'APP_FEATURES_NF01_ENABLED at the first start' $Initial 'feature switches must use the documented names' {
+  Case 'FEATURE_NF01_ENABLED at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Initial; Set-Env (App $td) 'FEATURE_NF01_ENABLED' 'true'; $td }
+  Case 'FEATURE_NF01_ENABLED after bootstrap (steady)' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_ENABLED' 'false'; $td }
+  Case 'PRIVACY_RETENTION_ENABLED after bootstrap (steady)' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'PRIVACY_RETENTION_ENABLED' 'true'; $td }
+  Case 'INTEGRATION_HUB_PUBLIC_API_ENABLED after bootstrap (steady)' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'INTEGRATION_HUB_PUBLIC_API_ENABLED' 'true'; $td }
+  Case 'INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED after bootstrap (steady)' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED' 'false'; $td }
+  Case 'APP_FEATURES_NF01_ENABLED at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Initial; Set-Env (App $td) 'APP_FEATURES_NF01_ENABLED' 'true'; $td }
-  Case 'APP_FEATURES_NF01_ENABLED after bootstrap' $SteadyOn 'feature switches must use the documented names' {
+  Case 'APP_FEATURES_NF01_ENABLED after bootstrap' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Steady 'true'; Set-Env (App $td) 'APP_FEATURES_NF01_ENABLED' 'true'; $td }
-  Case 'app.features.nf02-customer-portal.enabled at the first start' $Initial 'feature switches must use the documented names' {
+  Case 'app.features.nf02-customer-portal.enabled at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Initial; Set-Env (App $td) 'app.features.nf02-customer-portal.enabled' 'true'; $td }
-  Case 'privacy.retention.enabled at the first start' $Initial 'feature switches must use the documented names' {
+  Case 'privacy.retention.enabled at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Initial; Set-Env (App $td) 'privacy.retention.enabled' 'true'; $td }
-  Case 'integration.hub.public-api.enabled at the first start' $Initial 'feature switches must use the documented names' {
+  Case 'integration.hub.public-api.enabled at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Initial; Set-Env (App $td) 'integration.hub.public-api.enabled' 'true'; $td }
-  Case 'INTEGRATION_HUB_PUBLICAPI_ENABLED at the first start' $Initial 'feature switches must stay unset for the initial bootstrap start' {
+  Case 'INTEGRATION_HUB_PUBLICAPI_ENABLED at the first start' $Initial 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Initial; Set-Env (App $td) 'INTEGRATION_HUB_PUBLICAPI_ENABLED' 'false'; $td }
-  Case 'FEATURE_NF01_ENABLED from the secret store' $SteadyOn 'settings checked by value must be in environment' {
+  Case 'FEATURE_NF01_ENABLED from the secret store' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
     $td = New-Steady 'true'; Add-Secret (App $td) 'FEATURE_NF01_ENABLED'; $td }
+  Case 'FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF01_DUAL_CONFIRMATION_PRIVACY_SIGN_OFF_REF' 'PRIV-1'; $td }
+  Case 'IMPORT_ADMISSION_DECISION_ID in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'IMPORT_ADMISSION_DECISION_ID' 'DO-NF06-2026-001'; $td }
+  Case 'IMPORT_ADMISSION_APPROVAL_DIGEST in secrets' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Add-Secret (App $td) 'IMPORT_ADMISSION_APPROVAL_DIGEST'; $td }
+  Case 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE empty in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE' ''; $td }
+  Case 'PRIVACY_APPROVAL_D01_DECISION_ID in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'PRIVACY_APPROVAL_D01_DECISION_ID' 'D01-1'; $td }
+  Case 'PRIVACY_DSAR_DUE_DAYS in initial' $Initial 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Initial; Set-Env (App $td) 'PRIVACY_DSAR_DUE_DAYS' '30'; $td }
+  Case 'PRIVACY_DSAR_PACKAGE_MAX_AGE in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'PRIVACY_DSAR_PACKAGE_MAX_AGE' 'P7D'; $td }
+  Case 'INTEGRATION_HUB_INBOUND_DECISION_ID in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'INTEGRATION_HUB_INBOUND_DECISION_ID' 'DG-05-IN-20261201-01'; $td }
+  Case 'INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST in steady' $SteadyOn 'legacy feature switches and moved approval settings must not be set' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST' ('a' * 64); $td }
   Case 'app_scheduling_enabled from the secret store' $SteadyOn 'settings checked by value must be in environment' {
     $td = New-Steady 'true'; Remove-Env (App $td) 'APP_SCHEDULING_ENABLED'; Add-Secret (App $td) 'app_scheduling_enabled'; $td }
   Case 'MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE' $SteadyOn 'guarded property trees must use the short names' {
@@ -350,6 +379,18 @@ try {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"feature-enablement":{"max-staleness":"PT300S"}}}'; $td }
   Case 'FEATURE_ENABLEMENT_ALLOWED in the environment SPRING_APPLICATION_JSON' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
     $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"FEATURE_ENABLEMENT_ALLOWED":"true"}'; $td }
+  Case 'app.features legacy switch in SPRING_APPLICATION_JSON (A2 N2)' $SteadyOn 'legacy feature switches and moved approval settings must not be set in SPRING_APPLICATION_JSON' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"features":{"nf01-dual-confirmation":{"enabled":true}}}}'; $td }
+  Case 'app.features non-legacy key in SPRING_APPLICATION_JSON (A2 N2)' $Initial 'SPRING_APPLICATION_JSON sets guarded properties' {
+    $td = New-Initial; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"features":{"other":"x"}}}'; $td }
+  Case 'app.import-center.admission in SPRING_APPLICATION_JSON' $SteadyOn 'legacy feature switches and moved approval settings must not be set in SPRING_APPLICATION_JSON' {
+    $td = New-Steady 'true'; Set-Env (App $td) 'SPRING_APPLICATION_JSON' '{"app":{"import-center":{"admission":{"decision-id":"DO-NF06-2026-001"}}}}'; $td }
+  Case 'privacy-trust mounted at /app/config (A2 N1)' $Initial 'privacy-trust must not mount at /, /app, /app/config' {
+    $td = New-Initial; (@((App $td).mountPoints | Where-Object { $_.sourceVolume -eq 'privacy-trust' })[0]).containerPath = '/app/config'; $td }
+  Case 'privacy-trust mounted under /app/config/sub (A2 N1)' $SteadyOn 'privacy-trust must not mount at /, /app, /app/config' {
+    $td = New-Steady 'true'; (@((App $td).mountPoints | Where-Object { $_.sourceVolume -eq 'privacy-trust' })[0]).containerPath = '/app/config/trust'; $td }
+  Case 'privacy-trust mounted at /app (A2 N1)' $Initial 'privacy-trust must not mount at /, /app, /app/config' {
+    $td = New-Initial; (@((App $td).mountPoints | Where-Object { $_.sourceVolume -eq 'privacy-trust' })[0]).containerPath = '/app'; $td }
 
   # ---- negative cases kept from earlier rounds
   Case 'profile prod,dev' $Initial 'SPRING_PROFILES_ACTIVE must be exactly prod' {

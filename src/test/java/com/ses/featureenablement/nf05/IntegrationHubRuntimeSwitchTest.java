@@ -150,7 +150,7 @@ class IntegrationHubRuntimeSwitchTest {
 
     private IntegrationHubRuntimeSwitch runtime() {
         return new IntegrationHubRuntimeSwitch(properties, provider(switches), provider(holder), provider(overlay),
-                provider(FeatureEnablementCatalog.standard()), provider(settings));
+                provider(settings));
     }
 
     private void snapshot(EnablementState state, boolean masterAllowed) {

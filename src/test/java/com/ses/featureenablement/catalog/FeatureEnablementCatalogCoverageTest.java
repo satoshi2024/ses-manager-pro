@@ -151,30 +151,16 @@ class FeatureEnablementCatalogCoverageTest {
     }
 
     /**
-     * FE-A11: 段階 A は容易な7件に DB 管理の印を付ける。段階 B は NF01 二者確認（FE-B01）と NF06（FE-B02）に、段階 C は NF07 の2件（FE-C05）に、
-     * 段階 D は NF05 の2件（FE-D02）に印を足す（段階 D の後は全ての開放単位に印がある）。
+     * FE-E02: 段階 A〜D の過渡期の DB 管理の印と合成の源を撤去し、{@code database} の源では全 13 件の開放単位を一律に DB の開放状態で扱う。
      */
     @Test
-    void 段階Aの7件と段階BからDで足した開放単位にDB管理の印があり写しで印を付け直せる() {
-        EnumSet<Feature> stageA = EnumSet.of(Feature.NF01, Feature.NF02, Feature.NF02_CUSTOMER_PORTAL, Feature.NF03,
-                Feature.NF03_CERTIFICATION_PII, Feature.NF04, Feature.NF10);
-        EnumSet<Feature> stageB = EnumSet.of(Feature.NF01_DUAL_CONFIRMATION, Feature.NF06);
-        EnumSet<Feature> stageD = EnumSet.of(Feature.NF05_INBOUND, Feature.NF05_OUTBOUND);
-        for (Feature feature : Feature.values()) {
-            assertThat(catalog.databaseManaged(feature)).as(feature.name()).isEqualTo(stageA.contains(feature)
-                    || stageB.contains(feature) || FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED.contains(feature)
-                    || stageD.contains(feature));
-        }
-        assertThat(FeatureEnablementCatalog.STAGE_A_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageA);
-        // 段階 C（FE-C05）: NF07 の2件
-        assertThat(FeatureEnablementCatalog.STAGE_C_DATABASE_MANAGED)
-                .containsExactlyInAnyOrder(Feature.NF07_RETENTION, Feature.NF07_DSAR);
-        assertThat(FeatureEnablementCatalog.STAGE_D_DATABASE_MANAGED).containsExactlyInAnyOrderElementsOf(stageD);
-        FeatureEnablementCatalog managed = catalog.withDatabaseManaged(EnumSet.of(Feature.NF04, Feature.NF07_DSAR));
-        assertThat(managed.databaseManaged(Feature.NF04)).isTrue();
-        assertThat(managed.databaseManaged(Feature.NF07_DSAR)).isTrue();
-        assertThat(managed.databaseManaged(Feature.NF01)).isFalse();
-        assertThat(catalog.databaseManaged(Feature.NF01)).as("元の目録は変えない").isTrue();
+    void 目録と開放単位の定義に段階のDB管理の印が残っていない() {
+        assertThat(Arrays.stream(UnitDefinition.class.getRecordComponents()).map(java.lang.reflect.RecordComponent::getName))
+                .doesNotContain("databaseManaged");
+        assertThat(Arrays.stream(FeatureEnablementCatalog.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                .noneMatch(name -> name.startsWith("STAGE_"));
+        assertThat(Arrays.stream(FeatureEnablementCatalog.class.getDeclaredMethods()).map(java.lang.reflect.Method::getName))
+                .doesNotContain("databaseManaged", "withDatabaseManaged");
     }
 
     @Test

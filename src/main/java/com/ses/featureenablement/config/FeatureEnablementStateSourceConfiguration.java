@@ -1,7 +1,6 @@
 package com.ses.featureenablement.config;
 
 import com.ses.config.feature.FeatureSwitchProperties;
-import com.ses.featureenablement.catalog.FeatureEnablementCatalog;
 import com.ses.featureenablement.state.DatabaseFeatureEnablementStateSource;
 import com.ses.featureenablement.state.FeatureEnablementOverlay;
 import com.ses.featureenablement.state.FeatureEnablementSnapshotHolder;
@@ -15,9 +14,8 @@ import org.springframework.context.annotation.Primary;
 import java.time.Clock;
 
 /**
- * 開放状態の源の選択（design §3.1）。{@code app.feature-enablement.source} が {@code database} なら DB の源（目録の DB 管理の印の
- * 無い開放単位は property の値を返す合成の源）、それ以外は property の源。prod で {@code database} 以外を拒否するのは
- * {@code FeatureEnablementProductionValidator}（FE-A08）。
+ * 開放状態の源の選択（design §3.1・FE-E02）。{@code app.feature-enablement.source} が {@code database} なら DB の源、それ以外は
+ * property の源。prod で {@code database} 以外を拒否するのは {@code FeatureEnablementProductionValidator}（FE-A08）。
  */
 @Configuration
 public class FeatureEnablementStateSourceConfiguration {
@@ -31,12 +29,10 @@ public class FeatureEnablementStateSourceConfiguration {
     @Primary
     public FeatureEnablementStateSource featureEnablementStateSource(
             FeatureEnablementProperties properties, PropertyFeatureEnablementStateSource propertySource,
-            ObjectProvider<FeatureEnablementSnapshotHolder> holder, FeatureEnablementOverlay overlay,
-            FeatureEnablementCatalog catalog, Clock clock) {
+            ObjectProvider<FeatureEnablementSnapshotHolder> holder, FeatureEnablementOverlay overlay, Clock clock) {
         if (!properties.databaseSource()) {
             return propertySource;
         }
-        return new DatabaseFeatureEnablementStateSource(holder.getObject(), overlay, catalog, propertySource,
-                properties, clock);
+        return new DatabaseFeatureEnablementStateSource(holder.getObject(), overlay, properties, clock);
     }
 }

@@ -9,9 +9,10 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -123,26 +124,64 @@ class FeatureSwitchDefaultsTest {
     }
 
     @Test
-    void prodプロファイルの既定値も全機能OFF() throws IOException {
+    void prodプロファイルの設定はDBの源で機能スイッチと承認値のplaceholderを持たない() throws IOException {
         FeatureSwitches switches = bind(Map.of(), "application.yml", "application-prod.yml");
-
         for (Feature feature : Feature.values()) {
             assertThat(switches.isEnabled(feature)).as(feature.propertyName()).isFalse();
         }
+        String prodYml = new ClassPathResource("application-prod.yml").getContentAsString(
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(prodYml).contains("source: database").contains("allowed: ${FEATURE_ENABLEMENT_ALLOWED:true}");
+        assertThat(prodYml).doesNotContain("${FEATURE_NF", "${PRIVACY_RETENTION_ENABLED", "${PRIVACY_DSAR_ENABLED",
+                "${PRIVACY_APPROVAL_", "${PRIVACY_DSAR_DUE_DAYS", "${PRIVACY_DSAR_PACKAGE_MAX_AGE",
+                "${IMPORT_ADMISSION_", "${INTEGRATION_HUB_PUBLIC_API_ENABLED",
+                "${INTEGRATION_HUB_EXTERNAL_TRANSPORT_ENABLED", "${INTEGRATION_HUB_INBOUND_DECISION_ID",
+                "${INTEGRATION_HUB_INBOUND_APPROVAL_DIGEST", "${INTEGRATION_HUB_OUTBOUND_DECISION_ID",
+                "${INTEGRATION_HUB_OUTBOUND_APPROVAL_DIGEST");
     }
 
-    // NF05 の2件（機能の開放の開放単位。feature-enablement-console design §3.4）は prod の application-prod.yml が
-    // integration.hub.*.enabled を false に固定し環境変数を読まない（開くのは段階 D の起動の前の読取り）。
+    /**
+     * FE-E02（design §10・FE-RQ-006・016）: prod では全 13 件の開放単位を画面「機能の開放」で開閉するため、旧い機能スイッチの環境変数・
+     * 設定キーは値に依らず起動時に拒否する（dev・test の property の源の挙動は下の {@code application.yml} の case で確かめる）。
+     */
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = {"NF05_INBOUND", "NF05_OUTBOUND"}, mode = EnumSource.Mode.EXCLUDE)
-    void prodで環境変数を指定した機能だけがONになる(Feature target) throws IOException {
-        // 子スイッチは親の環境変数も必要（親子の論理積）。指定した機能と祖先だけがONになり、子は自動でONにならない。
+    @EnumSource(Feature.class)
+    void prodでは全ての旧い機能スイッチの環境変数と設定キーを拒否する(Feature target) {
+        org.springframework.mock.env.MockEnvironment prod = new org.springframework.mock.env.MockEnvironment();
+        prod.setActiveProfiles("prod");
+        prod.setProperty(com.ses.featureenablement.config.FeatureEnablementProductionValidator.ALLOWED_PROPERTY, "true");
+        com.ses.featureenablement.config.FeatureEnablementProperties properties =
+                new com.ses.featureenablement.config.FeatureEnablementProperties();
+        properties.setSource(com.ses.featureenablement.config.FeatureEnablementProperties.Source.DATABASE);
+
+        for (String value : List.of("true", "false")) {
+            assertThatThrownBy(() -> new com.ses.featureenablement.config.FeatureEnablementProductionValidator(prod,
+                    properties, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(),
+                    () -> Map.of(target.environmentVariable(), value), java.util.Properties::new).validate())
+                    .as("%s=%s", target.environmentVariable(), value)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining(target.environmentVariable());
+        }
+        java.util.Properties systemProperties = new java.util.Properties();
+        systemProperties.setProperty(target.propertyName(), "true");
+        assertThatThrownBy(() -> new com.ses.featureenablement.config.FeatureEnablementProductionValidator(prod,
+                properties, com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(),
+                Map::of, () -> systemProperties).validate())
+                .as(target.propertyName())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(target.propertyName());
+    }
+
+    @ParameterizedTest
+    @EnumSource(Feature.class)
+    void propertyの源では環境変数を指定した機能だけがONになる(Feature target) throws IOException {
+        // dev 等の property の源（application.yml）では、子スイッチは親の環境変数も必要（親子の論理積）。
         Set<Feature> lineage = FeatureSwitchTestSupport.lineage(target);
         Map<String, Object> environment = new HashMap<>();
         for (Feature feature : lineage) {
             environment.put(feature.environmentVariable(), "true");
         }
-        FeatureSwitches switches = bind(environment, "application.yml", "application-prod.yml");
+        FeatureSwitches switches = bind(environment, "application.yml");
 
         for (Feature feature : Feature.values()) {
             assertThat(switches.isEnabled(feature))
@@ -154,9 +193,8 @@ class FeatureSwitchDefaultsTest {
     @ParameterizedTest
     @EnumSource(value = Feature.class, names = {"NF01_DUAL_CONFIRMATION", "NF02_CUSTOMER_PORTAL",
             "NF03_CERTIFICATION_PII"})
-    void prodで子スイッチの環境変数だけを指定しても親がOFFなら何もONにならない(Feature child) throws IOException {
-        FeatureSwitches switches = bind(Map.of(child.environmentVariable(), "true"),
-                "application.yml", "application-prod.yml");
+    void propertyの源で子スイッチの環境変数だけを指定しても親がOFFなら何もONにならない(Feature child) throws IOException {
+        FeatureSwitches switches = bind(Map.of(child.environmentVariable(), "true"), "application.yml");
 
         for (Feature feature : Feature.values()) {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
@@ -166,10 +204,9 @@ class FeatureSwitchDefaultsTest {
     @ParameterizedTest
     @EnumSource(value = Feature.class, names = {"NF01_DUAL_CONFIRMATION", "NF02_CUSTOMER_PORTAL",
             "NF03_CERTIFICATION_PII"})
-    void prodで親だけONにしても子スイッチは既定OFFのまま(Feature child) throws IOException {
+    void propertyの源で親だけONにしても子スイッチは既定OFFのまま(Feature child) throws IOException {
         Feature parent = child.parent().orElseThrow();
-        FeatureSwitches switches = bind(Map.of(parent.environmentVariable(), "true"),
-                "application.yml", "application-prod.yml");
+        FeatureSwitches switches = bind(Map.of(parent.environmentVariable(), "true"), "application.yml");
 
         assertThat(switches.isEnabled(parent)).isTrue();
         assertThat(switches.isEnabled(child)).isFalse();
@@ -180,14 +217,14 @@ class FeatureSwitchDefaultsTest {
     void 真偽値として解釈できない子スイッチの環境変数もbind失敗で起動を止める() {
         assertThatThrownBy(() -> bind(Map.of(Feature.NF02.environmentVariable(), "true",
                         Feature.NF02_CUSTOMER_PORTAL.environmentVariable(), "ture"),
-                "application.yml", "application-prod.yml"))
+                "application.yml"))
                 .isInstanceOf(BindException.class);
     }
 
     @Test
     void 真偽値として解釈できない環境変数はOFFに倒さずbind失敗で起動を止める() {
         assertThatThrownBy(() -> bind(Map.of(Feature.NF01.environmentVariable(), "ture"),
-                "application.yml", "application-prod.yml"))
+                "application.yml"))
                 .isInstanceOf(BindException.class);
     }
 
@@ -355,13 +392,14 @@ class FeatureSwitchDefaultsTest {
 
     private static Binder binder(Map<String, Object> environment, String... yamlResources) throws IOException {
         MutablePropertySources sources = new MutablePropertySources();
-        sources.addFirst(new MapPropertySource("testEnvironment", environment));
+        String envSourceName = StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
+        sources.addFirst(new SystemEnvironmentPropertySource(envSourceName, environment));
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         for (String name : yamlResources) {
             List<PropertySource<?>> loaded = loader.load(name, new ClassPathResource(name));
             for (PropertySource<?> source : loaded) {
-                // 後から読んだファイルほど優先する（testEnvironmentの直後へ差し込む）。
-                sources.addAfter("testEnvironment", source);
+                // 後から読んだファイルほど優先する（systemEnvironmentの直後へ差し込む）。
+                sources.addAfter(envSourceName, source);
             }
         }
         return new Binder(ConfigurationPropertySources.from(sources), new PropertySourcesPlaceholdersResolver(sources));

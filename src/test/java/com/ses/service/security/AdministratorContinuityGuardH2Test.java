@@ -308,14 +308,13 @@ class AdministratorContinuityGuardH2Test {
         assertEquals(AdministratorContinuityGuard.UNVERIFIABLE_MESSAGE_KEY, rejected.getMessageKey());
     }
 
-    /** NF07 を DB の開放状態で管理する目録（段階 C の印）と DB の源で読む部品。 */
+    /** NF07 を DB の源で読む部品。 */
     private com.ses.privacy.production.PrivacyEnablementStateReader databaseReader(
             com.ses.mapper.FeatureEnablementStateMapper stateMapper) {
         com.ses.featureenablement.config.FeatureEnablementProperties properties =
                 new com.ses.featureenablement.config.FeatureEnablementProperties();
         properties.setSource(com.ses.featureenablement.config.FeatureEnablementProperties.Source.DATABASE);
-        return new com.ses.privacy.production.PrivacyEnablementStateReader(properties,
-                com.ses.featureenablement.catalog.FeatureEnablementCatalog.standard(), stateMapper, featureRequestMapper,
+        return new com.ses.privacy.production.PrivacyEnablementStateReader(properties, stateMapper, featureRequestMapper,
                 com.ses.featureenablement.state.FeatureEnablementTenant.fixed(TENANT));
     }
 

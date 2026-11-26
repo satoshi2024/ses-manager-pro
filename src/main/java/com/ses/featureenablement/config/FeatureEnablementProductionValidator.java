@@ -40,10 +40,10 @@ import java.util.function.Supplier;
  *       {@code FEATURE_ENABLEMENT_*} は総スイッチを含めて止める）。D-5: 配備の設定は鍵と総スイッチだけで、{@code max-staleness} を
  *       大きくして fail-closed を外すことも防ぐ。{@code evaluation-initial-delay}・{@code sign-off-purge-cron} も同じ（review rb-fe-a1
  *       P3-5）。</li>
- *   <li><b>旧い変数</b>（prod）: 目録で DB 管理にした開放単位の旧い開閉の変数（{@link Feature#environmentVariable()}・
+ *   <li><b>旧い変数</b>（prod）: 全 13 開放単位の旧い開閉の変数（{@link Feature#environmentVariable()}・
  *       {@link Feature#propertyName()} の全ての綴り）が環境変数・system property・{@code SPRING_APPLICATION_JSON} にあれば止める
- *       （§18 J-12。無視すると運用者が開閉を誤解する）。段階 A〜D の間は DB 管理の印のある開放単位だけ、段階 E で全てを拒否する。
- *       開閉以外の旧い変数（署名・設定へ移した承認の値。{@link #LEGACY_SETTING_RULES}）も、DB 管理の印のある開放単位の分を同じく拒否する。</li>
+ *       （§18 J-12・FE-E02。無視すると運用者が開閉を誤解する）。開閉以外の旧い変数（署名・設定へ移した承認の値。
+ *       {@link #LEGACY_SETTING_RULES}）も同じく無条件に拒否する。</li>
  * </ul>
  *
  * <p>prod の判定は {@code Environment.acceptsProfiles(Profiles.of("prod"))}（CLAUDE.md。{@code @ActiveProfiles("prod")} の試験でも
@@ -65,10 +65,9 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
-     * 開閉以外の旧い変数の規則（値を system の中の署名・設定へ移した承認の値。D-5）。段階 B・C・D がそれぞれ足した拒否（B の
-     * 開放単位ごとの名前の前方一致・C の開放単位の集合と接頭辞・D の NF05 の名前の完全一致）を、この1つの表にまとめた（段階の整合 M1）。
-     * 各行は開放単位の集合と名前（環境変数と property の綴り）で、集合のどれかが DB 管理なら、正規化した名前がどれかの名前（正規化）で
-     * 始まる変数を拒否する（前方一致のため list の添字の付いた綴りも拾う。review rb-fe-c P3-8）。
+     * 開閉以外の旧い変数の規則（値を system の中の署名・設定へ移した承認の値。D-5・FE-E02）。段階 B・C・D がそれぞれ足した拒否を1つの表に
+     * まとめた（段階の整合 M1）。各行は対応する開放単位（参照情報）と名前（環境変数と property の綴り）で、正規化した名前がどれかの名前
+     * （正規化）で始まる変数を無条件に拒否する（前方一致のため list の添字の付いた綴りも拾う。review rb-fe-c P3-8）。
      * 配備の設定に残る運用値（{@code PRIVACY_DSAR_DEADLINE_WARNING_DAYS}・Journal・trust・行参照の鍵・NF05 の許可の一覧等）は、どの行の
      * 名前でも始まらないように行の名前を選ぶ（運用値に当たると prod はその運用値で起動しなくなる。{@code application*.yml} の
      * placeholder のうち規則に当たるものが移した値だけであることを {@code FeatureEnablementProductionValidatorTest} が確かめる）。
@@ -79,7 +78,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
      *   <li>FE-B03: NF02 顧客ポータルの公開範囲（承認で変える設定 {@code nf02-customer-portal.visible-since} へ移した。空の値も拒否する）。</li>
      *   <li>FE-C05: NF07 の {@code PRIVACY_APPROVAL_*}（決定 ID の束縛・D-02・D-03・D-05 は署名の組と署名へ、失効の警告の日数は system 設定
      *       {@code feature-enablement.expiry-warning-days} へ移した。review rb-fe-c P3-4）と、D-06 の {@code PRIVACY_DSAR_DUE_DAYS}・
-     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。NF07 の2件のどちらかが DB 管理なら拒否する。</li>
+     *       {@code PRIVACY_DSAR_PACKAGE_MAX_AGE}（D-06 の構造化された値へ移した。§18 J-15）。</li>
      *   <li>FE-D05: NF05 の決定 ID と approval digest（確認済みの署名から読む）。許可する送信元・送信先の一覧
      *       （{@code allowed-client-cidrs}・{@code allowed-destinations}）は digest の内容で配備の設定に残すため含めない。</li>
      * </ul>
@@ -103,7 +102,7 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
                     "integration.hub.external-transport.approval.decision-id",
                     "integration.hub.external-transport.approval.approval-digest")));
 
-    /** 開閉以外の旧い変数の規則の1行（{@code units} のどれかが DB 管理なら、正規化した {@code names} のどれかで始まる変数を拒否する）。 */
+    /** 開閉以外の旧い変数の規則の1行（{@code units} は対応する開放単位の参照情報、正規化した {@code names} のどれかで始まる変数を拒否する）。 */
     record LegacySettingRule(Set<Feature> units, List<String> names) {
     }
 
@@ -121,9 +120,10 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
     }
 
     /** 試験用（環境変数と system property を差し替える）。 */
-    FeatureEnablementProductionValidator(Environment environment, FeatureEnablementProperties properties,
-                                         FeatureEnablementCatalog catalog, Supplier<Map<String, String>> systemEnvironment,
-                                         Supplier<Properties> systemProperties) {
+    public FeatureEnablementProductionValidator(Environment environment, FeatureEnablementProperties properties,
+                                                FeatureEnablementCatalog catalog,
+                                                Supplier<Map<String, String>> systemEnvironment,
+                                                Supplier<Properties> systemProperties) {
         this.environment = Objects.requireNonNull(environment, "environment");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -192,25 +192,21 @@ public class FeatureEnablementProductionValidator implements SmartInitializingSi
         return violations;
     }
 
-    /** DB 管理の印のある開放単位の旧い開閉の変数（正規化した名前）。 */
+    /** 全開放単位の旧い開閉の変数（正規化した名前。FE-E02）。 */
     Set<String> legacyKeys() {
         Set<String> keys = new LinkedHashSet<>();
         for (UnitDefinition unit : catalog.units()) {
-            if (unit.databaseManaged()) {
-                keys.add(nameKey(unit.feature().environmentVariable()));
-                keys.add(nameKey(unit.feature().propertyName()));
-            }
+            keys.add(nameKey(unit.feature().environmentVariable()));
+            keys.add(nameKey(unit.feature().propertyName()));
         }
         return keys;
     }
 
-    /** DB 管理の印のある開放単位の開閉以外の旧い変数（{@link #LEGACY_SETTING_RULES}。正規化した名前。前方一致で比べる）。 */
+    /** 開閉以外の旧い変数（{@link #LEGACY_SETTING_RULES}。正規化した名前。前方一致で比べる。FE-E02）。 */
     Set<String> legacySettingPrefixes() {
         Set<String> prefixes = new LinkedHashSet<>();
         for (LegacySettingRule rule : LEGACY_SETTING_RULES) {
-            if (rule.units().stream().anyMatch(catalog::databaseManaged)) {
-                rule.names().forEach(name -> prefixes.add(nameKey(name)));
-            }
+            rule.names().forEach(name -> prefixes.add(nameKey(name)));
         }
         return prefixes;
     }

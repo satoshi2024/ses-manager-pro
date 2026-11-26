@@ -52,11 +52,9 @@ class DatabaseFeatureEnablementStateSourceTest {
     private final FeatureSignOffBundleMapper bundleMapper = mock(FeatureSignOffBundleMapper.class);
     private final FeatureSignOffBundleMemberMapper memberMapper = mock(FeatureSignOffBundleMemberMapper.class);
     private final MutableClock clock = new MutableClock(Instant.parse("2026-11-23T01:00:00Z"));
-    private final FeatureEnablementCatalog catalog = FeatureEnablementCatalog.standard()
-            .withDatabaseManaged(EnumSet.of(Feature.NF03, Feature.NF04));
+    private final FeatureEnablementCatalog catalog = FeatureEnablementCatalog.standard();
     private final FeatureEnablementProperties properties = new FeatureEnablementProperties();
     private final FeatureEnablementOverlay overlay = new FeatureEnablementOverlay();
-    private final FeatureSwitchProperties switchProperties = new FeatureSwitchProperties();
     private FeatureEnablementSnapshotHolder holder;
     private DatabaseFeatureEnablementStateSource source;
 
@@ -67,8 +65,7 @@ class DatabaseFeatureEnablementStateSourceTest {
                 settingMapper, signOffMapper, bundleMapper, memberMapper, catalog, properties, clock);
         holder = new FeatureEnablementSnapshotHolder(loader, FeatureEnablementTenant.fixed(TENANT), properties, overlay,
                 clock);
-        source = new DatabaseFeatureEnablementStateSource(holder, overlay, catalog,
-                new PropertyFeatureEnablementStateSource(switchProperties), properties, clock);
+        source = new DatabaseFeatureEnablementStateSource(holder, overlay, properties, clock);
         when(generationMapper.selectGeneration(TENANT)).thenReturn(7L);
         when(stateMapper.selectByTenant(TENANT)).thenReturn(List.of(open("NF03")));
         when(signOffMapper.selectConfirmedByTenant(TENANT)).thenReturn(List.of(signOff(1L, "NF03_BUSINESS_OWNER")));
@@ -166,20 +163,21 @@ class DatabaseFeatureEnablementStateSourceTest {
     }
 
     @Test
-    void 再起動待ちと閉鎖は閉でDB管理の印の無い開放単位はpropertyの値を返す() {
-        FeatureEnablementState pending = open("NF03");
-        pending.setState("MANUALLY_CLOSED");
-        pending.setClosedReason("MANUAL");
-        when(stateMapper.selectByTenant(TENANT)).thenReturn(List.of(pending));
+    void 再起動待ちと閉鎖と行の無い開放単位は全て閉を返す() {
+        FeatureEnablementState manuallyClosed = open("NF03");
+        manuallyClosed.setState("MANUALLY_CLOSED");
+        manuallyClosed.setClosedReason("MANUAL_OTHER");
+        FeatureEnablementState pendingRestart = open("NF05_INBOUND");
+        pendingRestart.setState("OPEN_PENDING_RESTART");
+        when(stateMapper.selectByTenant(TENANT)).thenReturn(List.of(manuallyClosed, pendingRestart));
         holder.reload();
         assertThat(source.isOpen(Feature.NF03)).isFalse();
-        assertThat(source.closedReasons(Feature.NF03)).containsExactly("state.MANUALLY_CLOSED(MANUAL)");
+        assertThat(source.closedReasons(Feature.NF03)).containsExactly("state.MANUALLY_CLOSED(MANUAL_OTHER)");
+        assertThat(source.isOpen(Feature.NF05_INBOUND)).isFalse();
+        assertThat(source.closedReasons(Feature.NF05_INBOUND)).containsExactly("state.OPEN_PENDING_RESTART");
 
-        // NF01 は印が無いため property の値（既定 OFF。ON にすれば開く）
+        // 行の無い開放単位は全て CLOSED（FE-E02 で property への fallback は無い）
         assertThat(source.isOpen(Feature.NF01)).isFalse();
-        switchProperties.getNf01().setEnabled(true);
-        assertThat(source.isOpen(Feature.NF01)).isTrue();
-        // 行の無い開放単位は CLOSED
         assertThat(source.isOpen(Feature.NF04)).isFalse();
         assertThat(source.closedReasons(Feature.NF04)).containsExactly("state.CLOSED");
     }
