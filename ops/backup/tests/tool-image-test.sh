@@ -13,7 +13,7 @@
 #   配布 tar は SHA-256 が一致しなければ docker load せず、読み込んだ tag の content ID で照合する。
 # - image/install-toolchain.sh: 固定値が仮置きの値なら何もダウンロードせずに失敗し、署名鍵は SHA-256・
 #   primary key が 1 つであること・primary key の fingerprint・有効期限を検証してから keyring にする。
-#   MySQL client の版と repo の component は列挙した MySQL 8.4 LTS の値（8.4.13・mysql-8.4-lts）だけを受け付ける。
+#   MySQL client の版と repo の component は列挙した MySQL 8.4 LTS の値（8.4.13.1・mysql-8.4-lts）だけを受け付ける。
 # - Dockerfile / compose / .dockerignore の静的契約
 set -uo pipefail
 
@@ -615,12 +615,12 @@ setup_installer_full_flow() {
   export FAKE_RESTIC_BZ2="$T/restic.bz2"
   FAKE_RESTIC_SHA=$(sha256sum "$T/restic.bz2" | cut -d' ' -f1)
   for b in mysql mysqlbinlog mysqldump; do
-    printf '#!/usr/bin/env bash\necho "%s  Ver 8.4.13 for Linux on x86_64 (MySQL Community Server - GPL)"\n' "$b" > "$T/bin/$b"
+    printf '#!/usr/bin/env bash\necho "%s  Ver 8.4.13.1 for Linux on x86_64 (MySQL Community Server - GPL)"\n' "$b" > "$T/bin/$b"
     chmod +x "$T/bin/$b"
   done
   write_gpg_listing "$T/listing-ok" 1824293027 BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
   export FAKE_DPKG_LIST='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u7\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
-  export FAKE_DPKG_LIST_AFTER='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u8\tamd64\nii \tmysql-community-client\t8.4.13-1debian12\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
+  export FAKE_DPKG_LIST_AFTER='ii \tbash\t5.2.15-2+b2\tamd64\nii \tlibc-bin\t2.36-9+deb12u8\tamd64\nii \tmysql-community-client\t8.4.13.1-1debian12\tamd64\nii \ttar\t1.34+dfsg-1.2\tamd64\n'
   export FAKE_DPKG_ESSENTIAL='ii \tbash\tyes\nii \tlibc-bin\tyes\nii \ttar\tyes\n'
   INSTALLED_TSV=$(printf '%b' "$FAKE_DPKG_LIST_AFTER" | awk -F'\t' '{print $2 "\t" $3 "\t" $4}' | LC_ALL=C sort)
 }
@@ -723,7 +723,7 @@ run_installer() { # [VAR=value ...] [-- <install-toolchain.sh の引数>...]
   done
   INSTALL_OUT=$(env PATH="$T/bin:$PATH" TMPDIR="$T" \
     BASE_IMAGE="debian:bookworm-slim@sha256:$(hex64 c)" \
-    MYSQL_CLIENT_VERSION=8.4.13 MYSQL_DEB_REVISION=1debian12 MYSQL_APT_SUITE=bookworm MYSQL_APT_COMPONENT=mysql-8.4-lts \
+    MYSQL_CLIENT_VERSION=8.4.13.1 MYSQL_DEB_REVISION=1debian12 MYSQL_APT_SUITE=bookworm MYSQL_APT_COMPONENT=mysql-8.4-lts \
     MYSQL_REPO_KEY_URL=https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 \
     MYSQL_REPO_KEY_SHA256="$(hex64 d)" \
     MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C \
@@ -768,20 +768,20 @@ case_installer_rejects_placeholders_before_download() {
   assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "base digest 未固定でも何も実行しない"
 }
 
-# RB-W 8.4 対応: client の版と repo の component は、install-toolchain.sh に列挙した MySQL 8.4 LTS の値（8.4.13・
+# RB-W 8.4 対応: client の版と repo の component は、install-toolchain.sh に列挙した MySQL 8.4 LTS の値（8.4.13.1・
 # mysql-8.4-lts）だけを受け付ける。8.0・列挙していない 8.4 の patch・8.5 以降・innovation 系・空・前後の空白・大文字は、
 # apt・ダウンロードより前に失敗する。列挙した値（Dockerfile の ARG の値）は受け付け、その版を mysql-8.4-lts から入れる。
 case_installer_accepts_only_listed_mysql_84_lts() {
   local variant df_version df_revision df_component
   setup_fake_installer
   for variant in MYSQL_CLIENT_VERSION=8.0.46 MYSQL_CLIENT_VERSION=8.0.36 MYSQL_CLIENT_VERSION=8.4.12 \
-      MYSQL_CLIENT_VERSION=8.4.14 MYSQL_CLIENT_VERSION=8.5.0 MYSQL_CLIENT_VERSION=9.1.0 MYSQL_CLIENT_VERSION=8.4 \
-      MYSQL_CLIENT_VERSION=8.4.13-1debian12 'MYSQL_CLIENT_VERSION=8.4.13 ' 'MYSQL_CLIENT_VERSION= 8.4.13' \
-      'MYSQL_CLIENT_VERSION='; do
+      MYSQL_CLIENT_VERSION=8.4.13 MYSQL_CLIENT_VERSION=8.4.14 MYSQL_CLIENT_VERSION=8.5.0 MYSQL_CLIENT_VERSION=9.1.0 \
+      MYSQL_CLIENT_VERSION=8.4 MYSQL_CLIENT_VERSION=8.4.13.1-1debian12 'MYSQL_CLIENT_VERSION=8.4.13.1 ' \
+      'MYSQL_CLIENT_VERSION= 8.4.13.1' 'MYSQL_CLIENT_VERSION='; do
     : > "$FAKE_INSTALL_LOG"
     run_installer "$variant"
     assert_nonzero "$INSTALL_RC" "列挙していない client の版は失敗: [$variant]"
-    assert_contains "$INSTALL_OUT" "MYSQL_CLIENT_VERSION は MySQL 8.4 LTS の列挙した版（8.4.13）だけを受け付けます" \
+    assert_contains "$INSTALL_OUT" "MYSQL_CLIENT_VERSION は MySQL 8.4 LTS の列挙した版（8.4.13.1）だけを受け付けます" \
       "受け付ける版を通知: [$variant]"
     assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "列挙していない client の版では apt・ダウンロードを一切行わない: [$variant]"
   done
@@ -795,23 +795,23 @@ case_installer_accepts_only_listed_mysql_84_lts() {
     assert_eq "" "$(cat "$FAKE_INSTALL_LOG")" "列挙していない component では apt・ダウンロードを一切行わない: [$variant]"
   done
 
-  # 受け付ける側: Dockerfile の ARG の値（8.4.13・1debian12・mysql-8.4-lts）で導入の最後（版一覧の記録）まで進む。
+  # 受け付ける側: Dockerfile の ARG の値（8.4.13.1・1debian12・mysql-8.4-lts）で導入の最後（版一覧の記録）まで進む。
   # Dockerfile の版だけを上げて install-toolchain.sh の列挙を直さないと、ここが失敗する。
   df_version=$(tr -d '\r' < "$BACKUP_ROOT/Dockerfile" | sed -n 's/^ARG MYSQL_CLIENT_VERSION=//p')
   df_revision=$(tr -d '\r' < "$BACKUP_ROOT/Dockerfile" | sed -n 's/^ARG MYSQL_DEB_REVISION=//p')
   df_component=$(tr -d '\r' < "$BACKUP_ROOT/Dockerfile" | sed -n 's/^ARG MYSQL_APT_COMPONENT=//p')
-  assert_eq "8.4.13/1debian12/mysql-8.4-lts" "$df_version/$df_revision/$df_component" "Dockerfile の ARG は 8.4.13・1debian12・mysql-8.4-lts（前提）"
+  assert_eq "8.4.13.1/1debian12/mysql-8.4-lts" "$df_version/$df_revision/$df_component" "Dockerfile の ARG は 8.4.13.1・1debian12・mysql-8.4-lts（前提）"
   setup_installer_full_flow
   printf '# 記載なし\n' > "$T/lock"
   run_installer_full_flow "$T/lock" MYSQL_CLIENT_VERSION="$df_version" MYSQL_DEB_REVISION="$df_revision" \
     MYSQL_APT_COMPONENT="$df_component"
   assert_zero "$INSTALL_RC" "Dockerfile の値（列挙した 8.4 LTS の値）は受け付けて導入の最後まで進む"
-  assert_contains "$(cat "$FAKE_INSTALL_LOG")" "mysql-community-client=8.4.13-1debian12" "client を列挙した版で入れる"
-  assert_contains "$(cat "$FAKE_INSTALL_LOG")" "mysql-community-server-core=8.4.13-1debian12" \
+  assert_contains "$(cat "$FAKE_INSTALL_LOG")" "mysql-community-client=8.4.13.1-1debian12" "client を列挙した版で入れる"
+  assert_contains "$(cat "$FAKE_INSTALL_LOG")" "mysql-community-server-core=8.4.13.1-1debian12" \
     "server-core（mysqlbinlog を含む）を列挙した版で入れる"
   assert_eq "deb [signed-by=$SYSROOT/usr/share/keyrings/mysql-release-engineering.gpg] https://repo.mysql.com/apt/debian/ bookworm mysql-8.4-lts" \
     "$(cat "$SYSROOT/etc/apt/sources.list.d/mysql.list" 2>/dev/null)" "apt source の component は mysql-8.4-lts"
-  assert_contains "$(cat "$T/manifest/toolchain.env" 2>/dev/null)" "mysql_packages=8.4.13-1debian12" "導入した版を記録する"
+  assert_contains "$(cat "$T/manifest/toolchain.env" 2>/dev/null)" "mysql_packages=8.4.13.1-1debian12" "導入した版を記録する"
 }
 
 case_installer_rejects_key_checksum_mismatch() {
@@ -908,7 +908,7 @@ case_static_image_contract() {
   assert_eq "8.4.13" "$(grep -oE 'mysql:[0-9A-Za-z][A-Za-z0-9._-]*' <<< "$integration" | sed 's/^mysql://' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')" \
     "integration compose の MySQL image の tag は 8.4.13 だけ（コメントも含む）"
   assert_not_contains "$integration" "      - --binlog-format=" "8.4 で非推奨の --binlog-format を server に渡さない"
-  assert_contains "$dockerfile" "ARG MYSQL_CLIENT_VERSION=8.4.13" "ツールイメージの client は 8.4.13"
+  assert_contains "$dockerfile" "ARG MYSQL_CLIENT_VERSION=8.4.13.1" "ツールイメージの client は 8.4.13.1"
   assert_contains "$dockerfile" "ARG MYSQL_APT_COMPONENT=mysql-8.4-lts" "repo の component は mysql-8.4-lts"
   assert_contains "$prod" "image: ses-backup-tool:8.4.13" "production compose のツールイメージの tag は 8.4.13"
   assert_not_contains "$prod" "  build:" "production compose は build しない"
