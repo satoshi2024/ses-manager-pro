@@ -127,7 +127,7 @@ class IntegrationHubEnablementConditionsTest {
     }
 
     @Test
-    void refreshRemoteはoutboundの時だけlockの前にtruststoreを読み直す() {
+    void refreshRemoteはoutboundの時だけlockの前にtruststoreを読み直す() throws Exception {
         IntegrationHubEnablementConditions fresh = conditions();
         fresh.refreshRemote(Feature.NF05_INBOUND);
         assertThat(codes(fresh.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.REQUEST, false))))
@@ -136,6 +136,12 @@ class IntegrationHubEnablementConditionsTest {
         fresh.refreshRemote(Feature.NF05_OUTBOUND);
         assertThat(codes(fresh.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.REQUEST, false))))
                 .contains("nf05.outbound.policy:SATISFIED");
+
+        Files.delete(Path.of(properties.getExternalTransport().getTruststorePath()));
+        fresh.refreshRemote(Feature.NF05_OUTBOUND);
+        assertThat(codes(fresh.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.REQUEST, false))))
+                .as("削除後の refreshRemote は以前の正常内容を残さず読取り失敗で上書きする")
+                .contains("nf05.outbound.truststore.unverifiable:UNVERIFIABLE");
     }
 
     @Test

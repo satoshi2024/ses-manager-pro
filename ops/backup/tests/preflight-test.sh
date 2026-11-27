@@ -185,7 +185,7 @@ case_preflight_quiesce_sql_error_keeps_table_names_when_user_is_substring() {
 # RB-QUIESCE 最終 review の残余 1: redact した失敗の文が 400 文字を超え、400 文字目が host 名や接続元の IP の途中に来ても、
 # 識別子を伏せてから 400 文字に切るため、その値の断片を出力しない（切ってから伏せると、切れ目の前の断片が伏せられずに残る）
 case_preflight_quiesce_sql_error_is_masked_before_truncation() {
-  local kind value lead tail pad i leaked
+  local kind value lead tail pad i leaked reason sql_part
   for kind in host user-host; do
     setup_quiesce_env
     if [[ "$kind" == host ]]; then
@@ -216,6 +216,9 @@ case_preflight_quiesce_sql_error_is_masked_before_truncation() {
     done
     assert_eq "" "$leaked" "切れ目の前の値の断片（先頭の 4 文字以上）を出力しない（$kind）"
     assert_not_contains "$out" "tail-marker-zz9" "伏せた後も 400 文字までに切る（$kind）"
+    reason=$(jq -r '.reasons[] | select(startswith("書込み静止の信号表"))' <<< "$out")
+    sql_part=${reason#*: }
+    assert_eq 400 "${#sql_part}" "伏せた後の SQL 失敗文は 400 文字ちょうどで打ち切る（$kind）"
     assert_no_secret "$out"
   done
 }

@@ -358,14 +358,9 @@ class IntegrationHubEnablementRestartMySqlTest {
                 });
         IntegrationHubEnablementBootResolver resolver = new IntegrationHubEnablementBootResolver(logCollector,
                 IntegrationHubEnablementBootResolver::connect);
-        Map<String, Object> values = resolver.resolve(environment);
-        // postProcessEnvironment と同じ起動 log を記録する
-        bootLogs.add("[機能の開放] NF05 の起動時の判定: inbound="
-                + values.get("app.feature-enablement.nf05-boot.inbound.result") + " outbound="
-                + values.get("app.feature-enablement.nf05-boot.outbound.result") + " purge="
-                + values.get("integration.hub.retention-purge.enabled"));
-        environment.getPropertySources().addFirst(new MapPropertySource(IntegrationHubEnablementBootResolver.PROPERTY_SOURCE,
-                values));
+        resolver.postProcessEnvironment(environment, null);
+        Map<String, Object> values = ((MapPropertySource) java.util.Objects.requireNonNull(
+                environment.getPropertySources().get(IntegrationHubEnablementBootResolver.PROPERTY_SOURCE))).getSource();
         IntegrationHubExternalApiProperties properties = Binder.get(environment)
                 .bind("integration.hub", Bindable.of(IntegrationHubExternalApiProperties.class)).get();
         DatabaseFeatureEnablementStateSource stateSource = new DatabaseFeatureEnablementStateSource(holder, overlay,

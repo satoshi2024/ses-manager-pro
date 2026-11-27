@@ -553,6 +553,18 @@ case_sql_error_text_is_logged_with_password_redacted() {
   assert_contains "$JOB_ERR" "<redacted>" "password を伏せた印を出す"
   assert_eq 0 "$(call_count poll-acks)" "登録できなければ ack の待ちへ進まない"
   teardown_qdb
+
+  local lead pad
+  setup_qdb
+  lead="ERROR 1142 (42000) at line 12: INSERT command denied "
+  pad=$(printf '%*s' $(( 400 - ${#lead} - 11 )) '' | tr ' ' 'x')
+  printf '1\n' > "$T/qdb/insert-request.rc"
+  printf '%s\n' "${lead}${pad}boundary400tail401marker" > "$T/qdb/insert-request.err"
+  run_job CHECKPOINT acquire release
+  assert_eq 11 "$JOB_RC" "長い SQL 失敗文でも acquire が失敗する"
+  assert_contains "$JOB_ERR" "boundary400" "QDB_SQL_ERROR の 400 文字目までは log に残す"
+  assert_not_contains "$JOB_ERR" "tail401marker" "QDB_SQL_ERROR の 401 文字目以降は切り捨てる"
+  teardown_qdb
 }
 
 # 2d review P3-9: verify の準備（設定の検査・接続の準備）の失敗も verify-failed の印を書き、解除の理由を VERIFY_FAILED にする
