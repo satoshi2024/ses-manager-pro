@@ -678,18 +678,19 @@ case_quiesce_sql_files_contract() {
   assert_contains "$all" "GET_LOCK('ses_backup_ddl_freeze'" "DDL 凍結の lock の名前は Flyway の callback と同じ"
 }
 
-# 2d review P2-1 の回帰の守り（最終 review P3-8）: quiesce_db::run_sql を subshell で動く所（command substitution の $( ) と
-# ` `、process substitution の <( ) と >( )、( ) の subshell、pipeline の | の前後）で呼ぶと、失敗の文（QDB_SQL_ERROR）が
-# 親の shell に届かない。provider・preflight・保持 process は quiesce_db::query で呼び、run_sql を直接呼ぶのは
-# lib/quiesce-db-common.sh（query の中）だけにする。行全体のコメントは見ない。
-# lib の外では行の中の run_sql を全て検出するため、subshell の形の検出は lib の中の書き方への守り（RB-QUIESCE 最終 review の
-# 残余 2）。同じ行で ( の後・) の前にある run_sql を ( ) の中とみなし、run_sql の後の ; や && より前にある単独の |（|| ではない）と、
-# run_sql の直前の単独の | を pipeline とみなす（正規表現の (a|b) や ; の後の pipeline は検出しない）。
+# 2d review P2-1 の回帰の守り（最終 review P3-8、RB-P3-BACKLOG P3-1・P3-2）: quiesce_db::run_sql を subshell で動く所
+# （command substitution の $( ) と ` `、process substitution の <( ) と >( )、( ) の subshell、pipeline の | の前後、
+# background の &）で呼ぶと、失敗の文（QDB_SQL_ERROR）が親の shell に届かない。provider・preflight・保持 process は
+# quiesce_db::query で呼び、run_sql を直接呼ぶのは lib/quiesce-db-common.sh（query の中）だけにする。行全体のコメントは見ない。
+# lib の外では行の中の run_sql を全て検出するため、subshell の形の検出は lib の中の書き方への守り。同じ行で ( の後・) の前にある
+# run_sql を ( ) の中とみなし、run_sql の後の ; や && より前にある単独の |（|| ではない。<&・>&・&> は許容）と、run_sql の直前の
+# 単独の | を pipeline とみなす（正規表現の (a|b) や ; の後の pipeline・& は検出しない。複合文 { ...; } | cmd や if ...; fi | cmd、
+# coproc、入れ子の $( ) は単行走査の対象外）。
 # 出力: <file>:<行番号>: <理由>
 quiesce_run_sql_misuse() { # <file...>
   awk '
     /^[[:space:]]*#/ { next }
-    /\$\([^)]*quiesce_db::run_sql/ || /`[[:space:]]*quiesce_db::run_sql/ {
+    /\$\([^)]*quiesce_db::run_sql/ || /`[^`]*quiesce_db::run_sql/ {
       print FILENAME ":" FNR ": command substitution の中の quiesce_db::run_sql"; next
     }
     /[<>]\([^)]*quiesce_db::run_sql/ {
@@ -698,9 +699,12 @@ quiesce_run_sql_misuse() { # <file...>
     /^\([^)]*quiesce_db::run_sql/ || /[^$<>]\([^)]*quiesce_db::run_sql/ {
       print FILENAME ":" FNR ": subshell の中の quiesce_db::run_sql"; next
     }
-    /quiesce_db::run_sql([^|;&]|>&|&>)*[|][^|]/ || /quiesce_db::run_sql([^|;&]|>&|&>)*[|]$/ ||
+    /quiesce_db::run_sql([^|;&]|[<>]&|&>)*[|][^|]/ || /quiesce_db::run_sql([^|;&]|[<>]&|&>)*[|]$/ ||
       /^[|]&?[[:space:]]*quiesce_db::run_sql/ || /[^|][|]&?[[:space:]]*quiesce_db::run_sql/ {
       print FILENAME ":" FNR ": pipeline の中の quiesce_db::run_sql"; next
+    }
+    /(quiesce_db::run_sql|quiesce_db::run_sql[^;]*[^<>&|;])&($|[^&>])/ {
+      print FILENAME ":" FNR ": background の quiesce_db::run_sql"; next
     }
     /quiesce_db::run_sql/ && FILENAME !~ /\/lib\/quiesce-db-common\.sh$/ {
       print FILENAME ":" FNR ": lib/quiesce-db-common.sh の外の quiesce_db::run_sql"
@@ -713,8 +717,8 @@ case_quiesce_run_sql_is_not_called_in_command_substitution() {
   local f out fx
   fx=$(mktemp -d)
   mkdir -p "$fx/lib" "$fx/providers" "$fx/bad/lib"
-  # 走査器の見本: 検出すべき書き方（command substitution の 3 つの形、lib の外の直接の呼出し、lib の中の pipeline（| の後と
-  # 前）・( ) の subshell・process substitution）と、検出しない書き方
+  # 走査器の見本: 検出すべき書き方（command substitution の 3 つの形、lib の外の直接の呼出し、lib の中の pipeline（| の後・前・
+  # 行末・行頭）・( ) の subshell・process substitution（<( ) と >( )）・background の &）と、検出しない書き方
   cat > "$fx/providers/bad.sh" <<'FIXTURE'
 out=$(quiesce_db::run_sql precheck "int:x=1") || rc=$?
 out=$( quiesce_db::run_sql renew "int:x=1" {ddl_fd}>&- ) || rc=$?
@@ -726,13 +730,14 @@ quiesce_db::query out precheck "int:x=1" || rc=$?
 quiesce_db::log "失敗: ${QDB_SQL_ERROR:-rc=$rc}"
 FIXTURE
   # lib の中で検出しない書き方: query の中の呼出し（|| は pipeline でない）、{ } の group（同じ shell）、正規表現の ( と |、
-  # 後ろの <( )（run_sql を含まない）、; の後の pipeline（run_sql を含まない）
+  # 後ろの <( )（run_sql を含まない）、; の後の pipeline・&（run_sql を含まない）、<&・>&・&> の redirect
   cat > "$fx/lib/quiesce-db-common.sh" <<'FIXTURE'
   quiesce_db::run_sql "$@" > "$__qdb_out" || __qdb_rc=$?
   { quiesce_db::run_sql "$@" > "$__qdb_out"; } 2>/dev/null || __qdb_rc=$?
   [[ "$m" =~ ^(ONLINE|APP_STOPPED)$ ]] && quiesce_db::run_sql "$@" > "$__qdb_out"
   quiesce_db::run_sql "$@" < "$__qdb_in" > "$__qdb_out" && cmp -s "$__qdb_out" <(printf '%s' "$x")
   quiesce_db::run_sql "$@" > "$__qdb_out"; tr -d '\r' < "$__qdb_out" | head -n 1 > /dev/null
+  quiesce_db::run_sql "$@" <&3 > "$__qdb_out" 2>&1 || __qdb_rc=$?
 FIXTURE
   # lib の中で検出する書き方（各行の番号を下の検査で使う）
   cat > "$fx/bad/lib/quiesce-db-common.sh" <<'FIXTURE'
@@ -740,23 +745,31 @@ FIXTURE
   printf '%s\n' "$sql" | quiesce_db::run_sql renew "int:x=1" > "$tmp"
   ( quiesce_db::run_sql renew "int:x=1" > "$tmp" ) || rc=$?
   done < <(quiesce_db::run_sql poll-acks "int:x=1")
+  printf '%s\n' "$sql" > >(quiesce_db::run_sql renew "int:x=1")
+  quiesce_db::run_sql renew "int:x=1" <&3 |
+  | quiesce_db::run_sql renew "int:x=1" > "$tmp"
+  quiesce_db::run_sql renew "int:x=1" > "$tmp" &
 FIXTURE
   cat > "$fx/providers/direct.sh" <<'FIXTURE'
 quiesce_db::run_sql precheck > "$tmp"
 FIXTURE
   out=$(quiesce_run_sql_misuse "$fx/providers/bad.sh" "$fx/providers/good.sh" "$fx/lib/quiesce-db-common.sh" \
     "$fx/providers/direct.sh" "$fx/bad/lib/quiesce-db-common.sh")
-  assert_eq 8 "$(grep -c . <<< "$out")" "走査器は command substitution の 3 つ、lib の外の直接の呼出し 1 つ、lib の中の subshell の形 4 つを検出する（$out）"
+  assert_eq 12 "$(grep -c . <<< "$out")" "走査器は command substitution の 3 つ、lib の外の直接の呼出し 1 つ、lib の中の subshell の形 8 つを検出する（$out）"
   assert_not_contains "$out" "good.sh" "query・コメント・log は検出しない"
-  assert_not_contains "$out" "$fx/lib/quiesce-db-common.sh:" "lib の中の query・{ } の group・正規表現の ( と |・run_sql を含まない <( ) と pipeline は検出しない"
+  assert_not_contains "$out" "$fx/lib/quiesce-db-common.sh:" "lib の中の query・{ } の group・正規表現の ( と |・run_sql を含まない <( ) と pipeline・redirect は検出しない"
   assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:1: pipeline の中の quiesce_db::run_sql" "lib の中の run_sql の後の | を検出する"
   assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:2: pipeline の中の quiesce_db::run_sql" "lib の中の run_sql の前の | を検出する"
   assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:3: subshell の中の quiesce_db::run_sql" "lib の中の ( ) の subshell を検出する"
   assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:4: process substitution の中の quiesce_db::run_sql" "lib の中の <( ) を検出する"
+  assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:5: process substitution の中の quiesce_db::run_sql" "lib の中の >( ) を検出する"
+  assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:6: pipeline の中の quiesce_db::run_sql" "lib の中の <& と行末の | を検出する"
+  assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:7: pipeline の中の quiesce_db::run_sql" "lib の中の行頭の | を検出する"
+  assert_contains "$out" "$fx/bad/lib/quiesce-db-common.sh:8: background の quiesce_db::run_sql" "lib の中の background の & を検出する"
   rm -rf "$fx"
   while IFS= read -r f; do files+=("$f"); done < <(production_scripts)
   out=$(quiesce_run_sql_misuse "${files[@]}")
-  assert_eq "" "$out" "本番 script は quiesce_db::run_sql を command substitution の中で呼ばず、lib の外で直接呼ばない"
+  assert_eq "" "$out" "本番 script は quiesce_db::run_sql を command substitution・process substitution・subshell・pipeline・background の中で呼ばず、lib の外で直接呼ばない"
 }
 
 run_case case_long_children_close_hold_fd

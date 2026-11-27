@@ -202,7 +202,11 @@ quiesce_db::query() { # <変数名> <名前> [<型>:<名前>=<値>...]
   [[ "$__qdb_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { quiesce_db::log "結果の変数名が不正です: $__qdb_var"; return 2; }
   QDB_SQL_ERROR=""
   QDB_SQL_ERROR_FULL=""
-  __qdb_out=$(mktemp "${TMPDIR:-/tmp}/ses-quiesce-db-out.XXXXXX") || { QDB_SQL_ERROR="結果の一時 file を作れません"; return 2; }
+  __qdb_out=$(mktemp "${TMPDIR:-/tmp}/ses-quiesce-db-out.XXXXXX") || {
+    QDB_SQL_ERROR="結果の一時 file を作れません"
+    QDB_SQL_ERROR_FULL=$QDB_SQL_ERROR
+    return 2
+  }
   quiesce_db::run_sql "$@" > "$__qdb_out" || __qdb_rc=$?
   __qdb_val=$(cat "$__qdb_out" 2>/dev/null || true)
   rm -f "$__qdb_out"

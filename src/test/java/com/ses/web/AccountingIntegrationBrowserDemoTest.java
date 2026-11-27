@@ -496,7 +496,10 @@ class AccountingIntegrationBrowserDemoTest {
             assertTrue(browser.waitFor("document.readyState === 'complete' && document.querySelector('#accountingTabs') !== null", java.time.Duration.ofSeconds(30)),
                     "[manager-" + viewport + "] 会計連携画面のタブが表示されること");
             browser.evaluate("if(window.AccountingIntegration && window.AccountingIntegration.loadJobs) window.AccountingIntegration.loadJobs(1);");
-            browser.waitFor("document.querySelectorAll('#jobsTbody tr').length > 0", java.time.Duration.ofSeconds(20));
+            assertTrue(browser.waitFor(
+                            "document.querySelectorAll('#jobsTbody tr').length > 0 && document.querySelector('#jobsTbody td') !== null && document.querySelector('#jobsTbody td').getAttribute('colspan') === null",
+                            java.time.Duration.ofSeconds(20)),
+                    "[manager-" + viewport + "] Jobs テーブルに実ジョブ行が描画されるまで待機できること");
             String jobText = browser.evaluate("document.querySelector('#jobsTbody').textContent").asText("");
             assertTrue(jobText.contains("#" + managerJobId), "[manager-" + viewport + "] 自組織ジョブが可視であること");
             assertTrue(!jobText.contains("#" + adminJobId), "[manager-" + viewport + "] 全社共通 (organization_id NULL) ジョブが不可視であること (認可境界)");

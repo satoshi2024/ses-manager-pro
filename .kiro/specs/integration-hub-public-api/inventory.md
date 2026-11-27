@@ -98,7 +98,7 @@ fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）
 | 境界 | 現行実装 | 行/契約 | NF-05への含意 |
 |---|---|---|---|
 | 内部管理chain | SecurityConfig.securityFilterChain | SecurityConfig.java（securityFilterChain） | form login、OIDC、内部role、CSRFを持つ。HTTP Basicは業務chainに無く、`GET /actuator/prometheus` 専用のchain（`@Order(2)`、STATELESS）だけが持つ（FINAL review §6.4 で訂正） |
-| 内部filter順 | MenuPermissionFilter → ApiAuditFilter → MfaEnforcementFilter → PersistentSessionFilter | SecurityConfig.securityFilterChainのaddFilterBefore・addFilterAfter | 新公開clientを内部Authenticationへ変換しない |
+| 内部filter順 | ImportRawBodyTransportGuardFilter（CsrfFilterの前）、認証後は PersistentSessionFilter → InternalTenantContextFilter → MenuPermissionFilter → ApiAuditFilter → MfaEnforcementFilter → PasswordChangeEnforcementFilter → BootstrapSessionFilter | SecurityConfig.securityFilterChainのaddFilterBefore・addFilterAfter | 新公開clientを内部Authenticationへ変換しない |
 | 内部認可 | ActionPermissionResolver + AuthorizationService + MenuPermissionFilter | MenuPermissionFilter.java:66-117 | menu/API actionの正本は内部向け。公開client scopeとは別モデルにする |
 | 内部audit | ApiAuditFilter | ApiAuditFilter.isAuditTarget | /api/のPOST/PUT/DELETEとdownload中心。/external-api/は未カバー |
 | 内部CSRF | Cookie XSRF-TOKEN → X-XSRF-TOKEN | SecurityConfig.securityFilterChainのcsrf（csrfTokenRepository） | 公開machine-to-machine chainはCSRF方式と署名認証の役割を分離して承認する |
