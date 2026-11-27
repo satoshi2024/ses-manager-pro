@@ -127,6 +127,18 @@ class IntegrationHubEnablementConditionsTest {
     }
 
     @Test
+    void refreshRemoteはoutboundの時だけlockの前にtruststoreを読み直す() {
+        IntegrationHubEnablementConditions fresh = conditions();
+        fresh.refreshRemote(Feature.NF05_INBOUND);
+        assertThat(codes(fresh.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.REQUEST, false))))
+                .contains("nf05.outbound.truststore.unverifiable:UNVERIFIABLE");
+
+        fresh.refreshRemote(Feature.NF05_OUTBOUND);
+        assertThat(codes(fresh.evaluate(Feature.NF05_OUTBOUND, context(FeatureEvaluationContext.Purpose.REQUEST, false))))
+                .contains("nf05.outbound.policy:SATISFIED");
+    }
+
+    @Test
     void 承認の値はDBの源で署名からpropertyの源で配備の設定から作る() {
         assertThat(codes(conditions().evaluate(Feature.NF05_INBOUND,
                 context(FeatureEvaluationContext.Purpose.PERIODIC, true)))).contains("nf05.inbound.policy:SATISFIED");

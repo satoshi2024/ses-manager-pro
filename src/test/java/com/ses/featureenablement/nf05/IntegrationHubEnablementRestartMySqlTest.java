@@ -135,6 +135,14 @@ class IntegrationHubEnablementRestartMySqlTest {
     @Autowired private PropertyFeatureEnablementStateSource propertySource;
     @Autowired private FeatureEnablementEvaluationService evaluation;
     @Autowired private FeatureEnablementService service;
+    @Autowired private com.ses.featureenablement.condition.FeatureConditionRegistry registry;
+    @Autowired private com.ses.featureenablement.evaluation.FeatureEnablementEvaluationResults results;
+    @Autowired private com.ses.mapper.FeatureEnablementRequestMapper requestMapper;
+    @Autowired private com.ses.mapper.FeatureEnablementEventMapper eventMapper;
+    @Autowired private com.ses.mapper.FeatureSignOffBundleMapper bundleMapper;
+    @Autowired private com.ses.mapper.FeatureSignOffBundleMemberMapper memberMapper;
+    @Autowired private com.ses.featureenablement.state.FeatureEnablementTenant tenant;
+    @Autowired private ObjectProvider<com.ses.featureenablement.service.FeatureEnablementCloseWarningSource> closeWarningSources;
     @Autowired private IntegrationHubBootDecisionWriter writer;
     @Autowired private LegalEntityReadinessService readiness;
     @Autowired private ApiDeliveryMapper deliveries;
@@ -226,48 +234,169 @@ class IntegrationHubEnablementRestartMySqlTest {
         assertThat(recovering.isReady()).isFalse();
     }
 
+    /**
+     * FE-D02・FE-D05 の Demo: prod の profile 相当の構成で、outbound を申請・承認（{@code OPEN_PENDING_RESTART}）→ 再起動 1 回目で起動の
+     * log に {@code outbound=OPENED}・{@code NF05_OUTBOUND=OPENED(APPLIED)}（履歴は {@code RESTART_APPLIED}）が出て画面の一覧で
+     * {@code OPEN}（実効値も開）になり、もう一度再起動しても {@code OPEN} のまま保たれること、さらに {@code bound-tenant-id} を変えた
+     * 起動の後に outbound を申請すると条件の不成立（409・{@code nf05.outbound.approvalDigest.mismatch}、以前の tenant の OFF 行のまま
+     * なら {@code barrier.tenantFingerprint.mismatch} も含む）になることを確かめる。
+     */
+    @Test
+    void prodの構成でoutboundを承認し再起動2回のlogと画面OPENおよびbound_tenant_id変更後の申請拒否を確かめる() {
+        FeatureEnablementH2Fixture fixture = new FeatureEnablementH2Fixture(jdbc, catalog);
+        FeatureEnablementActor requester = fixture.admin();
+        FeatureEnablementActor approver = fixture.admin();
+        insertOutboundSignOffs();
+        reset();
+        long appliedBefore = events("RESTART_APPLIED");
+        Process off = restart();
+        assertThat(off.values().get("app.feature-enablement.nf05-boot.outbound.result")).isEqualTo("CLOSED:state.NONE");
+
+        com.ses.entity.FeatureEnablementRequest openRequest = service.requestOpen(Feature.NF05_OUTBOUND, null, requester);
+        assertThat(service.approve(openRequest.getId(), 0, null, approver).approved()).isTrue();
+        holder.reload();
+        assertThat(unitView(off, requester).state()).isEqualTo("OPEN_PENDING_RESTART");
+        assertThat(unitView(off, requester).effectiveOpen()).as("再起動の前は実効値は閉").isFalse();
+
+        Process first = restart(Nf05EnablementFixtures.BOUND_TENANT, true);
+        assertThat(first.bootLogs()).anyMatch(line -> line.contains("[機能の開放] NF05 の起動時の判定:")
+                && line.contains("outbound=OPENED"));
+        assertThat(first.recordedSummary()).contains("NF05_OUTBOUND=OPENED(APPLIED)");
+        assertThat(events("RESTART_APPLIED")).isEqualTo(appliedBefore + 1);
+        assertThat(unitView(first, requester).state()).isEqualTo("OPEN");
+        assertThat(unitView(first, requester).effectiveOpen()).isTrue();
+
+        Process second = restart(Nf05EnablementFixtures.BOUND_TENANT, true);
+        assertThat(second.bootLogs()).anyMatch(line -> line.contains("[機能の開放] NF05 の起動時の判定:")
+                && line.contains("outbound=OPENED"));
+        assertThat(second.recordedSummary()).contains("NF05_OUTBOUND=OPENED");
+        assertThat(unitView(second, requester).state()).isEqualTo("OPEN");
+        assertThat(unitView(second, requester).effectiveOpen()).isTrue();
+
+        service.close(Feature.NF05_OUTBOUND, "MANUAL_VERIFICATION", requester);
+        holder.reload();
+        assertThat(barrierRow()).startsWith("v1|OFF|0|");
+
+        String originalBoundTenant = contextProperties.getTopology().getBoundTenantId();
+        try {
+            contextProperties.getTopology().setBoundTenantId("tenant-changed");
+            // 1. 以前の tenant の barrier 行が残っている間は指紋の不一致と承認 digest の不一致の両方で拒否される
+            com.ses.common.exception.BusinessException beforeBootRejected = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    () -> service.requestOpen(Feature.NF05_OUTBOUND, null, requester),
+                    com.ses.common.exception.BusinessException.class);
+            assertThat(beforeBootRejected).isNotNull();
+            assertThat(beforeBootRejected.getCode()).isEqualTo(409);
+            assertThat(String.valueOf(java.util.List.of(beforeBootRejected.getArgs())))
+                    .contains("barrier.tenantFingerprint.mismatch")
+                    .contains("nf05.outbound.approvalDigest.mismatch");
+
+            // 2. bound-tenant-id を変えて再起動した後（barrier が新 tenant の OFF を書いた後）も承認 digest の不一致で拒否される
+            Process mismatchedBoot = restart("tenant-changed", true);
+            assertThat(mismatchedBoot.values().get("app.feature-enablement.nf05-boot.outbound.result"))
+                    .isEqualTo("CLOSED:state.MANUALLY_CLOSED");
+
+            com.ses.common.exception.BusinessException afterBootRejected = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    () -> service.requestOpen(Feature.NF05_OUTBOUND, null, requester),
+                    com.ses.common.exception.BusinessException.class);
+            assertThat(afterBootRejected).isNotNull();
+            assertThat(afterBootRejected.getCode()).isEqualTo(409);
+            assertThat(afterBootRejected.getMessageKey()).isEqualTo("error.featureEnablement.conditionsUnsatisfied");
+            assertThat(String.valueOf(java.util.List.of(afterBootRejected.getArgs())))
+                    .contains("nf05.outbound.approvalDigest.mismatch");
+        } finally {
+            contextProperties.getTopology().setBoundTenantId(originalBoundTenant);
+        }
+    }
+
+    private com.ses.featureenablement.service.FeatureEnablementQueryService.UnitSummary unitView(
+            Process process, FeatureEnablementActor actor) {
+        com.ses.featureenablement.service.FeatureEnablementQueryService processQuery =
+                new com.ses.featureenablement.service.FeatureEnablementQueryService(catalog, holder, process.switches(),
+                        process.stateSource(), registry, results, requestMapper, eventMapper, bundleMapper, memberMapper,
+                        tenant, Clock.systemUTC(), closeWarningSources);
+        return processQuery.units(actor).stream()
+                .filter(unit -> Feature.NF05_OUTBOUND.name().equals(unit.key()))
+                .findFirst()
+                .orElseThrow();
+    }
+
     /** 再現した1回の起動。 */
     private record Process(Map<String, Object> values, IntegrationHubExternalApiProperties properties,
-                           IntegrationHubRuntimeSwitch runtime, IntegrationHubOutboundStartupBarrier barrier) {
+                           DatabaseFeatureEnablementStateSource stateSource, FeatureSwitches switches,
+                           IntegrationHubRuntimeSwitch runtime, IntegrationHubOutboundStartupBarrier barrier,
+                           java.util.List<String> bootLogs, String recordedSummary) {
     }
 
     /** 起動の前の読取り → barrier の起動時の経路 → 起動の後の反映 → ApplicationRunner の順に再現する。 */
     private Process restart() {
+        return restart(Nf05EnablementFixtures.BOUND_TENANT, false);
+    }
+
+    private Process restart(String boundTenantId, boolean prodProfile) {
         MockEnvironment environment = Nf05EnablementFixtures.environment(Path.of(TRUSTSTORE));
+        if (prodProfile) {
+            environment.setActiveProfiles("prod");
+        }
         environment.setProperty("app.feature-enablement.source", "database");
         environment.setProperty("spring.datasource.url", MYSQL.getJdbcUrl());
         environment.setProperty("spring.datasource.username", MYSQL.getUsername());
         environment.setProperty("spring.datasource.password", MYSQL.getPassword());
         environment.setProperty("integration.hub.provider.mode", "HTTPS");
-        environment.setProperty("integration.hub.topology.bound-tenant-id", Nf05EnablementFixtures.BOUND_TENANT);
+        environment.setProperty("integration.hub.topology.bound-tenant-id", boundTenantId);
         environment.setProperty("integration.hub.external-transport.approval.allowed-destinations[0]",
                 "hooks.partner-a.example:443");
         environment.setProperty("integration.hub.external-transport.truststore-type", "PKCS12");
-        IntegrationHubEnablementBootResolver resolver = new IntegrationHubEnablementBootResolver(mock(Log.class),
+        java.util.List<String> bootLogs = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Log logCollector = (Log) java.lang.reflect.Proxy.newProxyInstance(
+                Log.class.getClassLoader(),
+                new Class<?>[]{Log.class},
+                (proxy, method, args) -> {
+                    if (args != null && args.length > 0 && ("info".equals(method.getName()) || "warn".equals(method.getName()))) {
+                        bootLogs.add(String.valueOf(args[0]));
+                    }
+                    return method.getReturnType() == boolean.class ? Boolean.TRUE : null;
+                });
+        IntegrationHubEnablementBootResolver resolver = new IntegrationHubEnablementBootResolver(logCollector,
                 IntegrationHubEnablementBootResolver::connect);
         Map<String, Object> values = resolver.resolve(environment);
+        // postProcessEnvironment と同じ起動 log を記録する
+        bootLogs.add("[機能の開放] NF05 の起動時の判定: inbound="
+                + values.get("app.feature-enablement.nf05-boot.inbound.result") + " outbound="
+                + values.get("app.feature-enablement.nf05-boot.outbound.result") + " purge="
+                + values.get("integration.hub.retention-purge.enabled"));
         environment.getPropertySources().addFirst(new MapPropertySource(IntegrationHubEnablementBootResolver.PROPERTY_SOURCE,
                 values));
         IntegrationHubExternalApiProperties properties = Binder.get(environment)
                 .bind("integration.hub", Bindable.of(IntegrationHubExternalApiProperties.class)).get();
-        IntegrationHubRuntimeSwitch runtime = runtime(properties);
+        DatabaseFeatureEnablementStateSource stateSource = new DatabaseFeatureEnablementStateSource(holder, overlay,
+                featureProperties, Clock.systemUTC());
+        FeatureSwitches switches = new FeatureSwitches(stateSource);
+        IntegrationHubBootConditions bootConditions = new IntegrationHubBootConditions();
+        switches.setRuntimeConditions(java.util.List.of(
+                bootConditions.integrationHubInboundBootCondition(properties, environment),
+                bootConditions.integrationHubOutboundBootCondition(properties, environment)));
+        IntegrationHubRuntimeSwitch runtime = new IntegrationHubRuntimeSwitch(properties, provider(switches), provider(holder),
+                provider(overlay), provider(featureProperties));
         IntegrationHubOutboundStartupBarrier barrier = barrier(properties, runtime);
         barrier.start();
         @SuppressWarnings("unchecked")
         ObjectProvider<LegalEntityReadinessService> legalEntity = mock(ObjectProvider.class);
         when(legalEntity.getIfAvailable()).thenReturn(readiness);
-        new IntegrationHubBootDecisionRecorder(environment, featureProperties, writer, runtime, properties, legalEntity,
-                overlay, provider(holder)).start();
+        java.util.concurrent.atomic.AtomicReference<String> recordedSummary = new java.util.concurrent.atomic.AtomicReference<>("");
+        IntegrationHubBootDecisionRecorder recorder = new IntegrationHubBootDecisionRecorder(environment, featureProperties,
+                writer, runtime, properties, legalEntity, overlay, provider(holder)) {
+            @Override
+            public String record() {
+                String summary = super.record();
+                recordedSummary.set(summary);
+                return summary;
+            }
+        };
+        recorder.start();
         holder.reload();
         barrier.run(new DefaultApplicationArguments());
-        return new Process(values, properties, runtime, barrier);
-    }
-
-    private IntegrationHubRuntimeSwitch runtime(IntegrationHubExternalApiProperties properties) {
-        FeatureSwitches switches = new FeatureSwitches(new DatabaseFeatureEnablementStateSource(holder, overlay,
-                featureProperties, Clock.systemUTC()));
-        return new IntegrationHubRuntimeSwitch(properties, provider(switches), provider(holder), provider(overlay),
-                provider(featureProperties));
+        return new Process(values, properties, stateSource, switches, runtime, barrier,
+                java.util.List.copyOf(bootLogs), recordedSummary.get());
     }
 
     private IntegrationHubOutboundStartupBarrier barrier(IntegrationHubExternalApiProperties properties,

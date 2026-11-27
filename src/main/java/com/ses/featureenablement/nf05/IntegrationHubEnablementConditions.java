@@ -74,6 +74,17 @@ public class IntegrationHubEnablementConditions implements FeatureConditionEvalu
         return Set.of(Feature.NF05_INBOUND, Feature.NF05_OUTBOUND);
     }
 
+    /**
+     * 申請・承認の世代の行の lock の前に truststore を読み直す（lock の中の評価は最後の結果を読む。review rb-fe-c P2-6）。
+     * outbound だけ。
+     */
+    @Override
+    public void refreshRemote(Feature feature) {
+        if (feature == Feature.NF05_OUTBOUND) {
+            truststore(true);
+        }
+    }
+
     @Override
     public List<FeatureConditionCheck> evaluate(Feature feature, FeatureEvaluationContext context) {
         boolean outbound = feature == Feature.NF05_OUTBOUND;

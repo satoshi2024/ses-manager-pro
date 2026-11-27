@@ -67,6 +67,8 @@ class FeatureEnablementConditionSchedulerH2Test {
     @Autowired
     private FeatureEnablementService service;
     @Autowired
+    private com.ses.featureenablement.service.FeatureSignOffService signOffs;
+    @Autowired
     private FeatureEnablementEvaluationWriter writer;
     @Autowired
     private FeatureEnablementNotifier notifier;
@@ -248,6 +250,56 @@ class FeatureEnablementConditionSchedulerH2Test {
         assertThat(jdbc.queryForObject("SELECT purge_after FROM t_feature_sign_off WHERE id = ?", LocalDate.class, sre))
                 .as("失効はその失効日の3年後").isEqualTo(LocalDate.of(2029, 11, 24));
         assertThat(fixture.requestStatus(stale.getId())).isEqualTo("EXPIRED");
+    }
+
+    /** FE-A07 Demo: 開いた NF04 の署名を失効日が翌日の合成署名へ差し替え、clock を進めると自動閉鎖して全管理者へ通知する。 */
+    @Test
+    void 開いたNF04の署名を失効日が翌日の合成署名へ差し替えclockを進めると自動閉鎖し通知する() {
+        fixture.confirmedSignOffs(Feature.NF04, SIGNED, EXPIRES);
+        open(Feature.NF04);
+        LocalDate today = LocalDate.ofInstant(clock.instant(), clock.getZone());
+        com.ses.entity.FeatureSignOff replacement = signOffs.register(
+                new com.ses.featureenablement.service.FeatureSignOffService.Registration("NF04_SRE", "SRE-DEMO-2026-1123",
+                        "SRE", "署名 太郎", today, today.plusDays(1), java.util.Map.of()),
+                "%PDF-1.7\n1 0 obj<<>>endobj\n% fe-a07\n%%EOF\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+                "nf04-sre.pdf", requester);
+        signOffs.confirm(replacement.getId(), 0, approver);
+        holder.reload();
+        assertThat(fixture.state(Feature.NF04)).as("差替え当日はまだ開いている").isEqualTo("OPEN");
+
+        clock.advance(Duration.ofDays(1));
+        evaluation.evaluateOpenUnits(FeatureEvaluationContext.Purpose.PERIODIC, false);
+        FeatureEnablementH2Fixture.runAfterCommit();
+
+        assertThat(fixture.state(Feature.NF04)).isEqualTo("AUTO_CLOSED");
+        assertThat(fixture.closedReason(Feature.NF04)).isEqualTo("SIGN_OFF_EXPIRED");
+        assertThat(FeatureEnablementH2Fixture.notices()).filteredOn(notice -> notice.eventKey().equals("autoClosed")
+                && notice.recipients().contains(requester.userId())
+                && notice.recipients().contains(approver.userId())
+                && "NF04".equals(notice.args()[0])).isNotEmpty();
+    }
+
+    /** FE-C05（review rb-fe-c P3-9）: prod 以外では NF07 の固有評価器が無く evaluator.missing（評価できない類）で申請は 409。 */
+    @Test
+    void prod以外のprofileではNF07の評価器が無く申請はevaluator_missingで409になる() {
+        Long group = jdbc.queryForList("SELECT id FROM m_permission_group WHERE tenant_id = 'default' AND group_key = "
+                + "'privacy-admin' AND enabled = 1 AND deleted_flag = 0", Long.class).stream().findFirst().orElse(null);
+        if (group == null) {
+            jdbc.update("INSERT INTO m_permission_group (tenant_id, group_key, group_name, enabled, deleted_flag) "
+                    + "VALUES ('default', 'privacy-admin', 'privacy-admin', 1, 0)");
+            group = jdbc.queryForObject("SELECT id FROM m_permission_group WHERE tenant_id = 'default' AND group_key = "
+                    + "'privacy-admin'", Long.class);
+        }
+        jdbc.update("INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_by, deleted_flag) "
+                + "VALUES ('default', ?, ?, 1, 0)", requester.userId(), group);
+
+        com.ses.common.exception.BusinessException rejected = org.assertj.core.api.Assertions.catchThrowableOfType(
+                () -> service.requestOpen(Feature.NF07_RETENTION, null, requester),
+                com.ses.common.exception.BusinessException.class);
+        assertThat(rejected).isNotNull();
+        assertThat(rejected.getCode()).isEqualTo(409);
+        assertThat(String.valueOf(java.util.List.of(rejected.getArgs())))
+                .contains(FeatureConditionRegistry.CODE_EVALUATOR_MISSING);
     }
 
     @Test
